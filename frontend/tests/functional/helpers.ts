@@ -10,6 +10,11 @@ export const USERS = {
 
 export const PASSWORD = "password-123!";
 export const ORG = "acme-dev";
+
+/** The dataset every journey runs inside: the mock mirrors the backend sweep,
+ * so each fixture org carries exactly one dataset named `default`. */
+export const DS = "default";
+
 /** Reserved for tests that mutate mock state; never pixel-compared. */
 export const ORG_MUTABLE = "mutable-dev";
 

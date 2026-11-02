@@ -34,10 +34,10 @@ export interface S3IngestState {
  * receipts panel's because the poller's own cadence is a minute — refetching
  * faster than the thing being observed changes only burns requests.
  */
-export function useS3Ingest(org: string) {
+export function useS3Ingest(org: string, ds: string) {
   return useQuery({
     queryKey: [...queryKeys.org(org), "s3-ingest"],
-    queryFn: () => bffFetch<S3IngestState>(`/api/orgs/${org}/s3-ingest`),
+    queryFn: () => bffFetch<S3IngestState>(`/api/orgs/${org}/datasets/${ds}/s3-ingest`),
     refetchInterval: 60_000,
   });
 }

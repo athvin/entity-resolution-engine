@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { login, USERS } from "./helpers";
+import { DS, login, USERS } from "./helpers";
 
 /**
  * The Account/Org entity type end-to-end through the UI (design §1.1). The
@@ -18,7 +18,7 @@ test.describe("account entity type", () => {
     page,
   }) => {
     await login(page, USERS.admin);
-    await page.goto(`/${ACCOUNT_ORG}/duplicates`);
+    await page.goto(`/${ACCOUNT_ORG}/${DS}/duplicates`);
 
     const groups = page.getByTestId("duplicate-groups");
     await expect(groups).toBeVisible();
@@ -37,9 +37,10 @@ test.describe("account entity type", () => {
     // entity type from it, and the auto-suggested mapping must run with account
     // hints (not the person default it shows before the config resolves).
     const configLoaded = page.waitForResponse(
-      (response) => response.url().includes(`/api/orgs/${ACCOUNT_ORG}/config`) && response.ok(),
+      (response) =>
+        response.url().includes(`/api/orgs/${ACCOUNT_ORG}/datasets/${DS}/config`) && response.ok(),
     );
-    await page.goto(`/${ACCOUNT_ORG}/sources/new`);
+    await page.goto(`/${ACCOUNT_ORG}/${DS}/sources/new`);
     await configLoaded;
     await expect(page.getByTestId("new-source-wizard")).toBeVisible();
 

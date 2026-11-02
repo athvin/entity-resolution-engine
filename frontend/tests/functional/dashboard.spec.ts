@@ -1,11 +1,11 @@
 import { expect, test } from "@playwright/test";
 
-import { login, ORG, USERS } from "./helpers";
+import { DS, login, ORG, USERS } from "./helpers";
 
 test.describe("dashboard", () => {
   test.beforeEach(async ({ page }) => {
     await login(page, USERS.steward);
-    await page.goto(`/${ORG}/dashboard`);
+    await page.goto(`/${ORG}/${DS}/dashboard`);
   });
 
   test("renders live tiles from the control plane", async ({ page }) => {

@@ -11,6 +11,7 @@ import { useOrgEntityType } from "@/lib/query/config";
 import type { GoldenRecord } from "@/lib/query/hooks";
 import { useEnrich, type EnrichSuggestion } from "@/lib/query/enrich";
 import { useMassUpdate, type GoldenField } from "@/lib/query/mass-update";
+import { useDatasetSlug } from "@/lib/use-dataset-slug";
 
 /**
  * AI enrichment (design §Phase 2.3): a steward asks the model to fill empty
@@ -28,12 +29,13 @@ export function EnrichPanel({
   entityId: string;
   golden: GoldenRecord;
 }) {
-  const entityType = useOrgEntityType(org);
+  const ds = useDatasetSlug();
+  const entityType = useOrgEntityType(org, ds);
   const labels = new Map<string, string>(
     goldenAttributes(entityType).map(({ key, label }) => [key, label]),
   );
-  const enrich = useEnrich(org);
-  const massUpdate = useMassUpdate(org);
+  const enrich = useEnrich(org, ds);
+  const massUpdate = useMassUpdate(org, ds);
   const [applied, setApplied] = useState<ReadonlySet<string>>(new Set());
   const [applyingField, setApplyingField] = useState<string | null>(null);
   const [applyError, setApplyError] = useState<string | null>(null);

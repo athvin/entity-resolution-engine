@@ -36,6 +36,7 @@ import { useSuggestMapping } from "@/lib/query/schema-ai";
 import { redactProfile } from "@/lib/schema-ai/redact";
 import { useImportFile, useSources } from "@/lib/query/steward";
 import { cn } from "@/lib/utils";
+import { useDatasetSlug } from "@/lib/use-dataset-slug";
 
 const STEPS = ["Sample", "Profile", "Map", "Identity", "Review"] as const;
 
@@ -85,21 +86,22 @@ function describeError(cause: unknown, fallback: string): string {
  * engine's score-only mode and stays on the roadmap.
  */
 export function NewSourceWizard({ org }: { org: string }) {
+  const ds = useDatasetSlug();
   const router = useRouter();
-  const activeConfig = useActiveConfig(org);
-  const entityType = useOrgEntityType(org);
+  const activeConfig = useActiveConfig(org, ds);
+  const entityType = useOrgEntityType(org, ds);
   const canonical = canonicalAttributes(entityType);
-  const sources = useSources(org);
-  const createDraft = useCreateDraft(org);
-  const publish = usePublish(org);
-  const importFile = useImportFile(org);
+  const sources = useSources(org, ds);
+  const createDraft = useCreateDraft(org, ds);
+  const publish = usePublish(org, ds);
+  const importFile = useImportFile(org, ds);
   const [step, setStep] = useState(0);
   const [rankTouched, setRankTouched] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [draftVersion, setDraftVersion] = useState<number | null>(null);
   // V8: the model's answers land in `state.mapping` like any other
   // suggestion; these two only carry what it SAID and why.
-  const suggest = useSuggestMapping(org);
+  const suggest = useSuggestMapping(org, ds);
   const [aiNote, setAiNote] = useState<string | null>(null);
   const [aiReasons, setAiReasons] = useState<Record<string, string>>({});
   const [activation, setActivation] = useState<Activation | null>(null);
@@ -342,7 +344,7 @@ export function NewSourceWizard({ org }: { org: string }) {
     }
     try {
       const result = await importFile.mutateAsync({ source: state.name, file: state.file });
-      router.push(`/${org}/runs/${result.job.id}`);
+      router.push(`/${org}/${ds}/runs/${result.job.id}`);
     } catch (cause) {
       setActivation({
         phase: "upload",
@@ -428,7 +430,7 @@ export function NewSourceWizard({ org }: { org: string }) {
                         Retry upload
                       </Button>
                       <Button size="sm" variant="outline" asChild>
-                        <Link href={`/${org}/sources`}>Go to sources</Link>
+                        <Link href={`/${org}/${ds}/sources`}>Go to sources</Link>
                       </Button>
                     </div>
                   </>
@@ -489,7 +491,7 @@ export function NewSourceWizard({ org }: { org: string }) {
           </CardContent>
         </Card>
         <Button variant="outline" asChild>
-          <Link href={`/${org}/sources`}>Back to sources</Link>
+          <Link href={`/${org}/${ds}/sources`}>Back to sources</Link>
         </Button>
       </div>
     );
@@ -502,7 +504,7 @@ export function NewSourceWizard({ org }: { org: string }) {
     >
       <div>
         <Link
-          href={`/${org}/sources`}
+          href={`/${org}/${ds}/sources`}
           className="text-muted-foreground mb-2 inline-flex items-center gap-1 text-sm hover:underline"
         >
           <ArrowLeft className="size-3.5" /> Sources

@@ -16,6 +16,7 @@ import {
   useToggleSchedule,
 } from "@/lib/query/steward";
 import { CronBuilder } from "./cron-builder";
+import { useDatasetSlug } from "@/lib/use-dataset-slug";
 
 const KINDS = ["run_all_incremental", "run_all_full", "correct", "lake_maintain"] as const;
 
@@ -27,10 +28,11 @@ function originLabel(source: string): string {
 }
 
 export function SchedulesContent({ org }: { org: string }) {
-  const schedules = useSchedules(org);
-  const create = useCreateSchedule(org);
-  const remove = useDeleteSchedule(org);
-  const toggle = useToggleSchedule(org);
+  const ds = useDatasetSlug();
+  const schedules = useSchedules(org, ds);
+  const create = useCreateSchedule(org, ds);
+  const remove = useDeleteSchedule(org, ds);
+  const toggle = useToggleSchedule(org, ds);
   const session = useSession();
   const isAdmin = effectiveRole(session.data, org) === "admin";
   const [error, setError] = useState<string | null>(null);

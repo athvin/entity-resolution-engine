@@ -16,7 +16,7 @@ test.describe("tenant lifecycle", () => {
     await expect(page.getByTestId("resume-org")).toBeVisible();
 
     // A suspended org refuses work through the same guards production uses.
-    const refused = await page.request.post("/api/orgs/mutable-dev/jobs/submit", {
+    const refused = await page.request.post("/api/orgs/mutable-dev/datasets/default/jobs/submit", {
       data: { kind: "train", intent: "lifecycle-check-1" },
     });
     expect(refused.status()).toBe(409);
@@ -60,7 +60,7 @@ test.describe("fresh-tenant onboarding", () => {
   }) => {
     test.skip(isMobile, "state-mutating flow runs once, on desktop");
     await login(page, USERS.steward);
-    await page.goto("/fresh-dev/dashboard");
+    await page.goto("/fresh-dev/default/dashboard");
     const checklist = page.getByTestId("onboarding-checklist");
     await expect(checklist).toContainText("Three steps to your first golden records");
     await expect(page.getByTestId("precondition-note")).toContainText(

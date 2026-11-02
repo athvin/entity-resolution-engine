@@ -22,14 +22,17 @@ export interface SuggestMappingInput extends SchemaProfile {
  * No cache invalidation — the answer is applied to local wizard state, and
  * there is no server-side resource to refresh.
  */
-export function useSuggestMapping(org: string) {
+export function useSuggestMapping(org: string, ds: string) {
   return useMutation({
     mutationFn: (input: SuggestMappingInput) =>
-      bffFetch<{ mappings: MappingSuggestion[] }>(`/api/orgs/${org}/sources/suggest-mapping`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(input),
-      }),
+      bffFetch<{ mappings: MappingSuggestion[] }>(
+        `/api/orgs/${org}/datasets/${ds}/sources/suggest-mapping`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(input),
+        },
+      ),
   });
 }
 

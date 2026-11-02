@@ -43,6 +43,7 @@ export interface MassUpdateItem {
  */
 export async function fetchGoldenIdsMatching(
   org: string,
+  ds: string,
   q: string,
   onProgress?: (count: number) => void,
 ): Promise<{ ids: string[]; capped: boolean }> {
@@ -52,7 +53,9 @@ export async function fetchGoldenIdsMatching(
     const params = new URLSearchParams({ limit: "200" });
     if (q) params.set("q", q);
     if (cursor) params.set("cursor", cursor);
-    const page = await fetchGoldenPage(`/api/orgs/${org}/golden-records?${params.toString()}`);
+    const page = await fetchGoldenPage(
+      `/api/orgs/${org}/datasets/${ds}/golden-records?${params.toString()}`,
+    );
     for (const item of page.items) {
       if (ids.length >= MASS_UPDATE_CAP) return { ids, capped: true };
       ids.push(item.id);
@@ -69,7 +72,7 @@ interface MassUpdateResult {
   apply_job?: string;
 }
 
-export function useMassUpdate(org: string) {
+export function useMassUpdate(org: string, ds: string) {
   const queryClient = useQueryClient();
   return useMutation({
     // Chunked to the server's 200-per-lock-window cap; each chunk applies now.
@@ -77,7 +80,7 @@ export function useMassUpdate(org: string) {
       let last: MassUpdateResult | null = null;
       for (let start = 0; start < items.length; start += MASS_UPDATE_CHUNK) {
         const chunk = items.slice(start, start + MASS_UPDATE_CHUNK);
-        last = await bffFetch<MassUpdateResult>(`/api/orgs/${org}/mass-update`, {
+        last = await bffFetch<MassUpdateResult>(`/api/orgs/${org}/datasets/${ds}/mass-update`, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ items: chunk, apply_now: true }),
@@ -88,7 +91,7 @@ export function useMassUpdate(org: string) {
     },
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: [...queryKeys.org(org), "staged"] });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.jobs(org) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.jobs(org, ds) });
     },
   });
 }

@@ -222,14 +222,18 @@ async fn orgs_crud_and_state_machine() {
     // `apply_corrections` job just as surely. Guarding only the first would have
     // left the same defect reachable behind two other handlers.
     for (uri, body, what) in [
-        ("/v1/orgs/acme/jobs", r#"{"kind":"run_all_full"}"#, "a job"),
         (
-            "/v1/orgs/acme/assertions",
+            "/v1/orgs/acme/datasets/default/jobs",
+            r#"{"kind":"run_all_full"}"#,
+            "a job",
+        ),
+        (
+            "/v1/orgs/acme/datasets/default/assertions",
             r#"{"a":"crm:C001","b":"crm:C002","kind":"never"}"#,
             "an assertion",
         ),
         (
-            "/v1/orgs/acme/records/suppress",
+            "/v1/orgs/acme/datasets/default/records/suppress",
             r#"{"record_key":"crm:C001"}"#,
             "a suppression",
         ),
@@ -275,7 +279,7 @@ async fn orgs_crud_and_state_machine() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/jobs",
+            "/v1/orgs/acme/datasets/default/jobs",
             "op-secret",
             Body::from(r#"{"kind":"run_all_full"}"#),
         ))
@@ -376,7 +380,7 @@ async fn orgs_crud_and_state_machine() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/jobs",
+            "/v1/orgs/acme/datasets/default/jobs",
             "op-secret",
             Body::from(r#"{"kind":"run"}"#),
         ))

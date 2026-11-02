@@ -11,6 +11,7 @@ import type { ProposedAction } from "@/lib/agent-actions/propose";
 import { BffRequestError } from "@/lib/api/client";
 import { useRunAction } from "@/lib/query/agent-actions";
 import { cn } from "@/lib/utils";
+import { useDatasetSlug } from "@/lib/use-dataset-slug";
 
 interface ToolCitation {
   name: string;
@@ -36,12 +37,13 @@ const SUGGESTIONS = [
 /** The "talk with your data" chat (design §5.8): streamed answers, and every
  * tool call surfaced as an inspectable citation — trust you can open. */
 export function AssistantChat({ org }: { org: string }) {
+  const ds = useDatasetSlug();
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [openCitations, setOpenCitations] = useState<number | null>(null);
   // V9. Keyed by turn+action so the same proposal in two turns tracks apart.
-  const run = useRunAction(org);
+  const run = useRunAction(org, ds);
   const [actionState, setActionState] = useState<Record<string, ActionState>>({});
   const [actionFailure, setActionFailure] = useState<Record<string, string>>({});
 
@@ -82,7 +84,7 @@ export function AssistantChat({ org }: { org: string }) {
     };
 
     try {
-      const response = await fetch(`/api/orgs/${org}/assistant`, {
+      const response = await fetch(`/api/orgs/${org}/datasets/${ds}/assistant`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({

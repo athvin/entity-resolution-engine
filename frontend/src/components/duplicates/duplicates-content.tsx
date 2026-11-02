@@ -15,6 +15,7 @@ import { cn } from "@/lib/utils";
 import { MatchPreviewCard } from "./match-preview-card";
 import { PreMergeReport } from "./pre-merge-report";
 import { ScoreBandBrowser } from "./score-band-browser";
+import { useDatasetSlug } from "@/lib/use-dataset-slug";
 
 const ROLE_RANK = { viewer: 0, steward: 1, admin: 2 } as const;
 
@@ -33,8 +34,9 @@ function sourceOf(memberKey: string): string {
 }
 
 function GroupsTab({ org }: { org: string }) {
-  const query = useDuplicates(org);
-  const entityType = useOrgEntityType(org);
+  const ds = useDatasetSlug();
+  const query = useDuplicates(org, ds);
+  const entityType = useOrgEntityType(org, ds);
   const [sort, setSort] = useState<(typeof SORTS)[number]["id"]>("members");
   const [sourceFilter, setSourceFilter] = useState<string | null>(null);
 
@@ -127,7 +129,7 @@ function GroupsTab({ org }: { org: string }) {
 
       <div className="grid gap-3 lg:grid-cols-2" data-testid="duplicate-groups">
         {visible.map((group: DuplicateGroup) => (
-          <Link key={group.entity_id} href={`/${org}/records/${group.entity_id}`}>
+          <Link key={group.entity_id} href={`/${org}/${ds}/records/${group.entity_id}`}>
             <Card className="hover:border-primary/40 h-full transition-colors">
               <CardContent className="flex flex-col gap-2 p-4">
                 <div className="flex items-center gap-2">

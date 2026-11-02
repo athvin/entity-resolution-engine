@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { login, ORG, USERS } from "./helpers";
+import { DS, login, ORG, USERS } from "./helpers";
 
 /**
  * Resolution metrics over time (O7b-1). O7a started retaining the snapshots
@@ -14,7 +14,7 @@ test.describe("insights", () => {
     page,
   }) => {
     await login(page, USERS.viewer);
-    await page.goto(`/${ORG}/insights`);
+    await page.goto(`/${ORG}/${DS}/insights`);
 
     // The rate is counted by RECORD, not by group — O7a's first judgement,
     // because counting only groups calls a five-record cluster and a pair the
@@ -36,7 +36,7 @@ test.describe("insights", () => {
 
   test("a rate it cannot compute is a gap, not a zero", async ({ page }) => {
     await login(page, USERS.viewer);
-    await page.goto(`/${ORG}/insights`);
+    await page.goto(`/${ORG}/${DS}/insights`);
 
     // The oldest snapshot in the fixture has an empty corpus, so its rate is
     // null. O7a sends null rather than 0.0 precisely so nothing draws a
@@ -57,7 +57,7 @@ test.describe("insights", () => {
 
   test("says which feed the duplicates come from, worst first", async ({ page }) => {
     await login(page, USERS.viewer);
-    await page.goto(`/${ORG}/insights`);
+    await page.goto(`/${ORG}/${DS}/insights`);
 
     // The corpus-wide rate says a tenant HAS a problem; this says which feed to
     // go and fix, which is the difference between knowing and acting.
@@ -100,7 +100,7 @@ test.describe("insights", () => {
 
   test("an org with no runs says so rather than drawing an empty frame", async ({ page }) => {
     await login(page, USERS.steward);
-    await page.goto("/mutable-dev/insights");
+    await page.goto("/mutable-dev/default/insights");
     await expect(page.getByTestId("insights-series")).toContainText("No snapshots yet");
     await expect(page.getByTestId("insight-duplicate-rate")).toContainText("No runs yet");
     await expect(page.getByTestId("insight-sources")).toContainText("No attribution yet");
@@ -112,7 +112,7 @@ test.describe("insights", () => {
     // other assertion covers, and a bar that silently rendered at the wrong
     // width would read as a different corpus rather than as a bug.
     await login(page, USERS.viewer);
-    await page.goto(`/${ORG}/insights`);
+    await page.goto(`/${ORG}/${DS}/insights`);
     await expect(page.getByTestId("insight-sources")).toContainText("webforms");
     await expect(page.getByTestId("insights-series")).toBeVisible();
     await expect(page).toHaveScreenshot("insights.png", { fullPage: true });
@@ -125,7 +125,7 @@ test.describe("insights", () => {
     // phone's tab bar holds four and pushes the rest into "More" — so a new
     // screen can be reachable on a desktop and unreachable on a phone.
     await login(page, USERS.viewer);
-    await page.goto(`/${ORG}/dashboard`);
+    await page.goto(`/${ORG}/${DS}/dashboard`);
     if (isMobile) {
       await page.getByTestId("bottom-tabs").getByRole("button", { name: "More" }).click();
       // The overflow entries are `DropdownMenuItem asChild`, so the anchor

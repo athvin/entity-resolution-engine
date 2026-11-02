@@ -50,9 +50,14 @@ export function useTags(org: string) {
  * because the server already answers it with one indexed read and the chips on
  * a page change independently of the vocabulary.
  */
-export function useSubjectTags(org: string, subjectType: TagSubject, subjectId: string) {
+export function useSubjectTags(
+  org: string,
+  ds: string,
+  subjectType: TagSubject,
+  subjectId: string,
+) {
   return useQuery({
-    queryKey: queryKeys.subjectTags(org, subjectType, subjectId),
+    queryKey: queryKeys.subjectTags(org, ds, subjectType, subjectId),
     queryFn: () =>
       bffFetch<Tag[]>(
         `/api/orgs/${org}/tags?subject_type=${subjectType}&subject_id=${encodeURIComponent(
@@ -74,6 +79,7 @@ export function useSubjectTags(org: string, subjectType: TagSubject, subjectId: 
  */
 function useTagMutation<T, V>(
   org: string,
+  ds: string,
   run: (input: V) => Promise<T>,
   subject?: { type: TagSubject; id: string },
 ) {
@@ -84,7 +90,7 @@ function useTagMutation<T, V>(
       void queryClient.invalidateQueries({ queryKey: queryKeys.tags(org) });
       if (subject) {
         void queryClient.invalidateQueries({
-          queryKey: queryKeys.subjectTags(org, subject.type, subject.id),
+          queryKey: queryKeys.subjectTags(org, ds, subject.type, subject.id),
         });
       }
     },
@@ -92,9 +98,10 @@ function useTagMutation<T, V>(
 }
 
 /** Add a label to the vocabulary. Steward+. */
-export function useCreateTag(org: string, subject?: { type: TagSubject; id: string }) {
+export function useCreateTag(org: string, ds: string, subject?: { type: TagSubject; id: string }) {
   return useTagMutation(
     org,
+    ds,
     (body: { name: string; description?: string }) =>
       bffFetch<Tag>(`/api/orgs/${org}/tags`, {
         method: "POST",
@@ -106,12 +113,17 @@ export function useCreateTag(org: string, subject?: { type: TagSubject; id: stri
 }
 
 /** Apply or remove a tag on one subject. Steward+. */
-export function useTagApplication(org: string, subject: { type: TagSubject; id: string }) {
+export function useTagApplication(
+  org: string,
+  ds: string,
+  subject: { type: TagSubject; id: string },
+) {
   return useTagMutation(
     org,
+    ds,
     ({ tagId, apply }: { tagId: string; apply: boolean }) =>
       bffFetch<unknown>(
-        `/api/orgs/${org}/tags/${encodeURIComponent(tagId)}/${apply ? "apply" : "unapply"}`,
+        `/api/orgs/${org}/datasets/${ds}/tags/${encodeURIComponent(tagId)}/${apply ? "apply" : "unapply"}`,
         {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -123,8 +135,8 @@ export function useTagApplication(org: string, subject: { type: TagSubject; id: 
 }
 
 /** Retire a tag. Admin+ — it affects every subject the tag touched. */
-export function useRetireTag(org: string) {
-  return useTagMutation(org, (tagId: string) =>
+export function useRetireTag(org: string, ds: string) {
+  return useTagMutation(org, ds, (tagId: string) =>
     bffFetch<unknown>(`/api/orgs/${org}/tags/${encodeURIComponent(tagId)}`, { method: "DELETE" }),
   );
 }

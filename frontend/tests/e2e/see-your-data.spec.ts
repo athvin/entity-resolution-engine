@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
 
-import { snap } from "./helpers";
+import { DS, snap } from "./helpers";
 
 /**
  * The M2 slice of the full-stack story: browse the real corpus, open an entity
@@ -30,9 +30,9 @@ async function loginAs(page: import("@playwright/test").Page, email: string) {
 test("a steward browses real golden records with provenance and history", async ({ page }) => {
   const { org } = expected();
   await loginAs(page, "steward@acme.dev");
-  await expect(page).toHaveURL(new RegExp(`/${org}/dashboard$`));
+  await expect(page).toHaveURL(new RegExp(`/${org}/${DS}/dashboard$`));
 
-  await page.goto(`/${org}/records`);
+  await page.goto(`/${org}/${DS}/records`);
   await expect(page.getByTestId("snapshot-indicator")).toBeVisible();
   const rows = page.getByTestId("records-list").locator("a");
   await expect(rows.first()).toBeVisible();
@@ -46,7 +46,7 @@ test("a steward browses real golden records with provenance and history", async 
   await expect(page.getByTestId("entity-timeline")).toBeVisible();
   await snap(page, "entity-real");
 
-  await page.goto(`/${org}/runs`);
+  await page.goto(`/${org}/${DS}/runs`);
   // Assert on the job kind every journey keeps producing, not the seed's
   // one-time train — the tenant is long-lived and each e2e pass appends jobs,
   // so train eventually scrolls out of the table's window.
@@ -85,7 +85,11 @@ test("the operator provisions a tenant through the UI and impersonates it", asyn
   await page.getByTestId(`view-as-${name}`).click();
   await page.getByTestId(`view-as-${name}-admin`).click();
   await expect(page.getByTestId("impersonation-banner")).toContainText(`Viewing ${name} as admin`);
-  await expect(page.getByTestId("dashboard")).toBeVisible();
+  // The fresh tenant's `default` dataset may still be provisioning (its lake
+  // and starter config are a job); the dataset guard shows "Setting up…" and
+  // polls until it flips active, so give the dashboard the job's time rather
+  // than the default expect budget.
+  await expect(page.getByTestId("dashboard")).toBeVisible({ timeout: 60_000 });
   await snap(page, "impersonated-fresh-tenant");
 
   await page.getByTestId("impersonation-exit").click();

@@ -50,7 +50,7 @@ test.describe("members", () => {
     await guest.getByTestId("invite-password").fill("a-very-long-password");
     await guest.getByTestId("invite-accept").click();
     // Accepting signs them in and lands them in the workspace.
-    await guest.waitForURL(/\/selectall-dev\/dashboard/);
+    await guest.waitForURL(/\/selectall-dev\/default\/dashboard/);
     await guest.close();
     await context.close();
 

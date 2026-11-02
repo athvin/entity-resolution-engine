@@ -12,11 +12,11 @@ export default async function OrgLayout({
 }) {
   const { org } = await params;
   const identity = await identityFromCookies();
-  if (!identity) redirect(`/login?next=${encodeURIComponent(`/${org}/dashboard`)}`);
+  if (!identity) redirect(`/login?next=${encodeURIComponent(`/${org}`)}`);
 
   // An active impersonation pins the whole app to that tenant.
   if (identity.impersonating && identity.impersonating.org !== org) {
-    redirect(`/${identity.impersonating.org}/dashboard`);
+    redirect(`/${identity.impersonating.org}`);
   }
   const membership = identity.memberships.find((m) => m.org === org);
   // Non-members learn nothing about which orgs exist; super admins pass.

@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { login, ORG, USERS } from "./helpers";
+import { DS, login, ORG, USERS } from "./helpers";
 
 /** The duplicates uplift (design §5.3): groups with sort/filter, and the
  * probability-band browse over match_scores with per-pair evidence. */
@@ -8,7 +8,7 @@ import { login, ORG, USERS } from "./helpers";
 test.describe("duplicates", () => {
   test("groups tab sorts and filters by source", async ({ page }) => {
     await login(page, USERS.viewer);
-    await page.goto(`/${ORG}/duplicates`);
+    await page.goto(`/${ORG}/${DS}/duplicates`);
     await expect(page.getByTestId("duplicate-groups")).toBeVisible();
 
     await expect(page.getByTestId("groups-sort")).toHaveValue("members");
@@ -26,7 +26,7 @@ test.describe("duplicates", () => {
 
   test("the pre-merge report carries the chosen master-election policy", async ({ page }) => {
     await login(page, USERS.viewer);
-    await page.goto(`/${ORG}/duplicates`);
+    await page.goto(`/${ORG}/${DS}/duplicates`);
     const card = page.getByTestId("pre-merge-report");
     await expect(card).toBeVisible();
 
@@ -72,7 +72,7 @@ test.describe("duplicates", () => {
 
   test("by-score tab narrows the band and shows the evidence", async ({ page }) => {
     await login(page, USERS.viewer);
-    await page.goto(`/${ORG}/duplicates`);
+    await page.goto(`/${ORG}/${DS}/duplicates`);
     await page.getByTestId("tab-scores").click();
     await expect(page.getByTestId("score-band-browser")).toBeVisible();
 
@@ -93,7 +93,7 @@ test.describe("duplicates", () => {
   test("a steward merges two entities ad hoc from entity detail", async ({ page }) => {
     await login(page, USERS.steward);
     // Entity 0 (Ada Lovelace) has two source records in the mock's shape.
-    await page.goto("/selectall-dev/records/01jm0e000000");
+    await page.goto("/selectall-dev/default/records/01jm0e000000");
     await expect(page.getByTestId("entity-view")).toBeVisible();
 
     await page.getByTestId("merge-with-button").click();
@@ -117,7 +117,7 @@ test.describe("duplicates", () => {
 
   test("a steward flags a scored pair as not-a-match", async ({ page }) => {
     await login(page, USERS.steward);
-    await page.goto("/selectall-dev/duplicates");
+    await page.goto("/selectall-dev/default/duplicates");
     await page.getByTestId("tab-scores").click();
     await expect(page.getByTestId("score-rows").locator("> div")).toHaveCount(10);
 

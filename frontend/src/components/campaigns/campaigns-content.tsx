@@ -14,6 +14,7 @@ import { displayName } from "@/lib/domain/attributes";
 import { useOrgEntityType } from "@/lib/query/config";
 import { effectiveRole, fetchGoldenPage, useSession } from "@/lib/query/hooks";
 import { queryKeys } from "@/lib/query/keys";
+import { useDatasetSlug } from "@/lib/use-dataset-slug";
 
 const ROLE_RANK = { viewer: 0, steward: 1, admin: 2 } as const;
 
@@ -25,25 +26,32 @@ interface SegmentRow {
 }
 
 function useSegments(org: string) {
+  const ds = useDatasetSlug();
   return useQuery({
     queryKey: [...queryKeys.org(org), "segments"],
-    queryFn: () => bffFetch<SegmentRow[]>(`/api/orgs/${org}/segments`),
+    queryFn: () => bffFetch<SegmentRow[]>(`/api/orgs/${org}/datasets/${ds}/segments`),
   });
 }
 
 function usePreview(org: string, q: string) {
+  const ds = useDatasetSlug();
   return useQuery({
     queryKey: [...queryKeys.org(org), "segment-preview", q],
     queryFn: () =>
       fetchGoldenPage(
-        `/api/orgs/${org}/golden-records?limit=5${q ? `&q=${encodeURIComponent(q)}` : ""}`,
+        `/api/orgs/${org}/datasets/${ds}/golden-records?limit=5${q ? `&q=${encodeURIComponent(q)}` : ""}`,
       ),
     staleTime: 15_000,
   });
 }
 
-async function downloadCsv(org: string, definition: { q: string; limit: number }, name: string) {
-  const response = await fetch(`/api/orgs/${org}/segments/export`, {
+async function downloadCsv(
+  org: string,
+  ds: string,
+  definition: { q: string; limit: number },
+  name: string,
+) {
+  const response = await fetch(`/api/orgs/${org}/datasets/${ds}/segments/export`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(definition),
@@ -61,6 +69,7 @@ async function downloadCsv(org: string, definition: { q: string; limit: number }
 /** Campaigns v1 (design §5.7): saved segments + snapshot-consistent CSV export.
  * Scheduled deliveries ride the parameterized export job (§7.19) when it lands. */
 export function CampaignsContent({ org }: { org: string }) {
+  const ds = useDatasetSlug();
   const session = useSession();
   const segments = useSegments(org);
   const queryClient = useQueryClient();
@@ -69,7 +78,7 @@ export function CampaignsContent({ org }: { org: string }) {
     return role !== null && ROLE_RANK[role] >= ROLE_RANK.steward;
   })();
 
-  const entityType = useOrgEntityType(org);
+  const entityType = useOrgEntityType(org, ds);
   const [name, setName] = useState("");
   const [q, setQ] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -77,7 +86,7 @@ export function CampaignsContent({ org }: { org: string }) {
 
   const create = useMutation({
     mutationFn: () =>
-      bffFetch<SegmentRow>(`/api/orgs/${org}/segments`, {
+      bffFetch<SegmentRow>(`/api/orgs/${org}/datasets/${ds}/segments`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ name, definition: { q, limit: 1000 } }),
@@ -94,7 +103,9 @@ export function CampaignsContent({ org }: { org: string }) {
 
   const remove = useMutation({
     mutationFn: (segmentId: string) =>
-      bffFetch<unknown>(`/api/orgs/${org}/segments/${segmentId}`, { method: "DELETE" }),
+      bffFetch<unknown>(`/api/orgs/${org}/datasets/${ds}/segments/${segmentId}`, {
+        method: "DELETE",
+      }),
     onSettled: () =>
       void queryClient.invalidateQueries({ queryKey: [...queryKeys.org(org), "segments"] }),
   });
@@ -223,7 +234,9 @@ export function CampaignsContent({ org }: { org: string }) {
                           variant="outline"
                           size="sm"
                           data-testid={`export-${segment.name}`}
-                          onClick={() => void downloadCsv(org, segment.definition, segment.name)}
+                          onClick={() =>
+                            void downloadCsv(org, ds, segment.definition, segment.name)
+                          }
                         >
                           <Download /> CSV
                         </Button>

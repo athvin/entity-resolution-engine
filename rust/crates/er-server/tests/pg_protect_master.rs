@@ -30,7 +30,11 @@ async fn oid(client: &tokio_postgres::Client, name: &str) -> String {
 async fn golden_entity_ids(app: &axum::Router) -> Vec<String> {
     let resp = app
         .clone()
-        .oneshot(op("GET", "/v1/orgs/acme/golden-records", Body::empty()))
+        .oneshot(op(
+            "GET",
+            "/v1/orgs/acme/datasets/default/golden-records",
+            Body::empty(),
+        ))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -159,7 +163,7 @@ async fn members(app: &axum::Router, entity_id: &str) -> Vec<String> {
         .clone()
         .oneshot(op(
             "GET",
-            &format!("/v1/orgs/acme/golden-records/{entity_id}"),
+            &format!("/v1/orgs/acme/datasets/default/golden-records/{entity_id}"),
             Body::empty(),
         ))
         .await
@@ -182,7 +186,11 @@ async fn members(app: &axum::Router, entity_id: &str) -> Vec<String> {
 async fn plan_master(app: &axum::Router, entity_id: &str) -> Option<String> {
     let resp = app
         .clone()
-        .oneshot(op("GET", "/v1/orgs/acme/merge-plans", Body::empty()))
+        .oneshot(op(
+            "GET",
+            "/v1/orgs/acme/datasets/default/merge-plans",
+            Body::empty(),
+        ))
         .await
         .unwrap();
     json_body(resp).await["items"]
@@ -260,7 +268,7 @@ async fn protect_pins_master_and_retract_restores_policy() {
         .clone()
         .oneshot(op(
             "POST",
-            "/v1/orgs/acme/records/protect",
+            "/v1/orgs/acme/datasets/default/records/protect",
             Body::from(serde_json::json!({ "record_key": victim }).to_string()),
         ))
         .await
@@ -294,7 +302,7 @@ async fn protect_pins_master_and_retract_restores_policy() {
         .clone()
         .oneshot(op(
             "POST",
-            "/v1/orgs/acme/records/unprotect",
+            "/v1/orgs/acme/datasets/default/records/unprotect",
             Body::from(serde_json::json!({ "record_key": victim }).to_string()),
         ))
         .await

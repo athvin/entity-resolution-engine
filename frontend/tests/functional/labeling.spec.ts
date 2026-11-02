@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { labelingOrg, login, ORG, USERS } from "./helpers";
+import { DS, labelingOrg, login, ORG, USERS } from "./helpers";
 
 /**
  * The labelling surface (E10c-2).
@@ -27,7 +27,7 @@ test.describe("labelling", () => {
   test("asks about a scored pair and explains why that pair", async ({ page }, testInfo) => {
     const org = labelingOrg(testInfo.project.name);
     await login(page, USERS.steward);
-    await page.goto(`/${org}/labeling`);
+    await page.goto(`/${org}/${DS}/labeling`);
 
     const queue = page.getByTestId("labeling-queue");
     // A bare probability is a defect on this product: the score is rendered to
@@ -47,7 +47,7 @@ test.describe("labelling", () => {
   test("a verdict moves the queue on and is counted", async ({ page }, testInfo) => {
     const org = labelingOrg(testInfo.project.name);
     await login(page, USERS.steward);
-    await page.goto(`/${org}/labeling`);
+    await page.goto(`/${org}/${DS}/labeling`);
 
     const score = page.getByTestId("labeling-probability");
     await expect(score).toHaveText(SCORE);
@@ -71,7 +71,7 @@ test.describe("labelling", () => {
   test("skipping advances without recording anything", async ({ page }, testInfo) => {
     const org = labelingOrg(testInfo.project.name);
     await login(page, USERS.steward);
-    await page.goto(`/${org}/labeling`);
+    await page.goto(`/${org}/${DS}/labeling`);
 
     const score = page.getByTestId("labeling-probability");
     const coverage = page.getByTestId("labeling-coverage");
@@ -93,7 +93,7 @@ test.describe("labelling", () => {
     // `ORG` — the per-project orgs get admin and steward alone, so a viewer
     // there gets a 404 from the tenant layout rather than a readonly page.
     await login(page, USERS.viewer);
-    await page.goto(`/${ORG}/labeling`);
+    await page.goto(`/${ORG}/${DS}/labeling`);
 
     // The readonly note must appear and the buttons must never, including
     // during the window before the session resolves — `effectiveRole` returns

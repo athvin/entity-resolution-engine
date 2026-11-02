@@ -7,6 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { WaterfallChart } from "@/components/review/waterfall-chart";
 import { useMatchPreview } from "@/lib/query/duplicates";
+import { useDatasetSlug } from "@/lib/use-dataset-slug";
 
 /**
  * Score-only match preview (frontend-design §7.16): dry-run the committed model
@@ -14,9 +15,10 @@ import { useMatchPreview } from "@/lib/query/duplicates";
  * scoring is heavy, so it runs only when the steward clicks "Preview matches".
  */
 export function MatchPreviewCard({ org }: { org: string }) {
+  const ds = useDatasetSlug();
   const [run, setRun] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
-  const preview = useMatchPreview(org, run);
+  const preview = useMatchPreview(org, ds, run);
   const data = preview.data;
 
   return (

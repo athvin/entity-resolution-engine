@@ -29,12 +29,12 @@ export interface EntityLink {
   updated_at: string;
 }
 
-export function useEntityLinks(org: string, entityId: string) {
+export function useEntityLinks(org: string, ds: string, entityId: string) {
   return useQuery({
     queryKey: [...queryKeys.org(org), "entity-links", entityId],
     queryFn: () =>
       bffFetch<{ items: EntityLink[] }>(
-        `/api/orgs/${org}/entities/${encodeURIComponent(entityId)}/links`,
+        `/api/orgs/${org}/datasets/${ds}/entities/${encodeURIComponent(entityId)}/links`,
       ),
     enabled: entityId !== "",
   });
@@ -47,11 +47,11 @@ export interface CreateLinkInput {
   note?: string;
 }
 
-export function useCreateEntityLink(org: string, entityId: string) {
+export function useCreateEntityLink(org: string, ds: string, entityId: string) {
   const client = useQueryClient();
   return useMutation({
     mutationFn: (input: CreateLinkInput) =>
-      bffFetch<EntityLink>(`/api/orgs/${org}/entity-links`, {
+      bffFetch<EntityLink>(`/api/orgs/${org}/datasets/${ds}/entity-links`, {
         method: "POST",
         body: JSON.stringify(input),
       }),
@@ -63,16 +63,19 @@ export function useCreateEntityLink(org: string, entityId: string) {
   });
 }
 
-export function useDeleteEntityLink(org: string, entityId: string) {
+export function useDeleteEntityLink(org: string, ds: string, entityId: string) {
   const client = useQueryClient();
   return useMutation({
     mutationFn: (linkId: string) =>
       // `{deleted}`, not void: the route answers with a JSON body like every
       // other DELETE here, and a bare 204 is what made the BFF's `forward`
       // throw "Unexpected end of JSON input".
-      bffFetch<{ deleted: string }>(`/api/orgs/${org}/entity-links/${encodeURIComponent(linkId)}`, {
-        method: "DELETE",
-      }),
+      bffFetch<{ deleted: string }>(
+        `/api/orgs/${org}/datasets/${ds}/entity-links/${encodeURIComponent(linkId)}`,
+        {
+          method: "DELETE",
+        },
+      ),
     onSuccess: () => {
       void client.invalidateQueries({
         queryKey: [...queryKeys.org(org), "entity-links", entityId],

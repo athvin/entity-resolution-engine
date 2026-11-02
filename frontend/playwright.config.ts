@@ -30,6 +30,13 @@ export default defineConfig({
     ],
   ],
   expect: {
+    // Regeneration (`--update-snapshots=all`) needs TWO consecutive identical
+    // captures, and a full-page webkit shot of the longest screens (config
+    // studio, tenant detail) takes ~3s each in the pinned container — the
+    // default 5s budget fails the regeneration run while the ordinary
+    // single-capture compare fits it comfortably. Scoped to regeneration so
+    // CI's failure latency is unchanged.
+    ...(process.env.UPDATE_BASELINES === "1" ? { timeout: 30_000 } : {}),
     // 0.0005 is ~840 pixels on a 1440x1170 full-page shot. The old 0.01 was
     // ~16,800, and a whole navigation item costs ~1,050 — measured in #292,
     // where adding one changed NO baseline at all.

@@ -4,11 +4,13 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 import { NAV_ITEMS } from "@/lib/nav";
+import { useDatasetSlug } from "@/lib/use-dataset-slug";
 import { cn } from "@/lib/utils";
 
 /** Desktop navigation: a slim left rail (hidden below lg). */
 export function NavRail({ org }: { org: string }) {
   const pathname = usePathname();
+  const ds = useDatasetSlug();
   return (
     <nav
       aria-label="Primary"
@@ -16,7 +18,7 @@ export function NavRail({ org }: { org: string }) {
       data-testid="nav-rail"
     >
       {NAV_ITEMS.map((item) => {
-        const href = item.path(org);
+        const href = item.path(org, ds);
         const active = pathname.startsWith(href);
         if (!item.enabled) {
           return (

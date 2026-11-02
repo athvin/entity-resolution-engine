@@ -2,7 +2,7 @@ import "server-only";
 import type Anthropic from "@anthropic-ai/sdk";
 
 import { forwardGoldenPage } from "@/lib/bff/golden";
-import { forward, type EffectiveOrgAccess } from "@/lib/bff/proxy";
+import { datasetPath, forward, type EffectiveDatasetAccess } from "@/lib/bff/proxy";
 import { parseProposals } from "@/lib/agent-actions/propose";
 import { PROPOSAL_SCHEMA, proposalInstructions } from "@/lib/agent-actions/prompt";
 
@@ -98,37 +98,39 @@ export const TOOL_DEFINITIONS: Anthropic.Tool[] = [
 
 /** Execute one tool with the viewer credential; returns the JSON-able result. */
 export async function executeTool(
-  access: EffectiveOrgAccess,
+  access: EffectiveDatasetAccess,
   name: string,
   input: Record<string, unknown>,
 ): Promise<unknown> {
-  const org = access.org;
   switch (name) {
     case "get_metrics":
-      return forward(access, `/v1/orgs/${org}/metrics`);
+      return forward(access, datasetPath(access, "/metrics"));
     case "list_runs":
-      return forward(access, `/v1/orgs/${org}/runs`);
+      return forward(access, datasetPath(access, "/runs"));
     case "list_jobs": {
       const searchParams = new URLSearchParams({
         limit: String(Math.min(Number(input.limit ?? 20), 50)),
       });
-      return forward(access, `/v1/orgs/${org}/jobs`, { searchParams });
+      return forward(access, datasetPath(access, "/jobs"), { searchParams });
     }
     case "search_golden_records": {
       const q = typeof input.q === "string" ? input.q : "";
       const searchParams = new URLSearchParams({ q, limit: "20" });
       // The golden-records data lane is Arrow IPC; decode it server-side to the
       // same row shape the tool previously returned as JSON.
-      return forwardGoldenPage(access, `/v1/orgs/${org}/golden-records`, { searchParams });
+      return forwardGoldenPage(access, datasetPath(access, "/golden-records"), { searchParams });
     }
     case "get_entity":
       return forward(
         access,
-        `/v1/orgs/${org}/golden-records/${encodeURIComponent(typeof input.entity_id === "string" ? input.entity_id : "")}`,
+        datasetPath(
+          access,
+          `/golden-records/${encodeURIComponent(typeof input.entity_id === "string" ? input.entity_id : "")}`,
+        ),
       );
     case "list_open_reviews": {
       const searchParams = new URLSearchParams({ limit: "50" });
-      return forward(access, `/v1/orgs/${org}/reviews`, { searchParams });
+      return forward(access, datasetPath(access, "/reviews"), { searchParams });
     }
     case "get_import_receipts": {
       const searchParams = new URLSearchParams({ limit: "20" });
@@ -139,13 +141,13 @@ export async function executeTool(
       // "newest first" and the latter is a forward keyset cursor, so this tool
       // handed the model the OLDEST 20 receipts and called them the newest.
       // Kept in the `{items}` envelope the tool result already had.
-      const items = await forward<unknown[]>(access, `/v1/orgs/${org}/imports/recent`, {
+      const items = await forward<unknown[]>(access, datasetPath(access, "/imports/recent"), {
         searchParams,
       });
       return { items };
     }
     case "list_config_versions":
-      return forward(access, `/v1/orgs/${org}/config/versions`);
+      return forward(access, datasetPath(access, "/config/versions"));
     case "propose_actions": {
       // **Performs nothing.** This is the one tool with no `forward` call, and
       // that is the whole V9 design: the model emits a proposal, the ROUTE

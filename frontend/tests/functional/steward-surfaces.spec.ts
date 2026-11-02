@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { login, ORG, ORG_MUTABLE, USERS } from "./helpers";
+import { DS, login, ORG, ORG_MUTABLE, USERS } from "./helpers";
 
 // Which multi-member acme entity each project unmerges — one per project so
 // parallel runs never race on the same entity (every third index is multi).
@@ -13,7 +13,7 @@ const UNMERGE_ENTITY: Record<string, string> = {
 test.describe("sources & imports", () => {
   test("lists configured sources from the active config", async ({ page }) => {
     await login(page, USERS.viewer);
-    await page.goto(`/${ORG}/sources`);
+    await page.goto(`/${ORG}/${DS}/sources`);
     for (const source of ["crm", "billing", "webforms"]) {
       await expect(page.getByTestId(`source-${source}`)).toBeVisible();
     }
@@ -22,7 +22,7 @@ test.describe("sources & imports", () => {
 
   test("receipts answer 'did my file do anything?' honestly", async ({ page }) => {
     await login(page, USERS.viewer);
-    await page.goto(`/${ORG}/sources`);
+    await page.goto(`/${ORG}/${DS}/sources`);
     const receipts = page.getByTestId("receipts");
     await expect(receipts).toContainText("webforms");
     await expect(receipts).toContainText("12"); // new
@@ -49,7 +49,7 @@ test.describe("sources & imports", () => {
 
   test("auto-ingest names the exact drop path per source (E9c)", async ({ page }) => {
     await login(page, USERS.viewer);
-    await page.goto(`/${ORG}/sources`);
+    await page.goto(`/${ORG}/${DS}/sources`);
     const panel = page.getByTestId("auto-ingest");
     // The path is the one thing a tenant has to get exactly right, and getting
     // it wrong is silent: the source comes from the DIRECTORY, so a file
@@ -85,14 +85,14 @@ test.describe("sources & imports", () => {
     // `fresh-dev` has no bucket, which is every tenant until an operator points
     // the poller at one. An empty table here would read as "configured and
     // nothing has ever arrived", which is a different and alarming fact.
-    await page.goto(`/fresh-dev/sources`);
+    await page.goto(`/fresh-dev/default/sources`);
     await expect(page.getByTestId("auto-ingest-off")).toContainText("Not configured");
     await expect(page.getByTestId("auto-ingest-table")).toHaveCount(0);
   });
 
   test("a steward uploads a file and the import queues", async ({ page }) => {
     await login(page, USERS.steward);
-    await page.goto(`/${ORG_MUTABLE}/sources`);
+    await page.goto(`/${ORG_MUTABLE}/${DS}/sources`);
     await page.getByTestId("source-crm-file").setInputFiles({
       name: "delta.csv",
       mimeType: "text/csv",
@@ -103,14 +103,14 @@ test.describe("sources & imports", () => {
 
   test("viewers get a read-only sources page", async ({ page }) => {
     await login(page, USERS.viewer);
-    await page.goto(`/${ORG}/sources`);
+    await page.goto(`/${ORG}/${DS}/sources`);
     await expect(page.getByTestId("source-crm")).toContainText("importing needs the steward role");
     await expect(page.getByTestId("source-crm-upload")).toHaveCount(0);
   });
 
   test("sources visual baseline @visual", async ({ page }) => {
     await login(page, USERS.viewer);
-    await page.goto(`/${ORG}/sources`);
+    await page.goto(`/${ORG}/${DS}/sources`);
     await expect(page.getByTestId("receipts")).toContainText("webforms");
     await expect(page).toHaveScreenshot("sources.png", { fullPage: true });
   });
@@ -119,7 +119,7 @@ test.describe("sources & imports", () => {
 test.describe("schedules", () => {
   test("renders the ledger with the config-owned row locked", async ({ page }) => {
     await login(page, USERS.admin);
-    await page.goto(`/${ORG}/runs/schedules`);
+    await page.goto(`/${ORG}/${DS}/runs/schedules`);
     await expect(page.getByTestId("schedule-run_all_incremental")).toContainText("0 6 * * *");
     const systemRow = page.getByTestId("schedule-correct");
     await expect(systemRow).toContainText("config (correction pass)");
@@ -129,7 +129,7 @@ test.describe("schedules", () => {
   test("an admin creates, disables and deletes a schedule", async ({ page, isMobile }) => {
     test.skip(isMobile, "state-mutating flow runs once, on the desktop project");
     await login(page, USERS.admin);
-    await page.goto(`/${ORG_MUTABLE}/runs/schedules`);
+    await page.goto(`/${ORG_MUTABLE}/${DS}/runs/schedules`);
     await page.getByTestId("schedule-kind").selectOption("run_all_full");
     // The raw escape hatch: whatever the API accepts stays reachable.
     await page.getByTestId("cron-preset-custom").click();
@@ -150,7 +150,7 @@ test.describe("schedules", () => {
 
   test("the cron builder composes presets and previews the next fires", async ({ page }) => {
     await login(page, USERS.admin);
-    await page.goto(`/${ORG_MUTABLE}/runs/schedules`);
+    await page.goto(`/${ORG_MUTABLE}/${DS}/runs/schedules`);
     // Daily is the default shape, and the composed expression is always visible.
     await expect(page.getByTestId("cron-value")).toHaveText("0 6 * * *");
     await expect(page.getByTestId("cron-preview")).toContainText("UTC");
@@ -171,7 +171,7 @@ test.describe("schedules", () => {
 
   test("stewards see schedules but cannot edit", async ({ page }) => {
     await login(page, USERS.steward);
-    await page.goto(`/${ORG}/runs/schedules`);
+    await page.goto(`/${ORG}/${DS}/runs/schedules`);
     await expect(page.getByTestId("schedules-table")).toContainText("run_all_incremental");
     await expect(page.getByTestId("new-schedule")).toHaveCount(0);
     await expect(page.getByTestId("schedule-toggle-run_all_incremental")).toBeDisabled();
@@ -183,7 +183,7 @@ test.describe("unmerge", () => {
     const entityId = UNMERGE_ENTITY[testInfo.project.name];
     if (!entityId) throw new Error(`no unmerge fixture for ${testInfo.project.name}`);
     await login(page, USERS.steward);
-    await page.goto(`/${ORG}/records/${entityId}`);
+    await page.goto(`/${ORG}/${DS}/records/${entityId}`);
     await expect(page.getByTestId("entity-view")).toContainText("2 source records");
 
     const webformsMember = page.locator("[data-testid^=mark-webforms]");
@@ -201,7 +201,7 @@ test.describe("unmerge", () => {
 
   test("viewers see no unmerge controls", async ({ page }) => {
     await login(page, USERS.viewer);
-    await page.goto(`/${ORG}/records/01jm0e000000`);
+    await page.goto(`/${ORG}/${DS}/records/01jm0e000000`);
     await expect(page.getByTestId("entity-members")).toBeVisible();
     await expect(page.getByTestId("unmerge-button")).toHaveCount(0);
   });
@@ -213,7 +213,7 @@ test.describe("protect", () => {
   // projects can target the same multi-member entity without racing.
   test("a steward pins a record as the surviving master", async ({ page }) => {
     await login(page, USERS.steward);
-    await page.goto(`/${ORG}/records/01jm0e000000`);
+    await page.goto(`/${ORG}/${DS}/records/01jm0e000000`);
     await expect(page.getByTestId("entity-view")).toContainText("source records");
     await page.locator("[data-testid^=mark-]").first().check();
     await page.getByTestId("protect-button").click();
@@ -222,7 +222,7 @@ test.describe("protect", () => {
 
   test("viewers see no protect controls", async ({ page }) => {
     await login(page, USERS.viewer);
-    await page.goto(`/${ORG}/records/01jm0e000000`);
+    await page.goto(`/${ORG}/${DS}/records/01jm0e000000`);
     await expect(page.getByTestId("entity-members")).toBeVisible();
     await expect(page.getByTestId("protect-button")).toHaveCount(0);
   });
@@ -235,13 +235,13 @@ test.describe("protect", () => {
     // decision. Counting the requests is the only way to see that from here:
     // the UI reported "protected N records" either way.
     const calls: unknown[] = [];
-    await page.route(`**/api/orgs/${ORG}/records/protect`, async (route) => {
+    await page.route(`**/api/orgs/${ORG}/datasets/${DS}/records/protect`, async (route) => {
       calls.push(route.request().postDataJSON());
       await route.continue();
     });
 
     await login(page, USERS.steward);
-    await page.goto(`/${ORG}/records/01jm0e000000`);
+    await page.goto(`/${ORG}/${DS}/records/01jm0e000000`);
     await expect(page.getByTestId("entity-view")).toContainText("source records");
     const marks = page.locator("[data-testid^=mark-]");
     await marks.nth(0).check();

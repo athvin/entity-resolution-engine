@@ -13,6 +13,7 @@ import { useToast } from "@/components/ui/toaster";
 import { displayName } from "@/lib/domain/attributes";
 import { RUN_KINDS, type RunKind } from "@/lib/domain/run-kinds";
 import { NAV_ITEMS } from "@/lib/nav";
+import { useDatasetSlug } from "@/lib/use-dataset-slug";
 import { useImpersonation, type AdminOrgRow } from "@/lib/query/admin";
 import { useOrgEntityType } from "@/lib/query/config";
 import { effectiveRole, fetchGoldenPage, useSession } from "@/lib/query/hooks";
@@ -64,8 +65,9 @@ export function CommandPalette({
   const { enter, exit } = useImpersonation();
   const [input, setInput] = useState("");
   const q = useDebounced(input.trim(), 200);
-  const submit = useSubmitJob(org);
-  const entityType = useOrgEntityType(org);
+  const ds = useDatasetSlug();
+  const submit = useSubmitJob(org, ds);
+  const entityType = useOrgEntityType(org, ds);
   const toast = useToast();
   // Through `effectiveRole` and the session, not the `memberships` prop: that
   // prop carries real memberships, and under impersonation the role that
@@ -89,9 +91,11 @@ export function CommandPalette({
   }, [open, onOpenChange]);
 
   const records = useQuery({
-    queryKey: ["org", org, "palette-records", q],
+    queryKey: ["org", org, "ds", ds, "palette-records", q],
     queryFn: () =>
-      fetchGoldenPage(`/api/orgs/${org}/golden-records?q=${encodeURIComponent(q)}&limit=6`),
+      fetchGoldenPage(
+        `/api/orgs/${org}/datasets/${ds}/golden-records?q=${encodeURIComponent(q)}&limit=6`,
+      ),
     enabled: open && q.length >= 2,
     staleTime: 10_000,
   });
@@ -121,7 +125,7 @@ export function CommandPalette({
       { kind: entry.kind, params: entry.params },
       {
         onSuccess: (result) => {
-          router.push(`/${org}/runs/${result.id}`);
+          router.push(`/${org}/${ds}/runs/${result.id}`);
         },
         onError: () => {
           toast({
@@ -165,7 +169,7 @@ export function CommandPalette({
                   value={`record ${name} ${secondary} ${record.id}`}
                   onSelect={() => {
                     run(() => {
-                      router.push(`/${org}/records/${record.id}`);
+                      router.push(`/${org}/${ds}/records/${record.id}`);
                     });
                   }}
                   className={ITEM_CLASS}
@@ -215,7 +219,7 @@ export function CommandPalette({
               disabled={!item.enabled}
               onSelect={() => {
                 run(() => {
-                  router.push(item.path(org));
+                  router.push(item.path(org, ds));
                 });
               }}
               className={ITEM_CLASS}
@@ -238,7 +242,7 @@ export function CommandPalette({
                 key={membership.org}
                 onSelect={() => {
                   run(() => {
-                    router.push(`/${membership.org}/dashboard`);
+                    router.push(`/${membership.org}`);
                   });
                 }}
                 className={ITEM_CLASS}

@@ -1,7 +1,7 @@
 //! The golden-records read API over a real per-org DuckLake (gated on BOTH
 //! `ER_TEST_PG_DSN` and `DEDUPE_E2E_DUCKLAKE=1`): an org whose stored env points
 //! at a lake, populated by `er_cli::run_all` over base_10, read back through
-//! `GET /v1/orgs/{org}/golden-records` — list, keyset paging, contains-search,
+//! `GET /v1/orgs/{org}/datasets/default/golden-records` — list, keyset paging, contains-search,
 //! and the malformed-cursor 422. Run with e.g.
 //!   ER_TEST_PG_DSN='...' DEDUPE_E2E_DUCKLAKE=1 \
 //!     cargo test -p er-server --test pg_golden_read
@@ -229,7 +229,7 @@ async fn golden_records_read_over_ducklake() {
     // next-cursor header.
     let resp = app
         .clone()
-        .oneshot(op_get("/v1/orgs/acme/golden-records"))
+        .oneshot(op_get("/v1/orgs/acme/datasets/default/golden-records"))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -252,7 +252,7 @@ async fn golden_records_read_over_ducklake() {
     // Keyset paging: limit=4 walks all 10 in 3 pages with no dup/missing. The next
     // cursor rides the x-er-next-cursor header.
     let mut seen: BTreeSet<String> = BTreeSet::new();
-    let mut uri = "/v1/orgs/acme/golden-records?limit=4".to_string();
+    let mut uri = "/v1/orgs/acme/datasets/default/golden-records?limit=4".to_string();
     let mut pages = 0;
     loop {
         let resp = app.clone().oneshot(op_get(&uri)).await.unwrap();
@@ -263,7 +263,9 @@ async fn golden_records_read_over_ducklake() {
         }
         pages += 1;
         match page.next_cursor {
-            Some(c) => uri = format!("/v1/orgs/acme/golden-records?limit=4&cursor={c}"),
+            Some(c) => {
+                uri = format!("/v1/orgs/acme/datasets/default/golden-records?limit=4&cursor={c}");
+            }
             None => break,
         }
         assert!(pages < 10, "paging must terminate");
@@ -274,7 +276,9 @@ async fn golden_records_read_over_ducklake() {
     // Contains-search: a term in no name yields an empty page (schema, no rows).
     let resp = app
         .clone()
-        .oneshot(op_get("/v1/orgs/acme/golden-records?q=zzzznotarealname"))
+        .oneshot(op_get(
+            "/v1/orgs/acme/datasets/default/golden-records?q=zzzznotarealname",
+        ))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -284,7 +288,7 @@ async fn golden_records_read_over_ducklake() {
     let resp = app
         .clone()
         .oneshot(op_get(
-            "/v1/orgs/acme/golden-records?cursor=%%%not-base64%%%",
+            "/v1/orgs/acme/datasets/default/golden-records?cursor=%%%not-base64%%%",
         ))
         .await
         .unwrap();
@@ -294,7 +298,7 @@ async fn golden_records_read_over_ducklake() {
     let resp = app
         .clone()
         .oneshot(op_get(&format!(
-            "/v1/orgs/acme/golden-records/{some_entity}"
+            "/v1/orgs/acme/datasets/default/golden-records/{some_entity}"
         )))
         .await
         .unwrap();
@@ -315,7 +319,9 @@ async fn golden_records_read_over_ducklake() {
     // Detail of an absent entity is a 404.
     let resp = app
         .clone()
-        .oneshot(op_get("/v1/orgs/acme/golden-records/no-such-entity"))
+        .oneshot(op_get(
+            "/v1/orgs/acme/datasets/default/golden-records/no-such-entity",
+        ))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
@@ -323,7 +329,7 @@ async fn golden_records_read_over_ducklake() {
     // Metrics: base_10 => 10 entities, 23 current std records, some dup groups.
     let resp = app
         .clone()
-        .oneshot(op_get("/v1/orgs/acme/metrics"))
+        .oneshot(op_get("/v1/orgs/acme/datasets/default/metrics"))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -339,7 +345,7 @@ async fn golden_records_read_over_ducklake() {
     // 10 entities; every rate + the composite score in [0,1]; base_10 has dupes.
     let resp = app
         .clone()
-        .oneshot(op_get("/v1/orgs/acme/data-quality"))
+        .oneshot(op_get("/v1/orgs/acme/datasets/default/data-quality"))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -364,7 +370,9 @@ async fn golden_records_read_over_ducklake() {
     // The stale_days query param is honoured (presentation parameter, not config).
     let resp = app
         .clone()
-        .oneshot(op_get("/v1/orgs/acme/data-quality?stale_days=1"))
+        .oneshot(op_get(
+            "/v1/orgs/acme/datasets/default/data-quality?stale_days=1",
+        ))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -372,7 +380,7 @@ async fn golden_records_read_over_ducklake() {
     // READ-ONLY: data-quality committed nothing — the metrics snapshot is unchanged.
     let resp = app
         .clone()
-        .oneshot(op_get("/v1/orgs/acme/metrics"))
+        .oneshot(op_get("/v1/orgs/acme/datasets/default/metrics"))
         .await
         .unwrap();
     assert_eq!(
@@ -384,7 +392,7 @@ async fn golden_records_read_over_ducklake() {
     // Duplicates: groups with >=2 members, each carrying its member list.
     let resp = app
         .clone()
-        .oneshot(op_get("/v1/orgs/acme/duplicates"))
+        .oneshot(op_get("/v1/orgs/acme/datasets/default/duplicates"))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -404,7 +412,7 @@ async fn golden_records_read_over_ducklake() {
     let resp = app
         .clone()
         .oneshot(op_get(&format!(
-            "/v1/orgs/acme/duplicates?min_members={biggest}"
+            "/v1/orgs/acme/datasets/default/duplicates?min_members={biggest}"
         )))
         .await
         .unwrap();
@@ -424,7 +432,9 @@ async fn golden_records_read_over_ducklake() {
     // duplicate group, so admitting one would change what the endpoint means.
     let resp = app
         .clone()
-        .oneshot(op_get("/v1/orgs/acme/duplicates?min_members=1"))
+        .oneshot(op_get(
+            "/v1/orgs/acme/datasets/default/duplicates?min_members=1",
+        ))
         .await
         .unwrap();
     let floored = json_body(resp).await;
@@ -440,7 +450,7 @@ async fn golden_records_read_over_ducklake() {
     // Match-scores: base_10 has 19 active scored pairs with evidence.
     let resp = app
         .clone()
-        .oneshot(op_get("/v1/orgs/acme/match-scores"))
+        .oneshot(op_get("/v1/orgs/acme/datasets/default/match-scores"))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -461,7 +471,9 @@ async fn golden_records_read_over_ducklake() {
     // request while both this test and the Playwright mock stayed green.
     let resp = app
         .clone()
-        .oneshot(op_get("/v1/orgs/acme/match-scores?band_low=0.95"))
+        .oneshot(op_get(
+            "/v1/orgs/acme/datasets/default/match-scores?band_low=0.95",
+        ))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -487,7 +499,7 @@ async fn golden_records_read_over_ducklake() {
     let resp = app
         .clone()
         .oneshot(op_get(&format!(
-            "/v1/orgs/acme/match-scores?band_low={}",
+            "/v1/orgs/acme/datasets/default/match-scores?band_low={}",
             ceiling + 0.001
         )))
         .await
@@ -503,7 +515,7 @@ async fn golden_records_read_over_ducklake() {
     let resp = app
         .clone()
         .oneshot(op_get(&format!(
-            "/v1/orgs/acme/match-scores?band_high={}",
+            "/v1/orgs/acme/datasets/default/match-scores?band_high={}",
             ceiling - 0.001
         )))
         .await
@@ -522,7 +534,9 @@ async fn golden_records_read_over_ducklake() {
     // Records-by-key: look up a real standardized record by its record_key.
     let resp = app
         .clone()
-        .oneshot(op_get(&format!("/v1/orgs/acme/records?key={some_key}")))
+        .oneshot(op_get(&format!(
+            "/v1/orgs/acme/datasets/default/records?key={some_key}"
+        )))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -537,7 +551,7 @@ async fn golden_records_read_over_ducklake() {
     // No key params => empty list (not an error).
     let resp = app
         .clone()
-        .oneshot(op_get("/v1/orgs/acme/records"))
+        .oneshot(op_get("/v1/orgs/acme/datasets/default/records"))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -548,7 +562,7 @@ async fn golden_records_read_over_ducklake() {
     // always one feed.
     let resp = app
         .clone()
-        .oneshot(op_get("/v1/orgs/acme/insights"))
+        .oneshot(op_get("/v1/orgs/acme/datasets/default/insights"))
         .await
         .unwrap();
     let series = json_body(resp).await;
@@ -558,7 +572,7 @@ async fn golden_records_read_over_ducklake() {
 
     let resp = app
         .clone()
-        .oneshot(op_get("/v1/orgs/acme/insights/sources"))
+        .oneshot(op_get("/v1/orgs/acme/datasets/default/insights/sources"))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -607,7 +621,7 @@ async fn golden_records_read_over_ducklake() {
     // ~0.857 is one such open gray_band review.
     let resp = app
         .clone()
-        .oneshot(op_get("/v1/orgs/acme/reviews"))
+        .oneshot(op_get("/v1/orgs/acme/datasets/default/reviews"))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -627,7 +641,7 @@ async fn golden_records_read_over_ducklake() {
     let resp = app
         .clone()
         .oneshot(op_get(&format!(
-            "/v1/orgs/acme/reviews?min_probability={}",
+            "/v1/orgs/acme/datasets/default/reviews?min_probability={}",
             probability + 0.05
         )))
         .await
@@ -652,7 +666,7 @@ async fn golden_records_read_over_ducklake() {
     // ...and absent-band reads are unchanged, nulls included.
     let resp = app
         .clone()
-        .oneshot(op_get("/v1/orgs/acme/reviews"))
+        .oneshot(op_get("/v1/orgs/acme/datasets/default/reviews"))
         .await
         .unwrap();
     let unbanded = json_body(resp).await;
@@ -667,7 +681,7 @@ async fn golden_records_read_over_ducklake() {
     let resp = app
         .clone()
         .oneshot(op_get(
-            "/v1/orgs/acme/reviews?min_probability=0.9&max_probability=0.1",
+            "/v1/orgs/acme/datasets/default/reviews?min_probability=0.9&max_probability=0.1",
         ))
         .await
         .unwrap();
@@ -679,7 +693,9 @@ async fn golden_records_read_over_ducklake() {
     // and the reason a filter that is merely declared is worse than none.
     let resp = app
         .clone()
-        .oneshot(op_get("/v1/orgs/acme/reviews?status=resolved_match"))
+        .oneshot(op_get(
+            "/v1/orgs/acme/datasets/default/reviews?status=resolved_match",
+        ))
         .await
         .unwrap();
     assert_eq!(
@@ -690,7 +706,9 @@ async fn golden_records_read_over_ducklake() {
     );
     let resp = app
         .clone()
-        .oneshot(op_get("/v1/orgs/acme/reviews?reason=gray_band"))
+        .oneshot(op_get(
+            "/v1/orgs/acme/datasets/default/reviews?reason=gray_band",
+        ))
         .await
         .unwrap();
     let by_reason = json_body(resp).await;
@@ -701,7 +719,9 @@ async fn golden_records_read_over_ducklake() {
     );
     let resp = app
         .clone()
-        .oneshot(op_get("/v1/orgs/acme/reviews?reason=never_unsatisfiable"))
+        .oneshot(op_get(
+            "/v1/orgs/acme/datasets/default/reviews?reason=never_unsatisfiable",
+        ))
         .await
         .unwrap();
     assert_eq!(
@@ -713,7 +733,9 @@ async fn golden_records_read_over_ducklake() {
     // review-by-id resolves that review.
     let resp = app
         .clone()
-        .oneshot(op_get(&format!("/v1/orgs/acme/reviews/{review_id}")))
+        .oneshot(op_get(&format!(
+            "/v1/orgs/acme/datasets/default/reviews/{review_id}"
+        )))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -722,7 +744,7 @@ async fn golden_records_read_over_ducklake() {
     // assertions are still empty (no steward writes in a base run).
     let resp = app
         .clone()
-        .oneshot(op_get("/v1/orgs/acme/assertions"))
+        .oneshot(op_get("/v1/orgs/acme/datasets/default/assertions"))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -732,7 +754,7 @@ async fn golden_records_read_over_ducklake() {
     // webforms), each all-new for the base delivery.
     let resp = app
         .clone()
-        .oneshot(op_get("/v1/orgs/acme/imports"))
+        .oneshot(op_get("/v1/orgs/acme/datasets/default/imports"))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -767,7 +789,7 @@ async fn golden_records_read_over_ducklake() {
     // at different timestamps and non-monotonic run ids would close the gap.
     let resp = app
         .clone()
-        .oneshot(op_get("/v1/orgs/acme/imports/recent"))
+        .oneshot(op_get("/v1/orgs/acme/datasets/default/imports/recent"))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -789,7 +811,9 @@ async fn golden_records_read_over_ducklake() {
     // which end, and only one of them answers the panel's question.
     let resp = app
         .clone()
-        .oneshot(op_get("/v1/orgs/acme/imports/recent?limit=1"))
+        .oneshot(op_get(
+            "/v1/orgs/acme/datasets/default/imports/recent?limit=1",
+        ))
         .await
         .unwrap();
     let newest = json_body(resp).await;
@@ -805,7 +829,7 @@ async fn golden_records_read_over_ducklake() {
     );
     let resp = app
         .clone()
-        .oneshot(op_get("/v1/orgs/acme/imports?limit=1"))
+        .oneshot(op_get("/v1/orgs/acme/datasets/default/imports?limit=1"))
         .await
         .unwrap();
     let oldest = json_body(resp).await;
@@ -823,7 +847,7 @@ async fn golden_records_read_over_ducklake() {
     let resp = app
         .clone()
         .oneshot(op_get(&format!(
-            "/v1/orgs/acme/imports/recent?source={one_source}"
+            "/v1/orgs/acme/datasets/default/imports/recent?source={one_source}"
         )))
         .await
         .unwrap();
@@ -840,7 +864,7 @@ async fn golden_records_read_over_ducklake() {
     // Runs: run_all wrote a `runs` ledger row (full mode, succeeded).
     let resp = app
         .clone()
-        .oneshot(op_get("/v1/orgs/acme/runs"))
+        .oneshot(op_get("/v1/orgs/acme/datasets/default/runs"))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -864,7 +888,9 @@ async fn golden_records_read_over_ducklake() {
     // A review by id is a 404 when there's no review_queue / no such review.
     let resp = app
         .clone()
-        .oneshot(op_get("/v1/orgs/acme/reviews/no-such-review"))
+        .oneshot(op_get(
+            "/v1/orgs/acme/datasets/default/reviews/no-such-review",
+        ))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
@@ -876,7 +902,7 @@ async fn golden_records_read_over_ducklake() {
     // lake yields rows.)
     let resp = app
         .clone()
-        .oneshot(op_get("/v1/orgs/acme/merge-plans"))
+        .oneshot(op_get("/v1/orgs/acme/datasets/default/merge-plans"))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -887,7 +913,7 @@ async fn golden_records_read_over_ducklake() {
         let resp = app
             .clone()
             .oneshot(op_get(&format!(
-                "/v1/orgs/acme/merge-plans?policy={policy}"
+                "/v1/orgs/acme/datasets/default/merge-plans?policy={policy}"
             )))
             .await
             .unwrap();
@@ -897,7 +923,9 @@ async fn golden_records_read_over_ducklake() {
     // An unknown policy is a 422.
     let resp = app
         .clone()
-        .oneshot(op_get("/v1/orgs/acme/merge-plans?policy=nonsense"))
+        .oneshot(op_get(
+            "/v1/orgs/acme/datasets/default/merge-plans?policy=nonsense",
+        ))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
@@ -905,7 +933,9 @@ async fn golden_records_read_over_ducklake() {
     // CSV format: a text/csv body with the header row.
     let resp = app
         .clone()
-        .oneshot(op_get("/v1/orgs/acme/merge-plans?format=csv"))
+        .oneshot(op_get(
+            "/v1/orgs/acme/datasets/default/merge-plans?format=csv",
+        ))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -944,7 +974,7 @@ async fn golden_records_read_over_ducklake() {
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri("/v1/orgs/acme/golden-records")
+                .uri("/v1/orgs/acme/datasets/default/golden-records")
                 .header(header::AUTHORIZATION, format!("Bearer {viewer_key}"))
                 .body(Body::empty())
                 .unwrap(),
@@ -959,7 +989,7 @@ async fn golden_records_read_over_ducklake() {
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri("/v1/orgs/acme/imports/recent")
+                .uri("/v1/orgs/acme/datasets/default/imports/recent")
                 .header(header::AUTHORIZATION, format!("Bearer {viewer_key}"))
                 .body(Body::empty())
                 .unwrap(),

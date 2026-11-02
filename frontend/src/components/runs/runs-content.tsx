@@ -21,6 +21,7 @@ import { RunCost } from "./run-cost";
 import { useConfigSegments } from "@/lib/query/blocking";
 import { RUN_KINDS } from "@/lib/domain/run-kinds";
 import { cn } from "@/lib/utils";
+import { useDatasetSlug } from "@/lib/use-dataset-slug";
 
 const ROLE_RANK = { viewer: 0, steward: 1, admin: 2 } as const;
 
@@ -56,17 +57,18 @@ function lastStage(job: JobRow): string {
 
 /** Runs & jobs monitor (design §5.4), read-only in M2 plus cancel/resume on detail. */
 export function RunsContent({ org }: { org: string }) {
-  const jobs = useJobs(org);
-  const runs = useRuns(org);
+  const ds = useDatasetSlug();
+  const jobs = useJobs(org, ds);
+  const runs = useRuns(org, ds);
   const session = useSession();
-  const submit = useSubmitJob(org);
+  const submit = useSubmitJob(org, ds);
   const router = useRouter();
   const [kindOpen, setKindOpen] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   // The config's `segments:` block — named slices a run may be restricted to.
   // The job carries the NAME; the predicate is looked up in the org's own
   // published config server-side, so no SQL ever travels in a request.
-  const segments = useConfigSegments(org);
+  const segments = useConfigSegments(org, ds);
   const [segment, setSegment] = useState("");
   const activeJob = (jobs.data ?? []).find((job) => ACTIVE.has(job.state));
   const role = effectiveRole(session.data, org);
@@ -83,7 +85,7 @@ export function RunsContent({ org }: { org: string }) {
       { kind, params: scoped },
       {
         onSuccess: (result) => {
-          router.push(`/${org}/runs/${result.id}`);
+          router.push(`/${org}/${ds}/runs/${result.id}`);
         },
         onError: () => {
           setSubmitError("could not start the run — the org may already have one in flight");
@@ -174,7 +176,7 @@ export function RunsContent({ org }: { org: string }) {
           </span>
         )}
         <Link
-          href={`/${org}/runs/schedules`}
+          href={`/${org}/${ds}/runs/schedules`}
           className="text-muted-foreground text-sm underline-offset-2 hover:underline"
           data-testid="schedules-link"
         >
@@ -189,7 +191,7 @@ export function RunsContent({ org }: { org: string }) {
       )}
 
       {activeJob && (
-        <Link href={`/${org}/runs/${activeJob.id}`} data-testid="active-job-link">
+        <Link href={`/${org}/${ds}/runs/${activeJob.id}`} data-testid="active-job-link">
           <Card className="border-primary/40">
             <CardContent className="flex flex-wrap items-center gap-3 p-4 text-sm">
               <Loader2 className="size-4 animate-spin" />
@@ -241,7 +243,7 @@ export function RunsContent({ org }: { org: string }) {
                     </td>
                     <td className="py-2">
                       <Link
-                        href={`/${org}/runs/${job.id}`}
+                        href={`/${org}/${ds}/runs/${job.id}`}
                         className="font-mono text-xs underline-offset-2 hover:underline"
                       >
                         {job.id.slice(-8)}

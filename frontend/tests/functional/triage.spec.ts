@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { login, triageOrg, USERS } from "./helpers";
+import { DS, login, triageOrg, USERS } from "./helpers";
 
 /** The M3 acceptance gate: a 20-item triage entirely by keyboard on desktop
  * and entirely by swipe on the mobile projects — each project against its own
@@ -8,7 +8,7 @@ import { login, triageOrg, USERS } from "./helpers";
 
 async function openInbox(page: Page, projectName: string) {
   await login(page, USERS.steward);
-  await page.goto(`/${triageOrg(projectName)}/reviews`);
+  await page.goto(`/${triageOrg(projectName)}/${DS}/reviews`);
 }
 
 test.describe("steward triage", () => {
@@ -91,7 +91,7 @@ test.describe("steward triage", () => {
   }) => {
     test.skip(isMobile, "bulk selection is the desktop grid path");
     await login(page, USERS.steward);
-    await page.goto("/selectall-dev/reviews");
+    await page.goto("/selectall-dev/default/reviews");
     await expect(page.getByTestId("review-list")).toBeVisible();
 
     // Header checkbox selects every LOADED row; the banner offers the rest.

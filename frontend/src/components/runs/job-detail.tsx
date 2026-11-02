@@ -10,6 +10,7 @@ import { Working } from "@/components/ui/working";
 import { effectiveRole, useJob, useJobAction, useSession } from "@/lib/query/hooks";
 import { cn } from "@/lib/utils";
 import { StateChip } from "./runs-content";
+import { useDatasetSlug } from "@/lib/use-dataset-slug";
 
 const ACTIVE = new Set(["queued", "dispatching", "running", "retrying", "canceling"]);
 const STOPPED = new Set(["failed", "canceled"]);
@@ -117,10 +118,11 @@ function StageTrace({ stages, jobState }: { stages: { stage: string }[]; jobStat
 const RESOLVING_KINDS = new Set(["run_all_full", "run_all_incremental"]);
 
 export function JobDetail({ org, jobId }: { org: string; jobId: string }) {
-  const job = useJob(org, jobId);
+  const ds = useDatasetSlug();
+  const job = useJob(org, ds, jobId);
   const session = useSession();
-  const cancel = useJobAction(org, jobId, "cancel");
-  const resume = useJobAction(org, jobId, "resume");
+  const cancel = useJobAction(org, ds, jobId, "cancel");
+  const resume = useJobAction(org, ds, jobId, "resume");
 
   if (job.isPending || !job.data) {
     return (
@@ -142,7 +144,7 @@ export function JobDetail({ org, jobId }: { org: string; jobId: string }) {
     >
       <div>
         <Link
-          href={`/${org}/runs`}
+          href={`/${org}/${ds}/runs`}
           className="text-muted-foreground mb-2 inline-flex items-center gap-1 text-sm hover:underline"
         >
           <ArrowLeft className="size-3.5" /> Runs
@@ -226,7 +228,7 @@ export function JobDetail({ org, jobId }: { org: string; jobId: string }) {
             <span className="font-medium">Run complete — see how your data clusters.</span>
             <span className="flex-1" />
             <Button asChild size="sm" data-testid="job-success-cta">
-              <Link href={`/${org}/duplicates`}>View duplicate groups</Link>
+              <Link href={`/${org}/${ds}/duplicates`}>View duplicate groups</Link>
             </Button>
           </CardContent>
         </Card>

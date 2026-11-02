@@ -68,7 +68,7 @@ async fn lexicon_round_trip_canonicalises_and_enqueues_rebuild() {
         .clone()
         .oneshot(op(
             "PUT",
-            "/v1/orgs/acme/lexicon",
+            "/v1/orgs/acme/datasets/default/lexicon",
             Body::from(put.to_string()),
         ))
         .await
@@ -96,7 +96,11 @@ async fn lexicon_round_trip_canonicalises_and_enqueues_rebuild() {
     // GET round-trips the stored pairs.
     let resp = app
         .clone()
-        .oneshot(op("GET", "/v1/orgs/acme/lexicon", Body::empty()))
+        .oneshot(op(
+            "GET",
+            "/v1/orgs/acme/datasets/default/lexicon",
+            Body::empty(),
+        ))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -108,7 +112,7 @@ async fn lexicon_round_trip_canonicalises_and_enqueues_rebuild() {
     let resp = app
         .oneshot(op(
             "PUT",
-            "/v1/orgs/acme/lexicon",
+            "/v1/orgs/acme/datasets/default/lexicon",
             Body::from(bad.to_string()),
         ))
         .await

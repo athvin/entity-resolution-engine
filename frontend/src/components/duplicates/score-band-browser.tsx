@@ -10,6 +10,7 @@ import { WaterfallChart } from "@/components/review/waterfall-chart";
 import { probabilityLabel } from "@/components/review/decision-panel";
 import { useAddAssertion, useMatchScores, type MatchScoreRow } from "@/lib/query/duplicates";
 import { cn } from "@/lib/utils";
+import { useDatasetSlug } from "@/lib/use-dataset-slug";
 
 /**
  * Probability-band browse over `match_scores` (design §5.3): the audit read
@@ -17,12 +18,13 @@ import { cn } from "@/lib/utils";
  * steward who disagrees writes the durable never-assertion right here.
  */
 export function ScoreBandBrowser({ org, isSteward }: { org: string; isSteward: boolean }) {
+  const ds = useDatasetSlug();
   const [low, setLow] = useState(0.9);
   const [high, setHigh] = useState(1.0);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [lastWrite, setLastWrite] = useState<string | null>(null);
-  const scores = useMatchScores(org, { low, high });
-  const assertion = useAddAssertion(org);
+  const scores = useMatchScores(org, ds, { low, high });
+  const assertion = useAddAssertion(org, ds);
 
   const rows = scores.data?.items ?? [];
 

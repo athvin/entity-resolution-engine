@@ -33,6 +33,8 @@ const need = (key) => {
 const API = need("ERSERVER_BASE_URL");
 const TOKEN = need("ER_OPERATOR_TOKEN");
 const ORG = need("DEV_ORG");
+// The dataset provisioning creates alongside the org; every seeded resource lives in it.
+const DS = "default";
 const CONFIG_DIR = need("CONFIG_DIR");
 const DROP_DIR = need("DROP_DIR");
 const LAKE_DIR = need("LAKE_DIR");
@@ -193,12 +195,14 @@ log("base_10 resolved into the lake");
 // config studio both require. Tier C on a first version, so it enqueues a
 // `train` alongside the `run_all_full` rebuild — both of which now have the
 // corpus the CLI just resolved.
-const created = await api("POST", `/v1/orgs/${ORG}/config/versions`, { yaml: configYaml });
+const created = await api("POST", `/v1/orgs/${ORG}/datasets/${DS}/config/versions`, {
+  yaml: configYaml,
+});
 const { version } = created;
 if (typeof version !== "number") {
   throw new Error(`config version create returned no version: ${JSON.stringify(created)}`);
 }
-await api("POST", `/v1/orgs/${ORG}/config/versions/${String(version)}/publish`, {});
+await api("POST", `/v1/orgs/${ORG}/datasets/${DS}/config/versions/${String(version)}/publish`, {});
 log(`config v${String(version)} published (enqueued the first run)`);
 
 // --------------------------------------------------------------------- wait
@@ -211,7 +215,7 @@ const deadlineMs = Date.now() + 15 * 60 * 1000;
 let jobs = [];
 for (;;) {
   // `{ "jobs": [...] }`, not `items` — list_jobs wraps under its own key.
-  jobs = (await api("GET", `/v1/orgs/${ORG}/jobs`)).jobs ?? [];
+  jobs = (await api("GET", `/v1/orgs/${ORG}/datasets/${DS}/jobs`)).jobs ?? [];
   const pending = jobs.filter((job) => !TERMINAL.has(job.state));
   if (jobs.length > 0 && pending.length === 0) break;
   if (Date.now() > deadlineMs) {

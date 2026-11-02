@@ -57,7 +57,7 @@ async fn config_versions_crud() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/config/versions",
+            "/v1/orgs/acme/datasets/default/config/versions",
             "op-secret",
             create_body(DEFAULT_YAML),
         ))
@@ -75,7 +75,7 @@ async fn config_versions_crud() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/config/versions",
+            "/v1/orgs/acme/datasets/default/config/versions",
             "op-secret",
             create_body(DEFAULT_YAML),
         ))
@@ -89,7 +89,7 @@ async fn config_versions_crud() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/config/versions",
+            "/v1/orgs/acme/datasets/default/config/versions",
             "op-secret",
             create_body("tenant: x\nnot_a_block: 1\n"),
         ))
@@ -102,7 +102,7 @@ async fn config_versions_crud() {
         .clone()
         .oneshot(req(
             "GET",
-            "/v1/orgs/acme/config/versions",
+            "/v1/orgs/acme/datasets/default/config/versions",
             "op-secret",
             Body::empty(),
         ))
@@ -124,7 +124,7 @@ async fn config_versions_crud() {
         .clone()
         .oneshot(req(
             "GET",
-            "/v1/orgs/acme/config/versions/1",
+            "/v1/orgs/acme/datasets/default/config/versions/1",
             "op-secret",
             Body::empty(),
         ))
@@ -142,7 +142,7 @@ async fn config_versions_crud() {
             .clone()
             .oneshot(req(
                 "GET",
-                &format!("/v1/orgs/acme/config/versions/{bad}"),
+                &format!("/v1/orgs/acme/datasets/default/config/versions/{bad}"),
                 "op-secret",
                 Body::empty(),
             ))
@@ -156,7 +156,7 @@ async fn config_versions_crud() {
         .clone()
         .oneshot(req(
             "GET",
-            "/v1/orgs/acme/config",
+            "/v1/orgs/acme/datasets/default/config",
             "op-secret",
             Body::empty(),
         ))
@@ -172,7 +172,7 @@ async fn config_versions_crud() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/config/versions",
+            "/v1/orgs/acme/datasets/default/config/versions",
             &steward_key,
             create_body(DEFAULT_YAML),
         ))
@@ -183,7 +183,7 @@ async fn config_versions_crud() {
     let resp = app
         .oneshot(req(
             "GET",
-            "/v1/orgs/acme/config/versions",
+            "/v1/orgs/acme/datasets/default/config/versions",
             &viewer_key,
             Body::empty(),
         ))

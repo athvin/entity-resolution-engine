@@ -1136,6 +1136,18 @@ function entityDetail(org, entityId) {
   return { golden, members, lineage, events };
 }
 
+/** The one dataset every fixture org has, as the dataset detail route shapes
+ * it (name/display/entity_type/state/version/timestamps — never env). */
+const mockDataset = (org) => ({
+  name: "default",
+  display_name: null,
+  entity_type: org.name === "orgs-dev" ? "account" : "person",
+  state: org.state === "provisioning" ? "provisioning" : org.state,
+  active_config_version: org.active_config_version ?? 1,
+  created_at: org.created_at,
+  updated_at: org.created_at,
+});
+
 const server = http.createServer((req, res) => {
   void (async () => {
     const url = new URL(req.url, `http://localhost:${PORT}`);
@@ -1549,6 +1561,20 @@ const server = http.createServer((req, res) => {
       );
       return send(res, 200, rows);
     }
+    // Datasets (the switchover): every fixture org carries exactly one, named
+    // `default`, mirroring the backend's convergence sweep. The entity_type
+    // follows the org fixture so orgs-dev reads as an account dataset.
+    if ((match = /^\/v1\/orgs\/([^/]+)\/datasets$/.exec(path)) && req.method === "GET") {
+      const org = state.orgs[match[1]];
+      if (!org) return send(res, 404, { detail: "not found" });
+      return send(res, 200, [mockDataset(org)]);
+    }
+    if ((match = /^\/v1\/orgs\/([^/]+)\/datasets\/([^/]+)$/.exec(path)) && req.method === "GET") {
+      const org = state.orgs[match[1]];
+      if (!org) return send(res, 404, { detail: "not found" });
+      if (match[2] !== "default") return send(res, 404, { detail: "not found" });
+      return send(res, 200, mockDataset(org));
+    }
     if ((match = /^\/v1\/orgs\/([^/]+)$/.exec(path)) && req.method === "GET") {
       const org = state.orgs[match[1]];
       if (!org) return send(res, 404, { detail: "not found" });
@@ -1575,11 +1601,17 @@ const server = http.createServer((req, res) => {
         role,
       });
     }
-    if ((match = /^\/v1\/orgs\/([^/]+)\/metrics$/.exec(path)) && req.method === "GET") {
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/metrics$/.exec(path)) &&
+      req.method === "GET"
+    ) {
       const metrics = state.metrics[match[1]];
       return metrics ? send(res, 200, metrics) : send(res, 503, { detail: "lake unavailable" });
     }
-    if ((match = /^\/v1\/orgs\/([^/]+)\/data-quality$/.exec(path)) && req.method === "GET") {
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/data-quality$/.exec(path)) &&
+      req.method === "GET"
+    ) {
       const m = state.metrics[match[1]];
       if (!m) return send(res, 503, { detail: "lake unavailable" });
       const dupRate = m.records > 0 ? m.records_in_duplicate_groups / m.records : 0;
@@ -1611,7 +1643,10 @@ const server = http.createServer((req, res) => {
       });
     }
     // ---- labelling (E10b's surface, built in E10c-2) -----------------------
-    if ((match = /^\/v1\/orgs\/([^/]+)\/labeling\/next$/.exec(path)) && req.method === "GET") {
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/labeling\/next$/.exec(path)) &&
+      req.method === "GET"
+    ) {
       const org = match[1];
       if (!state.orgs[org]) return send(res, 404, { detail: "not found" });
       const threshold = 0.95;
@@ -1659,7 +1694,10 @@ const server = http.createServer((req, res) => {
         },
       });
     }
-    if ((match = /^\/v1\/orgs\/([^/]+)\/labels$/.exec(path)) && req.method === "POST") {
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/labels$/.exec(path)) &&
+      req.method === "POST"
+    ) {
       const org = match[1];
       if (!state.orgs[org]) return send(res, 404, { detail: "not found" });
       const body = await readBody(req);
@@ -1694,7 +1732,10 @@ const server = http.createServer((req, res) => {
       }
       return send(res, 201, row);
     }
-    if ((match = /^\/v1\/orgs\/([^/]+)\/labels$/.exec(path)) && req.method === "GET") {
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/labels$/.exec(path)) &&
+      req.method === "GET"
+    ) {
       const org = match[1];
       if (!state.orgs[org]) return send(res, 404, { detail: "not found" });
       return send(res, 200, { labels: [...(state.labels[org] ?? [])].reverse() });
@@ -1755,7 +1796,9 @@ const server = http.createServer((req, res) => {
       return send(res, 200, { retired: true });
     }
     if (
-      (match = /^\/v1\/orgs\/([^/]+)\/tags\/([^/]+)\/(apply|unapply)$/.exec(path)) &&
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/tags\/([^/]+)\/(apply|unapply)$/.exec(
+        path,
+      )) &&
       req.method === "POST"
     ) {
       const [, org, tagId, verb] = match;
@@ -1796,7 +1839,7 @@ const server = http.createServer((req, res) => {
       return send(res, 200, { removed: true });
     }
     if (
-      (match = /^\/v1\/orgs\/([^/]+)\/tags\/([^/]+)\/subjects$/.exec(path)) &&
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/tags\/([^/]+)\/subjects$/.exec(path)) &&
       req.method === "GET"
     ) {
       const org = match[1];
@@ -1807,7 +1850,10 @@ const server = http.createServer((req, res) => {
         .filter((g) => kind === null || g.subject_type === kind);
       return send(res, 200, { subjects });
     }
-    if ((match = /^\/v1\/orgs\/([^/]+)\/records$/.exec(path)) && req.method === "GET") {
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/records$/.exec(path)) &&
+      req.method === "GET"
+    ) {
       if (!state.orgs[match[1]]) return send(res, 404, { detail: "not found" });
       const keys = url.searchParams.getAll("key");
       if (keys.length === 0) return send(res, 422, { detail: "at least one key is required" });
@@ -1820,7 +1866,10 @@ const server = http.createServer((req, res) => {
         snapshot: state.metrics[match[1]]?.snapshot ?? 1,
       });
     }
-    if ((match = /^\/v1\/orgs\/([^/]+)\/golden-records$/.exec(path)) && req.method === "GET") {
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/golden-records$/.exec(path)) &&
+      req.method === "GET"
+    ) {
       const rows = state.golden[match[1]];
       if (!rows) return send(res, 503, { detail: "lake unavailable" });
       const q = (url.searchParams.get("q") ?? "").toLowerCase();
@@ -1860,13 +1909,16 @@ const server = http.createServer((req, res) => {
       return sendArrow(res, bytes, snapshot, next_cursor);
     }
     if (
-      (match = /^\/v1\/orgs\/([^/]+)\/golden-records\/([^/]+)$/.exec(path)) &&
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/golden-records\/([^/]+)$/.exec(path)) &&
       req.method === "GET"
     ) {
       const detail = entityDetail(match[1], match[2]);
       return detail ? send(res, 200, detail) : send(res, 404, { detail: "not found" });
     }
-    if ((match = /^\/v1\/orgs\/([^/]+)\/mass-update$/.exec(path)) && req.method === "POST") {
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/mass-update$/.exec(path)) &&
+      req.method === "POST"
+    ) {
       return send(res, 200, {
         status: "staged",
         action_ids: ["mock-override"],
@@ -1877,9 +1929,10 @@ const server = http.createServer((req, res) => {
     // steward path. The read-path master override is exercised by the Rust e2e;
     // here we just confirm the staged acknowledgement the UI reports.
     if (
-      (match = /^\/v1\/orgs\/([^/]+)\/records\/(protect|unprotect|suppress|unsuppress)$/.exec(
-        path,
-      )) &&
+      (match =
+        /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/records\/(protect|unprotect|suppress|unsuppress)$/.exec(
+          path,
+        )) &&
       req.method === "POST"
     ) {
       // Both body shapes, and the real batch response (O6). ONE `apply_job`
@@ -1911,10 +1964,16 @@ const server = http.createServer((req, res) => {
         apply_job: `mock-${match[2]}-job`,
       });
     }
-    if ((match = /^\/v1\/orgs\/([^/]+)\/runs$/.exec(path)) && req.method === "GET") {
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/runs$/.exec(path)) &&
+      req.method === "GET"
+    ) {
       return send(res, 200, state.runs[match[1]] ?? []);
     }
-    if ((match = /^\/v1\/orgs\/([^/]+)\/jobs$/.exec(path)) && req.method === "POST") {
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/jobs$/.exec(path)) &&
+      req.method === "POST"
+    ) {
       const org = state.orgs[match[1]];
       if (!org) return send(res, 404, { detail: "not found" });
       if (org.state !== "active") {
@@ -1942,7 +2001,10 @@ const server = http.createServer((req, res) => {
       (state.jobs[match[1]] ??= []).unshift(job);
       return send(res, 202, job);
     }
-    if ((match = /^\/v1\/orgs\/([^/]+)\/jobs$/.exec(path)) && req.method === "GET") {
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/jobs$/.exec(path)) &&
+      req.method === "GET"
+    ) {
       const limit = Number(url.searchParams.get("limit") ?? 50);
       const wanted = url.searchParams.get("state");
       // `{ jobs: [...] }`, matching er-server, which wraps every list response.
@@ -1958,12 +2020,15 @@ const server = http.createServer((req, res) => {
       );
       return send(res, 200, { jobs: rows.slice(0, limit) });
     }
-    if ((match = /^\/v1\/orgs\/([^/]+)\/jobs\/([^/:]+)$/.exec(path)) && req.method === "GET") {
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/jobs\/([^/:]+)$/.exec(path)) &&
+      req.method === "GET"
+    ) {
       const job = (state.jobs[match[1]] ?? []).find((row) => row.id === match[2]);
       return job ? send(res, 200, job) : send(res, 404, { detail: "not found" });
     }
     if (
-      (match = /^\/v1\/orgs\/([^/]+)\/jobs\/([^/:]+):cancel$/.exec(path)) &&
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/jobs\/([^/:]+):cancel$/.exec(path)) &&
       req.method === "POST"
     ) {
       const job = (state.jobs[match[1]] ?? []).find((row) => row.id === match[2]);
@@ -1974,7 +2039,7 @@ const server = http.createServer((req, res) => {
       return send(res, 200, { id: job.id, state: "canceled" });
     }
     if (
-      (match = /^\/v1\/orgs\/([^/]+)\/jobs\/([^/:]+):resume$/.exec(path)) &&
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/jobs\/([^/:]+):resume$/.exec(path)) &&
       req.method === "POST"
     ) {
       const job = (state.jobs[match[1]] ?? []).find((row) => row.id === match[2]);
@@ -1985,7 +2050,10 @@ const server = http.createServer((req, res) => {
       job.error_class = null;
       return send(res, 200, { id: job.id, state: "queued" });
     }
-    if ((match = /^\/v1\/orgs\/([^/]+)\/reviews$/.exec(path)) && req.method === "GET") {
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/reviews$/.exec(path)) &&
+      req.method === "GET"
+    ) {
       const limit = Number(url.searchParams.get("limit") ?? 50);
       const status = url.searchParams.get("status") ?? "open";
       const reason = url.searchParams.get("reason");
@@ -2024,12 +2092,17 @@ const server = http.createServer((req, res) => {
         unscored_hidden: banded ? unscoredOpen : 0,
       });
     }
-    if ((match = /^\/v1\/orgs\/([^/]+)\/reviews\/([^/:]+)$/.exec(path)) && req.method === "GET") {
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/reviews\/([^/:]+)$/.exec(path)) &&
+      req.method === "GET"
+    ) {
       const row = (state.reviews[match[1]] ?? []).find((r) => r.id === match[2]);
       return row ? send(res, 200, row) : send(res, 404, { detail: "not found" });
     }
     if (
-      (match = /^\/v1\/orgs\/([^/]+)\/reviews\/([^/:]+):resolve$/.exec(path)) &&
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/reviews\/([^/:]+):resolve$/.exec(
+        path,
+      )) &&
       req.method === "POST"
     ) {
       const org = match[1];
@@ -2057,7 +2130,7 @@ const server = http.createServer((req, res) => {
       });
     }
     if (
-      (match = /^\/v1\/orgs\/([^/]+)\/reviews:bulk-resolve$/.exec(path)) &&
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/reviews:bulk-resolve$/.exec(path)) &&
       req.method === "POST"
     ) {
       const org = match[1];
@@ -2087,16 +2160,25 @@ const server = http.createServer((req, res) => {
         apply_job: "01jmbulkapply000000000000j1",
       });
     }
-    if ((match = /^\/v1\/orgs\/([^/]+)\/staged$/.exec(path)) && req.method === "GET") {
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/staged$/.exec(path)) &&
+      req.method === "GET"
+    ) {
       return send(res, 200, { pending_count: state.stagedCount[match[1]] ?? 0 });
     }
-    if ((match = /^\/v1\/orgs\/([^/]+)\/assertions$/.exec(path)) && req.method === "GET") {
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/assertions$/.exec(path)) &&
+      req.method === "GET"
+    ) {
       const includeRetracted = url.searchParams.get("include_retracted") === "true";
       let rows = state.assertions[match[1]] ?? [];
       if (!includeRetracted) rows = rows.filter((row) => row.active);
       return send(res, 200, { items: rows, next_cursor: null });
     }
-    if ((match = /^\/v1\/orgs\/([^/]+)\/assertions$/.exec(path)) && req.method === "POST") {
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/assertions$/.exec(path)) &&
+      req.method === "POST"
+    ) {
       const body = await readBody(req);
       const assertion = {
         assertion_id: `01jmassertnew${String((state.assertions[match[1]] ?? []).length)}`,
@@ -2120,13 +2202,15 @@ const server = http.createServer((req, res) => {
       });
     }
     if (
-      (match = /^\/v1\/orgs\/([^/]+)\/assertions:contradictions$/.exec(path)) &&
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/assertions:contradictions$/.exec(
+        path,
+      )) &&
       req.method === "GET"
     ) {
       return send(res, 200, { contradictions: state.contradictions[match[1]] ?? [] });
     }
     if (
-      (match = /^\/v1\/orgs\/([^/]+)\/assertions\/([^/:]+)$/.exec(path)) &&
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/assertions\/([^/:]+)$/.exec(path)) &&
       req.method === "DELETE"
     ) {
       const row = (state.assertions[match[1]] ?? []).find(
@@ -2144,7 +2228,10 @@ const server = http.createServer((req, res) => {
         pending_until_next_reconcile: true,
       });
     }
-    if ((match = /^\/v1\/orgs\/([^/]+)\/duplicates$/.exec(path)) && req.method === "GET") {
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/duplicates$/.exec(path)) &&
+      req.method === "GET"
+    ) {
       // Every third golden entity is a two-member group, matching entityDetail.
       const rows = (state.golden[match[1]] ?? []).filter((_, index) => index % 3 === 0);
       // Account orgs pair crm with vendors and preview company_name/domain; person
@@ -2166,7 +2253,10 @@ const server = http.createServer((req, res) => {
         next_cursor: null,
       });
     }
-    if ((match = /^\/v1\/orgs\/([^/]+)\/merge-plans$/.exec(path)) && req.method === "GET") {
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/merge-plans$/.exec(path)) &&
+      req.method === "GET"
+    ) {
       const policy = url.searchParams.get("policy") ?? "most_attributes";
       const policies = [
         "most_attributes",
@@ -2205,7 +2295,10 @@ const server = http.createServer((req, res) => {
       res.writeHead(200, { "content-type": "text/csv" });
       return res.end("entity_id,master_key\n");
     }
-    if ((match = /^\/v1\/orgs\/([^/]+)\/match-scores$/.exec(path)) && req.method === "GET") {
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/match-scores$/.exec(path)) &&
+      req.method === "GET"
+    ) {
       const limit = Number(url.searchParams.get("limit") ?? 50);
       const bandLow = url.searchParams.get("band_low");
       const bandHigh = url.searchParams.get("band_high");
@@ -2221,7 +2314,10 @@ const server = http.createServer((req, res) => {
     // Field names are `BlockingEstimate`'s, read off the Rust struct: the
     // marginal column is `marginal_pairs`, the running total
     // `cumulative_pairs`. `largest` caps the block list.
-    if ((match = /^\/v1\/orgs\/([^/]+)\/blocking-estimate$/.exec(path)) && req.method === "GET") {
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/blocking-estimate$/.exec(path)) &&
+      req.method === "GET"
+    ) {
       // An org with no model has nothing to estimate — a 409 the UI renders as
       // a designed state, not an error.
       if (match[1] === "fresh-dev") {
@@ -2261,7 +2357,10 @@ const server = http.createServer((req, res) => {
         ].slice(0, largest),
       });
     }
-    if ((match = /^\/v1\/orgs\/([^/]+)\/segments$/.exec(path)) && req.method === "GET") {
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/segments$/.exec(path)) &&
+      req.method === "GET"
+    ) {
       // The published config's `segments:` block — name plus predicate, so an
       // operator can see what a slice covers. NOT the campaigns saved-segment
       // store, which lives in the erweb database.
@@ -2279,7 +2378,10 @@ const server = http.createServer((req, res) => {
     // `models_index`. It was a single row until activation became unique per
     // (org, name), at which point `find(state == "active")` named an arbitrary
     // ensemble member.
-    if ((match = /^\/v1\/orgs\/([^/]+)\/models$/.exec(path)) && req.method === "GET") {
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/models$/.exec(path)) &&
+      req.method === "GET"
+    ) {
       const rows = state.models[match[1]] ?? [];
       const active = rows
         .filter((m) => m.state === "active")
@@ -2287,7 +2389,10 @@ const server = http.createServer((req, res) => {
         .map((m) => ({ name: m.name, version: m.version, model_hash: m.model_hash }));
       return send(res, 200, { items: rows, active });
     }
-    if ((match = /^\/v1\/orgs\/([^/]+)\/models\/compile$/.exec(path)) && req.method === "POST") {
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/models\/compile$/.exec(path)) &&
+      req.method === "POST"
+    ) {
       const rows = (state.models[match[1]] ??= []);
       const version =
         Math.max(0, ...rows.filter((m) => m.name === "default").map((m) => m.version)) + 1;
@@ -2308,7 +2413,10 @@ const server = http.createServer((req, res) => {
       rows.push(minted);
       return send(res, 201, minted);
     }
-    if ((match = /^\/v1\/orgs\/([^/]+)\/models\/versions$/.exec(path)) && req.method === "POST") {
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/models\/versions$/.exec(path)) &&
+      req.method === "POST"
+    ) {
       const body = await readBody(req);
       const rows = (state.models[match[1]] ??= []);
       const name = body.name ?? "default";
@@ -2332,7 +2440,9 @@ const server = http.createServer((req, res) => {
       return send(res, 201, minted);
     }
     if (
-      (match = /^\/v1\/orgs\/([^/]+)\/models\/([^/]+)\/versions\/(\d+)$/.exec(path)) &&
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/models\/([^/]+)\/versions\/(\d+)$/.exec(
+        path,
+      )) &&
       req.method === "GET"
     ) {
       const row = (state.models[match[1]] ?? []).find(
@@ -2378,7 +2488,10 @@ const server = http.createServer((req, res) => {
       });
     }
     if (
-      (match = /^\/v1\/orgs\/([^/]+)\/models\/([^/]+)\/versions\/(\d+)\/evaluation$/.exec(path)) &&
+      (match =
+        /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/models\/([^/]+)\/versions\/(\d+)\/evaluation$/.exec(
+          path,
+        )) &&
       req.method === "GET"
     ) {
       const row = (state.models[match[1]] ?? []).find(
@@ -2429,7 +2542,10 @@ const server = http.createServer((req, res) => {
       });
     }
     if (
-      (match = /^\/v1\/orgs\/([^/]+)\/models\/([^/]+)\/versions\/(\d+)\/activate$/.exec(path)) &&
+      (match =
+        /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/models\/([^/]+)\/versions\/(\d+)\/activate$/.exec(
+          path,
+        )) &&
       req.method === "POST"
     ) {
       const rows = state.models[match[1]] ?? [];
@@ -2451,7 +2567,7 @@ const server = http.createServer((req, res) => {
     // org so the three device projects' orgs cannot race each other, the same
     // reason tags and webhooks got one org per project.
     if (
-      (match = /^\/v1\/orgs\/([^/]+)\/entities\/([^/]+)\/links$/.exec(path)) &&
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/entities\/([^/]+)\/links$/.exec(path)) &&
       req.method === "GET"
     ) {
       const org = match[1];
@@ -2463,7 +2579,10 @@ const server = http.createServer((req, res) => {
         items: all.filter((l) => l.parent_entity_id === entityId || l.child_entity_id === entityId),
       });
     }
-    if ((match = /^\/v1\/orgs\/([^/]+)\/entity-links$/.exec(path)) && req.method === "POST") {
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/entity-links$/.exec(path)) &&
+      req.method === "POST"
+    ) {
       const org = match[1];
       const body = await readBody(req);
       if (!["household", "company", "related"].includes(body.kind)) {
@@ -2502,7 +2621,7 @@ const server = http.createServer((req, res) => {
       return send(res, 201, link);
     }
     if (
-      (match = /^\/v1\/orgs\/([^/]+)\/entity-links\/([^/]+)$/.exec(path)) &&
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/entity-links\/([^/]+)$/.exec(path)) &&
       req.method === "DELETE"
     ) {
       const org = match[1];
@@ -2524,7 +2643,10 @@ const server = http.createServer((req, res) => {
     // Field names are the entity's. The handler projects a subset of the
     // cursor row — no `id`, no `org_id` — but renames nothing, so this fixture
     // and the generated `S3IngestCursor` binding cannot drift apart.
-    if ((match = /^\/v1\/orgs\/([^/]+)\/s3-ingest$/.exec(path)) && req.method === "GET") {
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/s3-ingest$/.exec(path)) &&
+      req.method === "GET"
+    ) {
       if (match[1] === "fresh-dev") {
         return send(res, 200, { bucket: null, prefix: null, sources: [] });
       }
@@ -2544,7 +2666,10 @@ const server = http.createServer((req, res) => {
       });
     }
 
-    if ((match = /^\/v1\/orgs\/([^/]+)\/imports\/recent$/.exec(path)) && req.method === "GET") {
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/imports\/recent$/.exec(path)) &&
+      req.method === "GET"
+    ) {
       const source = url.searchParams.get("source");
       const limit = Number(url.searchParams.get("limit") ?? 20);
       let rows = [...(state.receipts[match[1]] ?? [])].sort((a, b) => (a.id < b.id ? 1 : -1));
@@ -2555,14 +2680,20 @@ const server = http.createServer((req, res) => {
     // `ORDER BY id` with `id > $after`. This mock used to serve the fixtures in
     // their stored (descending) order, which is how the receipts panel looked
     // correct in every tier while the real endpoint handed it the oldest page.
-    if ((match = /^\/v1\/orgs\/([^/]+)\/imports$/.exec(path)) && req.method === "GET") {
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/imports$/.exec(path)) &&
+      req.method === "GET"
+    ) {
       const source = url.searchParams.get("source");
       const limit = Number(url.searchParams.get("limit") ?? 50);
       let rows = [...(state.receipts[match[1]] ?? [])].sort((a, b) => (a.id > b.id ? 1 : -1));
       if (source) rows = rows.filter((r) => r.source_system === source);
       return send(res, 200, { items: rows.slice(0, limit), next_cursor: null });
     }
-    if ((match = /^\/v1\/orgs\/([^/]+)\/imports$/.exec(path)) && req.method === "POST") {
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/imports$/.exec(path)) &&
+      req.method === "POST"
+    ) {
       const org = match[1];
       const source = url.searchParams.get("source") ?? "unknown";
       req.resume(); // drain the multipart body; the mock never parses it
@@ -2595,10 +2726,16 @@ const server = http.createServer((req, res) => {
       (state.jobs[org] ??= []).unshift(job);
       return send(res, 202, { delivery_id: `mockdelivery-${source}`, job });
     }
-    if ((match = /^\/v1\/orgs\/([^/]+)\/schedules$/.exec(path)) && req.method === "GET") {
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/schedules$/.exec(path)) &&
+      req.method === "GET"
+    ) {
       return send(res, 200, state.schedules[match[1]] ?? []);
     }
-    if ((match = /^\/v1\/orgs\/([^/]+)\/schedules$/.exec(path)) && req.method === "POST") {
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/schedules$/.exec(path)) &&
+      req.method === "POST"
+    ) {
       const body = await readBody(req);
       const schedule = {
         id: `01jmschednew${String((state.schedules[match[1]] ?? []).length)}`,
@@ -2612,7 +2749,7 @@ const server = http.createServer((req, res) => {
       return send(res, 201, schedule);
     }
     if (
-      (match = /^\/v1\/orgs\/([^/]+)\/schedules\/([^/]+)$/.exec(path)) &&
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/schedules\/([^/]+)$/.exec(path)) &&
       req.method === "PATCH"
     ) {
       const row = (state.schedules[match[1]] ?? []).find((r) => r.id === match[2]);
@@ -2624,7 +2761,7 @@ const server = http.createServer((req, res) => {
       return send(res, 200, { id: row.id, enabled: row.enabled });
     }
     if (
-      (match = /^\/v1\/orgs\/([^/]+)\/schedules\/([^/]+)$/.exec(path)) &&
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/schedules\/([^/]+)$/.exec(path)) &&
       req.method === "DELETE"
     ) {
       const rows = state.schedules[match[1]] ?? [];
@@ -2762,7 +2899,10 @@ const server = http.createServer((req, res) => {
       if (index >= 0) rows.splice(index, 1);
       return send(res, 200, { deleted: index >= 0 });
     }
-    if ((match = /^\/v1\/orgs\/([^/]+)\/insights\/sources$/.exec(path)) && req.method === "GET") {
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/insights\/sources$/.exec(path)) &&
+      req.method === "GET"
+    ) {
       // Per-source attribution for the newest run, worst first. The counts sum
       // to the newest snapshot's corpus-wide figures (13 records, 6 duplicate)
       // because the real server assembles both from ONE group computation — a
@@ -2806,7 +2946,10 @@ const server = http.createServer((req, res) => {
         ],
       });
     }
-    if ((match = /^\/v1\/orgs\/([^/]+)\/insights$/.exec(path)) && req.method === "GET") {
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/insights$/.exec(path)) &&
+      req.method === "GET"
+    ) {
       // `{snapshot, series}` — the real envelope. The BFF unwraps to the bare
       // array the browser contract uses, and a mock that answered a bare array
       // would make a wrong BFF look right.
@@ -2816,24 +2959,36 @@ const server = http.createServer((req, res) => {
         series: (state.insights[match[1]] ?? []).slice(0, limit),
       });
     }
-    if ((match = /^\/v1\/orgs\/([^/]+)\/config$/.exec(path)) && req.method === "GET") {
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/config$/.exec(path)) &&
+      req.method === "GET"
+    ) {
       const config = state.configs[match[1]];
       return config ? send(res, 200, config) : send(res, 404, { detail: "no active config" });
     }
-    if ((match = /^\/v1\/orgs\/([^/]+)\/lexicon$/.exec(path)) && req.method === "GET") {
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/lexicon$/.exec(path)) &&
+      req.method === "GET"
+    ) {
       const pairs = (state.lexicons ??= {})[match[1]] ?? [
         { variant_a: "bob", variant_b: "robert" },
         { variant_a: "anthony", variant_b: "tony" },
       ];
       return send(res, 200, { pairs });
     }
-    if ((match = /^\/v1\/orgs\/([^/]+)\/lexicon$/.exec(path)) && req.method === "PUT") {
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/lexicon$/.exec(path)) &&
+      req.method === "PUT"
+    ) {
       const body = await readBody(req);
       const pairs = Array.isArray(body.pairs) ? body.pairs : [];
       (state.lexicons ??= {})[match[1]] = pairs;
       return send(res, 200, { pairs, apply_job: "job_mocklexicon" });
     }
-    if ((match = /^\/v1\/orgs\/([^/]+)\/config\/versions$/.exec(path)) && req.method === "GET") {
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/config\/versions$/.exec(path)) &&
+      req.method === "GET"
+    ) {
       const rows = state.configVersions[match[1]] ?? [];
       return send(
         res,
@@ -2841,7 +2996,10 @@ const server = http.createServer((req, res) => {
         rows.map(({ yaml: _yaml, ...row }) => row).sort((a, b) => b.version - a.version),
       );
     }
-    if ((match = /^\/v1\/orgs\/([^/]+)\/config\/versions$/.exec(path)) && req.method === "POST") {
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/config\/versions$/.exec(path)) &&
+      req.method === "POST"
+    ) {
       const org = match[1];
       const body = await readBody(req);
       const yamlText = String(body.yaml ?? "");
@@ -2863,7 +3021,7 @@ const server = http.createServer((req, res) => {
       return send(res, 201, { org, version, config_hash: `mockhash-v${version}`, state: "draft" });
     }
     if (
-      (match = /^\/v1\/orgs\/([^/]+)\/config\/versions\/(\d+)$/.exec(path)) &&
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/config\/versions\/(\d+)$/.exec(path)) &&
       req.method === "GET"
     ) {
       const row = (state.configVersions[match[1]] ?? []).find(
@@ -2872,7 +3030,9 @@ const server = http.createServer((req, res) => {
       return row ? send(res, 200, row) : send(res, 404, { detail: "no such version" });
     }
     if (
-      (match = /^\/v1\/orgs\/([^/]+)\/config\/versions\/(\d+):publish$/.exec(path)) &&
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/config\/versions\/(\d+):publish$/.exec(
+        path,
+      )) &&
       req.method === "POST"
     ) {
       const org = match[1];
@@ -2940,7 +3100,9 @@ const server = http.createServer((req, res) => {
       });
     }
     if (
-      (match = /^\/v1\/orgs\/([^/]+)\/golden-records\/([^/:]+):unmerge$/.exec(path)) &&
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/golden-records\/([^/:]+):unmerge$/.exec(
+        path,
+      )) &&
       req.method === "POST"
     ) {
       const body = await readBody(req);

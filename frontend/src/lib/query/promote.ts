@@ -15,10 +15,10 @@ export interface CompareResult {
 }
 
 /** Compare this org's published config against another's. */
-export function useCompareConfigs(org: string) {
+export function useCompareConfigs(org: string, ds: string) {
   return useMutation({
     mutationFn: (input: { against: string; version?: number }) =>
-      bffFetch<CompareResult>(`/api/orgs/${org}/config/promote`, {
+      bffFetch<CompareResult>(`/api/orgs/${org}/datasets/${ds}/config/promote`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(input),
@@ -39,17 +39,17 @@ export interface ImportResult {
  * history — which is the review surface, and the only place someone will see
  * what they just staged.
  */
-export function useImportConfig(org: string) {
+export function useImportConfig(org: string, ds: string) {
   const client = useQueryClient();
   return useMutation({
     mutationFn: (input: { from: string; version?: number }) =>
-      bffFetch<ImportResult>(`/api/orgs/${org}/config/promote`, {
+      bffFetch<ImportResult>(`/api/orgs/${org}/datasets/${ds}/config/promote`, {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(input),
       }),
     onSuccess: () => {
-      void client.invalidateQueries({ queryKey: configKey(org) });
+      void client.invalidateQueries({ queryKey: configKey(org, ds) });
     },
   });
 }

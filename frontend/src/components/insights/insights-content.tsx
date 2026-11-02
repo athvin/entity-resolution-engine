@@ -10,6 +10,7 @@ import {
   type SourceAttribution,
 } from "@/lib/query/insights";
 
+import { useDatasetSlug } from "@/lib/use-dataset-slug";
 /** A count with grouped digits. */
 function count(value: number): string {
   return value.toLocaleString();
@@ -125,7 +126,8 @@ const TILES: Tile[] = [
  * had no caller at all; this is the caller.
  */
 export function InsightsContent({ org }: { org: string }) {
-  const insights = useInsights(org);
+  const ds = useDatasetSlug();
+  const insights = useInsights(org, ds);
   const series = insights.data ?? [];
   const newest = series[0];
 
@@ -234,7 +236,8 @@ export function InsightsContent({ org }: { org: string }) {
  * to everything rather than one bad batch.
  */
 function SourceAttributionCard({ org }: { org: string }) {
-  const attribution = useSourceAttribution(org);
+  const ds = useDatasetSlug();
+  const attribution = useSourceAttribution(org, ds);
   const sources: SourceAttribution[] = attribution.data?.sources ?? [];
   const worst = Math.max(...sources.map((s) => s.duplicate_records), 1);
 

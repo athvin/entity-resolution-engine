@@ -8,9 +8,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAssertions, useContradictions, useRetractAssertion } from "@/lib/query/reviews";
 import { cn } from "@/lib/utils";
+import { useDatasetSlug } from "@/lib/use-dataset-slug";
 
 function ContradictionInspector({ org }: { org: string }) {
-  const contradictions = useContradictions(org);
+  const ds = useDatasetSlug();
+  const contradictions = useContradictions(org, ds);
   if (contradictions.isPending || !contradictions.data) return null;
   if (contradictions.data.length === 0) {
     return (
@@ -45,9 +47,10 @@ function ContradictionInspector({ org }: { org: string }) {
 }
 
 export function AssertionLibrary({ org, isSteward }: { org: string; isSteward: boolean }) {
+  const ds = useDatasetSlug();
   const [includeRetracted, setIncludeRetracted] = useState(false);
-  const assertions = useAssertions(org, includeRetracted);
-  const retract = useRetractAssertion(org);
+  const assertions = useAssertions(org, ds, includeRetracted);
+  const retract = useRetractAssertion(org, ds);
   const rows = (assertions.data?.pages ?? []).flatMap((page) => page.items);
 
   return (

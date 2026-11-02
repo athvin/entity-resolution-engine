@@ -35,7 +35,7 @@ async fn pending(app: &axum::Router) -> i64 {
         .clone()
         .oneshot(req(
             "GET",
-            "/v1/orgs/acme/staged",
+            "/v1/orgs/acme/datasets/default/staged",
             "op-secret",
             Body::empty(),
         ))
@@ -65,7 +65,7 @@ async fn steward_actions_stage_and_guard() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/assertions",
+            "/v1/orgs/acme/datasets/default/assertions",
             "op-secret",
             Body::from(r#"{"kind":"always","a":"crm:C001","b":"webforms:W006"}"#),
         ))
@@ -82,7 +82,7 @@ async fn steward_actions_stage_and_guard() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/assertions",
+            "/v1/orgs/acme/datasets/default/assertions",
             "op-secret",
             Body::from(r#"{"kind":"maybe","a":"x","b":"y"}"#),
         ))
@@ -95,7 +95,7 @@ async fn steward_actions_stage_and_guard() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/assertions",
+            "/v1/orgs/acme/datasets/default/assertions",
             "op-secret",
             Body::from(r#"{"kind":"never","a":"crm:C003","b":"billing:B003","apply_now":true}"#),
         ))
@@ -110,7 +110,7 @@ async fn steward_actions_stage_and_guard() {
         .clone()
         .oneshot(req(
             "DELETE",
-            "/v1/orgs/acme/assertions/some-assertion-id",
+            "/v1/orgs/acme/datasets/default/assertions/some-assertion-id",
             "op-secret",
             Body::empty(),
         ))
@@ -141,7 +141,7 @@ async fn steward_actions_stage_and_guard() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/reviews/gray_band:crm:C001:webforms:W006/resolve",
+            "/v1/orgs/acme/datasets/default/reviews/gray_band:crm:C001:webforms:W006/resolve",
             "op-secret",
             Body::from(r#"{"resolution":"match"}"#),
         ))
@@ -156,7 +156,7 @@ async fn steward_actions_stage_and_guard() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/reviews/some-id/resolve",
+            "/v1/orgs/acme/datasets/default/reviews/some-id/resolve",
             "op-secret",
             Body::from(r#"{"resolution":"perhaps"}"#),
         ))
@@ -169,7 +169,7 @@ async fn steward_actions_stage_and_guard() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/reviews/bulk-resolve",
+            "/v1/orgs/acme/datasets/default/reviews/bulk-resolve",
             "op-secret",
             Body::from(
                 r#"{"items":[{"review_id":"r1","resolution":"dismiss"},{"review_id":"r2","resolution":"no_match"}]}"#,
@@ -192,7 +192,7 @@ async fn steward_actions_stage_and_guard() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/reviews/bulk-resolve",
+            "/v1/orgs/acme/datasets/default/reviews/bulk-resolve",
             "op-secret",
             Body::from(r#"{"items":[]}"#),
         ))
@@ -216,7 +216,7 @@ async fn steward_actions_stage_and_guard() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/assertions",
+            "/v1/orgs/acme/datasets/default/assertions",
             &viewer_key,
             Body::from(r#"{"kind":"always","a":"x","b":"y"}"#),
         ))
@@ -239,7 +239,7 @@ async fn steward_actions_stage_and_guard() {
     let resp = app
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/assertions",
+            "/v1/orgs/acme/datasets/default/assertions",
             "op-secret",
             Body::from(r#"{"kind":"always","a":"x","b":"y"}"#),
         ))

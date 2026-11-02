@@ -159,7 +159,7 @@ async fn tags_are_named_applied_and_retired_without_losing_what_they_touched() {
         async move {
             app.oneshot(req(
                 "POST",
-                &format!("/v1/orgs/acme/tags/{tag_id}/{verb}"),
+                &format!("/v1/orgs/acme/datasets/default/tags/{tag_id}/{verb}"),
                 &key,
                 Body::from(
                     serde_json::json!({ "subject_type": kind, "subject_id": id }).to_string(),
@@ -249,7 +249,7 @@ async fn tags_are_named_applied_and_retired_without_losing_what_they_touched() {
     // What carries the tag — the scope a bulk action by tag will read.
     let subjects = json_body(
         get(
-            &format!("/v1/orgs/acme/tags/{tag_id}/subjects"),
+            &format!("/v1/orgs/acme/datasets/default/tags/{tag_id}/subjects"),
             &viewer_key,
         )
         .await,
@@ -262,7 +262,7 @@ async fn tags_are_named_applied_and_retired_without_losing_what_they_touched() {
     );
     let only_reviews = json_body(
         get(
-            &format!("/v1/orgs/acme/tags/{tag_id}/subjects?subject_type=review"),
+            &format!("/v1/orgs/acme/datasets/default/tags/{tag_id}/subjects?subject_type=review"),
             &viewer_key,
         )
         .await,

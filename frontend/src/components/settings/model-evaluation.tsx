@@ -3,6 +3,7 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useModelEvaluation, type ConfusionMetrics } from "@/lib/query/models";
+import { useDatasetSlug } from "@/lib/use-dataset-slug";
 
 /**
  * A ratio as a percentage, or an em dash where it is null.
@@ -142,7 +143,8 @@ export function ModelEvaluation({
   name: string;
   version: number;
 }) {
-  const evaluation = useModelEvaluation(org, name, version);
+  const ds = useDatasetSlug();
+  const evaluation = useModelEvaluation(org, ds, name, version);
   const data = evaluation.data;
 
   return (

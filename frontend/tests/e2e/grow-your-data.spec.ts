@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { snap } from "./helpers";
+import { DS, snap } from "./helpers";
 
 /**
  * The M4 slice of the full-stack story: a threshold change published through
@@ -23,7 +23,7 @@ async function loginAs(page: Page, email: string) {
 
 async function waitForQuietQueue(page: Page, timeout = 300_000) {
   await expect(async () => {
-    const response = await page.request.get(`/api/orgs/${ORG}/jobs?limit=10`);
+    const response = await page.request.get(`/api/orgs/${ORG}/datasets/${DS}/jobs?limit=10`);
     const jobs = (await response.json()) as { state: string }[];
     expect(
       jobs.some((job) =>
@@ -42,7 +42,7 @@ test("the studio publishes a threshold change and the tier-A rebuild succeeds", 
   test.skip(isMobile, "the publish journey runs once");
   test.setTimeout(420_000);
   await loginAs(page, "admin@acme.dev");
-  await page.goto(`/${ORG}/settings/config`);
+  await page.goto(`/${ORG}/${DS}/settings/config`);
   await expect(page.getByTestId("threshold-editor")).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId("band-estimate")).toContainText("recently scored pairs");
   await snap(page, "real-config-studio");
@@ -59,14 +59,16 @@ test("the studio publishes a threshold change and the tier-A rebuild succeeds", 
   await snap(page, "real-config-published");
 
   await waitForQuietQueue(page);
-  const jobs = (await (await page.request.get(`/api/orgs/${ORG}/jobs?limit=3`)).json()) as {
+  const jobs = (await (
+    await page.request.get(`/api/orgs/${ORG}/datasets/${DS}/jobs?limit=3`)
+  ).json()) as {
     state: string;
     kind: string;
   }[];
   expect(jobs[0]?.state).toBe("succeeded");
 
   // The diff between the two newest versions shows exactly the threshold line.
-  await page.goto(`/${ORG}/settings/config`);
+  await page.goto(`/${ORG}/${DS}/settings/config`);
   const firstDiff = page.locator("[data-testid^=diff-]").first();
   await firstDiff.click();
   await expect(page.getByTestId("version-diff")).toContainText("auto_merge");
@@ -79,7 +81,7 @@ test("the wizard activates a new source and its file clusters", async ({ page, i
   // run — three real engine jobs back to back.
   test.setTimeout(900_000);
   await loginAs(page, "admin@acme.dev");
-  await page.goto(`/${ORG}/sources/new`);
+  await page.goto(`/${ORG}/${DS}/sources/new`);
   // Two rows, one persona: the new source arrives carrying its own duplicate,
   // so the run must end with a fresh two-member group whatever else the
   // corpus holds.
@@ -108,7 +110,9 @@ test("the wizard activates a new source and its file clusters", async ({ page, i
   await waitForQuietQueue(page, 780_000);
 
   // The queue ran exactly the promised sequence, newest first, all green.
-  const jobs = (await (await page.request.get(`/api/orgs/${ORG}/jobs?limit=3`)).json()) as {
+  const jobs = (await (
+    await page.request.get(`/api/orgs/${ORG}/datasets/${DS}/jobs?limit=3`)
+  ).json()) as {
     state: string;
     kind: string;
   }[];
@@ -132,7 +136,7 @@ test("the wizard activates a new source and its file clusters", async ({ page, i
     const params = new URLSearchParams({ limit: "100" });
     if (cursor) params.set("cursor", cursor);
     const groups = (await (
-      await page.request.get(`/api/orgs/${ORG}/duplicates?${params.toString()}`)
+      await page.request.get(`/api/orgs/${ORG}/datasets/${DS}/duplicates?${params.toString()}`)
     ).json()) as { items: { members: string[] }[]; next_cursor: string | null };
     found = groups.items.some((group) =>
       group.members.some((member) => member.startsWith(`${sourceName}:`)),
@@ -143,7 +147,7 @@ test("the wizard activates a new source and its file clusters", async ({ page, i
   expect(found, `a duplicate group holding ${sourceName} records`).toBe(true);
 
   // The delivery receipt exists for the new source too.
-  await page.goto(`/${ORG}/sources`);
+  await page.goto(`/${ORG}/${DS}/sources`);
   await expect(page.getByTestId("receipts")).toContainText(sourceName, { timeout: 30_000 });
 });
 
@@ -153,7 +157,7 @@ test("a segment exports real golden records as snapshot-consistent CSV", async (
 }) => {
   test.skip(isMobile, "the export journey runs once");
   await loginAs(page, "steward@acme.dev");
-  await page.goto(`/${ORG}/campaigns`);
+  await page.goto(`/${ORG}/${DS}/campaigns`);
   const name = `all-${Date.now().toString(36).slice(-5)}`;
   await page.getByTestId("segment-name").fill(name);
   await page.getByTestId("segment-create").click();
@@ -175,7 +179,9 @@ test("a segment exports real golden records as snapshot-consistent CSV", async (
   // The stable claim is the one worth making: the unfiltered segment exports
   // every entity in the corpus, exactly once — so read the count.
   expect(lines[0]).toContain("id,given_name");
-  const metrics = (await (await page.request.get(`/api/orgs/${ORG}/metrics`)).json()) as {
+  const metrics = (await (
+    await page.request.get(`/api/orgs/${ORG}/datasets/${DS}/metrics`)
+  ).json()) as {
     entities: number;
   };
   expect(metrics.entities).toBeGreaterThan(0);
@@ -191,7 +197,7 @@ test("the assistant answers over live data (real model key required)", async ({
   test.skip(!process.env.ANTHROPIC_API_KEY, "set ANTHROPIC_API_KEY to run the live assistant");
   test.setTimeout(180_000);
   await loginAs(page, "steward@acme.dev");
-  await page.goto(`/${ORG}/assistant`);
+  await page.goto(`/${ORG}/${DS}/assistant`);
   await page.getByTestId("assistant-input").fill("How many golden entities are there right now?");
   await page.getByTestId("assistant-send").click();
   const answer = page.getByTestId("turn-assistant");

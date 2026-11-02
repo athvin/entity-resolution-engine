@@ -48,10 +48,10 @@ export async function POST(request: Request): Promise<NextResponse> {
       .where(eq(schema.orgMembers.userId, user.id))
       .orderBy(schema.orgMembers.org)
       .limit(1);
-    let target = memberships[0] ? `/${memberships[0].org}/dashboard` : null;
+    let target = memberships[0] ? `/${memberships[0].org}` : null;
     if (!target && user.isSuperAdmin) {
       const registered = await database.select().from(schema.orgsRegistry).limit(1);
-      target = registered[0] ? `/${registered[0].org}/dashboard` : "/admin";
+      target = registered[0] ? `/${registered[0].org}` : "/admin";
     }
 
     const response = NextResponse.json({

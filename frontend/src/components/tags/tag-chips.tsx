@@ -19,6 +19,7 @@ import {
   type TagSubject,
 } from "@/lib/query/tags";
 
+import { useDatasetSlug } from "@/lib/use-dataset-slug";
 /**
  * The tags on one entity or review, with the affordance to change them.
  *
@@ -41,14 +42,15 @@ export function TagChips({
   subjectType: TagSubject;
   subjectId: string;
 }) {
-  const applied = useSubjectTags(org, subjectType, subjectId);
+  const ds = useDatasetSlug();
+  const applied = useSubjectTags(org, ds, subjectType, subjectId);
   const vocabulary = useTags(org);
   const session = useSession();
   const canTag = canApplyTags(effectiveRole(session.data, org));
 
   const subject = { type: subjectType, id: subjectId };
-  const application = useTagApplication(org, subject);
-  const create = useCreateTag(org, subject);
+  const application = useTagApplication(org, ds, subject);
+  const create = useCreateTag(org, ds, subject);
   const [picking, setPicking] = useState(false);
   const [draft, setDraft] = useState("");
   const [failure, setFailure] = useState<string | null>(null);

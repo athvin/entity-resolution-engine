@@ -11,11 +11,13 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { MOBILE_TAB_IDS, NAV_ITEMS } from "@/lib/nav";
+import { useDatasetSlug } from "@/lib/use-dataset-slug";
 import { cn } from "@/lib/utils";
 
 /** Mobile navigation: a fixed bottom tab bar (hidden at lg and up). */
 export function BottomTabs({ org }: { org: string }) {
   const pathname = usePathname();
+  const ds = useDatasetSlug();
   const tabIds: readonly string[] = MOBILE_TAB_IDS;
   const tabs = NAV_ITEMS.filter((item) => tabIds.includes(item.id)).sort(
     (a, b) => tabIds.indexOf(a.id) - tabIds.indexOf(b.id),
@@ -29,7 +31,7 @@ export function BottomTabs({ org }: { org: string }) {
       className="bg-background/95 fixed inset-x-0 bottom-0 z-40 flex border-t pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden"
     >
       {tabs.map((item) => {
-        const href = item.path(org);
+        const href = item.path(org, ds);
         const active = pathname.startsWith(href);
         const className = cn(
           "flex min-h-14 flex-1 flex-col items-center justify-center gap-1 text-[11px] font-medium",
@@ -65,7 +67,7 @@ export function BottomTabs({ org }: { org: string }) {
           {overflow.map((item) =>
             item.enabled ? (
               <DropdownMenuItem key={item.id} asChild>
-                <Link href={item.path(org)}>
+                <Link href={item.path(org, ds)}>
                   <item.icon />
                   {item.label}
                 </Link>

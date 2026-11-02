@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { login, ORG, PASSWORD, USERS } from "./helpers";
+import { DS, login, ORG, PASSWORD, USERS } from "./helpers";
 
 /** An org the fixtures do not contain. A tenant user must not be able to tell
  * this apart from one that exists but is not theirs. */
@@ -33,7 +33,7 @@ test("no erserver credential ever reaches the browser", async ({ page }) => {
   });
 
   await login(page, USERS.admin);
-  await page.goto(`/${ORG}/dashboard`);
+  await page.goto(`/${ORG}/${DS}/dashboard`);
   await expect(page.getByTestId("tile-records")).toContainText("800");
 
   // Exercise the session endpoint the shell uses, plus every dashboard read.
@@ -56,9 +56,9 @@ test("a tenant admin cannot read another org, and learns nothing about it", asyn
   await login(page, USERS.admin);
 
   for (const path of [
-    `/api/orgs/${FOREIGN_ORG}/metrics`,
-    `/api/orgs/${FOREIGN_ORG}/golden-records`,
-    `/api/orgs/${FOREIGN_ORG}/reviews`,
+    `/api/orgs/${FOREIGN_ORG}/datasets/${DS}/metrics`,
+    `/api/orgs/${FOREIGN_ORG}/datasets/${DS}/golden-records`,
+    `/api/orgs/${FOREIGN_ORG}/datasets/${DS}/reviews`,
     `/api/orgs/${FOREIGN_ORG}/members`,
   ]) {
     const response = await page.request.get(path);
@@ -84,12 +84,15 @@ test("a viewer cannot perform steward or admin writes", async ({ page }) => {
 
   // A read the viewer IS allowed, first — so a blanket failure would show up as
   // this assertion rather than as a false pass below.
-  const allowed = await page.request.get(`/api/orgs/${ORG}/metrics`);
+  const allowed = await page.request.get(`/api/orgs/${ORG}/datasets/${DS}/metrics`);
   expect(allowed.ok()).toBe(true);
 
   const forbidden = [
-    { path: `/api/orgs/${ORG}/jobs/submit`, data: { kind: "run_all_incremental" } },
-    { path: `/api/orgs/${ORG}/reviews/bulk-resolve`, data: { ids: ["r1"], decision: "merge" } },
+    { path: `/api/orgs/${ORG}/datasets/${DS}/jobs/submit`, data: { kind: "run_all_incremental" } },
+    {
+      path: `/api/orgs/${ORG}/datasets/${DS}/reviews/bulk-resolve`,
+      data: { ids: ["r1"], decision: "merge" },
+    },
     { path: `/api/orgs/${ORG}/members`, data: { email: "x@example.com", role: "admin" } },
   ];
   for (const { path, data } of forbidden) {
@@ -108,7 +111,7 @@ test("a viewer cannot perform steward or admin writes", async ({ page }) => {
 test("a traversal-shaped org name cannot re-point the upstream request", async ({ page }) => {
   await login(page, USERS.admin);
   for (const org of ["..", "..%2f..%2fvictim", "acme%2f..%2fvictim", "Acme-Dev"]) {
-    const response = await page.request.get(`/api/orgs/${org}/metrics`);
+    const response = await page.request.get(`/api/orgs/${org}/datasets/${DS}/metrics`);
     expect([404, 400], `org=${org}`).toContain(response.status());
   }
 });
@@ -133,15 +136,23 @@ test("a hostile ?next= cannot redirect off-origin after login", async ({ page, b
     expect(page.url(), `next=${hostile}`).not.toContain("evil.example");
 
     await page.request.post("/api/auth/logout");
+    // Reload the tenant page we landed on: the server layout answers the now
+    // dead session with its own redirect to /login, which both proves the
+    // logout landed and leaves the page quiescent. Anything less determinate
+    // races webkit's late client-side redirect, which interrupts the next
+    // iteration's goto for timing reasons unrelated to the property under
+    // test.
+    await page.reload();
+    await page.waitForURL(/\/login/, { timeout: 15_000 });
   }
 });
 
 test("a legitimate ?next= deep link still works", async ({ page }) => {
   // The fix must not break the flow the proxy and the tenant layout depend on.
-  await page.goto(`/login?next=${encodeURIComponent(`/${ORG}/records`)}`);
+  await page.goto(`/login?next=${encodeURIComponent(`/${ORG}/${DS}/records`)}`);
   await page.getByLabel("Email").fill(USERS.admin);
   await page.getByLabel("Password").fill(PASSWORD);
   await page.getByTestId("login-submit").click();
-  await page.waitForURL(new RegExp(`/${ORG}/records`), { timeout: 15_000 });
-  expect(new URL(page.url()).pathname).toBe(`/${ORG}/records`);
+  await page.waitForURL(new RegExp(`/${ORG}/${DS}/records`), { timeout: 15_000 });
+  expect(new URL(page.url()).pathname).toBe(`/${ORG}/${DS}/records`);
 });

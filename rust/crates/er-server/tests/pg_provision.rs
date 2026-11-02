@@ -196,7 +196,7 @@ async fn provisioning_a_tenant_end_to_end() {
         .clone()
         .oneshot(op(
             "POST",
-            "/v1/orgs/acme/jobs",
+            "/v1/orgs/acme/datasets/default/jobs",
             Body::from(r#"{"kind":"run_all_full"}"#),
         ))
         .await
@@ -254,6 +254,14 @@ async fn provisioning_a_tenant_end_to_end() {
         assert!(ran, "the provision job should have been claimed");
         let org = pg::get_org(&client, "acme").await.unwrap().unwrap();
         assert_eq!(org.state, "active", "provisioning promotes the org");
+        // The default dataset was converged while the org was still
+        // provisioning; the activate step must take it along, or the dataset
+        // guard renders every fresh tenant as perpetually setting up.
+        let ds = pg::get_dataset(&client, &org.id, "default")
+            .await
+            .unwrap()
+            .expect("the default dataset exists from the org's first moment");
+        assert_eq!(ds.state, "active", "activation promotes the dataset too");
         // The lake exists with every DDL-owned relation and a ledger that says
         // which catalog version created them.
         let catalog = org.env["ER_LAKE_CATALOG"].as_str().unwrap();

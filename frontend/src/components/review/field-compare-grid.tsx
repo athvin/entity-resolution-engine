@@ -8,6 +8,7 @@ import { diffFields } from "@/lib/domain/field-diff";
 import { useOrgEntityType } from "@/lib/query/config";
 import { useRecordPair, type SourceRecord } from "@/lib/query/reviews";
 import { cn } from "@/lib/utils";
+import { useDatasetSlug } from "@/lib/use-dataset-slug";
 
 /**
  * The side-by-side field comparison (design §5.3): the two records' values,
@@ -30,8 +31,9 @@ export function FieldCompareGrid({
   /** `grid` is the desktop three-column table; `stacked` is the phone card. */
   layout?: "grid" | "stacked";
 }) {
-  const entityType = useOrgEntityType(org);
-  const pair = useRecordPair(org, keyA, keyB);
+  const ds = useDatasetSlug();
+  const entityType = useOrgEntityType(org, ds);
+  const pair = useRecordPair(org, ds, keyA, keyB);
 
   if (keyA === null || keyB === null) {
     return (

@@ -145,7 +145,7 @@ async fn the_model_registry_seeds_versions_and_activates_exactly_one() {
         .clone()
         .oneshot(req(
             "GET",
-            "/v1/orgs/acme/models",
+            "/v1/orgs/acme/datasets/default/models",
             &viewer_key,
             Body::empty(),
         ))
@@ -186,7 +186,7 @@ async fn the_model_registry_seeds_versions_and_activates_exactly_one() {
         .clone()
         .oneshot(req(
             "GET",
-            "/v1/orgs/acme/models",
+            "/v1/orgs/acme/datasets/default/models",
             &viewer_key,
             Body::empty(),
         ))
@@ -204,7 +204,7 @@ async fn the_model_registry_seeds_versions_and_activates_exactly_one() {
         .clone()
         .oneshot(req(
             "GET",
-            "/v1/orgs/acme/models/default/versions/1",
+            "/v1/orgs/acme/datasets/default/models/default/versions/1",
             &viewer_key,
             Body::empty(),
         ))
@@ -245,7 +245,7 @@ async fn the_model_registry_seeds_versions_and_activates_exactly_one() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/config/versions",
+            "/v1/orgs/acme/datasets/default/config/versions",
             &admin_key,
             Body::from(serde_json::json!({ "yaml": DEFAULT_YAML }).to_string()),
         ))
@@ -257,7 +257,7 @@ async fn the_model_registry_seeds_versions_and_activates_exactly_one() {
         .clone()
         .oneshot(req(
             "POST",
-            &format!("/v1/orgs/acme/config/versions/{version}/publish"),
+            &format!("/v1/orgs/acme/datasets/default/config/versions/{version}/publish"),
             &admin_key,
             Body::empty(),
         ))
@@ -274,7 +274,7 @@ async fn the_model_registry_seeds_versions_and_activates_exactly_one() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/models/versions",
+            "/v1/orgs/acme/datasets/default/models/versions",
             &viewer_key,
             Body::from(upload.to_string()),
         ))
@@ -287,7 +287,7 @@ async fn the_model_registry_seeds_versions_and_activates_exactly_one() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/models/versions",
+            "/v1/orgs/acme/datasets/default/models/versions",
             &admin_key,
             Body::from(
                 serde_json::json!({ "model_json": "{\"not\":\"a model\"}", "model_version_label": "v0002" })
@@ -312,7 +312,7 @@ async fn the_model_registry_seeds_versions_and_activates_exactly_one() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/models/versions",
+            "/v1/orgs/acme/datasets/default/models/versions",
             &admin_key,
             Body::from(serde_json::json!({ "model_json": starter_json }).to_string()),
         ))
@@ -329,7 +329,7 @@ async fn the_model_registry_seeds_versions_and_activates_exactly_one() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/models/versions",
+            "/v1/orgs/acme/datasets/default/models/versions",
             &admin_key,
             Body::from(upload.to_string()),
         ))
@@ -346,7 +346,7 @@ async fn the_model_registry_seeds_versions_and_activates_exactly_one() {
         .clone()
         .oneshot(req(
             "GET",
-            "/v1/orgs/acme/models",
+            "/v1/orgs/acme/datasets/default/models",
             &viewer_key,
             Body::empty(),
         ))
@@ -359,7 +359,7 @@ async fn the_model_registry_seeds_versions_and_activates_exactly_one() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/models/default/versions/2/activate",
+            "/v1/orgs/acme/datasets/default/models/default/versions/2/activate",
             &viewer_key,
             Body::empty(),
         ))
@@ -374,7 +374,7 @@ async fn the_model_registry_seeds_versions_and_activates_exactly_one() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/models/default/versions/2/activate",
+            "/v1/orgs/acme/datasets/default/models/default/versions/2/activate",
             &admin_key,
             Body::empty(),
         ))
@@ -385,7 +385,7 @@ async fn the_model_registry_seeds_versions_and_activates_exactly_one() {
         .clone()
         .oneshot(req(
             "GET",
-            "/v1/orgs/acme/models",
+            "/v1/orgs/acme/datasets/default/models",
             &viewer_key,
             Body::empty(),
         ))
@@ -421,7 +421,7 @@ async fn the_model_registry_seeds_versions_and_activates_exactly_one() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/models/default/versions/2/activate",
+            "/v1/orgs/acme/datasets/default/models/default/versions/2/activate",
             &admin_key,
             Body::empty(),
         ))
@@ -432,7 +432,7 @@ async fn the_model_registry_seeds_versions_and_activates_exactly_one() {
         .clone()
         .oneshot(req(
             "GET",
-            "/v1/orgs/acme/models",
+            "/v1/orgs/acme/datasets/default/models",
             &viewer_key,
             Body::empty(),
         ))
@@ -449,7 +449,7 @@ async fn the_model_registry_seeds_versions_and_activates_exactly_one() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/models/default/versions/99/activate",
+            "/v1/orgs/acme/datasets/default/models/default/versions/99/activate",
             &admin_key,
             Body::empty(),
         ))
@@ -482,7 +482,7 @@ async fn the_model_registry_seeds_versions_and_activates_exactly_one() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/models/accounts/versions/1/activate",
+            "/v1/orgs/acme/datasets/default/models/accounts/versions/1/activate",
             &admin_key,
             Body::empty(),
         ))
@@ -506,7 +506,7 @@ async fn the_model_registry_seeds_versions_and_activates_exactly_one() {
         .clone()
         .oneshot(req(
             "GET",
-            "/v1/orgs/acme/models",
+            "/v1/orgs/acme/datasets/default/models",
             &viewer_key,
             Body::empty(),
         ))
@@ -527,7 +527,7 @@ async fn the_model_registry_seeds_versions_and_activates_exactly_one() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/models/compile",
+            "/v1/orgs/acme/datasets/default/models/compile",
             &viewer_key,
             Body::empty(),
         ))
@@ -543,7 +543,7 @@ async fn the_model_registry_seeds_versions_and_activates_exactly_one() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/models/compile",
+            "/v1/orgs/acme/datasets/default/models/compile",
             &admin_key,
             Body::empty(),
         ))
@@ -581,7 +581,7 @@ async fn the_model_registry_seeds_versions_and_activates_exactly_one() {
         .clone()
         .oneshot(req(
             "GET",
-            &format!("/v1/orgs/acme/models/default/versions/{compiled_version}"),
+            &format!("/v1/orgs/acme/datasets/default/models/default/versions/{compiled_version}"),
             &viewer_key,
             Body::empty(),
         ))
@@ -623,7 +623,9 @@ async fn the_model_registry_seeds_versions_and_activates_exactly_one() {
         .clone()
         .oneshot(req(
             "POST",
-            &format!("/v1/orgs/acme/models/default/versions/{compiled_version}/activate"),
+            &format!(
+                "/v1/orgs/acme/datasets/default/models/default/versions/{compiled_version}/activate"
+            ),
             &admin_key,
             Body::empty(),
         ))
@@ -634,7 +636,7 @@ async fn the_model_registry_seeds_versions_and_activates_exactly_one() {
         .clone()
         .oneshot(req(
             "GET",
-            "/v1/orgs/acme/models",
+            "/v1/orgs/acme/datasets/default/models",
             &viewer_key,
             Body::empty(),
         ))
@@ -662,7 +664,7 @@ async fn the_model_registry_seeds_versions_and_activates_exactly_one() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/models/versions",
+            "/v1/orgs/acme/datasets/default/models/versions",
             &admin_key,
             Body::from(second.to_string()),
         ))
@@ -680,7 +682,7 @@ async fn the_model_registry_seeds_versions_and_activates_exactly_one() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/models/strict/versions/1/activate",
+            "/v1/orgs/acme/datasets/default/models/strict/versions/1/activate",
             &admin_key,
             Body::empty(),
         ))
@@ -707,7 +709,7 @@ async fn the_model_registry_seeds_versions_and_activates_exactly_one() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/models/versions",
+            "/v1/orgs/acme/datasets/default/models/versions",
             &admin_key,
             Body::from(
                 serde_json::json!({
@@ -726,7 +728,7 @@ async fn the_model_registry_seeds_versions_and_activates_exactly_one() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/models/strict/versions/2/activate",
+            "/v1/orgs/acme/datasets/default/models/strict/versions/2/activate",
             &admin_key,
             Body::empty(),
         ))
@@ -750,7 +752,7 @@ async fn the_model_registry_seeds_versions_and_activates_exactly_one() {
         .clone()
         .oneshot(req(
             "GET",
-            "/v1/orgs/acme/models",
+            "/v1/orgs/acme/datasets/default/models",
             &viewer_key,
             Body::empty(),
         ))

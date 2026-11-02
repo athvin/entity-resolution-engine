@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
 
-import { snap } from "./helpers";
+import { DS, snap } from "./helpers";
 
 /**
  * The M1 slice of the full-stack story: a seeded steward signs in and the
@@ -28,13 +28,15 @@ test("a seeded steward signs in and sees real engine numbers", async ({ page }) 
   await page.getByLabel("Email").fill("steward@acme.dev");
   await page.getByLabel("Password").fill("password-123!");
   await page.getByTestId("login-submit").click();
-  await expect(page).toHaveURL(new RegExp(`/${org}/dashboard$`));
+  await expect(page).toHaveURL(new RegExp(`/${org}/${DS}/dashboard$`));
 
   // The tiles must equal what the engine reports RIGHT NOW — the M3 journeys
   // legitimately mutate this tenant (unmerges, deliveries), so the truth is the
   // live metrics read, not the frozen seed snapshot. The seed's expected.json
   // stays as a sanity floor: the corpus never shrinks below its initial size.
-  const live = (await (await page.request.get(`/api/orgs/${org}/metrics`)).json()) as {
+  const live = (await (
+    await page.request.get(`/api/orgs/${org}/datasets/${DS}/metrics`)
+  ).json()) as {
     records: number;
     entities: number;
     duplicate_groups: number;
@@ -59,7 +61,7 @@ test("the operator account can view a tenant it does not belong to", async ({ pa
   await page.getByLabel("Email").fill("root@er.dev");
   await page.getByLabel("Password").fill("password-123!");
   await page.getByTestId("login-submit").click();
-  await expect(page).toHaveURL(new RegExp(`/${org}/dashboard$`));
+  await expect(page).toHaveURL(new RegExp(`/${org}/${DS}/dashboard$`));
   await expect(page.getByTestId("tile-records")).not.toBeEmpty();
   await snap(page, "operator-view");
 });

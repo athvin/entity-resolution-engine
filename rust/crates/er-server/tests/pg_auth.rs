@@ -94,7 +94,7 @@ async fn api_key_auth_role_scope_and_revocation() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/jobs",
+            "/v1/orgs/acme/datasets/default/jobs",
             &admin_key,
             Body::from(r#"{"kind":"run"}"#),
         ))
@@ -107,7 +107,7 @@ async fn api_key_auth_role_scope_and_revocation() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/jobs",
+            "/v1/orgs/acme/datasets/default/jobs",
             &viewer_key,
             Body::from(r#"{"kind":"run"}"#),
         ))
@@ -118,7 +118,12 @@ async fn api_key_auth_role_scope_and_revocation() {
     // ...but a viewer can list (viewer+).
     let resp = app
         .clone()
-        .oneshot(req("GET", "/v1/orgs/acme/jobs", &viewer_key, Body::empty()))
+        .oneshot(req(
+            "GET",
+            "/v1/orgs/acme/datasets/default/jobs",
+            &viewer_key,
+            Body::empty(),
+        ))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -128,7 +133,7 @@ async fn api_key_auth_role_scope_and_revocation() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/other/jobs",
+            "/v1/orgs/other/datasets/default/jobs",
             &admin_key,
             Body::from(r#"{"kind":"run"}"#),
         ))
@@ -141,7 +146,7 @@ async fn api_key_auth_role_scope_and_revocation() {
         .clone()
         .oneshot(req(
             "GET",
-            "/v1/orgs/acme/jobs",
+            "/v1/orgs/acme/datasets/default/jobs",
             "erk_01bogus_deadbeef",
             Body::empty(),
         ))
@@ -168,7 +173,7 @@ async fn api_key_auth_role_scope_and_revocation() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/jobs",
+            "/v1/orgs/acme/datasets/default/jobs",
             &admin_key,
             Body::from(r#"{"kind":"run"}"#),
         ))
@@ -194,7 +199,7 @@ async fn api_key_auth_role_scope_and_revocation() {
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri("/v1/orgs/acme/jobs")
+                .uri("/v1/orgs/acme/datasets/default/jobs")
                 .body(Body::empty())
                 .unwrap(),
         )

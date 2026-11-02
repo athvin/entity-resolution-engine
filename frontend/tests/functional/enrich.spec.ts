@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { login, ORG, USERS } from "./helpers";
+import { DS, login, ORG, USERS } from "./helpers";
 
 // A single-member, stable entity. Enrichment never mutates mock state (apply is
 // a canned mass-update), so it is safe to run on the read fixtures and alongside
@@ -10,7 +10,7 @@ const ENTITY = "01jm0e000001";
 test.describe("AI enrichment (steward)", () => {
   test("suggests fixes, drops no-ops, and accepts one as a durable override", async ({ page }) => {
     await login(page, USERS.steward);
-    await page.goto(`/${ORG}/records/${ENTITY}`);
+    await page.goto(`/${ORG}/${DS}/records/${ENTITY}`);
 
     const panel = page.getByTestId("enrich-panel");
     await expect(panel).toBeVisible();
@@ -32,7 +32,7 @@ test.describe("AI enrichment (steward)", () => {
 
   test("viewers see no enrichment controls", async ({ page }) => {
     await login(page, USERS.viewer);
-    await page.goto(`/${ORG}/records/${ENTITY}`);
+    await page.goto(`/${ORG}/${DS}/records/${ENTITY}`);
     await expect(page.getByTestId("entity-golden")).toBeVisible();
     await expect(page.getByTestId("enrich-panel")).toHaveCount(0);
   });

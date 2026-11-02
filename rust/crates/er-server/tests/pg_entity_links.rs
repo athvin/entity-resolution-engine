@@ -78,7 +78,7 @@ async fn entity_links_upsert_read_and_role_boundary() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/entity-links",
+            "/v1/orgs/acme/datasets/default/entity-links",
             &steward,
             Body::from(
                 r#"{"parent_entity_id":"ent-household-1","child_entity_id":"ent-person-1",
@@ -101,7 +101,7 @@ async fn entity_links_upsert_read_and_role_boundary() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/entity-links",
+            "/v1/orgs/acme/datasets/default/entity-links",
             &steward,
             Body::from(
                 r#"{"parent_entity_id":"ent-household-1","child_entity_id":"ent-person-1",
@@ -125,7 +125,7 @@ async fn entity_links_upsert_read_and_role_boundary() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/entity-links",
+            "/v1/orgs/acme/datasets/default/entity-links",
             &steward,
             Body::from(
                 r#"{"parent_entity_id":"ent-household-1","child_entity_id":"ent-person-1",
@@ -141,7 +141,7 @@ async fn entity_links_upsert_read_and_role_boundary() {
         .clone()
         .oneshot(req(
             "GET",
-            "/v1/orgs/acme/entities/ent-person-1/links",
+            "/v1/orgs/acme/datasets/default/entities/ent-person-1/links",
             &viewer,
             Body::empty(),
         ))
@@ -161,7 +161,7 @@ async fn entity_links_upsert_read_and_role_boundary() {
         .clone()
         .oneshot(req(
             "GET",
-            "/v1/orgs/acme/entities/ent-household-1/links",
+            "/v1/orgs/acme/datasets/default/entities/ent-household-1/links",
             &viewer,
             Body::empty(),
         ))
@@ -178,7 +178,7 @@ async fn entity_links_upsert_read_and_role_boundary() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/entity-links",
+            "/v1/orgs/acme/datasets/default/entity-links",
             &steward,
             Body::from(
                 r#"{"parent_entity_id":"ent-a","child_entity_id":"ent-a","kind":"household"}"#,
@@ -197,7 +197,7 @@ async fn entity_links_upsert_read_and_role_boundary() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/entity-links",
+            "/v1/orgs/acme/datasets/default/entity-links",
             &steward,
             Body::from(r#"{"parent_entity_id":"ent-a","child_entity_id":"ent-b","kind":"spouse"}"#),
         ))
@@ -216,7 +216,7 @@ async fn entity_links_upsert_read_and_role_boundary() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/entity-links",
+            "/v1/orgs/acme/datasets/default/entity-links",
             &viewer,
             Body::from(
                 r#"{"parent_entity_id":"ent-x","child_entity_id":"ent-y","kind":"company"}"#,
@@ -234,7 +234,7 @@ async fn entity_links_upsert_read_and_role_boundary() {
         .clone()
         .oneshot(req(
             "GET",
-            "/v1/orgs/acme/entities/ent-person-1/links",
+            "/v1/orgs/acme/datasets/default/entities/ent-person-1/links",
             &other_steward,
             Body::empty(),
         ))
@@ -262,7 +262,7 @@ async fn entity_links_upsert_read_and_role_boundary() {
         .clone()
         .oneshot(req(
             "DELETE",
-            &format!("/v1/orgs/acme/entity-links/{link_id}"),
+            &format!("/v1/orgs/acme/datasets/default/entity-links/{link_id}"),
             &steward,
             Body::empty(),
         ))
@@ -274,7 +274,7 @@ async fn entity_links_upsert_read_and_role_boundary() {
         .clone()
         .oneshot(req(
             "GET",
-            "/v1/orgs/acme/entities/ent-person-1/links",
+            "/v1/orgs/acme/datasets/default/entities/ent-person-1/links",
             &viewer,
             Body::empty(),
         ))
@@ -290,7 +290,7 @@ async fn entity_links_upsert_read_and_role_boundary() {
         .clone()
         .oneshot(req(
             "DELETE",
-            &format!("/v1/orgs/acme/entity-links/{link_id}"),
+            &format!("/v1/orgs/acme/datasets/default/entity-links/{link_id}"),
             &steward,
             Body::empty(),
         ))

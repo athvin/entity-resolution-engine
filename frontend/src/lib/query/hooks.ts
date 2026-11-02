@@ -139,34 +139,34 @@ export function effectiveRole(
   return session.user.isSuperAdmin ? "admin" : null;
 }
 
-export function useMetrics(org: string) {
+export function useMetrics(org: string, ds: string) {
   return useQuery({
-    queryKey: queryKeys.metrics(org),
-    queryFn: () => bffFetch<Metrics>(`/api/orgs/${org}/metrics`),
+    queryKey: queryKeys.metrics(org, ds),
+    queryFn: () => bffFetch<Metrics>(`/api/orgs/${org}/datasets/${ds}/metrics`),
     refetchInterval: 30_000,
   });
 }
 
-export function useDataQuality(org: string) {
+export function useDataQuality(org: string, ds: string) {
   return useQuery({
     queryKey: ["data-quality", org],
-    queryFn: () => bffFetch<DataQuality>(`/api/orgs/${org}/data-quality`),
+    queryFn: () => bffFetch<DataQuality>(`/api/orgs/${org}/datasets/${ds}/data-quality`),
     refetchInterval: 30_000,
   });
 }
 
-export function useRuns(org: string) {
+export function useRuns(org: string, ds: string) {
   return useQuery({
-    queryKey: queryKeys.runs(org),
-    queryFn: () => bffFetch<RunRow[]>(`/api/orgs/${org}/runs`),
+    queryKey: queryKeys.runs(org, ds),
+    queryFn: () => bffFetch<RunRow[]>(`/api/orgs/${org}/datasets/${ds}/runs`),
     refetchInterval: 30_000,
   });
 }
 
-export function useJobs(org: string) {
+export function useJobs(org: string, ds: string) {
   return useQuery({
-    queryKey: queryKeys.jobs(org),
-    queryFn: () => bffFetch<JobRow[]>(`/api/orgs/${org}/jobs?limit=20`),
+    queryKey: queryKeys.jobs(org, ds),
+    queryFn: () => bffFetch<JobRow[]>(`/api/orgs/${org}/datasets/${ds}/jobs?limit=20`),
     // Poll fast while anything is in flight; settle down when quiet.
     refetchInterval: (query) =>
       (query.state.data ?? []).some((job) => ACTIVE_JOB_STATES.has(job.state)) ? 1_500 : 30_000,
@@ -189,45 +189,48 @@ export async function fetchGoldenPage(path: string): Promise<GoldenPage> {
   };
 }
 
-export function useGoldenRecords(org: string, q: string) {
+export function useGoldenRecords(org: string, ds: string, q: string) {
   return useInfiniteQuery({
-    queryKey: queryKeys.goldenRecords(org, q),
+    queryKey: queryKeys.goldenRecords(org, ds, q),
     queryFn: ({ pageParam }): Promise<GoldenPage> => {
       const params = new URLSearchParams({ limit: "100" });
       if (q) params.set("q", q);
       if (pageParam) params.set("cursor", pageParam);
-      return fetchGoldenPage(`/api/orgs/${org}/golden-records?${params.toString()}`);
+      return fetchGoldenPage(`/api/orgs/${org}/datasets/${ds}/golden-records?${params.toString()}`);
     },
     initialPageParam: "",
     getNextPageParam: (last) => last.next_cursor ?? undefined,
   });
 }
 
-export function useEntityDetail(org: string, entityId: string, enabled = true) {
+export function useEntityDetail(org: string, ds: string, entityId: string, enabled = true) {
   return useQuery({
-    queryKey: queryKeys.entity(org, entityId),
-    queryFn: () => bffFetch<EntityDetail>(`/api/orgs/${org}/golden-records/${entityId}`),
+    queryKey: queryKeys.entity(org, ds, entityId),
+    queryFn: () =>
+      bffFetch<EntityDetail>(`/api/orgs/${org}/datasets/${ds}/golden-records/${entityId}`),
     enabled: enabled && entityId !== "",
   });
 }
 
-export function useJob(org: string, jobId: string) {
+export function useJob(org: string, ds: string, jobId: string) {
   return useQuery({
-    queryKey: queryKeys.job(org, jobId),
-    queryFn: () => bffFetch<JobRow>(`/api/orgs/${org}/jobs/${jobId}`),
+    queryKey: queryKeys.job(org, ds, jobId),
+    queryFn: () => bffFetch<JobRow>(`/api/orgs/${org}/datasets/${ds}/jobs/${jobId}`),
     refetchInterval: (query) =>
       query.state.data && ACTIVE_JOB_STATES.has(query.state.data.state) ? 1_500 : false,
   });
 }
 
-export function useJobAction(org: string, jobId: string, action: "cancel" | "resume") {
+export function useJobAction(org: string, ds: string, jobId: string, action: "cancel" | "resume") {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: () =>
-      bffFetch<unknown>(`/api/orgs/${org}/jobs/${jobId}/${action}`, { method: "POST" }),
+      bffFetch<unknown>(`/api/orgs/${org}/datasets/${ds}/jobs/${jobId}/${action}`, {
+        method: "POST",
+      }),
     onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.job(org, jobId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.jobs(org) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.job(org, ds, jobId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.jobs(org, ds) });
     },
   });
 }

@@ -111,7 +111,7 @@ async fn labels_are_recorded_canonically_and_corrections_replace() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/labels",
+            "/v1/orgs/acme/datasets/default/labels",
             &steward_key,
             Body::from(
                 serde_json::json!({
@@ -144,7 +144,7 @@ async fn labels_are_recorded_canonically_and_corrections_replace() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/labels",
+            "/v1/orgs/acme/datasets/default/labels",
             &steward_key,
             Body::from(
                 serde_json::json!({
@@ -170,7 +170,7 @@ async fn labels_are_recorded_canonically_and_corrections_replace() {
         .clone()
         .oneshot(req(
             "GET",
-            "/v1/orgs/acme/labels",
+            "/v1/orgs/acme/datasets/default/labels",
             &viewer_key,
             Body::empty(),
         ))
@@ -203,7 +203,7 @@ async fn labels_are_recorded_canonically_and_corrections_replace() {
             .clone()
             .oneshot(req(
                 "POST",
-                "/v1/orgs/acme/labels",
+                "/v1/orgs/acme/datasets/default/labels",
                 &steward_key,
                 Body::from(body.to_string()),
             ))
@@ -229,7 +229,7 @@ async fn labels_are_recorded_canonically_and_corrections_replace() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/labels",
+            "/v1/orgs/acme/datasets/default/labels",
             &viewer_key,
             Body::from(
                 serde_json::json!({ "rec_a_key": "a:1", "rec_b_key": "b:2", "verdict": "match" })
@@ -246,7 +246,7 @@ async fn labels_are_recorded_canonically_and_corrections_replace() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/labels",
+            "/v1/orgs/acme/datasets/default/labels",
             &steward_key,
             Body::from(
                 serde_json::json!({
@@ -266,7 +266,7 @@ async fn labels_are_recorded_canonically_and_corrections_replace() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/config/versions",
+            "/v1/orgs/acme/datasets/default/config/versions",
             "op-secret",
             Body::from(serde_json::json!({ "yaml": DEFAULT_YAML }).to_string()),
         ))
@@ -278,7 +278,7 @@ async fn labels_are_recorded_canonically_and_corrections_replace() {
         .clone()
         .oneshot(req(
             "POST",
-            &format!("/v1/orgs/acme/config/versions/{version}/publish"),
+            &format!("/v1/orgs/acme/datasets/default/config/versions/{version}/publish"),
             "op-secret",
             Body::empty(),
         ))
@@ -294,7 +294,7 @@ async fn labels_are_recorded_canonically_and_corrections_replace() {
         .clone()
         .oneshot(req(
             "GET",
-            "/v1/orgs/acme/labeling/next",
+            "/v1/orgs/acme/datasets/default/labeling/next",
             &viewer_key,
             Body::empty(),
         ))
@@ -324,7 +324,7 @@ async fn labels_are_recorded_canonically_and_corrections_replace() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/models/versions",
+            "/v1/orgs/acme/datasets/default/models/versions",
             &admin_key,
             Body::from(
                 serde_json::json!({
@@ -351,7 +351,7 @@ async fn labels_are_recorded_canonically_and_corrections_replace() {
             .clone()
             .oneshot(req(
                 "POST",
-                "/v1/orgs/acme/labels",
+                "/v1/orgs/acme/datasets/default/labels",
                 &steward_key,
                 Body::from(
                     serde_json::json!({
@@ -369,8 +369,9 @@ async fn labels_are_recorded_canonically_and_corrections_replace() {
         assert_eq!(resp.status(), StatusCode::CREATED, "labelling {a}/{b}");
     }
 
-    let eval_path =
-        format!("/v1/orgs/acme/models/{model_name}/versions/{model_version}/evaluation");
+    let eval_path = format!(
+        "/v1/orgs/acme/datasets/default/models/{model_name}/versions/{model_version}/evaluation"
+    );
     let resp = app
         .clone()
         .oneshot(req("GET", &eval_path, &viewer_key, Body::empty()))
@@ -429,7 +430,7 @@ async fn labels_are_recorded_canonically_and_corrections_replace() {
         .clone()
         .oneshot(req(
             "GET",
-            &format!("/v1/orgs/acme/models/{model_name}/versions/99/evaluation"),
+            &format!("/v1/orgs/acme/datasets/default/models/{model_name}/versions/99/evaluation"),
             &viewer_key,
             Body::empty(),
         ))

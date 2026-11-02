@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { login, ORG, tagOrg, USERS } from "./helpers";
+import { DS, login, ORG, tagOrg, USERS } from "./helpers";
 
 /**
  * One entity PER TEST. `fullyParallel` runs these at the same time, so sharing
@@ -33,7 +33,7 @@ test.describe("tags", () => {
   test("a steward names a tag and it lands on the entity", async ({ page }, testInfo) => {
     const org = tagOrg(testInfo.project.name);
     await login(page, USERS.steward);
-    await page.goto(`/${org}/records/${ENTITY.names}`);
+    await page.goto(`/${org}/${DS}/records/${ENTITY.names}`);
     await page.getByTestId("entity-view").waitFor();
 
     const chips = page.getByTestId("tag-chips");
@@ -53,7 +53,7 @@ test.describe("tags", () => {
   test("an applied tag is offered nowhere else and removes cleanly", async ({ page }, testInfo) => {
     const org = tagOrg(testInfo.project.name);
     await login(page, USERS.steward);
-    await page.goto(`/${org}/records/${ENTITY.offers}`);
+    await page.goto(`/${org}/${DS}/records/${ENTITY.offers}`);
     await page.getByTestId("entity-view").waitFor();
 
     const name = `triage-${testInfo.project.name}`;
@@ -82,7 +82,7 @@ test.describe("tags", () => {
     // layout rather than a readonly page. And this spec writes nothing, so it
     // cannot race: the chip it reads is seeded, not created.
     await login(page, USERS.viewer);
-    await page.goto(`/${ORG}/records/${SEEDED_ENTITY}`);
+    await page.goto(`/${ORG}/${DS}/records/${SEEDED_ENTITY}`);
     await page.getByTestId("entity-view").waitFor();
 
     // The chip is readable — seeing how work is labelled is not changing it.

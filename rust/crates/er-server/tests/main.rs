@@ -73,6 +73,7 @@ mod pg_satoken;
 mod pg_scheduler_tick;
 mod pg_schedules;
 mod pg_schema_coverage;
+mod pg_schema_replay;
 mod pg_segments;
 mod pg_serial;
 mod pg_source_ranks;

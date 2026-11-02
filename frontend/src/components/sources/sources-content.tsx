@@ -14,6 +14,7 @@ import { effectiveRole, useSession } from "@/lib/query/hooks";
 import { queryKeys } from "@/lib/query/keys";
 import { useImportFile, useSources } from "@/lib/query/steward";
 import { cn } from "@/lib/utils";
+import { useDatasetSlug } from "@/lib/use-dataset-slug";
 
 export interface ReceiptRow {
   id: string;
@@ -39,9 +40,13 @@ export interface ReceiptRow {
 }
 
 function ReceiptsPanel({ org }: { org: string }) {
+  const ds = useDatasetSlug();
   const receipts = useQuery({
     queryKey: [...queryKeys.org(org), "receipts"],
-    queryFn: () => bffFetch<{ items: ReceiptRow[] }>(`/api/orgs/${org}/imports/receipts?limit=20`),
+    queryFn: () =>
+      bffFetch<{ items: ReceiptRow[] }>(
+        `/api/orgs/${org}/datasets/${ds}/imports/receipts?limit=20`,
+      ),
     refetchInterval: 30_000,
   });
   return (
@@ -121,7 +126,8 @@ function ReceiptsPanel({ org }: { org: string }) {
 const ROLE_RANK = { viewer: 0, steward: 1, admin: 2 } as const;
 
 function SourceCard({ org, name, isSteward }: { org: string; name: string; isSteward: boolean }) {
-  const importFile = useImportFile(org);
+  const ds = useDatasetSlug();
+  const importFile = useImportFile(org, ds);
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -210,7 +216,8 @@ function SourceCard({ org, name, isSteward }: { org: string; name: string; isSte
 }
 
 export function SourcesContent({ org }: { org: string }) {
-  const sources = useSources(org);
+  const ds = useDatasetSlug();
+  const sources = useSources(org, ds);
   const session = useSession();
   const role = effectiveRole(session.data, org);
   const isSteward = role !== null && ROLE_RANK[role] >= ROLE_RANK.steward;
@@ -230,7 +237,7 @@ export function SourcesContent({ org }: { org: string }) {
           )}
           {role === "admin" && (
             <Button size="sm" variant="outline" asChild data-testid="new-source">
-              <Link href={`/${org}/sources/new`}>New source</Link>
+              <Link href={`/${org}/${ds}/sources/new`}>New source</Link>
             </Button>
           )}
         </span>
@@ -261,7 +268,7 @@ export function SourcesContent({ org }: { org: string }) {
       <Card>
         <CardContent className="text-muted-foreground flex flex-wrap items-center gap-2 p-4 text-xs">
           Adding a brand-new source (guided mapping, match preview) is the M4 wizard;
-          <Link href={`/${org}/runs`} className="underline underline-offset-2">
+          <Link href={`/${org}/${ds}/runs`} className="underline underline-offset-2">
             watch imports land in Runs
           </Link>
           meanwhile.

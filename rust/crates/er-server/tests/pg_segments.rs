@@ -102,7 +102,7 @@ async fn a_run_names_a_segment_and_an_unknown_name_is_refused_at_submit() {
         .clone()
         .oneshot(req(
             "GET",
-            "/v1/orgs/acme/segments",
+            "/v1/orgs/acme/datasets/default/segments",
             &viewer_key,
             Body::empty(),
         ))
@@ -123,7 +123,7 @@ async fn a_run_names_a_segment_and_an_unknown_name_is_refused_at_submit() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/config/versions",
+            "/v1/orgs/acme/datasets/default/config/versions",
             &admin_key,
             Body::from(serde_json::json!({ "yaml": scoped }).to_string()),
         ))
@@ -135,7 +135,7 @@ async fn a_run_names_a_segment_and_an_unknown_name_is_refused_at_submit() {
         .clone()
         .oneshot(req(
             "POST",
-            &format!("/v1/orgs/acme/config/versions/{version}/publish"),
+            &format!("/v1/orgs/acme/datasets/default/config/versions/{version}/publish"),
             &admin_key,
             Body::empty(),
         ))
@@ -154,7 +154,7 @@ async fn a_run_names_a_segment_and_an_unknown_name_is_refused_at_submit() {
         .clone()
         .oneshot(req(
             "GET",
-            "/v1/orgs/acme/segments",
+            "/v1/orgs/acme/datasets/default/segments",
             &viewer_key,
             Body::empty(),
         ))
@@ -180,7 +180,7 @@ async fn a_run_names_a_segment_and_an_unknown_name_is_refused_at_submit() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/jobs",
+            "/v1/orgs/acme/datasets/default/jobs",
             &admin_key,
             Body::from(r#"{"kind":"run_all_incremental","segment":"west"}"#),
         ))
@@ -202,7 +202,7 @@ async fn a_run_names_a_segment_and_an_unknown_name_is_refused_at_submit() {
             .clone()
             .oneshot(req(
                 "POST",
-                "/v1/orgs/acme/jobs",
+                "/v1/orgs/acme/datasets/default/jobs",
                 &admin_key,
                 Body::from(
                     serde_json::json!({ "kind": "run_all_incremental", "segment": bad })
@@ -231,7 +231,7 @@ async fn a_run_names_a_segment_and_an_unknown_name_is_refused_at_submit() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/jobs",
+            "/v1/orgs/acme/datasets/default/jobs",
             &admin_key,
             Body::from(r#"{"kind":"run_all_incremental"}"#),
         ))
@@ -250,7 +250,7 @@ async fn a_run_names_a_segment_and_an_unknown_name_is_refused_at_submit() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/jobs",
+            "/v1/orgs/acme/datasets/default/jobs",
             &viewer_key,
             Body::from(r#"{"kind":"run_all_incremental","segment":"west"}"#),
         ))
@@ -323,7 +323,7 @@ async fn a_segment_whose_sql_is_broken_cannot_be_published(dsn: &str) {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/segbad/config/versions",
+            "/v1/orgs/segbad/datasets/default/config/versions",
             &admin_key,
             Body::from(serde_json::json!({ "yaml": bad }).to_string()),
         ))
@@ -340,7 +340,7 @@ async fn a_segment_whose_sql_is_broken_cannot_be_published(dsn: &str) {
         .clone()
         .oneshot(req(
             "POST",
-            &format!("/v1/orgs/segbad/config/versions/{version}/publish"),
+            &format!("/v1/orgs/segbad/datasets/default/config/versions/{version}/publish"),
             &admin_key,
             Body::empty(),
         ))
@@ -363,7 +363,7 @@ async fn a_segment_whose_sql_is_broken_cannot_be_published(dsn: &str) {
         .clone()
         .oneshot(req(
             "GET",
-            "/v1/orgs/segbad/segments",
+            "/v1/orgs/segbad/datasets/default/segments",
             &admin_key,
             Body::empty(),
         ))

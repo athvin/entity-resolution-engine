@@ -42,7 +42,7 @@ async fn create_version(app: &axum::Router, bearer: &str, yaml: &str) -> i64 {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/config/versions",
+            "/v1/orgs/acme/datasets/default/config/versions",
             bearer,
             create_body(yaml),
         ))
@@ -56,7 +56,7 @@ async fn publish(app: &axum::Router, bearer: &str, version: i64) -> axum::respon
     app.clone()
         .oneshot(req(
             "POST",
-            &format!("/v1/orgs/acme/config/versions/{version}/publish"),
+            &format!("/v1/orgs/acme/datasets/default/config/versions/{version}/publish"),
             bearer,
             Body::empty(),
         ))
@@ -142,7 +142,7 @@ async fn config_publish_tiers_and_authz() {
         .clone()
         .oneshot(req(
             "GET",
-            "/v1/orgs/acme/config",
+            "/v1/orgs/acme/datasets/default/config",
             &admin_key,
             Body::empty(),
         ))
@@ -159,7 +159,12 @@ async fn config_publish_tiers_and_authz() {
     let read_schedules = async |bearer: &str| -> Vec<serde_json::Value> {
         let resp = app
             .clone()
-            .oneshot(req("GET", "/v1/orgs/acme/schedules", bearer, Body::empty()))
+            .oneshot(req(
+                "GET",
+                "/v1/orgs/acme/datasets/default/schedules",
+                bearer,
+                Body::empty(),
+            ))
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
@@ -232,7 +237,7 @@ async fn config_publish_tiers_and_authz() {
         .clone()
         .oneshot(req(
             "GET",
-            "/v1/orgs/acme/config",
+            "/v1/orgs/acme/datasets/default/config",
             "op-secret",
             Body::empty(),
         ))

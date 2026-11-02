@@ -56,34 +56,36 @@ below `lg`.
 ### Screens swept by the axe gate
 
 - `/`
-- `/[org]/assistant`
-- `/[org]/campaigns`
-- `/[org]/dashboard`
-- `/[org]/duplicates`
-- `/[org]/insights`
-- `/[org]/labeling`
-- `/[org]/records`
-- `/[org]/reviews`
-- `/[org]/runs`
+- `/[org]/[ds]/assistant`
+- `/[org]/[ds]/campaigns`
+- `/[org]/[ds]/dashboard`
+- `/[org]/[ds]/duplicates`
+- `/[org]/[ds]/insights`
+- `/[org]/[ds]/labeling`
+- `/[org]/[ds]/records`
+- `/[org]/[ds]/reviews`
+- `/[org]/[ds]/runs`
+- `/[org]/[ds]/settings/config`
+- `/[org]/[ds]/settings/models`
+- `/[org]/[ds]/sources`
 - `/[org]/settings/ai`
-- `/[org]/settings/config`
 - `/[org]/settings/members`
-- `/[org]/settings/models`
 - `/[org]/settings/webhooks`
-- `/[org]/sources`
 
 ### Routes NOT in the axe gate
 
 Each of these renders without any accessibility check. See the prose above
 for the three categories that legitimately sit outside the sweep.
 
-- `/[org]/records/[entityId]`
-- `/[org]/runs/[jobId]`
-- `/[org]/runs/schedules`
+- `/[org]`
+- `/[org]/[ds]/records/[entityId]`
+- `/[org]/[ds]/runs/[jobId]`
+- `/[org]/[ds]/runs/schedules`
+- `/[org]/[ds]/settings`
+- `/[org]/[ds]/sources/new`
 - `/[org]/settings`
 - `/[org]/settings/audit`
 - `/[org]/settings/profile`
-- `/[org]/sources/new`
 - `/admin`
 - `/admin/audit`
 - `/admin/queue`

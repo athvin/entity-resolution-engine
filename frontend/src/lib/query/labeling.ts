@@ -117,18 +117,19 @@ export function labelPayloadFor(item: LabelCandidate, verdict: Verdict): LabelIn
  * verdict yields a queue that has genuinely moved on rather than one the client
  * has to filter.
  */
-export function useLabelingQueue(org: string) {
+export function useLabelingQueue(org: string, ds: string) {
   return useQuery({
-    queryKey: queryKeys.labelingQueue(org),
-    queryFn: () => bffFetch<LabelingQueue>(`/api/orgs/${org}/labeling/next?limit=25`),
+    queryKey: queryKeys.labelingQueue(org, ds),
+    queryFn: () =>
+      bffFetch<LabelingQueue>(`/api/orgs/${org}/datasets/${ds}/labeling/next?limit=25`),
   });
 }
 
 /** Every verdict recorded, newest first. */
-export function useLabels(org: string) {
+export function useLabels(org: string, ds: string) {
   return useQuery({
-    queryKey: queryKeys.labels(org),
-    queryFn: () => bffFetch<PairLabel[]>(`/api/orgs/${org}/labels?limit=50`),
+    queryKey: queryKeys.labels(org, ds),
+    queryFn: () => bffFetch<PairLabel[]>(`/api/orgs/${org}/datasets/${ds}/labels?limit=50`),
   });
 }
 
@@ -139,18 +140,18 @@ export function useLabels(org: string) {
  * already-labelled pairs, so the queue's contents change as a result of this
  * call and a stale one would offer the same pair again.
  */
-export function useRecordLabel(org: string) {
+export function useRecordLabel(org: string, ds: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (body: LabelInput) =>
-      bffFetch<PairLabel>(`/api/orgs/${org}/labels`, {
+      bffFetch<PairLabel>(`/api/orgs/${org}/datasets/${ds}/labels`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
       }),
     onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.labelingQueue(org) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.labels(org) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.labelingQueue(org, ds) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.labels(org, ds) });
     },
   });
 }

@@ -51,7 +51,7 @@ export default function AcceptInvitePage({ params }: { params: Promise<{ token: 
           display_name: form.get("display_name") ?? undefined,
         }),
       });
-      router.push(`/${result.org}/dashboard`);
+      router.push(`/${result.org}`);
       router.refresh();
     } catch (cause) {
       setError(

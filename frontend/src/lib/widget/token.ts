@@ -11,7 +11,7 @@ import { env } from "@/lib/env";
  * record X". So the token in the URL is the entire credential, and every
  * decision here follows from that.
  *
- * **It is scoped to one record, not to an org.** A token that said "this org"
+ * **It is scoped to one record in one dataset, not to an org.** A token that said "this org"
  * would, if it leaked from one embed, read the whole corpus. Scoping it to the
  * record it was minted for means a leaked token exposes the page the holder
  * could already see.
@@ -25,6 +25,7 @@ import { env } from "@/lib/env";
 
 export interface WidgetClaims {
   org: string;
+  dataset: string;
   recordKey: string;
   /** Unix seconds. */
   exp: number;
@@ -55,7 +56,7 @@ function body(claims: WidgetClaims): string {
   // than by `JSON.stringify` over a built object, so the signed bytes cannot
   // change because a key was added somewhere upstream.
   return Buffer.from(
-    JSON.stringify({ o: claims.org, r: claims.recordKey, e: claims.exp }),
+    JSON.stringify({ o: claims.org, d: claims.dataset, r: claims.recordKey, e: claims.exp }),
     "utf8",
   ).toString("base64url");
 }
@@ -67,11 +68,12 @@ function sign(payload: string): string {
 /** Mint a token for one record. */
 export function mintWidgetToken(
   org: string,
+  dataset: string,
   recordKey: string,
   ttlSeconds: number = DEFAULT_TTL_SECONDS,
 ): string {
   const exp = Math.floor(Date.now() / 1000) + Math.min(ttlSeconds, MAX_TTL_SECONDS);
-  const payload = body({ org, recordKey, exp });
+  const payload = body({ org, dataset, recordKey, exp });
   return `${payload}.${sign(payload)}`;
 }
 
@@ -115,13 +117,19 @@ export function verifyWidgetToken(
   if (typeof parsed !== "object" || parsed === null) return { ok: false, failure: "malformed" };
   const record = parsed as Record<string, unknown>;
   const org = record["o"];
+  const dataset = record["d"];
   const recordKey = record["r"];
   const exp = record["e"];
-  if (typeof org !== "string" || typeof recordKey !== "string" || typeof exp !== "number") {
+  if (
+    typeof org !== "string" ||
+    typeof dataset !== "string" ||
+    typeof recordKey !== "string" ||
+    typeof exp !== "number"
+  ) {
     return { ok: false, failure: "malformed" };
   }
-  if (org === "" || recordKey === "") return { ok: false, failure: "malformed" };
+  if (org === "" || dataset === "" || recordKey === "") return { ok: false, failure: "malformed" };
 
   if (exp * 1000 <= Date.now()) return { ok: false, failure: "expired" };
-  return { ok: true, claims: { org, recordKey, exp } };
+  return { ok: true, claims: { org, dataset, recordKey, exp } };
 }
