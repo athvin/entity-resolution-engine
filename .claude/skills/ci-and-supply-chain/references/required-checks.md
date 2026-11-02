@@ -99,7 +99,7 @@ job instead — `terraform plan` is the worked example.
 | `test-gate` | test | 5 | `${{ !cancelled() && needs.detect.outputs.code == 'true' }}` |
 | `security` | cargo-deny (advisories + licenses + bans) | 10 | `needs.detect.outputs.code == 'true'` |
 | `lake-e2e` | DuckLake e2e shard (${{ matrix.partition }}) | 45 | `needs.detect.outputs.code == 'true'` |
-| `ducklake-e2e` | DuckLake e2e (server + extensions) | 45 | `needs.detect.outputs.code == 'true'` |
+| `ducklake-e2e` | DuckLake e2e server (${{ matrix.slice }}) | 45 | `needs.detect.outputs.code == 'true'` |
 | `ducklake-gate` | DuckLake + extensions e2e | 5 | `${{ !cancelled() && needs.detect.outputs.code == 'true' }}` |
 | `bench-compile` | benchmarks (compile) | 30 | `github.event_name != 'pull_request'` |
 | `scale-tests` | scale golden (50k) | 30 | `github.event_name != 'pull_request'` |
