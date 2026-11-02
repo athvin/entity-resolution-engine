@@ -1316,8 +1316,13 @@ jobs:
       # That measurement is also why this job SURVIVED the sccache move to S3.
       # sccache no longer writes here at all, so its 3,341 MiB line is now
       # always zero and its budget is vestigial — kept only so a rollback to the
-      # GHA backend does not silently uncap it. buildkit is the live reason, and
-      # it is the producer that was doing the damage all along.
+      # GHA backend does not silently uncap it. buildkit — the producer that
+      # was doing the damage all along — moved to ECR too (er-buildcache;
+      # images.yml `cache-to: type=registry`), so BOTH budgets are now
+      # rollback insurance rather than live caps. images.yml keeps a
+      # transitional `type=gha` cache-FROM, which only reads; once that line
+      # is dropped this whole job's remaining value is the enumeration it
+      # prints, and retiring it becomes a fair question.
       #
       # What is deliberately NOT capped: `v1-rust*` (two ~364 MiB entries,
       # the thing all of this protects), `pnpm-store`, `next-build` and

@@ -128,8 +128,18 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ env.ECR }}/er-api:${{ steps.tag.outputs.sha }}
-          cache-from: "type=gha,scope=er-api"
-          cache-to: "type=gha,mode=max,scope=er-api"
+          # Layer cache in ECR (er-buildcache, terraform: envs/core/registry.tf),
+          # not the Actions cache: the gha backend's ~5 GB mode=max cache was the
+          # largest producer in the shared 10 GB budget — the thing rust.yml's
+          # cache-prune exists to cap. `image-manifest=true,oci-mediatypes=true`
+          # because ECR rejects buildkit's default cache-manifest media type.
+          # The gha line stays as a transitional SECOND cache-from only (first
+          # registry run starts cold otherwise); cache-to no longer feeds the
+          # Actions cache at all, so the budget pressure ends here.
+          cache-from: |
+            type=registry,ref=${{ env.ECR }}/er-buildcache:er-api
+            type=gha,scope=er-api
+          cache-to: "type=registry,ref=${{ env.ECR }}/er-buildcache:er-api,mode=max,image-manifest=true,oci-mediatypes=true"
 
   er-web:
     needs: detect
@@ -164,8 +174,12 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ env.ECR }}/er-web:${{ steps.tag.outputs.sha }}
-          cache-from: "type=gha,scope=er-web"
-          cache-to: "type=gha,mode=max,scope=er-web"
+          # Same ECR-backed layer cache as er-api above — see that step's
+          # comment for the full reasoning and the transitional gha line.
+          cache-from: |
+            type=registry,ref=${{ env.ECR }}/er-buildcache:er-web
+            type=gha,scope=er-web
+          cache-to: "type=registry,ref=${{ env.ECR }}/er-buildcache:er-web,mode=max,image-manifest=true,oci-mediatypes=true"
 
   # §14.2's Helm half: "Dev platform releases apply from CI on `main`". Lives
   # here rather than in its own workflow so ordering is structural — a deploy
