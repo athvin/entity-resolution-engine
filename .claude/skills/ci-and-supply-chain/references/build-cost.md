@@ -21,6 +21,7 @@ against it.
 - Shipped: sccache on S3 (2026-10-29)
 - Shipped: the e2e tier split into parallel legs (2026-11-02)
 - Measured: the sharded tiers, same day (2026-11-02)
+- Measured: the second pass, and the workers=2 verdict (2026-11-02, later)
 
 ## The measured baseline (2026-10-22)
 
@@ -687,3 +688,41 @@ Two side-findings recorded while measuring:
   the server legs ~13G (12G target) — margins without reclaim would be ~7G
   and ~2G against the errno-28 class that motivated the step (#207). The
   1.9m/leg is the price of 4-vCPU runners with 15G free.
+
+## Measured: the second pass, and the workers=2 verdict (2026-11-02, later)
+
+Three more PRs the same afternoon, each from the first pass's numbers: #397
+(the workers=2 experiment gets its own dispatchable workflow,
+`frontend-experiments.yml` — a dispatch of frontend.yml costs the whole ~40
+runner-minute tier for one ~10m data point), #398 (pg suite split at its
+measured time-midpoint into `pg a-l`/`pg m-z` slices; lake partitions 3→4;
+the extensions step moved to the `test` tier's rest leg where dedupe-core's
+binary is already built — it had been paying a 2m15s tree build for 0.5s of
+tests).
+
+After #398 (run 41498668987, warm): every rust leg lands between 6.9m and
+9.8m — lake shards 8.7/9.2/9.2/7.3, server pg a-l 6.9 / pg m-z 7.7 / rest
+8.1, test shards 9.1/9.8. **The rust PR wall is ~9.8m**; with the frontend
+tier at ~10m the PR wall clock is **~10m, from 32–35m at the start of the
+day**. Slice completeness was verified from the logs again: pg 23+26 passed
+with complementary filtered-out counts, extensions 5 passed in 0.49s
+(zero "skipping" lines) in its new home.
+
+One cargo lesson paid for en route: `cargo test` accepts at most ONE
+positional TESTNAME (`error: unexpected argument 'pg_b' found`); multiple
+OR'd filters are a libtest feature and must be passed after `--`.
+
+**The workers=2 flip is NOT taken, and this is the evidence.** Ten parallel
+dispatches of the experiment: **9 green, 1 failed**. The failure is the
+known-flaky `grow.spec.ts:421` "streams an answer grounded in a cited tool
+call" on mobile-safari — the same test that was the single flaky in the
+1-worker baseline run and in #389's shard run — exhausting both retries with
+`locator.click: Test timeout of 30000ms exceeded — waiting for
+getByTestId('assistant-send')` (the button never becomes enabled/stable).
+The mock's Anthropic handler is stateless per-request, so this is not an
+obvious cross-worker state bleed, but the enable-path was not diagnosed to
+the root. The protocol demanded ~10 consecutive greens; 9/10 with a known
+flake that doubles as a PR-gate flake risk does not meet it. The flip is
+gated on fixing that test's flake (it already flakes at 1 worker); the
+nightly experiment keeps accumulating evidence meanwhile. When it flips,
+every playwright shard roughly halves (~5m → ~3m).
