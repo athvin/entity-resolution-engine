@@ -40,6 +40,7 @@ import { ConfigAiPanel } from "./config-ai-panel";
 import { ComparisonEditor } from "./comparison-editor";
 import { SurvivorshipEditor } from "./survivorship-editor";
 import { ThresholdEditor } from "./threshold-editor";
+import { useDatasetSlug } from "@/lib/use-dataset-slug";
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
   return (
@@ -50,10 +51,11 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 }
 
 function VersionHistory({ org }: { org: string }) {
-  const versions = useConfigVersions(org);
+  const ds = useDatasetSlug();
+  const versions = useConfigVersions(org, ds);
   const [compare, setCompare] = useState<[number, number] | null>(null);
-  const before = useConfigVersion(org, compare ? compare[0] : null);
-  const after = useConfigVersion(org, compare ? compare[1] : null);
+  const before = useConfigVersion(org, ds, compare ? compare[0] : null);
+  const after = useConfigVersion(org, ds, compare ? compare[1] : null);
 
   return (
     <Card data-testid="version-history">
@@ -155,11 +157,12 @@ function VersionHistory({ org }: { org: string }) {
 }
 
 export function ConfigStudio({ org }: { org: string }) {
-  const active = useActiveConfig(org);
-  const scores = useScoreSample(org);
+  const ds = useDatasetSlug();
+  const active = useActiveConfig(org, ds);
+  const scores = useScoreSample(org, ds);
   const session = useSession();
-  const createDraft = useCreateDraft(org);
-  const publish = usePublish(org);
+  const createDraft = useCreateDraft(org, ds);
+  const publish = usePublish(org, ds);
   const isAdmin = effectiveRole(session.data, org) === "admin";
 
   const [thresholds, setThresholds] = useState<Thresholds | null>(null);
@@ -170,13 +173,13 @@ export function ConfigStudio({ org }: { org: string }) {
   const [publishError, setPublishError] = useState<string | null>(null);
   // V7's panel state. Kept here rather than inside the panel so the panel stays
   // props-only and its render branches are testable without a query client.
-  const draftFromProse = useDraftFromProse(org);
-  const explainRule = useExplainRule(org);
-  const starterConfig = useStarterConfig(org);
+  const draftFromProse = useDraftFromProse(org, ds);
+  const explainRule = useExplainRule(org, ds);
+  const starterConfig = useStarterConfig(org, ds);
   // O9. The candidate list comes from the SESSION's memberships, so it offers
   // only orgs this person administers; the server checks both sides anyway.
-  const compareConfigs = useCompareConfigs(org);
-  const importConfig = useImportConfig(org);
+  const compareConfigs = useCompareConfigs(org, ds);
+  const importConfig = useImportConfig(org, ds);
   const candidates = promotableOrgs(session.data?.memberships ?? [], org);
   const [promoteTarget, setPromoteTarget] = useState("");
   const [promoteDiff, setPromoteDiff] = useState<DiffLine[] | null>(null);
@@ -301,7 +304,7 @@ export function ConfigStudio({ org }: { org: string }) {
             <Rocket className="text-foreground size-4" />v{published.version} published (tier{" "}
             {published.tier ?? "—"}) — {published.jobs.length} job
             {published.jobs.length === 1 ? "" : "s"} enqueued.
-            <Link href={`/${org}/runs`} className="underline underline-offset-2">
+            <Link href={`/${org}/${ds}/runs`} className="underline underline-offset-2">
               watch in Runs
             </Link>
           </CardContent>

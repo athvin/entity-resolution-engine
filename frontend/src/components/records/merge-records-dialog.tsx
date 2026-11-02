@@ -17,6 +17,7 @@ import {
   type GoldenRecord,
 } from "@/lib/query/hooks";
 import { cn } from "@/lib/utils";
+import { useDatasetSlug } from "@/lib/use-dataset-slug";
 
 /**
  * Ad-hoc "merge these two entities" (design §5.3): search a target, compare
@@ -38,11 +39,12 @@ export function MergeRecordsDialog({
   onClose: () => void;
   onDone: (message: string) => void;
 }) {
+  const ds = useDatasetSlug();
   const [q, setQ] = useState("");
   const [debounced, setDebounced] = useState("");
   const [targetId, setTargetId] = useState<string | null>(null);
   const headingId = useId();
-  const assertion = useAddAssertion(org);
+  const assertion = useAddAssertion(org, ds);
 
   useEffect(() => {
     const handle = setTimeout(() => {
@@ -61,9 +63,9 @@ export function MergeRecordsDialog({
     }
   }, [open]);
 
-  const entityType = useOrgEntityType(org);
-  const search = useGoldenRecords(org, debounced);
-  const target = useEntityDetail(org, targetId ?? "");
+  const entityType = useOrgEntityType(org, ds);
+  const search = useGoldenRecords(org, ds, debounced);
+  const target = useEntityDetail(org, ds, targetId ?? "");
   const candidates = useMemo(
     () =>
       (search.data?.pages ?? [])

@@ -9,6 +9,6 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   // The console does not exist for non-operators.
   if (!identity.user.isSuperAdmin) notFound();
   // While impersonating, the super admin IS the tenant; exit first.
-  if (identity.impersonating) redirect(`/${identity.impersonating.org}/dashboard`);
+  if (identity.impersonating) redirect(`/${identity.impersonating.org}`);
   return <AdminShell user={identity.user}>{children}</AdminShell>;
 }

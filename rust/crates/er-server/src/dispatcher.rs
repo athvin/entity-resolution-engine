@@ -247,8 +247,10 @@ pub async fn s3_poll_tick(
             // have refused. This is the check whose refusal needed a reason
             // rather than a status code, because this log line is its only
             // reader.
-            let (_, _, drop_root) =
-                match crate::delivery_preconditions(client, &org_name, source).await {
+            // The poller is org-driven; its deliveries land in the org's one
+            // converged dataset, by the name the sweep guarantees.
+            let (_, _, _, drop_root) =
+                match crate::delivery_preconditions(client, &org_name, "default", source).await {
                     Ok(t) => t,
                     Err(refusal) => {
                         eprintln!(
@@ -295,6 +297,7 @@ pub async fn s3_poll_tick(
                     org_id: &org_id,
                     source,
                     delivery_id: &delivery_id,
+                    dataset_id: org_dataset.as_deref(),
                     temp_path: &part.to_string_lossy(),
                     bytes,
                     action: "import.s3",
@@ -716,6 +719,10 @@ async fn dispatch_claimed(
         let models: Vec<ActiveModel> = match pg::active_models(client, &job.org_id).await {
             Ok(rows) => rows
                 .into_iter()
+                // The dataset's own models only: each dataset trains and scores
+                // against its own corpus. Pre-dataset rows were backfilled, so
+                // for a single-dataset org this filters nothing out.
+                .filter(|m| m.dataset_id.as_deref() == job.dataset_id.as_deref())
                 .map(|m| ActiveModel {
                     model_json: m.model_json,
                     model_version_label: m.model_version_label,
@@ -1078,6 +1085,16 @@ async fn emit_entity_aggregates(
             return;
         }
     };
+    // The detail route lives under the job's dataset; a run without one (an
+    // org-level job cannot produce entity events, but degrade rather than
+    // skip) falls back to the sweep's universal name.
+    let ds_name = match job.dataset_id.as_deref() {
+        Some(id) => match pg::get_dataset_by_id(client, id).await {
+            Ok(Some(d)) => d.name,
+            _ => "default".to_string(),
+        },
+        None => "default".to_string(),
+    };
     for (kind, n) in counts {
         let Some(event) = entity_event_name(kind) else {
             eprintln!(
@@ -1096,7 +1113,7 @@ async fn emit_entity_aggregates(
             "event_type": kind,
             "count": n,
             "detail_path": format!(
-                "/v1/orgs/{org_name}/runs/{}/entity-events?event_type={kind}",
+                "/v1/orgs/{org_name}/datasets/{ds_name}/runs/{}/entity-events?event_type={kind}",
                 job.id
             ),
         });
@@ -1959,6 +1976,20 @@ async fn provision_tenant(
     let activate = pg::set_org_state(client, &org.name, "active", "provisioning")
         .await
         .map_err(|e| format!("promote {} to active: {e}", org.name));
+    // The default dataset was converged at org creation with the ORG's state
+    // of that moment — `provisioning` — and nothing else ever moves it: the
+    // boot sweep is DO-NOTHING on existing rows. Flip it with the org, under
+    // the same expected-state guard, or every auto-provisioned tenant keeps a
+    // dataset the guard rightly renders as still being set up.
+    if activate.is_ok()
+        && let Err(e) =
+            pg::set_dataset_state(client, &org.id, "default", "active", "provisioning").await
+    {
+        eprintln!(
+            "job {job_id}: provisioned {} but its default dataset stayed provisioning: {e}",
+            org.name
+        );
+    }
     match &activate {
         Ok(_) => {
             if let Some(rr) = report.as_mut() {

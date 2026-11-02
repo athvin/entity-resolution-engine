@@ -1,6 +1,6 @@
 import { expect, test, type APIResponse } from "@playwright/test";
 
-import { login, ORG, USERS } from "./helpers";
+import { DS, login, ORG, USERS } from "./helpers";
 
 /**
  * The response security headers from next.config.ts.
@@ -35,9 +35,9 @@ test("every enforced security header is present on a static page", async ({ page
 
 test("every enforced security header is present on a dynamic page", async ({ page }) => {
   await login(page, USERS.admin);
-  const response = await page.goto(`/${ORG}/dashboard`);
+  const response = await page.goto(`/${ORG}/${DS}/dashboard`);
   if (!response) throw new Error("no response for the dashboard");
-  expectEnforced(response.headers(), `/${ORG}/dashboard (dynamic)`);
+  expectEnforced(response.headers(), `/${ORG}/${DS}/dashboard (dynamic)`);
 });
 
 test("every enforced security header is present on a BFF route", async ({ page }) => {

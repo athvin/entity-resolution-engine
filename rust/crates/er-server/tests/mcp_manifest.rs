@@ -481,11 +481,11 @@ fn the_derivation_sees_real_handlers() {
     // `by_org`, not nothing: see `tool_name`. `/v1/orgs` and `/v1/orgs/{org}`
     // are different tools and must not share a name.
     let jobs = by_name
-        .get("get_orgs_by_org_jobs")
-        .expect("the org jobs list is a routed GET with a Viewer+ doc comment");
+        .get("get_orgs_by_org_datasets_by_ds_jobs")
+        .expect("the dataset jobs list is a routed GET with a Viewer+ doc comment");
     assert_eq!(jobs.method, "GET");
     assert_eq!(jobs.role, "viewer");
-    assert_eq!(jobs.params, vec!["org"]);
+    assert_eq!(jobs.params, vec!["org", "ds"]);
     assert!(!jobs.needs_body);
     assert!(
         !jobs.summary.is_empty() && !jobs.summary.contains('`'),

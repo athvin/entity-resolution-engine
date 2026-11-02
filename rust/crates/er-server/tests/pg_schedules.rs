@@ -46,7 +46,7 @@ async fn schedules_crud_and_role_boundary() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/schedules",
+            "/v1/orgs/acme/datasets/default/schedules",
             "op-secret",
             Body::from(r#"{"kind":"run_all_full","cron":"0 3 * * *"}"#),
         ))
@@ -66,7 +66,7 @@ async fn schedules_crud_and_role_boundary() {
             .clone()
             .oneshot(req(
                 "POST",
-                "/v1/orgs/acme/schedules",
+                "/v1/orgs/acme/datasets/default/schedules",
                 "op-secret",
                 Body::from(body),
             ))
@@ -80,7 +80,7 @@ async fn schedules_crud_and_role_boundary() {
         .clone()
         .oneshot(req(
             "GET",
-            "/v1/orgs/acme/schedules",
+            "/v1/orgs/acme/datasets/default/schedules",
             "op-secret",
             Body::empty(),
         ))
@@ -98,7 +98,7 @@ async fn schedules_crud_and_role_boundary() {
         .clone()
         .oneshot(req(
             "PATCH",
-            &format!("/v1/orgs/acme/schedules/{schedule_id}"),
+            &format!("/v1/orgs/acme/datasets/default/schedules/{schedule_id}"),
             "op-secret",
             Body::from(r#"{"enabled":false}"#),
         ))
@@ -112,7 +112,7 @@ async fn schedules_crud_and_role_boundary() {
         .clone()
         .oneshot(req(
             "PATCH",
-            "/v1/orgs/acme/schedules/does-not-exist",
+            "/v1/orgs/acme/datasets/default/schedules/does-not-exist",
             "op-secret",
             Body::from(r#"{"enabled":true}"#),
         ))
@@ -125,7 +125,7 @@ async fn schedules_crud_and_role_boundary() {
         .clone()
         .oneshot(req(
             "DELETE",
-            &format!("/v1/orgs/acme/schedules/{schedule_id}"),
+            &format!("/v1/orgs/acme/datasets/default/schedules/{schedule_id}"),
             "op-secret",
             Body::empty(),
         ))
@@ -137,7 +137,7 @@ async fn schedules_crud_and_role_boundary() {
         .clone()
         .oneshot(req(
             "DELETE",
-            &format!("/v1/orgs/acme/schedules/{schedule_id}"),
+            &format!("/v1/orgs/acme/datasets/default/schedules/{schedule_id}"),
             "op-secret",
             Body::empty(),
         ))
@@ -161,7 +161,7 @@ async fn schedules_crud_and_role_boundary() {
         .clone()
         .oneshot(req(
             "GET",
-            "/v1/orgs/acme/schedules",
+            "/v1/orgs/acme/datasets/default/schedules",
             &viewer_key,
             Body::empty(),
         ))
@@ -171,7 +171,7 @@ async fn schedules_crud_and_role_boundary() {
     let resp = app
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/schedules",
+            "/v1/orgs/acme/datasets/default/schedules",
             &viewer_key,
             Body::from(r#"{"kind":"run_all_full","cron":"0 3 * * *"}"#),
         ))

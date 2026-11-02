@@ -18,6 +18,7 @@ import {
   type RunRow,
 } from "@/lib/query/hooks";
 import { useSubmitJob } from "@/lib/query/steward";
+import { useDatasetSlug } from "@/lib/use-dataset-slug";
 
 const ACTIVE_STATES = new Set(["queued", "dispatching", "running", "retrying", "canceling"]);
 
@@ -25,7 +26,8 @@ const ACTIVE_STATES = new Set(["queued", "dispatching", "running", "retrying", "
  * of a surprise): deliver files → train → resolve. Renders only while the
  * corpus is empty, and reads progress from real job history. */
 function OnboardingChecklist({ org, jobs }: { org: string; jobs: JobRow[] }) {
-  const submit = useSubmitJob(org);
+  const ds = useDatasetSlug();
+  const submit = useSubmitJob(org, ds);
   const delivered = jobs.some((job) => job.kind === "run_all_incremental");
   const trained = jobs.some((job) => job.kind === "train" && job.state === "succeeded");
   const preconditionFailures = jobs.filter((job) => job.error_class === "precondition").length;
@@ -37,7 +39,7 @@ function OnboardingChecklist({ org, jobs }: { org: string; jobs: JobRow[] }) {
       body: (
         <>
           Drop a CSV on each source in{" "}
-          <Link href={`/${org}/sources`} className="underline underline-offset-2">
+          <Link href={`/${org}/${ds}/sources`} className="underline underline-offset-2">
             Sources
           </Link>
           . First deliveries land, then matching waits for a model — that&apos;s the plan, not a
@@ -257,10 +259,11 @@ function nudges(reviewCount: number | undefined, jobs: JobRow[] | undefined): st
 }
 
 export function DashboardContent({ org }: { org: string }) {
-  const metrics = useMetrics(org);
-  const runs = useRuns(org);
-  const jobs = useJobs(org);
-  const dq = useDataQuality(org);
+  const ds = useDatasetSlug();
+  const metrics = useMetrics(org, ds);
+  const runs = useRuns(org, ds);
+  const jobs = useJobs(org, ds);
+  const dq = useDataQuality(org, ds);
   const reviewCount = metrics.data?.open_reviews;
 
   if (metrics.error instanceof BffRequestError && metrics.error.error.code === "lake_unavailable") {

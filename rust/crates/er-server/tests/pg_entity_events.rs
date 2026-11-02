@@ -121,6 +121,9 @@ async fn entity_events_are_aggregated_per_kind_and_expand_through_the_detail_end
     )
     .await
     .unwrap();
+    // Below-HTTP upserts do not converge; give both orgs their default
+    // dataset the way boot would.
+    pg::converge_default_datasets(&mut client).await.unwrap();
     let org_id = pg::org_id_by_name(&client, "acme")
         .await
         .unwrap()
@@ -182,7 +185,7 @@ async fn entity_events_are_aggregated_per_kind_and_expand_through_the_detail_end
     // Checked before the lake phases so it is asserted even where DuckDB's
     // extensions are unavailable: an authorization bug must not be able to hide
     // behind a skipped tier.
-    let detail = "/v1/orgs/acme/runs/01ANYRUN0000000000000000000/entity-events";
+    let detail = "/v1/orgs/acme/datasets/default/runs/01ANYRUN0000000000000000000/entity-events";
     let resp = api
         .clone()
         .oneshot(
@@ -300,7 +303,7 @@ async fn entity_events_are_aggregated_per_kind_and_expand_through_the_detail_end
     assert_eq!(
         created.payload["detail_path"],
         serde_json::Value::String(format!(
-            "/v1/orgs/acme/runs/{}/entity-events?event_type=created",
+            "/v1/orgs/acme/datasets/default/runs/{}/entity-events?event_type=created",
             queued.id
         )),
         "the aggregate has to say where the rows are, already narrowed to its kind"
@@ -457,7 +460,11 @@ async fn entity_events_are_aggregated_per_kind_and_expand_through_the_detail_end
     // ...and the unfiltered page over the same run is strictly larger, which is
     // what makes the two assertions above a test of the filter rather than of
     // the run having produced one kind.
-    let whole = page_for(&format!("/v1/orgs/acme/runs/{}/entity-events", second.id)).await;
+    let whole = page_for(&format!(
+        "/v1/orgs/acme/datasets/default/runs/{}/entity-events",
+        second.id
+    ))
+    .await;
     assert_eq!(
         whole["items"].as_array().unwrap().len(),
         2,
@@ -466,7 +473,7 @@ async fn entity_events_are_aggregated_per_kind_and_expand_through_the_detail_end
 
     // The first run's page: every entity it created, in one page.
     let page = page_for(&format!(
-        "/v1/orgs/acme/runs/{}/entity-events?event_type=created",
+        "/v1/orgs/acme/datasets/default/runs/{}/entity-events?event_type=created",
         queued.id
     ))
     .await;
@@ -487,7 +494,10 @@ async fn entity_events_are_aggregated_per_kind_and_expand_through_the_detail_end
         .clone()
         .oneshot(req(
             "GET",
-            &format!("/v1/orgs/acme/runs/{}/entity-events?limit=200", queued.id),
+            &format!(
+                "/v1/orgs/acme/datasets/default/runs/{}/entity-events?limit=200",
+                queued.id
+            ),
             &viewer_key,
             Body::empty(),
         ))
@@ -509,7 +519,10 @@ async fn entity_events_are_aggregated_per_kind_and_expand_through_the_detail_end
         .clone()
         .oneshot(req(
             "GET",
-            &format!("/v1/orgs/acme/runs/{}/entity-events?limit=3", queued.id),
+            &format!(
+                "/v1/orgs/acme/datasets/default/runs/{}/entity-events?limit=3",
+                queued.id
+            ),
             &viewer_key,
             Body::empty(),
         ))
@@ -526,7 +539,7 @@ async fn entity_events_are_aggregated_per_kind_and_expand_through_the_detail_end
         .oneshot(req(
             "GET",
             &format!(
-                "/v1/orgs/acme/runs/{}/entity-events?limit=3&cursor={cursor}",
+                "/v1/orgs/acme/datasets/default/runs/{}/entity-events?limit=3&cursor={cursor}",
                 queued.id
             ),
             &viewer_key,
@@ -556,7 +569,7 @@ async fn entity_events_are_aggregated_per_kind_and_expand_through_the_detail_end
         .oneshot(req(
             "GET",
             &format!(
-                "/v1/orgs/acme/runs/{}/entity-events?cursor=not-a-cursor",
+                "/v1/orgs/acme/datasets/default/runs/{}/entity-events?cursor=not-a-cursor",
                 queued.id
             ),
             &viewer_key,
@@ -572,7 +585,7 @@ async fn entity_events_are_aggregated_per_kind_and_expand_through_the_detail_end
         .clone()
         .oneshot(req(
             "GET",
-            "/v1/orgs/acme/runs/01NOSUCHRUN00000000000000/entity-events",
+            "/v1/orgs/acme/datasets/default/runs/01NOSUCHRUN00000000000000/entity-events",
             &viewer_key,
             Body::empty(),
         ))

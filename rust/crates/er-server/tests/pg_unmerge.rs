@@ -141,7 +141,7 @@ async fn first_duplicate_group(app: &axum::Router, org: &str) -> Vec<String> {
         .clone()
         .oneshot(op(
             "GET",
-            &format!("/v1/orgs/{org}/duplicates"),
+            &format!("/v1/orgs/{org}/datasets/default/duplicates"),
             Body::empty(),
         ))
         .await
@@ -198,7 +198,7 @@ async fn unmerge_splits_and_respects_contradictions() {
         .clone()
         .oneshot(op(
             "POST",
-            &format!("/v1/orgs/split/golden-records/{entity_id}/unmerge"),
+            &format!("/v1/orgs/split/datasets/default/golden-records/{entity_id}/unmerge"),
             Body::from(serde_json::json!({ "records": [peeled] }).to_string()),
         ))
         .await
@@ -253,7 +253,7 @@ async fn unmerge_splits_and_respects_contradictions() {
         .clone()
         .oneshot(op(
             "POST",
-            "/v1/orgs/conflict/assertions",
+            "/v1/orgs/conflict/datasets/default/assertions",
             Body::from(serde_json::json!({ "kind": "always", "a": keep, "b": peel }).to_string()),
         ))
         .await
@@ -280,7 +280,7 @@ async fn unmerge_splits_and_respects_contradictions() {
         .clone()
         .oneshot(op(
             "POST",
-            &format!("/v1/orgs/conflict/golden-records/{entity_id}/unmerge"),
+            &format!("/v1/orgs/conflict/datasets/default/golden-records/{entity_id}/unmerge"),
             Body::from(serde_json::json!({ "records": [peel] }).to_string()),
         ))
         .await
@@ -301,7 +301,7 @@ async fn unmerge_splits_and_respects_contradictions() {
         .clone()
         .oneshot(op(
             "POST",
-            "/v1/orgs/conflict/assertions",
+            "/v1/orgs/conflict/datasets/default/assertions",
             Body::from(serde_json::json!({ "kind": "never", "a": keep, "b": peel }).to_string()),
         ))
         .await
@@ -329,7 +329,7 @@ async fn unmerge_splits_and_respects_contradictions() {
         .clone()
         .oneshot(op(
             "GET",
-            "/v1/orgs/conflict/assertions:contradictions",
+            "/v1/orgs/conflict/datasets/default/assertions:contradictions",
             Body::empty(),
         ))
         .await

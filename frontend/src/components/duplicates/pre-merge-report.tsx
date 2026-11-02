@@ -14,6 +14,7 @@ import {
   type MasterElectionPolicy,
 } from "@/lib/domain/master-election";
 
+import { useDatasetSlug } from "@/lib/use-dataset-slug";
 /**
  * The pre-merge report: what would merge, and which record survives as master.
  *
@@ -28,6 +29,7 @@ import {
  * policy does not live in the config studio.
  */
 export function PreMergeReport({ org }: { org: string }) {
+  const ds = useDatasetSlug();
   const [policy, setPolicy] = useState<MasterElectionPolicy>(DEFAULT_MASTER_ELECTION_POLICY);
   const [pending, setPending] = useState(false);
   const toast = useToast();
@@ -35,9 +37,12 @@ export function PreMergeReport({ org }: { org: string }) {
   async function download() {
     setPending(true);
     try {
-      const response = await fetch(`/api/orgs/${org}/merge-plans?policy=${policy}&format=csv`, {
-        cache: "no-store",
-      });
+      const response = await fetch(
+        `/api/orgs/${org}/datasets/${ds}/merge-plans?policy=${policy}&format=csv`,
+        {
+          cache: "no-store",
+        },
+      );
       if (!response.ok) throw new Error(`export failed (${String(response.status)})`);
       const blob = await response.blob();
       const url = URL.createObjectURL(blob);

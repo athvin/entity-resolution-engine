@@ -37,12 +37,13 @@ interface SourceRecord {
 export async function adjudicateReview(
   access: EffectiveOrgAccess,
   org: string,
+  ds: string,
   reviewId: string,
   ai: AiResolved,
 ): Promise<StoredRecommendation> {
   const review = await forward<ReviewDetail>(
     access,
-    `/v1/orgs/${org}/reviews/${encodeURIComponent(reviewId)}`,
+    `/v1/orgs/${org}/datasets/${ds}/reviews/${encodeURIComponent(reviewId)}`,
   );
   if (review.rec_a_key === null || review.rec_b_key === null) {
     // An entity-level escalation is not a pair and there is nothing to compare.
@@ -60,9 +61,13 @@ export async function adjudicateReview(
   const searchParams = new URLSearchParams();
   searchParams.append("key", review.rec_a_key);
   searchParams.append("key", review.rec_b_key);
-  const page = await forward<{ items: SourceRecord[] }>(access, `/v1/orgs/${org}/records`, {
-    searchParams,
-  });
+  const page = await forward<{ items: SourceRecord[] }>(
+    access,
+    `/v1/orgs/${org}/datasets/${ds}/records`,
+    {
+      searchParams,
+    },
+  );
   const byKey = new Map(page.items.map((item) => [item.record_key, item.attributes]));
   const a = byKey.get(review.rec_a_key);
   const b = byKey.get(review.rec_b_key);
@@ -111,9 +116,7 @@ export async function adjudicateReview(
     throw new BffFailure(502, "internal", "the model did not return a usable recommendation");
   }
 
-  // "default": the sweep's name for every org's one dataset until the
-  // dataset-scoped routes land and thread the real name through here.
-  return saveRecommendation(org, "default", reviewId, recommendation, {
+  return saveRecommendation(org, ds, reviewId, recommendation, {
     model: ai.model,
     matchProbability: review.match_probability,
     requestedBy: access.identity.user.email,

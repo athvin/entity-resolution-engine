@@ -20,6 +20,7 @@ import {
   useEntityLinks,
 } from "@/lib/query/entity-links";
 
+import { useDatasetSlug } from "@/lib/use-dataset-slug";
 /**
  * Relationships that are NOT merges (E11b).
  *
@@ -42,9 +43,10 @@ export function EntityLinksPanel({
   entityId: string;
   canEdit: boolean;
 }) {
-  const links = useEntityLinks(org, entityId);
-  const create = useCreateEntityLink(org, entityId);
-  const remove = useDeleteEntityLink(org, entityId);
+  const ds = useDatasetSlug();
+  const links = useEntityLinks(org, ds, entityId);
+  const create = useCreateEntityLink(org, ds, entityId);
+  const remove = useDeleteEntityLink(org, ds, entityId);
   const [target, setTarget] = useState("");
   const [kind, setKind] = useState<LinkKind>("household");
   const [failure, setFailure] = useState<string | null>(null);
@@ -106,7 +108,7 @@ export function EntityLinksPanel({
                       {isParent(link, entityId) ? "contains" : "belongs to"}
                     </span>
                     <Link
-                      href={`/${org}/records/${encodeURIComponent(other)}`}
+                      href={`/${org}/${ds}/records/${encodeURIComponent(other)}`}
                       className="truncate font-mono text-xs underline underline-offset-2"
                     >
                       {other}

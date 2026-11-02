@@ -231,8 +231,11 @@ describe("the BFF reads the envelope er-server actually sends", () => {
     // A ledger that failed to parse, or shrank to nothing, would make every
     // assertion below pass while checking nothing.
     expect(Object.keys(l).length).toBeGreaterThan(30);
-    expect(l["GET /v1/orgs/{org}/jobs"]).toEqual({ envelope: "wrapped", key: "jobs" });
-    expect(l["GET /v1/orgs/{org}/runs"]).toEqual({ envelope: "bare" });
+    expect(l["GET /v1/orgs/{org}/datasets/{ds}/jobs"]).toEqual({
+      envelope: "wrapped",
+      key: "jobs",
+    });
+    expect(l["GET /v1/orgs/{org}/datasets/{ds}/runs"]).toEqual({ envelope: "bare" });
   });
 
   it("finds the BFF GET routes", () => {

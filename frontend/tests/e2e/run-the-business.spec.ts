@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 
-import { snap } from "./helpers";
+import { DS, snap } from "./helpers";
 
 /**
  * The M5 slice of the full-stack story: the operator freezes a real tenant and
@@ -36,8 +36,20 @@ test.describe.serial("run the business", () => {
     await snap(page, "tenant-suspended");
 
     // The refusal comes from the same control-plane guard production uses,
-    // through the tenant's own BFF path — not from UI state.
-    const refused = await page.request.post(`/api/orgs/${org()}/jobs/submit`, {
+    // through the tenant's own BFF path — not from UI state. Wait until the
+    // ENGINE's own view of the org says suspended first: the UI flips on the
+    // admin response, and asserting the refusal in that window once enqueued
+    // a real train on a tenant the operator had just frozen.
+    await expect
+      .poll(
+        async () => {
+          const detail = await page.request.get(`/api/admin/orgs/${org()}`);
+          return ((await detail.json()) as { state?: string }).state;
+        },
+        { timeout: 15_000 },
+      )
+      .toBe("suspended");
+    const refused = await page.request.post(`/api/orgs/${org()}/datasets/${DS}/jobs/submit`, {
       data: { kind: "train", intent: "e2e-lifecycle-freeze-check" },
     });
     expect(refused.status()).toBe(409);

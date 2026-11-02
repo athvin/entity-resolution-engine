@@ -67,19 +67,19 @@ export interface ModelVersionDetail extends ModelVersionRow {
   weights: ModelWeights | null;
 }
 
-export function useModels(org: string) {
+export function useModels(org: string, ds: string) {
   return useQuery({
-    queryKey: queryKeys.models(org),
-    queryFn: () => bffFetch<ModelIndex>(`/api/orgs/${org}/models`),
+    queryKey: queryKeys.models(org, ds),
+    queryFn: () => bffFetch<ModelIndex>(`/api/orgs/${org}/datasets/${ds}/models`),
   });
 }
 
-export function useModelVersion(org: string, name: string, version: number | null) {
+export function useModelVersion(org: string, ds: string, name: string, version: number | null) {
   return useQuery({
-    queryKey: queryKeys.modelVersion(org, name, version ?? 0),
+    queryKey: queryKeys.modelVersion(org, ds, name, version ?? 0),
     queryFn: () =>
       bffFetch<ModelVersionDetail>(
-        `/api/orgs/${org}/models/${encodeURIComponent(name)}/versions/${String(version)}`,
+        `/api/orgs/${org}/datasets/${ds}/models/${encodeURIComponent(name)}/versions/${String(version)}`,
       ),
     enabled: version !== null && name !== "",
   });
@@ -132,12 +132,12 @@ export interface ModelEvaluation {
  * Only labels carrying that version's own score are evaluable, which is why
  * `counts` ships beside the metrics rather than being inferred from them.
  */
-export function useModelEvaluation(org: string, name: string, version: number | null) {
+export function useModelEvaluation(org: string, ds: string, name: string, version: number | null) {
   return useQuery({
-    queryKey: queryKeys.modelEvaluation(org, name, version ?? 0),
+    queryKey: queryKeys.modelEvaluation(org, ds, name, version ?? 0),
     queryFn: () =>
       bffFetch<ModelEvaluation>(
-        `/api/orgs/${org}/models/${encodeURIComponent(name)}/versions/${String(
+        `/api/orgs/${org}/datasets/${ds}/models/${encodeURIComponent(name)}/versions/${String(
           version,
         )}/evaluation`,
       ),
@@ -146,34 +146,34 @@ export function useModelEvaluation(org: string, name: string, version: number | 
 }
 
 /** Everything that changes the registry invalidates the same index. */
-function useRegistryMutation<T>(org: string, run: () => Promise<T>) {
+function useRegistryMutation<T>(org: string, ds: string, run: () => Promise<T>) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: run,
     onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.models(org) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.models(org, ds) });
     },
   });
 }
 
-export function useActivateModel(org: string) {
+export function useActivateModel(org: string, ds: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ name, version }: { name: string; version: number }) =>
       bffFetch<unknown>(
-        `/api/orgs/${org}/models/${encodeURIComponent(name)}/versions/${String(version)}/activate`,
+        `/api/orgs/${org}/datasets/${ds}/models/${encodeURIComponent(name)}/versions/${String(version)}/activate`,
         { method: "POST" },
       ),
     onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.models(org) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.models(org, ds) });
     },
   });
 }
 
 /** Compile a draft from the org's active published config. No body. */
-export function useCompileModel(org: string) {
-  return useRegistryMutation(org, () =>
-    bffFetch<ModelVersionRow>(`/api/orgs/${org}/models/compile`, { method: "POST" }),
+export function useCompileModel(org: string, ds: string) {
+  return useRegistryMutation(org, ds, () =>
+    bffFetch<ModelVersionRow>(`/api/orgs/${org}/datasets/${ds}/models/compile`, { method: "POST" }),
   );
 }
 
@@ -184,16 +184,16 @@ export interface ModelUpload {
   tf_snapshot_id?: string;
 }
 
-export function useUploadModel(org: string) {
+export function useUploadModel(org: string, ds: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (body: ModelUpload) =>
-      bffFetch<ModelVersionRow>(`/api/orgs/${org}/models/versions`, {
+      bffFetch<ModelVersionRow>(`/api/orgs/${org}/datasets/${ds}/models/versions`, {
         method: "POST",
         body: JSON.stringify(body),
       }),
     onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.models(org) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.models(org, ds) });
     },
   });
 }

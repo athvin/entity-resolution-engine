@@ -25,18 +25,18 @@ export interface SourcesPayload {
   sources: SourceInfo[];
 }
 
-export function useSchedules(org: string) {
+export function useSchedules(org: string, ds: string) {
   return useQuery({
     queryKey: [...queryKeys.org(org), "schedules"],
-    queryFn: () => bffFetch<ScheduleRow[]>(`/api/orgs/${org}/schedules`),
+    queryFn: () => bffFetch<ScheduleRow[]>(`/api/orgs/${org}/datasets/${ds}/schedules`),
   });
 }
 
-export function useCreateSchedule(org: string) {
+export function useCreateSchedule(org: string, ds: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (body: { kind: string; cron: string }) =>
-      bffFetch<unknown>(`/api/orgs/${org}/schedules`, {
+      bffFetch<unknown>(`/api/orgs/${org}/datasets/${ds}/schedules`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
@@ -46,21 +46,23 @@ export function useCreateSchedule(org: string) {
   });
 }
 
-export function useDeleteSchedule(org: string) {
+export function useDeleteSchedule(org: string, ds: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (scheduleId: string) =>
-      bffFetch<unknown>(`/api/orgs/${org}/schedules/${scheduleId}`, { method: "DELETE" }),
+      bffFetch<unknown>(`/api/orgs/${org}/datasets/${ds}/schedules/${scheduleId}`, {
+        method: "DELETE",
+      }),
     onSettled: () =>
       void queryClient.invalidateQueries({ queryKey: [...queryKeys.org(org), "schedules"] }),
   });
 }
 
-export function useToggleSchedule(org: string) {
+export function useToggleSchedule(org: string, ds: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ scheduleId, enabled }: { scheduleId: string; enabled: boolean }) =>
-      bffFetch<unknown>(`/api/orgs/${org}/schedules/${scheduleId}`, {
+      bffFetch<unknown>(`/api/orgs/${org}/datasets/${ds}/schedules/${scheduleId}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ enabled }),
@@ -85,10 +87,10 @@ export function useToggleSchedule(org: string) {
   });
 }
 
-export function useSources(org: string) {
+export function useSources(org: string, ds: string) {
   return useQuery({
     queryKey: [...queryKeys.org(org), "sources"],
-    queryFn: () => bffFetch<SourcesPayload>(`/api/orgs/${org}/sources`),
+    queryFn: () => bffFetch<SourcesPayload>(`/api/orgs/${org}/datasets/${ds}/sources`),
   });
 }
 
@@ -97,32 +99,32 @@ export interface ImportResult {
   batch_id?: string;
 }
 
-export function useImportFile(org: string) {
+export function useImportFile(org: string, ds: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({ source, file }: { source: string; file: File }) => {
       const body = new FormData();
       body.set("file", file);
       return bffFetch<ImportResult>(
-        `/api/orgs/${org}/imports?source=${encodeURIComponent(source)}`,
+        `/api/orgs/${org}/datasets/${ds}/imports?source=${encodeURIComponent(source)}`,
         { method: "POST", body },
       );
     },
     onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.jobs(org) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.jobs(org, ds) });
     },
   });
 }
 
-export function useSubmitJob(org: string) {
+export function useSubmitJob(org: string, ds: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (body: { kind: string; params?: Record<string, unknown> }) =>
-      bffFetch<{ id: string }>(`/api/orgs/${org}/jobs/submit`, {
+      bffFetch<{ id: string }>(`/api/orgs/${org}/datasets/${ds}/jobs/submit`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ ...body, intent: ulid().toLowerCase() }),
       }),
-    onSettled: () => void queryClient.invalidateQueries({ queryKey: queryKeys.jobs(org) }),
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: queryKeys.jobs(org, ds) }),
   });
 }

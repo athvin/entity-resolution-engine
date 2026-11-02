@@ -28,7 +28,11 @@ async fn oid(client: &tokio_postgres::Client, name: &str) -> String {
 async fn golden_entity_ids(app: &axum::Router) -> Vec<String> {
     let resp = app
         .clone()
-        .oneshot(op("GET", "/v1/orgs/acme/golden-records", Body::empty()))
+        .oneshot(op(
+            "GET",
+            "/v1/orgs/acme/datasets/default/golden-records",
+            Body::empty(),
+        ))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -132,7 +136,7 @@ async fn members(app: &axum::Router, entity_id: &str) -> Vec<String> {
         .clone()
         .oneshot(op(
             "GET",
-            &format!("/v1/orgs/acme/golden-records/{entity_id}"),
+            &format!("/v1/orgs/acme/datasets/default/golden-records/{entity_id}"),
             Body::empty(),
         ))
         .await
@@ -206,7 +210,7 @@ async fn suppress_excludes_a_record_and_retract_restores_it() {
         .clone()
         .oneshot(op(
             "POST",
-            "/v1/orgs/acme/records/suppress",
+            "/v1/orgs/acme/datasets/default/records/suppress",
             Body::from(serde_json::json!({ "record_key": victim }).to_string()),
         ))
         .await
@@ -245,7 +249,7 @@ async fn suppress_excludes_a_record_and_retract_restores_it() {
         .clone()
         .oneshot(op(
             "POST",
-            "/v1/orgs/acme/records/unsuppress",
+            "/v1/orgs/acme/datasets/default/records/unsuppress",
             Body::from(serde_json::json!({ "record_key": victim }).to_string()),
         ))
         .await
@@ -309,7 +313,7 @@ async fn suppress_excludes_a_record_and_retract_restores_it() {
         .clone()
         .oneshot(op(
             "POST",
-            "/v1/orgs/acme/records/suppress",
+            "/v1/orgs/acme/datasets/default/records/suppress",
             Body::from(serde_json::json!({ "record_keys": batch, "apply_now": true }).to_string()),
         ))
         .await
@@ -337,7 +341,7 @@ async fn suppress_excludes_a_record_and_retract_restores_it() {
         .clone()
         .oneshot(op(
             "POST",
-            "/v1/orgs/acme/records/unsuppress",
+            "/v1/orgs/acme/datasets/default/records/unsuppress",
             Body::from(
                 serde_json::json!({
                     "record_key": batch[0],
@@ -360,7 +364,7 @@ async fn suppress_excludes_a_record_and_retract_restores_it() {
         .clone()
         .oneshot(op(
             "POST",
-            "/v1/orgs/acme/records/suppress",
+            "/v1/orgs/acme/datasets/default/records/suppress",
             Body::from(r#"{"record_keys":[]}"#),
         ))
         .await
@@ -380,7 +384,7 @@ async fn suppress_excludes_a_record_and_retract_restores_it() {
     let resp = app
         .oneshot(op(
             "POST",
-            "/v1/orgs/acme/records/suppress",
+            "/v1/orgs/acme/datasets/default/records/suppress",
             Body::from(serde_json::json!({ "record_keys": too_many }).to_string()),
         ))
         .await

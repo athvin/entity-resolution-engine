@@ -118,7 +118,7 @@ export function useImpersonation() {
       }),
     onSuccess: (data) => {
       queryClient.clear();
-      router.push(`/${data.org}/dashboard`);
+      router.push(`/${data.org}`);
       router.refresh();
     },
   });

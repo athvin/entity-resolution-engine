@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { login, ORG, USERS } from "./helpers";
+import { DS, login, ORG, USERS } from "./helpers";
 
 // acme-dev review fixtures are render-only: resolving them would shift the
 // dashboard's "14 reviews waiting" and the visual baselines under parallel
@@ -8,7 +8,7 @@ import { login, ORG, USERS } from "./helpers";
 test.describe("review inbox — rendering", () => {
   test.beforeEach(async ({ page }) => {
     await login(page, USERS.viewer);
-    await page.goto(`/${ORG}/reviews`);
+    await page.goto(`/${ORG}/${DS}/reviews`);
   });
 
   test("shows the queue, the staged banner, and the evidence waterfall", async ({

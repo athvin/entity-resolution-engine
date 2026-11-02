@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { login, ORG, USERS } from "./helpers";
+import { DS, login, ORG, USERS } from "./helpers";
 
 /**
  * E6c: the blocking estimator (E6a) and the config's segment catalog (E6b)
@@ -16,12 +16,12 @@ test.describe("run cost", () => {
     // query opens the org's lake and counts pairs, so an automatic fetch would
     // make a cheap page expensive to open.
     let calls = 0;
-    await page.route(`**/api/orgs/${ORG}/blocking-estimate*`, (route) => {
+    await page.route(`**/api/orgs/${ORG}/datasets/${DS}/blocking-estimate*`, (route) => {
       calls += 1;
       return route.fallback();
     });
 
-    await page.goto(`/${ORG}/runs`);
+    await page.goto(`/${ORG}/${DS}/runs`);
     await expect(page.getByTestId("run-cost")).toBeVisible();
     expect(calls).toBe(0);
 
@@ -34,7 +34,7 @@ test.describe("run cost", () => {
     page,
   }) => {
     await login(page, USERS.steward);
-    await page.goto(`/${ORG}/runs`);
+    await page.goto(`/${ORG}/${DS}/runs`);
     await page.getByTestId("run-cost-estimate").click();
 
     const panel = page.getByTestId("run-cost");
@@ -56,7 +56,7 @@ test.describe("run cost", () => {
   test("an org with no model says so instead of erroring", async ({ page }) => {
     await login(page, USERS.steward);
     // `fresh-dev` has no model; the endpoint 409s and that is a designed state.
-    await page.goto("/fresh-dev/runs");
+    await page.goto("/fresh-dev/default/runs");
     await page.getByTestId("run-cost-estimate").click();
     await expect(page.getByTestId("run-cost-unavailable")).toContainText("no model yet");
     await expect(page.getByTestId("run-cost-error")).toHaveCount(0);
@@ -64,7 +64,7 @@ test.describe("run cost", () => {
 
   test("a viewer is not offered a run's cost", async ({ page }) => {
     await login(page, USERS.viewer);
-    await page.goto(`/${ORG}/runs`);
+    await page.goto(`/${ORG}/${DS}/runs`);
     await expect(page.getByTestId("jobs-table")).toBeVisible();
     // The panel rides the steward's run-trigger surface; a viewer cannot start
     // a run, so costing one is not their question.
@@ -78,7 +78,7 @@ test.describe("run cost", () => {
     // second looking at a correctly disabled button.
     const org = "segment-dev";
     await login(page, USERS.steward);
-    await page.goto(`/${org}/runs`);
+    await page.goto(`/${org}/${DS}/runs`);
 
     // The names come from the published config; the predicate rides the option
     // title so an operator can see what the slice covers.
@@ -89,7 +89,9 @@ test.describe("run cost", () => {
     // The job carries the segment NAME. The predicate is resolved server-side
     // against the org's own config, so no SQL travels in a request.
     const submitted = page.waitForRequest(
-      (request) => request.url().includes(`/api/orgs/${org}/jobs`) && request.method() === "POST",
+      (request) =>
+        request.url().includes(`/api/orgs/${org}/datasets/${DS}/jobs`) &&
+        request.method() === "POST",
     );
     await picker.selectOption("west");
     await page.getByTestId("run-now").click();

@@ -22,18 +22,18 @@ export interface DraftFromProseResult {
  * in the history card — that card IS the review surface, and a draft nobody can
  * see is a draft nobody will read before publishing something else.
  */
-export function useDraftFromProse(org: string) {
+export function useDraftFromProse(org: string, ds: string) {
   const client = useQueryClient();
   return useMutation({
     mutationFn: (instruction: string) =>
-      bffFetch<DraftFromProseResult>(`/api/orgs/${org}/config/draft-from-prose`, {
+      bffFetch<DraftFromProseResult>(`/api/orgs/${org}/datasets/${ds}/config/draft-from-prose`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ instruction }),
       }),
     onSuccess: (result) => {
       if (result.drafted) {
-        void client.invalidateQueries({ queryKey: configKey(org) });
+        void client.invalidateQueries({ queryKey: configKey(org, ds) });
       }
     },
   });
@@ -44,10 +44,10 @@ export interface ExplanationResult {
   explanation: string;
 }
 
-export function useExplainRule(org: string) {
+export function useExplainRule(org: string, ds: string) {
   return useMutation({
     mutationFn: (input: { block: string; rule: string }) =>
-      bffFetch<ExplanationResult>(`/api/orgs/${org}/config/explain`, {
+      bffFetch<ExplanationResult>(`/api/orgs/${org}/datasets/${ds}/config/explain`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(input),
@@ -66,13 +66,13 @@ export interface StarterResult {
  * Invalidates the config family for the reason `useDraftFromProse` does: the
  * new draft has to appear in the version history, which is the review surface.
  */
-export function useStarterConfig(org: string) {
+export function useStarterConfig(org: string, ds: string) {
   const client = useQueryClient();
   return useMutation({
     mutationFn: () =>
-      bffFetch<StarterResult>(`/api/orgs/${org}/config/starter`, { method: "POST" }),
+      bffFetch<StarterResult>(`/api/orgs/${org}/datasets/${ds}/config/starter`, { method: "POST" }),
     onSuccess: () => {
-      void client.invalidateQueries({ queryKey: configKey(org) });
+      void client.invalidateQueries({ queryKey: configKey(org, ds) });
     },
   });
 }

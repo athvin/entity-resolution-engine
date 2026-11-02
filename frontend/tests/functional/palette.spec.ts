@@ -1,11 +1,11 @@
 import { expect, test } from "@playwright/test";
 
-import { login, ORG, USERS } from "./helpers";
+import { DS, login, ORG, USERS } from "./helpers";
 
 test.describe("command palette", () => {
   test.beforeEach(async ({ page }) => {
     await login(page, USERS.admin);
-    await page.goto(`/${ORG}/dashboard`);
+    await page.goto(`/${ORG}/${DS}/dashboard`);
   });
 
   test("opens with the keyboard on desktop and lists pages", async ({ page, isMobile }) => {
@@ -15,7 +15,7 @@ test.describe("command palette", () => {
     await expect(input).toBeVisible();
     await input.fill("records");
     await page.getByRole("option", { name: "Records", exact: true }).click();
-    await expect(page).toHaveURL(new RegExp(`/${ORG}/records$`));
+    await expect(page).toHaveURL(new RegExp(`/${ORG}/${DS}/records$`));
   });
 
   test("opens from the search button", async ({ page }) => {
@@ -35,7 +35,7 @@ test.describe("command palette", () => {
     const option = page.getByRole("option", { name: /Radia Lovelace/ }).first();
     await expect(option).toBeVisible();
     await option.click();
-    await expect(page).toHaveURL(new RegExp(`/${ORG}/records/01jm0e`));
+    await expect(page).toHaveURL(new RegExp(`/${ORG}/${DS}/records/01jm0e`));
     await expect(page.getByTestId("entity-name")).toContainText("Radia Lovelace");
   });
 });
@@ -50,7 +50,7 @@ test.describe("palette — runs", () => {
     // A private org: starting a run occupies the workspace's single writer
     // slot, so sharing one with the Runs page's Run-now test would disable
     // whichever button ran second.
-    await page.goto("/palette-dev/dashboard");
+    await page.goto("/palette-dev/default/dashboard");
     await page.getByTestId("open-palette").click();
     await page.getByPlaceholder("Search records, pages, commands…").fill("run now");
 
@@ -66,7 +66,7 @@ test.describe("palette — runs", () => {
 
   test("viewers get no run commands", async ({ page }) => {
     await login(page, USERS.viewer);
-    await page.goto(`/${ORG}/dashboard`);
+    await page.goto(`/${ORG}/${DS}/dashboard`);
     await page.getByTestId("open-palette").click();
     await page.getByPlaceholder("Search records, pages, commands…").fill("run now");
     // Starting a run is a steward action, so it is absent rather than offered
@@ -78,7 +78,7 @@ test.describe("palette — runs", () => {
 test.describe("palette — operator", () => {
   test("a super admin can view-as straight from the palette", async ({ page }) => {
     await login(page, USERS.superAdmin);
-    await page.goto(`/${ORG}/dashboard`);
+    await page.goto(`/${ORG}/${DS}/dashboard`);
     await page.getByTestId("open-palette").click();
     await page.getByPlaceholder("Search records, pages, commands…").fill(`view as ${ORG}`);
     await page.getByRole("option", { name: `View ${ORG} as admin` }).click();

@@ -3,7 +3,16 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
-import { Building2, ChevronsUpDown, LogOut, Moon, Search, ShieldCheck, Sun } from "lucide-react";
+import {
+  Building2,
+  ChevronsUpDown,
+  Layers,
+  LogOut,
+  Moon,
+  Search,
+  ShieldCheck,
+  Sun,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -16,6 +25,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { bffFetch } from "@/lib/api/client";
 import type { Membership, SessionUser } from "@/lib/auth/types";
+import { useDatasets } from "@/lib/query/datasets";
+import { useDatasetSlug } from "@/lib/use-dataset-slug";
 
 interface TopBarProps {
   org: string;
@@ -28,6 +39,8 @@ interface TopBarProps {
 export function TopBar({ org, user, memberships, impersonating, onOpenPalette }: TopBarProps) {
   const router = useRouter();
   const { resolvedTheme, setTheme } = useTheme();
+  const ds = useDatasetSlug();
+  const datasets = useDatasets(org);
 
   async function signOut() {
     await bffFetch("/api/auth/logout", { method: "POST" });
@@ -58,7 +71,7 @@ export function TopBar({ org, user, memberships, impersonating, onOpenPalette }:
               <DropdownMenuItem
                 key={membership.org}
                 onSelect={() => {
-                  router.push(`/${membership.org}/dashboard`);
+                  router.push(`/${membership.org}`);
                 }}
               >
                 <Building2 />
@@ -75,6 +88,49 @@ export function TopBar({ org, user, memberships, impersonating, onOpenPalette }:
         >
           <Building2 className="size-4" />
           {org}
+        </span>
+      )}
+
+      {/* Dataset switcher (or a plain label while the org has just one). */}
+      {(datasets.data?.length ?? 0) > 1 ? (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="gap-2 font-medium"
+              data-testid="dataset-switcher"
+            >
+              <Layers className="size-4" />
+              {ds}
+              <ChevronsUpDown className="text-muted-foreground size-3" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start">
+            <DropdownMenuLabel>Switch dataset</DropdownMenuLabel>
+            {datasets.data?.map((dataset) => (
+              <DropdownMenuItem
+                key={dataset.name}
+                onSelect={() => {
+                  router.push(`/${org}/${dataset.name}/dashboard`);
+                }}
+              >
+                <Layers />
+                {dataset.display_name ?? dataset.name}
+                <span className="text-muted-foreground ml-auto text-[10px] tracking-wide uppercase">
+                  {dataset.entity_type}
+                </span>
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : (
+        <span
+          className="text-muted-foreground flex items-center gap-2 px-2 text-sm font-medium"
+          data-testid="dataset-label"
+        >
+          <Layers className="size-4" />
+          {ds}
         </span>
       )}
 

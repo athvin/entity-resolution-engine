@@ -27,8 +27,8 @@ test.describe("login screen", () => {
   });
 
   test("deep links carry a next parameter through the redirect", async ({ page }) => {
-    await page.goto("/acme/dashboard");
-    await expect(page).toHaveURL(/\/login\?next=%2Facme%2Fdashboard$/);
+    await page.goto("/acme/default/dashboard");
+    await expect(page).toHaveURL(/\/login\?next=%2Facme%2Fdefault%2Fdashboard$/);
   });
 
   test("login page visual baseline @visual", async ({ page }) => {

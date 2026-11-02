@@ -38,10 +38,10 @@ export interface InsightRow {
  * newest-first the way a run list does, and the sparkline reverses for itself
  * because a trend reads left-to-right in time.
  */
-export function useInsights(org: string) {
+export function useInsights(org: string, ds: string) {
   return useQuery({
-    queryKey: queryKeys.insights(org),
-    queryFn: () => bffFetch<InsightRow[]>(`/api/orgs/${org}/insights`),
+    queryKey: queryKeys.insights(org, ds),
+    queryFn: () => bffFetch<InsightRow[]>(`/api/orgs/${org}/datasets/${ds}/insights`),
   });
 }
 
@@ -73,9 +73,10 @@ export interface SourceAttributionPage {
   sources: SourceAttribution[];
 }
 
-export function useSourceAttribution(org: string) {
+export function useSourceAttribution(org: string, ds: string) {
   return useQuery({
-    queryKey: queryKeys.insightSources(org),
-    queryFn: () => bffFetch<SourceAttributionPage>(`/api/orgs/${org}/insights/sources`),
+    queryKey: queryKeys.insightSources(org, ds),
+    queryFn: () =>
+      bffFetch<SourceAttributionPage>(`/api/orgs/${org}/datasets/${ds}/insights/sources`),
   });
 }

@@ -4,12 +4,17 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 import { cn } from "@/lib/utils";
+import { useDatasetSlug } from "@/lib/use-dataset-slug";
 
 export function SettingsNav({ org }: { org: string }) {
   const pathname = usePathname();
+  // Config and models belong to ONE dataset; the rest of the tabs are the
+  // org's. Rendered as a single row so settings still feels like one surface,
+  // with the dataset segment deciding which base each tab links under.
+  const ds = useDatasetSlug();
   const tabs = [
-    { href: `/${org}/settings/config`, label: "Config studio" },
-    { href: `/${org}/settings/models`, label: "Models" },
+    { href: `/${org}/${ds}/settings/config`, label: "Config studio" },
+    { href: `/${org}/${ds}/settings/models`, label: "Models" },
     { href: `/${org}/settings/webhooks`, label: "Webhooks" },
     { href: `/${org}/settings/ai`, label: "AI" },
     { href: `/${org}/settings/members`, label: "Members" },

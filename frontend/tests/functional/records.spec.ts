@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { login, ORG, USERS } from "./helpers";
+import { DS, login, ORG, USERS } from "./helpers";
 
 // Every third mock entity has two members; index 0 is multi-member and its
 // name is deterministic (Ada Lovelace, index 0).
@@ -9,7 +9,7 @@ const MULTI_MEMBER_ENTITY = "01jm0e000000";
 test.describe("golden records", () => {
   test.beforeEach(async ({ page }) => {
     await login(page, USERS.viewer);
-    await page.goto(`/${ORG}/records`);
+    await page.goto(`/${ORG}/${DS}/records`);
   });
 
   test("browses the snapshot-pinned grid and paginates by cursor", async ({ page }) => {
@@ -48,7 +48,7 @@ test.describe("golden records", () => {
   test("links two entities without merging them (E11b)", async ({ page }, testInfo) => {
     const entity = LINK_ENTITY[testInfo.project.name] ?? "01jm0e000012";
     await login(page, USERS.steward);
-    await page.goto(`/${ORG}/records/${entity}`);
+    await page.goto(`/${ORG}/${DS}/records/${entity}`);
 
     const panel = page.getByTestId("entity-links");
     await expect(panel).toBeVisible();
@@ -78,7 +78,7 @@ test.describe("golden records", () => {
 
   test("a viewer reads links but is offered no controls (E11b)", async ({ page }) => {
     await login(page, USERS.viewer);
-    await page.goto(`/${ORG}/records/${MULTI_MEMBER_ENTITY}`);
+    await page.goto(`/${ORG}/${DS}/records/${MULTI_MEMBER_ENTITY}`);
     await expect(page.getByTestId("entity-links")).toBeVisible();
     // Seeing that an entity belongs to a household is reading; creating the
     // link is a steward's judgement.
@@ -87,7 +87,7 @@ test.describe("golden records", () => {
   });
 
   test("entity detail explains provenance, members and history", async ({ page }) => {
-    await page.goto(`/${ORG}/records/${MULTI_MEMBER_ENTITY}`);
+    await page.goto(`/${ORG}/${DS}/records/${MULTI_MEMBER_ENTITY}`);
     await expect(page.getByTestId("entity-name")).toContainText("Ada Lovelace");
     await expect(page.getByTestId("entity-view")).toContainText("2 source records");
     await expect(page.getByTestId("lineage-email")).toContainText("from crm:C-5000");
@@ -97,7 +97,7 @@ test.describe("golden records", () => {
   });
 
   test("an unknown entity is a designed state, not an error page", async ({ page }) => {
-    await page.goto(`/${ORG}/records/does-not-exist`);
+    await page.goto(`/${ORG}/${DS}/records/does-not-exist`);
     await expect(page.getByText("No entity does-not-exist in this workspace.")).toBeVisible();
   });
 
@@ -109,7 +109,7 @@ test.describe("golden records", () => {
   });
 
   test("entity detail visual baseline @visual", async ({ page }) => {
-    await page.goto(`/${ORG}/records/${MULTI_MEMBER_ENTITY}`);
+    await page.goto(`/${ORG}/${DS}/records/${MULTI_MEMBER_ENTITY}`);
     await expect(page.getByTestId("entity-timeline")).toContainText("member added");
     await expect(page).toHaveScreenshot("entity-detail.png", { fullPage: true });
   });
@@ -118,7 +118,7 @@ test.describe("golden records", () => {
 test.describe("mass update (steward)", () => {
   test.beforeEach(async ({ page }) => {
     await login(page, USERS.steward);
-    await page.goto(`/${ORG}/records`);
+    await page.goto(`/${ORG}/${DS}/records`);
   });
 
   test("sets a golden field across matching records with a typed confirm", async ({ page }) => {

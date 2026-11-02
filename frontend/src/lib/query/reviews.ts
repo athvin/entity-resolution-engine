@@ -65,6 +65,7 @@ const inboxKey = (org: string, reason: string | null, band: ReviewBand) =>
 
 export function useReviewInbox(
   org: string,
+  ds: string,
   reason: string | null,
   band: ReviewBand = { min: null, max: null },
 ) {
@@ -80,7 +81,7 @@ export function useReviewInbox(
       if (band.min !== null) params.set("min_probability", String(band.min));
       if (band.max !== null) params.set("max_probability", String(band.max));
       if (pageParam) params.set("cursor", pageParam);
-      return bffFetch<ReviewPage>(`/api/orgs/${org}/reviews?${params.toString()}`);
+      return bffFetch<ReviewPage>(`/api/orgs/${org}/datasets/${ds}/reviews?${params.toString()}`);
     },
     initialPageParam: "",
     getNextPageParam: (last) => last.next_cursor ?? undefined,
@@ -103,11 +104,11 @@ function dropReviews(
 
 /** Resolve one review. Optimistic removal from the inbox; the honest lake-state
  * chip comes from the response `status` — never guessed. */
-export function useResolveReview(org: string) {
+export function useResolveReview(org: string, ds: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ reviewId, resolution }: { reviewId: string; resolution: Resolution }) =>
-      bffFetch<ResolveResult>(`/api/orgs/${org}/reviews/${reviewId}/resolve`, {
+      bffFetch<ResolveResult>(`/api/orgs/${org}/datasets/${ds}/reviews/${reviewId}/resolve`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ resolution }),
@@ -129,7 +130,7 @@ export function useResolveReview(org: string) {
     },
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: [...queryKeys.org(org), "staged"] });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.metrics(org) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.metrics(org, ds) });
     },
   });
 }
@@ -154,6 +155,7 @@ export const SELECT_ALL_CAP = 2_000;
  */
 export async function fetchReviewIdsMatching(
   org: string,
+  ds: string,
   reason: string | null,
   onProgress?: (count: number) => void,
 ): Promise<{ ids: string[]; capped: boolean }> {
@@ -164,7 +166,7 @@ export async function fetchReviewIdsMatching(
     if (reason) params.set("reason", reason);
     if (cursor) params.set("cursor", cursor);
     const page: ReviewPage = await bffFetch<ReviewPage>(
-      `/api/orgs/${org}/reviews?${params.toString()}`,
+      `/api/orgs/${org}/datasets/${ds}/reviews?${params.toString()}`,
     );
     for (const item of page.items) {
       if (ids.length >= SELECT_ALL_CAP) return { ids, capped: true };
@@ -176,7 +178,7 @@ export async function fetchReviewIdsMatching(
   }
 }
 
-export function useBulkResolve(org: string) {
+export function useBulkResolve(org: string, ds: string) {
   const queryClient = useQueryClient();
   return useMutation({
     // Chunked to the server's 200-per-lock-window cap: a select-all batch posts
@@ -185,11 +187,14 @@ export function useBulkResolve(org: string) {
       let combined: BulkResult | null = null;
       for (let start = 0; start < body.items.length; start += BULK_RESOLVE_CHUNK) {
         const chunk = body.items.slice(start, start + BULK_RESOLVE_CHUNK);
-        const result = await bffFetch<BulkResult>(`/api/orgs/${org}/reviews/bulk-resolve`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ items: chunk, apply_now: true }),
-        });
+        const result = await bffFetch<BulkResult>(
+          `/api/orgs/${org}/datasets/${ds}/reviews/bulk-resolve`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ items: chunk, apply_now: true }),
+          },
+        );
         combined = combined ? { ...result, failed: combined.failed + result.failed } : result;
       }
       if (combined === null) throw new Error("bulk resolve needs at least one item");
@@ -206,8 +211,8 @@ export function useBulkResolve(org: string) {
     },
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: [...queryKeys.org(org), "staged"] });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.metrics(org) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.jobs(org) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.metrics(org, ds) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.jobs(org, ds) });
     },
   });
 }
@@ -226,7 +231,7 @@ export interface SourceRecord {
  * needs this lookup. Keyed by the pair so switching rows in the inbox reuses a
  * cached page instead of refetching what the steward just saw.
  */
-export function useRecordPair(org: string, keyA: string | null, keyB: string | null) {
+export function useRecordPair(org: string, ds: string, keyA: string | null, keyB: string | null) {
   return useQuery({
     queryKey: [...queryKeys.org(org), "record-pair", keyA ?? "", keyB ?? ""],
     queryFn: () => {
@@ -234,7 +239,7 @@ export function useRecordPair(org: string, keyA: string | null, keyB: string | n
       if (keyA) params.append("key", keyA);
       if (keyB) params.append("key", keyB);
       return bffFetch<{ items: SourceRecord[]; snapshot: number }>(
-        `/api/orgs/${org}/records?${params.toString()}`,
+        `/api/orgs/${org}/datasets/${ds}/records?${params.toString()}`,
       );
     },
     enabled: keyA !== null && keyB !== null,
@@ -242,10 +247,10 @@ export function useRecordPair(org: string, keyA: string | null, keyB: string | n
   });
 }
 
-export function useStagedCount(org: string) {
+export function useStagedCount(org: string, ds: string) {
   return useQuery({
     queryKey: [...queryKeys.org(org), "staged"],
-    queryFn: () => bffFetch<{ pending_count: number }>(`/api/orgs/${org}/staged`),
+    queryFn: () => bffFetch<{ pending_count: number }>(`/api/orgs/${org}/datasets/${ds}/staged`),
     refetchInterval: 15_000,
     select: (data) => data.pending_count,
   });
@@ -264,7 +269,7 @@ export interface AssertionRow {
   note: string | null;
 }
 
-export function useAssertions(org: string, includeRetracted: boolean) {
+export function useAssertions(org: string, ds: string, includeRetracted: boolean) {
   return useInfiniteQuery({
     queryKey: [...queryKeys.org(org), "assertions", includeRetracted],
     queryFn: ({ pageParam }) => {
@@ -272,7 +277,7 @@ export function useAssertions(org: string, includeRetracted: boolean) {
       if (includeRetracted) params.set("include_retracted", "true");
       if (pageParam) params.set("cursor", pageParam);
       return bffFetch<{ items: AssertionRow[]; next_cursor: string | null }>(
-        `/api/orgs/${org}/assertions?${params.toString()}`,
+        `/api/orgs/${org}/datasets/${ds}/assertions?${params.toString()}`,
       );
     },
     initialPageParam: "",
@@ -280,11 +285,11 @@ export function useAssertions(org: string, includeRetracted: boolean) {
   });
 }
 
-export function useRetractAssertion(org: string) {
+export function useRetractAssertion(org: string, ds: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (assertionId: string) =>
-      bffFetch<ResolveResult>(`/api/orgs/${org}/assertions/${assertionId}`, {
+      bffFetch<ResolveResult>(`/api/orgs/${org}/datasets/${ds}/assertions/${assertionId}`, {
         method: "DELETE",
       }),
     onSettled: () => {
@@ -302,11 +307,13 @@ export interface Contradiction {
   component: string[];
 }
 
-export function useContradictions(org: string) {
+export function useContradictions(org: string, ds: string) {
   return useQuery({
     queryKey: [...queryKeys.org(org), "contradictions"],
     queryFn: () =>
-      bffFetch<{ contradictions: Contradiction[] }>(`/api/orgs/${org}/assertions/contradictions`),
+      bffFetch<{ contradictions: Contradiction[] }>(
+        `/api/orgs/${org}/datasets/${ds}/assertions/contradictions`,
+      ),
     select: (data) => data.contradictions,
   });
 }
@@ -317,25 +324,28 @@ export interface UnmergeResult {
   apply_job?: string;
 }
 
-export function useUnmerge(org: string, entityId: string) {
+export function useUnmerge(org: string, ds: string, entityId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (records: string[]) =>
-      bffFetch<UnmergeResult>(`/api/orgs/${org}/golden-records/${entityId}/unmerge`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ records, apply_now: true }),
-      }),
+      bffFetch<UnmergeResult>(
+        `/api/orgs/${org}/datasets/${ds}/golden-records/${entityId}/unmerge`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ records, apply_now: true }),
+        },
+      ),
     onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.entity(org, entityId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.jobs(org) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.entity(org, ds, entityId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.jobs(org, ds) });
     },
   });
 }
 
 /** Steward: exclude (suppress) member records from entity assembly. A per-record
  *  overlay that survives re-ingest (unlike a source tombstone). */
-export function useSuppressRecords(org: string, entityId: string) {
+export function useSuppressRecords(org: string, ds: string, entityId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (records: string[]) => {
@@ -343,7 +353,7 @@ export function useSuppressRecords(org: string, entityId: string) {
       // enqueues an `apply_corrections` job that runs a correction pass over
       // the entire corpus — so selecting ten members queued ten full passes to
       // express one decision.
-      await bffFetch(`/api/orgs/${org}/records/suppress`, {
+      await bffFetch(`/api/orgs/${org}/datasets/${ds}/records/suppress`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ record_keys: records }),
@@ -351,8 +361,8 @@ export function useSuppressRecords(org: string, entityId: string) {
       return { suppressed: records.length };
     },
     onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.entity(org, entityId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.jobs(org) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.entity(org, ds, entityId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.jobs(org, ds) });
     },
   });
 }
@@ -360,7 +370,7 @@ export function useSuppressRecords(org: string, entityId: string) {
 /** Steward: protect member records — pin them as the surviving master for their
  *  entity, overriding the survivorship policy. A per-record overlay that survives
  *  re-ingest; applied on the read path so it takes effect next correction run. */
-export function useProtectRecords(org: string, entityId: string) {
+export function useProtectRecords(org: string, ds: string, entityId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (records: string[]) => {
@@ -368,7 +378,7 @@ export function useProtectRecords(org: string, entityId: string) {
       // enqueues an `apply_corrections` job that runs a correction pass over
       // the entire corpus — so selecting ten members queued ten full passes to
       // express one decision.
-      await bffFetch(`/api/orgs/${org}/records/protect`, {
+      await bffFetch(`/api/orgs/${org}/datasets/${ds}/records/protect`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ record_keys: records }),
@@ -376,8 +386,8 @@ export function useProtectRecords(org: string, entityId: string) {
       return { protected: records.length };
     },
     onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.entity(org, entityId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.jobs(org) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.entity(org, ds, entityId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.jobs(org, ds) });
     },
   });
 }

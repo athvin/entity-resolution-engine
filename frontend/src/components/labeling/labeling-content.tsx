@@ -18,6 +18,7 @@ import {
   type Verdict,
 } from "@/lib/query/labeling";
 
+import { useDatasetSlug } from "@/lib/use-dataset-slug";
 /**
  * Teaching the matcher, one pair at a time.
  *
@@ -40,8 +41,9 @@ import {
  *   Skip advances without writing anything.
  */
 export function LabelingContent({ org }: { org: string }) {
-  const queue = useLabelingQueue(org);
-  const record = useRecordLabel(org);
+  const ds = useDatasetSlug();
+  const queue = useLabelingQueue(org, ds);
+  const record = useRecordLabel(org, ds);
   const session = useSession();
   // An ALLOWLIST, not `!== "viewer"`. `effectiveRole` returns null while the
   // session is loading, and `null !== "viewer"` is true — so the negated form

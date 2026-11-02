@@ -20,6 +20,7 @@ import {
   type ModelVersionRow,
 } from "@/lib/query/models";
 
+import { useDatasetSlug } from "@/lib/use-dataset-slug";
 /** `log2(m/u)` to one decimal, or an em dash where the level has no weight. */
 function weight(value: number | null): string {
   return value === null ? "—" : value.toFixed(1);
@@ -41,15 +42,16 @@ function probability(value: number | null): string {
  * config's `models:` list decides which of them score.
  */
 export function ModelsContent({ org }: { org: string }) {
-  const index = useModels(org);
+  const ds = useDatasetSlug();
+  const index = useModels(org, ds);
   const session = useSession();
-  const activate = useActivateModel(org);
-  const compile = useCompileModel(org);
-  const upload = useUploadModel(org);
+  const activate = useActivateModel(org, ds);
+  const compile = useCompileModel(org, ds);
+  const upload = useUploadModel(org, ds);
   const isAdmin = effectiveRole(session.data, org) === "admin";
 
   const [selected, setSelected] = useState<{ name: string; version: number } | null>(null);
-  const detail = useModelVersion(org, selected?.name ?? "", selected?.version ?? null);
+  const detail = useModelVersion(org, ds, selected?.name ?? "", selected?.version ?? null);
   const [error, setError] = useState<string | null>(null);
   const [modelJson, setModelJson] = useState("");
   const [label, setLabel] = useState("");

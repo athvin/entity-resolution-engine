@@ -17,11 +17,11 @@ export default async function PortalEntry() {
   const identity = await identityFromCookies();
   if (!identity) redirect("/login");
   const first = identity.memberships[0];
-  if (first) redirect(`/${first.org}/dashboard`);
+  if (first) redirect(`/${first.org}`);
   if (identity.user.isSuperAdmin) {
     const database = await db();
     const registered = await database.select().from(schema.orgsRegistry).limit(1);
-    redirect(registered[0] ? `/${registered[0].org}/dashboard` : "/admin");
+    redirect(registered[0] ? `/${registered[0].org}` : "/admin");
   }
   redirect("/login?error=no-workspace");
 }

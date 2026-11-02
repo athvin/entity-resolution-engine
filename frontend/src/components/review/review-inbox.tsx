@@ -30,6 +30,7 @@ import { cn } from "@/lib/utils";
 import { DecisionPanel, probabilityLabel } from "./decision-panel";
 import { RecommendationBadge } from "./recommendation-badge";
 import { SwipeCard } from "./swipe-card";
+import { useDatasetSlug } from "@/lib/use-dataset-slug";
 
 /**
  * What a confidence band is hiding, said out loud.
@@ -70,7 +71,8 @@ const BANDS: { key: string; label: string; min: number | null; max: number | nul
 const REASONS = ["gray_band", "never_unsatisfiable", "coherence"] as const;
 
 function StagedBanner({ org }: { org: string }) {
-  const staged = useStagedCount(org);
+  const ds = useDatasetSlug();
+  const staged = useStagedCount(org, ds);
   if (!staged.data) return null;
   return (
     <Card className="border-foreground/40" data-testid="staged-banner">
@@ -105,18 +107,19 @@ function LastResult({ status }: { status: "applied" | "staged" | null }) {
 
 /** The steward inbox (design §5.3): triage like a mail client, not form-filling. */
 export function ReviewInbox({ org, isSteward }: { org: string; isSteward: boolean }) {
+  const ds = useDatasetSlug();
   const [reason, setReason] = useState<string | null>(null);
   const [bandKey, setBandKey] = useState<string>("all");
   const band = BANDS.find((b) => b.key === bandKey);
   const bandActive = bandKey !== "all";
-  const inbox = useReviewInbox(org, reason, {
+  const inbox = useReviewInbox(org, ds, reason, {
     min: band?.min ?? null,
     max: band?.max ?? null,
   });
   // Constant for a snapshot, so the first page is the answer.
   const unscoredHidden = inbox.data?.pages[0]?.unscored_hidden ?? 0;
-  const resolve = useResolveReview(org);
-  const bulk = useBulkResolve(org);
+  const resolve = useResolveReview(org, ds);
+  const bulk = useBulkResolve(org, ds);
   const [cursor, setCursor] = useState(0);
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [lastStatus, setLastStatus] = useState<"applied" | "staged" | null>(null);
@@ -131,17 +134,17 @@ export function ReviewInbox({ org, isSteward }: { org: string; isSteward: boolea
   // rather than passing `rows` straight through, so paging in more rows is what
   // changes the query key — not every unrelated re-render.
   const reviewIds = useMemo(() => rows.map((row) => row.id), [rows]);
-  const recommendations = useReviewRecommendations(org, reviewIds);
-  const recommend = useRecommendReview(org);
-  const recommendBulk = useRecommendBulk(org);
+  const recommendations = useReviewRecommendations(org, ds, reviewIds);
+  const recommend = useRecommendReview(org, ds);
+  const recommendBulk = useRecommendBulk(org, ds);
   const [recommendFailure, setRecommendFailure] = useState<string | null>(null);
   const [bulkRecommendNote, setBulkRecommendNote] = useState<string | null>(null);
   // O12a. The inbox has the richest filter state in the product — a reason and
   // a confidence band — which makes it the surface where re-reaching a filter
   // is worth most.
-  const savedViews = useSavedViews(org, "reviews");
-  const saveView = useSaveView(org, "reviews");
-  const deleteView = useDeleteView(org, "reviews");
+  const savedViews = useSavedViews(org, ds, "reviews");
+  const saveView = useSaveView(org, ds, "reviews");
+  const deleteView = useDeleteView(org, ds, "reviews");
   const [activeViewId, setActiveViewId] = useState<string | null>(null);
   const [viewFailure, setViewFailure] = useState<string | null>(null);
   const currentDefinition = {
@@ -198,7 +201,7 @@ export function ReviewInbox({ org, isSteward }: { org: string; isSteward: boolea
     setSelectingAll(0);
     setSelectionNote(null);
     try {
-      const { ids, capped } = await fetchReviewIdsMatching(org, reason, setSelectingAll);
+      const { ids, capped } = await fetchReviewIdsMatching(org, ds, reason, setSelectingAll);
       setSelected(new Set(ids));
       setSelectionNote(
         capped

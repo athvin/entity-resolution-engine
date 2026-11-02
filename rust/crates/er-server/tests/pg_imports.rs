@@ -1,6 +1,6 @@
 //! Getting data in, over the real Postgres backend (behind `ER_TEST_PG_DSN`):
-//! `POST /v1/orgs/{org}/imports?source=…` (a file) and
-//! `POST /v1/orgs/{org}/records:ingest` (JSON).
+//! `POST /v1/orgs/{org}/datasets/default/imports?source=…` (a file) and
+//! `POST /v1/orgs/{org}/datasets/default/records:ingest` (JSON).
 //!
 //! Both land the same way — rendered into the source's declared CSV shape,
 //! staged under a temp name, renamed into the drop root, run enqueued — because
@@ -152,7 +152,7 @@ async fn deliveries_arrive_as_a_file_or_as_json_and_enqueue_their_run() {
     let resp = app
         .clone()
         .oneshot(upload_req(
-            "/v1/orgs/acme/imports?source=crm",
+            "/v1/orgs/acme/datasets/default/imports?source=crm",
             &steward_key,
             &ct,
             body,
@@ -170,7 +170,7 @@ async fn deliveries_arrive_as_a_file_or_as_json_and_enqueue_their_run() {
         .clone()
         .oneshot(json_req(
             "POST",
-            "/v1/orgs/acme/config/versions",
+            "/v1/orgs/acme/datasets/default/config/versions",
             &admin_key,
             Body::from(serde_json::json!({ "yaml": DEFAULT_YAML }).to_string()),
         ))
@@ -182,7 +182,7 @@ async fn deliveries_arrive_as_a_file_or_as_json_and_enqueue_their_run() {
         .clone()
         .oneshot(json_req(
             "POST",
-            &format!("/v1/orgs/acme/config/versions/{version}/publish"),
+            &format!("/v1/orgs/acme/datasets/default/config/versions/{version}/publish"),
             &admin_key,
             Body::empty(),
         ))
@@ -196,7 +196,7 @@ async fn deliveries_arrive_as_a_file_or_as_json_and_enqueue_their_run() {
     let resp = app
         .clone()
         .oneshot(upload_req(
-            "/v1/orgs/acme/imports?source=crm",
+            "/v1/orgs/acme/datasets/default/imports?source=crm",
             &steward_key,
             &ct,
             body,
@@ -238,7 +238,7 @@ async fn deliveries_arrive_as_a_file_or_as_json_and_enqueue_their_run() {
         .clone()
         .oneshot(json_req(
             "GET",
-            &format!("/v1/orgs/acme/jobs/{job_id}"),
+            &format!("/v1/orgs/acme/datasets/default/jobs/{job_id}"),
             &steward_key,
             Body::empty(),
         ))
@@ -255,7 +255,7 @@ async fn deliveries_arrive_as_a_file_or_as_json_and_enqueue_their_run() {
     let resp = app
         .clone()
         .oneshot(upload_req(
-            "/v1/orgs/acme/imports?source=crm",
+            "/v1/orgs/acme/datasets/default/imports?source=crm",
             &steward_key,
             &ct,
             body,
@@ -282,7 +282,7 @@ async fn deliveries_arrive_as_a_file_or_as_json_and_enqueue_their_run() {
     let resp = app
         .clone()
         .oneshot(upload_req(
-            "/v1/orgs/acme/imports?source=crm",
+            "/v1/orgs/acme/datasets/default/imports?source=crm",
             &viewer_key,
             &ct,
             body,
@@ -295,7 +295,12 @@ async fn deliveries_arrive_as_a_file_or_as_json_and_enqueue_their_run() {
     let (ct, body) = multipart_body("crm.csv", "crm_id\nC9\n");
     let resp = app
         .clone()
-        .oneshot(upload_req("/v1/orgs/acme/imports", &steward_key, &ct, body))
+        .oneshot(upload_req(
+            "/v1/orgs/acme/datasets/default/imports",
+            &steward_key,
+            &ct,
+            body,
+        ))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
@@ -306,7 +311,7 @@ async fn deliveries_arrive_as_a_file_or_as_json_and_enqueue_their_run() {
     let resp = app
         .clone()
         .oneshot(upload_req(
-            "/v1/orgs/acme/imports?source=nosuch",
+            "/v1/orgs/acme/datasets/default/imports?source=nosuch",
             &steward_key,
             &ct,
             body,
@@ -328,7 +333,7 @@ async fn deliveries_arrive_as_a_file_or_as_json_and_enqueue_their_run() {
     let resp = app
         .clone()
         .oneshot(upload_req(
-            "/v1/orgs/acme/imports?source=crm",
+            "/v1/orgs/acme/datasets/default/imports?source=crm",
             &steward_key,
             &ct,
             body,
@@ -342,7 +347,7 @@ async fn deliveries_arrive_as_a_file_or_as_json_and_enqueue_their_run() {
     let resp = app
         .clone()
         .oneshot(upload_req(
-            "/v1/orgs/acme/imports?source=crm",
+            "/v1/orgs/acme/datasets/default/imports?source=crm",
             &steward_key,
             &ct,
             body,
@@ -372,7 +377,7 @@ async fn deliveries_arrive_as_a_file_or_as_json_and_enqueue_their_run() {
     let resp = app
         .clone()
         .oneshot(upload_req(
-            "/v1/orgs/acme/imports?source=crm",
+            "/v1/orgs/acme/datasets/default/imports?source=crm",
             &steward_key,
             &ct,
             body,
@@ -413,7 +418,7 @@ async fn deliveries_arrive_as_a_file_or_as_json_and_enqueue_their_run() {
         .clone()
         .oneshot(json_req(
             "POST",
-            "/v1/orgs/acme/records/ingest",
+            "/v1/orgs/acme/datasets/default/records/ingest",
             &viewer_key,
             Body::from(push.to_string()),
         ))
@@ -426,7 +431,7 @@ async fn deliveries_arrive_as_a_file_or_as_json_and_enqueue_their_run() {
         .clone()
         .oneshot(json_req(
             "POST",
-            "/v1/orgs/acme/records/ingest",
+            "/v1/orgs/acme/datasets/default/records/ingest",
             &steward_key,
             Body::from(push.to_string()),
         ))
@@ -487,7 +492,7 @@ async fn deliveries_arrive_as_a_file_or_as_json_and_enqueue_their_run() {
         .clone()
         .oneshot(json_req(
             "POST",
-            "/v1/orgs/acme/records/ingest",
+            "/v1/orgs/acme/datasets/default/records/ingest",
             &steward_key,
             Body::from(tricky.to_string()),
         ))
@@ -510,7 +515,7 @@ async fn deliveries_arrive_as_a_file_or_as_json_and_enqueue_their_run() {
         .clone()
         .oneshot(json_req(
             "POST",
-            "/v1/orgs/acme/records/ingest",
+            "/v1/orgs/acme/datasets/default/records/ingest",
             &steward_key,
             Body::from(unknown.to_string()),
         ))
@@ -545,7 +550,7 @@ async fn deliveries_arrive_as_a_file_or_as_json_and_enqueue_their_run() {
             .clone()
             .oneshot(json_req(
                 "POST",
-                "/v1/orgs/acme/records/ingest",
+                "/v1/orgs/acme/datasets/default/records/ingest",
                 &steward_key,
                 Body::from(body.to_string()),
             ))

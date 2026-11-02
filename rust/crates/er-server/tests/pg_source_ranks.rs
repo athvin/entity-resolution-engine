@@ -1,7 +1,7 @@
 //! Regression: the `source_priority` master-election policy could never load
 //! its source ranks (behind `ER_TEST_PG_DSN`).
 //!
-//! `GET /v1/orgs/{org}/merge-plans?policy=source_priority` is the one policy
+//! `GET /v1/orgs/{org}/datasets/default/merge-plans?policy=source_priority` is the one policy
 //! that needs the org's config, which it loaded with
 //! `pg::get_config_version(&client, org, active)` — passing the org **name**
 //! where that query keys on the org **id**. The lookup therefore missed for
@@ -91,7 +91,7 @@ async fn source_priority_loads_its_ranks_from_the_active_config() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/config/versions",
+            "/v1/orgs/acme/datasets/default/config/versions",
             &admin_key,
             Body::from(serde_json::json!({ "yaml": DEFAULT_YAML }).to_string()),
         ))
@@ -103,7 +103,7 @@ async fn source_priority_loads_its_ranks_from_the_active_config() {
         .clone()
         .oneshot(req(
             "POST",
-            &format!("/v1/orgs/acme/config/versions/{version}/publish"),
+            &format!("/v1/orgs/acme/datasets/default/config/versions/{version}/publish"),
             &admin_key,
             Body::empty(),
         ))
@@ -116,7 +116,7 @@ async fn source_priority_loads_its_ranks_from_the_active_config() {
         .clone()
         .oneshot(req(
             "GET",
-            "/v1/orgs/acme/merge-plans?policy=most_attributes",
+            "/v1/orgs/acme/datasets/default/merge-plans?policy=most_attributes",
             &admin_key,
             Body::empty(),
         ))
@@ -133,7 +133,7 @@ async fn source_priority_loads_its_ranks_from_the_active_config() {
         .clone()
         .oneshot(req(
             "GET",
-            "/v1/orgs/acme/merge-plans?policy=source_priority",
+            "/v1/orgs/acme/datasets/default/merge-plans?policy=source_priority",
             &admin_key,
             Body::empty(),
         ))

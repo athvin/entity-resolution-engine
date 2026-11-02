@@ -1,13 +1,13 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { hydratedFill, login, ORG, triageOrg, USERS, wizardOrg } from "./helpers";
+import { DS, hydratedFill, login, ORG, triageOrg, USERS, wizardOrg } from "./helpers";
 
 test.describe("config studio", () => {
   test("renders thresholds over the histogram, survivorship, and rule editors", async ({
     page,
   }) => {
     await login(page, USERS.viewer);
-    await page.goto(`/${ORG}/settings/config`);
+    await page.goto(`/${ORG}/${DS}/settings/config`);
     await expect(page.getByTestId("config-studio")).toContainText("active v1 · tenant acme");
     await expect(page.getByTestId("gray-band")).toBeVisible();
     await expect(page.getByTestId("band-estimate")).toContainText("recently scored pairs");
@@ -25,7 +25,7 @@ test.describe("config studio", () => {
 
   test("shows the nickname lexicon, read-only for viewers", async ({ page }) => {
     await login(page, USERS.viewer);
-    await page.goto(`/${ORG}/settings/config`);
+    await page.goto(`/${ORG}/${DS}/settings/config`);
     await expect(page.getByTestId("lexicon-editor")).toBeVisible();
     await expect(page.getByTestId("lexicon-pair").first()).toBeVisible();
     // Viewers cannot edit: no add/save controls.
@@ -36,7 +36,7 @@ test.describe("config studio", () => {
   test("an admin adds a nickname pair and saves", async ({ page }, testInfo) => {
     const org = triageOrg(testInfo.project.name);
     await login(page, USERS.admin);
-    await page.goto(`/${org}/settings/config`);
+    await page.goto(`/${org}/${DS}/settings/config`);
     await expect(page.getByTestId("lexicon-editor")).toBeVisible();
     await page.getByTestId("lexicon-a").fill("liz");
     await page.getByTestId("lexicon-b").fill("elizabeth");
@@ -49,7 +49,7 @@ test.describe("config studio", () => {
     test.skip(isMobile, "the publish journey runs once, on desktop");
     const org = triageOrg(testInfo.project.name);
     await login(page, USERS.admin);
-    await page.goto(`/${org}/settings/config`);
+    await page.goto(`/${org}/${DS}/settings/config`);
     await expect(page.getByTestId("threshold-editor")).toBeVisible();
 
     // Nothing changed yet — publish is disabled.
@@ -73,7 +73,7 @@ test.describe("config studio", () => {
    */
   test("a viewer can ask what a rule does but cannot describe a change", async ({ page }) => {
     await login(page, USERS.viewer);
-    await page.goto(`/${ORG}/settings/config`);
+    await page.goto(`/${ORG}/${DS}/settings/config`);
     await expect(page.getByTestId("config-ai")).toBeVisible();
 
     // The writing half is ABSENT, not merely disabled.
@@ -95,7 +95,7 @@ test.describe("config studio", () => {
     // with the publish journeys that assert "v2 published" and click `diff-2`.
     const org = "configai-dev";
     await login(page, USERS.admin);
-    await page.goto(`/${org}/settings/config`);
+    await page.goto(`/${org}/${DS}/settings/config`);
     await expect(page.getByTestId("config-ai")).toBeVisible();
 
     await page.getByTestId("config-ai-instruction").fill("raise the review threshold a little");
@@ -120,7 +120,7 @@ test.describe("config studio", () => {
   test("an admin gets a proposed starting config as a draft", async ({ page, isMobile }) => {
     test.skip(isMobile, "the config journey runs once, on desktop");
     await login(page, USERS.admin);
-    await page.goto("/configai-dev/settings/config");
+    await page.goto("/configai-dev/default/settings/config");
     await expect(page.getByTestId("config-ai")).toBeVisible();
 
     const [response] = await Promise.all([
@@ -141,7 +141,7 @@ test.describe("config studio", () => {
     // Its own mutating org: the tier-A journey publishes on the triage org in
     // parallel, and two publishes there would race the pinned version number.
     await login(page, USERS.admin);
-    await page.goto("/selectall-dev/settings/config");
+    await page.goto("/selectall-dev/default/settings/config");
     await expect(page.getByTestId("blocking-editor")).toBeVisible();
 
     // The mutable config declares no blocking; adding a first rule arms tier B.
@@ -156,7 +156,7 @@ test.describe("config studio", () => {
   test("a comparison edit arms the tier C cost label", async ({ page, isMobile }) => {
     test.skip(isMobile, "identical control; keep the matrix lean");
     await login(page, USERS.admin);
-    await page.goto(`/${ORG}/settings/config`);
+    await page.goto(`/${ORG}/${DS}/settings/config`);
     await expect(page.getByTestId("comparison-editor")).toBeVisible();
     // Arm only — publishing would mutate the pixel-asserted acme fixtures.
     await page.getByTestId("tf-email").click();
@@ -172,10 +172,10 @@ test.describe("config studio", () => {
     test.skip(isMobile, "identical control; keep the matrix lean");
     const org = triageOrg(testInfo.project.name);
     await login(page, USERS.admin);
-    await page.goto(`/${org}/settings/config`);
+    await page.goto(`/${org}/${DS}/settings/config`);
     // mutable configs have no survivorship block; acme does — use acme read-only
     // for chains, and assert the arm/disarm behavior on thresholds instead.
-    await page.goto(`/${ORG}/settings/config`);
+    await page.goto(`/${ORG}/${DS}/settings/config`);
     const chain = page.getByTestId("chain-email");
     await expect(chain.getByTestId("pill-email-validated")).toBeVisible();
   });
@@ -183,7 +183,7 @@ test.describe("config studio", () => {
 
 /** Walk Sample → Profile → Map → Identity and stop on the Review step. */
 async function walkToReview(page: Page, org: string, sourceName: string): Promise<void> {
-  await page.goto(`/${org}/sources/new`);
+  await page.goto(`/${org}/${DS}/sources/new`);
 
   await page.getByTestId("wizard-file").setInputFiles({
     name: "erp_export.csv",
@@ -223,7 +223,7 @@ test.describe("new-source wizard", () => {
   test("refuses to continue past a file whose record id repeats", async ({ page, isMobile }) => {
     test.skip(isMobile, "the wizard journey runs once, on desktop");
     await login(page, USERS.steward);
-    await page.goto(`/${wizardOrg("desktop-chromium")}/sources/new`);
+    await page.goto(`/${wizardOrg("desktop-chromium")}/${DS}/sources/new`);
 
     await page.getByTestId("wizard-file").setInputFiles({
       name: "dupes.csv",
@@ -260,7 +260,7 @@ test.describe("new-source wizard", () => {
   }) => {
     test.skip(isMobile, "the wizard journey runs once, on desktop");
     await login(page, USERS.steward);
-    await page.goto(`/${wizardOrg("desktop-chromium")}/sources/new`);
+    await page.goto(`/${wizardOrg("desktop-chromium")}/${DS}/sources/new`);
 
     await page.getByTestId("wizard-file").setInputFiles({
       name: "legacy.csv",
@@ -344,7 +344,7 @@ test.describe("new-source wizard", () => {
     // spinning on "Create draft" with no error and no request ever sent —
     // which `grow-your-data.spec.ts` only ever saw as a 120s `waitForURL`
     // timeout, two phases away from the real stall.
-    await page.route(`**/api/orgs/${org}/config`, (route) =>
+    await page.route(`**/api/orgs/${org}/datasets/${DS}/config`, (route) =>
       route.fulfill({ status: 500, json: { code: "internal", message: "config read failed" } }),
     );
     await walkToReview(page, org, `erp_gate_${testInfo.project.name.replaceAll("-", "_")}`);
@@ -362,7 +362,7 @@ test.describe("new-source wizard", () => {
     const org = wizardOrg(testInfo.project.name);
     await login(page, USERS.admin);
     // Draft and publish go through; the upload is the hop that fails.
-    await page.route(`**/api/orgs/${org}/imports*`, (route) =>
+    await page.route(`**/api/orgs/${org}/datasets/${DS}/imports*`, (route) =>
       route.fulfill({
         status: 422,
         json: { code: "validation", message: "the drop dir rejected the delivery" },
@@ -390,10 +390,10 @@ test.describe("campaigns", () => {
     await login(page, USERS.steward);
     // Segments preview needs golden records — acme has them; use acme for the
     // read-only preview assertion and the project org for mutations.
-    await page.goto(`/${ORG}/campaigns`);
+    await page.goto(`/${ORG}/${DS}/campaigns`);
     await expect(page.getByTestId("segment-preview")).toContainText("snapshot 42");
 
-    await page.goto(`/${org}/campaigns`);
+    await page.goto(`/${org}/${DS}/campaigns`);
     const name = `seg-${testInfo.project.name}`;
     await page.getByTestId("segment-name").fill(name);
     await page.getByTestId("segment-create").click();
@@ -412,7 +412,7 @@ test.describe("campaigns", () => {
 
   test("viewers can export but not create or delete", async ({ page }) => {
     await login(page, USERS.viewer);
-    await page.goto(`/${ORG}/campaigns`);
+    await page.goto(`/${ORG}/${DS}/campaigns`);
     await expect(page.getByTestId("segment-builder")).toHaveCount(0);
   });
 });
@@ -420,7 +420,7 @@ test.describe("campaigns", () => {
 test.describe("assistant", () => {
   test("streams an answer grounded in a cited tool call", async ({ page }) => {
     await login(page, USERS.viewer);
-    await page.goto(`/${ORG}/assistant`);
+    await page.goto(`/${ORG}/${DS}/assistant`);
     await expect(page.getByTestId("assistant-suggestions")).toBeVisible();
 
     // hydratedFill, not fill: the send button is gated on React state, and a
@@ -450,7 +450,7 @@ test.describe("assistant", () => {
   }) => {
     test.skip(isMobile, "the assistant journey runs once, on desktop");
     await login(page, USERS.steward);
-    await page.goto(`/${triageOrg("desktop-chromium")}/assistant`);
+    await page.goto(`/${triageOrg("desktop-chromium")}/${DS}/assistant`);
     await hydratedFill(
       page,
       "assistant-input",
@@ -477,14 +477,14 @@ test.describe("assistant", () => {
 
   test("assistant visual baseline @visual", async ({ page }) => {
     await login(page, USERS.viewer);
-    await page.goto(`/${ORG}/assistant`);
+    await page.goto(`/${ORG}/${DS}/assistant`);
     await expect(page.getByTestId("assistant-suggestions")).toBeVisible();
     await expect(page).toHaveScreenshot("assistant.png", { fullPage: true });
   });
 
   test("config studio visual baseline @visual", async ({ page }) => {
     await login(page, USERS.viewer);
-    await page.goto(`/${ORG}/settings/config`);
+    await page.goto(`/${ORG}/${DS}/settings/config`);
     await expect(page.getByTestId("band-estimate")).toContainText("recently scored pairs");
     // Wait for version history TOO. The band estimate resolves from a different
     // query, so waiting only on it let the screenshot catch the history card

@@ -141,7 +141,11 @@ async fn drain_and_correct_applies_through_dispatcher() {
 
     let resp = app
         .clone()
-        .oneshot(op("GET", "/v1/orgs/acme/reviews", Body::empty()))
+        .oneshot(op(
+            "GET",
+            "/v1/orgs/acme/datasets/default/reviews",
+            Body::empty(),
+        ))
         .await
         .unwrap();
     let review_id = json_body(resp).await["items"][0]["id"]
@@ -171,7 +175,7 @@ async fn drain_and_correct_applies_through_dispatcher() {
         .clone()
         .oneshot(op(
             "POST",
-            "/v1/orgs/acme/assertions",
+            "/v1/orgs/acme/datasets/default/assertions",
             Body::from(r#"{"kind":"always","a":"crm:C001","b":"billing:B001"}"#),
         ))
         .await
@@ -181,7 +185,7 @@ async fn drain_and_correct_applies_through_dispatcher() {
         .clone()
         .oneshot(op(
             "POST",
-            &format!("/v1/orgs/acme/reviews/{review_id}/resolve"),
+            &format!("/v1/orgs/acme/datasets/default/reviews/{review_id}/resolve"),
             Body::from(r#"{"resolution":"match"}"#),
         ))
         .await
@@ -215,7 +219,11 @@ async fn drain_and_correct_applies_through_dispatcher() {
     );
     let resp = app
         .clone()
-        .oneshot(op("GET", "/v1/orgs/acme/assertions", Body::empty()))
+        .oneshot(op(
+            "GET",
+            "/v1/orgs/acme/datasets/default/assertions",
+            Body::empty(),
+        ))
         .await
         .unwrap();
     let rows = json_body(resp).await["items"].as_array().unwrap().clone();
@@ -226,7 +234,7 @@ async fn drain_and_correct_applies_through_dispatcher() {
     let resp = app
         .oneshot(op(
             "GET",
-            &format!("/v1/orgs/acme/reviews/{review_id}"),
+            &format!("/v1/orgs/acme/datasets/default/reviews/{review_id}"),
             Body::empty(),
         ))
         .await

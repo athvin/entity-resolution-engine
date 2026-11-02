@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { login, modelOrg, USERS } from "./helpers";
+import { DS, login, modelOrg, USERS } from "./helpers";
 
 /**
  * The model registry surface (E5b-3). Before this the registry had no UI at
@@ -12,7 +12,7 @@ test.describe("model registry", () => {
   test("shows every active name, not one", async ({ page }, testInfo) => {
     const org = modelOrg(testInfo.project.name);
     await login(page, USERS.steward);
-    await page.goto(`/${org}/settings/models`);
+    await page.goto(`/${org}/${DS}/settings/models`);
 
     // Two names active at once is the shape an ensemble has, and the reason
     // `active` is a list: activation is unique per (org, NAME), so the old
@@ -32,7 +32,7 @@ test.describe("model registry", () => {
   test("the weights view reads log2(m/u) off the model", async ({ page }, testInfo) => {
     const org = modelOrg(testInfo.project.name);
     await login(page, USERS.steward);
-    await page.goto(`/${org}/settings/models`);
+    await page.goto(`/${org}/${DS}/settings/models`);
     await page.getByTestId("model-weights-default-1").click();
 
     const weights = page.getByTestId("model-weights");
@@ -52,7 +52,7 @@ test.describe("model registry", () => {
   }, testInfo) => {
     const org = modelOrg(testInfo.project.name);
     await login(page, USERS.steward);
-    await page.goto(`/${org}/settings/models`);
+    await page.goto(`/${org}/${DS}/settings/models`);
     await page.getByTestId("model-weights-default-1").click();
 
     const evaluation = page.getByTestId("model-evaluation");
@@ -87,7 +87,7 @@ test.describe("model registry", () => {
   test("a steward sees the registry but cannot change it", async ({ page }, testInfo) => {
     const org = modelOrg(testInfo.project.name);
     await login(page, USERS.steward);
-    await page.goto(`/${org}/settings/models`);
+    await page.goto(`/${org}/${DS}/settings/models`);
     await expect(page.getByTestId("models-table")).toBeVisible();
     // The steward is the highest NON-admin role, so this is the tight boundary:
     // if a steward cannot mint or activate a version, no lesser role can.
@@ -104,7 +104,7 @@ test.describe("model registry", () => {
     test.skip(isMobile, "state-mutating flow runs once, on the desktop project");
     const org = modelOrg(testInfo.project.name);
     await login(page, USERS.admin);
-    await page.goto(`/${org}/settings/models`);
+    await page.goto(`/${org}/${DS}/settings/models`);
 
     await page.getByTestId("model-activate-default-2").click();
     const table = page.getByTestId("models-table");
@@ -123,7 +123,7 @@ test.describe("model registry", () => {
     test.skip(isMobile, "state-mutating flow runs once, on the desktop project");
     const org = modelOrg(testInfo.project.name);
     await login(page, USERS.admin);
-    await page.goto(`/${org}/settings/models`);
+    await page.goto(`/${org}/${DS}/settings/models`);
     await page.getByTestId("model-compile").click();
     // A compile lands as a DRAFT: deriving a model must not re-cluster a
     // tenant's corpus as a side effect.

@@ -101,7 +101,11 @@ fn populate_lake(catalog: &str, data_path: &str) {
 async fn golden_rows(app: &axum::Router) -> Vec<RecordBatch> {
     let resp = app
         .clone()
-        .oneshot(op("GET", "/v1/orgs/acme/golden-records", Body::empty()))
+        .oneshot(op(
+            "GET",
+            "/v1/orgs/acme/datasets/default/golden-records",
+            Body::empty(),
+        ))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -187,7 +191,7 @@ async fn mass_update_overrides_and_clears_golden_fields() {
         .clone()
         .oneshot(op(
             "POST",
-            "/v1/orgs/acme/mass-update",
+            "/v1/orgs/acme/datasets/default/mass-update",
             Body::from(body.to_string()),
         ))
         .await
@@ -223,7 +227,7 @@ async fn mass_update_overrides_and_clears_golden_fields() {
         .clone()
         .oneshot(op(
             "POST",
-            "/v1/orgs/acme/mass-update",
+            "/v1/orgs/acme/datasets/default/mass-update",
             Body::from(body.to_string()),
         ))
         .await
@@ -253,7 +257,7 @@ async fn mass_update_overrides_and_clears_golden_fields() {
         .clone()
         .oneshot(op(
             "POST",
-            "/v1/orgs/acme/mass-update",
+            "/v1/orgs/acme/datasets/default/mass-update",
             Body::from(bad.to_string()),
         ))
         .await

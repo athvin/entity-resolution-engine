@@ -37,10 +37,11 @@ export interface BlockingEstimate {
  * fetching it on every Runs page load would make a cheap page expensive —
  * `enabled` is the caller's explicit "yes, estimate it now".
  */
-export function useBlockingEstimate(org: string, enabled: boolean) {
+export function useBlockingEstimate(org: string, ds: string, enabled: boolean) {
   return useQuery({
-    queryKey: queryKeys.blockingEstimate(org),
-    queryFn: () => bffFetch<BlockingEstimate>(`/api/orgs/${org}/blocking-estimate?largest=5`),
+    queryKey: queryKeys.blockingEstimate(org, ds),
+    queryFn: () =>
+      bffFetch<BlockingEstimate>(`/api/orgs/${org}/datasets/${ds}/blocking-estimate?largest=5`),
     enabled,
     // The corpus does not change while a page is open, and the query is
     // expensive; a stale estimate is better than a surprise scan.
@@ -55,12 +56,12 @@ export interface SegmentChoice {
   predicate: string;
 }
 
-export function useConfigSegments(org: string) {
+export function useConfigSegments(org: string, ds: string) {
   return useQuery({
-    queryKey: queryKeys.configSegments(org),
+    queryKey: queryKeys.configSegments(org, ds),
     queryFn: async () => {
       const body = await bffFetch<{ segments?: SegmentChoice[] }>(
-        `/api/orgs/${org}/config/segments`,
+        `/api/orgs/${org}/datasets/${ds}/config/segments`,
       );
       // The envelope is the server's `{segments: […]}`; unwrapped here rather
       // than asserted about, which is the W0.5b lesson.

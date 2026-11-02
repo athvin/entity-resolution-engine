@@ -83,8 +83,28 @@ pub async fn ensure_schema(client: &mut Client) -> Result<(), SchemaError> {
     // suppress the DDL ledger for the replay so boots don't spam it (real
     // migrations and operator DDL never set this).
     tx.batch_execute("SET LOCAL er.ddl_log_skip = 'on'").await?;
+    // A baseline statement can reference a column the live store does not have
+    // yet — a new index lands in the baseline the same release its column
+    // lands in the catalog, and the reconciler that ADDs the column runs
+    // AFTER this replay. `IF NOT EXISTS` only skips an existing index; on a
+    // live older store the CREATE still resolves its column list and fails
+    // with undefined_column. Those statements are deferred (under a savepoint,
+    // so the transaction survives) and replayed STRICTLY after the reconciler
+    // has added what they need. Any other error still fails the boot here.
+    let mut deferred: Vec<&str> = Vec::new();
     for stmt in er_entities::schema::POSTGRES_BASELINE {
-        tx.batch_execute(stmt).await?;
+        tx.batch_execute("SAVEPOINT baseline_stmt").await?;
+        match tx.batch_execute(stmt).await {
+            Ok(()) => {
+                tx.batch_execute("RELEASE SAVEPOINT baseline_stmt").await?;
+            }
+            Err(e) if e.code() == Some(&tokio_postgres::error::SqlState::UNDEFINED_COLUMN) => {
+                tx.batch_execute("ROLLBACK TO SAVEPOINT baseline_stmt")
+                    .await?;
+                deferred.push(stmt);
+            }
+            Err(e) => return Err(e.into()),
+        }
     }
     tx.commit().await?;
     // The reconciler's ADD COLUMNs are real migrations: ledgered, and visible
@@ -108,6 +128,21 @@ pub async fn ensure_schema(client: &mut Client) -> Result<(), SchemaError> {
         eprintln!(
             "er-server: control-plane schema is ahead of this build: {}: {}",
             ahead.relation, ahead.message
+        );
+    }
+    // Baseline statements deferred above (indexes on columns the reconciler
+    // just added) replay strictly now — before the AfterReconcile fixups, so
+    // the new-named locks exist before the old-named ones are dropped.
+    if !deferred.is_empty() {
+        let tx = client.transaction().await?;
+        tx.batch_execute("SET LOCAL er.ddl_log_skip = 'on'").await?;
+        for stmt in &deferred {
+            tx.batch_execute(stmt).await?;
+        }
+        tx.commit().await?;
+        eprintln!(
+            "er-server: {} baseline statement(s) replayed after reconcile (new-column indexes)",
+            deferred.len()
         );
     }
     // Data work that needs the reconciler's ADD COLUMNs (backfills) runs after
@@ -174,8 +209,12 @@ pub async fn connect_pg_as(dsn: &str, actor: &str) -> Result<Client, PgError> {
 ///
 /// # Errors
 /// Propagates the insert error.
-pub async fn ensure_org(client: &Client, name: &str, config_path: &str) -> Result<(), PgError> {
+pub async fn ensure_org(client: &Client, name: &str, config_path: &str) -> Result<(), SchemaError> {
     er_entities::org::create::ensure(client, &er_ids::new_v7(), name, config_path).await?;
+    // Same invariant the create-org handlers hold: an org has its `default`
+    // dataset from its first moment, not at the next boot's convergence sweep.
+    // Test fixtures reach the dataset-scoped routes through this helper.
+    crate::fixups::ensure_default_dataset_by_name(client, name).await?;
     Ok(())
 }
 
@@ -451,6 +490,14 @@ pub async fn list_jobs_all(
 ///
 /// # Errors
 /// Propagates the update error.
+/// Converge the `default` dataset for every org that lacks one — the same
+/// pass `ensure_schema` runs at boot, callable after minting orgs below the
+/// HTTP layer (`upsert_org_byo`), which deliberately does not converge so the
+/// sweep's own tests keep an unconverged org to exercise.
+pub async fn converge_default_datasets(client: &mut Client) -> Result<(), SchemaError> {
+    crate::fixups::ensure_default_datasets(client).await
+}
+
 pub async fn merge_org_env(
     client: &Client,
     org: &str,
@@ -1590,10 +1637,15 @@ pub async fn publish_config_version(
     client: &Client,
     org_id: &str,
     org_name: &str,
+    dataset_id: &str,
     version: i64,
     tier: Option<&str>,
 ) -> Result<(), PgError> {
     er_entities::config_version::update::publish(client, tier, org_id, version).await?;
+    // Both pointers move: the dataset's is what every dataset-scoped read
+    // (`dataset_active_config`, delivery preconditions) consults; the org's is
+    // the deprecated mirror the clean-break phase retires.
+    er_entities::dataset::update::set_active_config(client, version, dataset_id).await?;
     er_entities::org::update::set_active_config(client, version, org_name).await?;
     Ok(())
 }

@@ -632,7 +632,7 @@ gen_screens_coverage() {
 	# covered screen is worse than one that stays quiet.
 	gated=$(
 		grep -oE 'path: (`[^`]*`|"[^"]*"|'"'"'[^'"'"']*'"'"')' "$spec" \
-			| sed -e 's/^path: //' -e 's/^[`"'"'"']//' -e 's/[`"'"'"']$//' -e 's#\${ORG}#[org]#g' \
+			| sed -e 's/^path: //' -e 's/^[`"'"'"']//' -e 's/[`"'"'"']$//' -e 's#\${ORG}#[org]#g' -e 's#\${DS}#[ds]#g' \
 			| sort -u
 	)
 	echo "### Screens swept by the axe gate"

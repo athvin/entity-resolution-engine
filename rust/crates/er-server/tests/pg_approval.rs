@@ -147,7 +147,7 @@ async fn only_approved_reviews_are_staged_and_only_while_the_tag_lives() {
             .clone()
             .oneshot(req(
                 "POST",
-                &format!("/v1/orgs/acme/tags/{tag_id}/apply"),
+                &format!("/v1/orgs/acme/datasets/default/tags/{tag_id}/apply"),
                 &steward_key,
                 Body::from(
                     serde_json::json!({ "subject_type": "review", "subject_id": review })
@@ -164,7 +164,7 @@ async fn only_approved_reviews_are_staged_and_only_while_the_tag_lives() {
         .clone()
         .oneshot(req(
             "POST",
-            &format!("/v1/orgs/acme/tags/{tag_id}/apply"),
+            &format!("/v1/orgs/acme/datasets/default/tags/{tag_id}/apply"),
             &steward_key,
             Body::from(
                 serde_json::json!({ "subject_type": "entity", "subject_id": "01jm0e000000" })
@@ -186,7 +186,7 @@ async fn only_approved_reviews_are_staged_and_only_while_the_tag_lives() {
                 .clone()
                 .oneshot(req(
                     "POST",
-                    "/v1/orgs/acme/jobs",
+                    "/v1/orgs/acme/datasets/default/jobs",
                     &admin_key,
                     Body::from(serde_json::json!({ "kind": "apply_approved" }).to_string()),
                 ))
@@ -295,7 +295,7 @@ async fn only_approved_reviews_are_staged_and_only_while_the_tag_lives() {
             .clone()
             .oneshot(req(
                 "POST",
-                &format!("/v1/orgs/acme/tags/{tag_id}/apply"),
+                &format!("/v1/orgs/acme/datasets/default/tags/{tag_id}/apply"),
                 &steward_key,
                 Body::from(
                     serde_json::json!({ "subject_type": "review", "subject_id": review })

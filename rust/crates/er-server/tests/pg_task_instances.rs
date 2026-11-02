@@ -338,7 +338,10 @@ async fn the_task_ledger_statements_hold_their_contracts() {
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri(format!("/v1/orgs/acme/jobs/{}/tasks", job.id))
+                .uri(format!(
+                    "/v1/orgs/acme/datasets/default/jobs/{}/tasks",
+                    job.id
+                ))
                 .header("authorization", "Bearer op-secret")
                 .body(Body::empty())
                 .unwrap(),

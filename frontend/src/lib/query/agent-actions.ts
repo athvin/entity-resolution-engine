@@ -19,13 +19,13 @@ import type { ProposedAction } from "@/lib/agent-actions/propose";
  * first and is reachable from the UI; an endpoint whose only caller is the
  * assistant would be exactly the write tool this design avoids.
  */
-export function useRunAction(org: string) {
+export function useRunAction(org: string, ds: string) {
   return useMutation({
     mutationFn: async (action: ProposedAction) => {
       switch (action.kind) {
         case "resolve_review":
           return bffFetch<unknown>(
-            `/api/orgs/${org}/reviews/${encodeURIComponent(action.subject)}/resolve`,
+            `/api/orgs/${org}/datasets/${ds}/reviews/${encodeURIComponent(action.subject)}/resolve`,
             {
               method: "POST",
               headers: { "content-type": "application/json" },
@@ -42,7 +42,7 @@ export function useRunAction(org: string) {
             protect_record: "protect",
             unprotect_record: "unprotect",
           }[action.kind];
-          return bffFetch<unknown>(`/api/orgs/${org}/records/${path}`, {
+          return bffFetch<unknown>(`/api/orgs/${org}/datasets/${ds}/records/${path}`, {
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({ record_key: action.subject }),

@@ -104,7 +104,7 @@ pub struct AppState {
     /// `POST /v1/email` then answers 503, exactly as an environment with no mail
     /// backend does.
     mail: Arc<mail::Mailer>,
-    /// The `POST /v1/orgs/{org}/imports` body cap, enforced both as the route's
+    /// The `POST /v1/orgs/{org}/datasets/{ds}/imports` body cap, enforced both as the route's
     /// body limit and while the part streams. Defaults to
     /// [`DEFAULT_MAX_IMPORT_BYTES`]; configurable so an operator can tighten it
     /// and so the oversize path is testable without a 256 MiB request.
@@ -205,7 +205,7 @@ impl AppState {
         self
     }
 
-    /// Override the import body cap: the `POST /v1/orgs/{org}/imports` route's
+    /// Override the import body cap: the `POST /v1/orgs/{org}/datasets/{ds}/imports` route's
     /// body limit and the running byte count while the part streams.
     #[must_use]
     pub fn with_max_import_bytes(mut self, bytes: usize) -> Self {
@@ -339,6 +339,28 @@ impl IntoResponse for Refusal {
 ///
 /// Boxed like `org_or_404`'s error, because an axum `Response` is large enough
 /// that clippy's `result_large_err` refuses it unboxed.
+/// [`refuse_unless_active`] down to the dataset: the org must be active AND
+/// the dataset must be active, the 409 naming whichever is not. A suspended
+/// dataset refuses work without touching its siblings — the point of
+/// per-dataset lifecycle.
+fn refuse_unless_active_dataset(
+    org: &pg::OrgDetail,
+    d: &pg::DatasetDetail,
+    what: &str,
+) -> Result<(), Box<axum::response::Response>> {
+    refuse_unless_active(org, what)?;
+    if d.state == "active" {
+        return Ok(());
+    }
+    Err(Box::new(detail_err(
+        StatusCode::CONFLICT,
+        format!(
+            "dataset '{}' is {}; {what} are accepted only when active",
+            d.name, d.state
+        ),
+    )))
+}
+
 fn refuse_unless_active(
     org: &pg::OrgDetail,
     what: &str,
@@ -898,7 +920,14 @@ async fn provision_org(
     }
     // (org_id, org_name) — the two are adjacent `&str`s, so a swap compiles and
     // silently publishes nothing. Caught by asserting `active_config_version`.
-    if let Err(e) = pg::publish_config_version(&client, &org_row.id, name, version, Some("C")).await
+    let Some(ds_id) = ds.as_deref() else {
+        return detail_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "the default dataset was just converged yet cannot be read back",
+        );
+    };
+    if let Err(e) =
+        pg::publish_config_version(&client, &org_row.id, name, ds_id, version, Some("C")).await
     {
         return pg_err(e);
     }
@@ -1962,12 +1991,12 @@ fn config_invalid(e: &er_config::ConfigError) -> (StatusCode, Json<Value>) {
     )
 }
 
-/// Admin+: create a draft config version (`POST /v1/orgs/{org}/config/versions`).
+/// Admin+: create a draft config version (`POST /v1/orgs/{org}/datasets/{ds}/config/versions`).
 /// The YAML is structurally validated and hashed; the version is `max+1`.
 async fn create_config_version(
     principal: Principal,
     State(state): State<AppState>,
-    Path(org): Path<String>,
+    Path((org, ds)): Path<(String, String)>,
     Json(body): Json<ConfigIn>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Admin) {
@@ -1989,13 +2018,16 @@ async fn create_config_version(
         Ok(r) => r,
         Err(r) => return *r,
     };
+    let d = match dataset_or_404(&client, &org_row, &ds).await {
+        Ok(row) => row,
+        Err(r) => return *r,
+    };
     // History images record the acting principal (er.actor).
     let _ = pg::set_actor(&client, &principal.actor).await;
-    let ds = stamp_dataset(&client, &org_row.id).await;
     match pg::create_config_version(
         &client,
         &org_row.id,
-        ds.as_deref(),
+        Some(d.id.as_str()),
         &body.yaml,
         &hash,
         &principal.actor,
@@ -2087,7 +2119,7 @@ fn model_weights(model_json: &str) -> Option<Value> {
 }
 
 /// Admin+: compile the org's ACTIVE config into a new draft model version
-/// (`POST /v1/orgs/{org}/models:compile`).
+/// (`POST /v1/orgs/{org}/datasets/{ds}/models:compile`).
 ///
 /// This is the endpoint that makes the tenant-facing matching config mean
 /// something. The `comparisons:` / `blocking:` blocks have always been
@@ -2103,7 +2135,7 @@ fn model_weights(model_json: &str) -> Option<Value> {
 async fn compile_model_version(
     principal: Principal,
     State(state): State<AppState>,
-    Path(org): Path<String>,
+    Path((org, ds)): Path<(String, String)>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Admin) {
         return e.into_response();
@@ -2119,7 +2151,11 @@ async fn compile_model_version(
         Ok(r) => r,
         Err(r) => return *r,
     };
-    let config = match org_active_config(&client, &org_row).await {
+    let d = match dataset_or_404(&client, &org_row, &ds).await {
+        Ok(row) => row,
+        Err(r) => return *r,
+    };
+    let config = match dataset_active_config(&client, &d).await {
         Ok(c) => c,
         Err(r) => return *r,
     };
@@ -2151,11 +2187,10 @@ async fn compile_model_version(
         "by": principal.actor,
     });
     let _ = pg::set_actor(&client, &principal.actor).await;
-    let ds = stamp_dataset(&client, &org_row.id).await;
     match pg::create_model_version(
         &client,
         &org_row.id,
-        ds.as_deref(),
+        Some(d.id.as_str()),
         pg::DEFAULT_MODEL_NAME,
         entity_type,
         &compiled.model_json,
@@ -2184,12 +2219,12 @@ async fn compile_model_version(
     }
 }
 
-/// Viewer+: the tenant's model versions (`GET /v1/orgs/{org}/models`), newest
+/// Viewer+: the tenant's model versions (`GET /v1/orgs/{org}/datasets/{ds}/models`), newest
 /// version of each name first, plus which one is active.
 async fn models_index(
     principal: Principal,
     State(state): State<AppState>,
-    Path(org): Path<String>,
+    Path((org, ds)): Path<(String, String)>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
@@ -2205,6 +2240,10 @@ async fn models_index(
         Ok(r) => r,
         Err(r) => return *r,
     };
+    // Scope-correct before anything is served: an unknown dataset 404s.
+    if let Err(r) = dataset_or_404(&client, &org_row, &ds).await {
+        return *r;
+    }
     match pg::list_model_versions(&client, &org_row.id).await {
         Ok(rows) => {
             // `active` is a LIST, one entry per name. It used to be
@@ -2261,7 +2300,7 @@ struct ModelVersionIn {
     provenance: Option<Value>,
 }
 
-/// Admin+: mint a new model version (`POST /v1/orgs/{org}/models/versions`).
+/// Admin+: mint a new model version (`POST /v1/orgs/{org}/datasets/{ds}/models/versions`).
 ///
 /// Versions are immutable — this is the only way a model changes, and it always
 /// lands as a `draft`. Activation is a separate, explicit step so that uploading
@@ -2269,7 +2308,7 @@ struct ModelVersionIn {
 async fn create_model_version(
     principal: Principal,
     State(state): State<AppState>,
-    Path(org): Path<String>,
+    Path((org, ds)): Path<(String, String)>,
     Json(body): Json<ModelVersionIn>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Admin) {
@@ -2296,9 +2335,13 @@ async fn create_model_version(
         Ok(r) => r,
         Err(r) => return *r,
     };
+    let d = match dataset_or_404(&client, &org_row, &ds).await {
+        Ok(row) => row,
+        Err(r) => return *r,
+    };
     // The entity type comes from the org's active config, not the caller: a
     // model scores against one canonical schema and the lake has exactly one.
-    let entity_type = match org_active_config(&client, &org_row).await {
+    let entity_type = match dataset_active_config(&client, &d).await {
         Ok(c) => {
             if c.entity_type.is_person() {
                 "person"
@@ -2317,11 +2360,10 @@ async fn create_model_version(
         .provenance
         .unwrap_or_else(|| json!({ "origin": "uploaded", "by": principal.actor }));
     let _ = pg::set_actor(&client, &principal.actor).await;
-    let ds = stamp_dataset(&client, &org_row.id).await;
     match pg::create_model_version(
         &client,
         &org_row.id,
-        ds.as_deref(),
+        Some(d.id.as_str()),
         &name,
         entity_type,
         &body.model_json,
@@ -2349,11 +2391,11 @@ async fn create_model_version(
 }
 
 /// Viewer+: one model version with its document and weights
-/// (`GET /v1/orgs/{org}/models/{name}/versions/{version}`).
+/// (`GET /v1/orgs/{org}/datasets/{ds}/models/{name}/versions/{version}`).
 async fn get_model_version(
     principal: Principal,
     State(state): State<AppState>,
-    Path((org, name, version)): Path<(String, String, i64)>,
+    Path((org, ds, name, version)): Path<(String, String, String, i64)>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
@@ -2369,6 +2411,10 @@ async fn get_model_version(
         Ok(r) => r,
         Err(r) => return *r,
     };
+    // Scope-correct before anything is served: an unknown dataset 404s.
+    if let Err(r) = dataset_or_404(&client, &org_row, &ds).await {
+        return *r;
+    }
     match pg::model_version(&client, &org_row.id, &name, version).await {
         Ok(Some(m)) => {
             let mut body = model_summary(&m);
@@ -2521,7 +2567,7 @@ fn label_evaluation(
 }
 
 /// Viewer+: how a model version scored against its own labels
-/// (`GET /v1/orgs/{org}/models/{name}/versions/{version}/evaluation`).
+/// (`GET /v1/orgs/{org}/datasets/{ds}/models/{name}/versions/{version}/evaluation`).
 ///
 /// Answers "can I trust this version" with the tenant's own verdicts rather than
 /// a number from training. `?threshold=` overrides the org's configured
@@ -2530,7 +2576,7 @@ fn label_evaluation(
 async fn model_version_evaluation(
     principal: Principal,
     State(state): State<AppState>,
-    Path((org, name, version)): Path<(String, String, i64)>,
+    Path((org, ds, name, version)): Path<(String, String, String, i64)>,
     Query(params): Query<HashMap<String, String>>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
@@ -2547,6 +2593,10 @@ async fn model_version_evaluation(
         Ok(r) => r,
         Err(r) => return *r,
     };
+    // Scope-correct before anything is served: an unknown dataset 404s.
+    if let Err(r) = dataset_or_404(&client, &org_row, &ds).await {
+        return *r;
+    }
     let model = match pg::model_version(&client, &org_row.id, &name, version).await {
         Ok(Some(m)) => m,
         Ok(None) => {
@@ -2582,7 +2632,7 @@ async fn model_version_evaluation(
 }
 
 /// Admin+: activate a model version
-/// (`POST /v1/orgs/{org}/models/{name}/versions/{version}/activate`).
+/// (`POST /v1/orgs/{org}/datasets/{ds}/models/{name}/versions/{version}/activate`).
 ///
 /// Activation is explicit and recorded, because it decides what the next run
 /// scores against — the thing DataGroomr avoids by pinning old models rather
@@ -2590,7 +2640,7 @@ async fn model_version_evaluation(
 async fn activate_model_version(
     principal: Principal,
     State(state): State<AppState>,
-    Path((org, name, version)): Path<(String, String, i64)>,
+    Path((org, ds, name, version)): Path<(String, String, String, i64)>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Admin) {
         return e.into_response();
@@ -2606,6 +2656,10 @@ async fn activate_model_version(
         Ok(r) => r,
         Err(r) => return *r,
     };
+    // Scope-correct before anything is served: an unknown dataset 404s.
+    if let Err(r) = dataset_or_404(&client, &org_row, &ds).await {
+        return *r;
+    }
     let target = match pg::model_version(&client, &org_row.id, &name, version).await {
         Ok(Some(m)) => m,
         Ok(None) => {
@@ -2670,11 +2724,11 @@ fn config_registry_unavailable() -> axum::response::Response {
 }
 
 /// Viewer+: list an org's config versions, newest first
-/// (`GET /v1/orgs/{org}/config/versions`), with no `yaml` body.
+/// (`GET /v1/orgs/{org}/datasets/{ds}/config/versions`), with no `yaml` body.
 async fn list_config_versions(
     principal: Principal,
     State(state): State<AppState>,
-    Path(org): Path<String>,
+    Path((org, ds)): Path<(String, String)>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
@@ -2690,6 +2744,10 @@ async fn list_config_versions(
         Ok(r) => r,
         Err(r) => return *r,
     };
+    // Scope-correct before anything is served: an unknown dataset 404s.
+    if let Err(r) = dataset_or_404(&client, &org_row, &ds).await {
+        return *r;
+    }
     match pg::list_config_versions(&client, &org_row.id).await {
         Ok(rows) => {
             let out: Vec<Value> = rows
@@ -2718,11 +2776,11 @@ fn parse_version(s: &str) -> Option<i64> {
 }
 
 /// Viewer+: one config version with its `yaml`
-/// (`GET /v1/orgs/{org}/config/versions/{version}`), 404 if absent.
+/// (`GET /v1/orgs/{org}/datasets/{ds}/config/versions/{version}`), 404 if absent.
 async fn get_config_version(
     principal: Principal,
     State(state): State<AppState>,
-    Path((org, version)): Path<(String, String)>,
+    Path((org, ds, version)): Path<(String, String, String)>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
@@ -2741,6 +2799,10 @@ async fn get_config_version(
         Ok(r) => r,
         Err(r) => return *r,
     };
+    // Scope-correct before anything is served: an unknown dataset 404s.
+    if let Err(r) = dataset_or_404(&client, &org_row, &ds).await {
+        return *r;
+    }
     match pg::get_config_version(&client, &org_row.id, version).await {
         Ok(Some(d)) => Json(config_detail_json(&d)).into_response(),
         Ok(None) => config_version_missing(&org, &version.to_string()).into_response(),
@@ -2770,12 +2832,12 @@ fn config_detail_json(d: &pg::ConfigVersionDetail) -> Value {
     })
 }
 
-/// Viewer+: the org's active (published) config (`GET /v1/orgs/{org}/config`),
+/// Viewer+: the org's active (published) config (`GET /v1/orgs/{org}/datasets/{ds}/config`),
 /// 404 if nothing is published.
 async fn active_config(
     principal: Principal,
     State(state): State<AppState>,
-    Path(org): Path<String>,
+    Path((org, ds)): Path<(String, String)>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
@@ -2802,6 +2864,10 @@ async fn active_config(
         Ok(r) => r,
         Err(r) => return *r,
     };
+    // Scope-correct before anything is served: an unknown dataset 404s.
+    if let Err(r) = dataset_or_404(&client, &org_row, &ds).await {
+        return *r;
+    }
     match pg::get_config_version(&client, &org_row.id, active).await {
         Ok(Some(d)) => Json(config_detail_json(&d)).into_response(),
         Ok(None) => (
@@ -2881,12 +2947,12 @@ fn sibling_path(path: &str, name: &str) -> String {
     )
 }
 
-/// Viewer+: the org's nickname lexicon (`GET /v1/orgs/{org}/lexicon`). Returns
+/// Viewer+: the org's nickname lexicon (`GET /v1/orgs/{org}/datasets/{ds}/lexicon`). Returns
 /// the packaged default when the org has none yet, so the editor never starts empty.
 async fn get_lexicon(
     principal: Principal,
     State(state): State<AppState>,
-    Path(org): Path<String>,
+    Path((org, ds)): Path<(String, String)>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
@@ -2903,25 +2969,28 @@ async fn get_lexicon(
         Ok(None) => return detail_err(StatusCode::NOT_FOUND, format!("no org '{org}'")),
         Err(e) => return pg_err(e),
     };
-    let pairs: Vec<(String, String)> =
-        match org_row.env.get("ER_LEXICON_PATH").and_then(Value::as_str) {
-            Some(p) if std::path::Path::new(p).exists() => read_lexicon_pairs(p),
-            _ => DEFAULT_LEXICON
-                .iter()
-                .map(|(a, b)| ((*a).to_string(), (*b).to_string()))
-                .collect(),
-        };
+    let d = match dataset_or_404(&client, &org_row, &ds).await {
+        Ok(row) => row,
+        Err(r) => return *r,
+    };
+    let pairs: Vec<(String, String)> = match d.env.get("ER_LEXICON_PATH").and_then(Value::as_str) {
+        Some(p) if std::path::Path::new(p).exists() => read_lexicon_pairs(p),
+        _ => DEFAULT_LEXICON
+            .iter()
+            .map(|(a, b)| ((*a).to_string(), (*b).to_string()))
+            .collect(),
+    };
     Json(json!({ "pairs": lexicon_pairs_json(&pairs) })).into_response()
 }
 
-/// Steward+: replace the org's nickname lexicon (`PUT /v1/orgs/{org}/lexicon`).
+/// Steward+: replace the org's nickname lexicon (`PUT /v1/orgs/{org}/datasets/{ds}/lexicon`).
 /// Canonicalises + validates each pair, atomically writes the org's
 /// `ER_LEXICON_PATH` CSV (deriving + persisting one from `ER_CONFIG_PATH` if
 /// unset), then enqueues a `run_all_full` rebuild to apply it.
 async fn put_lexicon(
     principal: Principal,
     State(state): State<AppState>,
-    Path(org): Path<String>,
+    Path((org, ds)): Path<(String, String)>,
     Json(body): Json<LexiconPut>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Steward) {
@@ -2947,6 +3016,10 @@ async fn put_lexicon(
         }
         Ok(None) => return detail_err(StatusCode::NOT_FOUND, format!("no org '{org}'")),
         Err(e) => return pg_err(e),
+    };
+    let d = match dataset_or_404(&client, &org_row, &ds).await {
+        Ok(row) => row,
+        Err(r) => return *r,
     };
 
     // Validate + canonicalise. Commas/control chars would corrupt the CSV or the
@@ -3016,11 +3089,10 @@ async fn put_lexicon(
 
     let idem = format!("lexicon-apply:{}", er_ids::new_v7());
     let params = json!({ "skip_ingest": true });
-    let ds = stamp_dataset(&client, &org_row.id).await;
     let apply_job = match pg::enqueue(
         &client,
         &org_row.id,
-        ds.as_deref(),
+        Some(d.id.as_str()),
         "run_all_full",
         0,
         Some(&idem),
@@ -3115,7 +3187,7 @@ fn write_config_file(path: &str, yaml: &str) -> std::io::Result<()> {
 }
 
 /// Admin+ (operator for structural blocks): publish a draft config version
-/// (`POST /v1/orgs/{org}/config/versions/{version}/publish`; the Python
+/// (`POST /v1/orgs/{org}/datasets/{ds}/config/versions/{version}/publish`; the Python
 /// `{version}:publish` action). Re-validates, classifies the change tier versus
 /// the current active config, writes the YAML to `config_path`, points
 /// `active_config_version` at it, and enqueues the tier's rebuild jobs.
@@ -3126,7 +3198,7 @@ fn write_config_file(path: &str, yaml: &str) -> std::io::Result<()> {
 async fn publish_config_version(
     principal: Principal,
     State(state): State<AppState>,
-    Path((org, version)): Path<(String, String)>,
+    Path((org, ds, version)): Path<(String, String, String)>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Admin) {
         return e.into_response();
@@ -3144,6 +3216,10 @@ async fn publish_config_version(
 
     let org_row = match org_or_404(&client, &org).await {
         Ok(r) => r,
+        Err(r) => return *r,
+    };
+    let d = match dataset_or_404(&client, &org_row, &ds).await {
+        Ok(row) => row,
         Err(r) => return *r,
     };
 
@@ -3278,10 +3354,11 @@ async fn publish_config_version(
     }
     // History images record the acting principal (er.actor).
     let _ = pg::set_actor(&client, &principal.actor).await;
-    if let Err(e) = pg::publish_config_version(&client, &org_row.id, &org, version, tier).await {
+    if let Err(e) =
+        pg::publish_config_version(&client, &org_row.id, &org, &d.id, version, tier).await
+    {
         return pg_err(e);
     }
-    let ds = stamp_dataset(&client, &org_row.id).await;
     // The published document's `correction_pass.cadence` becomes a real
     // schedule. It had been stored by every tenant config and read by nothing,
     // so the periodic correction pass it describes never ran.
@@ -3289,7 +3366,7 @@ async fn publish_config_version(
         && let Err(e) = pg::ensure_correction_schedule(
             &client,
             &org_row.id,
-            ds.as_deref(),
+            Some(d.id.as_str()),
             &config.correction_pass.cadence,
         )
         .await
@@ -3306,7 +3383,7 @@ async fn publish_config_version(
             match pg::enqueue(
                 &client,
                 &org_row.id,
-                ds.as_deref(),
+                Some(d.id.as_str()),
                 "train",
                 0,
                 Some(&train_key),
@@ -3321,7 +3398,7 @@ async fn publish_config_version(
             match pg::enqueue(
                 &client,
                 &org_row.id,
-                ds.as_deref(),
+                Some(d.id.as_str()),
                 "run_all_full",
                 0,
                 Some(&rebuild_key),
@@ -3337,7 +3414,7 @@ async fn publish_config_version(
         Some("A" | "B") => match pg::enqueue(
             &client,
             &org_row.id,
-            ds.as_deref(),
+            Some(d.id.as_str()),
             "run_all_full",
             0,
             Some(&rebuild_key),
@@ -3371,7 +3448,7 @@ async fn publish_config_version(
     if let Err(e) = webhook::emit(
         &client,
         &org_row.id,
-        ds.as_deref(),
+        Some(d.id.as_str()),
         &org,
         "config.published",
         &json!({
@@ -3412,11 +3489,11 @@ struct EnqueueJob {
     segment: Option<String>,
 }
 
-/// Steward+: enqueue a job for an org (`POST /v1/orgs/{org}/jobs`).
+/// Steward+: enqueue a job for an org (`POST /v1/orgs/{org}/datasets/{ds}/jobs`).
 async fn create_job(
     principal: Principal,
     State(state): State<AppState>,
-    Path(org): Path<String>,
+    Path((org, ds)): Path<(String, String)>,
     Json(body): Json<EnqueueJob>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Steward) {
@@ -3438,7 +3515,11 @@ async fn create_job(
             Ok(r) => r,
             Err(r) => return *r,
         };
-        if let Err(e) = refuse_unless_active(&org_row, "jobs") {
+        let d = match dataset_or_404(&client, &org_row, &ds).await {
+            Ok(row) => row,
+            Err(r) => return *r,
+        };
+        if let Err(e) = refuse_unless_active_dataset(&org_row, &d, "jobs") {
             return *e;
         }
         // Resolve the segment NAME against the published config here, so an
@@ -3446,7 +3527,7 @@ async fn create_job(
         // exist — rather than a job that sits in the queue and then fails.
         let mut params = None;
         if let Some(name) = &body.segment {
-            let config = match org_active_config(&client, &org_row).await {
+            let config = match dataset_active_config(&client, &d).await {
                 Ok(c) => c,
                 Err(r) => return *r,
             };
@@ -3467,11 +3548,10 @@ async fn create_job(
             }
             params = Some(json!({ "segment": name }));
         }
-        let ds = stamp_dataset(&client, &org_row.id).await;
         return match pg::enqueue(
             &client,
             &org_row.id,
-            ds.as_deref(),
+            Some(d.id.as_str()),
             &body.kind,
             body.priority,
             None,
@@ -3657,11 +3737,11 @@ where
     Ok(Some(completed))
 }
 
-/// Viewer+: list an org's jobs, newest first (`GET /v1/orgs/{org}/jobs`).
+/// Viewer+: list an org's jobs, newest first (`GET /v1/orgs/{org}/datasets/{ds}/jobs`).
 async fn list_jobs(
     principal: Principal,
     State(state): State<AppState>,
-    Path(org): Path<String>,
+    Path((org, ds)): Path<(String, String)>,
     Query(params): Query<HashMap<String, String>>,
 ) -> axum::response::Response {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
@@ -3695,11 +3775,19 @@ async fn list_jobs(
             Ok(r) => r,
             Err(r) => return *r,
         };
+        let d = match dataset_or_404(&client, &org_row, &ds).await {
+            Ok(row) => row,
+            Err(r) => return *r,
+        };
         // Through `list_jobs_all` scoped to this org: it already takes limit and
         // state and clamps the limit, so the per-org view no longer serializes
-        // every job an org has ever had.
+        // every job an org has ever had. Filtered to the dataset's own jobs —
+        // org-level rows (provision) belong to no dataset's view.
         return match pg::list_jobs_all(&client, Some(&org_row.id), state_filter, limit).await {
-            Ok(jobs) => Json(json!({ "jobs": jobs })).into_response(),
+            Ok(mut jobs) => {
+                jobs.retain(|j| j.dataset_id.as_deref() == Some(d.id.as_str()));
+                Json(json!({ "jobs": jobs })).into_response()
+            }
             Err(e) => pg_err(e),
         };
     }
@@ -3715,12 +3803,12 @@ async fn list_jobs(
     Json(json!({ "jobs": jobs })).into_response()
 }
 
-/// Viewer+: one job by id (`GET /v1/orgs/{org}/jobs/{job_id}`), 404 if absent
+/// Viewer+: one job by id (`GET /v1/orgs/{org}/datasets/{ds}/jobs/{job_id}`), 404 if absent
 /// or not this org's.
 async fn get_job(
     principal: Principal,
     State(state): State<AppState>,
-    Path((org, job_id)): Path<(String, String)>,
+    Path((org, ds, job_id)): Path<(String, String, String)>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
@@ -3734,6 +3822,10 @@ async fn get_job(
             Ok(r) => r,
             Err(r) => return *r,
         };
+        // Scope-correct before anything is served: an unknown dataset 404s.
+        if let Err(r) = dataset_or_404(&client, &org_row, &ds).await {
+            return *r;
+        }
         return match pg::get_job(&client, &org_row.id, &job_id).await {
             Ok(Some(job)) => (StatusCode::OK, Json(json!(job))).into_response(),
             Ok(None) => (
@@ -3759,12 +3851,12 @@ async fn get_job(
     }
 }
 
-/// Steward+: cancel a job (`POST /v1/orgs/{org}/jobs/{job_id}/cancel`),
+/// Steward+: cancel a job (`POST /v1/orgs/{org}/datasets/{ds}/jobs/{job_id}/cancel`),
 /// idempotent-ish: queued/running -> canceled.
 async fn cancel_job(
     principal: Principal,
     State(state): State<AppState>,
-    Path((org, job_id)): Path<(String, String)>,
+    Path((org, ds, job_id)): Path<(String, String, String)>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Steward) {
         return e.into_response();
@@ -3779,6 +3871,10 @@ async fn cancel_job(
             Ok(r) => r,
             Err(r) => return *r,
         };
+        // Scope-correct before anything is served: an unknown dataset 404s.
+        if let Err(r) = dataset_or_404(&client, &org_row, &ds).await {
+            return *r;
+        }
         return match pg::get_job(&client, &org_row.id, &job_id).await {
             Ok(Some(job)) if state.executor_kinds.contains(&job.kind) => {
                 // The executor path (§5.6): a queued job dies directly; a
@@ -3844,7 +3940,7 @@ async fn cancel_job(
 }
 
 /// Steward+: requeue a failed/canceled job
-/// (`POST /v1/orgs/{org}/jobs/{job_id}/resume`; the Python `{job_id}:resume`
+/// (`POST /v1/orgs/{org}/datasets/{ds}/jobs/{job_id}/resume`; the Python `{job_id}:resume`
 /// action). 409 if the job isn't in a resumable state. Postgres-only (the
 /// in-memory store has no resume path).
 ///
@@ -3854,7 +3950,7 @@ async fn cancel_job(
 async fn resume_job(
     principal: Principal,
     State(state): State<AppState>,
-    Path((org, job_id)): Path<(String, String)>,
+    Path((org, ds, job_id)): Path<(String, String, String)>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Steward) {
         return e.into_response();
@@ -3870,6 +3966,10 @@ async fn resume_job(
         Ok(r) => r,
         Err(r) => return *r,
     };
+    // Scope-correct before anything is served: an unknown dataset 404s.
+    if let Err(r) = dataset_or_404(&client, &org_row, &ds).await {
+        return *r;
+    }
     match pg::resume_job(&client, &org_row.id, &job_id).await {
         Ok(true) => {
             let _ = pg::audit(
@@ -3896,13 +3996,13 @@ async fn resume_job(
 }
 
 /// Viewer: every try of every task of one job, in topological then try order,
-/// archived tries included (`GET /v1/orgs/{org}/jobs/{job_id}/tasks`). The
+/// archived tries included (`GET /v1/orgs/{org}/datasets/{ds}/jobs/{job_id}/tasks`). The
 /// task ledger of batch-orchestration-design §4.2; rows exist once the DAG
 /// planner runs (Phase 1 ships the ledger and this read before any executor).
 async fn list_job_tasks(
     principal: Principal,
     State(state): State<AppState>,
-    Path((org, job_id)): Path<(String, String)>,
+    Path((org, ds, job_id)): Path<(String, String, String)>,
 ) -> axum::response::Response {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
@@ -3921,6 +4021,10 @@ async fn list_job_tasks(
         Ok(r) => r,
         Err(r) => return *r,
     };
+    // Scope-correct before anything is served: an unknown dataset 404s.
+    if let Err(r) = dataset_or_404(&client, &org_row, &ds).await {
+        return *r;
+    }
     match er_entities::task_instance::read::by_job(&client, &org_row.id, &job_id).await {
         Ok(tasks) => Json(json!({ "tasks": tasks })).into_response(),
         Err(e) => pg_err(e),
@@ -4588,13 +4692,14 @@ async fn update_resources(
     }
 }
 
-/// Open the requesting org's lake read-only, resolving the org row first.
-/// Returns the attached session, or a ready error response (404 no org, 501 no
-/// Postgres backend, 503 lake unavailable).
-async fn org_lake(
+/// Resolve `{org}/{ds}` to the dataset's row, or a ready error response (404
+/// for either level — scope-safe both ways — 501 without Postgres, 500 on a
+/// read failure). Every dataset-scoped lake handler starts here.
+async fn dataset_for_lake(
     state: &AppState,
     org: &str,
-) -> Result<dedupe_core::Session, Box<axum::response::Response>> {
+    ds: &str,
+) -> Result<pg::DatasetDetail, Box<axum::response::Response>> {
     let Some(dsn) = &state.dsn else {
         return Err(Box::new(detail_err(
             StatusCode::NOT_IMPLEMENTED,
@@ -4602,8 +4707,8 @@ async fn org_lake(
         )));
     };
     let client = connect_pg(dsn).await.map_err(|r| Box::new(*r))?;
-    let env = match pg::get_org(&client, org).await {
-        Ok(Some(o)) => o.env,
+    let org_row = match pg::get_org(&client, org).await {
+        Ok(Some(o)) => o,
         Ok(None) => {
             return Err(Box::new(detail_err(
                 StatusCode::NOT_FOUND,
@@ -4617,7 +4722,29 @@ async fn org_lake(
             )));
         }
     };
-    read::open_org_lake(&env).map_err(|e| {
+    match pg::get_dataset(&client, &org_row.id, ds).await {
+        Ok(Some(d)) => Ok(d),
+        Ok(None) => Err(Box::new(detail_err(
+            StatusCode::NOT_FOUND,
+            format!("no dataset '{ds}' in org '{org}'"),
+        ))),
+        Err(e) => Err(Box::new(detail_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("db: {e}"),
+        ))),
+    }
+}
+
+/// Open one dataset's lake read-only. Returns the attached session, or a ready
+/// error response (404 no org/dataset, 501 no Postgres backend, 503 lake
+/// unavailable).
+async fn dataset_lake(
+    state: &AppState,
+    org: &str,
+    ds: &str,
+) -> Result<dedupe_core::Session, Box<axum::response::Response>> {
+    let d = dataset_for_lake(state, org, ds).await?;
+    read::open_org_lake(&d.env).map_err(|e| {
         Box::new(detail_err(
             StatusCode::SERVICE_UNAVAILABLE,
             format!("lake unavailable: {e}"),
@@ -4625,37 +4752,17 @@ async fn org_lake(
     })
 }
 
-/// Like [`org_lake`], but also resolves the org's auto-merge threshold from its
-/// config (for the run ledger's per-run auto-merge count, PR 1.5b). One
-/// `get_org`. The threshold is `None` when the org has no readable config.
-async fn org_lake_auto_merge(
+/// Like [`dataset_lake`], but also resolves the dataset's auto-merge threshold
+/// from its config (for the run ledger's per-run auto-merge count). The
+/// threshold is `None` when the dataset has no readable config.
+async fn dataset_lake_auto_merge(
     state: &AppState,
     org: &str,
+    ds: &str,
 ) -> Result<(dedupe_core::Session, Option<f64>), Box<axum::response::Response>> {
-    let Some(dsn) = &state.dsn else {
-        return Err(Box::new(detail_err(
-            StatusCode::NOT_IMPLEMENTED,
-            "read API requires Postgres",
-        )));
-    };
-    let client = connect_pg(dsn).await.map_err(|r| Box::new(*r))?;
-    let env = match pg::get_org(&client, org).await {
-        Ok(Some(o)) => o.env,
-        Ok(None) => {
-            return Err(Box::new(detail_err(
-                StatusCode::NOT_FOUND,
-                format!("no org '{org}'"),
-            )));
-        }
-        Err(e) => {
-            return Err(Box::new(detail_err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("db: {e}"),
-            )));
-        }
-    };
-    let auto_merge = auto_merge_from_env(&env);
-    let session = read::open_org_lake(&env).map_err(|e| {
+    let d = dataset_for_lake(state, org, ds).await?;
+    let auto_merge = auto_merge_from_env(&d.env);
+    let session = read::open_org_lake(&d.env).map_err(|e| {
         Box::new(detail_err(
             StatusCode::SERVICE_UNAVAILABLE,
             format!("lake unavailable: {e}"),
@@ -4688,37 +4795,20 @@ fn auto_merge_from_env(env: &Value) -> Option<f64> {
         .map(|c| c.thresholds.auto_merge)
 }
 
-/// Like [`org_lake`], but also resolves the org's entity type (one `get_org`).
-/// The golden/entity reads dispatch on it so an Account org reads its
-/// `acct_golden_*` projection; a person org is unchanged.
-async fn org_lake_golden(
+/// Like [`dataset_lake`], but also resolves the dataset's entity type (its own
+/// column — no config re-parse). The golden/entity reads dispatch on it so an
+/// account dataset reads its `acct_golden_*` projection.
+async fn dataset_lake_golden(
     state: &AppState,
     org: &str,
+    ds: &str,
 ) -> Result<(dedupe_core::Session, er_config::EntityType), Box<axum::response::Response>> {
-    let Some(dsn) = &state.dsn else {
-        return Err(Box::new(detail_err(
-            StatusCode::NOT_IMPLEMENTED,
-            "read API requires Postgres",
-        )));
+    let d = dataset_for_lake(state, org, ds).await?;
+    let entity_type = match d.entity_type.as_str() {
+        "account" => er_config::EntityType::Account,
+        _ => er_config::EntityType::Person,
     };
-    let client = connect_pg(dsn).await.map_err(|r| Box::new(*r))?;
-    let env = match pg::get_org(&client, org).await {
-        Ok(Some(o)) => o.env,
-        Ok(None) => {
-            return Err(Box::new(detail_err(
-                StatusCode::NOT_FOUND,
-                format!("no org '{org}'"),
-            )));
-        }
-        Err(e) => {
-            return Err(Box::new(detail_err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("db: {e}"),
-            )));
-        }
-    };
-    let entity_type = entity_type_from_env(&env);
-    let session = read::open_org_lake(&env).map_err(|e| {
+    let session = read::open_org_lake(&d.env).map_err(|e| {
         Box::new(detail_err(
             StatusCode::SERVICE_UNAVAILABLE,
             format!("lake unavailable: {e}"),
@@ -4728,18 +4818,18 @@ async fn org_lake_golden(
 }
 
 /// Viewer+: a keyset page of the org's golden (resolved) records
-/// (`GET /v1/orgs/{org}/golden-records`). Query: `q` (contains-search), `cursor`
+/// (`GET /v1/orgs/{org}/datasets/{ds}/golden-records`). Query: `q` (contains-search), `cursor`
 /// (opaque), `limit` (<=200). Reads the org's DuckLake at a pinned snapshot.
 async fn golden_records_list(
     principal: Principal,
     State(state): State<AppState>,
-    Path(org): Path<String>,
+    Path((org, ds)): Path<(String, String)>,
     Query(params): Query<HashMap<String, String>>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
     }
-    let (session, entity_type) = match org_lake_golden(&state, &org).await {
+    let (session, entity_type) = match dataset_lake_golden(&state, &org, &ds).await {
         Ok(s) => s,
         Err(r) => return *r,
     };
@@ -4812,7 +4902,7 @@ struct SnapshotQuery {
 }
 
 /// Viewer+: one resolved entity with members/lineage/events
-/// (`GET /v1/orgs/{org}/golden-records/{entity_id}`), 404 if absent.
+/// (`GET /v1/orgs/{org}/datasets/{ds}/golden-records/{entity_id}`), 404 if absent.
 ///
 /// `?snapshot=N` reads the entity AS IT WAS at lake version N. Out-of-range
 /// versions are refused by the lake itself rather than clamped: silently
@@ -4821,13 +4911,13 @@ struct SnapshotQuery {
 async fn golden_record_detail(
     principal: Principal,
     State(state): State<AppState>,
-    Path((org, entity_id)): Path<(String, String)>,
+    Path((org, ds, entity_id)): Path<(String, String, String)>,
     Query(query): Query<SnapshotQuery>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
     }
-    let (session, entity_type) = match org_lake_golden(&state, &org).await {
+    let (session, entity_type) = match dataset_lake_golden(&state, &org, &ds).await {
         Ok(s) => s,
         Err(r) => return *r,
     };
@@ -4845,16 +4935,16 @@ async fn golden_record_detail(
     }
 }
 
-/// Viewer+: dashboard counters over the org's lake (`GET /v1/orgs/{org}/metrics`).
+/// Viewer+: dashboard counters over the org's lake (`GET /v1/orgs/{org}/datasets/{ds}/metrics`).
 async fn org_metrics(
     principal: Principal,
     State(state): State<AppState>,
-    Path(org): Path<String>,
+    Path((org, ds)): Path<(String, String)>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
     }
-    let session = match org_lake(&state, &org).await {
+    let session = match dataset_lake(&state, &org, &ds).await {
         Ok(s) => s,
         Err(r) => return *r,
     };
@@ -4869,12 +4959,12 @@ async fn org_metrics(
 }
 
 /// Viewer+: data-quality scores over the org's lake
-/// (`GET /v1/orgs/{org}/data-quality?stale_days=N`). Read-only analytics;
+/// (`GET /v1/orgs/{org}/datasets/{ds}/data-quality?stale_days=N`). Read-only analytics;
 /// `stale_days` (default 365) is a presentation parameter, never config.
 async fn org_data_quality(
     principal: Principal,
     State(state): State<AppState>,
-    Path(org): Path<String>,
+    Path((org, ds)): Path<(String, String)>,
     Query(params): Query<HashMap<String, String>>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
@@ -4885,7 +4975,7 @@ async fn org_data_quality(
         .and_then(|s| s.parse::<i64>().ok())
         .unwrap_or(365)
         .clamp(1, 36_500);
-    let session = match org_lake(&state, &org).await {
+    let session = match dataset_lake(&state, &org, &ds).await {
         Ok(s) => s,
         Err(r) => return *r,
     };
@@ -4900,17 +4990,17 @@ async fn org_data_quality(
 }
 
 /// Viewer+: duplicate groups (entities with >=2 members)
-/// (`GET /v1/orgs/{org}/duplicates`). Keyset page; query `cursor`, `limit`.
+/// (`GET /v1/orgs/{org}/datasets/{ds}/duplicates`). Keyset page; query `cursor`, `limit`.
 async fn duplicates_list(
     principal: Principal,
     State(state): State<AppState>,
-    Path(org): Path<String>,
+    Path((org, ds)): Path<(String, String)>,
     Query(params): Query<HashMap<String, String>>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
     }
-    let (session, entity_type) = match org_lake_golden(&state, &org).await {
+    let (session, entity_type) = match dataset_lake_golden(&state, &org, &ds).await {
         Ok(sv) => sv,
         Err(r) => return *r,
     };
@@ -4949,7 +5039,7 @@ async fn duplicates_list(
 }
 
 /// Viewer+: one run's per-source duplicate attribution
-/// (`GET /v1/orgs/{org}/insights/sources`). Query `run_id`; defaults to the
+/// (`GET /v1/orgs/{org}/datasets/{ds}/insights/sources`). Query `run_id`; defaults to the
 /// newest snapshot's run.
 ///
 /// The corpus-wide rate says a tenant has a problem; this says which feed it
@@ -4957,13 +5047,13 @@ async fn duplicates_list(
 async fn insight_sources(
     principal: Principal,
     State(state): State<AppState>,
-    Path(org): Path<String>,
+    Path((org, ds)): Path<(String, String)>,
     Query(params): Query<HashMap<String, String>>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
     }
-    let session = match org_lake(&state, &org).await {
+    let session = match dataset_lake(&state, &org, &ds).await {
         Ok(s) => s,
         Err(r) => return *r,
     };
@@ -4999,7 +5089,7 @@ async fn insight_sources(
     }
 }
 
-/// Viewer+: the resolution metrics over time (`GET /v1/orgs/{org}/insights`).
+/// Viewer+: the resolution metrics over time (`GET /v1/orgs/{org}/datasets/{ds}/insights`).
 ///
 /// Every dashboard number has always been computed live, so it could say what
 /// is true now and nothing about the direction of travel — and "is the
@@ -5010,13 +5100,13 @@ async fn insight_sources(
 async fn insights(
     principal: Principal,
     State(state): State<AppState>,
-    Path(org): Path<String>,
+    Path((org, ds)): Path<(String, String)>,
     Query(params): Query<HashMap<String, String>>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
     }
-    let session = match org_lake(&state, &org).await {
+    let session = match dataset_lake(&state, &org, &ds).await {
         Ok(s) => s,
         Err(r) => return *r,
     };
@@ -5036,7 +5126,7 @@ async fn insights(
     }
 }
 
-/// Viewer+: the corpus's data-quality picture (`GET /v1/orgs/{org}/quality`).
+/// Viewer+: the corpus's data-quality picture (`GET /v1/orgs/{org}/datasets/{ds}/quality`).
 ///
 /// The distribution in buckets, the per-dimension means, and the worst records
 /// as a work queue. `?limit=` sizes the queue.
@@ -5047,13 +5137,13 @@ async fn insights(
 async fn quality(
     principal: Principal,
     State(state): State<AppState>,
-    Path(org): Path<String>,
+    Path((org, ds)): Path<(String, String)>,
     Query(params): Query<HashMap<String, String>>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
     }
-    let session = match org_lake(&state, &org).await {
+    let session = match dataset_lake(&state, &org, &ds).await {
         Ok(s) => s,
         Err(r) => return *r,
     };
@@ -5073,7 +5163,7 @@ async fn quality(
     }
 }
 
-/// Viewer+: active pairwise match scores (`GET /v1/orgs/{org}/match-scores`).
+/// Viewer+: active pairwise match scores (`GET /v1/orgs/{org}/datasets/{ds}/match-scores`).
 /// Keyset page; query `cursor`, `limit`, `band_low`/`band_high` (probability
 /// band). The band names must match what the BFF forwards
 /// (`src/app/api/orgs/[org]/match-scores/route.ts`): a rename on one side only
@@ -5081,13 +5171,13 @@ async fn quality(
 async fn match_scores_list(
     principal: Principal,
     State(state): State<AppState>,
-    Path(org): Path<String>,
+    Path((org, ds)): Path<(String, String)>,
     Query(params): Query<HashMap<String, String>>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
     }
-    let session = match org_lake(&state, &org).await {
+    let session = match dataset_lake(&state, &org, &ds).await {
         Ok(s) => s,
         Err(r) => return *r,
     };
@@ -5122,7 +5212,7 @@ async fn match_scores_list(
     }
 }
 
-/// Viewer+: what to label next (`GET /v1/orgs/{org}/labeling/next`).
+/// Viewer+: what to label next (`GET /v1/orgs/{org}/datasets/{ds}/labeling/next`).
 ///
 /// Serves the pairs the model is LEAST sure about — nearest the decision
 /// threshold first — with a coverage summary of the labels already recorded.
@@ -5141,7 +5231,7 @@ async fn match_scores_list(
 async fn labeling_next(
     principal: Principal,
     State(state): State<AppState>,
-    Path(org): Path<String>,
+    Path((org, ds)): Path<(String, String)>,
     Query(params): Query<HashMap<String, String>>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
@@ -5158,7 +5248,11 @@ async fn labeling_next(
         Ok(r) => r,
         Err(r) => return *r,
     };
-    let config = match org_active_config(&client, &org_row).await {
+    let d = match dataset_or_404(&client, &org_row, &ds).await {
+        Ok(row) => row,
+        Err(r) => return *r,
+    };
+    let config = match dataset_active_config(&client, &d).await {
         Ok(c) => c,
         Err(r) => return *r,
     };
@@ -5172,7 +5266,7 @@ async fn labeling_next(
         .map(|l| (l.rec_a_key.clone(), l.rec_b_key.clone()))
         .collect();
 
-    let session = match org_lake(&state, &org).await {
+    let session = match dataset_lake(&state, &org, &ds).await {
         Ok(s) => s,
         Err(r) => return *r,
     };
@@ -5249,7 +5343,7 @@ struct LabelIn {
     score_at_label: Option<f64>,
 }
 
-/// Steward+: record a verdict on a pair (`POST /v1/orgs/{org}/labels`).
+/// Steward+: record a verdict on a pair (`POST /v1/orgs/{org}/datasets/{ds}/labels`).
 ///
 /// Upserts on the pair, so re-labelling corrects rather than stacks — two
 /// contradictory rows for one pair would make the training set ambiguous with
@@ -5261,7 +5355,7 @@ struct LabelIn {
 async fn create_label(
     principal: Principal,
     State(state): State<AppState>,
-    Path(org): Path<String>,
+    Path((org, ds)): Path<(String, String)>,
     Json(body): Json<LabelIn>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Steward) {
@@ -5300,11 +5394,14 @@ async fn create_label(
         Ok(r) => r,
         Err(r) => return *r,
     };
-    let ds = stamp_dataset(&client, &org_row.id).await;
+    let d = match dataset_or_404(&client, &org_row, &ds).await {
+        Ok(row) => row,
+        Err(r) => return *r,
+    };
     match record_label(
         &client,
         &org_row.id,
-        ds.as_deref(),
+        Some(d.id.as_str()),
         (&a, &b),
         &body.verdict,
         "human",
@@ -5331,12 +5428,12 @@ async fn create_label(
     }
 }
 
-/// Viewer+: the labels a tenant has recorded (`GET /v1/orgs/{org}/labels`),
+/// Viewer+: the labels a tenant has recorded (`GET /v1/orgs/{org}/datasets/{ds}/labels`),
 /// newest first, filterable by `verdict` and `origin`.
 async fn labels_list(
     principal: Principal,
     State(state): State<AppState>,
-    Path(org): Path<String>,
+    Path((org, ds)): Path<(String, String)>,
     Query(params): Query<HashMap<String, String>>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
@@ -5353,6 +5450,10 @@ async fn labels_list(
         Ok(r) => r,
         Err(r) => return *r,
     };
+    // Scope-correct before anything is served: an unknown dataset 404s.
+    if let Err(r) = dataset_or_404(&client, &org_row, &ds).await {
+        return *r;
+    }
     let limit = read::parse_limit(params.get("limit").map(String::as_str));
     match er_entities::pair_label::read::page(
         &client,
@@ -5421,7 +5522,7 @@ async fn record_label(
 }
 
 /// Steward+: a READ-ONLY score-only match preview (frontend §7.16,
-/// `GET /v1/orgs/{org}/match-preview`). Runs the committed model over the current
+/// `GET /v1/orgs/{org}/datasets/{ds}/match-preview`). Runs the committed model over the current
 /// corpus and returns the pairs it WOULD score, bucketed by the config
 /// thresholds, with a sample carrying the evidence waterfall. Writes nothing —
 /// no `match_scores` / `review_queue` / golden, no determinism-contract artifact.
@@ -5430,7 +5531,7 @@ async fn record_label(
 async fn match_preview(
     principal: Principal,
     State(state): State<AppState>,
-    Path(org): Path<String>,
+    Path((org, ds)): Path<(String, String)>,
     Query(params): Query<HashMap<String, String>>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Steward) {
@@ -5446,8 +5547,8 @@ async fn match_preview(
         Ok(c) => c,
         Err(r) => return *r,
     };
-    let env = match pg::get_org(&client, &org).await {
-        Ok(Some(o)) if o.state == "active" => o.env,
+    let org_row = match pg::get_org(&client, &org).await {
+        Ok(Some(o)) if o.state == "active" => o,
         Ok(Some(o)) => {
             return detail_err(
                 StatusCode::CONFLICT,
@@ -5456,6 +5557,10 @@ async fn match_preview(
         }
         Ok(None) => return detail_err(StatusCode::NOT_FOUND, format!("no org '{org}'")),
         Err(e) => return pg_err(e),
+    };
+    let env = match dataset_or_404(&client, &org_row, &ds).await {
+        Ok(d) => d.env,
+        Err(r) => return *r,
     };
     let limit = read::parse_limit(params.get("limit").map(String::as_str))
         .try_into()
@@ -5485,7 +5590,7 @@ struct ResolveIn {
 }
 
 /// Viewer+: resolve an UNSAVED record against the corpus
-/// (`POST /v1/orgs/{org}/resolve`).
+/// (`POST /v1/orgs/{org}/datasets/{ds}/resolve`).
 ///
 /// The online half of the product: a form, an ingestion pipeline or a
 /// middleware layer posts a record and learns which entity it belongs to, and
@@ -5506,7 +5611,7 @@ struct ResolveIn {
 async fn resolve_record(
     principal: Principal,
     State(state): State<AppState>,
-    Path(org): Path<String>,
+    Path((org, ds)): Path<(String, String)>,
     Json(body): Json<ResolveIn>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
@@ -5525,8 +5630,8 @@ async fn resolve_record(
         Ok(c) => c,
         Err(r) => return *r,
     };
-    let env = match pg::get_org(&client, &org).await {
-        Ok(Some(o)) if o.state == "active" => o.env,
+    let org_row = match pg::get_org(&client, &org).await {
+        Ok(Some(o)) if o.state == "active" => o,
         Ok(Some(o)) => {
             return detail_err(
                 StatusCode::CONFLICT,
@@ -5535,6 +5640,10 @@ async fn resolve_record(
         }
         Ok(None) => return detail_err(StatusCode::NOT_FOUND, format!("no org '{org}'")),
         Err(e) => return pg_err(e),
+    };
+    let env = match dataset_or_404(&client, &org_row, &ds).await {
+        Ok(d) => d.env,
+        Err(r) => return *r,
     };
     let limit = body.limit.unwrap_or(10).clamp(1, 100);
     let source = body.source.clone();
@@ -5602,7 +5711,7 @@ fn load_lexicon_file(path: &str) -> Vec<(String, String)> {
 }
 
 /// Viewer+: what a run would cost before it runs
-/// (`GET /v1/orgs/{org}/blocking-estimate`). Query: `largest` (how many
+/// (`GET /v1/orgs/{org}/datasets/{ds}/blocking-estimate`). Query: `largest` (how many
 /// pathological blocks to name, default 5).
 ///
 /// The competitor's answer to a large corpus is a hard three-hour cap on
@@ -5617,7 +5726,7 @@ fn load_lexicon_file(path: &str) -> Vec<(String, String)> {
 async fn blocking_estimate(
     principal: Principal,
     State(state): State<AppState>,
-    Path(org): Path<String>,
+    Path((org, ds)): Path<(String, String)>,
     Query(params): Query<HashMap<String, String>>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
@@ -5633,8 +5742,8 @@ async fn blocking_estimate(
         Ok(c) => c,
         Err(r) => return *r,
     };
-    let env = match pg::get_org(&client, &org).await {
-        Ok(Some(o)) if o.state == "active" => o.env,
+    let org_row = match pg::get_org(&client, &org).await {
+        Ok(Some(o)) if o.state == "active" => o,
         Ok(Some(o)) => {
             return detail_err(
                 StatusCode::CONFLICT,
@@ -5646,6 +5755,10 @@ async fn blocking_estimate(
         }
         Ok(None) => return detail_err(StatusCode::NOT_FOUND, format!("no org '{org}'")),
         Err(e) => return pg_err(e),
+    };
+    let env = match dataset_or_404(&client, &org_row, &ds).await {
+        Ok(d) => d.env,
+        Err(r) => return *r,
     };
     let largest = params
         .get("largest")
@@ -5761,18 +5874,18 @@ fn match_preview_blocking(env: &Value, limit: usize) -> Result<Value, String> {
 }
 
 /// Viewer+: standardized source records by `record_key`
-/// (`GET /v1/orgs/{org}/records?key=…`, `key` repeats, capped at 50). Not
+/// (`GET /v1/orgs/{org}/datasets/{ds}/records?key=…`, `key` repeats, capped at 50). Not
 /// paginated — a bounded lookup. Returns `{ items, snapshot }`.
 async fn records_by_key(
     principal: Principal,
     State(state): State<AppState>,
-    Path(org): Path<String>,
+    Path((org, ds)): Path<(String, String)>,
     axum::extract::RawQuery(query): axum::extract::RawQuery,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
     }
-    let session = match org_lake(&state, &org).await {
+    let session = match dataset_lake(&state, &org, &ds).await {
         Ok(s) => s,
         Err(r) => return *r,
     };
@@ -5817,17 +5930,17 @@ fn page_envelope(r: Result<(Vec<Value>, Option<String>), String>) -> axum::respo
     }
 }
 
-/// Viewer+: the open-review queue (`GET /v1/orgs/{org}/reviews`).
+/// Viewer+: the open-review queue (`GET /v1/orgs/{org}/datasets/{ds}/reviews`).
 async fn reviews_list(
     principal: Principal,
     State(state): State<AppState>,
-    Path(org): Path<String>,
+    Path((org, ds)): Path<(String, String)>,
     Query(params): Query<HashMap<String, String>>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
     }
-    let session = match org_lake(&state, &org).await {
+    let session = match dataset_lake(&state, &org, &ds).await {
         Ok(s) => s,
         Err(r) => return *r,
     };
@@ -5887,16 +6000,16 @@ async fn reviews_list(
     .into_response()
 }
 
-/// Viewer+: one review by id (`GET /v1/orgs/{org}/reviews/{review_id}`), 404 if absent.
+/// Viewer+: one review by id (`GET /v1/orgs/{org}/datasets/{ds}/reviews/{review_id}`), 404 if absent.
 async fn review_detail(
     principal: Principal,
     State(state): State<AppState>,
-    Path((org, review_id)): Path<(String, String)>,
+    Path((org, ds, review_id)): Path<(String, String, String)>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
     }
-    let session = match org_lake(&state, &org).await {
+    let session = match dataset_lake(&state, &org, &ds).await {
         Ok(s) => s,
         Err(r) => return *r,
     };
@@ -5911,18 +6024,18 @@ async fn review_detail(
     }
 }
 
-/// Viewer+: the assertion ledger (`GET /v1/orgs/{org}/assertions`), active-only
+/// Viewer+: the assertion ledger (`GET /v1/orgs/{org}/datasets/{ds}/assertions`), active-only
 /// unless `?include_retracted=true`.
 async fn assertions_list(
     principal: Principal,
     State(state): State<AppState>,
-    Path(org): Path<String>,
+    Path((org, ds)): Path<(String, String)>,
     Query(params): Query<HashMap<String, String>>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
     }
-    let session = match org_lake(&state, &org).await {
+    let session = match dataset_lake(&state, &org, &ds).await {
         Ok(s) => s,
         Err(r) => return *r,
     };
@@ -5958,6 +6071,36 @@ pub const DEFAULT_MAX_IMPORT_BYTES: usize = 256 * 1024 * 1024;
 /// `pg::get_config_version` keys on the org **id** while `pg::org_publish_context`
 /// keys on the **name** — a footgun that reaching through the row avoids, and
 /// that `org_source_ranks` tripped over before this existed.
+/// A DATASET's active published config, parsed — [`org_active_config`]'s
+/// dataset-scoped twin, reading the version pointer off the dataset row.
+pub(crate) async fn dataset_active_config(
+    client: &tokio_postgres::Client,
+    d: &pg::DatasetDetail,
+) -> Result<er_config::Config, Box<axum::response::Response>> {
+    let Some(active) = d.active_config_version else {
+        return Err(Box::new(detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "no published config; publish a config version first",
+        )));
+    };
+    let detail = match pg::get_config_version(client, &d.org_id, active).await {
+        Ok(Some(v)) => v,
+        Ok(None) => {
+            return Err(Box::new(detail_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("active config version {active} is missing"),
+            )));
+        }
+        Err(e) => return Err(Box::new(pg_err(e))),
+    };
+    load_config_str(&detail.yaml).map_err(|e| {
+        Box::new(detail_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("active config does not load: {}", errfmt::chain(&e)),
+        ))
+    })
+}
+
 pub(crate) async fn org_active_config(
     client: &tokio_postgres::Client,
     org_row: &pg::OrgDetail,
@@ -5994,8 +6137,9 @@ pub(crate) async fn org_active_config(
 pub(crate) async fn delivery_preconditions(
     client: &tokio_postgres::Client,
     org: &str,
+    ds: &str,
     source: &str,
-) -> Result<(pg::OrgDetail, er_config::Config, String), Box<Refusal>> {
+) -> Result<(pg::OrgDetail, pg::DatasetDetail, er_config::Config, String), Box<Refusal>> {
     let org_row = org_or_404(client, org).await?;
     if org_row.state != "active" {
         return Err(Refusal::new(
@@ -6006,7 +6150,17 @@ pub(crate) async fn delivery_preconditions(
             ),
         ));
     }
-    let config = org_active_config(client, &org_row).await?;
+    let d = dataset_or_404(client, &org_row, ds).await?;
+    if d.state != "active" {
+        return Err(Refusal::new(
+            StatusCode::CONFLICT,
+            format!(
+                "dataset '{ds}' is {}; imports are accepted only when active",
+                d.state
+            ),
+        ));
+    }
+    let config = dataset_active_config(client, &d).await?;
     if !config.sources.contains_key(source) {
         let known: Vec<&str> = config.sources.keys().map(String::as_str).collect();
         return Err(Refusal::new(
@@ -6018,10 +6172,10 @@ pub(crate) async fn delivery_preconditions(
             ),
         ));
     }
-    let Some(drop_root) = org_row.drop_root.clone() else {
+    let Some(drop_root) = d.drop_root.clone() else {
         return Err(Refusal::new(
             StatusCode::SERVICE_UNAVAILABLE,
-            format!("org '{org}' has no drop_root to land a delivery into"),
+            format!("dataset '{ds}' has no drop_root to land a delivery into"),
         ));
     };
     // The source is a key of the active config, so it cannot traverse; assert it
@@ -6041,7 +6195,7 @@ pub(crate) async fn delivery_preconditions(
             format!("drop_root {drop_root} is not writable: {e}"),
         ));
     }
-    Ok((org_row, config, drop_root))
+    Ok((org_row, d, config, drop_root))
 }
 
 /// Publish a staged delivery and enqueue the run that reads it.
@@ -6055,6 +6209,9 @@ pub(crate) struct StagedDelivery<'a> {
     pub(crate) org_id: &'a str,
     pub(crate) source: &'a str,
     pub(crate) delivery_id: &'a str,
+    /// The dataset the delivery lands in (its run and events are stamped with
+    /// it). `None` only for the org-driven S3 poller falling back pre-converge.
+    pub(crate) dataset_id: Option<&'a str>,
     /// Where the bytes are now. Renamed into place by `finish_delivery`.
     pub(crate) temp_path: &'a str,
     pub(crate) bytes: u64,
@@ -6074,6 +6231,7 @@ pub(crate) async fn finish_delivery(
         org_id,
         source,
         delivery_id,
+        dataset_id,
         temp_path,
         bytes,
         action,
@@ -6091,7 +6249,7 @@ pub(crate) async fn finish_delivery(
     }
     // No idempotency key: two deliveries of the same source are two deliveries
     // and must run twice, so an upsert on a per-source key would be wrong.
-    let ds = stamp_dataset(client, org_id).await;
+    let ds = dataset_id.map(str::to_string);
     let job = match pg::enqueue(
         client,
         org_id,
@@ -6167,7 +6325,7 @@ struct PushRecordsIn {
     records: Vec<Value>,
 }
 
-/// Steward+: push records as JSON (`POST /v1/orgs/{org}/records:ingest`).
+/// Steward+: push records as JSON (`POST /v1/orgs/{org}/datasets/{ds}/records:ingest`).
 ///
 /// The write half of the batch API. Before this, data could only arrive as a
 /// file: there was no way for a pipeline to hand records over programmatically,
@@ -6186,7 +6344,7 @@ struct PushRecordsIn {
 async fn push_records(
     principal: Principal,
     State(state): State<AppState>,
-    Path(org): Path<String>,
+    Path((org, ds)): Path<(String, String)>,
     Json(body): Json<PushRecordsIn>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Steward) {
@@ -6215,8 +6373,8 @@ async fn push_records(
         Ok(c) => c,
         Err(r) => return *r,
     };
-    let (org_row, config, drop_root) =
-        match delivery_preconditions(&client, &org, &body.source).await {
+    let (org_row, d, config, drop_root) =
+        match delivery_preconditions(&client, &org, &ds, &body.source).await {
             Ok(t) => t,
             Err(r) => return r.into_response(),
         };
@@ -6284,6 +6442,7 @@ async fn push_records(
             org_id: &org_row.id,
             source: &body.source,
             delivery_id: &delivery_id,
+            dataset_id: Some(&d.id),
             temp_path: &temp_path,
             bytes,
             action: "import.push",
@@ -6313,7 +6472,7 @@ fn csv_cell(value: Option<&Value>) -> String {
 const MAX_PUSHED_RECORDS: usize = 10_000;
 
 /// Steward+: upload one source's delivery
-/// (`POST /v1/orgs/{org}/imports?source=<source>`), then enqueue the run that
+/// (`POST /v1/orgs/{org}/datasets/{ds}/imports?source=<source>`), then enqueue the run that
 /// picks it up.
 ///
 /// This is the HTTP half of ingest. The dispatcher reads each configured
@@ -6331,7 +6490,7 @@ const MAX_PUSHED_RECORDS: usize = 10_000;
 async fn upload_import(
     principal: Principal,
     State(state): State<AppState>,
-    Path(org): Path<String>,
+    Path((org, ds)): Path<(String, String)>,
     Query(params): Query<HashMap<String, String>>,
     mut multipart: axum::extract::Multipart,
 ) -> impl IntoResponse {
@@ -6355,10 +6514,11 @@ async fn upload_import(
         Ok(c) => c,
         Err(r) => return *r,
     };
-    let (org_row, _config, drop_root) = match delivery_preconditions(&client, &org, source).await {
-        Ok(t) => t,
-        Err(r) => return r.into_response(),
-    };
+    let (org_row, d, _config, drop_root) =
+        match delivery_preconditions(&client, &org, &ds, source).await {
+            Ok(t) => t,
+            Err(r) => return r.into_response(),
+        };
     let delivery_id = er_ids::new_v7();
     let temp_path = format!("{drop_root}/.{source}.{delivery_id}.csv.part");
 
@@ -6451,6 +6611,7 @@ async fn upload_import(
             org_id: &org_row.id,
             source,
             delivery_id: &delivery_id,
+            dataset_id: Some(&d.id),
             temp_path: &temp_path,
             bytes: bytes_written,
             action: "import.upload",
@@ -6459,18 +6620,18 @@ async fn upload_import(
     .await
 }
 
-/// Viewer+: ingest-batch receipts (`GET /v1/orgs/{org}/imports`), optional
+/// Viewer+: ingest-batch receipts (`GET /v1/orgs/{org}/datasets/{ds}/imports`), optional
 /// `?source` filter.
 async fn imports_list(
     principal: Principal,
     State(state): State<AppState>,
-    Path(org): Path<String>,
+    Path((org, ds)): Path<(String, String)>,
     Query(params): Query<HashMap<String, String>>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
     }
-    let session = match org_lake(&state, &org).await {
+    let session = match dataset_lake(&state, &org, &ds).await {
         Ok(s) => s,
         Err(r) => return *r,
     };
@@ -6489,7 +6650,7 @@ async fn imports_list(
 }
 
 /// Viewer+: the most recent ingest-batch receipts
-/// (`GET /v1/orgs/{org}/imports/recent`), newest first, a bare array — the
+/// (`GET /v1/orgs/{org}/datasets/{ds}/imports/recent`), newest first, a bare array — the
 /// shape `runs_list` already uses for the same kind of latest-activity read.
 ///
 /// Separate from `imports_list` rather than a flag on it, because that endpoint
@@ -6501,13 +6662,13 @@ async fn imports_list(
 async fn imports_recent(
     principal: Principal,
     State(state): State<AppState>,
-    Path(org): Path<String>,
+    Path((org, ds)): Path<(String, String)>,
     Query(params): Query<HashMap<String, String>>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
     }
-    let session = match org_lake(&state, &org).await {
+    let session = match dataset_lake(&state, &org, &ds).await {
         Ok(s) => s,
         Err(r) => return *r,
     };
@@ -6528,7 +6689,7 @@ async fn imports_recent(
 }
 
 /// Viewer+: this tenant's auto-ingest state
-/// (`GET /v1/orgs/{org}/s3-ingest`) — the watched prefix, and per source what
+/// (`GET /v1/orgs/{org}/datasets/{ds}/s3-ingest`) — the watched prefix, and per source what
 /// was last read from it.
 ///
 /// Exists because auto-ingest is the one delivery path with no request to look
@@ -6544,7 +6705,7 @@ async fn imports_recent(
 async fn s3_ingest_state(
     principal: Principal,
     State(state): State<AppState>,
-    Path(org): Path<String>,
+    Path((org, ds)): Path<(String, String)>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
@@ -6563,6 +6724,10 @@ async fn s3_ingest_state(
         Ok(o) => o,
         Err(r) => return *r,
     };
+    // Scope-correct before anything is served: an unknown dataset 404s.
+    if let Err(r) = dataset_or_404(&client, &org_row, &ds).await {
+        return *r;
+    }
     let sources = match er_entities::s3_ingest_cursor::read::by_org(&client, &org_row.id).await {
         Ok(rows) => rows,
         Err(e) => return pg_err(e),
@@ -6588,16 +6753,16 @@ async fn s3_ingest_state(
     .into_response()
 }
 
-/// Viewer+: the 20 most recent runs (`GET /v1/orgs/{org}/runs`), a bare array.
+/// Viewer+: the 20 most recent runs (`GET /v1/orgs/{org}/datasets/{ds}/runs`), a bare array.
 async fn runs_list(
     principal: Principal,
     State(state): State<AppState>,
-    Path(org): Path<String>,
+    Path((org, ds)): Path<(String, String)>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
     }
-    let (session, auto_merge) = match org_lake_auto_merge(&state, &org).await {
+    let (session, auto_merge) = match dataset_lake_auto_merge(&state, &org, &ds).await {
         Ok(pair) => pair,
         Err(r) => return *r,
     };
@@ -6612,7 +6777,7 @@ async fn runs_list(
 }
 
 /// Viewer+: one run's entity events
-/// (`GET /v1/orgs/{org}/runs/{run_id}/entity-events`). Keyset page; query
+/// (`GET /v1/orgs/{org}/datasets/{ds}/runs/{run_id}/entity-events`). Keyset page; query
 /// `event_type`, `cursor`, `limit`.
 ///
 /// The detail behind the `entity.*` webhook aggregate. Those events carry a
@@ -6624,13 +6789,13 @@ async fn runs_list(
 async fn run_entity_events(
     principal: Principal,
     State(state): State<AppState>,
-    Path((org, run_id)): Path<(String, String)>,
+    Path((org, ds, run_id)): Path<(String, String, String)>,
     Query(params): Query<HashMap<String, String>>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
     }
-    let session = match org_lake(&state, &org).await {
+    let session = match dataset_lake(&state, &org, &ds).await {
         Ok(s) => s,
         Err(r) => return *r,
     };
@@ -6693,12 +6858,12 @@ async fn org_source_ranks(
 }
 
 /// Viewer+: merge plans for entities touched by a merge/member-add
-/// (`GET /v1/orgs/{org}/merge-plans`). Query: `policy` (master-election, default
+/// (`GET /v1/orgs/{org}/datasets/{ds}/merge-plans`). Query: `policy` (master-election, default
 /// `most_attributes`), `since` (ISO8601), `limit`, `format` (json|csv).
 async fn merge_plans(
     principal: Principal,
     State(state): State<AppState>,
-    Path(org): Path<String>,
+    Path((org, ds)): Path<(String, String)>,
     Query(params): Query<HashMap<String, String>>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
@@ -6722,7 +6887,7 @@ async fn merge_plans(
     } else {
         None
     };
-    let session = match org_lake(&state, &org).await {
+    let session = match dataset_lake(&state, &org, &ds).await {
         Ok(s) => s,
         Err(r) => return *r,
     };
@@ -6794,11 +6959,11 @@ struct ScheduleUpdateIn {
     enabled: bool,
 }
 
-/// Admin+: create an API-sourced schedule (`POST /v1/orgs/{org}/schedules`).
+/// Admin+: create an API-sourced schedule (`POST /v1/orgs/{org}/datasets/{ds}/schedules`).
 async fn create_schedule(
     principal: Principal,
     State(state): State<AppState>,
-    Path(org): Path<String>,
+    Path((org, ds)): Path<(String, String)>,
     Json(body): Json<ScheduleIn>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Admin) {
@@ -6827,14 +6992,17 @@ async fn create_schedule(
         Ok(r) => r,
         Err(r) => return *r,
     };
+    let d = match dataset_or_404(&client, &org_row, &ds).await {
+        Ok(row) => row,
+        Err(r) => return *r,
+    };
     let params = body.params.unwrap_or_else(|| json!({}));
     // History images record the acting principal (er.actor).
     let _ = pg::set_actor(&client, &principal.actor).await;
-    let ds = stamp_dataset(&client, &org_row.id).await;
     match pg::create_schedule(
         &client,
         &org_row.id,
-        ds.as_deref(),
+        Some(d.id.as_str()),
         &body.kind,
         &body.cron,
         &params,
@@ -6850,11 +7018,11 @@ async fn create_schedule(
     }
 }
 
-/// Viewer+: list an org's schedules (`GET /v1/orgs/{org}/schedules`).
+/// Viewer+: list an org's schedules (`GET /v1/orgs/{org}/datasets/{ds}/schedules`).
 async fn schedules_index(
     principal: Principal,
     State(state): State<AppState>,
-    Path(org): Path<String>,
+    Path((org, ds)): Path<(String, String)>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
@@ -6870,6 +7038,10 @@ async fn schedules_index(
         Ok(r) => r,
         Err(r) => return *r,
     };
+    // Scope-correct before anything is served: an unknown dataset 404s.
+    if let Err(r) = dataset_or_404(&client, &org_row, &ds).await {
+        return *r;
+    }
     match pg::list_schedules(&client, &org_row.id).await {
         Ok(rows) => {
             let out: Vec<Value> = rows
@@ -6892,12 +7064,12 @@ async fn schedules_index(
 }
 
 /// Admin+: enable/disable a schedule
-/// (`PATCH /v1/orgs/{org}/schedules/{schedule_id}`).
+/// (`PATCH /v1/orgs/{org}/datasets/{ds}/schedules/{schedule_id}`).
 /// Config/system-owned rows refuse (409).
 async fn update_schedule(
     principal: Principal,
     State(state): State<AppState>,
-    Path((org, schedule_id)): Path<(String, String)>,
+    Path((org, ds, schedule_id)): Path<(String, String, String)>,
     Json(body): Json<ScheduleUpdateIn>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Admin) {
@@ -6914,6 +7086,10 @@ async fn update_schedule(
         Ok(r) => r,
         Err(r) => return *r,
     };
+    // Scope-correct before anything is served: an unknown dataset 404s.
+    if let Err(r) = dataset_or_404(&client, &org_row, &ds).await {
+        return *r;
+    }
     // History images record the acting principal (er.actor).
     let _ = pg::set_actor(&client, &principal.actor).await;
     match pg::set_schedule_enabled(&client, &org_row.id, &schedule_id, body.enabled).await {
@@ -6926,11 +7102,11 @@ async fn update_schedule(
     }
 }
 
-/// Admin+: delete a schedule (`DELETE /v1/orgs/{org}/schedules/{schedule_id}`).
+/// Admin+: delete a schedule (`DELETE /v1/orgs/{org}/datasets/{ds}/schedules/{schedule_id}`).
 async fn delete_schedule(
     principal: Principal,
     State(state): State<AppState>,
-    Path((org, schedule_id)): Path<(String, String)>,
+    Path((org, ds, schedule_id)): Path<(String, String, String)>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Admin) {
         return e.into_response();
@@ -6946,6 +7122,10 @@ async fn delete_schedule(
         Ok(r) => r,
         Err(r) => return *r,
     };
+    // Scope-correct before anything is served: an unknown dataset 404s.
+    if let Err(r) = dataset_or_404(&client, &org_row, &ds).await {
+        return *r;
+    }
     // History images record the acting principal (er.actor).
     let _ = pg::set_actor(&client, &principal.actor).await;
     match pg::delete_schedule(&client, &org_row.id, &schedule_id).await {
@@ -6989,7 +7169,7 @@ async fn webhook_events_catalog(
 }
 
 /// Viewer+: the segments the active config declares
-/// (`GET /v1/orgs/{org}/segments`).
+/// (`GET /v1/orgs/{org}/datasets/{ds}/segments`).
 ///
 /// The same discovery reason as the webhook catalog: a run names a segment, so
 /// the names have to be obtainable. Returning the predicate alongside each name
@@ -6998,7 +7178,7 @@ async fn webhook_events_catalog(
 async fn segments_catalog(
     principal: Principal,
     State(state): State<AppState>,
-    Path(org): Path<String>,
+    Path((org, ds)): Path<(String, String)>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
@@ -7014,7 +7194,11 @@ async fn segments_catalog(
         Ok(r) => r,
         Err(r) => return *r,
     };
-    let config = match org_active_config(&client, &org_row).await {
+    let d = match dataset_or_404(&client, &org_row, &ds).await {
+        Ok(row) => row,
+        Err(r) => return *r,
+    };
+    let config = match dataset_active_config(&client, &d).await {
         Ok(c) => c,
         Err(r) => return *r,
     };
@@ -7398,7 +7582,7 @@ struct EntityLinkIn {
 }
 
 /// Steward+: link two entities WITHOUT merging them
-/// (`POST /v1/orgs/{org}/entity-links`), or correct an existing link of the
+/// (`POST /v1/orgs/{org}/datasets/{ds}/entity-links`), or correct an existing link of the
 /// same kind.
 ///
 /// The product has one answer to "these two records belong together" — merge
@@ -7414,7 +7598,7 @@ struct EntityLinkIn {
 async fn create_entity_link(
     principal: Principal,
     State(state): State<AppState>,
-    Path(org): Path<String>,
+    Path((org, ds)): Path<(String, String)>,
     Json(body): Json<EntityLinkIn>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Steward) {
@@ -7452,13 +7636,16 @@ async fn create_entity_link(
         Ok(r) => r,
         Err(r) => return *r,
     };
+    let d = match dataset_or_404(&client, &org_row, &ds).await {
+        Ok(row) => row,
+        Err(r) => return *r,
+    };
     let _ = pg::set_actor(&client, &principal.actor).await;
-    let ds = stamp_dataset(&client, &org_row.id).await;
     match er_entities::entity_link::create::upsert(
         &client,
         &er_ids::new_v7(),
         &org_row.id,
-        ds.as_deref(),
+        Some(d.id.as_str()),
         parent,
         child,
         &body.kind,
@@ -7489,11 +7676,11 @@ async fn create_entity_link(
 }
 
 /// Viewer+: every link touching one entity, from either side
-/// (`GET /v1/orgs/{org}/entities/{entity_id}/links`).
+/// (`GET /v1/orgs/{org}/datasets/{ds}/entities/{entity_id}/links`).
 async fn entity_links(
     principal: Principal,
     State(state): State<AppState>,
-    Path((org, entity_id)): Path<(String, String)>,
+    Path((org, ds, entity_id)): Path<(String, String, String)>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
@@ -7509,13 +7696,17 @@ async fn entity_links(
         Ok(r) => r,
         Err(r) => return *r,
     };
+    // Scope-correct before anything is served: an unknown dataset 404s.
+    if let Err(r) = dataset_or_404(&client, &org_row, &ds).await {
+        return *r;
+    }
     match er_entities::entity_link::read::for_entity(&client, &org_row.id, &entity_id).await {
         Ok(rows) => Json(json!({ "items": rows })).into_response(),
         Err(e) => pg_err(e),
     }
 }
 
-/// Steward+: remove a link (`DELETE /v1/orgs/{org}/entity-links/{link_id}`).
+/// Steward+: remove a link (`DELETE /v1/orgs/{org}/datasets/{ds}/entity-links/{link_id}`).
 ///
 /// Scoped by org in the statement itself, so a link id learned elsewhere
 /// cannot delete another tenant's row even if this handler's org check were
@@ -7523,7 +7714,7 @@ async fn entity_links(
 async fn delete_entity_link(
     principal: Principal,
     State(state): State<AppState>,
-    Path((org, link_id)): Path<(String, String)>,
+    Path((org, ds, link_id)): Path<(String, String, String)>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Steward) {
         return e.into_response();
@@ -7539,6 +7730,10 @@ async fn delete_entity_link(
         Ok(r) => r,
         Err(r) => return *r,
     };
+    // Scope-correct before anything is served: an unknown dataset 404s.
+    if let Err(r) = dataset_or_404(&client, &org_row, &ds).await {
+        return *r;
+    }
     let _ = pg::set_actor(&client, &principal.actor).await;
     match er_entities::entity_link::delete::by_id(&client, &org_row.id, &link_id).await {
         Ok(0) => detail_err(StatusCode::NOT_FOUND, "no such link"),
@@ -7569,7 +7764,7 @@ struct TagApplyIn {
 }
 
 /// Steward+: apply or remove a tag
-/// (`POST /v1/orgs/{org}/tags/{tag_id}/apply` and `.../unapply`).
+/// (`POST /v1/orgs/{org}/datasets/{ds}/tags/{tag_id}/apply` and `.../unapply`).
 ///
 /// Two routes onto one handler because the bodies and the checks are identical
 /// and only the verb differs; `apply` is idempotent at the schema, so a repeat
@@ -7577,27 +7772,28 @@ struct TagApplyIn {
 async fn apply_tag(
     principal: Principal,
     State(state): State<AppState>,
-    Path((org, tag_id)): Path<(String, String)>,
+    Path((org, ds, tag_id)): Path<(String, String, String)>,
     Json(body): Json<TagApplyIn>,
 ) -> impl IntoResponse {
-    tag_application(principal, state, org, tag_id, body, true).await
+    tag_application(principal, state, org, ds, tag_id, body, true).await
 }
 
 /// Steward+: remove a tag from a subject
-/// (`POST /v1/orgs/{org}/tags/{tag_id}/unapply`).
+/// (`POST /v1/orgs/{org}/datasets/{ds}/tags/{tag_id}/unapply`).
 async fn unapply_tag(
     principal: Principal,
     State(state): State<AppState>,
-    Path((org, tag_id)): Path<(String, String)>,
+    Path((org, ds, tag_id)): Path<(String, String, String)>,
     Json(body): Json<TagApplyIn>,
 ) -> impl IntoResponse {
-    tag_application(principal, state, org, tag_id, body, false).await
+    tag_application(principal, state, org, ds, tag_id, body, false).await
 }
 
 async fn tag_application(
     principal: Principal,
     state: AppState,
     org: String,
+    ds: String,
     tag_id: String,
     body: TagApplyIn,
     apply: bool,
@@ -7626,12 +7822,15 @@ async fn tag_application(
         Err(r) => return *r,
     };
     let _ = pg::set_actor(&client, &principal.actor).await;
+    let d = match dataset_or_404(&client, &org_row, &ds).await {
+        Ok(row) => row,
+        Err(r) => return *r,
+    };
     let outcome = if apply {
-        let ds = stamp_dataset(&client, &org_row.id).await;
         pg::apply_tag(
             &client,
             &org_row.id,
-            ds.as_deref(),
+            Some(&d.id),
             &tag_id,
             &body.subject_type,
             &body.subject_id,
@@ -7671,11 +7870,11 @@ async fn tag_application(
     }
 }
 
-/// Viewer+: what carries a tag (`GET /v1/orgs/{org}/tags/{tag_id}/subjects`).
+/// Viewer+: what carries a tag (`GET /v1/orgs/{org}/datasets/{ds}/tags/{tag_id}/subjects`).
 async fn tag_subjects(
     principal: Principal,
     State(state): State<AppState>,
-    Path((org, tag_id)): Path<(String, String)>,
+    Path((org, ds, tag_id)): Path<(String, String, String)>,
     Query(params): Query<HashMap<String, String>>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
@@ -7700,6 +7899,10 @@ async fn tag_subjects(
         Ok(r) => r,
         Err(r) => return *r,
     };
+    // Scope-correct before anything is served: an unknown dataset 404s.
+    if let Err(r) = dataset_or_404(&client, &org_row, &ds).await {
+        return *r;
+    }
     let limit = read::parse_limit(params.get("limit").map(String::as_str));
     match pg::subjects_for_tag(
         &client,
@@ -7764,6 +7967,7 @@ async fn steward_stage(
     client: &tokio_postgres::Client,
     actor: &str,
     org: &str,
+    ds: &str,
     action: &Value,
 ) -> Result<String, Box<axum::response::Response>> {
     let detail = match pg::get_org(client, org).await {
@@ -7790,8 +7994,8 @@ async fn steward_stage(
         .and_then(Value::as_str)
         .unwrap_or("unknown")
         .to_string();
-    let ds = stamp_dataset(client, &detail.id).await;
-    let action_id = pg::stage_action(client, &detail.id, ds.as_deref(), action, actor)
+    let d = dataset_or_404(client, &detail, ds).await?;
+    let action_id = pg::stage_action(client, &detail.id, Some(&d.id), action, actor)
         .await
         .map_err(|e| Box::new(pg_err(e)))?;
     let _ = pg::audit(
@@ -7854,12 +8058,12 @@ struct AssertionIn {
 }
 
 /// Steward+: stage an always/never assertion on a pair
-/// (`POST /v1/orgs/{org}/assertions`). With `apply_now`, also enqueue an
+/// (`POST /v1/orgs/{org}/datasets/{ds}/assertions`). With `apply_now`, also enqueue an
 /// incremental rebuild that drains + applies it.
 async fn add_assertion(
     principal: Principal,
     State(state): State<AppState>,
-    Path(org): Path<String>,
+    Path((org, ds)): Path<(String, String)>,
     Json(body): Json<AssertionIn>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Steward) {
@@ -7889,7 +8093,7 @@ async fn add_assertion(
         "created_by": principal.actor,
         "note": body.note,
     });
-    let action_id = match steward_stage(&client, &principal.actor, &org, &action).await {
+    let action_id = match steward_stage(&client, &principal.actor, &org, &ds, &action).await {
         Ok(id) => id,
         Err(r) => return *r,
     };
@@ -7904,14 +8108,17 @@ async fn add_assertion(
         Ok(r) => r,
         Err(r) => return *r,
     };
+    let d = match dataset_or_404(&client, &org_row, &ds).await {
+        Ok(row) => row,
+        Err(r) => return *r,
+    };
     if let Err(e) = refuse_unless_active(&org_row, "assertions") {
         return *e;
     }
-    let ds = stamp_dataset(&client, &org_row.id).await;
     match pg::enqueue(
         &client,
         &org_row.id,
-        ds.as_deref(),
+        Some(d.id.as_str()),
         "apply_corrections",
         0,
         Some(&idem),
@@ -7989,6 +8196,7 @@ async fn record_overlay_action(
     principal: Principal,
     state: AppState,
     org: String,
+    ds: String,
     body: SuppressIn,
     overlay: &'static str,
     retract: bool,
@@ -8044,7 +8252,7 @@ async fn record_overlay_action(
                 "created_by": principal.actor,
             })
         };
-        match steward_stage(&client, &principal.actor, &org, &action).await {
+        match steward_stage(&client, &principal.actor, &org, &ds, &action).await {
             Ok(id) => action_ids.push(id),
             Err(r) => {
                 // Partway through, the actions already staged are REAL and will
@@ -8073,14 +8281,17 @@ async fn record_overlay_action(
         Ok(r) => r,
         Err(r) => return *r,
     };
-    if let Err(e) = refuse_unless_active(&org_row, "steward actions") {
+    let d = match dataset_or_404(&client, &org_row, &ds).await {
+        Ok(row) => row,
+        Err(r) => return *r,
+    };
+    if let Err(e) = refuse_unless_active_dataset(&org_row, &d, "steward actions") {
         return *e;
     }
-    let ds = stamp_dataset(&client, &org_row.id).await;
     match pg::enqueue(
         &client,
         &org_row.id,
-        ds.as_deref(),
+        Some(&d.id),
         "apply_corrections",
         0,
         Some(&idem),
@@ -8110,55 +8321,55 @@ async fn record_overlay_action(
 }
 
 /// Steward+: exclude a record from golden assembly
-/// (`POST /v1/orgs/{org}/records/suppress`).
+/// (`POST /v1/orgs/{org}/datasets/{ds}/records/suppress`).
 async fn suppress_record_route(
     principal: Principal,
     State(state): State<AppState>,
-    Path(org): Path<String>,
+    Path((org, ds)): Path<(String, String)>,
     Json(body): Json<SuppressIn>,
 ) -> impl IntoResponse {
-    record_overlay_action(principal, state, org, body, "suppress", false).await
+    record_overlay_action(principal, state, org, ds, body, "suppress", false).await
 }
 
 /// Steward+: retract a record suppression
-/// (`POST /v1/orgs/{org}/records/unsuppress`).
+/// (`POST /v1/orgs/{org}/datasets/{ds}/records/unsuppress`).
 async fn unsuppress_record_route(
     principal: Principal,
     State(state): State<AppState>,
-    Path(org): Path<String>,
+    Path((org, ds)): Path<(String, String)>,
     Json(body): Json<SuppressIn>,
 ) -> impl IntoResponse {
-    record_overlay_action(principal, state, org, body, "suppress", true).await
+    record_overlay_action(principal, state, org, ds, body, "suppress", true).await
 }
 
 /// Steward+: pin a record master for its entity
-/// (`POST /v1/orgs/{org}/records/protect`).
+/// (`POST /v1/orgs/{org}/datasets/{ds}/records/protect`).
 async fn protect_record_route(
     principal: Principal,
     State(state): State<AppState>,
-    Path(org): Path<String>,
+    Path((org, ds)): Path<(String, String)>,
     Json(body): Json<SuppressIn>,
 ) -> impl IntoResponse {
-    record_overlay_action(principal, state, org, body, "protect", false).await
+    record_overlay_action(principal, state, org, ds, body, "protect", false).await
 }
 
 /// Steward+: retract a record protection
-/// (`POST /v1/orgs/{org}/records/unprotect`).
+/// (`POST /v1/orgs/{org}/datasets/{ds}/records/unprotect`).
 async fn unprotect_record_route(
     principal: Principal,
     State(state): State<AppState>,
-    Path(org): Path<String>,
+    Path((org, ds)): Path<(String, String)>,
     Json(body): Json<SuppressIn>,
 ) -> impl IntoResponse {
-    record_overlay_action(principal, state, org, body, "protect", true).await
+    record_overlay_action(principal, state, org, ds, body, "protect", true).await
 }
 
 /// Steward+: stage an assertion retraction
-/// (`DELETE /v1/orgs/{org}/assertions/{assertion_id}`).
+/// (`DELETE /v1/orgs/{org}/datasets/{ds}/assertions/{assertion_id}`).
 async fn retract_assertion(
     principal: Principal,
     State(state): State<AppState>,
-    Path((org, assertion_id)): Path<(String, String)>,
+    Path((org, ds, assertion_id)): Path<(String, String, String)>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Steward) {
         return e.into_response();
@@ -8174,7 +8385,7 @@ async fn retract_assertion(
         Err(r) => return *r,
     };
     let action = json!({ "type": "retract_assertion", "assertion_id": assertion_id });
-    match steward_stage(&client, &principal.actor, &org, &action).await {
+    match steward_stage(&client, &principal.actor, &org, &ds, &action).await {
         Ok(id) => staged_response(StatusCode::OK, &id),
         Err(r) => *r,
     }
@@ -8213,7 +8424,7 @@ fn active_to_assertions(
         .collect()
 }
 
-/// Viewer+: the unsatisfiable rule sets (`GET /v1/orgs/{org}/assertions:contradictions`,
+/// Viewer+: the unsatisfiable rule sets (`GET /v1/orgs/{org}/datasets/{ds}/assertions:contradictions`,
 /// normalized to `/assertions/contradictions`): every active `never` whose
 /// endpoints fall inside one `always`-connected component (S4.4.1
 /// `check_contradiction_1`). Returns `{ contradictions: [...] }` — empty when the
@@ -8221,12 +8432,12 @@ fn active_to_assertions(
 async fn assertions_contradictions(
     principal: Principal,
     State(state): State<AppState>,
-    Path(org): Path<String>,
+    Path((org, ds)): Path<(String, String)>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
     }
-    let session = match org_lake(&state, &org).await {
+    let session = match dataset_lake(&state, &org, &ds).await {
         Ok(s) => s,
         Err(r) => return *r,
     };
@@ -8266,7 +8477,7 @@ fn default_true() -> bool {
 }
 
 /// Steward+: split members out of a resolved entity
-/// (`POST /v1/orgs/{org}/golden-records/{entity_id}/unmerge`). `records` is the
+/// (`POST /v1/orgs/{org}/datasets/{ds}/golden-records/{entity_id}/unmerge`). `records` is the
 /// member record_keys to peel off; the endpoint stages one `never` rule between
 /// each and a representative member it keeps (the lexically smallest member not
 /// being peeled), so the next reconcile severs them. With `apply_now` (the
@@ -8283,7 +8494,7 @@ fn default_true() -> bool {
 async fn unmerge_entity(
     principal: Principal,
     State(state): State<AppState>,
-    Path((org, entity_id)): Path<(String, String)>,
+    Path((org, ds, entity_id)): Path<(String, String, String)>,
     Json(body): Json<UnmergeIn>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Steward) {
@@ -8304,7 +8515,7 @@ async fn unmerge_entity(
 
     // Read the entity + active assertions from the lake (read-only) to pick the
     // kept representative and precheck the proposed never-rules.
-    let session = match org_lake(&state, &org).await {
+    let session = match dataset_lake(&state, &org, &ds).await {
         Ok(s) => s,
         Err(r) => return *r,
     };
@@ -8395,7 +8606,7 @@ async fn unmerge_entity(
             "created_by": principal.actor,
             "note": format!("unmerge:{entity_id}"),
         });
-        match steward_stage(&client, &principal.actor, &org, &action).await {
+        match steward_stage(&client, &principal.actor, &org, &ds, &action).await {
             Ok(id) => action_ids.push(id),
             Err(r) => return *r,
         }
@@ -8421,11 +8632,14 @@ async fn unmerge_entity(
         Ok(r) => r,
         Err(r) => return *r,
     };
-    let ds = stamp_dataset(&client, &org_row.id).await;
+    let d = match dataset_or_404(&client, &org_row, &ds).await {
+        Ok(row) => row,
+        Err(r) => return *r,
+    };
     match pg::enqueue(
         &client,
         &org_row.id,
-        ds.as_deref(),
+        Some(d.id.as_str()),
         "apply_corrections",
         0,
         Some(&idem),
@@ -8449,11 +8663,11 @@ async fn unmerge_entity(
 }
 
 /// Viewer+: how many steward actions await the next reconcile
-/// (`GET /v1/orgs/{org}/staged`).
+/// (`GET /v1/orgs/{org}/datasets/{ds}/staged`).
 async fn staged_count(
     principal: Principal,
     State(state): State<AppState>,
-    Path(org): Path<String>,
+    Path((org, ds)): Path<(String, String)>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
@@ -8472,6 +8686,10 @@ async fn staged_count(
         Ok(r) => r,
         Err(r) => return *r,
     };
+    // Scope-correct before anything is served: an unknown dataset 404s.
+    if let Err(r) = dataset_or_404(&client, &org_row, &ds).await {
+        return *r;
+    }
     match pg::pending_count(&client, &org_row.id).await {
         Ok(n) => Json(json!({ "pending_count": n })).into_response(),
         Err(e) => pg_err(e),
@@ -8484,12 +8702,12 @@ struct ReviewResolveIn {
 }
 
 /// Steward+: stage a review resolution
-/// (`POST /v1/orgs/{org}/reviews/{review_id}/resolve`; the Python
+/// (`POST /v1/orgs/{org}/datasets/{ds}/reviews/{review_id}/resolve`; the Python
 /// `{review_id}:resolve` action). `resolution` is match | no_match | dismiss.
 async fn resolve_review(
     principal: Principal,
     State(state): State<AppState>,
-    Path((org, review_id)): Path<(String, String)>,
+    Path((org, ds, review_id)): Path<(String, String, String)>,
     Json(body): Json<ReviewResolveIn>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Steward) {
@@ -8516,7 +8734,7 @@ async fn resolve_review(
         "review_id": review_id,
         "resolution": body.resolution,
     });
-    match steward_stage(&client, &principal.actor, &org, &action).await {
+    match steward_stage(&client, &principal.actor, &org, &ds, &action).await {
         Ok(id) => staged_response(StatusCode::OK, &id),
         Err(r) => *r,
     }
@@ -8536,12 +8754,12 @@ struct BulkResolveIn {
 }
 
 /// Steward+: stage many review resolutions in one window
-/// (`POST /v1/orgs/{org}/reviews/bulk-resolve`). 1..=200 items; with `apply_now`
+/// (`POST /v1/orgs/{org}/datasets/{ds}/reviews/bulk-resolve`). 1..=200 items; with `apply_now`
 /// also enqueues the drain job.
 async fn bulk_resolve_reviews(
     principal: Principal,
     State(state): State<AppState>,
-    Path(org): Path<String>,
+    Path((org, ds)): Path<(String, String)>,
     Json(body): Json<BulkResolveIn>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Steward) {
@@ -8585,7 +8803,10 @@ async fn bulk_resolve_reviews(
         Ok(None) => return detail_err(StatusCode::NOT_FOUND, format!("no org '{org}'")),
         Err(e) => return pg_err(e),
     };
-    let ds = stamp_dataset(&client, &org_row.id).await;
+    let d = match dataset_or_404(&client, &org_row, &ds).await {
+        Ok(row) => row,
+        Err(r) => return *r,
+    };
     let mut action_ids = Vec::new();
     for item in &body.items {
         let action = json!({
@@ -8596,7 +8817,7 @@ async fn bulk_resolve_reviews(
         match pg::stage_action(
             &client,
             &org_row.id,
-            ds.as_deref(),
+            Some(d.id.as_str()),
             &action,
             &principal.actor,
         )
@@ -8622,7 +8843,7 @@ async fn bulk_resolve_reviews(
         match pg::enqueue(
             &client,
             &org_row.id,
-            ds.as_deref(),
+            Some(d.id.as_str()),
             "apply_corrections",
             0,
             Some(&idem),
@@ -8672,14 +8893,14 @@ struct MassUpdateIn {
 }
 
 /// Steward+: stage golden field overrides across many entities in one window
-/// (`POST /v1/orgs/{org}/mass-update`). 1..=200 items; each sets (`value`) or
+/// (`POST /v1/orgs/{org}/datasets/{ds}/mass-update`). 1..=200 items; each sets (`value`) or
 /// clears (`clear: true`) one golden field for one entity. With `apply_now` also
 /// enqueues the drain (`apply_corrections`), which re-asssembles golden over the
 /// staged overrides. Durable + auditable; the matcher/scores are untouched.
 async fn mass_update(
     principal: Principal,
     State(state): State<AppState>,
-    Path(org): Path<String>,
+    Path((org, ds)): Path<(String, String)>,
     Json(body): Json<MassUpdateIn>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Steward) {
@@ -8722,7 +8943,10 @@ async fn mass_update(
         Ok(None) => return detail_err(StatusCode::NOT_FOUND, format!("no org '{org}'")),
         Err(e) => return pg_err(e),
     };
-    let ds = stamp_dataset(&client, &org_row.id).await;
+    let d = match dataset_or_404(&client, &org_row, &ds).await {
+        Ok(row) => row,
+        Err(r) => return *r,
+    };
     let mut action_ids = Vec::new();
     for item in &body.items {
         let action = if item.clear {
@@ -8742,7 +8966,7 @@ async fn mass_update(
         match pg::stage_action(
             &client,
             &org_row.id,
-            ds.as_deref(),
+            Some(d.id.as_str()),
             &action,
             &principal.actor,
         )
@@ -8768,7 +8992,7 @@ async fn mass_update(
         match pg::enqueue(
             &client,
             &org_row.id,
-            ds.as_deref(),
+            Some(d.id.as_str()),
             "apply_corrections",
             0,
             Some(&idem),
@@ -8930,13 +9154,25 @@ fn build_routes(state: AppState) -> Router {
             post(suspend_dataset),
         )
         .route("/v1/orgs/{org}/datasets/{ds}/resume", post(resume_dataset))
-        .route("/v1/orgs/{org}/jobs", post(create_job).get(list_jobs))
-        .route("/v1/orgs/{org}/jobs/{job_id}", get(get_job))
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/jobs",
+            post(create_job).get(list_jobs),
+        )
+        .route("/v1/orgs/{org}/datasets/{ds}/jobs/{job_id}", get(get_job))
         // axum/matchit requires a param to be a whole segment, so the Python
         // `{job_id}:cancel` action becomes a `/cancel` sub-path here.
-        .route("/v1/orgs/{org}/jobs/{job_id}/cancel", post(cancel_job))
-        .route("/v1/orgs/{org}/jobs/{job_id}/resume", post(resume_job))
-        .route("/v1/orgs/{org}/jobs/{job_id}/tasks", get(list_job_tasks))
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/jobs/{job_id}/cancel",
+            post(cancel_job),
+        )
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/jobs/{job_id}/resume",
+            post(resume_job),
+        )
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/jobs/{job_id}/tasks",
+            get(list_job_tasks),
+        )
         // The §6.4 attempt channel (fallback-token flavour): machine-to-machine,
         // authenticated by the per-attempt token rather than a bearer
         // principal; in-namespace only once deployed (the BFF never forwards
@@ -8962,119 +9198,167 @@ fn build_routes(state: AppState) -> Router {
             "/v1/orgs/{org}/api-keys/{key_id}",
             axum::routing::delete(revoke_key),
         )
-        .route("/v1/orgs/{org}/models", get(models_index))
-        .route("/v1/orgs/{org}/models/versions", post(create_model_version))
+        .route("/v1/orgs/{org}/datasets/{ds}/models", get(models_index))
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/models/versions",
+            post(create_model_version),
+        )
         // A sub-path, not `models:compile`: matchit cannot match a param and a
         // literal in one segment. The app()-level rewrite accepts the BFF's
         // `:compile` spelling and lands it here.
-        .route("/v1/orgs/{org}/models/compile", post(compile_model_version))
         .route(
-            "/v1/orgs/{org}/models/{name}/versions/{version}",
+            "/v1/orgs/{org}/datasets/{ds}/models/compile",
+            post(compile_model_version),
+        )
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/models/{name}/versions/{version}",
             get(get_model_version),
         )
         .route(
-            "/v1/orgs/{org}/models/{name}/versions/{version}/evaluation",
+            "/v1/orgs/{org}/datasets/{ds}/models/{name}/versions/{version}/evaluation",
             get(model_version_evaluation),
         )
         .route(
-            "/v1/orgs/{org}/models/{name}/versions/{version}/activate",
+            "/v1/orgs/{org}/datasets/{ds}/models/{name}/versions/{version}/activate",
             post(activate_model_version),
         )
         .route(
-            "/v1/orgs/{org}/config/versions",
+            "/v1/orgs/{org}/datasets/{ds}/config/versions",
             post(create_config_version).get(list_config_versions),
         )
         .route(
-            "/v1/orgs/{org}/config/versions/{version}",
+            "/v1/orgs/{org}/datasets/{ds}/config/versions/{version}",
             get(get_config_version),
         )
         // Python's `{version}:publish` action -> a `/publish` sub-path (matchit).
         .route(
-            "/v1/orgs/{org}/config/versions/{version}/publish",
+            "/v1/orgs/{org}/datasets/{ds}/config/versions/{version}/publish",
             post(publish_config_version),
         )
-        .route("/v1/orgs/{org}/config", get(active_config))
-        .route("/v1/orgs/{org}/lexicon", get(get_lexicon).put(put_lexicon))
-        .route("/v1/orgs/{org}/golden-records", get(golden_records_list))
+        .route("/v1/orgs/{org}/datasets/{ds}/config", get(active_config))
         .route(
-            "/v1/orgs/{org}/golden-records/{entity_id}",
+            "/v1/orgs/{org}/datasets/{ds}/lexicon",
+            get(get_lexicon).put(put_lexicon),
+        )
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/golden-records",
+            get(golden_records_list),
+        )
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/golden-records/{entity_id}",
             get(golden_record_detail),
         )
         // Python's `{entity_id}:unmerge` action -> an `/unmerge` sub-path (matchit).
         .route(
-            "/v1/orgs/{org}/golden-records/{entity_id}/unmerge",
+            "/v1/orgs/{org}/datasets/{ds}/golden-records/{entity_id}/unmerge",
             post(unmerge_entity),
         )
-        .route("/v1/orgs/{org}/metrics", get(org_metrics))
-        .route("/v1/orgs/{org}/data-quality", get(org_data_quality))
-        .route("/v1/orgs/{org}/duplicates", get(duplicates_list))
-        .route("/v1/orgs/{org}/match-scores", get(match_scores_list))
-        .route("/v1/orgs/{org}/match-preview", get(match_preview))
-        .route("/v1/orgs/{org}/blocking-estimate", get(blocking_estimate))
-        .route("/v1/orgs/{org}/resolve", post(resolve_record))
-        .route("/v1/orgs/{org}/records/ingest", post(push_records))
-        .route("/v1/orgs/{org}/records", get(records_by_key))
-        .route("/v1/orgs/{org}/reviews", get(reviews_list))
+        .route("/v1/orgs/{org}/datasets/{ds}/metrics", get(org_metrics))
         .route(
-            "/v1/orgs/{org}/reviews/bulk-resolve",
+            "/v1/orgs/{org}/datasets/{ds}/data-quality",
+            get(org_data_quality),
+        )
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/duplicates",
+            get(duplicates_list),
+        )
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/match-scores",
+            get(match_scores_list),
+        )
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/match-preview",
+            get(match_preview),
+        )
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/blocking-estimate",
+            get(blocking_estimate),
+        )
+        .route("/v1/orgs/{org}/datasets/{ds}/resolve", post(resolve_record))
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/records/ingest",
+            post(push_records),
+        )
+        .route("/v1/orgs/{org}/datasets/{ds}/records", get(records_by_key))
+        .route("/v1/orgs/{org}/datasets/{ds}/reviews", get(reviews_list))
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/reviews/bulk-resolve",
             post(bulk_resolve_reviews),
         )
-        .route("/v1/orgs/{org}/mass-update", post(mass_update))
         .route(
-            "/v1/orgs/{org}/records/suppress",
+            "/v1/orgs/{org}/datasets/{ds}/mass-update",
+            post(mass_update),
+        )
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/records/suppress",
             post(suppress_record_route),
         )
         .route(
-            "/v1/orgs/{org}/records/unsuppress",
+            "/v1/orgs/{org}/datasets/{ds}/records/unsuppress",
             post(unsuppress_record_route),
         )
-        .route("/v1/orgs/{org}/records/protect", post(protect_record_route))
         .route(
-            "/v1/orgs/{org}/records/unprotect",
+            "/v1/orgs/{org}/datasets/{ds}/records/protect",
+            post(protect_record_route),
+        )
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/records/unprotect",
             post(unprotect_record_route),
         )
-        .route("/v1/orgs/{org}/reviews/{review_id}", get(review_detail))
         .route(
-            "/v1/orgs/{org}/reviews/{review_id}/resolve",
+            "/v1/orgs/{org}/datasets/{ds}/reviews/{review_id}",
+            get(review_detail),
+        )
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/reviews/{review_id}/resolve",
             post(resolve_review),
         )
         .route(
-            "/v1/orgs/{org}/assertions",
+            "/v1/orgs/{org}/datasets/{ds}/assertions",
             get(assertions_list).post(add_assertion),
         )
         // Python's `assertions:contradictions` -> a `/contradictions` sub-path.
         .route(
-            "/v1/orgs/{org}/assertions/contradictions",
+            "/v1/orgs/{org}/datasets/{ds}/assertions/contradictions",
             get(assertions_contradictions),
         )
         .route(
-            "/v1/orgs/{org}/assertions/{assertion_id}",
+            "/v1/orgs/{org}/datasets/{ds}/assertions/{assertion_id}",
             axum::routing::delete(retract_assertion),
         )
-        .route("/v1/orgs/{org}/staged", get(staged_count))
+        .route("/v1/orgs/{org}/datasets/{ds}/staged", get(staged_count))
         // The upload needs its own body limit: axum's default (2 MiB) would
         // reject every real delivery, and the limit must be enforced by the
         // server rather than trusted from the BFF.
         .route(
-            "/v1/orgs/{org}/imports",
+            "/v1/orgs/{org}/datasets/{ds}/imports",
             get(imports_list)
                 .post(upload_import)
                 .layer(axum::extract::DefaultBodyLimit::max(max_import_bytes)),
         )
-        .route("/v1/orgs/{org}/imports/recent", get(imports_recent))
-        .route("/v1/orgs/{org}/s3-ingest", get(s3_ingest_state))
-        .route("/v1/orgs/{org}/entity-links", post(create_entity_link))
         .route(
-            "/v1/orgs/{org}/entity-links/{link_id}",
+            "/v1/orgs/{org}/datasets/{ds}/imports/recent",
+            get(imports_recent),
+        )
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/s3-ingest",
+            get(s3_ingest_state),
+        )
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/entity-links",
+            post(create_entity_link),
+        )
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/entity-links/{link_id}",
             axum::routing::delete(delete_entity_link),
         )
         .route(
-            "/v1/orgs/{org}/entities/{entity_id}/links",
+            "/v1/orgs/{org}/datasets/{ds}/entities/{entity_id}/links",
             get(entity_links),
         )
-        .route("/v1/orgs/{org}/runs", get(runs_list))
+        .route("/v1/orgs/{org}/datasets/{ds}/runs", get(runs_list))
         .route(
-            "/v1/orgs/{org}/runs/{run_id}/entity-events",
+            "/v1/orgs/{org}/datasets/{ds}/runs/{run_id}/entity-events",
             get(run_entity_events),
         )
         .route("/v1/orgs/{org}/tags", get(tags_index).post(create_tag))
@@ -9082,20 +9366,41 @@ fn build_routes(state: AppState) -> Router {
             "/v1/orgs/{org}/tags/{tag_id}",
             axum::routing::delete(retire_tag),
         )
-        .route("/v1/orgs/{org}/tags/{tag_id}/apply", post(apply_tag))
-        .route("/v1/orgs/{org}/tags/{tag_id}/unapply", post(unapply_tag))
-        .route("/v1/orgs/{org}/tags/{tag_id}/subjects", get(tag_subjects))
-        .route("/v1/orgs/{org}/merge-plans", get(merge_plans))
         .route(
-            "/v1/orgs/{org}/schedules",
+            "/v1/orgs/{org}/datasets/{ds}/tags/{tag_id}/apply",
+            post(apply_tag),
+        )
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/tags/{tag_id}/unapply",
+            post(unapply_tag),
+        )
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/tags/{tag_id}/subjects",
+            get(tag_subjects),
+        )
+        .route("/v1/orgs/{org}/datasets/{ds}/merge-plans", get(merge_plans))
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/schedules",
             get(schedules_index).post(create_schedule),
         )
-        .route("/v1/orgs/{org}/labeling/next", get(labeling_next))
-        .route("/v1/orgs/{org}/labels", post(create_label).get(labels_list))
-        .route("/v1/orgs/{org}/insights", get(insights))
-        .route("/v1/orgs/{org}/insights/sources", get(insight_sources))
-        .route("/v1/orgs/{org}/quality", get(quality))
-        .route("/v1/orgs/{org}/segments", get(segments_catalog))
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/labeling/next",
+            get(labeling_next),
+        )
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/labels",
+            post(create_label).get(labels_list),
+        )
+        .route("/v1/orgs/{org}/datasets/{ds}/insights", get(insights))
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/insights/sources",
+            get(insight_sources),
+        )
+        .route("/v1/orgs/{org}/datasets/{ds}/quality", get(quality))
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/segments",
+            get(segments_catalog),
+        )
         .route(
             "/v1/orgs/{org}/webhooks/deliveries",
             get(webhook_deliveries),
@@ -9113,7 +9418,7 @@ fn build_routes(state: AppState) -> Router {
             axum::routing::delete(delete_webhook),
         )
         .route(
-            "/v1/orgs/{org}/schedules/{schedule_id}",
+            "/v1/orgs/{org}/datasets/{ds}/schedules/{schedule_id}",
             axum::routing::patch(update_schedule).delete(delete_schedule),
         )
         // INSIDE the router, which is the whole point: `MatchedPath` is

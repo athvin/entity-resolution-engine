@@ -3,6 +3,7 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { dropPathFor, useS3Ingest } from "@/lib/query/s3-ingest";
+import { useDatasetSlug } from "@/lib/use-dataset-slug";
 
 /**
  * Auto-ingest state (E9c): where to drop a file, and what has been read.
@@ -20,7 +21,8 @@ import { dropPathFor, useS3Ingest } from "@/lib/query/s3-ingest";
  * than describing.
  */
 export function AutoIngestPanel({ org, sources }: { org: string; sources: readonly string[] }) {
-  const state = useS3Ingest(org);
+  const ds = useDatasetSlug();
+  const state = useS3Ingest(org, ds);
 
   return (
     <Card data-testid="auto-ingest">

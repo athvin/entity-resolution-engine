@@ -24,6 +24,7 @@ interface DetailAtSnapshot {
  */
 export function useFieldHistory(
   org: string,
+  ds: string,
   entityId: string,
   attribute: string | null,
   runs: readonly RunLike[],
@@ -34,7 +35,7 @@ export function useFieldHistory(
       queryKey: ["org", org, "entity-at", entityId, point.snapshot] as const,
       queryFn: () =>
         bffFetch<DetailAtSnapshot>(
-          `/api/orgs/${org}/golden-records/${encodeURIComponent(entityId)}?snapshot=${String(point.snapshot)}`,
+          `/api/orgs/${org}/datasets/${ds}/golden-records/${encodeURIComponent(entityId)}?snapshot=${String(point.snapshot)}`,
         ),
       enabled: attribute !== null,
       // The past does not change: a snapshot read is immutable, so refetching

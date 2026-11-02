@@ -49,13 +49,14 @@ async fn the_sweep_reconciles_every_active_tenant_and_reports_it() {
         .await
         .unwrap();
     let acme = oid(&client, "acme").await;
-    pg::merge_org_env(
-        &client,
-        "acme",
-        &serde_json::json!({"ER_LAKE_CATALOG": catalog, "ER_LAKE_DATA_PATH": data_path}),
-    )
-    .await
-    .unwrap();
+    let lake_env = serde_json::json!({"ER_LAKE_CATALOG": catalog, "ER_LAKE_DATA_PATH": data_path});
+    pg::merge_org_env(&client, "acme", &lake_env).await.unwrap();
+    // The handlers fan org-env mutations out to every dataset env
+    // (`PATCH /resources` does both calls); below the HTTP layer the test does
+    // the same, or the dataset-scoped sweep job reads an env with no lake.
+    pg::merge_dataset_envs(&client, &acme, &lake_env)
+        .await
+        .unwrap();
     pg::set_org_state(&client, "dormant", "suspended", "active")
         .await
         .unwrap();
@@ -63,7 +64,7 @@ async fn the_sweep_reconciles_every_active_tenant_and_reports_it() {
     // ---- phase 1: a fresh lake is migrated ---------------------------------
     let jobs = schema::enqueue_tenant_migrations(&client).await.unwrap();
     assert_eq!(jobs.len(), 1, "only the active org is swept: {jobs:?}");
-    assert_eq!(jobs[0].0, "acme");
+    assert_eq!(jobs[0].0, "acme/default");
     assert_eq!(jobs[0].1.kind, schema::LAKE_MIGRATE_KIND);
     assert!(
         dispatcher::dispatch_once(&client, None, None)
@@ -74,7 +75,7 @@ async fn the_sweep_reconciles_every_active_tenant_and_reports_it() {
         .await
         .unwrap();
     assert_eq!(report.len(), 1);
-    assert_eq!(report[0].org, "acme");
+    assert_eq!(report[0].org, "acme/default");
     assert_eq!(report[0].outcome, "migrated", "{report:?}");
     assert!(!report[0].failed());
     assert!(

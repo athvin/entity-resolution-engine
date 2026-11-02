@@ -22,7 +22,7 @@ export const MAX_COMPARED_MEMBERS = 8;
  * editor built on a different read would drift from the pair adjudicator's
  * idea of what a record's values are.
  */
-export function useMemberValues(org: string, recordKeys: readonly string[]) {
+export function useMemberValues(org: string, ds: string, recordKeys: readonly string[]) {
   const keys = recordKeys.slice(0, MAX_COMPARED_MEMBERS);
   return useQuery({
     queryKey: queryKeys.memberValues(org, keys),
@@ -30,7 +30,7 @@ export function useMemberValues(org: string, recordKeys: readonly string[]) {
       const params = new URLSearchParams();
       for (const key of keys) params.append("key", key);
       return bffFetch<{ items: SourceRecord[]; snapshot: number }>(
-        `/api/orgs/${org}/records?${params.toString()}`,
+        `/api/orgs/${org}/datasets/${ds}/records?${params.toString()}`,
       );
     },
     enabled: keys.length > 0,

@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { login, ORG, USERS } from "./helpers";
+import { DS, login, ORG, USERS } from "./helpers";
 
 /**
  * The M5 accessibility gate: zero serious/critical axe violations on every
@@ -32,28 +32,28 @@ const SCREENS: {
   },
   {
     name: "dashboard",
-    path: `/${ORG}/dashboard`,
+    path: `/${ORG}/${DS}/dashboard`,
     ready: async (page) => {
       await expect(page.getByTestId("tile-records")).toContainText("800");
     },
   },
   {
     name: "records",
-    path: `/${ORG}/records`,
+    path: `/${ORG}/${DS}/records`,
     ready: async (page) => {
       await expect(page.getByTestId("records-list")).toBeVisible();
     },
   },
   {
     name: "reviews",
-    path: `/${ORG}/reviews`,
+    path: `/${ORG}/${DS}/reviews`,
     ready: async (page) => {
       await expect(page.getByTestId("review-inbox")).toBeVisible();
     },
   },
   {
     name: "duplicates",
-    path: `/${ORG}/duplicates`,
+    path: `/${ORG}/${DS}/duplicates`,
     ready: async (page) => {
       await expect(page.getByTestId("duplicate-groups")).toBeVisible();
     },
@@ -67,35 +67,35 @@ const SCREENS: {
   },
   {
     name: "runs",
-    path: `/${ORG}/runs`,
+    path: `/${ORG}/${DS}/runs`,
     ready: async (page) => {
       await expect(page.getByTestId("runs-table")).toBeVisible();
     },
   },
   {
     name: "sources",
-    path: `/${ORG}/sources`,
+    path: `/${ORG}/${DS}/sources`,
     ready: async (page) => {
       await expect(page.getByTestId("receipts")).toBeVisible();
     },
   },
   {
     name: "config-studio",
-    path: `/${ORG}/settings/config`,
+    path: `/${ORG}/${DS}/settings/config`,
     ready: async (page) => {
       await expect(page.getByTestId("threshold-editor")).toBeVisible();
     },
   },
   {
     name: "campaigns",
-    path: `/${ORG}/campaigns`,
+    path: `/${ORG}/${DS}/campaigns`,
     ready: async (page) => {
       await expect(page.getByTestId("campaigns-page")).toBeVisible();
     },
   },
   {
     name: "assistant",
-    path: `/${ORG}/assistant`,
+    path: `/${ORG}/${DS}/assistant`,
     ready: async (page) => {
       await expect(page.getByTestId("assistant-suggestions")).toBeVisible();
     },
@@ -106,7 +106,7 @@ const SCREENS: {
     // than usual here: the buttons carry visible `kbd` hints and must still be
     // reachable and named without them.
     name: "labeling",
-    path: `/${ORG}/labeling`,
+    path: `/${ORG}/${DS}/labeling`,
     ready: async (page) => {
       await expect(page.getByTestId("labeling-queue")).toBeVisible();
     },
@@ -115,7 +115,7 @@ const SCREENS: {
     // A screen absent from this array is silently unchecked, which is why the
     // models page is listed in the same change that adds it.
     name: "models",
-    path: `/${ORG}/settings/models`,
+    path: `/${ORG}/${DS}/settings/models`,
     ready: async (page) => {
       await expect(page.getByTestId("models-table")).toBeVisible();
     },
@@ -125,7 +125,7 @@ const SCREENS: {
     // precisely so it is legible to assistive tech, which is only true if
     // something checks.
     name: "insights",
-    path: `/${ORG}/insights`,
+    path: `/${ORG}/${DS}/insights`,
     ready: async (page) => {
       await expect(page.getByTestId("insights-series")).toBeVisible();
     },

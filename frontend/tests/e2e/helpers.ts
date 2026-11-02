@@ -2,6 +2,9 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import type { Page } from "@playwright/test";
 
+/** Every org lands with one dataset named `default`; the tier works inside it. */
+export const DS = "default";
+
 const walkthroughDir = path.join(
   process.env.PLAYWRIGHT_ARTIFACTS_DIR ?? path.join(process.cwd(), "tests/e2e/__artifacts__"),
   "walkthrough",

@@ -21,10 +21,10 @@ export interface EnrichResponse {
  * (the existing `override_field` path). Not auto-fetched — a steward triggers
  * it, because it spends model tokens.
  */
-export function useEnrich(org: string) {
+export function useEnrich(org: string, ds: string) {
   return useMutation({
     mutationFn: (entityId: string) =>
-      bffFetch<EnrichResponse>(`/api/orgs/${org}/enrich`, {
+      bffFetch<EnrichResponse>(`/api/orgs/${org}/datasets/${ds}/enrich`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ entity_id: entityId }),

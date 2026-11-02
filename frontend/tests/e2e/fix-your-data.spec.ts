@@ -1,7 +1,7 @@
 import path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 
-import { snap } from "./helpers";
+import { DS, snap } from "./helpers";
 
 /**
  * The M3 slice of the full-stack story, against the real engine: the steward
@@ -24,7 +24,7 @@ async function loginAs(page: Page, email: string) {
 async function waitForQuietQueue(page: Page) {
   // Poll the jobs API through the BFF until nothing is active (reconciles are ~30-60s).
   await expect(async () => {
-    const response = await page.request.get(`/api/orgs/${ORG}/jobs?limit=10`);
+    const response = await page.request.get(`/api/orgs/${ORG}/datasets/${DS}/jobs?limit=10`);
     const jobs = (await response.json()) as { state: string }[];
     expect(
       jobs.some((job) =>
@@ -38,7 +38,7 @@ test.describe.configure({ mode: "serial" });
 
 test("the review inbox renders the real queue with evidence", async ({ page }) => {
   await loginAs(page, "steward@acme.dev");
-  await page.goto(`/${ORG}/reviews`);
+  await page.goto(`/${ORG}/${DS}/reviews`);
   // The seeded corpus leaves ~1 open review; earlier local runs may have
   // resolved it. Both states are honest; assert whichever the engine shows.
   const inbox = page.getByTestId("review-inbox");
@@ -62,7 +62,7 @@ test("unmerge splits a real merged entity through the reconcile pipeline", async
   await loginAs(page, "steward@acme.dev");
 
   // Pick a merged group with ≥2 members from the duplicates read model.
-  await page.goto(`/${ORG}/duplicates`);
+  await page.goto(`/${ORG}/${DS}/duplicates`);
   const firstGroup = page.getByTestId("duplicate-groups").locator("a").first();
   await expect(firstGroup).toBeVisible();
   await firstGroup.click();
@@ -107,7 +107,7 @@ test("unmerge splits a real merged entity through the reconcile pipeline", async
   await snap(page, "real-entity-after-unmerge");
 
   // The never-rules the unmerge wrote are in the library, attributed to the person.
-  await page.goto(`/${ORG}/reviews`);
+  await page.goto(`/${ORG}/${DS}/reviews`);
   await page.getByTestId("tab-assertions").click();
   await expect(page.getByTestId("assertion-library")).toContainText("never");
   await expect(page.getByTestId("assertion-library")).toContainText("steward@acme.dev");
@@ -118,7 +118,7 @@ test("a real incremental delivery lands with receipts", async ({ page, isMobile 
   test.skip(isMobile, "the import journey runs once");
   test.setTimeout(420_000);
   await loginAs(page, "steward@acme.dev");
-  await page.goto(`/${ORG}/sources`);
+  await page.goto(`/${ORG}/${DS}/sources`);
   await expect(page.getByTestId("source-crm")).toBeVisible();
 
   await page.getByTestId("source-crm-file").setInputFiles(path.join(BATCH_CSV, "crm.csv"));
@@ -133,7 +133,7 @@ test("a real incremental delivery lands with receipts", async ({ page, isMobile 
   await snap(page, "real-import-receipts");
 
   // The job carries person attribution end to end.
-  await page.goto(`/${ORG}/runs`);
+  await page.goto(`/${ORG}/${DS}/runs`);
   const jobLink = page.getByTestId("jobs-table").locator("a").first();
   await jobLink.click();
   await expect(page.getByTestId("job-attribution")).toContainText("steward@acme.dev");
@@ -146,7 +146,7 @@ test("schedules: create, disable, delete against the real control plane", async 
 }) => {
   test.skip(isMobile, "the schedules journey runs once");
   await loginAs(page, "admin@acme.dev");
-  await page.goto(`/${ORG}/runs/schedules`);
+  await page.goto(`/${ORG}/${DS}/runs/schedules`);
 
   await page.getByTestId("schedule-kind").selectOption("run_all_incremental");
   // `schedule-cron` — a single free-text input — has not existed since the cron

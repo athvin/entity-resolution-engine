@@ -47,7 +47,7 @@ async fn jobs_for(app: &axum::Router, org: &str, bearer: &str) -> Vec<serde_json
         .clone()
         .oneshot(req(
             "GET",
-            &format!("/v1/orgs/{org}/jobs"),
+            &format!("/v1/orgs/{org}/datasets/default/jobs"),
             bearer,
             Body::empty(),
         ))
@@ -64,7 +64,12 @@ async fn jobs_for(app: &axum::Router, org: &str, bearer: &str) -> Vec<serde_json
 async fn schedules(app: &axum::Router, bearer: &str) -> Vec<serde_json::Value> {
     let resp = app
         .clone()
-        .oneshot(req("GET", "/v1/orgs/acme/schedules", bearer, Body::empty()))
+        .oneshot(req(
+            "GET",
+            "/v1/orgs/acme/datasets/default/schedules",
+            bearer,
+            Body::empty(),
+        ))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -125,7 +130,7 @@ async fn schedules_actually_fire_and_fire_once_per_minute() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/acme/schedules",
+            "/v1/orgs/acme/datasets/default/schedules",
             &admin_key,
             Body::from(r#"{"kind":"correct","cron":"0 3 * * 0"}"#),
         ))
@@ -209,7 +214,7 @@ async fn schedules_actually_fire_and_fire_once_per_minute() {
         .clone()
         .oneshot(req(
             "PATCH",
-            &format!("/v1/orgs/acme/schedules/{schedule_id}"),
+            &format!("/v1/orgs/acme/datasets/default/schedules/{schedule_id}"),
             &admin_key,
             Body::from(r#"{"enabled":false}"#),
         ))
@@ -229,7 +234,7 @@ async fn schedules_actually_fire_and_fire_once_per_minute() {
         .clone()
         .oneshot(req(
             "PATCH",
-            &format!("/v1/orgs/acme/schedules/{schedule_id}"),
+            &format!("/v1/orgs/acme/datasets/default/schedules/{schedule_id}"),
             &admin_key,
             Body::from(r#"{"enabled":true}"#),
         ))
@@ -288,7 +293,7 @@ async fn schedules_actually_fire_and_fire_once_per_minute() {
         .clone()
         .oneshot(req(
             "POST",
-            "/v1/orgs/beta/schedules",
+            "/v1/orgs/beta/datasets/default/schedules",
             &beta_key,
             Body::from(r#"{"kind":"lake_maintain","cron":"*/15 * * * *"}"#),
         ))

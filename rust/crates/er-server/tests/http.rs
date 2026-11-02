@@ -73,7 +73,7 @@ async fn an_enqueued_job_carries_the_requests_trace_context() {
 
     let traced = Request::builder()
         .method("POST")
-        .uri("/v1/orgs/acme/jobs")
+        .uri("/v1/orgs/acme/datasets/default/jobs")
         .header(header::AUTHORIZATION, "Bearer op-secret")
         .header(header::CONTENT_TYPE, "application/json")
         .header("traceparent", TRACEPARENT)
@@ -87,7 +87,7 @@ async fn an_enqueued_job_carries_the_requests_trace_context() {
     let resp = test_app()
         .oneshot(op_request(
             "POST",
-            "/v1/orgs/acme/jobs",
+            "/v1/orgs/acme/datasets/default/jobs",
             Body::from(r#"{"kind":"run","priority":0}"#),
         ))
         .await
@@ -99,7 +99,7 @@ async fn an_enqueued_job_carries_the_requests_trace_context() {
     // otherwise valid enqueue over a telemetry header.
     let bad = Request::builder()
         .method("POST")
-        .uri("/v1/orgs/acme/jobs")
+        .uri("/v1/orgs/acme/datasets/default/jobs")
         .header(header::AUTHORIZATION, "Bearer op-secret")
         .header(header::CONTENT_TYPE, "application/json")
         .header("traceparent", "not-a-traceparent")
@@ -119,7 +119,7 @@ async fn job_lifecycle_enqueue_list_get_cancel() {
         .clone()
         .oneshot(op_request(
             "POST",
-            "/v1/orgs/acme/jobs",
+            "/v1/orgs/acme/datasets/default/jobs",
             Body::from(r#"{"kind":"run","priority":5}"#),
         ))
         .await
@@ -134,7 +134,11 @@ async fn job_lifecycle_enqueue_list_get_cancel() {
     // list
     let resp = app
         .clone()
-        .oneshot(op_request("GET", "/v1/orgs/acme/jobs", Body::empty()))
+        .oneshot(op_request(
+            "GET",
+            "/v1/orgs/acme/datasets/default/jobs",
+            Body::empty(),
+        ))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -144,7 +148,11 @@ async fn job_lifecycle_enqueue_list_get_cancel() {
     // another org sees none
     let resp = app
         .clone()
-        .oneshot(op_request("GET", "/v1/orgs/other/jobs", Body::empty()))
+        .oneshot(op_request(
+            "GET",
+            "/v1/orgs/other/datasets/default/jobs",
+            Body::empty(),
+        ))
         .await
         .unwrap();
     assert_eq!(json_body(resp).await["jobs"].as_array().unwrap().len(), 0);
@@ -154,7 +162,7 @@ async fn job_lifecycle_enqueue_list_get_cancel() {
         .clone()
         .oneshot(op_request(
             "GET",
-            &format!("/v1/orgs/acme/jobs/{job_id}"),
+            &format!("/v1/orgs/acme/datasets/default/jobs/{job_id}"),
             Body::empty(),
         ))
         .await
@@ -166,7 +174,7 @@ async fn job_lifecycle_enqueue_list_get_cancel() {
         .clone()
         .oneshot(op_request(
             "POST",
-            &format!("/v1/orgs/acme/jobs/{job_id}/cancel"),
+            &format!("/v1/orgs/acme/datasets/default/jobs/{job_id}/cancel"),
             Body::empty(),
         ))
         .await
@@ -178,7 +186,7 @@ async fn job_lifecycle_enqueue_list_get_cancel() {
     let resp = app
         .oneshot(op_request(
             "GET",
-            "/v1/orgs/acme/jobs/job-999",
+            "/v1/orgs/acme/datasets/default/jobs/job-999",
             Body::empty(),
         ))
         .await
@@ -196,7 +204,7 @@ async fn action_colon_spelling_routes_like_the_subpath() {
         .clone()
         .oneshot(op_request(
             "POST",
-            "/v1/orgs/acme/jobs",
+            "/v1/orgs/acme/datasets/default/jobs",
             Body::from(r#"{"kind":"run"}"#),
         ))
         .await
@@ -208,7 +216,7 @@ async fn action_colon_spelling_routes_like_the_subpath() {
         .clone()
         .oneshot(op_request(
             "POST",
-            &format!("/v1/orgs/acme/jobs/{job_id}:cancel"),
+            &format!("/v1/orgs/acme/datasets/default/jobs/{job_id}:cancel"),
             Body::empty(),
         ))
         .await

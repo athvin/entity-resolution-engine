@@ -11,7 +11,7 @@
 # Silent when nothing is listening: this runs as a precondition, not a check.
 set -uo pipefail
 
-for port in 3100 8010; do
+for port in 3100 3200 8010; do
     # `lsof -t` prints one pid per line and exits non-zero when the port is
     # free, which is not an error here.
     while read -r pid; do

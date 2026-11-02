@@ -131,7 +131,11 @@ async fn steward_drain_applies_to_lake() {
     // The gray-band review run_all produced.
     let resp = app
         .clone()
-        .oneshot(op("GET", "/v1/orgs/acme/reviews", Body::empty()))
+        .oneshot(op(
+            "GET",
+            "/v1/orgs/acme/datasets/default/reviews",
+            Body::empty(),
+        ))
         .await
         .unwrap();
     let review_id = json_body(resp).await["items"][0]["id"]
@@ -144,7 +148,7 @@ async fn steward_drain_applies_to_lake() {
         .clone()
         .oneshot(op(
             "POST",
-            "/v1/orgs/acme/assertions",
+            "/v1/orgs/acme/datasets/default/assertions",
             Body::from(r#"{"kind":"always","a":"crm:C001","b":"billing:B001"}"#),
         ))
         .await
@@ -154,7 +158,7 @@ async fn steward_drain_applies_to_lake() {
         .clone()
         .oneshot(op(
             "POST",
-            &format!("/v1/orgs/acme/reviews/{review_id}/resolve"),
+            &format!("/v1/orgs/acme/datasets/default/reviews/{review_id}/resolve"),
             Body::from(r#"{"resolution":"match"}"#),
         ))
         .await
@@ -184,7 +188,11 @@ async fn steward_drain_applies_to_lake() {
     // Nothing pending now.
     let resp = app
         .clone()
-        .oneshot(op("GET", "/v1/orgs/acme/staged", Body::empty()))
+        .oneshot(op(
+            "GET",
+            "/v1/orgs/acme/datasets/default/staged",
+            Body::empty(),
+        ))
         .await
         .unwrap();
     assert_eq!(json_body(resp).await["pending_count"], 0);
@@ -193,7 +201,11 @@ async fn steward_drain_applies_to_lake() {
     // always assertion (2 active).
     let resp = app
         .clone()
-        .oneshot(op("GET", "/v1/orgs/acme/assertions", Body::empty()))
+        .oneshot(op(
+            "GET",
+            "/v1/orgs/acme/datasets/default/assertions",
+            Body::empty(),
+        ))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -207,7 +219,7 @@ async fn steward_drain_applies_to_lake() {
     let resp = app
         .oneshot(op(
             "GET",
-            &format!("/v1/orgs/acme/reviews/{review_id}"),
+            &format!("/v1/orgs/acme/datasets/default/reviews/{review_id}"),
             Body::empty(),
         ))
         .await

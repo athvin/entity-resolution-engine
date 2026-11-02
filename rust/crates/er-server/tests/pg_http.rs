@@ -1,7 +1,7 @@
 //! The HTTP surface over the real Postgres queue (behind `ER_TEST_PG_DSN`):
 //! drives the axum app built with `AppState::with_pg`, so every request connects
 //! to Postgres per-request exactly as production does. This is the queue of
-//! `pg_e2e.rs` seen through `/v1/orgs/{org}/jobs`. Run with e.g.
+//! `pg_e2e.rs` seen through `/v1/orgs/{org}/datasets/default/jobs`. Run with e.g.
 //!   ER_TEST_PG_DSN='host=localhost port=5433 user=er password=er dbname=er' \
 //!     cargo test -p er-server --test pg_http
 
@@ -54,7 +54,7 @@ async fn job_lifecycle_over_postgres_http() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/v1/orgs/acme/jobs")
+                .uri("/v1/orgs/acme/datasets/default/jobs")
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(Body::from(r#"{"kind":"run"}"#))
                 .unwrap(),
@@ -68,7 +68,7 @@ async fn job_lifecycle_over_postgres_http() {
         .clone()
         .oneshot(op_request(
             "POST",
-            "/v1/orgs/acme/jobs",
+            "/v1/orgs/acme/datasets/default/jobs",
             Body::from(r#"{"kind":"run","priority":5}"#),
         ))
         .await
@@ -96,7 +96,11 @@ async fn job_lifecycle_over_postgres_http() {
     // list sees exactly the one job
     let resp = app
         .clone()
-        .oneshot(op_request("GET", "/v1/orgs/acme/jobs", Body::empty()))
+        .oneshot(op_request(
+            "GET",
+            "/v1/orgs/acme/datasets/default/jobs",
+            Body::empty(),
+        ))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -108,7 +112,11 @@ async fn job_lifecycle_over_postgres_http() {
     // the listing resolves the org first, like every org-scoped read)
     let resp = app
         .clone()
-        .oneshot(op_request("GET", "/v1/orgs/other/jobs", Body::empty()))
+        .oneshot(op_request(
+            "GET",
+            "/v1/orgs/other/datasets/default/jobs",
+            Body::empty(),
+        ))
         .await
         .unwrap();
     assert_eq!(json_body(resp).await["jobs"].as_array().unwrap().len(), 0);
@@ -124,7 +132,7 @@ async fn job_lifecycle_over_postgres_http() {
             .clone()
             .oneshot(op_request(
                 "POST",
-                "/v1/orgs/acme/jobs",
+                "/v1/orgs/acme/datasets/default/jobs",
                 Body::from(format!(r#"{{"kind":"{kind}"}}"#)),
             ))
             .await
@@ -133,7 +141,11 @@ async fn job_lifecycle_over_postgres_http() {
     }
     let resp = app
         .clone()
-        .oneshot(op_request("GET", "/v1/orgs/acme/jobs", Body::empty()))
+        .oneshot(op_request(
+            "GET",
+            "/v1/orgs/acme/datasets/default/jobs",
+            Body::empty(),
+        ))
         .await
         .unwrap();
     assert_eq!(
@@ -146,7 +158,7 @@ async fn job_lifecycle_over_postgres_http() {
         .clone()
         .oneshot(op_request(
             "GET",
-            "/v1/orgs/acme/jobs?limit=2",
+            "/v1/orgs/acme/datasets/default/jobs?limit=2",
             Body::empty(),
         ))
         .await
@@ -164,7 +176,7 @@ async fn job_lifecycle_over_postgres_http() {
         .clone()
         .oneshot(op_request(
             "GET",
-            "/v1/orgs/acme/jobs?state=succeeded",
+            "/v1/orgs/acme/datasets/default/jobs?state=succeeded",
             Body::empty(),
         ))
         .await
@@ -182,7 +194,7 @@ async fn job_lifecycle_over_postgres_http() {
         .clone()
         .oneshot(op_request(
             "GET",
-            "/v1/orgs/acme/jobs?state=nonsense",
+            "/v1/orgs/acme/datasets/default/jobs?state=nonsense",
             Body::empty(),
         ))
         .await
@@ -194,7 +206,7 @@ async fn job_lifecycle_over_postgres_http() {
         .clone()
         .oneshot(op_request(
             "GET",
-            &format!("/v1/orgs/acme/jobs/{job_id}"),
+            &format!("/v1/orgs/acme/datasets/default/jobs/{job_id}"),
             Body::empty(),
         ))
         .await
@@ -207,7 +219,7 @@ async fn job_lifecycle_over_postgres_http() {
         .clone()
         .oneshot(op_request(
             "GET",
-            &format!("/v1/orgs/other/jobs/{job_id}"),
+            &format!("/v1/orgs/other/datasets/default/jobs/{job_id}"),
             Body::empty(),
         ))
         .await
@@ -219,7 +231,7 @@ async fn job_lifecycle_over_postgres_http() {
         .clone()
         .oneshot(op_request(
             "POST",
-            &format!("/v1/orgs/acme/jobs/{job_id}/cancel"),
+            &format!("/v1/orgs/acme/datasets/default/jobs/{job_id}/cancel"),
             Body::empty(),
         ))
         .await
@@ -232,7 +244,7 @@ async fn job_lifecycle_over_postgres_http() {
         .clone()
         .oneshot(op_request(
             "GET",
-            &format!("/v1/orgs/acme/jobs/{job_id}"),
+            &format!("/v1/orgs/acme/datasets/default/jobs/{job_id}"),
             Body::empty(),
         ))
         .await
@@ -244,7 +256,7 @@ async fn job_lifecycle_over_postgres_http() {
         .clone()
         .oneshot(op_request(
             "POST",
-            &format!("/v1/orgs/acme/jobs/{job_id}/resume"),
+            &format!("/v1/orgs/acme/datasets/default/jobs/{job_id}/resume"),
             Body::empty(),
         ))
         .await
@@ -255,7 +267,7 @@ async fn job_lifecycle_over_postgres_http() {
         .clone()
         .oneshot(op_request(
             "GET",
-            &format!("/v1/orgs/acme/jobs/{job_id}"),
+            &format!("/v1/orgs/acme/datasets/default/jobs/{job_id}"),
             Body::empty(),
         ))
         .await
@@ -267,7 +279,7 @@ async fn job_lifecycle_over_postgres_http() {
         .clone()
         .oneshot(op_request(
             "POST",
-            &format!("/v1/orgs/acme/jobs/{job_id}/resume"),
+            &format!("/v1/orgs/acme/datasets/default/jobs/{job_id}/resume"),
             Body::empty(),
         ))
         .await
@@ -278,7 +290,7 @@ async fn job_lifecycle_over_postgres_http() {
     let resp = app
         .oneshot(op_request(
             "GET",
-            "/v1/orgs/acme/jobs/01BOGUSULIDDOESNOTEXIST00",
+            "/v1/orgs/acme/datasets/default/jobs/01BOGUSULIDDOESNOTEXIST00",
             Body::empty(),
         ))
         .await

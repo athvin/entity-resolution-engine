@@ -14,6 +14,7 @@ import {
   type GoldenField,
 } from "@/lib/query/mass-update";
 
+import { useDatasetSlug } from "@/lib/use-dataset-slug";
 /**
  * Mass-update: set or clear one golden field across every record matching the
  * current search (design §6.1, Cloudingo parity). Steward-only on the server;
@@ -21,6 +22,7 @@ import {
  * Monochrome, like the rest of the app.
  */
 export function MassEditPanel({ org, q }: { org: string; q: string }) {
+  const ds = useDatasetSlug();
   const [open, setOpen] = useState(false);
   const [field, setField] = useState<GoldenField>(GOLDEN_FIELDS[0]);
   const [value, setValue] = useState("");
@@ -31,14 +33,14 @@ export function MassEditPanel({ org, q }: { org: string; q: string }) {
   const [confirming, setConfirming] = useState(false);
   const [done, setDone] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const massUpdate = useMassUpdate(org);
+  const massUpdate = useMassUpdate(org, ds);
 
   async function review() {
     setGathering(true);
     setError(null);
     setDone(null);
     try {
-      const { ids: gathered, capped: wasCapped } = await fetchGoldenIdsMatching(org, q);
+      const { ids: gathered, capped: wasCapped } = await fetchGoldenIdsMatching(org, ds, q);
       if (gathered.length === 0) {
         setError("No records match the current search.");
         return;

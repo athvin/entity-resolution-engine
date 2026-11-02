@@ -22,11 +22,12 @@ process.env.ERSERVER_OPERATOR_TOKEN = "test-operator-token";
 const { MAX_TTL_SECONDS, mintWidgetToken, verifyWidgetToken } = await import("@/lib/widget/token");
 
 describe("a token names one record, not an org", () => {
-  it("round-trips the org and the record it was minted for", () => {
-    const verified = verifyWidgetToken(mintWidgetToken("acme-dev", "crm:C001"));
+  it("round-trips the org, dataset and record it was minted for", () => {
+    const verified = verifyWidgetToken(mintWidgetToken("acme-dev", "default", "crm:C001"));
     expect(verified.ok).toBe(true);
     if (verified.ok) {
       expect(verified.claims.org).toBe("acme-dev");
+      expect(verified.claims.dataset).toBe("default");
       expect(verified.claims.recordKey).toBe("crm:C001");
     }
   });
@@ -35,7 +36,7 @@ describe("a token names one record, not an org", () => {
     // The record is INSIDE the signature, so editing it invalidates the token.
     // A token scoped to an org would, if it leaked from one embed, read the
     // whole corpus — this is what prevents that.
-    const token = mintWidgetToken("acme-dev", "crm:C001");
+    const token = mintWidgetToken("acme-dev", "default", "crm:C001");
     const tampered = token.replace("crm:C001", "crm:C002");
     // (The payload is base64url, so the literal will not appear — the point is
     // that any edit at all fails, which the next test proves directly.)
@@ -43,7 +44,7 @@ describe("a token names one record, not an org", () => {
   });
 
   it("rejects ANY edit to the payload", () => {
-    const token = mintWidgetToken("acme-dev", "crm:C001");
+    const token = mintWidgetToken("acme-dev", "default", "crm:C001");
     const dot = token.lastIndexOf(".");
     const payload = token.slice(0, dot);
     const signature = token.slice(dot + 1);
@@ -55,7 +56,7 @@ describe("a token names one record, not an org", () => {
   });
 
   it("rejects a forged signature", () => {
-    const token = mintWidgetToken("acme-dev", "crm:C001");
+    const token = mintWidgetToken("acme-dev", "default", "crm:C001");
     const payload = token.slice(0, token.lastIndexOf("."));
     expect(verifyWidgetToken(`${payload}.not-a-signature`).ok).toBe(false);
   });
@@ -65,7 +66,7 @@ describe("a token expires", () => {
   it("refuses one whose life has passed", () => {
     // An embed lives in a page the tenant controls and we do not, so a token in
     // a browser history or a referrer header has to stop working.
-    const expired = mintWidgetToken("acme-dev", "crm:C001", -10);
+    const expired = mintWidgetToken("acme-dev", "default", "crm:C001", -10);
     const verified = verifyWidgetToken(expired);
     expect(verified.ok).toBe(false);
     if (!verified.ok) expect(verified.failure).toBe("expired");
@@ -74,7 +75,7 @@ describe("a token expires", () => {
   it("caps the life a caller may ask for", () => {
     // Beyond the cap a token is a standing grant, which is what the expiry
     // exists to avoid.
-    const token = mintWidgetToken("acme-dev", "crm:C001", MAX_TTL_SECONDS * 10);
+    const token = mintWidgetToken("acme-dev", "default", "crm:C001", MAX_TTL_SECONDS * 10);
     const verified = verifyWidgetToken(token);
     expect(verified.ok).toBe(true);
     if (verified.ok) {
@@ -86,7 +87,7 @@ describe("a token expires", () => {
   it("checks the SIGNATURE before the expiry", () => {
     // Order matters: answering "expired" for a forged token tells a forger
     // their signature was accepted.
-    const expiredPayload = mintWidgetToken("acme-dev", "crm:C001", -10);
+    const expiredPayload = mintWidgetToken("acme-dev", "default", "crm:C001", -10);
     const payload = expiredPayload.slice(0, expiredPayload.lastIndexOf("."));
     const verified = verifyWidgetToken(`${payload}.wrong`);
     expect(verified.ok).toBe(false);
@@ -105,7 +106,7 @@ describe("malformed input never throws", () => {
   it("refuses a well-signed token carrying the wrong claims", () => {
     // A payload that verifies but is not a widget claim set — the shape a
     // confused-deputy bug would produce.
-    const token = mintWidgetToken("acme-dev", "crm:C001");
+    const token = mintWidgetToken("acme-dev", "default", "crm:C001");
     const dot = token.lastIndexOf(".");
     const empty = Buffer.from(JSON.stringify({ nope: 1 }), "utf8").toString("base64url");
     // Re-signing is not possible from outside, so this asserts the parse guard
@@ -113,9 +114,33 @@ describe("malformed input never throws", () => {
     expect(verifyWidgetToken(`${empty}.${token.slice(dot + 1)}`).ok).toBe(false);
   });
 
-  it("refuses empty org or record claims", () => {
-    expect(verifyWidgetToken(mintWidgetToken("", "crm:C001")).ok).toBe(false);
-    expect(verifyWidgetToken(mintWidgetToken("acme-dev", "")).ok).toBe(false);
+  it("refuses empty org, dataset or record claims", () => {
+    expect(verifyWidgetToken(mintWidgetToken("", "default", "crm:C001")).ok).toBe(false);
+    expect(verifyWidgetToken(mintWidgetToken("acme-dev", "", "crm:C001")).ok).toBe(false);
+    expect(verifyWidgetToken(mintWidgetToken("acme-dev", "default", "")).ok).toBe(false);
+  });
+
+  it("refuses a pre-dataset token even though its signature verifies", () => {
+    // The clean break: a token minted before datasets carries {o, r, e} and no
+    // dataset claim. Its HMAC is genuinely valid (reproduced here with the same
+    // derived key the module uses), so this must die at claim parsing, not at
+    // the signature check.
+    const legacy = Buffer.from(
+      JSON.stringify({ o: "acme-dev", r: "crm:C001", e: Math.floor(Date.now() / 1000) + 3600 }),
+      "utf8",
+    ).toString("base64url");
+    const key = createHmac("sha256", process.env.ERWEB_SESSION_SECRET ?? "")
+      .update("erweb.widget.v1")
+      .digest();
+    const resign = (payload: string) =>
+      createHmac("sha256", key).update(payload).digest("base64url");
+    // Positive control: the reproduction matches the module's own signing. If
+    // the derivation ever drifts, this fails loudly instead of letting the
+    // legacy assertion below pass vacuously as "bad signature".
+    const minted = mintWidgetToken("acme-dev", "default", "crm:C001");
+    const dot = minted.lastIndexOf(".");
+    expect(resign(minted.slice(0, dot))).toBe(minted.slice(dot + 1));
+    expect(verifyWidgetToken(`${legacy}.${resign(legacy)}`).ok).toBe(false);
   });
 });
 
@@ -123,7 +148,7 @@ describe("domain separation", () => {
   it("does not sign with the raw session secret", () => {
     // A widget token and a session cookie must not be interchangeable even if
     // one format is ever confused for the other.
-    const token = mintWidgetToken("acme-dev", "crm:C001");
+    const token = mintWidgetToken("acme-dev", "default", "crm:C001");
     const payload = token.slice(0, token.lastIndexOf("."));
     const naive = createHmac("sha256", process.env.ERWEB_SESSION_SECRET ?? "")
       .update(payload)

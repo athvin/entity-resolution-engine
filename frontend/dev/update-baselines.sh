@@ -26,7 +26,7 @@ docker run --rm -v "${FRONTEND_DIR}:/host" -w /tmp "${IMAGE}" bash -eu -o pipefa
   # rewritten: the committed baseline silently stops depicting the app and goes
   # on masking the next change too. Observed — adding a nav item costs ~1,050
   # pixels, so every rail-bearing baseline stayed stale while the gate passed.
-  pnpm test:e2e --update-snapshots=all --grep @visual
+  UPDATE_BASELINES=1 pnpm test:e2e --update-snapshots=all --grep @visual
   cd tests
   find . -type d -name "*-snapshots" | while read -r dir; do
     rm -rf "/host/tests/${dir#./}"

@@ -12,6 +12,7 @@ import { useGoldenRecords, type GoldenRecord } from "@/lib/query/hooks";
 import { useOrgEntityType } from "@/lib/query/config";
 import { displayName, type EntityType } from "@/lib/domain/attributes";
 import { MassEditPanel } from "./mass-edit-panel";
+import { useDatasetSlug } from "@/lib/use-dataset-slug";
 
 function useDebounced(value: string, ms: number): string {
   const [debounced, setDebounced] = useState(value);
@@ -71,11 +72,12 @@ function columnsFor(entityType: EntityType): Column[] {
  * the same rows render as cards.
  */
 export function RecordsBrowser({ org }: { org: string }) {
+  const ds = useDatasetSlug();
   const [search, setSearch] = useState("");
   const q = useDebounced(search, 250);
-  const entityType = useOrgEntityType(org);
+  const entityType = useOrgEntityType(org, ds);
   const columns = columnsFor(entityType);
-  const query = useGoldenRecords(org, q);
+  const query = useGoldenRecords(org, ds, q);
   const rows = useMemo(() => (query.data?.pages ?? []).flatMap((page) => page.items), [query.data]);
   const snapshot = query.data?.pages[0]?.snapshot;
 
@@ -166,7 +168,7 @@ export function RecordsBrowser({ org }: { org: string }) {
               return (
                 <Link
                   key={record.id}
-                  href={`/${org}/records/${record.id}`}
+                  href={`/${org}/${ds}/records/${record.id}`}
                   data-index={item.index}
                   ref={virtualizer.measureElement}
                   className="hover:bg-accent/50 absolute top-0 left-0 block w-full translate-y-(--row-y) border-b px-3 py-3"

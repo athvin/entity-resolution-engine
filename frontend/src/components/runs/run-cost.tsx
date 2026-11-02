@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Skeleton } from "@/components/ui/skeleton";
 import { BffRequestError } from "@/lib/api/client";
 import { useBlockingEstimate } from "@/lib/query/blocking";
+import { useDatasetSlug } from "@/lib/use-dataset-slug";
 
 /** Thousands separators; the numbers here are the point of the panel. */
 function count(value: number): string {
@@ -37,8 +38,9 @@ function avoided(candidate: number, total: number): string {
  * ran it automatically would make the Runs page expensive to open.
  */
 export function RunCost({ org }: { org: string }) {
+  const ds = useDatasetSlug();
   const [asked, setAsked] = useState(false);
-  const estimate = useBlockingEstimate(org, asked);
+  const estimate = useBlockingEstimate(org, ds, asked);
 
   const unavailable =
     estimate.error instanceof BffRequestError && estimate.error.status === 409

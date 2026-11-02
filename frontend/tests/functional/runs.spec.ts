@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { login, ORG, ORG_MUTABLE, USERS } from "./helpers";
+import { DS, login, ORG, ORG_MUTABLE, USERS } from "./helpers";
 
 const RUNNING_JOB = "01jm000000000000000000000c";
 const FAILED_JOB = "01jm000000000000000000000b";
@@ -10,7 +10,7 @@ const MUTABLE_FAILED = "01jmmutable00000000000000m2";
 test.describe("runs monitor", () => {
   test("shows the active job, the ledger and run history", async ({ page }) => {
     await login(page, USERS.viewer);
-    await page.goto(`/${ORG}/runs`);
+    await page.goto(`/${ORG}/${DS}/runs`);
     await expect(page.getByTestId("active-job-link")).toContainText("run_all_incremental");
     await expect(page.getByTestId("jobs-table")).toContainText("transient_io");
     await expect(page.getByTestId("runs-table")).toContainText("incremental");
@@ -22,11 +22,11 @@ test.describe("runs monitor", () => {
 
   test("job detail shows the stage state and the failure disposition", async ({ page }) => {
     await login(page, USERS.steward);
-    await page.goto(`/${ORG}/runs/${FAILED_JOB}`);
+    await page.goto(`/${ORG}/${DS}/runs/${FAILED_JOB}`);
     await expect(page.getByTestId("job-error")).toContainText("transient_io");
     await expect(page.getByTestId("job-error")).toContainText("Attempt 3 of 3");
     await expect(page.getByTestId("job-resume")).toBeVisible();
-    await page.goto(`/${ORG}/runs/${RUNNING_JOB}`);
+    await page.goto(`/${ORG}/${DS}/runs/${RUNNING_JOB}`);
     // This asserted the stage name "match" and could only ever pass against
     // the mock: `progress` has no producer in er-server, so the real response
     // omits it entirely and the card shows its waiting state. The mock used to
@@ -39,13 +39,13 @@ test.describe("runs monitor", () => {
 
   test("viewers see runs but no steward controls", async ({ page }) => {
     await login(page, USERS.viewer);
-    await page.goto(`/${ORG}/runs`);
+    await page.goto(`/${ORG}/${DS}/runs`);
     // Run-now is a steward action: absent for viewers, never a dead button.
     await expect(page.getByTestId("run-now")).toHaveCount(0);
-    await page.goto(`/${ORG}/runs/${FAILED_JOB}`);
+    await page.goto(`/${ORG}/${DS}/runs/${FAILED_JOB}`);
     await expect(page.getByTestId("job-error")).toBeVisible();
     await expect(page.getByTestId("job-resume")).toHaveCount(0);
-    await page.goto(`/${ORG}/runs/${RUNNING_JOB}`);
+    await page.goto(`/${ORG}/${DS}/runs/${RUNNING_JOB}`);
     await expect(page.getByTestId("job-cancel")).toHaveCount(0);
   });
 
@@ -53,7 +53,7 @@ test.describe("runs monitor", () => {
     test.skip(isMobile, "state-mutating flow runs once, on the desktop project");
     await login(page, USERS.steward);
     // selectall-dev has no job in flight, so the button is live.
-    await page.goto("/selectall-dev/runs");
+    await page.goto("/selectall-dev/default/runs");
     await expect(page.getByTestId("run-now")).toBeEnabled();
 
     // The caret exposes the other kinds; incremental is the default click.
@@ -69,7 +69,7 @@ test.describe("runs monitor", () => {
     await login(page, USERS.steward);
     // acme-dev's fixture holds a running job — one writer per org, so the
     // button says so instead of queueing a second.
-    await page.goto(`/${ORG}/runs`);
+    await page.goto(`/${ORG}/${DS}/runs`);
     await expect(page.getByTestId("run-now")).toBeDisabled();
     await expect(page.getByTestId("run-now")).toHaveAttribute(
       "title",
@@ -80,18 +80,18 @@ test.describe("runs monitor", () => {
   test("a steward cancels and resumes jobs", async ({ page, isMobile }) => {
     test.skip(isMobile, "state-mutating flow runs once, on the desktop project");
     await login(page, USERS.steward);
-    await page.goto(`/${ORG_MUTABLE}/runs/${MUTABLE_RUNNING}`);
+    await page.goto(`/${ORG_MUTABLE}/${DS}/runs/${MUTABLE_RUNNING}`);
     await page.getByTestId("job-cancel").click();
     await expect(page.getByTestId("job-detail").getByText("canceled").first()).toBeVisible();
 
-    await page.goto(`/${ORG_MUTABLE}/runs/${MUTABLE_FAILED}`);
+    await page.goto(`/${ORG_MUTABLE}/${DS}/runs/${MUTABLE_FAILED}`);
     await page.getByTestId("job-resume").click();
     await expect(page.getByTestId("job-detail").getByText("queued").first()).toBeVisible();
   });
 
   test("runs page visual baseline @visual", async ({ page }) => {
     await login(page, USERS.viewer);
-    await page.goto(`/${ORG}/runs`);
+    await page.goto(`/${ORG}/${DS}/runs`);
     await expect(page.getByTestId("runs-table")).toContainText("72s");
     await expect(page).toHaveScreenshot("runs.png", { fullPage: true });
   });

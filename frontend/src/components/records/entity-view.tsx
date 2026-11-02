@@ -34,6 +34,7 @@ import { useProtectRecords, useSuppressRecords, useUnmerge } from "@/lib/query/r
 import { FieldHistory } from "./field-history";
 import { EnrichPanel } from "./enrich-panel";
 import { MergeRecordsDialog } from "./merge-records-dialog";
+import { useDatasetSlug } from "@/lib/use-dataset-slug";
 
 const ROLE_RANK = { viewer: 0, steward: 1, admin: 2 } as const;
 
@@ -47,12 +48,13 @@ function describeEvent(event: EntityEvent): string {
  * per-field provenance from golden_lineage, and the entity_events timeline.
  */
 export function EntityView({ org, entityId }: { org: string; entityId: string }) {
-  const query = useEntityDetail(org, entityId);
-  const entityType = useOrgEntityType(org);
+  const ds = useDatasetSlug();
+  const query = useEntityDetail(org, ds, entityId);
+  const entityType = useOrgEntityType(org, ds);
   const session = useSession();
-  const unmerge = useUnmerge(org, entityId);
-  const suppress = useSuppressRecords(org, entityId);
-  const protect = useProtectRecords(org, entityId);
+  const unmerge = useUnmerge(org, ds, entityId);
+  const suppress = useSuppressRecords(org, ds, entityId);
+  const protect = useProtectRecords(org, ds, entityId);
   const [marked, setMarked] = useState<ReadonlySet<string>>(new Set());
   const [unmergeMessage, setUnmergeMessage] = useState<string | null>(null);
   const [suppressMessage, setSuppressMessage] = useState<string | null>(null);
@@ -63,17 +65,17 @@ export function EntityView({ org, entityId }: { org: string; entityId: string })
   const [historyAttribute, setHistoryAttribute] = useState<string | null>(null);
   const [restoringSnapshot, setRestoringSnapshot] = useState<number | null>(null);
   const [restoreFailure, setRestoreFailure] = useState<string | null>(null);
-  const runs = useRuns(org);
-  const restore = useMassUpdate(org);
+  const runs = useRuns(org, ds);
+  const restore = useMassUpdate(org, ds);
   // ABOVE the early returns: this is a hook, and calling it after the
   // pending/error branches makes it conditional — React throws the moment the
   // component takes a different path, which is how it broke the entity view
   // entirely rather than just the history panel.
-  const history = useFieldHistory(org, entityId, historyAttribute, runs.data ?? []);
+  const history = useFieldHistory(org, ds, entityId, historyAttribute, runs.data ?? []);
   // F1. Member VALUES, not just keys — `members` from the detail read carries
   // only record keys. Same `?key=` endpoint the pair compare grid uses.
   const memberKeys = (query.data?.members ?? []).map((member) => member.record_key);
-  const memberValues = useMemberValues(org, memberKeys);
+  const memberValues = useMemberValues(org, ds, memberKeys);
   const [differencesOnly, setDifferencesOnly] = useState(true);
   const [adopting, setAdopting] = useState<string | null>(null);
   const [adoptFailure, setAdoptFailure] = useState<string | null>(null);
@@ -85,7 +87,7 @@ export function EntityView({ org, entityId }: { org: string; entityId: string })
     return (
       <div className="mx-auto max-w-4xl py-16 text-center">
         <p className="font-medium">No entity {entityId} in this workspace.</p>
-        <Link href={`/${org}/records`} className="text-sm underline">
+        <Link href={`/${org}/${ds}/records`} className="text-sm underline">
           Back to records
         </Link>
       </div>
@@ -115,7 +117,7 @@ export function EntityView({ org, entityId }: { org: string; entityId: string })
     >
       <div>
         <Link
-          href={`/${org}/records`}
+          href={`/${org}/${ds}/records`}
           className="text-muted-foreground mb-2 inline-flex items-center gap-1 text-sm hover:underline"
         >
           <ArrowLeft className="size-3.5" /> Records

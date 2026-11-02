@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { bffFetch, BffRequestError } from "@/lib/api/client";
 import { effectiveRole, useSession } from "@/lib/query/hooks";
+import { useDatasetSlug } from "@/lib/use-dataset-slug";
 
 interface Pair {
   variant_a: string;
@@ -20,6 +21,7 @@ interface Pair {
  * rebuild to apply the change on the next run.
  */
 export function LexiconEditor({ org }: { org: string }) {
+  const ds = useDatasetSlug();
   const session = useSession();
   const role = effectiveRole(session.data, org);
   const canEdit = role === "steward" || role === "admin";
@@ -34,7 +36,7 @@ export function LexiconEditor({ org }: { org: string }) {
 
   useEffect(() => {
     let live = true;
-    bffFetch<{ pairs: Pair[] }>(`/api/orgs/${org}/lexicon`)
+    bffFetch<{ pairs: Pair[] }>(`/api/orgs/${org}/datasets/${ds}/lexicon`)
       .then((r) => {
         if (live) setPairs(r.pairs);
       })
@@ -68,7 +70,7 @@ export function LexiconEditor({ org }: { org: string }) {
     setSaved(false);
     try {
       const result = await bffFetch<{ pairs: Pair[]; apply_job: string }>(
-        `/api/orgs/${org}/lexicon`,
+        `/api/orgs/${org}/datasets/${ds}/lexicon`,
         {
           method: "PUT",
           headers: { "content-type": "application/json" },
