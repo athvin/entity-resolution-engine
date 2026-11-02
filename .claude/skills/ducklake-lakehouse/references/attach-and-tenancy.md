@@ -15,6 +15,7 @@
 |---|---|
 | `metadata` | everything after `ducklake:` in the ATTACH string, **verbatim** — `meta.ducklake`, `sqlite:meta.db`, `postgres:dbname=lake host=…` |
 | `data_path` | the `DATA_PATH` attach option: where Parquet files live |
+| `metadata_schema` | the `METADATA_SCHEMA` attach option: the schema inside the metadata database where DuckLake keeps **its own** catalog tables. `None` omits the option. How several lakes share one Postgres database as disjoint catalogs; never set for a file catalog |
 | `alias` | the catalog alias, default `lake`. Never `USE`d — all references are fully qualified |
 | `schema` | the schema **your tables** live in, default `main`, so `lake.main.golden_records` |
 | `read_only` | adds `READ_ONLY` to the attach |
@@ -39,22 +40,29 @@ naming actively works against telling them apart:
 2. **DuckLake's `METADATA_SCHEMA` attach option** — where DuckLake keeps *its
    own* catalog tables.
 
-`ER_LAKE_METADATA_SCHEMA`, despite its name, is read into **(1)**. On `main`,
-`DuckLakeConfig` has no field for (2) at all, so the attach never sets
-`METADATA_SCHEMA` and DuckLake uses its default.
+`ER_LAKE_METADATA_SCHEMA`, despite its name, is read into **(1)**. The field
+for (2) is `DuckLakeConfig.metadata_schema`, read from the deliberately
+differently-named **`ER_LAKE_CATALOG_SCHEMA`** — the schema inside the shared
+metadata database that holds one lake's catalog tables. Each metadata schema is
+an independent DuckLake catalog with its own recorded `DATA_PATH`; the first
+attach creates the schema, and re-attaching it under a **different**
+`DATA_PATH` is refused by DuckLake
+(`er-server/tests/pg_lake_catalog_schema.rs` pins all three properties).
 
 If you are reasoning about tenancy, read the code rather than the variable
-name. `er-server`'s `read::open_org_lake` is the authority for the read path.
+name. `er-server`'s `read::open_org_lake` is the authority for the read path,
+and `schema::open_lake_env` for the write path.
 
 ## Where a tenant's location comes from
 
-An org row carries an `env` JSON object. The read path takes three keys out of
+An org row carries an `env` JSON object. The read path takes four keys out of
 it:
 
 | Key | Used as | Default |
 |---|---|---|
 | `ER_LAKE_CATALOG` | `metadata` | required — absence is an error surfaced as 503 lake-unavailable |
 | `ER_LAKE_DATA_PATH` | `data_path` | none |
+| `ER_LAKE_CATALOG_SCHEMA` | `metadata_schema` (DuckLake's own catalog tables) | unset — omit the option (file catalogs always omit it) |
 | `ER_LAKE_METADATA_SCHEMA` | `schema` (the user-table schema) | `main` |
 
 The read path always opens **read-only** and with the deterministic session
@@ -66,9 +74,15 @@ Lake read statements carry **no `org_id` predicate**. There is nothing to
 filter on — a tenant's tables are in a tenant's catalog. That design is simple
 and fast, and it has one consequence that deserves to be stated plainly:
 
-> If two orgs ever resolve to the same `(catalog, data_path, schema)` triple,
-> one tenant reads another tenant's data, silently and completely, and no query
-> predicate exists that would have caught it.
+> If two orgs ever resolve to the same `(catalog, catalog schema, data path)`
+> triple, one tenant reads another tenant's data, silently and completely, and
+> no query predicate exists that would have caught it.
+
+One edge of that triple is now self-defending: a metadata schema records its
+own `DATA_PATH` at creation and DuckLake refuses to re-attach it under a
+different one, so a mis-derived data path against an existing catalog surfaces
+as an attach error rather than as silent cross-writing. The catalog and schema
+derivation remain pure convention — derive them from immutable identifiers.
 
 So the derivation of those three values is a security boundary, not
 configuration plumbing. Two orgs differing in any way must differ here, and a
@@ -107,24 +121,16 @@ Practical consequences:
 
 ## In flight
 
-A branch adds the missing object-store path and changes the tenancy model. It
-is **not on `main`**, so nothing above assumes it. Expected shape, recorded here
-so this file can be updated rather than rediscovered:
+The `METADATA_SCHEMA` half of the earlier in-flight shape has **landed**: the
+attach option, `ER_LAKE_CATALOG_SCHEMA`, and the pinning test are on `main`,
+and the datasets program builds on them (each dataset = one metadata schema in
+the org's `er_t_<org>` database + one data path). Still not on `main`:
 
 - An object-store config whose fields are all optional, producing a
   `CREATE OR REPLACE SECRET`, where the **absence of an explicit key selects
   the credential chain** (the pod's own identity in-cluster) rather than a mode
   flag choosing it. An explicit key is for MinIO and CI, which have no chain to
   consult.
-- A per-tenant DuckLake **`METADATA_SCHEMA`** becoming the real tenant
-  boundary — each metadata schema is an independent DuckLake catalog with its
-  own recorded `DATA_PATH`, so many tenants can share one Postgres metadata
-  database and still own separate prefixes. Re-attaching a metadata schema with
-  a different `DATA_PATH` is refused by DuckLake, and that refusal is the
-  guarantee: a tenant's data location is pinned by its own catalog.
 - A credential filter so nothing credential-shaped is ever persisted into an
   org row, because an org row is projected into job params and travels further
   than process env does.
-
-When that merges, update this file and the SKILL body's tenancy section
-together; the `…_METADATA_SCHEMA` naming trap above is what it resolves.

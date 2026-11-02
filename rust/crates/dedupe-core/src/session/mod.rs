@@ -364,6 +364,9 @@ impl Session {
         if let Some(dp) = &cfg.data_path {
             options.push(format!("DATA_PATH '{}'", dp.replace('\'', "''")));
         }
+        if let Some(ms) = &cfg.metadata_schema {
+            options.push(format!("METADATA_SCHEMA '{}'", ms.replace('\'', "''")));
+        }
         if cfg.read_only {
             options.push("READ_ONLY".to_string());
         }

@@ -30,6 +30,7 @@ fn a_tenant_lake_converges_and_its_ledger_records_it() {
         &conn,
         tmp.join("catalog.ducklake").to_str().unwrap(),
         Some(tmp.join("data").to_str().unwrap()),
+        None,
         false,
     )
     .unwrap();

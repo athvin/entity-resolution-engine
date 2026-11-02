@@ -4766,8 +4766,6 @@ fn resolve_blocking(
     limit: usize,
 ) -> Result<Value, String> {
     let s = |k: &str| env.get(k).and_then(Value::as_str).filter(|v| !v.is_empty());
-    let catalog = s("ER_LAKE_CATALOG").ok_or("org env missing ER_LAKE_CATALOG")?;
-    let data_path = s("ER_LAKE_DATA_PATH").ok_or("org env missing ER_LAKE_DATA_PATH")?;
     let model_path =
         s("ER_MODEL_PATH").ok_or("no model yet (ER_MODEL_PATH); run a full run first")?;
     let tf_path = s("ER_TF_PATH").ok_or("no model yet (ER_TF_PATH); run a full run first")?;
@@ -4782,7 +4780,7 @@ fn resolve_blocking(
     let lexicon = s("ER_LEXICON_PATH")
         .map(load_lexicon_file)
         .unwrap_or_default();
-    let session = er_cli::open_lake(catalog, data_path).map_err(|e| format!("open lake: {e:#}"))?;
+    let session = crate::schema::open_lake_env(env)?;
     let model = er_cli::MatchModel {
         settings_json: &settings_json,
         tf_csv_path: std::path::Path::new(tf_path),
@@ -4880,8 +4878,6 @@ async fn blocking_estimate(
 /// perform.
 fn blocking_estimate_blocking(env: &Value, largest: usize) -> Result<Value, String> {
     let s = |k: &str| env.get(k).and_then(Value::as_str).filter(|v| !v.is_empty());
-    let catalog = s("ER_LAKE_CATALOG").ok_or("org env missing ER_LAKE_CATALOG")?;
-    let data_path = s("ER_LAKE_DATA_PATH").ok_or("org env missing ER_LAKE_DATA_PATH")?;
     let model_path =
         s("ER_MODEL_PATH").ok_or("no model yet (ER_MODEL_PATH); publish or compile one first")?;
     let settings_json =
@@ -4911,7 +4907,7 @@ fn blocking_estimate_blocking(env: &Value, largest: usize) -> Result<Value, Stri
         return Err("the active model declares no blocking rules".to_string());
     }
 
-    let session = er_cli::open_lake(catalog, data_path).map_err(|e| format!("open lake: {e:#}"))?;
+    let session = crate::schema::open_lake_env(env)?;
     let estimate = er_cli::estimate_blocking(&session, &settings_json, &rules, largest)
         .map_err(|e| format!("{e:#}"))?;
     serde_json::to_value(&estimate).map_err(|e| format!("rendering the estimate: {e}"))
@@ -4923,8 +4919,6 @@ fn blocking_estimate_blocking(env: &Value, largest: usize) -> Result<Value, Stri
 /// trained model yet) returns a human string the handler maps to 409.
 fn match_preview_blocking(env: &Value, limit: usize) -> Result<Value, String> {
     let s = |k: &str| env.get(k).and_then(Value::as_str).filter(|v| !v.is_empty());
-    let catalog = s("ER_LAKE_CATALOG").ok_or("org env missing ER_LAKE_CATALOG")?;
-    let data_path = s("ER_LAKE_DATA_PATH").ok_or("org env missing ER_LAKE_DATA_PATH")?;
     let model_path =
         s("ER_MODEL_PATH").ok_or("no trained model yet (ER_MODEL_PATH); run a full run first")?;
     let tf_path =
@@ -4937,7 +4931,7 @@ fn match_preview_blocking(env: &Value, limit: usize) -> Result<Value, String> {
         std::fs::read_to_string(config_path).map_err(|e| format!("read config: {e}"))?;
     let config = er_config::load_config_str(&config_text)
         .map_err(|e| format!("config: {}", errfmt::chain(&e)))?;
-    let session = er_cli::open_lake(catalog, data_path).map_err(|e| format!("open lake: {e:#}"))?;
+    let session = crate::schema::open_lake_env(env)?;
     let model = er_cli::MatchModel {
         settings_json: &settings_json,
         tf_csv_path: std::path::Path::new(tf_path),

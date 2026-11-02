@@ -12,6 +12,14 @@ pub struct DuckLakeConfig {
     pub metadata: String,
     /// `DATA_PATH` attach option (Parquet data location).
     pub data_path: Option<String>,
+    /// `METADATA_SCHEMA` attach option: the schema inside the metadata
+    /// database where DuckLake keeps its own catalog tables. Distinct lakes
+    /// can share one Postgres database by each taking a schema of their own.
+    /// `None` omits the option (DuckLake's default). Not for file catalogs.
+    ///
+    /// Not to be confused with [`schema`](Self::schema), which is where the
+    /// *user tables* live inside the attached catalog.
+    pub metadata_schema: Option<String>,
     /// Catalog alias; never `USE`d — all references are fully qualified.
     pub alias: String,
     /// Schema within the lake catalog.
@@ -24,6 +32,7 @@ impl Default for DuckLakeConfig {
         DuckLakeConfig {
             metadata: String::new(),
             data_path: None,
+            metadata_schema: None,
             alias: "lake".to_string(),
             schema: "main".to_string(),
             read_only: false,

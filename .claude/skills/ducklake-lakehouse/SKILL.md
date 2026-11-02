@@ -128,13 +128,17 @@ The org's stored `env` supplies the location:
 |---|---|
 | `ER_LAKE_CATALOG` | the post-`ducklake:` metadata connection string |
 | `ER_LAKE_DATA_PATH` | `DATA_PATH` |
+| `ER_LAKE_CATALOG_SCHEMA` | DuckLake's **`METADATA_SCHEMA`** attach option — the schema of this lake's own catalog tables inside a shared Postgres metadata database; unset = omitted (file catalogs always omit it) |
 | `ER_LAKE_METADATA_SCHEMA` | the **user-table** schema (`lake.<schema>.*`), default `main` |
 
 **Read that last row carefully — the name is misleading.** Despite being called
 `…_METADATA_SCHEMA`, it sets `DuckLakeConfig.schema`, which is the schema your
-tables live in. It is *not* DuckLake's own `METADATA_SCHEMA` attach option
-(where DuckLake keeps its catalog tables). Anyone reasoning about tenancy from
-the variable name alone will get this wrong.
+tables live in. DuckLake's own `METADATA_SCHEMA` attach option (where DuckLake
+keeps its catalog tables) is the *other* key, `ER_LAKE_CATALOG_SCHEMA`. Anyone
+reasoning about tenancy from the variable names alone will get this wrong.
+Each metadata schema is an independent DuckLake catalog pinned to its own
+recorded `DATA_PATH` (re-attach under a different one is refused) — which is
+how several datasets share one `er_t_<org>` database as fully disjoint lakes.
 
 **A lake on `main` is a filesystem path.** There is no object-store credential
 path in the Rust engine today — no `httpfs`/`aws` load, no `CREATE SECRET`, no

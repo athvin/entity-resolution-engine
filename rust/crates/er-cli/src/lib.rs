@@ -88,11 +88,28 @@ pub const LEXICON: &str = "nickname_variants";
 /// # Errors
 /// Propagates the dedupe-core session open / DuckLake attach errors.
 pub fn open_lake(catalog: &str, data_path: &str) -> Result<Session> {
+    open_lake_with(catalog, data_path, None)
+}
+
+/// [`open_lake`] with DuckLake's `METADATA_SCHEMA` attach option.
+/// `catalog_schema` is the schema inside a shared Postgres metadata database
+/// that holds this lake's own catalog tables — how several datasets share one
+/// `er_t_<org>` database as fully disjoint lakes. `None` for file catalogs,
+/// which take no such option (the file is the isolation).
+///
+/// # Errors
+/// Propagates the dedupe-core session open / DuckLake attach errors.
+pub fn open_lake_with(
+    catalog: &str,
+    data_path: &str,
+    catalog_schema: Option<&str>,
+) -> Result<Session> {
     let mut session =
         Session::open_in_memory(SessionOptions::deterministic().with_baked_extensions())?;
     session.attach_ducklake(&DuckLakeConfig {
         metadata: catalog.to_string(),
         data_path: Some(data_path.to_string()),
+        metadata_schema: catalog_schema.map(str::to_string),
         ..DuckLakeConfig::default()
     })?;
     Ok(session)
