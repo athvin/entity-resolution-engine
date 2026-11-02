@@ -110,9 +110,10 @@ pub async fn ensure_schema(client: &mut Client) -> Result<(), SchemaError> {
             ahead.relation, ahead.message
         );
     }
-    // Data work that needs the reconciler's ADD COLUMNs (backfills, sweeps)
-    // runs after it.
+    // Data work that needs the reconciler's ADD COLUMNs (backfills) runs after
+    // it, and then the convergence ensures (every boot, not semantics-once).
     crate::fixups::apply_fixups(client, crate::fixups::Phase::AfterReconcile).await?;
+    crate::fixups::ensure_default_datasets(client).await?;
     Ok(())
 }
 

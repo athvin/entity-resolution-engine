@@ -20,12 +20,18 @@
 //!   stops on a "breaking" difference the very next statement would have
 //!   resolved.
 //! - [`Phase::AfterReconcile`] — data work that needs the reconciler's ADD
-//!   COLUMNs to exist: backfills, sweeps, derived rows. On a fresh database
-//!   the baseline already created everything, so the phase split costs
-//!   nothing there.
+//!   COLUMNs to exist: backfills and derived rows. On a fresh database the
+//!   baseline already created everything, so the phase split costs nothing
+//!   there.
 //!
 //! Names are append-only, `NNNN_` ordered, and never reused — the ledger row
 //! is what "already ran" means, so renaming a shipped fixup would re-run it.
+//!
+//! Not everything transition-shaped is a fixup. [`ensure_default_datasets`]
+//! runs on **every** boot, because "each org has a `default` dataset" is a
+//! convergence invariant, not an event: an org created after a one-shot sweep
+//! ran would be missed forever, and one `ON CONFLICT DO NOTHING` per org per
+//! boot is what idempotence is for.
 
 use tokio_postgres::Client;
 
@@ -38,9 +44,11 @@ pub(crate) enum Phase {
     AfterReconcile,
 }
 
-/// The ordered fixup list. Append only; a retired fixup keeps its name here
-/// (with a no-op body) or its ledger row keeps it skipped forever.
-const FIXUPS: &[(&str, Phase)] = &[("0001_default_datasets", Phase::AfterReconcile)];
+/// The ordered fixup list. Append only; a retired fixup keeps its ledger row,
+/// so its name is never reused. (Empty until the first dataset_id backfill
+/// lands — the framework ships ahead of its first passenger so the sweep test
+/// pins the semantics it will rely on.)
+const FIXUPS: &[(&str, Phase)] = &[];
 
 /// Run every not-yet-applied fixup of `phase`, each in its own transaction
 /// under the schema-bootstrap advisory lock (two boots racing: the loser waits,
@@ -60,14 +68,14 @@ pub(crate) async fn apply_fixups(client: &mut Client, phase: Phase) -> Result<()
             &[],
         )
         .await?;
-        if !er_entities::fixup::read::by_name(&tx, name).await?.is_empty() {
+        if !er_entities::fixup::read::by_name(&tx, name)
+            .await?
+            .is_empty()
+        {
             tx.rollback().await?;
             continue;
         }
-        match *name {
-            "0001_default_datasets" => default_datasets(&tx).await?,
-            other => unreachable!("fixup {other} is listed but has no body"),
-        }
+        run_fixup(&tx, name)?;
         er_entities::fixup::create::record(&tx, &er_ids::new_v7(), name, &applied_by()).await?;
         tx.commit().await?;
         eprintln!("er-server: fixup {name} applied");
@@ -75,26 +83,46 @@ pub(crate) async fn apply_fixups(client: &mut Client, phase: Phase) -> Result<()
     Ok(())
 }
 
+/// One fixup's body, dispatched by its ledger name — a new fixup is one arm
+/// here plus one line in [`FIXUPS`]. (Becomes `async` with its first real
+/// body; a placeholder `async` would be an `unused_async` lint.)
+fn run_fixup(_tx: &tokio_postgres::Transaction<'_>, name: &str) -> Result<(), SchemaError> {
+    // No ledgered fixup exists yet; the first dataset_id backfill adds the
+    // first arm. Reaching this is a FIXUPS entry without a body — a bug in
+    // this module, not in any database.
+    unreachable!("fixup {name} is listed but has no body")
+}
+
 fn applied_by() -> String {
     format!("er-server {}", env!("CARGO_PKG_VERSION"))
 }
 
-/// `0001_default_datasets` — give every org its one dataset, named `default`,
-/// copying the org's lake env, config pointer, delivery root, auto-ingest
-/// fields and active config version **verbatim**: nothing moves on disk or in
-/// any catalog, the dataset row simply names what the org row already meant.
+/// Give every org its one dataset, named `default`, copying the org's lake
+/// env, config pointer, delivery root, auto-ingest fields and active config
+/// version **verbatim**: nothing moves on disk or in any catalog, the dataset
+/// row simply names what the org row already meant. Runs on every boot
+/// (convergence, not an event — see the module docs); the insert is
+/// `ON CONFLICT (org_id, name) DO NOTHING`, so an org that already has a
+/// `default` dataset is left exactly as it is.
 ///
 /// `entity_type` comes from the org's active published config; an org with no
 /// published version defaults to `person` (the config's own default), and the
 /// publish-time entity-type guard corrects any mismatch loudly rather than
-/// this sweep guessing quietly. The insert is `ON CONFLICT (org_id, name) DO
-/// NOTHING`, so an org that already has a `default` dataset — created by a
-/// later provisioning path or an earlier run — is left exactly as it is.
-async fn default_datasets(tx: &tokio_postgres::Transaction<'_>) -> Result<(), SchemaError> {
-    let orgs = er_entities::org::read::list(tx).await?;
+/// this sweep guessing quietly.
+///
+/// # Errors
+/// Propagates the transaction / query errors (the boot stops, loudly).
+pub(crate) async fn ensure_default_datasets(client: &mut Client) -> Result<(), SchemaError> {
+    let tx = client.transaction().await?;
+    tx.execute(
+        "SELECT pg_advisory_xact_lock(hashtext('erserver.ensure_schema'), 0)",
+        &[],
+    )
+    .await?;
+    let orgs = er_entities::org::read::list(&tx).await?;
     for org in orgs {
         let entity_type = match org.active_config_version {
-            Some(version) => er_entities::config_version::read::by_version(tx, &org.id, version)
+            Some(version) => er_entities::config_version::read::by_version(&tx, &org.id, version)
                 .await?
                 .into_iter()
                 .next()
@@ -106,7 +134,7 @@ async fn default_datasets(tx: &tokio_postgres::Transaction<'_>) -> Result<(), Sc
             None => "person",
         };
         er_entities::dataset::create::ensure(
-            tx,
+            &tx,
             &er_ids::new_v7(),
             &org.id,
             "default",
@@ -122,5 +150,6 @@ async fn default_datasets(tx: &tokio_postgres::Transaction<'_>) -> Result<(), Sc
         )
         .await?;
     }
+    tx.commit().await?;
     Ok(())
 }

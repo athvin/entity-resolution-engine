@@ -37,8 +37,8 @@ pub mod dispatcher;
 pub mod dispatcher_bin;
 pub mod errfmt;
 pub mod exec_task;
-pub(crate) mod fixups;
 pub mod executor;
+pub(crate) mod fixups;
 pub mod mail;
 pub mod openapi;
 pub mod pg;
@@ -8435,7 +8435,10 @@ fn build_routes(state: AppState) -> Router {
             "/v1/orgs/{org}/datasets/{ds}",
             get(get_dataset_route).patch(update_dataset),
         )
-        .route("/v1/orgs/{org}/datasets/{ds}/suspend", post(suspend_dataset))
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/suspend",
+            post(suspend_dataset),
+        )
         .route("/v1/orgs/{org}/datasets/{ds}/resume", post(resume_dataset))
         .route("/v1/orgs/{org}/jobs", post(create_job).get(list_jobs))
         .route("/v1/orgs/{org}/jobs/{job_id}", get(get_job))
