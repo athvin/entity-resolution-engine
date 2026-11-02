@@ -29,7 +29,7 @@ async fn postgres_diff_matches_then_detects_a_type_change() {
         .batch_execute(
             "DROP TABLE IF EXISTS jobs CASCADE; \
              CREATE TABLE jobs ( \
-               id text NOT NULL, org_id text NOT NULL, kind text NOT NULL, \
+               id text NOT NULL, org_id text NOT NULL, dataset_id text, kind text NOT NULL, \
                params jsonb NOT NULL DEFAULT '{}'::jsonb, state text NOT NULL DEFAULT 'queued', \
                priority bigint NOT NULL DEFAULT 0, idempotency_key text, run_id text, \
                attempt bigint NOT NULL DEFAULT 0, max_attempts bigint NOT NULL DEFAULT 3, \
@@ -52,7 +52,7 @@ async fn postgres_diff_matches_then_detects_a_type_change() {
 
     let live = read_postgres_columns(&client, &relations).await.unwrap();
     let job_live = live.get("jobs").expect("jobs read back");
-    assert_eq!(job_live.len(), 26, "26 columns read");
+    assert_eq!(job_live.len(), 27, "27 columns read");
 
     // Diff just the job entity against the live `jobs`: no difference.
     let job_only = Catalog::from_entities(vec![catalog.by_name("job").unwrap().clone()]).unwrap();
