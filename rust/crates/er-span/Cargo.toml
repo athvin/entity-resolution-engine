@@ -1,0 +1,18 @@
+[package]
+name = "er-span"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# The leaf of the telemetry layer: `tracing` and nothing else. This crate is a
+# dependency of `er-entities` (the generated query functions call it), which is
+# itself a dependency of nearly everything — so anything added here lands in the
+# build graph of `er`, `dedupe`, `er-entity` and every test binary. The exporter
+# and the subscriber live in `er-obs`, which only binaries depend on.
+[dependencies]
+tracing.workspace = true
+
+[lints]
+workspace = true

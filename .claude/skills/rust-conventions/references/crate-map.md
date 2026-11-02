@@ -26,7 +26,7 @@ Bumping `arrow` or `datafusion` alone can never go green; dependabot is
 configured to leave them alone and the unblocker is upstream.
 
 <!-- BEGIN GENERATED: crate-map -->
-**31 crates.** The cargo workspace root is `rust/`, not the repo root.
+**32 crates.** The cargo workspace root is `rust/`, not the repo root.
 
 | Crate | Purpose |
 |---|---|
@@ -57,6 +57,7 @@ configured to leave them alone and the unblocker is upstream.
 | `er-reconcile` | The reconcile / entity-resolution stage (port of `src/er/entities/*` + `src/er/review/*`, DesignDoc.md S4.5) |
 | `er-schema` | The S5 schema registry (Rust port of `src/er/lake/*`), dependency-free so `config`/`golden`/tests can consume it without pulling a DB into their graph |
 | `er-server` | `er-server` — the Rust control plane (P3), an axum port of the Python `erserver` FastAPI app (`server/src/erserver/api.py`) |
+| `er-span` | The span vocabulary the generated query functions call |
 | `er-sql-check` | `er-sql-check` — the static analyser |
 | `er-standardize` | The standardization stage (port of the retired dbt models `stg_records.sql` + `int_std_records.sql`, DesignDoc.md S4.2) |
 | `er-std` | Standardization primitives (port of `src/er/std/*`, DesignDoc.md S4.2) |

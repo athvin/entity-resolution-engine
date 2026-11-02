@@ -2302,6 +2302,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "er-span"
+version = "0.1.0"
+dependencies = [
+ "tracing",
+]
+
+[[package]]
 name = "er-sql-check"
 version = "0.1.0"
 dependencies = [
