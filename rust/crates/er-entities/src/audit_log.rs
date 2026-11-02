@@ -67,9 +67,23 @@ pub mod create {
         const SQL: &str = "INSERT INTO public.audit_log (actor, org, dataset, action, detail)
 VALUES ($1, $2, $3, $4, $5)
 ";
-        client
-            .execute(SQL, &[&actor, &org, &dataset, &action, &detail])
-            .await
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "audit_log",
+            "create",
+            "append",
+            "audit_log",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.execute(SQL, &[&actor, &org, &dataset, &action, &detail]),
+        )
+        .await;
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, __n);
+        Ok(__n)
     }
 }
 
@@ -100,9 +114,22 @@ WHERE ($1::text IS NULL OR org = $1)
 ORDER BY id DESC
 LIMIT $4
 ";
-        let rows = client
-            .query(SQL, &[&org, &action, &before_id, &limit])
-            .await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "audit_log",
+            "read",
+            "page",
+            "audit_log",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.query(SQL, &[&org, &action, &before_id, &limit]),
+        )
+        .await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::AuditLog {

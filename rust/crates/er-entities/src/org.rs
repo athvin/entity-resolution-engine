@@ -75,7 +75,20 @@ pub mod create {
 VALUES ($1, $2, $3, 'active')
 ON CONFLICT (name) DO NOTHING
 ";
-        client.execute(SQL, &[&id, &name, &config_path]).await
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "org",
+            "create",
+            "ensure",
+            "orgs",
+            SQL,
+        );
+        let __result =
+            ::er_span::instrument(&__span, client.execute(SQL, &[&id, &name, &config_path])).await;
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, __n);
+        Ok(__n)
     }
 
     /// Upsert a bring-your-own-config org: insert active, or on replay refresh config_path/env/drop_root and the auto-ingest prefix while leaving state intact.
@@ -99,8 +112,17 @@ ON CONFLICT (name) DO UPDATE SET config_path = EXCLUDED.config_path,
   s3_ingest_bucket = EXCLUDED.s3_ingest_bucket,
   s3_ingest_prefix = EXCLUDED.s3_ingest_prefix, updated_at = now()
 ";
-        client
-            .execute(
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "org",
+            "create",
+            "upsert_byo",
+            "orgs",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.execute(
                 SQL,
                 &[
                     &id,
@@ -111,8 +133,13 @@ ON CONFLICT (name) DO UPDATE SET config_path = EXCLUDED.config_path,
                     &s3_ingest_bucket,
                     &s3_ingest_prefix,
                 ],
-            )
-            .await
+            ),
+        )
+        .await;
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, __n);
+        Ok(__n)
     }
 }
 
@@ -139,7 +166,18 @@ pub mod read {
 FROM public.orgs
 WHERE id = $1
 ";
-        let rows = client.query(SQL, &[&id]).await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "org",
+            "read",
+            "by_id",
+            "orgs",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.query(SQL, &[&id])).await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::Org {
@@ -180,7 +218,18 @@ WHERE id = $1
 FROM public.orgs
 WHERE name = $1
 ";
-        let rows = client.query(SQL, &[&name]).await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "org",
+            "read",
+            "by_name",
+            "orgs",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.query(SQL, &[&name])).await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::Org {
@@ -220,7 +269,18 @@ WHERE name = $1
 FROM public.orgs
 ORDER BY name
 ";
-        let rows = client.query(SQL, &[]).await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "org",
+            "read",
+            "list",
+            "orgs",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.query(SQL, &[])).await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::Org {
@@ -262,7 +322,18 @@ WHERE s3_ingest_bucket IS NOT NULL
   AND state = 'active'
 ORDER BY name
 ";
-        let rows = client.query(SQL, &[]).await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "org",
+            "read",
+            "with_s3_ingest",
+            "orgs",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.query(SQL, &[])).await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::Org {
@@ -294,7 +365,20 @@ pub mod update {
         const SQL: &str =
             "UPDATE public.orgs SET env = env || $1, updated_at = now() WHERE name = $2
 ";
-        client.execute(SQL, &[&updates, &name]).await
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "org",
+            "update",
+            "merge_env",
+            "orgs",
+            SQL,
+        );
+        let __result =
+            ::er_span::instrument(&__span, client.execute(SQL, &[&updates, &name])).await;
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, __n);
+        Ok(__n)
     }
 
     /// Point the org at a published config version (the orgs half of publish).
@@ -306,7 +390,20 @@ pub mod update {
         const SQL: &str =
             "UPDATE public.orgs SET active_config_version = $1, updated_at = now() WHERE name = $2
 ";
-        client.execute(SQL, &[&version, &name]).await
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "org",
+            "update",
+            "set_active_config",
+            "orgs",
+            SQL,
+        );
+        let __result =
+            ::er_span::instrument(&__span, client.execute(SQL, &[&version, &name])).await;
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, __n);
+        Ok(__n)
     }
 
     /// Transition an org's state only from the expected current state; zero rows changed means a lost race (409).
@@ -319,6 +416,22 @@ pub mod update {
         const SQL: &str =
             "UPDATE public.orgs SET state = $1, updated_at = now() WHERE name = $2 AND state = $3
 ";
-        client.execute(SQL, &[&new_state, &name, &expected]).await
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "org",
+            "update",
+            "set_state",
+            "orgs",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.execute(SQL, &[&new_state, &name, &expected]),
+        )
+        .await;
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, __n);
+        Ok(__n)
     }
 }

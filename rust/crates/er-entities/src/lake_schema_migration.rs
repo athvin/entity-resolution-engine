@@ -72,19 +72,34 @@ pub mod create {
 VALUES ($1, $2::timestamp, $2::timestamp, $3, $4, $5,
   $6, $7, $8)
 ";
-        conn.execute(
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "lake_schema_migration",
+            "create",
+            "record",
+            "schema_migrations",
             SQL,
-            ::duckdb::params![
-                id,
-                created_at,
-                catalog_hash,
-                kind,
-                relation,
-                statement,
-                applied_by,
-                snapshot_id
-            ],
-        )
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(
+            &__span,
+            conn.execute(
+                SQL,
+                ::duckdb::params![
+                    id,
+                    created_at,
+                    catalog_hash,
+                    kind,
+                    relation,
+                    statement,
+                    applied_by,
+                    snapshot_id
+                ],
+            ),
+        )?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
     }
 }
 
@@ -156,8 +171,20 @@ FROM lake.main.schema_migrations
 ORDER BY created_at DESC, id DESC
 LIMIT 1
 ";
-        let mut stmt = conn.prepare(SQL)?;
-        let batches = stmt.query_arrow(::duckdb::params![])?.collect::<Vec<_>>();
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "lake_schema_migration",
+            "read",
+            "latest",
+            "schema_migrations",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let mut stmt = ::er_span::check(&__span, conn.prepare(SQL))?;
+        let batches =
+            ::er_span::check(&__span, stmt.query_arrow(::duckdb::params![]))?.collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
         LatestRow::from_batches(&batches)
     }
 }

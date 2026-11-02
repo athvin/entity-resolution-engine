@@ -75,12 +75,26 @@ pub mod create {
             "INSERT INTO public.schedules (id, org_id, dataset_id, kind, params, cron, source)
 VALUES ($1, $2, $3, $4, $5, $6, 'api')
 ";
-        client
-            .execute(
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "schedule",
+            "create",
+            "create",
+            "schedules",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.execute(
                 SQL,
                 &[&schedule_id, &org_id, &dataset_id, &kind, &params, &cron],
-            )
-            .await
+            ),
+        )
+        .await;
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, __n);
+        Ok(__n)
     }
 
     /// Create a config-owned schedule (source like 'config:correction_pass') only if that owner does not already have one for the org. Paired with set_config_cron, which refreshes the cron of an existing row, so republishing a config keeps one schedule per owner rather than accumulating duplicates.
@@ -101,12 +115,26 @@ WHERE NOT EXISTS (
   WHERE org_id = $2 AND source = $6
 )
 ";
-        client
-            .execute(
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "schedule",
+            "create",
+            "ensure_config_owned",
+            "schedules",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.execute(
                 SQL,
                 &[&schedule_id, &org_id, &dataset_id, &kind, &cron, &source],
-            )
-            .await
+            ),
+        )
+        .await;
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, __n);
+        Ok(__n)
     }
 }
 
@@ -120,7 +148,20 @@ pub mod delete {
     ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
         const SQL: &str = "DELETE FROM public.schedules WHERE org_id = $1 AND id = $2
 ";
-        client.execute(SQL, &[&org_id, &schedule_id]).await
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "schedule",
+            "delete",
+            "delete",
+            "schedules",
+            SQL,
+        );
+        let __result =
+            ::er_span::instrument(&__span, client.execute(SQL, &[&org_id, &schedule_id])).await;
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, __n);
+        Ok(__n)
     }
 }
 
@@ -146,7 +187,18 @@ JOIN public.orgs o ON o.id = s.org_id
 WHERE s.enabled AND o.state = 'active'
 ORDER BY s.id
 ";
-        let rows = client.query(SQL, &[]).await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "schedule",
+            "read",
+            "due",
+            "schedules",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.query(SQL, &[])).await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::Schedule {
@@ -185,7 +237,18 @@ FROM public.schedules
 WHERE org_id = $1
 ORDER BY created_at
 ";
-        let rows = client.query(SQL, &[&org_id]).await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "schedule",
+            "read",
+            "list",
+            "schedules",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.query(SQL, &[&org_id])).await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::Schedule {
@@ -216,7 +279,19 @@ SET dataset_id = d.id, updated_at = now()
 FROM public.datasets d
 WHERE d.org_id = c.org_id AND d.name = 'default' AND c.dataset_id IS NULL
 ";
-        client.execute(SQL, &[]).await
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "schedule",
+            "update",
+            "backfill_dataset",
+            "schedules",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.execute(SQL, &[])).await;
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, __n);
+        Ok(__n)
     }
 
     /// Record that the scheduler tick enqueued this schedule's job. Observability only — the firing itself is made exactly-once by the job's idempotency key, not by this column.
@@ -227,7 +302,19 @@ WHERE d.org_id = c.org_id AND d.name = 'default' AND c.dataset_id IS NULL
         const SQL: &str = "UPDATE public.schedules SET last_enqueued_at = now(), updated_at = now()
 WHERE id = $1
 ";
-        client.execute(SQL, &[&schedule_id]).await
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "schedule",
+            "update",
+            "mark_enqueued",
+            "schedules",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.execute(SQL, &[&schedule_id])).await;
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, __n);
+        Ok(__n)
     }
 
     /// Point a config-owned schedule at the cadence the newly published config declares. Only touches the row when the cron actually changed, so republishing an unchanged cadence does not bump updated_at or write history.
@@ -240,7 +327,20 @@ WHERE id = $1
         const SQL: &str = "UPDATE public.schedules SET cron = $1, updated_at = now()
 WHERE org_id = $2 AND source = $3 AND cron <> $1
 ";
-        client.execute(SQL, &[&cron, &org_id, &source]).await
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "schedule",
+            "update",
+            "set_config_cron",
+            "schedules",
+            SQL,
+        );
+        let __result =
+            ::er_span::instrument(&__span, client.execute(SQL, &[&cron, &org_id, &source])).await;
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, __n);
+        Ok(__n)
     }
 
     /// Enable/disable an API-sourced schedule; config/system-owned rows refuse (zero rows changed).
@@ -253,8 +353,22 @@ WHERE org_id = $2 AND source = $3 AND cron <> $1
         const SQL: &str = "UPDATE public.schedules SET enabled = $1, updated_at = now()
 WHERE id = $2 AND org_id = $3 AND source = 'api'
 ";
-        client
-            .execute(SQL, &[&enabled, &schedule_id, &org_id])
-            .await
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "schedule",
+            "update",
+            "set_enabled",
+            "schedules",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.execute(SQL, &[&enabled, &schedule_id, &org_id]),
+        )
+        .await;
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, __n);
+        Ok(__n)
     }
 }

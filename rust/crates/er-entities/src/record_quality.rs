@@ -80,7 +80,19 @@ WHEN NOT MATCHED THEN INSERT
      source.freshness, source.run_id, source.scored_at,
      source.scored_at, source.scored_at)
 ";
-        conn.execute(SQL, ::duckdb::params![])
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "record_quality",
+            "create",
+            "upsert",
+            "record_qualities",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, conn.execute(SQL, ::duckdb::params![]))?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
     }
 }
 
@@ -91,7 +103,19 @@ pub mod delete {
         const SQL: &str = "DELETE FROM lake.main.record_qualities
 WHERE record_key NOT IN (SELECT record_key FROM __quality_src)
 ";
-        conn.execute(SQL, ::duckdb::params![])
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "record_quality",
+            "delete",
+            "absent_from_std",
+            "record_qualities",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, conn.execute(SQL, ::duckdb::params![]))?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
     }
 }
 
@@ -188,9 +212,21 @@ pub mod read {
        avg(freshness) AS mean_freshness
 FROM lake.main.record_qualities AT (VERSION => {snapshot})
 ";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "record_quality",
+            "read",
+            "distribution",
+            "record_qualities",
+            SQL,
+        );
+        let __entered = __span.enter();
         let sql = SQL.replace("{snapshot}", &snapshot.to_string());
-        let mut stmt = conn.prepare(&sql)?;
-        let batches = stmt.query_arrow(::duckdb::params![])?.collect::<Vec<_>>();
+        let mut stmt = ::er_span::check(&__span, conn.prepare(&sql))?;
+        let batches =
+            ::er_span::check(&__span, stmt.query_arrow(::duckdb::params![]))?.collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
         DistributionRow::from_batches(&batches)
     }
 
@@ -321,11 +357,24 @@ WHERE score <= $1
 ORDER BY score, record_key
 LIMIT $2
 ";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "record_quality",
+            "read",
+            "worst",
+            "record_qualities",
+            SQL,
+        );
+        let __entered = __span.enter();
         let sql = SQL.replace("{snapshot}", &snapshot.to_string());
-        let mut stmt = conn.prepare(&sql)?;
-        let batches = stmt
-            .query_arrow(::duckdb::params![max_score, limit])?
-            .collect::<Vec<_>>();
+        let mut stmt = ::er_span::check(&__span, conn.prepare(&sql))?;
+        let batches = ::er_span::check(
+            &__span,
+            stmt.query_arrow(::duckdb::params![max_score, limit]),
+        )?
+        .collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
         WorstRow::from_batches(&batches)
     }
 }

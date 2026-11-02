@@ -170,6 +170,18 @@ WHEN NOT MATCHED THEN INSERT
      source.cast_boolean, source.entropy_bits, source.top_values,
      source.captured_at, source.captured_at)
 ";
-        conn.execute(SQL, ::duckdb::params![])
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "column_profile",
+            "create",
+            "upsert",
+            "column_profiles",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, conn.execute(SQL, ::duckdb::params![]))?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
     }
 }

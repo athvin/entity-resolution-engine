@@ -25,6 +25,7 @@ tokio-postgres = { workspace = true, features = ["with-chrono-0_4"] }
 # include_str! and parsed on demand by the schema reconciler.
 er-entity-spec = { path = "../er-entity-spec" }
 serde_norway = { workspace = true }
+er-span = { version = "0.1.0", path = "../er-span" }
 
 # No `[lints]` block: the generated crate root carries its own clippy suppressions,
 # since generated code is not written to the workspace's pedantic style.

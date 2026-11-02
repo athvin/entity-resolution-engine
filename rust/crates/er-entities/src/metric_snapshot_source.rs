@@ -74,7 +74,19 @@ WHEN NOT MATCHED THEN INSERT
      source.duplicate_records, source.contributed_groups,
      source.captured_at, source.captured_at)
 ";
-        conn.execute(SQL, ::duckdb::params![])
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "metric_snapshot_source",
+            "create",
+            "upsert",
+            "metric_snapshot_sources",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, conn.execute(SQL, ::duckdb::params![]))?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
     }
 }
 
@@ -174,11 +186,21 @@ FROM lake.main.metric_snapshot_sources AT (VERSION => {snapshot})
 WHERE run_id = $1
 ORDER BY duplicate_records DESC, source_system
 ";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "metric_snapshot_source",
+            "read",
+            "by_run",
+            "metric_snapshot_sources",
+            SQL,
+        );
+        let __entered = __span.enter();
         let sql = SQL.replace("{snapshot}", &snapshot.to_string());
-        let mut stmt = conn.prepare(&sql)?;
-        let batches = stmt
-            .query_arrow(::duckdb::params![run_id])?
+        let mut stmt = ::er_span::check(&__span, conn.prepare(&sql))?;
+        let batches = ::er_span::check(&__span, stmt.query_arrow(::duckdb::params![run_id]))?
             .collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
         ByRunRow::from_batches(&batches)
     }
 }

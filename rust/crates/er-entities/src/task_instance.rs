@@ -237,12 +237,25 @@ RETURNING
   created_at,
   updated_at
 ";
-        let rows = client
-            .query(
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "task_instance",
+            "create",
+            "insert_cleared_try",
+            "task_instances",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.query(
                 SQL,
                 &[&resource_class, &retries, &image_digest, &task_instance_id],
-            )
-            .await?;
+            ),
+        )
+        .await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::TaskInstance {
@@ -373,12 +386,25 @@ RETURNING
   created_at,
   updated_at
 ";
-        let rows = client
-            .query(
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "task_instance",
+            "create",
+            "insert_retry_try",
+            "task_instances",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.query(
                 SQL,
                 &[&escalate, &backoff_cap, &backoff_base, &task_instance_id],
-            )
-            .await?;
+            ),
+        )
+        .await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::TaskInstance {
@@ -508,8 +534,17 @@ RETURNING
   created_at,
   updated_at
 ";
-        let rows = client
-            .query(
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "task_instance",
+            "create",
+            "plan",
+            "task_instances",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.query(
                 SQL,
                 &[
                     &id,
@@ -529,8 +564,12 @@ RETURNING
                     &image_digest,
                     &trace_context,
                 ],
-            )
-            .await?;
+            ),
+        )
+        .await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::TaskInstance {
@@ -645,7 +684,18 @@ FROM public.task_instances
 WHERE org_id = $1 AND job_id = $2
 ORDER BY seq, try_number
 ";
-        let rows = client.query(SQL, &[&org_id, &job_id]).await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "task_instance",
+            "read",
+            "by_job",
+            "task_instances",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.query(SQL, &[&org_id, &job_id])).await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::TaskInstance {
@@ -758,7 +808,18 @@ WHERE live IS TRUE AND kind = 'pod'
   AND k8s_job_name IS DISTINCT FROM 'inproc'
 ORDER BY job_id, seq
 ";
-        let rows = client.query(SQL, &[]).await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "task_instance",
+            "read",
+            "live_claimed_pods",
+            "task_instances",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.query(SQL, &[])).await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::TaskInstance {
@@ -879,7 +940,19 @@ FROM public.task_instances ti
 JOIN lineage l ON l.id = ti.id
 ORDER BY ti.try_number DESC
 ";
-        let rows = client.query(SQL, &[&task_instance_id]).await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "task_instance",
+            "read",
+            "retry_lineage",
+            "task_instances",
+            SQL,
+        );
+        let __result =
+            ::er_span::instrument(&__span, client.query(SQL, &[&task_instance_id])).await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::TaskInstance {
@@ -995,7 +1068,19 @@ WHERE live IS TRUE AND kind = 'pod' AND state = 'running'
   AND heartbeat_at < now() - make_interval(secs => ($2::bigint)::double precision)
 ORDER BY heartbeat_at
 ";
-        let rows = client.query(SQL, &[&owner_epoch, &stale_secs]).await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "task_instance",
+            "read",
+            "stale_heartbeats",
+            "task_instances",
+            SQL,
+        );
+        let __result =
+            ::er_span::instrument(&__span, client.query(SQL, &[&owner_epoch, &stale_secs])).await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::TaskInstance {
@@ -1110,7 +1195,18 @@ RETURNING
   created_at,
   updated_at
 ";
-        let rows = client.query(SQL, &[&owner_epoch]).await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "task_instance",
+            "update",
+            "adopt",
+            "task_instances",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.query(SQL, &[&owner_epoch])).await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::TaskInstance {
@@ -1238,8 +1334,17 @@ RETURNING
   created_at,
   updated_at
 ";
-        let rows = client
-            .query(
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "task_instance",
+            "update",
+            "advance_segment",
+            "task_instances",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.query(
                 SQL,
                 &[
                     &k8s_job_name,
@@ -1255,8 +1360,12 @@ RETURNING
                     &resource_class,
                     &clear_number,
                 ],
-            )
-            .await?;
+            ),
+        )
+        .await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::TaskInstance {
@@ -1372,7 +1481,19 @@ RETURNING
   created_at,
   updated_at
 ";
-        let rows = client.query(SQL, &[&org_id, &job_id, &task_ids]).await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "task_instance",
+            "update",
+            "archive_cleared",
+            "task_instances",
+            SQL,
+        );
+        let __result =
+            ::er_span::instrument(&__span, client.query(SQL, &[&org_id, &job_id, &task_ids])).await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::TaskInstance {
@@ -1489,8 +1610,17 @@ RETURNING
   created_at,
   updated_at
 ";
-        let rows = client
-            .query(
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "task_instance",
+            "update",
+            "archive_restarted",
+            "task_instances",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.query(
                 SQL,
                 &[
                     &exit_code,
@@ -1498,8 +1628,12 @@ RETURNING
                     &task_instance_id,
                     &k8s_job_name,
                 ],
-            )
-            .await?;
+            ),
+        )
+        .await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::TaskInstance {
@@ -1625,8 +1759,17 @@ RETURNING
   created_at,
   updated_at
 ";
-        let rows = client
-            .query(
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "task_instance",
+            "update",
+            "archive_try",
+            "task_instances",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.query(
                 SQL,
                 &[
                     &terminal_state,
@@ -1638,8 +1781,12 @@ RETURNING
                     &task_instance_id,
                     &k8s_job_name,
                 ],
-            )
-            .await?;
+            ),
+        )
+        .await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::TaskInstance {
@@ -1703,7 +1850,19 @@ SET dataset_id = d.id, updated_at = now()
 FROM public.datasets d
 WHERE d.org_id = c.org_id AND d.name = 'default' AND c.dataset_id IS NULL
 ";
-        client.execute(SQL, &[]).await
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "task_instance",
+            "update",
+            "backfill_dataset",
+            "task_instances",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.execute(SQL, &[])).await;
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, __n);
+        Ok(__n)
     }
 
     /// The cancel sweep's live arm: the write-ahead marker before a row's Job is revoked and deleted; settled to canceled only when the watch reports the pod gone (§5.6).
@@ -1765,7 +1924,18 @@ RETURNING
   created_at,
   updated_at
 ";
-        let rows = client.query(SQL, &[&org_id, &job_id]).await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "task_instance",
+            "update",
+            "cancel_live",
+            "task_instances",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.query(SQL, &[&org_id, &job_id])).await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::TaskInstance {
@@ -1879,7 +2049,18 @@ RETURNING
   created_at,
   updated_at
 ";
-        let rows = client.query(SQL, &[&org_id, &job_id]).await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "task_instance",
+            "update",
+            "cancel_pending",
+            "task_instances",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.query(SQL, &[&org_id, &job_id])).await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::TaskInstance {
@@ -1997,8 +2178,17 @@ RETURNING
   created_at,
   updated_at
 ";
-        let rows = client
-            .query(
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "task_instance",
+            "update",
+            "capacity_wait",
+            "task_instances",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.query(
                 SQL,
                 &[
                     &wait_secs,
@@ -2006,8 +2196,12 @@ RETURNING
                     &task_instance_id,
                     &k8s_job_name,
                 ],
-            )
-            .await?;
+            ),
+        )
+        .await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::TaskInstance {
@@ -2129,7 +2323,18 @@ RETURNING
   created_at,
   updated_at
 ";
-        let rows = client.query(SQL, &[&owner_epoch]).await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "task_instance",
+            "update",
+            "claim_control",
+            "task_instances",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.query(SQL, &[&owner_epoch])).await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::TaskInstance {
@@ -2267,12 +2472,25 @@ RETURNING
   created_at,
   updated_at
 ";
-        let rows = client
-            .query(
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "task_instance",
+            "update",
+            "claim_launch",
+            "task_instances",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.query(
                 SQL,
                 &[&owner_epoch, &k8s_job_name, &token_hash, &in_flight_cap],
-            )
-            .await?;
+            ),
+        )
+        .await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::TaskInstance {
@@ -2395,8 +2613,17 @@ RETURNING
   created_at,
   updated_at
 ";
-        let rows = client
-            .query(
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "task_instance",
+            "update",
+            "finish",
+            "task_instances",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.query(
                 SQL,
                 &[
                     &skipped,
@@ -2409,8 +2636,12 @@ RETURNING
                     &task_instance_id,
                     &pod_uid,
                 ],
-            )
-            .await?;
+            ),
+        )
+        .await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::TaskInstance {
@@ -2530,8 +2761,17 @@ RETURNING
   created_at,
   updated_at
 ";
-        let rows = client
-            .query(
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "task_instance",
+            "update",
+            "finish_control",
+            "task_instances",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.query(
                 SQL,
                 &[
                     &skipped,
@@ -2541,8 +2781,12 @@ RETURNING
                     &task_instance_id,
                     &owner_epoch,
                 ],
-            )
-            .await?;
+            ),
+        )
+        .await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::TaskInstance {
@@ -2656,9 +2900,22 @@ RETURNING
   created_at,
   updated_at
 ";
-        let rows = client
-            .query(SQL, &[&counters, &task_instance_id, &pod_uid])
-            .await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "task_instance",
+            "update",
+            "heartbeat",
+            "task_instances",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.query(SQL, &[&counters, &task_instance_id, &pod_uid]),
+        )
+        .await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::TaskInstance {
@@ -2773,9 +3030,22 @@ RETURNING
   created_at,
   updated_at
 ";
-        let rows = client
-            .query(SQL, &[&input, &task_instance_id, &clear_number])
-            .await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "task_instance",
+            "update",
+            "mark_scheduled",
+            "task_instances",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.query(SQL, &[&input, &task_instance_id, &clear_number]),
+        )
+        .await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::TaskInstance {
@@ -2891,12 +3161,25 @@ RETURNING
   created_at,
   updated_at
 ";
-        let rows = client
-            .query(
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "task_instance",
+            "update",
+            "note_interruption",
+            "task_instances",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.query(
                 SQL,
                 &[&termination_reason, &counters, &task_instance_id, &pod_uid],
-            )
-            .await?;
+            ),
+        )
+        .await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::TaskInstance {
@@ -3011,9 +3294,22 @@ RETURNING
   created_at,
   updated_at
 ";
-        let rows = client
-            .query(SQL, &[&state, &task_instance_id, &clear_number])
-            .await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "task_instance",
+            "update",
+            "propagate",
+            "task_instances",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.query(SQL, &[&state, &task_instance_id, &clear_number]),
+        )
+        .await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::TaskInstance {
@@ -3130,8 +3426,17 @@ RETURNING
   created_at,
   updated_at
 ";
-        let rows = client
-            .query(
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "task_instance",
+            "update",
+            "record_evidence",
+            "task_instances",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.query(
                 SQL,
                 &[
                     &exit_code,
@@ -3140,8 +3445,12 @@ RETURNING
                     &pod_uid,
                     &k8s_job_name,
                 ],
-            )
-            .await?;
+            ),
+        )
+        .await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::TaskInstance {
@@ -3259,8 +3568,17 @@ RETURNING
   created_at,
   updated_at
 ";
-        let rows = client
-            .query(
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "task_instance",
+            "update",
+            "requeue_launch",
+            "task_instances",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.query(
                 SQL,
                 &[
                     &wait_secs,
@@ -3268,8 +3586,12 @@ RETURNING
                     &task_instance_id,
                     &k8s_job_name,
                 ],
-            )
-            .await?;
+            ),
+        )
+        .await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::TaskInstance {
@@ -3389,8 +3711,17 @@ RETURNING
   created_at,
   updated_at
 ";
-        let rows = client
-            .query(
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "task_instance",
+            "update",
+            "reset_pending",
+            "task_instances",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.query(
                 SQL,
                 &[
                     &retries,
@@ -3400,8 +3731,12 @@ RETURNING
                     &job_id,
                     &task_ids,
                 ],
-            )
-            .await?;
+            ),
+        )
+        .await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::TaskInstance {
@@ -3517,9 +3852,22 @@ RETURNING
   created_at,
   updated_at
 ";
-        let rows = client
-            .query(SQL, &[&resource_class, &org_id, &job_id, &task_ids])
-            .await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "task_instance",
+            "update",
+            "restart_cleared",
+            "task_instances",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.query(SQL, &[&resource_class, &org_id, &job_id, &task_ids]),
+        )
+        .await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::TaskInstance {
@@ -3636,8 +3984,17 @@ RETURNING
   created_at,
   updated_at
 ";
-        let rows = client
-            .query(
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "task_instance",
+            "update",
+            "settle_canceled",
+            "task_instances",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.query(
                 SQL,
                 &[
                     &exit_code,
@@ -3645,8 +4002,12 @@ RETURNING
                     &task_instance_id,
                     &k8s_job_name,
                 ],
-            )
-            .await?;
+            ),
+        )
+        .await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::TaskInstance {
@@ -3764,8 +4125,17 @@ RETURNING
   created_at,
   updated_at
 ";
-        let rows = client
-            .query(
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "task_instance",
+            "update",
+            "start",
+            "task_instances",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.query(
                 SQL,
                 &[
                     &pod_name,
@@ -3775,8 +4145,12 @@ RETURNING
                     &task_instance_id,
                     &k8s_job_name,
                 ],
-            )
-            .await?;
+            ),
+        )
+        .await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::TaskInstance {

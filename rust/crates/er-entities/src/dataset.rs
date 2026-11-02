@@ -95,8 +95,17 @@ VALUES
    $12)
 ON CONFLICT (org_id, name) DO NOTHING
 ";
-        client
-            .execute(
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "dataset",
+            "create",
+            "ensure",
+            "datasets",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.execute(
                 SQL,
                 &[
                     &id,
@@ -112,8 +121,13 @@ ON CONFLICT (org_id, name) DO NOTHING
                     &active_config_version,
                     &state,
                 ],
-            )
-            .await
+            ),
+        )
+        .await;
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, __n);
+        Ok(__n)
     }
 }
 
@@ -142,7 +156,18 @@ pub mod read {
 FROM public.datasets
 WHERE id = $1
 ";
-        let rows = client.query(SQL, &[&id]).await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "dataset",
+            "read",
+            "by_id",
+            "datasets",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.query(SQL, &[&id])).await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::Dataset {
@@ -188,7 +213,18 @@ WHERE id = $1
 FROM public.datasets
 WHERE org_id = $1 AND name = $2
 ";
-        let rows = client.query(SQL, &[&org_id, &name]).await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "dataset",
+            "read",
+            "by_org_and_name",
+            "datasets",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.query(SQL, &[&org_id, &name])).await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::Dataset {
@@ -234,7 +270,18 @@ FROM public.datasets
 WHERE org_id = $1
 ORDER BY name
 ";
-        let rows = client.query(SQL, &[&org_id]).await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "dataset",
+            "read",
+            "list_for_org",
+            "datasets",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.query(SQL, &[&org_id])).await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::Dataset {
@@ -268,7 +315,20 @@ pub mod update {
         const SQL: &str = "UPDATE public.datasets SET env = env || $1, updated_at = now()
 WHERE org_id = $2
 ";
-        client.execute(SQL, &[&patch, &org_id]).await
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "dataset",
+            "update",
+            "merge_env",
+            "datasets",
+            SQL,
+        );
+        let __result =
+            ::er_span::instrument(&__span, client.execute(SQL, &[&patch, &org_id])).await;
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, __n);
+        Ok(__n)
     }
 
     /// Repoint a dataset's active config version (the dataset-scoped half of publish; the org-scoped publish path retires with the route switchover).
@@ -281,7 +341,20 @@ WHERE org_id = $2
             "UPDATE public.datasets SET active_config_version = $1, updated_at = now()
 WHERE id = $2
 ";
-        client.execute(SQL, &[&version, &dataset_id]).await
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "dataset",
+            "update",
+            "set_active_config",
+            "datasets",
+            SQL,
+        );
+        let __result =
+            ::er_span::instrument(&__span, client.execute(SQL, &[&version, &dataset_id])).await;
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, __n);
+        Ok(__n)
     }
 
     /// Rename a dataset's human label. The name itself never changes — it is the routing handle URLs and lake derivations hang off.
@@ -294,7 +367,23 @@ WHERE id = $2
         const SQL: &str = "UPDATE public.datasets SET display_name = $1, updated_at = now()
 WHERE org_id = $2 AND name = $3
 ";
-        client.execute(SQL, &[&display_name, &org_id, &name]).await
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "dataset",
+            "update",
+            "set_display_name",
+            "datasets",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.execute(SQL, &[&display_name, &org_id, &name]),
+        )
+        .await;
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, __n);
+        Ok(__n)
     }
 
     /// Transition a dataset's state only from the expected current state; zero rows changed means a lost race (409).
@@ -308,8 +397,22 @@ WHERE org_id = $2 AND name = $3
         const SQL: &str = "UPDATE public.datasets SET state = $1, updated_at = now()
 WHERE org_id = $2 AND name = $3 AND state = $4
 ";
-        client
-            .execute(SQL, &[&new_state, &org_id, &name, &expected])
-            .await
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "dataset",
+            "update",
+            "set_state",
+            "datasets",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.execute(SQL, &[&new_state, &org_id, &name, &expected]),
+        )
+        .await;
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, __n);
+        Ok(__n)
     }
 }

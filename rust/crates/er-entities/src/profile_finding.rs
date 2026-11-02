@@ -76,6 +76,18 @@ WHEN NOT MATCHED THEN INSERT
      source.profile_run_id, source.code, source.column_name, source.severity,
      source.message, source.detail, source.captured_at, source.captured_at)
 ";
-        conn.execute(SQL, ::duckdb::params![])
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "profile_finding",
+            "create",
+            "upsert",
+            "profile_findings",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, conn.execute(SQL, ::duckdb::params![]))?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
     }
 }

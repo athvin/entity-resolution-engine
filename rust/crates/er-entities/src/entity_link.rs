@@ -88,8 +88,17 @@ ON CONFLICT (org_id, parent_entity_id, child_entity_id, kind) DO UPDATE SET
 RETURNING id, org_id, dataset_id, parent_entity_id, child_entity_id, kind, origin, note,
           created_by, created_at, updated_at
 ";
-        let rows = client
-            .query(
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "entity_link",
+            "create",
+            "upsert",
+            "entity_links",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.query(
                 SQL,
                 &[
                     &link_id,
@@ -102,8 +111,12 @@ RETURNING id, org_id, dataset_id, parent_entity_id, child_entity_id, kind, origi
                     &note,
                     &created_by,
                 ],
-            )
-            .await?;
+            ),
+        )
+        .await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::EntityLink {
@@ -134,7 +147,20 @@ pub mod delete {
         const SQL: &str = "DELETE FROM public.entity_links
 WHERE org_id = $1 AND id = $2
 ";
-        client.execute(SQL, &[&org_id, &link_id]).await
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "entity_link",
+            "delete",
+            "by_id",
+            "entity_links",
+            SQL,
+        );
+        let __result =
+            ::er_span::instrument(&__span, client.execute(SQL, &[&org_id, &link_id])).await;
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, __n);
+        Ok(__n)
     }
 }
 
@@ -163,7 +189,19 @@ WHERE org_id = $1
   AND (parent_entity_id = $2 OR child_entity_id = $2)
 ORDER BY kind, parent_entity_id, child_entity_id
 ";
-        let rows = client.query(SQL, &[&org_id, &entity_id]).await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "entity_link",
+            "read",
+            "for_entity",
+            "entity_links",
+            SQL,
+        );
+        let __result =
+            ::er_span::instrument(&__span, client.query(SQL, &[&org_id, &entity_id])).await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::EntityLink {
@@ -194,6 +232,18 @@ SET dataset_id = d.id, updated_at = now()
 FROM public.datasets d
 WHERE d.org_id = c.org_id AND d.name = 'default' AND c.dataset_id IS NULL
 ";
-        client.execute(SQL, &[]).await
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "entity_link",
+            "update",
+            "backfill_dataset",
+            "entity_links",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.execute(SQL, &[])).await;
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, __n);
+        Ok(__n)
     }
 }

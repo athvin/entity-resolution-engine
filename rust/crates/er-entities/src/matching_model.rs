@@ -118,8 +118,17 @@ RETURNING
   created_at,
   updated_at
 ";
-        let rows = client
-            .query(
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "matching_model",
+            "create",
+            "create",
+            "matching_models",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.query(
                 SQL,
                 &[
                     &model_id,
@@ -134,8 +143,12 @@ RETURNING
                     &provenance,
                     &created_by,
                 ],
-            )
-            .await?;
+            ),
+        )
+        .await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::MatchingModel {
@@ -189,7 +202,18 @@ WHERE org_id = $1 AND state = 'active'
 ORDER BY version DESC
 LIMIT 1
 ";
-        let rows = client.query(SQL, &[&org_id]).await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "matching_model",
+            "read",
+            "active",
+            "matching_models",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.query(SQL, &[&org_id])).await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::MatchingModel {
@@ -239,7 +263,18 @@ FROM public.matching_models
 WHERE org_id = $1 AND state = 'active'
 ORDER BY name
 ";
-        let rows = client.query(SQL, &[&org_id]).await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "matching_model",
+            "read",
+            "active_all",
+            "matching_models",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.query(SQL, &[&org_id])).await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::MatchingModel {
@@ -290,7 +325,19 @@ ORDER BY name
 FROM public.matching_models
 WHERE org_id = $1 AND name = $2 AND version = $3
 ";
-        let rows = client.query(SQL, &[&org_id, &name, &version]).await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "matching_model",
+            "read",
+            "by_version",
+            "matching_models",
+            SQL,
+        );
+        let __result =
+            ::er_span::instrument(&__span, client.query(SQL, &[&org_id, &name, &version])).await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::MatchingModel {
@@ -340,7 +387,18 @@ FROM public.matching_models
 WHERE org_id = $1
 ORDER BY name, version DESC
 ";
-        let rows = client.query(SQL, &[&org_id]).await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "matching_model",
+            "read",
+            "list",
+            "matching_models",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.query(SQL, &[&org_id])).await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::MatchingModel {
@@ -389,7 +447,20 @@ WHERE org_id = $2
     )
   )
 ";
-        client.execute(SQL, &[&model_id, &org_id]).await
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "matching_model",
+            "update",
+            "activate",
+            "matching_models",
+            SQL,
+        );
+        let __result =
+            ::er_span::instrument(&__span, client.execute(SQL, &[&model_id, &org_id])).await;
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, __n);
+        Ok(__n)
     }
 
     /// The dataset_id backfill (fixup 0002): stamp every pre-dataset row with its org's default dataset. Idempotent — only NULL rows are touched, so a re-run after new writes (which stamp themselves) is a no-op.
@@ -401,6 +472,18 @@ SET dataset_id = d.id, updated_at = now()
 FROM public.datasets d
 WHERE d.org_id = c.org_id AND d.name = 'default' AND c.dataset_id IS NULL
 ";
-        client.execute(SQL, &[]).await
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "matching_model",
+            "update",
+            "backfill_dataset",
+            "matching_models",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.execute(SQL, &[])).await;
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, __n);
+        Ok(__n)
     }
 }

@@ -100,8 +100,17 @@ ON CONFLICT (org_id, rec_a_key, rec_b_key) DO UPDATE SET
 RETURNING id, org_id, dataset_id, rec_a_key, rec_b_key, verdict, origin, labeled_by,
           model_version, score_at_label, note, created_at, updated_at
 ";
-        let rows = client
-            .query(
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "pair_label",
+            "create",
+            "record",
+            "pair_labels",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.query(
                 SQL,
                 &[
                     &label_id,
@@ -116,8 +125,12 @@ RETURNING id, org_id, dataset_id, rec_a_key, rec_b_key, verdict, origin, labeled
                     &score_at_label,
                     &note,
                 ],
-            )
-            .await?;
+            ),
+        )
+        .await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::PairLabel {
@@ -153,7 +166,18 @@ FROM public.pair_labels
 WHERE org_id = $1
 ORDER BY rec_a_key, rec_b_key
 ";
-        let rows = client.query(SQL, &[&org_id]).await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "pair_label",
+            "read",
+            "all",
+            "pair_labels",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.query(SQL, &[&org_id])).await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::PairLabel {
@@ -192,9 +216,22 @@ WHERE org_id = $1
 ORDER BY created_at DESC, id DESC
 LIMIT $4
 ";
-        let rows = client
-            .query(SQL, &[&org_id, &verdict, &origin, &limit])
-            .await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "pair_label",
+            "read",
+            "page",
+            "pair_labels",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.query(SQL, &[&org_id, &verdict, &origin, &limit]),
+        )
+        .await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::PairLabel {
@@ -227,6 +264,18 @@ SET dataset_id = d.id, updated_at = now()
 FROM public.datasets d
 WHERE d.org_id = c.org_id AND d.name = 'default' AND c.dataset_id IS NULL
 ";
-        client.execute(SQL, &[]).await
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "pair_label",
+            "update",
+            "backfill_dataset",
+            "pair_labels",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.execute(SQL, &[])).await;
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, __n);
+        Ok(__n)
     }
 }

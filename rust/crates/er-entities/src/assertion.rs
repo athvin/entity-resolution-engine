@@ -77,18 +77,33 @@ pub mod create {
 VALUES ($1, $2, $3, $4, true, $5, $6::timestamp, $7,
   $6::timestamp)
 ";
-        conn.execute(
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "assertion",
+            "create",
+            "add",
+            "assertions",
             SQL,
-            ::duckdb::params![
-                assertion_id,
-                rec_a_key,
-                rec_b_key,
-                kind,
-                created_by,
-                created_at,
-                note
-            ],
-        )
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(
+            &__span,
+            conn.execute(
+                SQL,
+                ::duckdb::params![
+                    assertion_id,
+                    rec_a_key,
+                    rec_b_key,
+                    kind,
+                    created_by,
+                    created_at,
+                    note
+                ],
+            ),
+        )?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
     }
 
     /// Leave the always/never assertion a match/no_match review resolution implies, on the review's pair.
@@ -105,10 +120,25 @@ SELECT $1, rec_a_key, rec_b_key, $2, true, 'steward', $3::timestamp,
   $3::timestamp
 FROM lake.main.review_queue WHERE id = $4
 ";
-        conn.execute(
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "assertion",
+            "create",
+            "from_review",
+            "assertions",
             SQL,
-            ::duckdb::params![assertion_id, kind, created_at, review_id],
-        )
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(
+            &__span,
+            conn.execute(
+                SQL,
+                ::duckdb::params![assertion_id, kind, created_at, review_id],
+            ),
+        )?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
     }
 }
 
@@ -170,9 +200,21 @@ pub mod read {
 FROM lake.main.assertions AT (VERSION => {snapshot})
 WHERE active
 ";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "assertion",
+            "read",
+            "active_pairs",
+            "assertions",
+            SQL,
+        );
+        let __entered = __span.enter();
         let sql = SQL.replace("{snapshot}", &snapshot.to_string());
-        let mut stmt = conn.prepare(&sql)?;
-        let batches = stmt.query_arrow(::duckdb::params![])?.collect::<Vec<_>>();
+        let mut stmt = ::er_span::check(&__span, conn.prepare(&sql))?;
+        let batches =
+            ::er_span::check(&__span, stmt.query_arrow(::duckdb::params![]))?.collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
         ActivePairsRow::from_batches(&batches)
     }
 
@@ -231,8 +273,20 @@ WHERE active
 FROM lake.main.assertions
 WHERE active
 ";
-        let mut stmt = conn.prepare(SQL)?;
-        let batches = stmt.query_arrow(::duckdb::params![])?.collect::<Vec<_>>();
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "assertion",
+            "read",
+            "active_pairs_live",
+            "assertions",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let mut stmt = ::er_span::check(&__span, conn.prepare(SQL))?;
+        let batches =
+            ::er_span::check(&__span, stmt.query_arrow(::duckdb::params![]))?.collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
         ActivePairsLiveRow::from_batches(&batches)
     }
 
@@ -346,11 +400,24 @@ WHERE ($1 OR active) AND ($2 IS NULL OR id > $2)
 ORDER BY id
 LIMIT $3
 ";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "assertion",
+            "read",
+            "page",
+            "assertions",
+            SQL,
+        );
+        let __entered = __span.enter();
         let sql = SQL.replace("{snapshot}", &snapshot.to_string());
-        let mut stmt = conn.prepare(&sql)?;
-        let batches = stmt
-            .query_arrow(::duckdb::params![include_retracted, after, limit])?
-            .collect::<Vec<_>>();
+        let mut stmt = ::er_span::check(&__span, conn.prepare(&sql))?;
+        let batches = ::er_span::check(
+            &__span,
+            stmt.query_arrow(::duckdb::params![include_retracted, after, limit]),
+        )?
+        .collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
         PageRow::from_batches(&batches)
     }
 }
@@ -368,6 +435,21 @@ pub mod update {
     updated_at = $1::timestamp
 WHERE id = $2
 ";
-        conn.execute(SQL, ::duckdb::params![retracted_at, assertion_id])
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "assertion",
+            "update",
+            "retract",
+            "assertions",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(
+            &__span,
+            conn.execute(SQL, ::duckdb::params![retracted_at, assertion_id]),
+        )?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
     }
 }

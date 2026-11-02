@@ -157,8 +157,17 @@ RETURNING
   started_at,
   finished_at
 ";
-        let rows = client
-            .query(
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "job",
+            "create",
+            "enqueue",
+            "jobs",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.query(
                 SQL,
                 &[
                     &job_id,
@@ -171,8 +180,12 @@ RETURNING
                     &created_by,
                     &trace_context,
                 ],
-            )
-            .await?;
+            ),
+        )
+        .await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::Job {
@@ -257,8 +270,17 @@ RETURNING
   started_at,
   finished_at
 ";
-        let rows = client
-            .query(
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "job",
+            "create",
+            "enqueue_scheduled",
+            "jobs",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.query(
                 SQL,
                 &[
                     &job_id,
@@ -271,8 +293,12 @@ RETURNING
                     &schedule_id,
                     &trace_context,
                 ],
-            )
-            .await?;
+            ),
+        )
+        .await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::Job {
@@ -347,7 +373,18 @@ pub mod read {
 FROM public.jobs
 WHERE org_id = $1 AND id = $2
 ";
-        let rows = client.query(SQL, &[&org_id, &job_id]).await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "job",
+            "read",
+            "by_id",
+            "jobs",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.query(SQL, &[&org_id, &job_id])).await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::Job {
@@ -419,7 +456,19 @@ WHERE org_id = $1 AND id = $2
 FROM public.jobs
 WHERE org_id = $1 AND idempotency_key = $2
 ";
-        let rows = client.query(SQL, &[&org_id, &idempotency_key]).await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "job",
+            "read",
+            "by_idempotency_key",
+            "jobs",
+            SQL,
+        );
+        let __result =
+            ::er_span::instrument(&__span, client.query(SQL, &[&org_id, &idempotency_key])).await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::Job {
@@ -498,7 +547,19 @@ WHERE ($1::text IS NULL OR org_id = $1)
 ORDER BY id DESC
 LIMIT $3
 ";
-        let rows = client.query(SQL, &[&org_id, &state, &limit]).await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "job",
+            "read",
+            "list",
+            "jobs",
+            SQL,
+        );
+        let __result =
+            ::er_span::instrument(&__span, client.query(SQL, &[&org_id, &state, &limit])).await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::Job {
@@ -570,7 +631,18 @@ FROM public.jobs
 WHERE id = $1
 FOR UPDATE
 ";
-        let rows = client.query(SQL, &[&job_id]).await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "job",
+            "read",
+            "lock",
+            "jobs",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.query(SQL, &[&job_id])).await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::Job {
@@ -645,7 +717,18 @@ RETURNING
   started_at,
   finished_at
 ";
-        let rows = client.query(SQL, &[&owner_epoch]).await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "job",
+            "update",
+            "adopt",
+            "jobs",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.query(SQL, &[&owner_epoch])).await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::Job {
@@ -689,7 +772,19 @@ SET dataset_id = d.id, updated_at = now()
 FROM public.datasets d
 WHERE d.org_id = c.org_id AND d.name = 'default' AND c.dataset_id IS NULL
 ";
-        client.execute(SQL, &[]).await
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "job",
+            "update",
+            "backfill_dataset",
+            "jobs",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.execute(SQL, &[])).await;
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, __n);
+        Ok(__n)
     }
 
     /// Cancel with the org slot held: a queued job dies directly; a dispatching or running one becomes canceling — still inside the one-active-per-org predicate — until every pod is provably gone (§5.6).
@@ -732,7 +827,18 @@ RETURNING
   started_at,
   finished_at
 ";
-        let rows = client.query(SQL, &[&job_id, &org_id]).await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "job",
+            "update",
+            "cancel",
+            "jobs",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.query(SQL, &[&job_id, &org_id])).await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::Job {
@@ -832,7 +938,18 @@ RETURNING
   started_at,
   finished_at
 ";
-        let rows = client.query(SQL, &[&default_cap]).await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "job",
+            "update",
+            "claim",
+            "jobs",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.query(SQL, &[&default_cap])).await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::Job {
@@ -920,9 +1037,22 @@ RETURNING
   started_at,
   finished_at
 ";
-        let rows = client
-            .query(SQL, &[&retryable, &error_class, &error_detail, &job_id])
-            .await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "job",
+            "update",
+            "fail_or_retry",
+            "jobs",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.query(SQL, &[&retryable, &error_class, &error_detail, &job_id]),
+        )
+        .await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::Job {
@@ -973,7 +1103,20 @@ SET state = $1,
     finished_at = CASE WHEN $1 IN ('succeeded', 'failed', 'canceled') THEN now() ELSE finished_at END
 WHERE id = $2
 ";
-        client.execute(SQL, &[&state, &job_id]).await
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "job",
+            "update",
+            "mark",
+            "jobs",
+            SQL,
+        );
+        let __result =
+            ::er_span::instrument(&__span, client.execute(SQL, &[&state, &job_id])).await;
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, __n);
+        Ok(__n)
     }
 
     /// Commit the planning decision (dispatching -> running) in the same transaction as the claim and the task rows: writes run_id = id and both DAG hashes, so dispatching is never a committed state on the DAG path (§4.5).
@@ -1019,8 +1162,17 @@ RETURNING
   started_at,
   finished_at
 ";
-        let rows = client
-            .query(
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "job",
+            "update",
+            "plan",
+            "jobs",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.query(
                 SQL,
                 &[
                     &structural_fingerprint,
@@ -1029,8 +1181,12 @@ RETURNING
                     &owner_epoch,
                     &job_id,
                 ],
-            )
-            .await?;
+            ),
+        )
+        .await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::Job {
@@ -1105,9 +1261,22 @@ RETURNING
   started_at,
   finished_at
 ";
-        let rows = client
-            .query(SQL, &[&error_class, &error_detail, &job_id])
-            .await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "job",
+            "update",
+            "refuse_plan",
+            "jobs",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.query(SQL, &[&error_class, &error_detail, &job_id]),
+        )
+        .await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::Job {
@@ -1182,7 +1351,18 @@ RETURNING
   started_at,
   finished_at
 ";
-        let rows = client.query(SQL, &[&job_id, &org_id]).await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "job",
+            "update",
+            "reopen",
+            "jobs",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.query(SQL, &[&job_id, &org_id])).await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::Job {
@@ -1230,7 +1410,20 @@ RETURNING
                   ELSE params || jsonb_build_object('resume_run_id', run_id) END
 WHERE org_id = $1 AND id = $2 AND state IN ('failed', 'canceled')
 ";
-        client.execute(SQL, &[&org_id, &job_id]).await
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "job",
+            "update",
+            "resume",
+            "jobs",
+            SQL,
+        );
+        let __result =
+            ::er_span::instrument(&__span, client.execute(SQL, &[&org_id, &job_id])).await;
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, __n);
+        Ok(__n)
     }
 
     /// Settle a run from its leaf verdicts once no live task row is non-terminal; carries the state guard mark.sql lacks, so a late settle after a cancel matches zero rows.
@@ -1276,9 +1469,22 @@ RETURNING
   started_at,
   finished_at
 ";
-        let rows = client
-            .query(SQL, &[&state, &error_class, &error_detail, &job_id])
-            .await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "job",
+            "update",
+            "settle",
+            "jobs",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.query(SQL, &[&state, &error_class, &error_detail, &job_id]),
+        )
+        .await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::Job {

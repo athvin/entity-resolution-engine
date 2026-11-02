@@ -168,11 +168,21 @@ FROM lake.main.acct_golden_lineage AT (VERSION => {snapshot})
 WHERE entity_id = $1
 ORDER BY attribute, record_key
 ";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "acct_golden_lineage",
+            "read",
+            "by_entity",
+            "acct_golden_lineage",
+            SQL,
+        );
+        let __entered = __span.enter();
         let sql = SQL.replace("{snapshot}", &snapshot.to_string());
-        let mut stmt = conn.prepare(&sql)?;
-        let batches = stmt
-            .query_arrow(::duckdb::params![entity_id])?
+        let mut stmt = ::er_span::check(&__span, conn.prepare(&sql))?;
+        let batches = ::er_span::check(&__span, stmt.query_arrow(::duckdb::params![entity_id]))?
             .collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
         ByEntityRow::from_batches(&batches)
     }
 }

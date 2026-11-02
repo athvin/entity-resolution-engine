@@ -65,8 +65,17 @@ pub mod create {
         const SQL: &str = "INSERT INTO public.schema_migrations (id, catalog_hash, kind, relation, statement, applied_by)
 VALUES ($1, $2, $3, $4, $5, $6)
 ";
-        client
-            .execute(
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "schema_migration",
+            "create",
+            "record",
+            "schema_migrations",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.execute(
                 SQL,
                 &[
                     &id,
@@ -76,8 +85,13 @@ VALUES ($1, $2, $3, $4, $5, $6)
                     &statement,
                     &applied_by,
                 ],
-            )
-            .await
+            ),
+        )
+        .await;
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, __n);
+        Ok(__n)
     }
 }
 
@@ -93,7 +107,18 @@ FROM public.schema_migrations
 ORDER BY created_at DESC, id DESC
 LIMIT 1
 ";
-        let rows = client.query(SQL, &[]).await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "schema_migration",
+            "read",
+            "latest",
+            "schema_migrations",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.query(SQL, &[])).await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::SchemaMigration {
