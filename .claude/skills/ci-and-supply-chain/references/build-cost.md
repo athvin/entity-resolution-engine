@@ -18,7 +18,8 @@ against it.
 - Rejected: headstart
 - Blocked: more cores per job
 - Rejected: removing sccache
-- Next step: sccache on S3
+- Shipped: sccache on S3 (2026-10-29)
+- Shipped: the e2e tier split into parallel legs (2026-11-02)
 
 ## The measured baseline (2026-10-22)
 
@@ -577,9 +578,21 @@ already the worst case — worse.
 
 **Date.** 2026-10-22.
 
-## Next step: sccache on S3
+## Shipped: sccache on S3 (2026-10-29)
 
-**Promoted from contingency to the recommended next move** by the 97% hit rate
+What the paragraph below recommended happened: PR #346 wrote the bucket and the
+two OIDC roles (`infra/terraform/envs/core/sccache.tf`), a manual apply created
+them, and PR #350 pointed `rust.yml` at `SCCACHE_BUCKET`/`SCCACHE_REGION` and
+removed `SCCACHE_GHA_ENABLED`. Since then: main runs assume the write role, PRs
+the read role (a denied write is a counted miss, not a failure — 8 write errors
+on a green PR run confirmed the prediction in sccache.tf), hit rates on
+unchanged dependency trees run 97–100%, and `cache-prune`'s sccache budget line
+is vestigial (kept only so a rollback to the GHA backend is not silently
+uncapped — buildkit is the job's live reason now).
+
+The original recommendation, kept for the reasoning:
+
+Promoted from contingency to the recommended next move by the 97% hit rate
 above: sccache is the primary cache, so capping it to protect a shared 10 GB
 budget is the wrong trade. Take it out of the Actions cache entirely by pointing
 it at S3
@@ -587,8 +600,30 @@ it at S3
 from a 10 GB shared budget in one step, lifts the size cap, and keeps the
 dependency-bump resilience that is the reason to keep sccache at all.
 
-The plumbing already exists: `images.yml:95-105` assumes an AWS role through
-GitHub OIDC in `us-east-2`, and `infra/terraform` is where the bucket, its
-lifecycle expiry and the CI role's policy would go. The cost is a small S3 bill
-and one more Terraform-managed role — which is why it is the escalation and not
-the first move.
+## Shipped: the e2e tier split into parallel legs (2026-11-02)
+
+With compile solved by sccache-on-S3, the critical path moved to serial test
+EXECUTION. Run `41461727505` (a typical warm PR) decomposed the 30m
+`DuckLake + extensions e2e` job as:
+
+| Segment | time |
+|---|---|
+| setup (disk reclaim 1m54, toolchain, mold, OIDC, caches) | ~3m12 |
+| `cargo test -p dedupe-cli -p er-cli -p er-server -p er-entity-diff` build | 2m16 (sccache 100%) |
+| er-cli `tests/main` (44 tests; `lake_e2e` is 40 of them / 13.8m) | 888s |
+| er-server `tests/main` (84 tests) + small suites | ~7m30 |
+| extensions step: second build 2m15–7m48, tests 0.48s | 2m18–7m49 |
+
+The split: `lake-e2e` (2 nextest hash partitions of er-cli alone, no postgres
+service) + `ducklake-e2e` (server + extensions) + `ducklake-gate` carrying the
+old job's exact `name:` so branch protection never changed. nextest here even
+though the `test` job measured it out: that tax is process-per-test on
+thousands of tiny tests, and this suite is 44 tests averaging ~21s (A/B on the
+old combined job: 15.5m cargo vs 15.2m nextest). Hash partitioning auto-assigns
+new tests to a shard — the failure mode of hand-kept filter lists (a new test
+silently in no leg) cannot happen.
+
+The trade: ~+10 runner-minutes per PR run (two extra setup+build prefixes) for
+roughly half the tier's wall clock. Minutes are metered on this private repo;
+the trade was accepted deliberately. Per-leg measurements from the first runs
+get appended to this section as they land.

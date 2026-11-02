@@ -14,10 +14,11 @@
 # 56 (PR #345), what is left in both long jobs is dependency-tree compile, which
 # only a cache can touch.
 #
-# NOT APPLIED YET. Creating these resources is a deliberate act with a (small)
-# recurring bill; `.github/workflows/rust.yml` must not be pointed at the bucket
-# until `terraform apply` has run, or every compile job fails to assume a role
-# that does not exist. Sequence: merge this, apply, then the workflow change.
+# APPLIED 2026-10-28/29 (manual apply between PR #346 and PR #350, exactly the
+# sequence the original note here prescribed: merge the terraform, apply, then
+# point the workflow at the bucket). `.github/workflows/rust.yml` has been on
+# this backend since #350; the read-only PR role's denied writes surface as
+# counted misses, not failures — verified in production, see below.
 
 # --- the bucket ---------------------------------------------------------------
 

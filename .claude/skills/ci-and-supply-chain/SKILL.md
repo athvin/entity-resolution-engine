@@ -127,9 +127,9 @@ Read the **job log**, not the diff — the log names the advisory. Fix it in its
 own small PR rather than entangling it with a feature, so the feature's review
 stays about the feature.
 
-**2. Disk exhaustion in the Rust `test` job.** A full `rust/target` is tens of
-gigabytes, and the job carries a **disk-reclaim step** (it is the only job that
-does) which deletes preinstalled toolchains to recover space.
+**2. Disk exhaustion in the Rust `test` and e2e jobs.** A full `rust/target` is
+tens of gigabytes, and those jobs carry a **disk-reclaim step** which deletes
+preinstalled toolchains to recover space.
 
 The symptom is misleading: **`linking with cc failed` usually means the disk is
 full**, not that anything is wrong with the link. If you see it, check whether
@@ -140,13 +140,18 @@ cache and link with mold, but a `duckdb` bump invalidates the cache and forces a
 full rebuild — which is why the lint and DuckLake e2e jobs carry longer
 timeouts than their steady-state runtime needs.
 
-A bump is not the only way to land cold, though. **The two caches are a shared,
-capped resource**: GitHub allows 10 GB of Actions cache per repository and evicts
-LRU past it, and sccache's GHA backend writes one entry per compilation object —
-so its entry *count* is what evicts the rust-cache entries that make a run warm.
-That budget is the difference between a 14-minute and a 42-minute gate. Where the
-time actually goes, what the caches cost, and the decision log for changes
-against them: [references/build-cost.md](references/build-cost.md).
+A bump is not the only way to land cold, though — it used to be the lesser one.
+**The Actions cache is a shared, capped resource**: GitHub allows 10 GB per
+repository and evicts LRU past it, and while sccache lived on the GHA backend
+its one-entry-per-compilation-object count was what evicted the rust-cache
+entries that make a run warm. That budget was the difference between a
+14-minute and a 42-minute gate, and it is why sccache moved to **S3**
+(`SCCACHE_BUCKET` in rust.yml, bucket + OIDC roles in
+`infra/terraform/envs/core/sccache.tf`, shipped 2026-10-29) — no shared budget,
+no eviction class. The Actions cache still holds rust-cache and buildkit layers,
+so the prune job survives. Where the time actually goes, what the caches cost,
+and the decision log for changes against them:
+[references/build-cost.md](references/build-cost.md).
 
 ## Pinned actions
 

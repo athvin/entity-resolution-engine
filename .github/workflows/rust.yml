@@ -35,9 +35,9 @@
 # rust-toolchain selects the channel through its ref (`@stable`), which cannot
 # also carry the S9 `@<sha> # vTAG` pin the repo requires of every `uses:`.
 #
-# SPEED: every compile job shares an sccache compilation cache (GHA backend) and
-# links with mold, so the 6 jobs stop re-compiling the same crate-units cold and
-# the DuckDB static link is far cheaper. The heavy perf jobs (bench compile,
+# SPEED: every compile job shares an sccache compilation cache (the S3 backend
+# below — see the env block) and links with mold, so the jobs stop re-compiling
+# the same crate-units cold and the DuckDB static link is far cheaper. The heavy perf jobs (bench compile,
 # 50k scale) run only on main + nightly, not on every PR — the PR gate is
 # lint + test + the DuckLake integration e2e + cargo-deny.
 #
@@ -594,22 +594,123 @@ jobs:
           manifest-path: rust/Cargo.toml
           command: check advisories licenses bans sources
 
-  # NOT split, unlike `lint` — and that is a measurement, not an oversight. This
-  # job is now the critical path (23m10 in run 39775982197: 13m15 for the
-  # four-crate test, 8m17 for the rapidfuzz extension test), so splitting it is
-  # the obvious next move and it does not survive the numbers.
+  # SPLIT in three, and that is a measurement too — the opposite of the one a
+  # previous version of this comment recorded against splitting. Run 41461727505
+  # (2026-11-02) put this tier at 30m, decomposing as 2m16s of build (sccache on
+  # S3 at a 100% hit rate) and then ~22m of test binaries running one after the
+  # other: er-cli's lake suite alone 888s, then er-server's 419s. The tree-build
+  # cost that once made a split look worse than the job it would improve (the
+  # ~18m estimate, from the GHA-cache era) is ~2m now, so a second runner pays
+  # ~5m of setup+build to take ~15m off the wall. Three jobs rather than one
+  # matrix because the legs genuinely differ: the lake shards need no Postgres
+  # service and partition one crate's suite with nextest; the server leg keeps
+  # the service, plain `cargo test`, and the extensions step.
   #
-  # The extension step's 8m17 came AFTER the first step had already built the
-  # dependency tree, so unlike `lint`'s rustdoc (0m39) and OpenAPI gate (0m42) it
-  # is not riding cheaply on a tree someone else paid for — those 8m17 are its own
-  # test-target compile, link and run. Standalone it would pay a tree build on top
-  # of that, plausibly ~18m against this job's remaining 13m15, which would make
-  # the wall clock WORSE than the 23m10 it was meant to improve.
+  #   lake-e2e       er-cli only, 2 nextest hash partitions, no pg service
+  #   ducklake-e2e   dedupe-cli + er-server + er-entity-diff + extensions
+  #   ducklake-gate  the required context (see it for why the legs cannot be)
   #
-  # So: measure before splitting this. What would decide it is the tree cost for a
-  # `-p dedupe-core --test extensions` build alone, which no run has isolated yet.
+  # nextest here, though the `test` job measured it out (357s -> 453s): that tax
+  # is process-per-test on thousands of tiny tests. This suite is 44 tests
+  # averaging ~21s (A/B on the old combined job: 15.5m cargo vs 15.2m nextest),
+  # and hash partitioning is the thing libtest cannot do — every test lands in
+  # exactly one shard by name hash, so a new test is auto-assigned to a shard,
+  # never silently dropped, and existing tests do not migrate when one is added.
+  #
+  # nextest must NOT reach er-server's pg suite: those tests coordinate around
+  # the shared service database in-process (er-server/tests/common/mod.rs), and
+  # process-per-test would void that. The server leg stays on plain `cargo test`
+  # deliberately.
+  lake-e2e:
+    name: DuckLake e2e shard (${{ matrix.partition }})
+    needs: detect
+    if: needs.detect.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      # A flaky leg can be re-run alone; its sibling's green stands.
+      fail-fast: false
+      matrix:
+        partition: ["1/2", "2/2"]
+    permissions:
+      contents: read
+      id-token: write # OIDC exchange for the sccache S3 role
+    env:
+      RUSTC_WRAPPER: sccache
+      # A RUNTIME gate: each lake test early-returns without this (er-cli
+      # tests/lake_e2e.rs). A shard that lost this env would go green in
+      # seconds — if a shard finishes suspiciously fast, check here first.
+      DEDUPE_E2E_DUCKLAKE: "1"
+      # No ER_TEST_PG_DSN and no postgres service: er-cli's tests reference
+      # neither — the lake catalog is a DuckDB file under a per-test temp dir,
+      # which is also what makes nextest's process-per-test safe here.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Reclaim runner disk
+        # Same step and same reasoning as `test` (errno 28 masquerading as an
+        # `ar` failure). This leg builds only er-cli's targets, so it may not
+        # need the headroom — the Build cost step below prints `du`/`df` so
+        # that removal can be decided by measurement, not assumption.
+        run: |
+          df -h / | tail -1
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/share/boost /usr/share/swift \
+                      /opt/hostedtoolcache
+          df -h / | tail -1
+      - name: Install stable toolchain
+        run: rustup update stable --no-self-update && rustup default stable
+      - name: Install mold
+        # Retried and time-boxed — see the `test` job's copy for why.
+        timeout-minutes: 13
+        run: |
+          for i in 1 2 3; do
+            if timeout 120 sudo apt-get update && timeout 120 sudo apt-get install -y mold; then
+              exit 0
+            fi
+            echo "mold install attempt $i failed or timed out; retrying"
+            sleep 5
+          done
+          exit 1
+      # PRs assume the READ role — see the server leg's copy for the reasoning.
+      - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
+        with:
+          aws-region: us-east-2
+          role-to-assume: ${{ github.ref == 'refs/heads/main' && 'arn:aws:iam::797781631727:role/er-ci-sccache-write' || 'arn:aws:iam::797781631727:role/er-ci-sccache-read' }}
+      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: rust
+          shared-key: rust
+          prefix-key: "v1-rust"
+          key: ${{ hashFiles('rust/Cargo.toml') }}
+          # Restore-only. `lint` is the single writer of this key.
+          save-if: false
+      - name: Cache DuckDB extensions
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.duckdb/extensions
+          key: duckdb-extensions-${{ hashFiles('rust/Cargo.lock') }}
+          restore-keys: |
+            duckdb-extensions-
+      - uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
+        with:
+          tool: cargo-nextest
+      - name: DuckLake e2e (er-cli, hash partition)
+        # No `--test main` restriction: er-cli's lib unit tests partition too,
+        # so nothing the old combined job ran is dropped. Doctests are a
+        # cargo-test-only concept, and the `test` job runs them workspace-wide.
+        run: cargo nextest run -p er-cli --no-fail-fast --partition hash:${{ matrix.partition }}
+      - name: Build cost (sccache stats, target size)
+        # See the `lint` job's copy for why. The `du`/`df` pair is also the
+        # input for deciding whether this leg can drop the disk-reclaim step.
+        if: always()
+        run: |
+          sccache --show-stats || true
+          du -sh target || true
+          df -h / | tail -1
+
   ducklake-e2e:
-    name: DuckLake + extensions e2e
+    name: DuckLake e2e (server + extensions)
     needs: detect
     if: needs.detect.outputs.code == 'true'
     runs-on: ubuntu-latest
@@ -712,25 +813,78 @@ jobs:
           key: duckdb-extensions-${{ hashFiles('rust/Cargo.lock') }}
           restore-keys: |
             duckdb-extensions-
-      - name: DuckLake + Postgres e2e
-        # The 41 `pg_*` binaries still run one at a time here, because cargo
-        # runs one test binary at a time and each file holds one test. They now
-        # own a database each (er-server/tests/common/mod.rs), so the overlap is
-        # finally *safe* — but collecting it needs them in one binary, not a
-        # different runner. See the `test` job for why nextest is not that
-        # answer. Measured A/B on this job: 15.5m cargo vs 15.2m nextest.
-        run: cargo test -p dedupe-cli -p er-cli -p er-server -p er-entity-diff
+      - name: DuckLake + Postgres e2e (server tier)
+        # er-cli's lake suite runs in the `lake-e2e` shards above; this leg
+        # keeps everything that wants the Postgres service. The `pg_*` tests
+        # still run one at a time here, because cargo runs one test binary at a
+        # time and each file holds one test. They now own a database each
+        # (er-server/tests/common/mod.rs), so the overlap is finally *safe* —
+        # but collecting it needs them in one binary, not a different runner.
+        # See the `test` job for why nextest is not that answer here, and the
+        # comment above `lake-e2e` for why it is the answer for er-cli.
+        run: cargo test -p dedupe-cli -p er-server -p er-entity-diff
       - name: Extension loading (splink_udfs) and the engine version label
         # `--test main <filter>`: every file in dedupe-core/tests is a module of
         # one binary now (autotests = false), so the target is `main` and the old
         # file name is a name filter. See that crate's tests/main.rs.
         run: cargo test -p dedupe-core --test main extensions
       - name: Build cost (sccache stats, target size)
-        # See the `lint` job's copy for why.
+        # See the `lint` job's copy for why. The `du`/`df` pair is also the
+        # input for deciding whether a leg can drop the disk-reclaim step.
         if: always()
         run: |
           sccache --show-stats || true
           du -sh target || true
+          df -h / | tail -1
+
+  # The required status check for the e2e tier. The GitHub behaviour forcing
+  # this shape is stated in full above infra.yml's `plan-gate`, which this
+  # copies: A MATRIX JOB'S PER-LEG NAMES CANNOT BE REQUIRED STATUS CHECKS.
+  # When `lake-e2e` is skipped by its `if:`, GitHub reports a single check-run
+  # under the literal, uninterpolated name `DuckLake e2e shard (${{ matrix.partition }})`,
+  # so per-leg contexts never report on a PR that skips the tier — and a
+  # required context that never reports blocks the PR forever (learned on #359).
+  #
+  # This job carries the EXACT `name:` the old combined job had, so the split
+  # needed no branch-protection edit: the context "DuckLake + extensions e2e"
+  # kept reporting without interruption, just from a different job id.
+  ducklake-gate:
+    name: DuckLake + extensions e2e
+    needs: [detect, lake-e2e, ducklake-e2e]
+    # `!cancelled()`: the gate must RUN (and fail) when a leg fails — a gate
+    # skipped because its `needs` failed would read to branch protection as
+    # satisfied, which is the exact false-green this job exists to prevent.
+    if: ${{ !cancelled() && needs.detect.outputs.code == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: every e2e leg must have succeeded
+        # No checkout in this job, so the workflow's `working-directory: rust`
+        # default would fail — point the step at the (empty) workspace root.
+        working-directory: ${{ github.workspace }}
+        env:
+          # For the matrix job this is the aggregate: `success` only if every
+          # leg succeeded, `failure` if any failed, `skipped` if the whole job
+          # was.
+          SHARDS: ${{ needs.lake-e2e.result }}
+          SERVER: ${{ needs.ducklake-e2e.result }}
+        run: |
+          echo "lake shards: $SHARDS; server leg: $SERVER"
+          for r in "$SHARDS" "$SERVER"; do
+            case "$r" in
+              success) ;;
+              skipped)
+                # Defensive only: the legs skip exactly when detect says
+                # code != 'true', and then this gate is itself skipped. If a
+                # leg was skipped while the gate runs, detect gated it.
+                echo 'a leg reported skipped alongside a running gate'
+                ;;
+              *)
+                echo "::error::a DuckLake e2e leg did not succeed (result: $r)"
+                exit 1
+                ;;
+            esac
+          done
 
   # --- heavy perf jobs: main + nightly only (skipped on PRs for latency) ---
 
