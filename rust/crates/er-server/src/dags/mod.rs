@@ -18,7 +18,7 @@ use er_dag::{Dag, DagBuilder, TriggerRule};
 use control::{Activate, CreateCatalog, DrainActions, RegisterModel, SettleActions, StageApproved};
 use tasks::{
     ApplyStaged, Assemble, CorrectReconcile, CorrectionsInit, CorrectionsReconcile, Finish, Ingest,
-    Init, LakeInit, Maintain, Match, Reconcile, ReconcileSchema, Standardize, Train,
+    Init, LakeInit, Maintain, Match, ProfileCorpus, Reconcile, ReconcileSchema, Standardize, Train,
 };
 
 /// The lake session type every pod task body takes; fixed here so `er-dag`
@@ -38,6 +38,7 @@ pub enum JobKind {
     Correct,
     Train,
     LakeMaintain,
+    Profile,
     LakeMigrate,
     Provision,
     DatasetProvision,
@@ -46,12 +47,13 @@ pub enum JobKind {
 }
 
 impl JobKind {
-    pub const ALL: [JobKind; 10] = [
+    pub const ALL: [JobKind; 11] = [
         JobKind::RunAllFull,
         JobKind::RunAllIncremental,
         JobKind::Correct,
         JobKind::Train,
         JobKind::LakeMaintain,
+        JobKind::Profile,
         JobKind::LakeMigrate,
         JobKind::Provision,
         JobKind::DatasetProvision,
@@ -67,6 +69,7 @@ impl JobKind {
             JobKind::Correct => "correct",
             JobKind::Train => "train",
             JobKind::LakeMaintain => "lake_maintain",
+            JobKind::Profile => "profile",
             JobKind::LakeMigrate => "lake_migrate",
             JobKind::Provision => "provision",
             JobKind::DatasetProvision => "dataset_provision",
@@ -104,6 +107,7 @@ pub fn dag_for(kind: JobKind) -> Dag {
         JobKind::Correct => correct(),
         JobKind::Train => train(),
         JobKind::LakeMaintain => lake_maintain(),
+        JobKind::Profile => profile(),
         JobKind::LakeMigrate => lake_migrate(),
         JobKind::Provision => provision(),
         JobKind::DatasetProvision => dataset_provision(),
@@ -240,6 +244,16 @@ fn lake_maintain() -> Dag {
     let schema = d.source::<ReconcileSchema>();
     let _ = d.then::<Maintain>((schema,));
     d.build().expect("the lake_maintain DAG assembles")
+}
+
+/// Profile one corpus stage. A single task, like `lake_maintain`: the profile is
+/// read-mostly and its only write is its own three relations, so there is
+/// nothing to fan out and no downstream task to hand an edge to.
+fn profile() -> Dag {
+    let mut d = Builder::new(JobKind::Profile.dag_name());
+    let schema = d.source::<ReconcileSchema>();
+    let _ = d.then::<ProfileCorpus>((schema,));
+    d.build().expect("the profile DAG assembles")
 }
 
 fn lake_migrate() -> Dag {

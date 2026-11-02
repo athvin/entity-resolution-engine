@@ -10,7 +10,7 @@
 use er_dag::{LakeRef, NodePolicy, Outcome, Plan, Task, TaskCtx, TaskError};
 
 use super::Session;
-use super::edges::{Assembled, Labeled, Landed, Resolved, Scored, Standardized};
+use super::edges::{Assembled, Labeled, Landed, Profiled, Resolved, Scored, Standardized};
 use super::plans::{
     DrainedActions, FinishReport, LakeInitialized, MaintenanceReport, RunPlan, SchemaReconciled,
     TrainedModel,
@@ -151,6 +151,52 @@ impl Task<Session> for ReconcileSchema {
                     detail,
                 }),
                 er_dag::Counters::default(),
+            )),
+            Err(message) => Err(engine_error(&message)),
+        }
+    }
+}
+
+/// Profile one corpus stage and record it. REAL, like `Maintain`: the work is
+/// one `er_cli` call with no fan-out, so there is nothing to wait for an
+/// executor to supply.
+///
+/// The subject, tier and sampling come from the job's params rather than from
+/// the lake env, because they are per-request rather than per-tenant — asking
+/// for the golden records at tier 2 is a different question from asking for the
+/// standardized corpus at tier 1, and the same tenant asks both.
+#[derive(Default)]
+pub struct ProfileCorpus;
+
+impl Task<Session> for ProfileCorpus {
+    const NAME: &'static str = "profile";
+    const VERSION: u32 = 1;
+    type Input = (Plan<SchemaReconciled>,);
+    type Output = LakeRef<Profiled>;
+    const WRITES_LAKE: bool = true;
+
+    fn run(
+        &mut self,
+        ctx: &mut TaskCtx<'_, Session>,
+        _input: Self::Input,
+    ) -> Result<Outcome<Self::Output>, TaskError> {
+        let request = crate::profile_params::ProfileRequest::from_params(&ctx.order.params)
+            .map_err(|message| TaskError::Failed(er_errors::ErError::precondition(message)))?;
+        let account = ctx
+            .order
+            .lake_env
+            .get("ER_ENTITY_TYPE")
+            .and_then(serde_json::Value::as_str)
+            == Some("account");
+        let captured_at = crate::dispatcher::fmt_epoch(crate::dispatcher::unix_now());
+        match request.run(ctx.session, account, &captured_at) {
+            Ok(report) => Ok(Outcome::Done(
+                LakeRef::new(report.snapshot, report.column_count),
+                er_dag::Counters(serde_json::json!({
+                    "columns_profiled": report.column_count,
+                    "rows_read": report.row_count,
+                    "findings": report.findings.len(),
+                })),
             )),
             Err(message) => Err(engine_error(&message)),
         }

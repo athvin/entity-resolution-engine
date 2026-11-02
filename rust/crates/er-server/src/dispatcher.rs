@@ -1116,7 +1116,7 @@ async fn emit_entity_aggregates(
 }
 
 /// Seconds since the Unix epoch (the run-stamp wall clock).
-fn unix_now() -> u64 {
+pub(crate) fn unix_now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_secs())
@@ -1124,7 +1124,7 @@ fn unix_now() -> u64 {
 
 /// `secs` since the epoch as `YYYY-MM-DD HH:MM:SS` (UTC) — the lake's timestamp
 /// literal form. Howard Hinnant's civil-from-days: exact + dependency-free.
-fn fmt_epoch(secs: u64) -> String {
+pub(crate) fn fmt_epoch(secs: u64) -> String {
     let days = i64::try_from(secs / 86_400).unwrap_or(0);
     let rem = secs % 86_400;
     let (hh, mm, ss) = (rem / 3600, (rem % 3600) / 60, rem % 60);
@@ -1213,6 +1213,25 @@ fn run_job(
             let config = load_config()?;
             er_cli::run_correct_observed(&session, &config, run_id, &now, observer)
                 .map_err(|e| format!("{e:#}"))
+        }
+        "profile" => {
+            // The params are parsed by the same code the DAG task uses, so a
+            // scheduled profile and an executor-run one cannot disagree about
+            // what `{}` means.
+            let request = crate::profile_params::ProfileRequest::from_params(&job.params)?;
+            let config = load_config()?;
+            let stage = "profile";
+            observer.stage_started(stage);
+            match request.run(&session, !config.entity_type.is_person(), &now) {
+                Ok(report) => {
+                    observer.stage_succeeded(stage, Some(report.snapshot));
+                    Ok(())
+                }
+                Err(detail) => {
+                    observer.stage_failed(stage, &detail);
+                    Err(detail)
+                }
+            }
         }
         "run_all_full" | "run_all_incremental" => {
             let config = load_config()?;
@@ -1411,12 +1430,44 @@ fn run_job(
             // list goes through `run_all`, which builds the one-member slice
             // itself — so the single-model path stays one call deep and cannot
             // drift from what it did before ensembles existed.
-            if members.is_empty() {
+            let outcome = if members.is_empty() {
                 er_cli::run_all_observed(&session, &config, &inputs, observer)
             } else {
                 er_cli::run_all_ensemble_observed(&session, &config, &inputs, &members, observer)
             }
-            .map_err(|e| format!("{e:#}"))
+            .map_err(|e| format!("{e:#}"));
+
+            // A cheap profile of each delivered source, as delivered.
+            //
+            // Here rather than behind a button because the value of a profile is
+            // comparative: one describes a file, a series of them shows a source
+            // drifting — a column that stopped arriving, a fill rate that halved
+            // between two deliveries. Nobody thinks to ask for the FIRST of those
+            // profiles, so the only way to have the comparison later is to take
+            // it every time without being asked.
+            //
+            // Best-effort, like the entity-event counts below and
+            // `write_metric_snapshot` before them: the run's results are already
+            // committed, so failing the job because a description of its input
+            // could not be written would destroy work in order to describe it.
+            // Tier 1 only, and no exact distinct counts — this runs on every
+            // delivery, so it has to be the cheap pass.
+            if outcome.is_ok() {
+                for (source, _) in &deliveries {
+                    let request = crate::profile_params::ProfileRequest {
+                        subject: er_cli::profile::Subject::Raw,
+                        source: Some(source.clone()),
+                        tier: 1,
+                        options: dedupe_core::profile::ProfileOptions::default(),
+                    };
+                    if let Err(detail) =
+                        request.run(&session, !config.entity_type.is_person(), &now)
+                    {
+                        eprintln!("run {run_id}: profiling delivered {source} failed: {detail}");
+                    }
+                }
+            }
+            outcome
         }
         other => Err(format!("dispatcher does not handle job kind '{other}'")),
     }?;

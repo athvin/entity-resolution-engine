@@ -42,6 +42,7 @@ pub(crate) mod fixups;
 pub mod mail;
 pub mod openapi;
 pub mod pg;
+pub mod profile_params;
 pub mod provision;
 pub mod read;
 pub mod reporter;
@@ -6689,7 +6690,7 @@ async fn merge_plans(
 /// actually routed. `train` sat in this list with no dispatcher arm, failing
 /// every time it fired; a list of kinds the scheduler will enqueue is a promise
 /// that something handles them.
-pub const SCHEDULABLE_KINDS: [&str; 6] = [
+pub const SCHEDULABLE_KINDS: [&str; 7] = [
     "run_all_full",
     "run_all_incremental",
     "correct",
@@ -6698,6 +6699,11 @@ pub const SCHEDULABLE_KINDS: [&str; 6] = [
     // O5c. Harmless to schedule on a tenant with no `approval.tag`: the arm
     // reads the config, finds no gate, and does nothing.
     "apply_approved",
+    // A profile is worth scheduling because its value is comparative: one
+    // profile describes a corpus, a series of them shows it drifting. Params
+    // default to the standardized corpus at tier 1 with exact distinct counts,
+    // so a bare `{}` schedule is the useful one.
+    "profile",
 ];
 
 /// Whether a cron expression is one the scheduler can actually run.

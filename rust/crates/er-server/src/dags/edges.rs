@@ -45,6 +45,15 @@ impl LakeEdge for Assembled {
     ];
 }
 
+/// What `profile` records: the shape of a corpus stage, its most frequent
+/// values and the coded findings over them.
+pub struct Profiled;
+impl LakeEdge for Profiled {
+    const STABLE_NAME: &'static str = "profiled";
+    const RELATIONS: &'static [&'static str] =
+        &["profile_runs", "column_profiles", "profile_findings"];
+}
+
 /// What `apply_staged` writes: the steward's labels landed on the lake.
 pub struct Labeled;
 impl LakeEdge for Labeled {
@@ -61,6 +70,7 @@ pub fn all() -> Vec<(&'static str, &'static [&'static str])> {
         (Scored::STABLE_NAME, Scored::RELATIONS),
         (Resolved::STABLE_NAME, Resolved::RELATIONS),
         (Assembled::STABLE_NAME, Assembled::RELATIONS),
+        (Profiled::STABLE_NAME, Profiled::RELATIONS),
         (Labeled::STABLE_NAME, Labeled::RELATIONS),
     ]
 }
