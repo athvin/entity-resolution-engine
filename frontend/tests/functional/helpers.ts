@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 
 /** Fixture identities installed by ERWEB_TEST_FIXTURES=1 (see src/lib/db/test-fixtures.ts). */
 export const USERS = {
@@ -103,4 +103,32 @@ export async function login(page: Page, email: string): Promise<void> {
   if (!response.ok()) {
     throw new Error(`login as ${email} failed: ${String(response.status())}`);
   }
+}
+
+/**
+ * Fill a CONTROLLED input across the hydration boundary.
+ *
+ * `fill()` sets the DOM value and dispatches `input`, but before React has
+ * hydrated there is no listener: component state stays empty, and hydration
+ * then re-renders the controlled value — wiping the fill — so a submit button
+ * gated on that state (`disabled={!input.trim()}`) never enables and the
+ * eventual click times out. SSR'd content being visible proves nothing about
+ * hydration, and the race only loses on a slow engine under CPU contention —
+ * which is exactly how grow.spec's assistant test failed on mobile-safari in
+ * the workers=2 campaign (send button "visible, enabled and stable" × 52 for
+ * 30s) while passing everywhere fast.
+ *
+ * The retry is the proof: `enablesTestId` becoming enabled is only reachable
+ * through React state, so a fill that survives it landed after hydration.
+ */
+export async function hydratedFill(
+  page: Page,
+  inputTestId: string,
+  text: string,
+  enablesTestId: string,
+): Promise<void> {
+  await expect(async () => {
+    await page.getByTestId(inputTestId).fill(text);
+    await expect(page.getByTestId(enablesTestId)).toBeEnabled({ timeout: 500 });
+  }).toPass({ timeout: 15_000 });
 }
