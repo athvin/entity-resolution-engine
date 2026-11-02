@@ -178,7 +178,7 @@ pub async fn enqueue_tenant_migrations(
             LAKE_MIGRATE_PRIORITY,
             None,
             None,
-            Some("er-server migrate-tenants"),
+            pg::Provenance::actor("er-server migrate-tenants"),
         )
         .await?;
         jobs.push((org.name, job));

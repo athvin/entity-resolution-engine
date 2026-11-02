@@ -38,7 +38,7 @@ async fn queue_lifecycle_over_postgres() {
         5,
         None,
         None,
-        None,
+        pg::Provenance::default(),
     )
     .await
     .unwrap();
@@ -49,7 +49,7 @@ async fn queue_lifecycle_over_postgres() {
         0,
         None,
         None,
-        None,
+        pg::Provenance::default(),
     )
     .await
     .unwrap();
@@ -82,7 +82,7 @@ async fn queue_lifecycle_over_postgres() {
         0,
         Some("k1"),
         None,
-        None,
+        pg::Provenance::default(),
     )
     .await
     .unwrap();
@@ -93,7 +93,7 @@ async fn queue_lifecycle_over_postgres() {
         0,
         Some("k1"),
         None,
-        None,
+        pg::Provenance::default(),
     )
     .await
     .unwrap();

@@ -90,9 +90,17 @@ async fn the_projected_token_binds_overrides_and_refuses() {
     // A planned lake_maintain with reconcile_schema claimed for launch: the
     // row then carries the derived Job name a pod would extend.
     let dag = dags::dag_for(JobKind::LakeMaintain);
-    let job = pg::enqueue(&client, &org_id, "lake_maintain", 0, None, None, None)
-        .await
-        .unwrap();
+    let job = pg::enqueue(
+        &client,
+        &org_id,
+        "lake_maintain",
+        0,
+        None,
+        None,
+        pg::Provenance::default(),
+    )
+    .await
+    .unwrap();
     let claimed = pg::claim(&client).await.unwrap().expect("claimable");
     taskpg::plan(&mut client, &claimed, &dag, EPOCH, None)
         .await

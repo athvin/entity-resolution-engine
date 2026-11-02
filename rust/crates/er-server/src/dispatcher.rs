@@ -283,6 +283,10 @@ pub async fn s3_poll_tick(
             let response = crate::finish_delivery(
                 client,
                 S3_ACTOR,
+                // The S3 poll tick is not a request: there is no click behind
+                // this delivery, so the run roots its own trace rather than
+                // claiming a parent it does not have.
+                None,
                 &crate::StagedDelivery {
                     org: &org_name,
                     org_id: &org_id,
@@ -386,6 +390,10 @@ pub async fn schedule_tick(
             &key,
             Some(&schedule.params),
             &schedule.id,
+            // A cron tick has no caller to inherit from, so the run roots its
+            // own trace. The tick gets a span of its own once the subscriber
+            // exists, and this becomes that span's context.
+            None,
         )
         .await?;
         // A replayed firing (same minute, another tick or another replica) comes
@@ -848,7 +856,7 @@ async fn apply_approved_merges(
             0,
             Some(&idem),
             Some(&params),
-            Some(&actor),
+            pg::Provenance::actor(&actor),
         )
         .await
         {

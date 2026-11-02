@@ -106,7 +106,7 @@ impl Job {
 
 pub mod create {
     //! @generated query functions for this entity + operation.
-    /// Queue a job, idempotent on the org idempotency key (a repeat key returns the original row via a no-op upsert). `created_by` is the acting principal, so a job can say who asked for it; the column existed and only `enqueue_scheduled` ever wrote it.
+    /// Queue a job, idempotent on the org idempotency key (a repeat key returns the original row via a no-op upsert). `created_by` is the acting principal, so a job can say who asked for it; the column existed and only `enqueue_scheduled` ever wrote it. `trace_context` is the W3C traceparent of the span that asked for the job, so the run the dispatcher starts later is a child of the click rather than an unrelated trace joined by hand (infrastructure.md §10.2).
     pub async fn enqueue(
         client: &impl ::tokio_postgres::GenericClient,
         job_id: &str,
@@ -116,10 +116,12 @@ pub mod create {
         idempotency_key: Option<&str>,
         params: Option<&::serde_json::Value>,
         created_by: Option<&str>,
+        trace_context: Option<&str>,
     ) -> ::std::result::Result<Vec<super::Job>, ::tokio_postgres::Error> {
-        const SQL: &str = "INSERT INTO public.jobs (id, org_id, kind, priority, idempotency_key, params, created_by)
+        const SQL: &str = "INSERT INTO public.jobs (id, org_id, kind, priority, idempotency_key, params, created_by,
+                         trace_context)
 VALUES ($1, $2, $3, $4, $5, coalesce($6, '{}'::jsonb),
-        $7)
+        $7, $8)
 ON CONFLICT (org_id, idempotency_key) WHERE idempotency_key IS NOT NULL
   DO UPDATE SET kind = jobs.kind, updated_at = now()
 RETURNING
@@ -161,6 +163,7 @@ RETURNING
                     &idempotency_key,
                     &params,
                     &created_by,
+                    &trace_context,
                 ],
             )
             .await?;
@@ -197,7 +200,7 @@ RETURNING
             .collect())
     }
 
-    /// Queue a job on behalf of a schedule: same idempotent upsert as enqueue, but it records the originating schedule_id and a 'scheduler' principal so a scheduled run is attributable to the rule that caused it.
+    /// Queue a job on behalf of a schedule: same idempotent upsert as enqueue, but it records the originating schedule_id and a 'scheduler' principal so a scheduled run is attributable to the rule that caused it. `trace_context` is the scheduler tick's own traceparent — there is no click behind a scheduled run, so the trace roots at the tick (infrastructure.md §10.2).
     pub async fn enqueue_scheduled(
         client: &impl ::tokio_postgres::GenericClient,
         job_id: &str,
@@ -207,12 +210,14 @@ RETURNING
         idempotency_key: Option<&str>,
         params: Option<&::serde_json::Value>,
         schedule_id: &str,
+        trace_context: Option<&str>,
     ) -> ::std::result::Result<Vec<super::Job>, ::tokio_postgres::Error> {
         const SQL: &str = "INSERT INTO public.jobs
-  (id, org_id, kind, priority, idempotency_key, params, schedule_id, created_by)
+  (id, org_id, kind, priority, idempotency_key, params, schedule_id, created_by,
+   trace_context)
 VALUES
   ($1, $2, $3, $4, $5, coalesce($6, '{}'::jsonb),
-   $7, 'scheduler')
+   $7, 'scheduler', $8)
 ON CONFLICT (org_id, idempotency_key) WHERE idempotency_key IS NOT NULL
   DO UPDATE SET kind = jobs.kind, updated_at = now()
 RETURNING
@@ -254,6 +259,7 @@ RETURNING
                     &idempotency_key,
                     &params,
                     &schedule_id,
+                    &trace_context,
                 ],
             )
             .await?;

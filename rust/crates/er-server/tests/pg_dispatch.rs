@@ -57,7 +57,7 @@ async fn dispatcher_runs_run_all_over_a_per_org_ducklake() {
         0,
         None,
         None,
-        None,
+        pg::Provenance::default(),
     )
     .await
     .unwrap();
@@ -155,7 +155,7 @@ async fn dispatcher_runs_run_all_over_a_per_org_ducklake() {
         0,
         None,
         None,
-        None,
+        pg::Provenance::default(),
     )
     .await
     .unwrap();

@@ -100,9 +100,17 @@ async fn lake_maintain_runs_end_to_end_through_the_executor() {
     executor.adopt().await;
 
     // ---- phase 1: the green path -------------------------------------------
-    let queued = pg::enqueue(&client, &org_id, "lake_maintain", 0, None, None, None)
-        .await
-        .unwrap();
+    let queued = pg::enqueue(
+        &client,
+        &org_id,
+        "lake_maintain",
+        0,
+        None,
+        None,
+        pg::Provenance::default(),
+    )
+    .await
+    .unwrap();
     let ran = dispatcher::dispatch_once(&client, None, Some(&mut executor))
         .await
         .unwrap();
@@ -168,9 +176,17 @@ async fn lake_maintain_runs_end_to_end_through_the_executor() {
     assert_eq!(recorded, 1, "tenant_schema_states gained acme's row");
 
     // ---- phase 2: a scripted OOM retries on a fresh try, then recovers ------
-    let second = pg::enqueue(&client, &org_id, "lake_maintain", 0, None, None, None)
-        .await
-        .unwrap();
+    let second = pg::enqueue(
+        &client,
+        &org_id,
+        "lake_maintain",
+        0,
+        None,
+        None,
+        pg::Provenance::default(),
+    )
+    .await
+    .unwrap();
     assert!(
         dispatcher::dispatch_once(&client, None, Some(&mut executor))
             .await
@@ -239,9 +255,17 @@ async fn lake_maintain_runs_end_to_end_through_the_executor() {
     );
 
     // ---- phase 3: cancel through canceling with the sweep -------------------
-    let third = pg::enqueue(&client, &org_id, "lake_maintain", 0, None, None, None)
-        .await
-        .unwrap();
+    let third = pg::enqueue(
+        &client,
+        &org_id,
+        "lake_maintain",
+        0,
+        None,
+        None,
+        pg::Provenance::default(),
+    )
+    .await
+    .unwrap();
     assert!(
         dispatcher::dispatch_once(&client, None, Some(&mut executor))
             .await
@@ -273,9 +297,17 @@ async fn lake_maintain_runs_end_to_end_through_the_executor() {
             .collect::<Vec<_>>()
     );
     // The slot is free again: a fourth job claims.
-    let fourth = pg::enqueue(&client, &org_id, "lake_maintain", 0, None, None, None)
-        .await
-        .unwrap();
+    let fourth = pg::enqueue(
+        &client,
+        &org_id,
+        "lake_maintain",
+        0,
+        None,
+        None,
+        pg::Provenance::default(),
+    )
+    .await
+    .unwrap();
     assert!(
         dispatcher::dispatch_once(&client, None, Some(&mut executor))
             .await

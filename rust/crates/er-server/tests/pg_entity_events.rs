@@ -221,9 +221,17 @@ async fn entity_events_are_aggregated_per_kind_and_expand_through_the_detail_end
     }
 
     // ---- phase 3: a real run emits one aggregate per kind ------------------
-    let queued = pg::enqueue(&client, &org_id, "run_all_full", 0, None, None, None)
-        .await
-        .unwrap();
+    let queued = pg::enqueue(
+        &client,
+        &org_id,
+        "run_all_full",
+        0,
+        None,
+        None,
+        pg::Provenance::default(),
+    )
+    .await
+    .unwrap();
     let ran = er_server::dispatcher::dispatch_once_with(
         &client,
         &Ok(None),
@@ -345,9 +353,17 @@ async fn entity_events_are_aggregated_per_kind_and_expand_through_the_detail_end
          Portland,OR,97209,1972-05-18,2024-03-01 09:30:00,P99\n",
     );
     std::fs::write(&crm, appended).unwrap();
-    let second = pg::enqueue(&client, &org_id, "run_all_full", 0, None, None, None)
-        .await
-        .unwrap();
+    let second = pg::enqueue(
+        &client,
+        &org_id,
+        "run_all_full",
+        0,
+        None,
+        None,
+        pg::Provenance::default(),
+    )
+    .await
+    .unwrap();
     assert!(
         er_server::dispatcher::dispatch_once_with(
             &client,
