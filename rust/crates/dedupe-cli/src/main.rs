@@ -20,6 +20,7 @@ use dedupe_core::session::TableHandle;
 use dedupe_core::{DuckLakeConfig, Session, SessionOptions, Settings};
 
 fn main() {
+    let _telemetry = er_obs::init(er_obs::Role::Dedupe);
     if let Err(e) = run() {
         eprintln!("error: {e:#}");
         std::process::exit(1);

@@ -35,6 +35,10 @@ use std::io::{BufRead, Write};
 /// framing bug is far easier to see in a log of whole lines than in a stream.
 #[tokio::main]
 async fn main() -> std::process::ExitCode {
+    // Stdout is the JSON-RPC transport, so the subscriber must write to stderr
+    // and nothing else. `er_obs::init` does; a `fmt()` default would not, and
+    // one stray line here corrupts the protocol for the whole session.
+    let _telemetry = er_obs::init(er_obs::Role::Mcp);
     let Ok(base) = std::env::var("ER_MCP_BASE_URL") else {
         eprintln!("er-mcp: ER_MCP_BASE_URL is required (where er-server listens)");
         return std::process::ExitCode::FAILURE;

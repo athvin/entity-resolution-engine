@@ -10,5 +10,8 @@
 //! (`cargo build -p er-cli --bin er`, per docs/runbook.md).
 
 fn main() -> anyhow::Result<()> {
+    // First statement: the CLI's earliest diagnostics happen during argument
+    // parsing, and an event emitted before a subscriber exists is discarded.
+    let _telemetry = er_obs::init(er_obs::Role::Cli);
     er_cli::cli::run()
 }

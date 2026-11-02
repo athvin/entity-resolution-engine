@@ -32,6 +32,7 @@ er-std = { version = "0.1.0", path = "../er-std" }
 serde = { workspace = true, features = ["derive"] }
 er-compile = { version = "0.1.0", path = "../er-compile" }
 er-entity-diff = { version = "0.1.0", path = "../er-entity-diff" }
+er-obs = { version = "0.1.0", path = "../er-obs" }
 
 [dev-dependencies]
 er-hash = { path = "../er-hash" }

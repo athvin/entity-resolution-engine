@@ -19,6 +19,7 @@ serde_json = { workspace = true }
 # same SSRF surface a webhook does.
 reqwest = { workspace = true }
 tokio = { workspace = true }
+er-obs = { version = "0.1.0", path = "../er-obs" }
 
 [lints]
 workspace = true
