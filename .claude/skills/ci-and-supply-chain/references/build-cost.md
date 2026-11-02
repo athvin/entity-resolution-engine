@@ -20,6 +20,7 @@ against it.
 - Rejected: removing sccache
 - Shipped: sccache on S3 (2026-10-29)
 - Shipped: the e2e tier split into parallel legs (2026-11-02)
+- Measured: the sharded tiers, same day (2026-11-02)
 
 ## The measured baseline (2026-10-22)
 
@@ -626,4 +627,63 @@ silently in no leg) cannot happen.
 The trade: ~+10 runner-minutes per PR run (two extra setup+build prefixes) for
 roughly half the tier's wall clock. Minutes are metered on this private repo;
 the trade was accepted deliberately. Per-leg measurements from the first runs
-get appended to this section as they land.
+are in the next section.
+
+## Measured: the sharded tiers, same day (2026-11-02)
+
+Five PRs landed in sequence (#388 e2e split, #389 playwright shards, #391 test
+split, #393 the nightly workers=2 experiment, #394 server pg/rest + 3-way
+lake). Required contexts never changed: every gate carries the exact `name:`
+of the job it replaced, so branch protection was untouched throughout — each
+cutover PR's own run was the proof.
+
+Before (runs 41461727505 / 41461727537) against after (#394's run 41484769012,
+warm):
+
+| Tier | before | after | legs (after) |
+|---|---|---|---|
+| DuckLake e2e | 21–35m, typ. ~30m | **~13.5m** | lake hash 1–3/3: 9.8 / 13.0 / 12.0m; server pg 13.3m; server rest 11.2m; gate 0.1m |
+| test | ~13m | **~10.6m** | er-match 9.5m; rest 10.6m |
+| playwright | ~17m | **~10m** | shards 5.7 / 9.9 / 3.5m on #389's run; 579 = 193×3, pass/skip totals identical to the 1-worker run |
+| **PR wall clock** | **~32–35m** | **~13.5m** | |
+
+Completeness was checked, not assumed, because the e2e gating is a RUNTIME
+skip (a leg that loses `DEDUPE_E2E_DUCKLAKE` goes green in seconds): the two
+lake shards ran 31+25 = all 56 er-cli tests with real execution (518s + 274s);
+the pg slice ran 48 `pg_*` tests (423.8s) with zero non-pg leakage and 41
+filtered to the rest slice, whose log shows er-entity-diff's postgres tests
+(`postgres_diff_*`) running unfiltered.
+
+What the after-numbers say the remaining floors are:
+
+- **er-server's pg suite is the e2e tier's floor** — 423.8s in one binary on
+  one leg. Splitting it further means filter lists over `pg_*` module names
+  (alphabetic halves), plain cargo test both halves; worth ~2m of wall for
+  +6m of minutes. Not taken.
+- **Lake hash partitioning is count-balanced, duration-lumpy**: 2-way landed
+  518s/274s, 3-way landed legs at 9.8–13m wall. nextest has no
+  duration-aware partitioning; living with the lumpiness was the call.
+- **Playwright shard 2 drew the heavy tests** (8.6m vs 2.2m of execution).
+  The real lever is `--workers=2` (~halves every shard), which is what the
+  nightly experiment (#393) exists to validate — ~10 consecutive greens
+  including @visual, then the PR flip is one line.
+
+Minutes cost of the whole program: the rust PR tier went from ~45 to ~75
+runner-minutes and the frontend tier from ~17 to ~28 — ~+40 minutes per full
+PR cycle, for a wall clock that halved. Accepted deliberately; metered on
+this private repo.
+
+Two side-findings recorded while measuring:
+
+- **A lock-touching PR runs cold until it merges, by design.** The 12.4m
+  `entities` outlier (run 41455978978) was 305 C/C++ sccache misses at a 0%
+  C/C++ hit rate — a full bundled-DuckDB C++ rebuild — because the branch's
+  lockfile state was not in S3 and the PR role cannot write it there. That is
+  the poisoning defence working as specified (sccache.tf), not a bug: the
+  first main run after merge warms the bucket. Expect every job of such a PR
+  to pay the C++ build on every run until merge.
+- **The disk-reclaim step stays on every leg, measured.** Runners start at
+  15G free; reclaim recovers 26G. A lake shard consumes ~8G (6.9G target),
+  the server legs ~13G (12G target) — margins without reclaim would be ~7G
+  and ~2G against the errno-28 class that motivated the step (#207). The
+  1.9m/leg is the price of 4-vCPU runners with 15G free.
