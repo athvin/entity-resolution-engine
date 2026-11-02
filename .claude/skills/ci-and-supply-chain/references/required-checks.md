@@ -95,7 +95,8 @@ job instead — `terraform plan` is the worked example.
 | `skills` | agent skills (lint + drift) | 5 | `always` |
 | `lint` | fmt + clippy + docs | 45 | `needs.detect.outputs.code == 'true'` |
 | `entities` | entities | 45 | `needs.detect.outputs.code == 'true'` |
-| `test` | test | 30 | `needs.detect.outputs.code == 'true'` |
+| `test-shard` | test shard (${{ matrix.slice }}) | 30 | `needs.detect.outputs.code == 'true'` |
+| `test-gate` | test | 5 | `${{ !cancelled() && needs.detect.outputs.code == 'true' }}` |
 | `security` | cargo-deny (advisories + licenses + bans) | 10 | `needs.detect.outputs.code == 'true'` |
 | `lake-e2e` | DuckLake e2e shard (${{ matrix.partition }}) | 45 | `needs.detect.outputs.code == 'true'` |
 | `ducklake-e2e` | DuckLake e2e (server + extensions) | 45 | `needs.detect.outputs.code == 'true'` |
