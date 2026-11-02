@@ -378,6 +378,126 @@ columns:
 "#,
     ),
     (
+        "column_profile",
+        r#"kind: entity
+version: 1
+name: column_profile
+relation: column_profiles
+description: "One column's shape within one profile run: how full it is, how many distinct values it holds, how long its values are, what types they parse as, and its most frequent values. One row per column rather than per value, because the lake schema language cannot express a partition (there is no partition_by field) and a per-value table would grow with the corpus instead of with the schema."
+key: [id]
+natural_key: [profile_run_id, column_name]
+generate:
+  stores: [duckdb]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "Content-derived row id: sha256('column_profiles:' || profile_run_id || ':' || column_name)."
+  - name: profile_run_id
+    type: varchar
+    nullable: false
+    description: "The profile run this column belongs to. Named for the relation it points at, per the foreign-key convention, but no `references` is declared because DuckLake enforces no foreign keys (V11) and declaring one would claim a guarantee the lake does not provide."
+  - name: column_name
+    type: varchar
+    nullable: false
+    description: "The profiled column, as named in the corpus stage."
+  - name: row_count
+    type: bigint
+    nullable: false
+    description: "Rows read for this column (the sampled count when sampling was on)."
+  - name: total_row_count
+    type: bigint
+    nullable: false
+    description: "Rows in the corpus whether or not they were sampled, so a sampled figure can be scaled and labelled honestly."
+  - name: non_null_count
+    type: bigint
+    nullable: false
+    description: "Rows where the column is not NULL."
+  - name: blank_count
+    type: bigint
+    nullable: false
+    description: "Rows where the column is present but empty once trimmed. Counted apart from NULL because ingest lands every delivered value as a JSON string, so an empty cell arrives as '' and is not NULL — a fill rate treating the two alike reports a column as populated when every value in it is blank."
+  - name: distinct_approx
+    type: bigint
+    nullable: false
+    description: "HyperLogLog estimate of distinct values. Always present because it is cheap, and always approximate: measured on a fixture of 1000 genuinely distinct ids it returns 978, so it is wrong in both directions and must never settle a uniqueness question on its own."
+  - name: distinct_exact
+    type: bigint
+    description: "Exact distinct count, NULL when it was not requested. The expensive one (a per-column sort), and the only one a uniqueness verdict may be read from."
+  - name: distinct_normalized
+    type: bigint
+    description: "Exact distinct count after lowercasing, trimming and collapsing internal whitespace; NULL when not requested. Materially below distinct_exact is the signal that a column needs standardizing before it is compared, which is otherwise invisible — the raw count looks healthy precisely because the variants are counted as distinct values."
+  - name: len_min
+    type: bigint
+    description: "Shortest trimmed value length. NULL for an all-NULL column, where a length has no meaning."
+  - name: len_max
+    type: bigint
+    description: "Longest trimmed value length. A value at a round number here is the signature of upstream truncation."
+  - name: len_avg
+    type: double
+    description: "Mean trimmed value length."
+  - name: len_p50
+    type: bigint
+    description: "Approximate median trimmed length."
+  - name: len_p95
+    type: bigint
+    description: "Approximate 95th-percentile trimmed length. Read against len_max it separates a long tail from a single outlier."
+  - name: lex_min
+    type: varchar
+    description: "Lexically smallest trimmed value."
+  - name: lex_max
+    type: varchar
+    description: "Lexically largest trimmed value."
+  - name: num_min
+    type: double
+    description: "Smallest value that parses as a number, NULL when none does."
+  - name: num_max
+    type: double
+    description: "Largest value that parses as a number, NULL when none does."
+  - name: num_avg
+    type: double
+    description: "Mean of the values that parse as numbers."
+  - name: num_std
+    type: double
+    description: "Sample standard deviation of the values that parse as numbers. NULL for fewer than two such values, where it is undefined rather than zero."
+  - name: cast_bigint
+    type: bigint
+    nullable: false
+    description: "Non-null values that parse as an integer."
+  - name: cast_double
+    type: bigint
+    nullable: false
+    description: "Non-null values that parse as a double."
+  - name: cast_date
+    type: bigint
+    nullable: false
+    description: "Non-null values that parse as a date. This is the whole of type detection here: ingest stores every delivered value as text, so the declared type says nothing about content and conformance is the only evidence of what a column actually holds."
+  - name: cast_timestamp
+    type: bigint
+    nullable: false
+    description: "Non-null values that parse as a timestamp."
+  - name: cast_boolean
+    type: bigint
+    nullable: false
+    description: "Non-null values that parse as a boolean."
+  - name: entropy_bits
+    type: double
+    description: "Shannon entropy of the value distribution, in bits. Reported in bits so it is directly comparable with the compiler's match-weight scale, which is also in bits — one unit across both halves of the system. A low value means one or two values dominate, which makes the column a poor blocking key however full it is."
+  - name: top_values
+    type: json
+    description: "The most frequent values with their counts and shares, bounded to a small k. Bounded because this is a per-column row: an unbounded list would put the corpus inside the profile. NOTE for consumers: these are REAL VALUES — live emails and phone numbers — so they are the one field here that carries personal data and must be role-gated before display and never sent to a model."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical creation time."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical last-write time."
+"#,
+    ),
+    (
         "config_version",
         r#"kind: entity
 version: 1
@@ -1821,6 +1941,138 @@ indexes:
   # V17: the dataset-scoped read path.
   - name: pair_labels_dataset
     columns: [dataset_id, created_at]
+"#,
+    ),
+    (
+        "profile_finding",
+        r#"kind: entity
+version: 1
+name: profile_finding
+relation: profile_findings
+description: "One coded observation a profile made about a corpus — a column mostly null, a blocking key dominated by one value, a record id that is not unique. Stored rather than derived at read time because the thresholds that produced a finding belong to the run that applied them: re-deriving later against changed thresholds would silently rewrite history, and a finding is the part of a profile a user is most likely to act on."
+key: [id]
+natural_key: [profile_run_id, code, column_name]
+generate:
+  stores: [duckdb]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "Content-derived row id: sha256('profile_findings:' || profile_run_id || ':' || code || ':' || column_name)."
+  - name: profile_run_id
+    type: varchar
+    nullable: false
+    description: "The profile run that produced this finding. Named for the relation it points at, per the foreign-key convention; no `references` is declared because DuckLake enforces no foreign keys (V11)."
+  - name: code
+    type: varchar
+    nullable: false
+    description: "The finding's registry code (P001, P002, …). Codes are append-only and a retired rule keeps its code, so a stored finding stays interpretable after the rule that made it is gone — which is the point of coding them rather than storing only prose."
+  - name: column_name
+    type: varchar
+    nullable: false
+    description: "The column the finding is about, or the empty string for a dataset-level finding (a duplicate row rate, a schema change). A sentinel rather than NULL because this column is in the natural key, and a NULL key column never matches in a MERGE's ON clause — every re-profile would insert a second copy of the same finding."
+  - name: severity
+    type: varchar
+    nullable: false
+    description: "How much the finding should interrupt: `error`, `warning` or `info`. Carried on the row rather than looked up from the registry so that a severity reclassification does not retroactively change what a past profile reported."
+  - name: message
+    type: varchar
+    nullable: false
+    description: "The finding in one human sentence, with its numbers already in it. Rendered rather than templated at read time because the numbers are what make it actionable, and a message assembled later could be assembled against different data than the one that triggered it."
+  - name: detail
+    type: json
+    description: "The measurements behind the message — the shares, counts and thresholds — so a consumer can chart or re-check a finding without re-reading the column profile. NULL for a finding whose message is already complete."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical creation time."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical last-write time."
+"#,
+    ),
+    (
+        "profile_run",
+        r#"kind: entity
+version: 1
+name: profile_run
+relation: profile_runs
+description: "One execution of the dataset profiler over one corpus stage, and the cache key for its result. A profile exists to be looked at repeatedly and compared against the previous delivery, so recomputing it on every view would make the cheap tier expensive for no new information."
+key: [id]
+natural_key: [subject, source_system, corpus_digest, tier]
+generate:
+  stores: [duckdb]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "Content-derived row id: sha256('profile_runs:' || subject || ':' || source_system || ':' || corpus_digest || ':' || tier)."
+  - name: subject
+    type: varchar
+    nullable: false
+    description: "Which stage of the corpus was profiled: `raw` (as delivered, per source), `standardized` (the canonical attributes), or `golden` (post-resolution). The same aggregates run over all three, which is why a post-resolution profile costs no new machinery. Not an accepted_values list because DuckLake enforces no CHECK constraints (V11) and declaring one would promise a guarantee no layer provides."
+  - name: source_system
+    type: varchar
+    nullable: false
+    description: "The source whose delivered rows were profiled, or `*` when the subject is not source-scoped. A sentinel rather than NULL because this column is part of the natural key, and NULL never equals NULL in a MERGE's ON clause — a nullable key column would miss every match and insert a duplicate profile on each run."
+  - name: snapshot
+    type: bigint
+    nullable: false
+    description: "The DuckLake snapshot version the profile was computed against — informational provenance, deliberately NOT the cache key. It cannot be: the snapshot counter is per-catalog and this profile's own write advances it, so keying on it means every profile invalidates itself and the stored result grows a duplicate on every view instead of being reused. Found by the e2e test that asserts two profiles of unchanged data are one row."
+  - name: tier
+    type: bigint
+    nullable: false
+    description: "Profiling depth: 1 shape (one aggregate pass), 2 entity-resolution readiness (blocking cost, skew, coverage), 3 model readiness (agreement rates, u-probability pre-flight). Kept in the key so a cheap profile is never mistaken for a deep one, and so asking for tier 3 does not read a tier 1 row and report it as complete."
+  - name: ingest_batch_id
+    type: varchar
+    description: "For a `raw` subject, the delivery this profile describes — the per-delivery cache key, and what lets drift be measured between two consecutive batches. NULL for the standardized and golden subjects, which describe the whole corpus rather than one landing."
+  - name: corpus_digest
+    type: varchar
+    nullable: false
+    description: "A content digest of the rows profiled, and the actual cache key: one hash per row over all its columns, summed (so row order does not matter) and folded together with the row count. Equal digest means equal data, which is the question a cache has to answer — unlike the lake snapshot, which also moves when something unrelated is written, including this profile itself. Computed in one extra scan, which is cheap beside the distinct counts and top-k the profile already pays for."
+  - name: row_count
+    type: bigint
+    nullable: false
+    description: "Rows the profile actually read, which is the sampled count when sampling was on. Named row_count rather than rows because `rows` is reserved in DuckDB and a column called that cannot be selected unquoted."
+  - name: column_count
+    type: bigint
+    nullable: false
+    description: "Columns profiled. Read with row_count it says how wide the scan was, which is the only honest predictor of what a re-profile will cost."
+  - name: config_hash
+    type: varchar
+    description: "The config version in force when the profile ran, so a finding about a blocking rule can be traced to the rule set it was judged against. NULL for a profile that predates any published config — the common case for a first delivery, which is exactly when profiling is most useful."
+  - name: model_version
+    type: varchar
+    description: "The model whose rules a tier-2 or tier-3 profile measured, when one existed. NULL is the normal case for a new corpus and is not a defect: the candidate-key estimates are deliberately computable without a model."
+  - name: sampled
+    type: boolean
+    nullable: false
+    description: "Whether the figures come from a sample. Stored as its own flag rather than inferred from sample_proportion, because a consumer rendering a number has to know whether it is exact before it decides how to label it."
+  - name: sample_proportion
+    type: double
+    description: "The sampled share of rows, NULL when the whole corpus was read."
+  - name: sample_seed
+    type: bigint
+    description: "The salt the deterministic sample was drawn with, NULL when unsampled. Recorded because the sample is reproducible only if the seed is known, and a profile nobody can redraw cannot be compared against its successor."
+  - name: duration_ms
+    type: bigint
+    nullable: false
+    description: "Wall-clock cost of the profile, kept so the decision to run a deeper tier can be made from a measurement rather than a guess."
+  - name: captured_at
+    type: timestamp
+    nullable: false
+    description: "The run's logical clock, not wall time — so a replayed fixture produces the same row."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical creation time."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical last-write time. A re-profile of an unchanged snapshot rewrites the row in place rather than appending, so this moves while the rest of the row does not."
 "#,
     ),
     (

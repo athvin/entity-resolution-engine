@@ -4943,3 +4943,212 @@ fn scores_at_threads(tag: &str, threads: u32) -> BTreeMap<(String, String), Stri
     match_model(&session);
     active_scores(&session)
 }
+
+/// Count rows in a lake relation, for the cache assertions below.
+fn lake_count(session: &Session, relation: &str) -> i64 {
+    session
+        .query_strings(&format!("select count(*) from lake.main.{relation}"))
+        .unwrap()[0][0]
+        .parse()
+        .unwrap()
+}
+
+#[test]
+fn profile_persists_a_corpus_stage_and_caches_it() {
+    if !enabled() {
+        return;
+    }
+    let (session, _config, _tmp) = standardized_lake("profile_cache");
+
+    let first = er_cli::profile::run_profile(
+        &session,
+        er_cli::profile::Subject::Standardized,
+        None,
+        1,
+        &dedupe_core::profile::ProfileOptions {
+            exact_distinct: true,
+            sample: None,
+        },
+        false,
+        "2026-01-03 00:00:00",
+    )
+    .unwrap();
+
+    assert_eq!(first.subject, "standardized");
+    assert_eq!(
+        first.source_system,
+        er_cli::profile::NO_SOURCE,
+        "the standardized corpus is not source-scoped"
+    );
+    assert!(first.row_count > 0, "base_10 standardizes to some rows");
+    assert!(
+        first.columns.iter().any(|c| c.column_name == "email"),
+        "the canonical attributes should be profiled, got {:?}",
+        first
+            .columns
+            .iter()
+            .map(|c| &c.column_name)
+            .collect::<Vec<_>>()
+    );
+
+    let runs = lake_count(&session, "profile_runs");
+    let cols = lake_count(&session, "column_profiles");
+    assert_eq!(runs, 1);
+    assert_eq!(
+        cols,
+        i64::try_from(first.columns.len()).unwrap(),
+        "one column_profiles row per profiled column"
+    );
+
+    // THE CACHE CLAIM: re-profiling the same snapshot at the same tier must
+    // rewrite the same rows, not append a second copy. If the natural key or
+    // the MERGE were wrong, these counts would double and every view of a
+    // profile would show it twice.
+    let second = er_cli::profile::run_profile(
+        &session,
+        er_cli::profile::Subject::Standardized,
+        None,
+        1,
+        &dedupe_core::profile::ProfileOptions {
+            exact_distinct: true,
+            sample: None,
+        },
+        false,
+        "2026-01-04 00:00:00",
+    )
+    .unwrap();
+    assert_eq!(
+        second.profile_run_id, first.profile_run_id,
+        "the same subject/snapshot/tier is the same profile run"
+    );
+    assert_eq!(
+        lake_count(&session, "profile_runs"),
+        runs,
+        "runs must not grow"
+    );
+    assert_eq!(
+        lake_count(&session, "column_profiles"),
+        cols,
+        "column profiles must not grow"
+    );
+
+    // A different tier is a different profile, not an overwrite of the first.
+    er_cli::profile::run_profile(
+        &session,
+        er_cli::profile::Subject::Standardized,
+        None,
+        2,
+        &dedupe_core::profile::ProfileOptions::default(),
+        false,
+        "2026-01-05 00:00:00",
+    )
+    .unwrap();
+    assert_eq!(
+        lake_count(&session, "profile_runs"),
+        runs + 1,
+        "tier is part of the key, so tier 2 is its own row"
+    );
+}
+
+#[test]
+fn profile_reads_the_delivered_payload_before_any_mapping() {
+    if !enabled() {
+        return;
+    }
+    let (session, _config, _tmp) = standardized_lake("profile_raw");
+
+    let raw = er_cli::profile::run_profile(
+        &session,
+        er_cli::profile::Subject::Raw,
+        Some("crm"),
+        1,
+        &dedupe_core::profile::ProfileOptions {
+            exact_distinct: true,
+            sample: None,
+        },
+        false,
+        "2026-01-03 00:00:00",
+    )
+    .unwrap();
+
+    assert_eq!(raw.source_system, "crm");
+    let names: Vec<&str> = raw.columns.iter().map(|c| c.column_name.as_str()).collect();
+    // The delivered CSV's OWN header names, not the canonical attributes — this
+    // is the whole point of the raw subject: it can show columns nobody mapped,
+    // which config by definition cannot name.
+    assert!(
+        names.contains(&"crm_id"),
+        "expected the delivered source's own columns, got {names:?}"
+    );
+    assert!(
+        !names.contains(&"given_name"),
+        "canonical attributes belong to the standardized subject, got {names:?}"
+    );
+    assert!(
+        raw.columns.iter().all(|c| c.fill_rate.is_some()),
+        "every delivered column gets a fill rate"
+    );
+
+    // Raw and standardized are separate cache entries for the same snapshot,
+    // because subject is part of the key.
+    er_cli::profile::run_profile(
+        &session,
+        er_cli::profile::Subject::Standardized,
+        None,
+        1,
+        &dedupe_core::profile::ProfileOptions::default(),
+        false,
+        "2026-01-03 00:00:00",
+    )
+    .unwrap();
+    assert_eq!(lake_count(&session, "profile_runs"), 2);
+}
+
+#[test]
+fn profile_findings_name_the_columns_they_are_about() {
+    if !enabled() {
+        return;
+    }
+    let (session, _config, _tmp) = standardized_lake("profile_findings");
+
+    let report = er_cli::profile::run_profile(
+        &session,
+        er_cli::profile::Subject::Standardized,
+        None,
+        1,
+        &dedupe_core::profile::ProfileOptions {
+            exact_distinct: true,
+            sample: None,
+        },
+        false,
+        "2026-01-03 00:00:00",
+    )
+    .unwrap();
+
+    // base_10 is a small, deliberately messy corpus, so SOMETHING should be
+    // worth saying about it. An empty findings list here would mean the registry
+    // never runs, which is the failure mode a per-rule unit test cannot catch.
+    assert!(
+        !report.findings.is_empty(),
+        "expected at least one finding over base_10's standardized corpus"
+    );
+    for finding in &report.findings {
+        assert!(finding.code.starts_with('P'), "{finding:?}");
+        assert!(!finding.message.is_empty(), "{finding:?}");
+        assert!(
+            report
+                .columns
+                .iter()
+                .any(|c| c.column_name == finding.column_name)
+                || finding.column_name.is_empty(),
+            "finding {} names a column that was not profiled: {:?}",
+            finding.code,
+            finding.column_name
+        );
+    }
+    assert_eq!(
+        lake_count(&session, "profile_findings"),
+        i64::try_from(report.findings.len()).unwrap(),
+        "every reported finding is persisted"
+    );
+}

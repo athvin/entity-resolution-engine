@@ -605,6 +605,69 @@ erDiagram
         timestamp created_at
         timestamp updated_at
     }
+    profile_runs {
+        varchar id PK
+        varchar subject
+        varchar source_system
+        bigint snapshot
+        bigint tier
+        varchar ingest_batch_id
+        varchar corpus_digest
+        bigint row_count
+        bigint column_count
+        varchar config_hash
+        varchar model_version
+        boolean sampled
+        double sample_proportion
+        bigint sample_seed
+        bigint duration_ms
+        timestamp captured_at
+        timestamp created_at
+        timestamp updated_at
+    }
+    column_profiles {
+        varchar id PK
+        varchar profile_run_id
+        varchar column_name
+        bigint row_count
+        bigint total_row_count
+        bigint non_null_count
+        bigint blank_count
+        bigint distinct_approx
+        bigint distinct_exact
+        bigint distinct_normalized
+        bigint len_min
+        bigint len_max
+        double len_avg
+        bigint len_p50
+        bigint len_p95
+        varchar lex_min
+        varchar lex_max
+        double num_min
+        double num_max
+        double num_avg
+        double num_std
+        bigint cast_bigint
+        bigint cast_double
+        bigint cast_date
+        bigint cast_timestamp
+        bigint cast_boolean
+        double entropy_bits
+        json top_values
+        timestamp created_at
+        timestamp updated_at
+    }
+    profile_findings {
+        varchar id PK
+        varchar profile_run_id
+        varchar code
+        varchar column_name
+        varchar severity
+        varchar message
+        json detail
+        timestamp created_at
+        timestamp updated_at
+    }
     record_qualities {
         varchar id PK
         varchar record_key
@@ -908,6 +971,7 @@ erDiagram
     match_scores }o..|| metric_snapshots : "run_id"
     scored_records }o..|| metric_snapshots : "run_id"
     metric_snapshot_sources }o..|| metric_snapshots : "run_id"
+    profile_findings }o..|| column_profiles : "profile_run_id, column_name"
     record_qualities }o..|| metric_snapshots : "run_id"
     entity_membership }o..|| metric_snapshots : "run_id"
     entity_membership }o..|| metric_snapshot_sources : "run_id, source_system"
@@ -924,6 +988,8 @@ erDiagram
     acct_int_std_records }o..|| raw_records : "source_system, source_record_id, content_hash"
     acct_golden_lineage }o..|| golden_overrides : "entity_id, attribute"
     acct_golden_lineage }o..|| entity_membership : "source_system, source_record_id"
+    column_profiles }o..|| profile_runs : "profile_run_id → id"
+    profile_findings }o..|| profile_runs : "profile_run_id → id"
     entity_membership }o..|| entities : "entity_id → id"
     entity_events }o..|| entities : "entity_id → id"
     review_queue }o..|| entities : "entity_id → id"
@@ -941,6 +1007,7 @@ erDiagram
     run_stages }o..|| runs : "run_id → id"
     ingest_batches }o..|| runs : "run_id → id"
     raw_records }o..|| ingest_batches : "ingest_batch_id → id"
+    profile_runs }o..|| ingest_batches : "ingest_batch_id → id"
     int_std_records }o..|| ingest_batches : "ingest_batch_id → id"
     acct_int_std_records }o..|| ingest_batches : "ingest_batch_id → id"
 ```
@@ -952,6 +1019,9 @@ erDiagram
 | `scored_records` | ddl | What the last successful match pass actually scored: one row per (record, model identity) at the moment it was scored, with the content hash it was scored under. This is what makes an incremental run safe — a record is new or changed, FOR A GIVEN MODEL, precisely when the standardized corpus disagrees with that model's rows here. Keyed per identity rather than per record because an ensemble scores one record with several models (E5b-2b): a record-keyed ledger let the second member's sync overwrite the first's, so a two-member pass left a ledger claiming only the last member had scored anything — and 'member B has not scored record X' then had nowhere to be true. |
 | `metric_snapshots` | ddl | One run's resolution metrics, kept so the dashboard can show a TREND rather than only a current value. The dashboard has always computed its numbers live from the lake, which means it can say what is true now and nothing about whether that is better or worse than last week — which is the question an operator actually has. |
 | `metric_snapshot_sources` | ddl | One run's duplicate attribution, per source system. The corpus-wide duplicate rate says a tenant has a problem; it does not say WHERE the problem comes from, and the answer is nearly always one feed. Retained per run beside metric_snapshots for the same reason that table exists: a live number says what is true now and nothing about whether a source is getting better or worse. |
+| `profile_runs` | ddl | One execution of the dataset profiler over one corpus stage, and the cache key for its result. A profile exists to be looked at repeatedly and compared against the previous delivery, so recomputing it on every view would make the cheap tier expensive for no new information. |
+| `column_profiles` | ddl | One column's shape within one profile run: how full it is, how many distinct values it holds, how long its values are, what types they parse as, and its most frequent values. One row per column rather than per value, because the lake schema language cannot express a partition (there is no partition_by field) and a per-value table would grow with the corpus instead of with the schema. |
+| `profile_findings` | ddl | One coded observation a profile made about a corpus — a column mostly null, a blocking key dominated by one value, a record id that is not unique. Stored rather than derived at read time because the thresholds that produced a finding belong to the run that applied them: re-deriving later against changed thresholds would silently rewrite history, and a finding is the part of a profile a user is most likely to act on. |
 | `record_qualities` | ddl | A per-record data-quality score, 0-100, with the three dimensions kept separately. The dimensions are kept because a single number says a record is bad and not what to do about it: complete-but-invalid, valid-but-empty and simply old are three different jobs. |
 | `entity_membership` | ddl | One membership row per record (S4.4): which resolved entity the record's current version belongs to. |
 | `entities` | ddl | One resolved entity (S4.4): its lifecycle status and, for merge losers, the surviving entity it merged into. |

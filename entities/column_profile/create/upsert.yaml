@@ -1,0 +1,6 @@
+kind: statement
+operation: create
+mode: partial
+description: "Record one profile run's per-column shapes from the session's __column_profile_src staging. Keyed on (profile_run_id, column_name) so re-profiling a snapshot corrects each column in place; a column that has since disappeared from the corpus keeps its last row rather than being deleted, because the fact that it used to be there is what makes a schema-change finding possible."
+params: []
+returns: none

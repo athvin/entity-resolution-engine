@@ -284,7 +284,16 @@ fn er_run_all_reproduces_base_10_relations() {
         empty,
         vec![
             "assertions",
+            // The profiler's three relations. `run_all` resolves a corpus; it
+            // does not describe one, and `er profile` is a separate command —
+            // so a plain run leaves these empty, exactly as it leaves the
+            // steward overlays empty. The dispatcher DOES profile each delivery
+            // after a run, which is why its own e2e sees rows here and this one
+            // does not.
+            "column_profiles",
             "golden_overrides",
+            "profile_findings",
+            "profile_runs",
             "record_overlays",
             "record_qualities",
             // The per-stage ledger (batch-orchestration-design §4.3): its

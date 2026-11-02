@@ -1,0 +1,20 @@
+CREATE TABLE IF NOT EXISTS lake.main.profile_runs (
+  id VARCHAR NOT NULL,
+  subject VARCHAR NOT NULL,
+  source_system VARCHAR NOT NULL,
+  snapshot BIGINT NOT NULL,
+  tier BIGINT NOT NULL,
+  ingest_batch_id VARCHAR,
+  corpus_digest VARCHAR NOT NULL,
+  row_count BIGINT NOT NULL,
+  column_count BIGINT NOT NULL,
+  config_hash VARCHAR,
+  model_version VARCHAR,
+  sampled BOOLEAN NOT NULL,
+  sample_proportion DOUBLE,
+  sample_seed BIGINT,
+  duration_ms BIGINT NOT NULL,
+  captured_at TIMESTAMP NOT NULL,
+  created_at TIMESTAMP NOT NULL,
+  updated_at TIMESTAMP NOT NULL
+);

@@ -30,7 +30,7 @@ statements is read or written only through the engine's own stage SQL, not
 through a typed query function.
 
 <!-- BEGIN GENERATED: entities-index -->
-**44 entities, 240 declared statements.**
+**47 entities, 244 declared statements.**
 
 | Entity | Relation | Store | Key | Natural key | History |
 |---|---|---|---|---|---|
@@ -40,6 +40,7 @@ through a typed query function.
 | `api_key` | `api_keys` | postgres | `id` | — | yes |
 | `assertion` | `assertions` | duckdb | `id` | — | — |
 | `audit_log` | `audit_log` | postgres | `id` | — | — |
+| `column_profile` | `column_profiles` | duckdb | `id` | `profile_run_id, column_name` | — |
 | `config_version` | `config_versions` | postgres | `id` | `org_id, version` | yes |
 | `dataset` | `datasets` | postgres | `id` | `org_id, name` | yes |
 | `ddl_log` | `ddl_log` | postgres | `id` | — | — |
@@ -60,6 +61,8 @@ through a typed query function.
 | `metric_snapshot_source` | `metric_snapshot_sources` | duckdb | `id` | `run_id, source_system` | — |
 | `org` | `orgs` | postgres | `id` | `name` | yes |
 | `pair_label` | `pair_labels` | postgres | `id` | `org_id, rec_a_key, rec_b_key` | — |
+| `profile_finding` | `profile_findings` | duckdb | `id` | `profile_run_id, code, column_name` | — |
+| `profile_run` | `profile_runs` | duckdb | `id` | `subject, source_system, corpus_digest, tier` | — |
 | `raw_record` | `raw_records` | duckdb | `id` | `source_system, source_record_id, content_hash` | — |
 | `record_overlay` | `record_overlays` | duckdb | `id` | `record_key, kind` | — |
 | `record_quality` | `record_qualities` | duckdb | `id` | `record_key` | — |
@@ -89,6 +92,7 @@ Declared statements per entity and operation:
 | `api_key` | 1 | 1 | 1 | 0 |
 | `assertion` | 2 | 3 | 1 | 0 |
 | `audit_log` | 1 | 1 | 0 | 0 |
+| `column_profile` | 1 | 0 | 0 | 0 |
 | `config_version` | 1 | 2 | 2 | 0 |
 | `dataset` | 1 | 3 | 4 | 0 |
 | `ddl_log` | 0 | 1 | 0 | 0 |
@@ -109,6 +113,8 @@ Declared statements per entity and operation:
 | `metric_snapshot_source` | 1 | 1 | 0 | 0 |
 | `org` | 2 | 4 | 3 | 0 |
 | `pair_label` | 1 | 2 | 1 | 0 |
+| `profile_finding` | 1 | 0 | 0 | 0 |
+| `profile_run` | 1 | 1 | 0 | 0 |
 | `raw_record` | 0 | 2 | 0 | 1 |
 | `record_overlay` | 1 | 2 | 1 | 1 |
 | `record_quality` | 1 | 2 | 0 | 1 |

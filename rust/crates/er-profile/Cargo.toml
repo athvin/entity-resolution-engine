@@ -1,0 +1,33 @@
+[package]
+name = "er-profile"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# The dataset profiler's findings pass: the P-rules as a registry rather than a
+# hand-rolled list of `if` statements, on the same pattern as er-entity-lint's
+# V-rules. Each rule is a value carrying its code, title, explain prose and a
+# worked conforming/violating pair, so the rule reference (docs/profile-findings.md)
+# is generated from the same source the profiler enforces and cannot drift.
+#
+# Depends only on dedupe-core, for the `ColumnShape` a rule judges. A rule sees
+# a computed profile and nothing else — no database, no config, no model — which
+# is what keeps the registry testable from literals. Rules that need the tenant's
+# config (is this column actually used as a blocking key?) belong with the
+# config cross-reference, not here, because a rule that cannot be evaluated
+# without a config would have no fixture.
+autotests = false
+
+[dependencies]
+dedupe-core = { version = "0.1.0", path = "../dedupe-core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true
+
+[[test]]
+name = "main"
+path = "tests/main.rs"

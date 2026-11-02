@@ -1,0 +1,6 @@
+kind: statement
+operation: create
+mode: partial
+description: "Record a profile run from the session's __profile_run_src staging. Keyed on (subject, source_system, corpus_digest, tier), so re-profiling unchanged data rewrites its row rather than appending a second one — the behaviour the result cache depends on. The key is the CONTENT digest and not the lake snapshot, because the snapshot counter is per-catalog and this very write advances it: keying on it made every profile invalidate itself. Every key column is NOT NULL because a NULL never matches in a MERGE's ON clause, so a nullable key column would insert a duplicate on every run instead of updating."
+params: []
+returns: none

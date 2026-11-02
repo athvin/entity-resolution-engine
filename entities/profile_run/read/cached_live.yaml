@@ -1,0 +1,18 @@
+kind: statement
+operation: read
+description: "Whether this corpus stage has already been profiled at this tier, and what it cost. The question the profiler asks before doing any work: an existing row for the same content digest describes the same data, so recomputing would produce an identical answer. Keyed on the digest rather than the lake snapshot because the snapshot moves whenever anything is written to the catalog, including the profile itself."
+pin: live
+pin_reason: "The profiler reads its own writes: the cache is consulted immediately after the upsert that populates it, to read back the id the SQL derived, so a pinned snapshot would not see the row that was just committed."
+params:
+  - { name: subject, type: varchar }
+  - { name: source_system, type: varchar }
+  - { name: corpus_digest, type: varchar }
+  - { name: tier, type: bigint }
+returns:
+  - { name: id, type: varchar, nullable: false }
+  - { name: snapshot, type: bigint, nullable: false }
+  - { name: row_count, type: bigint, nullable: false }
+  - { name: column_count, type: bigint, nullable: false }
+  - { name: sampled, type: boolean, nullable: false }
+  - { name: duration_ms, type: bigint, nullable: false }
+  - { name: captured_at, type: timestamp, nullable: false }

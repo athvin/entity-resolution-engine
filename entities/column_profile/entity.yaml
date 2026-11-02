@@ -1,0 +1,116 @@
+kind: entity
+version: 1
+name: column_profile
+relation: column_profiles
+description: "One column's shape within one profile run: how full it is, how many distinct values it holds, how long its values are, what types they parse as, and its most frequent values. One row per column rather than per value, because the lake schema language cannot express a partition (there is no partition_by field) and a per-value table would grow with the corpus instead of with the schema."
+key: [id]
+natural_key: [profile_run_id, column_name]
+generate:
+  stores: [duckdb]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "Content-derived row id: sha256('column_profiles:' || profile_run_id || ':' || column_name)."
+  - name: profile_run_id
+    type: varchar
+    nullable: false
+    description: "The profile run this column belongs to. Named for the relation it points at, per the foreign-key convention, but no `references` is declared because DuckLake enforces no foreign keys (V11) and declaring one would claim a guarantee the lake does not provide."
+  - name: column_name
+    type: varchar
+    nullable: false
+    description: "The profiled column, as named in the corpus stage."
+  - name: row_count
+    type: bigint
+    nullable: false
+    description: "Rows read for this column (the sampled count when sampling was on)."
+  - name: total_row_count
+    type: bigint
+    nullable: false
+    description: "Rows in the corpus whether or not they were sampled, so a sampled figure can be scaled and labelled honestly."
+  - name: non_null_count
+    type: bigint
+    nullable: false
+    description: "Rows where the column is not NULL."
+  - name: blank_count
+    type: bigint
+    nullable: false
+    description: "Rows where the column is present but empty once trimmed. Counted apart from NULL because ingest lands every delivered value as a JSON string, so an empty cell arrives as '' and is not NULL — a fill rate treating the two alike reports a column as populated when every value in it is blank."
+  - name: distinct_approx
+    type: bigint
+    nullable: false
+    description: "HyperLogLog estimate of distinct values. Always present because it is cheap, and always approximate: measured on a fixture of 1000 genuinely distinct ids it returns 978, so it is wrong in both directions and must never settle a uniqueness question on its own."
+  - name: distinct_exact
+    type: bigint
+    description: "Exact distinct count, NULL when it was not requested. The expensive one (a per-column sort), and the only one a uniqueness verdict may be read from."
+  - name: distinct_normalized
+    type: bigint
+    description: "Exact distinct count after lowercasing, trimming and collapsing internal whitespace; NULL when not requested. Materially below distinct_exact is the signal that a column needs standardizing before it is compared, which is otherwise invisible — the raw count looks healthy precisely because the variants are counted as distinct values."
+  - name: len_min
+    type: bigint
+    description: "Shortest trimmed value length. NULL for an all-NULL column, where a length has no meaning."
+  - name: len_max
+    type: bigint
+    description: "Longest trimmed value length. A value at a round number here is the signature of upstream truncation."
+  - name: len_avg
+    type: double
+    description: "Mean trimmed value length."
+  - name: len_p50
+    type: bigint
+    description: "Approximate median trimmed length."
+  - name: len_p95
+    type: bigint
+    description: "Approximate 95th-percentile trimmed length. Read against len_max it separates a long tail from a single outlier."
+  - name: lex_min
+    type: varchar
+    description: "Lexically smallest trimmed value."
+  - name: lex_max
+    type: varchar
+    description: "Lexically largest trimmed value."
+  - name: num_min
+    type: double
+    description: "Smallest value that parses as a number, NULL when none does."
+  - name: num_max
+    type: double
+    description: "Largest value that parses as a number, NULL when none does."
+  - name: num_avg
+    type: double
+    description: "Mean of the values that parse as numbers."
+  - name: num_std
+    type: double
+    description: "Sample standard deviation of the values that parse as numbers. NULL for fewer than two such values, where it is undefined rather than zero."
+  - name: cast_bigint
+    type: bigint
+    nullable: false
+    description: "Non-null values that parse as an integer."
+  - name: cast_double
+    type: bigint
+    nullable: false
+    description: "Non-null values that parse as a double."
+  - name: cast_date
+    type: bigint
+    nullable: false
+    description: "Non-null values that parse as a date. This is the whole of type detection here: ingest stores every delivered value as text, so the declared type says nothing about content and conformance is the only evidence of what a column actually holds."
+  - name: cast_timestamp
+    type: bigint
+    nullable: false
+    description: "Non-null values that parse as a timestamp."
+  - name: cast_boolean
+    type: bigint
+    nullable: false
+    description: "Non-null values that parse as a boolean."
+  - name: entropy_bits
+    type: double
+    description: "Shannon entropy of the value distribution, in bits. Reported in bits so it is directly comparable with the compiler's match-weight scale, which is also in bits — one unit across both halves of the system. A low value means one or two values dominate, which makes the column a poor blocking key however full it is."
+  - name: top_values
+    type: json
+    description: "The most frequent values with their counts and shares, bounded to a small k. Bounded because this is a per-column row: an unbounded list would put the corpus inside the profile. NOTE for consumers: these are REAL VALUES — live emails and phone numbers — so they are the one field here that carries personal data and must be role-gated before display and never sent to a model."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical creation time."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical last-write time."

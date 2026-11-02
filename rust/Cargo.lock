@@ -1983,6 +1983,7 @@ dependencies = [
  "er-ingest",
  "er-match",
  "er-obs",
+ "er-profile",
  "er-reconcile",
  "er-schema",
  "er-standardize",
@@ -2236,6 +2237,15 @@ dependencies = [
  "rustls",
  "tokio-postgres",
  "tokio-postgres-rustls",
+]
+
+[[package]]
+name = "er-profile"
+version = "0.1.0"
+dependencies = [
+ "dedupe-core",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
