@@ -286,10 +286,17 @@ jobs:
           kubectl apply -f infra/k8s/storage/ebs-gp3.yaml
           helm upgrade --install "$CI_NAMESPACE" infra/k8s/charts/er-dev-namespace \
             --namespace default --set "developer=$CI_NAMESPACE" --wait
+          # The executor allowlist (batch-orchestration-design §11): the two
+          # Phase 2 kinds run as per-attempt Kubernetes Jobs in this namespace.
+          # Enabled HERE, not in the chart default, so a developer namespace
+          # opts in deliberately. Gated until 2026-11-02 on the Standard vCPU
+          # quotas (both now 64) — before the grant no runner node of any
+          # class could provision at all (§7.2).
           helm upgrade --install er-platform infra/k8s/charts/er-platform \
             --namespace "$CI_NAMESPACE" --set "developer=$CI_NAMESPACE" \
             --set "images.api.digest=${{ steps.digests.outputs.er_api }}" \
             --set "images.web.digest=${{ steps.digests.outputs.er_web }}" \
             --set "efs.fileSystemId=${{ steps.env.outputs.fs }}" \
             --set "efs.accessPointId=${{ steps.env.outputs.ap }}" \
+            --set 'executor.dagKinds=lake_maintain\,lake_migrate' \
             --atomic --wait --timeout 10m
