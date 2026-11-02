@@ -194,9 +194,16 @@ jobs:
           - leg: chromium 2/2
             slug: chromium-2
             args: --project=desktop-chromium --project=mobile-chrome --shard=2/2 --workers=2
-          - leg: webkit
-            slug: webkit
-            args: --project=mobile-safari --workers=2
+          # webkit in halves: its emulation runs ~2x slower per test than
+          # chromium (7.5m for all 193 at two workers, measured on this PR's
+          # own first run), so one webkit leg would be the tier's 9m pole
+          # while the chromium legs finish in ~5m.
+          - leg: webkit 1/2
+            slug: webkit-1
+            args: --project=mobile-safari --shard=1/2 --workers=2
+          - leg: webkit 2/2
+            slug: webkit-2
+            args: --project=mobile-safari --shard=2/2 --workers=2
     # The same image the committed visual baselines were rendered in; browsers
     # are preinstalled, so there is no `playwright install` step.
     container:
