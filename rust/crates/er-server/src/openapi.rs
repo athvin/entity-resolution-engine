@@ -25,6 +25,7 @@ use utoipa::OpenApi;
         er_entities::acct_golden_lineage::AcctGoldenLineage,
         er_entities::job::Job,
         er_entities::org::Org,
+        er_entities::dataset::Dataset,
         er_entities::api_key::ApiKey,
         er_entities::config_version::ConfigVersion,
         er_entities::schedule::Schedule,
@@ -144,8 +145,8 @@ mod tests {
 
     #[test]
     fn every_generated_entity_schema_is_registered() {
-        // The document carries one component schema per generated entity (13:
-        // 9 control entities + the 4 produced golden marts).
+        // The document carries one component schema per generated entity (14:
+        // 10 control entities + the 4 produced golden marts).
         let doc = ApiDoc::openapi();
         let schemas = doc
             .components
@@ -153,7 +154,7 @@ mod tests {
             .expect("components present")
             .schemas
             .len();
-        assert_eq!(schemas, 13, "expected one schema per generated entity");
+        assert_eq!(schemas, 14, "expected one schema per generated entity");
     }
 
     fn doc(schemas: &str) -> String {

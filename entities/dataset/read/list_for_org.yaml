@@ -1,0 +1,7 @@
+kind: statement
+operation: read
+mode: full
+description: "Every dataset of one org, name-ordered (the dataset list and the per-org sweeps)."
+params:
+  - { name: org_id, type: varchar }
+returns: entity

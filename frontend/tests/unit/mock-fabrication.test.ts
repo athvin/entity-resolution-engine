@@ -62,7 +62,12 @@ const ROW_THRESHOLD = 4;
  * real. `key` is `<best-matching entity>.<field>`.
  */
 const EXPLAINED: Record<string, string> = {
-  "org.resources":
+  // These are the mock's ORG detail rows. The dataset entity mirrors the org's
+  // routing/lifecycle columns by design (datasets program), so best-match
+  // attribution ties and lands on `dataset` — the attribution limit this
+  // file's header describes, seen again. The field itself is unchanged: the
+  // org detail's composed projection, not a column on either entity.
+  "dataset.resources":
     "the DuckDB parallelism view composed by update_resources (er-server/src/lib.rs), not a column",
   "metric_snapshot.duplicate_rate":
     "derived on read in er-server/src/read.rs — O7a's rule is that rates are computed, never stored",

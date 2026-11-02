@@ -9,7 +9,7 @@
 //!
 //! Codes are append-only. A retired rule leaves its code behind rather than
 //! freeing it for reuse, so a review that cited V7 keeps meaning what it said.
-//! The next free code is **V16**.
+//! The next free code is **V18**.
 
 use crate::{CatalogRule, EntityRule};
 
@@ -34,6 +34,7 @@ static ENTITY_RULES: &[&dyn EntityRule] = &[
     &store::HistoryIsControlPlaneOnly,
     &tenancy::TenantScopeIsIndexed,
     &store::TypescriptRequiresWire,
+    &tenancy::DatasetScopeIsDeclared,
 ];
 
 /// Rules that need the whole tree at once, in code order.

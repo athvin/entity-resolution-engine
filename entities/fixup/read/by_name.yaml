@@ -1,0 +1,7 @@
+kind: statement
+operation: read
+mode: full
+description: "Whether a named fixup has already run (the semantics-once check)."
+params:
+  - { name: name, type: varchar }
+returns: entity

@@ -1,0 +1,45 @@
+kind: entity
+version: 1
+name: widget
+relation: widgets
+description: "A control-plane entity carrying a dataset scope the way V17 asks: referenced, beside org_id, and indexed."
+key: [id]
+generate:
+  stores: [postgres]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "The row's id (UUIDv7)."
+  - name: org_id
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: id }
+    description: "The tenant the row belongs to."
+  - name: dataset_id
+    type: varchar
+    nullable: false
+    references: { relation: datasets, column: id }
+    description: "The dataset the row belongs to."
+  - name: state
+    type: varchar
+    nullable: false
+    description: "Some per-row state the composite index covers."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the row appeared."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "Wall-clock last-write time."
+indexes:
+  - name: widgets_org_state
+    columns: [org_id, state]
+  - name: widgets_dataset_state
+    columns: [dataset_id, state]

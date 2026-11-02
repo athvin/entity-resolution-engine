@@ -332,6 +332,96 @@
           }
         }
       },
+      "Dataset": {
+        "type": "object",
+        "description": "One of a tenant's resolution domains: its own lake location, config pointer, entity type and lifecycle state. The lake env points at a DuckLake catalog of its own (a METADATA_SCHEMA inside the org's metadata database, or a file catalog locally), so two datasets never share tables.",
+        "required": [
+          "id",
+          "org_id",
+          "name",
+          "entity_type",
+          "config_path",
+          "env",
+          "state",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "active_config_version": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The currently published config version, if any."
+          },
+          "config_path": {
+            "type": "string",
+            "description": "Path to the dataset's config document."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the dataset was created."
+          },
+          "display_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional human label; the name stays the stable routing handle."
+          },
+          "drop_root": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Delivery landing directory; one `<source>.csv` per config source."
+          },
+          "entity_type": {
+            "type": "string",
+            "description": "The one entity type this dataset's lake resolves. Fixed at creation: the lake's std/golden tables are per-type, so changing it would orphan the corpus. Publish refuses a config whose entity_type differs."
+          },
+          "env": {
+            "description": "Lake connection env (catalog, catalog schema, data path, config/model/TF/lexicon paths). Handed to the engine verbatim; the derived location keys always win over operator extras."
+          },
+          "id": {
+            "type": "string",
+            "description": "The dataset's unique id (UUIDv7, minted at creation)."
+          },
+          "name": {
+            "type": "string",
+            "description": "The dataset's name, unique within its org (the routing handle; URLs are name-based, same slug grammar as an org name). The migration sweep names every existing org's one dataset `default`."
+          },
+          "org_id": {
+            "type": "string",
+            "description": "The tenant this dataset belongs to."
+          },
+          "s3_ingest_bucket": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Bucket the auto-ingest poller watches for this dataset. Null means auto-ingest is off — the feature has to be opted into, because a poller that starts reading a bucket nobody pointed at it would be ingesting data on its own initiative."
+          },
+          "s3_ingest_prefix": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Key prefix under `s3_ingest_bucket`, with one directory per config source beneath it. A column rather than a key in `env` deliberately, for the same reason as the org's: `env` is handed to the engine subprocess, while this is read by the control plane itself."
+          },
+          "state": {
+            "type": "string",
+            "description": "Dataset lifecycle state. The org's own state gates the whole tenant above this."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Wall-clock last-write time (database default; advanced by mutations once the entity migrates)."
+          }
+        }
+      },
       "GoldenLineage": {
         "type": "object",
         "description": "Per-attribute survivorship provenance: which record each surviving golden value came from.",

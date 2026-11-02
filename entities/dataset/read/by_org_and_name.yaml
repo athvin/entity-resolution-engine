@@ -1,0 +1,8 @@
+kind: statement
+operation: read
+mode: full
+description: "One dataset by its org and name: the dataset_or_404 lookup every dataset-scoped handler runs."
+params:
+  - { name: org_id, type: varchar }
+  - { name: name, type: varchar }
+returns: entity

@@ -1,0 +1,30 @@
+kind: entity
+version: 1
+name: widget
+relation: widgets
+description: "A control-plane entity shaped to exercise every V17 violation at once: a bare dataset_id with no reference, no org_id beside it, and no usable index."
+key: [id]
+generate:
+  stores: [postgres]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "The row's id (UUIDv7)."
+  - name: dataset_id
+    type: varchar
+    nullable: false
+    description: "A loose dataset scope, exactly what V17 exists to refuse."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the row appeared."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "Wall-clock last-write time."
