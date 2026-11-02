@@ -87,7 +87,7 @@ async fn the_task_ledger_statements_hold_their_contracts() {
     )
     .await
     .unwrap();
-    let claimed = pg::claim(&client).await.unwrap().expect("claimable");
+    let claimed = pg::claim(&client, 1).await.unwrap().expect("claimable");
     assert_eq!(claimed.state, "dispatching");
     let planned = taskpg::plan(&mut client, &claimed, &dag, EPOCH, Some("sha256:test"))
         .await
@@ -675,7 +675,7 @@ async fn the_task_ledger_statements_hold_their_contracts() {
     assert!(fenced.is_empty(), "the stale verdict is fenced");
     // The reopened job re-claims through the existing index and re-plans
     // idempotently.
-    let reclaimed = pg::claim(&client)
+    let reclaimed = pg::claim(&client, 1)
         .await
         .unwrap()
         .expect("the reopened job claims");
@@ -857,7 +857,7 @@ async fn the_task_ledger_statements_hold_their_contracts() {
     )
     .await
     .unwrap();
-    let train_job = pg::claim(&client)
+    let train_job = pg::claim(&client, 1)
         .await
         .unwrap()
         .expect("the slot freed at cancel");

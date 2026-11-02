@@ -223,16 +223,26 @@ async fn only_approved_reviews_are_staged_and_only_while_the_tag_lives() {
     );
 
     // ---- phase 2: the gate configured, so the two reviews are staged ---------
-    client
-        .execute(
-            "UPDATE public.orgs SET env = $2 WHERE id = $1",
-            &[
-                &org_id,
-                &serde_json::json!({ "ER_CONFIG_PATH": gated_path.to_string_lossy() }),
-            ],
-        )
-        .await
-        .unwrap();
+    // Both stores: the job the route enqueues carries the default dataset,
+    // and the dispatcher reads the DATASET env (the org row is the template
+    // future datasets copy).
+    for table in ["orgs", "datasets"] {
+        let sql = if table == "orgs" {
+            "UPDATE public.orgs SET env = $2 WHERE id = $1"
+        } else {
+            "UPDATE public.datasets SET env = $2 WHERE org_id = $1"
+        };
+        client
+            .execute(
+                sql,
+                &[
+                    &org_id,
+                    &serde_json::json!({ "ER_CONFIG_PATH": gated_path.to_string_lossy() }),
+                ],
+            )
+            .await
+            .unwrap();
+    }
 
     assert!(run().await);
     let (staged, queued) = staged_and_queued(&client, &org_id).await;

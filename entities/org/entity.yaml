@@ -46,6 +46,9 @@ columns:
     default: "'active'"
     accepted_values: [provisioning, active, suspended, purging]
     description: "Tenant lifecycle state."
+  - name: max_concurrent_jobs
+    type: bigint
+    description: "How many of this org's jobs may be active at once, across its datasets (the noisy-neighbor cap). NULL inherits the server default (ER_ORG_JOB_CAP, which ships as 1 — the pre-dataset single-writer profile). The per-DATASET writer lock is separate and absolute."
   - name: created_at
     type: timestamp
     nullable: false

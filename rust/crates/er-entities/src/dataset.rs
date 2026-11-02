@@ -119,6 +119,51 @@ ON CONFLICT (org_id, name) DO NOTHING
 
 pub mod read {
     //! @generated query functions for this entity + operation.
+    /// One dataset by its id — the dispatcher's lookup from a claimed job's dataset_id.
+    pub async fn by_id(
+        client: &impl ::tokio_postgres::GenericClient,
+        id: &str,
+    ) -> ::std::result::Result<Vec<super::Dataset>, ::tokio_postgres::Error> {
+        const SQL: &str = "SELECT
+  id,
+  org_id,
+  name,
+  display_name,
+  entity_type,
+  config_path,
+  env,
+  drop_root,
+  s3_ingest_bucket,
+  s3_ingest_prefix,
+  active_config_version,
+  state,
+  created_at,
+  updated_at
+FROM public.datasets
+WHERE id = $1
+";
+        let rows = client.query(SQL, &[&id]).await?;
+        Ok(rows
+            .iter()
+            .map(|row| super::Dataset {
+                id: row.get("id"),
+                org_id: row.get("org_id"),
+                name: row.get("name"),
+                display_name: row.get("display_name"),
+                entity_type: row.get("entity_type"),
+                config_path: row.get("config_path"),
+                env: row.get("env"),
+                drop_root: row.get("drop_root"),
+                s3_ingest_bucket: row.get("s3_ingest_bucket"),
+                s3_ingest_prefix: row.get("s3_ingest_prefix"),
+                active_config_version: row.get("active_config_version"),
+                state: row.get("state"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
+            })
+            .collect())
+    }
+
     /// One dataset by its org and name: the dataset_or_404 lookup every dataset-scoped handler runs.
     pub async fn by_org_and_name(
         client: &impl ::tokio_postgres::GenericClient,
@@ -214,6 +259,31 @@ ORDER BY name
 
 pub mod update {
     //! @generated query functions for this entity + operation.
+    /// Merge a settings patch into every dataset env of one org. Org-level knobs (DuckDB resources, a lexicon path) are set through the org and must reach the envs runs actually read; the convergence sweep deliberately never rewrites an existing dataset, so explicit mutations fan out here instead.
+    pub async fn merge_env(
+        client: &impl ::tokio_postgres::GenericClient,
+        patch: &::serde_json::Value,
+        org_id: &str,
+    ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
+        const SQL: &str = "UPDATE public.datasets SET env = env || $1, updated_at = now()
+WHERE org_id = $2
+";
+        client.execute(SQL, &[&patch, &org_id]).await
+    }
+
+    /// Repoint a dataset's active config version (the dataset-scoped half of publish; the org-scoped publish path retires with the route switchover).
+    pub async fn set_active_config(
+        client: &impl ::tokio_postgres::GenericClient,
+        version: i64,
+        dataset_id: &str,
+    ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
+        const SQL: &str =
+            "UPDATE public.datasets SET active_config_version = $1, updated_at = now()
+WHERE id = $2
+";
+        client.execute(SQL, &[&version, &dataset_id]).await
+    }
+
     /// Rename a dataset's human label. The name itself never changes — it is the routing handle URLs and lake derivations hang off.
     pub async fn set_display_name(
         client: &impl ::tokio_postgres::GenericClient,

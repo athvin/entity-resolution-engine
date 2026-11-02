@@ -30,7 +30,7 @@ statements is read or written only through the engine's own stage SQL, not
 through a typed query function.
 
 <!-- BEGIN GENERATED: entities-index -->
-**44 entities, 236 declared statements.**
+**44 entities, 240 declared statements.**
 
 | Entity | Relation | Store | Key | Natural key | History |
 |---|---|---|---|---|---|
@@ -75,7 +75,7 @@ through a typed query function.
 | `tag` | `tags` | postgres | `id` | — | yes |
 | `tagging` | `taggings` | postgres | `id` | — | yes |
 | `task_instance` | `task_instances` | postgres | `id` | `job_id, task_id, try_number` | — |
-| `tenant_schema_state` | `tenant_schema_states` | postgres | `id` | `org_id` | — |
+| `tenant_schema_state` | `tenant_schema_states` | postgres | `id` | — | — |
 | `webhook` | `webhooks` | postgres | `id` | — | yes |
 | `webhook_delivery` | `webhook_deliveries` | postgres | `id` | — | — |
 
@@ -90,7 +90,7 @@ Declared statements per entity and operation:
 | `assertion` | 2 | 3 | 1 | 0 |
 | `audit_log` | 1 | 1 | 0 | 0 |
 | `config_version` | 1 | 2 | 2 | 0 |
-| `dataset` | 1 | 2 | 2 | 0 |
+| `dataset` | 1 | 3 | 4 | 0 |
 | `ddl_log` | 0 | 1 | 0 | 0 |
 | `entity_event` | 1 | 3 | 0 | 1 |
 | `entity_link` | 1 | 1 | 1 | 1 |
@@ -124,7 +124,7 @@ Declared statements per entity and operation:
 | `tag` | 1 | 3 | 1 | 0 |
 | `tagging` | 1 | 1 | 1 | 1 |
 | `task_instance` | 3 | 4 | 23 | 0 |
-| `tenant_schema_state` | 1 | 1 | 1 | 0 |
+| `tenant_schema_state` | 2 | 1 | 1 | 0 |
 | `webhook` | 1 | 3 | 1 | 0 |
 | `webhook_delivery` | 1 | 1 | 2 | 0 |
 <!-- END GENERATED: entities-index -->

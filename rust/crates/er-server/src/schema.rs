@@ -117,16 +117,31 @@ pub async fn record_tenant_state(
     catalog_hash: &str,
     detail: Option<&str>,
 ) -> Result<(), PgError> {
-    er_entities::tenant_schema_state::create::upsert(
-        client,
-        &er_ids::new_v7(),
-        org_id,
-        dataset_id,
-        catalog_hash,
-        status,
-        detail,
-    )
-    .await?;
+    match dataset_id {
+        Some(ds) => {
+            er_entities::tenant_schema_state::create::upsert(
+                client,
+                &er_ids::new_v7(),
+                org_id,
+                ds,
+                catalog_hash,
+                status,
+                detail,
+            )
+            .await?;
+        }
+        None => {
+            er_entities::tenant_schema_state::create::upsert_org_level(
+                client,
+                &er_ids::new_v7(),
+                org_id,
+                catalog_hash,
+                status,
+                detail,
+            )
+            .await?;
+        }
+    }
     Ok(())
 }
 
@@ -159,12 +174,14 @@ impl TenantReport {
     }
 }
 
-/// Enqueue one `lake_migrate` job per active org, created by the sweep. Suspended
-/// and provisioning orgs are skipped: a suspended lake migrates on resume (every
-/// job reconciles first), a provisioning one is reconciled by provisioning.
+/// Enqueue one `lake_migrate` job per ACTIVE DATASET of each active org — each
+/// dataset is its own lake, and each lake has its own position. Suspended and
+/// provisioning orgs/datasets are skipped: a suspended lake migrates on resume
+/// (every job reconciles first), a provisioning one is reconciled by
+/// provisioning. The report labels rows `org/dataset`.
 ///
 /// # Errors
-/// Propagates the org list or enqueue error.
+/// Propagates the org/dataset list or enqueue error.
 pub async fn enqueue_tenant_migrations(
     client: &tokio_postgres::Client,
 ) -> Result<Vec<(String, crate::Job)>, PgError> {
@@ -173,21 +190,23 @@ pub async fn enqueue_tenant_migrations(
         if org.state != "active" {
             continue;
         }
-        // The deploy sweep reconciles the org's one lake; until the fan-out
-        // goes per-dataset (PR5) that lake is the default dataset's.
-        let dataset_id = pg::default_dataset_id(client, &org.id).await?;
-        let job = pg::enqueue(
-            client,
-            &org.id,
-            dataset_id.as_deref(),
-            LAKE_MIGRATE_KIND,
-            LAKE_MIGRATE_PRIORITY,
-            None,
-            None,
-            pg::Provenance::actor("er-server migrate-tenants"),
-        )
-        .await?;
-        jobs.push((org.name, job));
+        for dataset in pg::list_datasets(client, &org.id).await? {
+            if dataset.state != "active" {
+                continue;
+            }
+            let job = pg::enqueue(
+                client,
+                &org.id,
+                Some(&dataset.id),
+                LAKE_MIGRATE_KIND,
+                LAKE_MIGRATE_PRIORITY,
+                None,
+                None,
+                pg::Provenance::actor("er-server migrate-tenants"),
+            )
+            .await?;
+            jobs.push((format!("{}/{}", org.name, dataset.name), job));
+        }
     }
     Ok(jobs)
 }
@@ -225,16 +244,19 @@ pub async fn wait_for_tenant_migrations(
             tokio::time::sleep(Duration::from_secs(2)).await;
         }
     }
+    // Keyed by dataset id where the row has one (the per-dataset position), by
+    // org id for org-level rows — matching how the sweep's jobs were scoped.
     let positions: std::collections::BTreeMap<String, (String, Option<String>)> =
         er_entities::tenant_schema_state::read::list(client)
             .await?
             .into_iter()
-            .map(|s| (s.org_id, (s.status, s.detail)))
+            .map(|s| (s.dataset_id.unwrap_or(s.org_id), (s.status, s.detail)))
             .collect();
     let mut report: Vec<TenantReport> = finished
         .into_iter()
         .map(|(org, job)| {
-            let (outcome, detail) = match positions.get(&job.org_id) {
+            let key = job.dataset_id.clone().unwrap_or_else(|| job.org_id.clone());
+            let (outcome, detail) = match positions.get(&key) {
                 Some((status, detail)) if job.state == "succeeded" => {
                     (status.clone(), detail.clone().unwrap_or_default())
                 }

@@ -1294,10 +1294,19 @@ indexes:
     columns: [org_id, idempotency_key]
     unique: true
     where: "idempotency_key IS NOT NULL"
-  - name: jobs_one_active_per_org
-    columns: [org_id]
+  # The per-DATASET writer lock: the lake is the thing being written, and each
+  # dataset is its own lake. The old per-org spelling (jobs_one_active_per_org)
+  # is dropped by fixup 0003 — the reconciler never drops, and the stale index
+  # would silently keep the whole org at one job.
+  - name: jobs_one_active_per_dataset
+    columns: [dataset_id]
     unique: true
     where: "state IN ('dispatching','running','canceling')"
+  # Org-level jobs (dataset_id IS NULL: provision) still serialize per org.
+  - name: jobs_one_active_org_level
+    columns: [org_id]
+    unique: true
+    where: "state IN ('dispatching','running','canceling') AND dataset_id IS NULL"
   - name: jobs_claimable
     columns: [state, not_before, priority, id]
   # V17: the dataset-scoped read path (and PR5's per-dataset claim predicate).
@@ -1713,6 +1722,9 @@ columns:
     default: "'active'"
     accepted_values: [provisioning, active, suspended, purging]
     description: "Tenant lifecycle state."
+  - name: max_concurrent_jobs
+    type: bigint
+    description: "How many of this org's jobs may be active at once, across its datasets (the noisy-neighbor cap). NULL inherits the server default (ER_ORG_JOB_CAP, which ships as 1 — the pre-dataset single-writer profile). The per-DATASET writer lock is separate and absolute."
   - name: created_at
     type: timestamp
     nullable: false
@@ -2934,10 +2946,16 @@ indexes:
     where: "live IS TRUE"
   # One live pod per tenant — the DB-level image of the assembly single-writer
   # check; control rows are exempt (they hold no org slot).
-  - name: task_instances_one_pod_per_org
-    columns: [org_id]
+  # One live pod per DATASET (the lake being written); org-level rows keep a
+  # per-org slot. The old per-org index is dropped by fixup 0003.
+  - name: task_instances_one_pod_per_dataset
+    columns: [dataset_id]
     unique: true
     where: "live IS TRUE AND kind = 'pod' AND state IN ('queued','running','restarting','canceling')"
+  - name: task_instances_one_pod_org_level
+    columns: [org_id]
+    unique: true
+    where: "live IS TRUE AND kind = 'pod' AND state IN ('queued','running','restarting','canceling') AND dataset_id IS NULL"
   - name: task_instances_claimable
     columns: [state, not_before, job_id, seq]
     where: "live IS TRUE"
@@ -2957,7 +2975,6 @@ name: tenant_schema_state
 relation: tenant_schema_states
 description: "The control plane's cache of each tenant lake's schema position: the catalog version the lake was last reconciled or checked against and how that went. The lake's own schema_migrations ledger is authoritative; this row is what the deploy report and the drift check read without opening every lake."
 key: [id]
-natural_key: [org_id]
 generate:
   stores: [postgres]
   languages: [rust]
@@ -3008,6 +3025,19 @@ columns:
 indexes:
   - name: tenant_schema_states_org
     columns: [org_id]
+  # One cached position per dataset; org-level reconciliations (provisioning,
+  # pre-dataset rows) keep one row per org. Two partial uniques rather than a
+  # natural key: a plain UNIQUE(dataset_id) treats NULLs as distinct, which
+  # would let org-level rows accumulate unboundedly. The old in-table
+  # UNIQUE(org_id) constraint is dropped by fixup 0003.
+  - name: tenant_schema_states_dataset_unique
+    columns: [dataset_id]
+    unique: true
+    where: "dataset_id IS NOT NULL"
+  - name: tenant_schema_states_org_level
+    columns: [org_id]
+    unique: true
+    where: "dataset_id IS NULL"
   # V17: the dataset-scoped read path.
   - name: tenant_schema_states_dataset
     columns: [dataset_id]

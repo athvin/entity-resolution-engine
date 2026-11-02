@@ -389,6 +389,11 @@ export interface components {
             env: unknown;
             /** @description The tenant's unique id (UUIDv7, minted at creation). */
             id: string;
+            /**
+             * Format: int64
+             * @description How many of this org's jobs may be active at once, across its datasets (the noisy-neighbor cap). NULL inherits the server default (ER_ORG_JOB_CAP, which ships as 1 — the pre-dataset single-writer profile). The per-DATASET writer lock is separate and absolute.
+             */
+            max_concurrent_jobs?: number | null;
             /** @description The tenant's unique name (the routing handle; URLs stay name-based). */
             name: string;
             /** @description Bucket the auto-ingest poller watches for this tenant. Null means auto-ingest is off, which is every existing tenant — the feature has to be opted into, because a poller that starts reading a bucket nobody pointed at it would be ingesting data on its own initiative. */

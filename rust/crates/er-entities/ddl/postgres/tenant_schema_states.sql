@@ -8,8 +8,9 @@ CREATE TABLE IF NOT EXISTS public.tenant_schema_states (
   checked_at timestamptz NOT NULL DEFAULT now(),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  PRIMARY KEY (id),
-  UNIQUE (org_id)
+  PRIMARY KEY (id)
 );
 CREATE INDEX IF NOT EXISTS tenant_schema_states_org ON public.tenant_schema_states (org_id);
+CREATE UNIQUE INDEX IF NOT EXISTS tenant_schema_states_dataset_unique ON public.tenant_schema_states (dataset_id) WHERE dataset_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS tenant_schema_states_org_level ON public.tenant_schema_states (org_id) WHERE dataset_id IS NULL;
 CREATE INDEX IF NOT EXISTS tenant_schema_states_dataset ON public.tenant_schema_states (dataset_id);

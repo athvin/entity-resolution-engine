@@ -102,7 +102,7 @@ async fn the_projected_token_binds_overrides_and_refuses() {
     )
     .await
     .unwrap();
-    let claimed = pg::claim(&client).await.unwrap().expect("claimable");
+    let claimed = pg::claim(&client, 1).await.unwrap().expect("claimable");
     taskpg::plan(&mut client, &claimed, &dag, EPOCH, None)
         .await
         .unwrap()

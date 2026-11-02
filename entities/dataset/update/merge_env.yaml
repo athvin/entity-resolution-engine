@@ -1,0 +1,8 @@
+kind: statement
+operation: update
+mode: partial
+description: "Merge a settings patch into every dataset env of one org. Org-level knobs (DuckDB resources, a lexicon path) are set through the org and must reach the envs runs actually read; the convergence sweep deliberately never rewrites an existing dataset, so explicit mutations fan out here instead."
+params:
+  - { name: patch, type: json }
+  - { name: org_id, type: varchar }
+returns: none

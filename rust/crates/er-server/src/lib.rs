@@ -1473,7 +1473,15 @@ async fn create_dataset(
     Path(org): Path<String>,
     Json(body): Json<DatasetIn>,
 ) -> impl IntoResponse {
-    if let Err(e) = operator_only(&principal) {
+    // BYO (an explicit config_path + lake env) stays operator-only: it can
+    // point a dataset at arbitrary paths, which is operator power. The
+    // auto-provisioning path derives everything, so a tenant admin may use it
+    // — it is the create-dataset wizard's whole mechanism.
+    if body.config_path.is_some() {
+        if let Err(e) = operator_only(&principal) {
+            return e.into_response();
+        }
+    } else if let Err(e) = guard(&principal, &org, Role::Admin) {
         return e.into_response();
     }
     if !valid_org_name(&body.name) {
@@ -1503,10 +1511,144 @@ async fn create_dataset(
             .into_response();
     };
     let Some(config_path) = body.config_path.as_deref() else {
-        return detail_err(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "dataset auto-provisioning is not available yet; pass config_path and the lake env",
-        );
+        // Auto mode: derive the dataset's lake from the provisioning profile,
+        // create its workspace and starter config, insert the row
+        // `provisioning`, and hand the slow half (the lake's first attach, the
+        // activation) to the dataset_provision job — the same split as org
+        // provisioning.
+        let profile = match (&state.provision, &state.provision_error) {
+            (Some(profile), _) => profile,
+            (None, Some(e)) => {
+                return detail_err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("auto-provisioning is misconfigured: {e}"),
+                );
+            }
+            (None, None) => {
+                return detail_err(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "dataset auto-provisioning not configured (set ER_PROVISION_MODE); \
+                     operators may pass config_path and the lake env instead",
+                );
+            }
+        };
+        let client = match connect_pg(dsn).await {
+            Ok(c) => c,
+            Err(r) => return *r,
+        };
+        let org_row = match org_or_404(&client, &org).await {
+            Ok(row) => row,
+            Err(r) => return *r,
+        };
+        if let Err(r) = refuse_unless_active(&org_row, "create a dataset") {
+            return *r;
+        }
+        if let Ok(Some(_)) = pg::get_dataset(&client, &org_row.id, &body.name).await {
+            return detail_err(
+                StatusCode::CONFLICT,
+                format!("dataset '{}' already exists in org '{org}'", body.name),
+            );
+        }
+        let plan = profile.plan_dataset(&org, &body.name);
+        if let Err(e) = provision::create_workspace(&plan, &profile.config_template) {
+            return detail_err(StatusCode::INTERNAL_SERVER_ERROR, e);
+        }
+        if matches!(profile.mode, provision::Mode::Local)
+            && let Err(e) = provision::create_local_lake(&plan)
+        {
+            return detail_err(StatusCode::INTERNAL_SERVER_ERROR, e);
+        }
+        let starter = match provision::starter_config(&profile.config_template) {
+            Ok(yaml) => yaml,
+            Err(e) => return detail_err(StatusCode::INTERNAL_SERVER_ERROR, e),
+        };
+        let starter_hash = match load_config_str(&starter) {
+            Ok(config) => config_hash(&config),
+            Err(e) => {
+                return detail_err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!(
+                        "the starter config template does not load: {}",
+                        errfmt::chain(&e)
+                    ),
+                );
+            }
+        };
+        let ds_id = er_ids::new_v7();
+        let _ = pg::set_actor(&client, &principal.actor).await;
+        if let Err(e) = er_entities::dataset::create::ensure(
+            &client,
+            &ds_id,
+            &org_row.id,
+            &body.name,
+            body.display_name.as_deref(),
+            entity_type,
+            &plan.config_path.to_string_lossy(),
+            &plan.env_json(),
+            Some(&plan.drop_root.to_string_lossy()),
+            None,
+            None,
+            None,
+            "provisioning",
+        )
+        .await
+        {
+            return pg_err(e);
+        }
+        let version = match pg::create_config_version(
+            &client,
+            &org_row.id,
+            Some(&ds_id),
+            &starter,
+            &starter_hash,
+            &principal.actor,
+        )
+        .await
+        {
+            Ok(v) => v,
+            Err(e) => return pg_err(e),
+        };
+        if let Err(e) =
+            er_entities::config_version::update::publish(&client, Some("C"), &org_row.id, version)
+                .await
+        {
+            return pg_err(e);
+        }
+        if let Err(e) =
+            er_entities::dataset::update::set_active_config(&client, version, &ds_id).await
+        {
+            return pg_err(e);
+        }
+        let idem = format!("dataset-provision:{org}:{}", body.name);
+        let job = match pg::enqueue(
+            &client,
+            &org_row.id,
+            Some(&ds_id),
+            "dataset_provision",
+            0,
+            Some(&idem),
+            None,
+            pg::Provenance::actor(&principal.actor),
+        )
+        .await
+        {
+            Ok(j) => j,
+            Err(e) => return pg_err(e),
+        };
+        let _ = pg::audit(
+            &client,
+            &principal.actor,
+            Some(&org),
+            Some(&body.name),
+            "dataset.provision",
+            &json!({ "dataset": body.name, "entity_type": entity_type, "job_id": job.id }),
+        )
+        .await;
+        return (
+            StatusCode::ACCEPTED,
+            Json(json!({ "name": body.name, "state": "provisioning", "job_id": job.id })),
+        )
+            .into_response();
     };
     // The same one-source-of-truth rule create_org enforces: config_path and
     // env.ER_CONFIG_PATH must name the same file, because publish writes to the
@@ -2793,10 +2935,16 @@ async fn put_lexicon(
             format!("lexicon write: {e}"),
         );
     }
-    if existing.is_none()
-        && let Err(e) = pg::merge_org_env(&client, &org, &json!({ "ER_LEXICON_PATH": path })).await
-    {
-        return pg_err(e);
+    if existing.is_none() {
+        // Runs read the DATASET env, so the path reaches both stores: the org
+        // row (the template future datasets copy) and every existing dataset.
+        let env_patch = json!({ "ER_LEXICON_PATH": path });
+        if let Err(e) = pg::merge_org_env(&client, &org, &env_patch).await {
+            return pg_err(e);
+        }
+        if let Err(e) = pg::merge_dataset_envs(&client, &org_row.id, &env_patch).await {
+            return pg_err(e);
+        }
     }
 
     let idem = format!("lexicon-apply:{}", er_ids::new_v7());
@@ -3416,7 +3564,7 @@ pub async fn dispatch_pg<F>(
 where
     F: FnOnce(&Job) -> Result<(), String>,
 {
-    let Some(job) = pg::claim(client).await? else {
+    let Some(job) = pg::claim(client, pg::org_job_cap()).await? else {
         return Ok(None);
     };
     pg::mark(client, &job.id, "running").await?;
@@ -4353,12 +4501,17 @@ async fn update_resources(
         Ok(c) => c,
         Err(r) => return *r,
     };
-    match pg::org_exists(&client, &org).await {
-        Ok(true) => {}
-        Ok(false) => return detail_err(StatusCode::NOT_FOUND, format!("no org '{org}'")),
-        Err(e) => return pg_err(e),
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(row) => row,
+        Err(r) => return *r,
+    };
+    let patch = Value::Object(updates);
+    if let Err(e) = pg::merge_org_env(&client, &org, &patch).await {
+        return pg_err(e);
     }
-    if let Err(e) = pg::merge_org_env(&client, &org, &Value::Object(updates)).await {
+    // Resource knobs are org-wide and runs read the DATASET env: fan the patch
+    // out to every dataset, exactly as the lexicon path does.
+    if let Err(e) = pg::merge_dataset_envs(&client, &org_row.id, &patch).await {
         return pg_err(e);
     }
     match pg::get_org(&client, &org).await {

@@ -21,6 +21,8 @@ export interface Org {
   active_config_version: number | null;
   /** Tenant lifecycle state. */
   state: string;
+  /** How many of this org's jobs may be active at once, across its datasets (the noisy-neighbor cap). NULL inherits the server default (ER_ORG_JOB_CAP, which ships as 1 — the pre-dataset single-writer profile). The per-DATASET writer lock is separate and absolute. */
+  max_concurrent_jobs: number | null;
   /** When the tenant was created. */
   created_at: string;
   /** Wall-clock last-write time (database default; advanced by mutations once the entity migrates). */

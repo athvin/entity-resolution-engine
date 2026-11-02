@@ -8,6 +8,7 @@ SELECT
   s3_ingest_prefix,
   active_config_version,
   state,
+  max_concurrent_jobs,
   created_at,
   updated_at
 FROM public.orgs

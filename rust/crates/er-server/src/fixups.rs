@@ -46,7 +46,10 @@ pub(crate) enum Phase {
 
 /// The ordered fixup list. Append only; a retired fixup keeps its ledger row,
 /// so its name is never reused.
-const FIXUPS: &[(&str, Phase)] = &[("0002_backfill_dataset_ids", Phase::AfterReconcile)];
+const FIXUPS: &[(&str, Phase)] = &[
+    ("0002_backfill_dataset_ids", Phase::AfterReconcile),
+    ("0003_per_dataset_locks", Phase::AfterReconcile),
+];
 
 /// Run every not-yet-applied fixup of `phase`, each in its own transaction
 /// under the schema-bootstrap advisory lock (two boots racing: the loser waits,
@@ -86,6 +89,7 @@ pub(crate) async fn apply_fixups(client: &mut Client, phase: Phase) -> Result<()
 async fn run_fixup(tx: &tokio_postgres::Transaction<'_>, name: &str) -> Result<(), SchemaError> {
     match name {
         "0002_backfill_dataset_ids" => backfill_dataset_ids(tx).await,
+        "0003_per_dataset_locks" => per_dataset_locks(tx).await,
         // Reaching this is a FIXUPS entry without a body — a bug in this
         // module, not in any database.
         other => unreachable!("fixup {other} is listed but has no body"),
@@ -113,6 +117,40 @@ async fn backfill_dataset_ids(tx: &tokio_postgres::Transaction<'_>) -> Result<()
     er_entities::entity_link::update::backfill_dataset(tx).await?;
     er_entities::tagging::update::backfill_dataset(tx).await?;
     er_entities::staged_steward_action::update::backfill_dataset(tx).await?;
+    Ok(())
+}
+
+/// `0003_per_dataset_locks` — retire the per-org writer locks the per-dataset
+/// ones supersede. The baseline replay only ever runs `CREATE … IF NOT
+/// EXISTS`, so a superseded index persists on live databases forever unless
+/// dropped here — and a stale `jobs_one_active_per_org` would silently keep
+/// the whole org at one job, which is precisely the limit this program lifts.
+/// The `tenant_schema_states` in-table `UNIQUE (org_id)` (generated from its
+/// retired natural key) is looked up by column set in `pg_constraint` rather
+/// than by name: Postgres named it, and names are the fragile part.
+async fn per_dataset_locks(tx: &tokio_postgres::Transaction<'_>) -> Result<(), SchemaError> {
+    tx.batch_execute(
+        "DROP INDEX IF EXISTS jobs_one_active_per_org;\n\
+         DROP INDEX IF EXISTS task_instances_one_pod_per_org;",
+    )
+    .await?;
+    let constraints = tx
+        .query(
+            "SELECT con.conname FROM pg_constraint con
+             JOIN pg_class rel ON rel.oid = con.conrelid
+             JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
+             WHERE nsp.nspname = 'public' AND rel.relname = 'tenant_schema_states'
+               AND con.contype = 'u'",
+            &[],
+        )
+        .await?;
+    for row in constraints {
+        let name: String = row.get(0);
+        tx.batch_execute(&format!(
+            "ALTER TABLE public.tenant_schema_states DROP CONSTRAINT IF EXISTS \"{name}\""
+        ))
+        .await?;
+    }
     Ok(())
 }
 

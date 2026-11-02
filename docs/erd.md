@@ -155,6 +155,7 @@ erDiagram
         varchar s3_ingest_prefix
         bigint active_config_version
         varchar state "in {active, provisioning, purging, suspended}"
+        bigint max_concurrent_jobs
         timestamp created_at
         timestamp updated_at
     }
