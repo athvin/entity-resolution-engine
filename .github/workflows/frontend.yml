@@ -154,12 +154,32 @@ jobs:
           pnpm gen:api
           git diff --exit-code -- src/lib/api/schema.d.ts
 
+  # SHARDED three ways, because the suite is big and Playwright's CI default is
+  # ONE worker: run 41461727537 (2026-11-02) measured 579 tests in 15.9m of
+  # strictly serial execution. More workers per runner would be the cheaper fix,
+  # but both webServers (the mock erserver and `next start` with its in-memory
+  # PGlite) are shared mutable state across workers, and the suite has only ever
+  # run at workers=1 in CI — parallel safety is unvalidated. Shards keep one
+  # worker per runner, so they change nothing about test semantics.
+  #
+  # `--shard=N/3` splits at test granularity across all three device projects
+  # (`fullyParallel: true`), ~193 tests per leg, auto-balanced as tests are
+  # added — unlike per-project legs, which are uneven (desktop carries the
+  # visual suite) and frozen at exactly three.
+  #
+  # The per-leg names can never be required checks (see `e2e-gate` below); the
+  # required context rides the gate.
   e2e:
-    name: playwright functional tier
+    name: playwright e2e (shard ${{ matrix.shard }}/3)
     needs: detect
     if: needs.detect.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      # A flaky leg can be re-run alone; its siblings' green stands.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     # The same image the committed visual baselines were rendered in; browsers
     # are preinstalled, so there is no `playwright install` step.
     container:
@@ -193,14 +213,65 @@ jobs:
       # CI=true (set by Actions) makes playwright.config.ts take the `next start`
       # branch, so we build explicitly first; `next start` then serves `.next/`.
       - run: pnpm build
-      - run: pnpm test:e2e
+      - run: pnpm test:e2e --shard=${{ matrix.shard }}/3
       - name: Upload Playwright report on failure
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: playwright-report
+          # Suffixed per shard: upload-artifact v4 hard-fails on a duplicate
+          # name, and two shards can fail in one run. Each report is
+          # self-contained for its shard's tests — no merge step needed for
+          # the only thing this is used for (reading a failure).
+          name: playwright-report-shard-${{ matrix.shard }}
           path: frontend/playwright-report/
           retention-days: 7
+
+  # The required status check for the playwright tier. The GitHub behaviour
+  # forcing this shape is stated in full above infra.yml's `plan-gate`, which
+  # this copies: A MATRIX JOB'S PER-LEG NAMES CANNOT BE REQUIRED STATUS CHECKS —
+  # a skipped matrix reports one check-run under the literal, uninterpolated
+  # `playwright e2e (shard ${{ matrix.shard }}/3)`, so per-leg contexts never
+  # report on a PR that skips the tier, and a required context that never
+  # reports blocks the PR forever.
+  #
+  # This job carries the EXACT `name:` the old single job had, so the split
+  # needed no branch-protection edit: the context "playwright functional tier"
+  # kept reporting without interruption, just from a different job id.
+  e2e-gate:
+    name: playwright functional tier
+    needs: [detect, e2e]
+    # `!cancelled()`: the gate must RUN (and fail) when a shard fails — a gate
+    # skipped because its `needs` failed would read to branch protection as
+    # satisfied.
+    if: ${{ !cancelled() && needs.detect.outputs.frontend == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: every shard must have succeeded
+        # No checkout in this job, so the workflow's `working-directory:
+        # frontend` default would fail — point the step at the workspace root.
+        working-directory: ${{ github.workspace }}
+        env:
+          # For the matrix job this is the aggregate: `success` only if every
+          # shard succeeded, `failure` if any failed, `skipped` if the whole
+          # job was.
+          RESULT: ${{ needs.e2e.result }}
+        run: |
+          echo "playwright shard tier result: $RESULT"
+          case "$RESULT" in
+            success)
+              echo "all shards succeeded"
+              ;;
+            skipped)
+              # Defensive only: the shards skip exactly when detect says
+              # frontend != 'true', and then this gate is itself skipped.
+              echo 'shards reported skipped alongside a running gate'
+              ;;
+            *)
+              echo "::error::a playwright shard did not succeed (result: $RESULT)"
+              exit 1
+              ;;
+          esac
 
   # The frontend's mirror of rust.yml's `cargo-deny (advisories + licenses +
   # bans)`. `pnpm audit` is the advisories half; scripts/check-licenses.mjs is
