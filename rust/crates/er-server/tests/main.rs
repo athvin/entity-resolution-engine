@@ -62,6 +62,7 @@ mod pg_mass_update;
 mod pg_migrate_tenants;
 mod pg_model_registry;
 mod pg_orgs;
+mod pg_profile;
 mod pg_protect_master;
 mod pg_provision;
 mod pg_publish;
