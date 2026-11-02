@@ -143,12 +143,45 @@ export function countRoutes(root) {
   return RULES.reduce((total, rule) => total + walk(path.join(root, rule.dir)).length, 0);
 }
 
+/**
+ * Route files that name the attempt channel's path prefix.
+ *
+ * The `/v1/internal/*` routes are machine-to-machine (the task pod reporting
+ * over the attempt channel, batch-orchestration-design §6.4): they are
+ * reachable only in-namespace, and the BFF must NEVER forward them — a BFF
+ * route naming that prefix would hand a browser session a path to the
+ * pod-credentialed surface. Unlike the authorization rules above this scans
+ * EVERY route file under src/app/api, because the property is "nowhere", not
+ * "somewhere with a guard".
+ */
+export function findInternalForwards(root) {
+  const offenders = [];
+  for (const file of walk(path.join(root, "src", "app", "api"))) {
+    if (readFileSync(file, "utf8").includes("/v1/internal")) {
+      offenders.push(path.relative(root, file));
+    }
+  }
+  return offenders;
+}
+
 // Entry point only when executed, so the unit test can import the functions.
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
   const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
   const examined = countRoutes(root);
   const violations = findUnauthorizedRoutes(root);
   const uncovered = findUncoveredApiDirs(root);
+  const internal = findInternalForwards(root);
+
+  if (internal.length) {
+    console.error(`\nauthz gate FAILED — ${internal.length} route file(s) name /v1/internal:\n`);
+    for (const file of internal) console.error(`  ${file}`);
+    console.error(
+      "\nThe attempt channel (/v1/internal/*) is the task pod's machine-to-machine\n" +
+        "surface; the BFF never forwards it (batch-orchestration-design §6.4). There is\n" +
+        "no exemption list on purpose — the property is 'nowhere'.\n",
+    );
+    process.exit(1);
+  }
 
   if (uncovered.length) {
     console.error(

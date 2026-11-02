@@ -92,6 +92,17 @@ spec:
               mountPath: {{ .Values.efs.mountPath }}
             - name: duckdb-tmp
               mountPath: /app/.tmp
+            # The §6.4 key-set credential, EXPLICIT because automount stays
+            # off: the three standard sources at the default path, so the
+            # in-cluster client conventions work unchanged. er-server uses it
+            # solely to read the cluster JWKS from
+            # https://kubernetes.default.svc/openid/v1/jwks (the fixed path,
+            # never the discovery document's jwks_uri) through the default
+            # service-account-issuer-discovery grant — it holds no Role.
+            # Deliberately NOT mounted into er-web.
+            - name: api-server-token
+              mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+              readOnly: true
         # --- the Next.js BFF (browser-facing) ---
         - name: er-web
           image: {{ include "er-platform.image" (dict "root" . "image" .Values.images.web) }}
@@ -135,3 +146,21 @@ spec:
         - name: duckdb-tmp
           emptyDir:
             sizeLimit: 2Gi
+        - name: api-server-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  # The default API-server audience — this token authenticates
+                  # the JWKS read, nothing else.
+                  expirationSeconds: 3600
+                  path: token
+              - configMap:
+                  name: kube-root-ca.crt
+                  items:
+                    - key: ca.crt
+                      path: ca.crt
+              - downwardAPI:
+                  items:
+                    - path: namespace
+                      fieldRef:
+                        fieldPath: metadata.namespace
