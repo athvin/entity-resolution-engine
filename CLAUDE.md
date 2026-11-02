@@ -45,7 +45,7 @@ belongs in, what each gate is for, and the rule that every gate must be observed
 
 ## Layout
 
-The backend is the Rust workspace under `rust/` (26 crates); the Python/dbt
+The backend is the Rust workspace under `rust/`; the Python/dbt
 implementation has been removed. **The cargo workspace root is `rust/`, not the
 repo root** — bare `cargo` commands must run from `rust/`, which is why the
 Makefile targets all `cd rust` first.

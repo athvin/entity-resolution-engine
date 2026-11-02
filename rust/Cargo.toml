@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/dedupe-core", "crates/dedupe-cli", "crates/er-eval", "crates/er-errors", "crates/er-ids", "crates/er-hash", "crates/er-k8s", "crates/er-schema", "crates/er-obs", "crates/er-env", "crates/er-versions", "crates/er-config", "crates/er-std", "crates/er-ingest", "crates/er-standardize", "crates/er-reconcile", "crates/er-match", "crates/er-compile", "crates/er-golden", "crates/er-cli", "crates/er-dag", "crates/er-server", "crates/er-mcp", "crates/er-entity-spec", "crates/er-entity-lint", "crates/er-entity-gen", "crates/er-entity-cli", "crates/er-entities", "crates/er-sql-check", "crates/er-entity-diff", "crates/er-pg-tls"]
+members = ["crates/dedupe-core", "crates/dedupe-cli", "crates/er-eval", "crates/er-errors", "crates/er-ids", "crates/er-hash", "crates/er-k8s", "crates/er-schema", "crates/er-span", "crates/er-obs", "crates/er-env", "crates/er-versions", "crates/er-config", "crates/er-std", "crates/er-ingest", "crates/er-standardize", "crates/er-reconcile", "crates/er-match", "crates/er-compile", "crates/er-golden", "crates/er-cli", "crates/er-dag", "crates/er-server", "crates/er-mcp", "crates/er-entity-spec", "crates/er-entity-lint", "crates/er-entity-gen", "crates/er-entity-cli", "crates/er-entities", "crates/er-sql-check", "crates/er-entity-diff", "crates/er-pg-tls"]
 
 [workspace.package]
 version = "0.1.0"
@@ -114,6 +114,13 @@ serde_json = { version = "1", features = ["float_roundtrip"] }
 serde_norway = "0.9"
 sqlparser = { version = "0.63", features = ["visitor"] }
 thiserror = "2"
+
+# The telemetry wire. Already in Cargo.lock transitively (hyper, reqwest,
+# tokio-postgres, aws-smithy, kube) with no subscriber installed, so every span
+# those crates emit is currently discarded. Declaring it here is what lets
+# er-span and the library crates emit; the subscriber and the OTLP exporter
+# live in er-obs, which only binaries depend on.
+tracing = "0.1"
 regex = "1"
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"
