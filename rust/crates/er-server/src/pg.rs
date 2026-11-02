@@ -1161,6 +1161,7 @@ pub async fn list_schedules(client: &Client, org_id: &str) -> Result<Vec<Schedul
 /// fresh one by its contents — so the freshly minted id is the signal: if it
 /// came back, this call is the one that created the row. The scheduler needs
 /// that distinction to avoid counting (and re-stamping) a replayed firing.
+#[allow(clippy::too_many_arguments)] // mirrors the statement's parameter list
 pub async fn enqueue_scheduled(
     client: &Client,
     org_id: &str,
