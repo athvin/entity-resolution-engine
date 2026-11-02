@@ -1,0 +1,6 @@
+kind: statement
+operation: create
+mode: partial
+description: "Record one profile run's findings from the session's __profile_finding_src staging. Keyed on (profile_run_id, code, column_name), with the empty string standing in for a dataset-level finding's column — a sentinel rather than NULL, because a NULL key column never matches here and every re-profile would append a second copy of the same finding."
+params: []
+returns: none

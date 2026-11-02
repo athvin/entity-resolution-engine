@@ -1,0 +1,254 @@
+//! The dataset profiler's findings pass.
+//!
+//! A profile is a page of numbers, and a page of numbers is not an answer. The
+//! findings pass is what turns one into the other: it reads a computed
+//! [`dedupe_core::profile::ColumnShape`] and emits coded, human-readable
+//! observations — this column is 70% empty, this one is 95% the same value,
+//! this identifier is not unique.
+//!
+//! The rules are a **registry**, not prose and not a chain of `if`s. Each is a
+//! value carrying its own code, title, reasoning and a worked
+//! conforming/violating pair, so `docs/profile-findings.md` is generated from
+//! the same source the profiler runs and the reference cannot drift from the
+//! behaviour. That is the pattern `er-entity-lint` established for the V-rules;
+//! this is the same shape applied to data rather than to schema.
+//!
+//! Codes are append-only. A retired rule leaves its code behind rather than
+//! freeing it, so a stored finding and a review that cited it keep meaning what
+//! they said.
+
+use dedupe_core::profile::{ColumnShape, ValueFrequency};
+
+pub mod rules;
+
+/// A rule's identifier, `P` followed by a number.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Code(pub &'static str);
+
+impl Code {
+    /// The numeric part, for ordering. `P10` must sort after `P9`, which it
+    /// does not do as a string.
+    #[must_use]
+    pub fn number(&self) -> u32 {
+        self.0.trim_start_matches('P').parse().unwrap_or(0)
+    }
+}
+
+impl std::fmt::Display for Code {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.0)
+    }
+}
+
+/// How loudly a finding should present.
+///
+/// Deliberately not a gate: nothing here refuses a corpus. A profile describes
+/// what is there, and the decision about whether a 70%-empty column is a defect
+/// or simply how that source works belongs to the person who owns the data.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Severity {
+    /// Something that will produce wrong results if left alone.
+    Error,
+    /// Something that will cost recall, runtime or trust.
+    Warning,
+    /// Worth knowing, no action implied.
+    Info,
+}
+
+impl Severity {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Severity::Error => "error",
+            Severity::Warning => "warning",
+            Severity::Info => "info",
+        }
+    }
+}
+
+/// Everything a rule declares about itself.
+pub struct RuleInfo {
+    pub code: Code,
+    /// The invariant, as a single lower-case clause.
+    pub title: &'static str,
+    /// Why the rule exists and what goes wrong without it.
+    pub explain: &'static str,
+    /// A column this rule is quiet about.
+    pub conforming: &'static str,
+    /// A column this rule fires on.
+    pub violating: &'static str,
+    pub severity: Severity,
+}
+
+/// One observation about one subject.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Finding {
+    pub code: Code,
+    pub severity: Severity,
+    /// The column, or empty for a corpus-level finding.
+    pub column_name: String,
+    /// One sentence, with its numbers already in it.
+    pub message: String,
+    /// The measurements behind the message.
+    pub detail: serde_json::Value,
+}
+
+impl Finding {
+    #[must_use]
+    pub fn new(
+        info: &RuleInfo,
+        column_name: impl Into<String>,
+        message: impl Into<String>,
+        detail: serde_json::Value,
+    ) -> Self {
+        Self {
+            code: info.code,
+            severity: info.severity,
+            column_name: column_name.into(),
+            message: message.into(),
+            detail,
+        }
+    }
+}
+
+/// What a column rule gets to look at: the column's shape, plus its most
+/// frequent values when they were collected.
+///
+/// The top values are optional because they are a second pass. A rule that
+/// needs them must say so by returning nothing when they are absent, rather
+/// than guessing — a finding derived from values nobody counted would be a
+/// confident answer to a question that was never asked.
+pub struct ColumnContext<'a> {
+    pub shape: &'a ColumnShape,
+    pub top_values: &'a [ValueFrequency],
+}
+
+impl ColumnContext<'_> {
+    /// The non-null, non-blank share of rows read, or 0.0 for an empty read.
+    #[must_use]
+    pub fn fill_rate(&self) -> f64 {
+        self.shape.fill_rate().unwrap_or(0.0)
+    }
+
+    /// The column's most frequent value, when values were collected.
+    #[must_use]
+    pub fn mode(&self) -> Option<&ValueFrequency> {
+        self.top_values.iter().find(|v| v.rank == 1)
+    }
+}
+
+/// A rule that judges one column.
+pub trait ColumnRule: Sync {
+    fn info(&self) -> RuleInfo;
+    fn check(&self, ctx: &ColumnContext<'_>) -> Vec<Finding>;
+}
+
+/// Run every registered rule over every column, in code order within a column.
+///
+/// Column order follows the input, so a caller that sorted its columns gets
+/// sorted findings — this does not re-sort, because the profile's own column
+/// order is meaningful (it is the corpus's) and re-sorting here would silently
+/// disagree with the table rendered beside it.
+#[must_use]
+pub fn findings(columns: &[(ColumnShape, Vec<ValueFrequency>)]) -> Vec<Finding> {
+    let mut out = Vec::new();
+    for (shape, top_values) in columns {
+        let ctx = ColumnContext { shape, top_values };
+        for rule in rules::column_rules() {
+            out.extend(rule.check(&ctx));
+        }
+    }
+    out
+}
+
+/// Every rule's declaration, in code order — the source both `--explain` and
+/// the generated reference read.
+#[must_use]
+pub fn rule_infos() -> Vec<RuleInfo> {
+    let mut infos: Vec<RuleInfo> = rules::column_rules().iter().map(|r| r.info()).collect();
+    infos.sort_by_key(|i| i.code.number());
+    infos
+}
+
+/// The generated rule reference (`docs/profile-findings.md`), rendered from the
+/// registry so it cannot drift from what the profiler actually reports.
+#[must_use]
+pub fn reference_markdown() -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    out.push_str("# Profile findings\n\n");
+    out.push_str(
+        "> **Generated** from the registry in `rust/crates/er-profile/src/rules/`.\n\
+         > Do not hand-edit — `er-profile`'s own test byte-compares this file.\n\n",
+    );
+    out.push_str(
+        "A profile describes a corpus; a finding says what about it is worth acting on. \
+         Nothing here refuses or gates a dataset — whether a 70%-empty column is a defect \
+         or simply how that source works is the data owner's call, so every rule reports \
+         and none blocks.\n\n",
+    );
+    out.push_str("| Code | Severity | Invariant |\n|---|---|---|\n");
+    for info in rule_infos() {
+        let _ = writeln!(
+            out,
+            "| {} | {} | {} |",
+            info.code,
+            info.severity.as_str(),
+            info.title
+        );
+    }
+    for info in rule_infos() {
+        let _ = write!(
+            out,
+            "\n## {} — {}\n\n*{}*\n\n{}\n\n**Quiet on:** {}\n\n**Fires on:** {}\n",
+            info.code,
+            info.title,
+            info.severity.as_str(),
+            info.explain,
+            info.conforming,
+            info.violating
+        );
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn codes_are_unique_and_sort_by_number() {
+        let infos = rule_infos();
+        let mut seen = std::collections::BTreeSet::new();
+        for info in &infos {
+            assert!(
+                seen.insert(info.code.0),
+                "{} is registered twice — codes are append-only and unique",
+                info.code
+            );
+        }
+        // P10 must sort after P9, which string ordering gets wrong.
+        let numbers: Vec<u32> = infos.iter().map(|i| i.code.number()).collect();
+        let mut sorted = numbers.clone();
+        sorted.sort_unstable();
+        assert_eq!(numbers, sorted, "rule_infos must come back in code order");
+        assert!(
+            numbers.iter().all(|n| *n > 0),
+            "every code parses to a number"
+        );
+    }
+
+    #[test]
+    fn every_rule_documents_itself() {
+        for info in rule_infos() {
+            assert!(!info.title.is_empty(), "{}: title", info.code);
+            assert!(
+                info.explain.len() > 80,
+                "{}: explain prose is too thin to be worth reading",
+                info.code
+            );
+            assert!(!info.conforming.is_empty(), "{}: conforming", info.code);
+            assert!(!info.violating.is_empty(), "{}: violating", info.code);
+        }
+    }
+}

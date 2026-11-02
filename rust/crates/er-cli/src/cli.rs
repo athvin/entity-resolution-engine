@@ -152,6 +152,39 @@ enum Command {
         #[arg(long, default_value = "7 days")]
         expire_older_than: String,
     },
+    /// Profile a corpus stage: per-column shape, most frequent values and coded
+    /// findings, persisted to the lake and printed as JSON.
+    ///
+    /// Re-profiling an unchanged lake snapshot rewrites its rows rather than
+    /// appending, so the stored result is a cache: asking twice costs one run.
+    Profile {
+        /// Which stage to profile: `raw` (as delivered, needs --source),
+        /// `standardized` or `golden`.
+        #[arg(long, default_value = "standardized")]
+        subject: String,
+        /// The source system, required for `--subject raw` because two sources'
+        /// payloads share no schema.
+        #[arg(long)]
+        source: Option<String>,
+        /// Depth: 1 shape only. Deeper tiers land with the blocking and
+        /// model-readiness passes.
+        #[arg(long, default_value_t = 1)]
+        tier: i64,
+        /// Also compute EXACT distinct counts. Off by default because it is a
+        /// per-column sort; on, it is what lets the uniqueness and
+        /// normalization findings speak at all.
+        #[arg(long)]
+        exact_distinct: bool,
+        /// Profile a deterministic sample of this proportion (0 < p <= 1)
+        /// instead of every row.
+        #[arg(long)]
+        sample: Option<f64>,
+        /// Salt for the sample. The same seed always draws the same rows.
+        #[arg(long)]
+        sample_seed: Option<i64>,
+        #[arg(long, default_value = "2026-01-01 00:00:00")]
+        run_at: String,
+    },
 }
 
 fn load_config(path: &PathBuf) -> Result<Config> {
@@ -384,6 +417,47 @@ pub fn run() -> Result<()> {
         }
         Command::Maintain { expire_older_than } => {
             let report = crate::run_maintain(&session, &expire_older_than)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        Command::Profile {
+            subject,
+            source,
+            tier,
+            exact_distinct,
+            sample,
+            sample_seed,
+            run_at,
+        } => {
+            let subject = crate::profile::Subject::parse(&subject)?;
+            let sample = match sample {
+                Some(p) if p > 0.0 && p <= 1.0 => {
+                    Some(dedupe_core::profile::ProfileSample {
+                        // The standardized and golden relations key on
+                        // record_key; raw rows are flattened from a payload and
+                        // carry the delivering source's own id column, so the
+                        // row id is whichever of those exists. `rowid` is
+                        // DuckDB's own and is stable within a snapshot, which is
+                        // all a deterministic sample needs.
+                        id_expr: "cast(rowid as varchar)".to_string(),
+                        proportion: p,
+                        seed: sample_seed,
+                    })
+                }
+                Some(p) => anyhow::bail!("--sample must be in (0, 1], got {p}"),
+                None => None,
+            };
+            let report = crate::profile::run_profile(
+                &session,
+                subject,
+                source.as_deref(),
+                tier,
+                &dedupe_core::profile::ProfileOptions {
+                    exact_distinct,
+                    sample,
+                },
+                !config.entity_type.is_person(),
+                &run_at,
+            )?;
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
     }

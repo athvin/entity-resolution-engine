@@ -33,6 +33,7 @@ serde = { workspace = true, features = ["derive"] }
 er-compile = { version = "0.1.0", path = "../er-compile" }
 er-entity-diff = { version = "0.1.0", path = "../er-entity-diff" }
 er-obs = { version = "0.1.0", path = "../er-obs" }
+er-profile = { version = "0.1.0", path = "../er-profile" }
 
 [dev-dependencies]
 er-hash = { path = "../er-hash" }

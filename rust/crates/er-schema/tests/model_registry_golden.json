@@ -5,6 +5,9 @@
   "scored_records",
   "metric_snapshots",
   "metric_snapshot_sources",
+  "profile_runs",
+  "column_profiles",
+  "profile_findings",
   "record_qualities",
   "entity_membership",
   "entities",
@@ -393,6 +396,178 @@
       "rec_b_key"
      ],
      "where": "active"
+    }
+   ],
+   "owner": "ddl"
+  },
+  "column_profiles": {
+   "columns": [
+    {
+     "name": "id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "profile_run_id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "column_name",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "row_count",
+     "nullable": false,
+     "type": "BIGINT"
+    },
+    {
+     "name": "total_row_count",
+     "nullable": false,
+     "type": "BIGINT"
+    },
+    {
+     "name": "non_null_count",
+     "nullable": false,
+     "type": "BIGINT"
+    },
+    {
+     "name": "blank_count",
+     "nullable": false,
+     "type": "BIGINT"
+    },
+    {
+     "name": "distinct_approx",
+     "nullable": false,
+     "type": "BIGINT"
+    },
+    {
+     "name": "distinct_exact",
+     "nullable": true,
+     "type": "BIGINT"
+    },
+    {
+     "name": "distinct_normalized",
+     "nullable": true,
+     "type": "BIGINT"
+    },
+    {
+     "name": "len_min",
+     "nullable": true,
+     "type": "BIGINT"
+    },
+    {
+     "name": "len_max",
+     "nullable": true,
+     "type": "BIGINT"
+    },
+    {
+     "name": "len_avg",
+     "nullable": true,
+     "type": "DOUBLE"
+    },
+    {
+     "name": "len_p50",
+     "nullable": true,
+     "type": "BIGINT"
+    },
+    {
+     "name": "len_p95",
+     "nullable": true,
+     "type": "BIGINT"
+    },
+    {
+     "name": "lex_min",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "lex_max",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "num_min",
+     "nullable": true,
+     "type": "DOUBLE"
+    },
+    {
+     "name": "num_max",
+     "nullable": true,
+     "type": "DOUBLE"
+    },
+    {
+     "name": "num_avg",
+     "nullable": true,
+     "type": "DOUBLE"
+    },
+    {
+     "name": "num_std",
+     "nullable": true,
+     "type": "DOUBLE"
+    },
+    {
+     "name": "cast_bigint",
+     "nullable": false,
+     "type": "BIGINT"
+    },
+    {
+     "name": "cast_double",
+     "nullable": false,
+     "type": "BIGINT"
+    },
+    {
+     "name": "cast_date",
+     "nullable": false,
+     "type": "BIGINT"
+    },
+    {
+     "name": "cast_timestamp",
+     "nullable": false,
+     "type": "BIGINT"
+    },
+    {
+     "name": "cast_boolean",
+     "nullable": false,
+     "type": "BIGINT"
+    },
+    {
+     "name": "entropy_bits",
+     "nullable": true,
+     "type": "DOUBLE"
+    },
+    {
+     "name": "top_values",
+     "nullable": true,
+     "type": "JSON"
+    },
+    {
+     "name": "created_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
+    },
+    {
+     "name": "updated_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
+    }
+   ],
+   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.column_profiles (\n  id VARCHAR NOT NULL,\n  profile_run_id VARCHAR NOT NULL,\n  column_name VARCHAR NOT NULL,\n  row_count BIGINT NOT NULL,\n  total_row_count BIGINT NOT NULL,\n  non_null_count BIGINT NOT NULL,\n  blank_count BIGINT NOT NULL,\n  distinct_approx BIGINT NOT NULL,\n  distinct_exact BIGINT,\n  distinct_normalized BIGINT,\n  len_min BIGINT,\n  len_max BIGINT,\n  len_avg DOUBLE,\n  len_p50 BIGINT,\n  len_p95 BIGINT,\n  lex_min VARCHAR,\n  lex_max VARCHAR,\n  num_min DOUBLE,\n  num_max DOUBLE,\n  num_avg DOUBLE,\n  num_std DOUBLE,\n  cast_bigint BIGINT NOT NULL,\n  cast_double BIGINT NOT NULL,\n  cast_date BIGINT NOT NULL,\n  cast_timestamp BIGINT NOT NULL,\n  cast_boolean BIGINT NOT NULL,\n  entropy_bits DOUBLE,\n  top_values JSON,\n  created_at TIMESTAMP NOT NULL,\n  updated_at TIMESTAMP NOT NULL\n);",
+   "enums": {},
+   "keys": [
+    {
+     "columns": [
+      "id"
+     ],
+     "where": null
+    },
+    {
+     "columns": [
+      "profile_run_id",
+      "column_name"
+     ],
+     "where": null
     }
    ],
    "owner": "ddl"
@@ -1426,6 +1601,188 @@
     {
      "columns": [
       "run_id"
+     ],
+     "where": null
+    }
+   ],
+   "owner": "ddl"
+  },
+  "profile_findings": {
+   "columns": [
+    {
+     "name": "id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "profile_run_id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "code",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "column_name",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "severity",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "message",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "detail",
+     "nullable": true,
+     "type": "JSON"
+    },
+    {
+     "name": "created_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
+    },
+    {
+     "name": "updated_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
+    }
+   ],
+   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.profile_findings (\n  id VARCHAR NOT NULL,\n  profile_run_id VARCHAR NOT NULL,\n  code VARCHAR NOT NULL,\n  column_name VARCHAR NOT NULL,\n  severity VARCHAR NOT NULL,\n  message VARCHAR NOT NULL,\n  detail JSON,\n  created_at TIMESTAMP NOT NULL,\n  updated_at TIMESTAMP NOT NULL\n);",
+   "enums": {},
+   "keys": [
+    {
+     "columns": [
+      "id"
+     ],
+     "where": null
+    },
+    {
+     "columns": [
+      "profile_run_id",
+      "code",
+      "column_name"
+     ],
+     "where": null
+    }
+   ],
+   "owner": "ddl"
+  },
+  "profile_runs": {
+   "columns": [
+    {
+     "name": "id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "subject",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "source_system",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "snapshot",
+     "nullable": false,
+     "type": "BIGINT"
+    },
+    {
+     "name": "tier",
+     "nullable": false,
+     "type": "BIGINT"
+    },
+    {
+     "name": "ingest_batch_id",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "corpus_digest",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "row_count",
+     "nullable": false,
+     "type": "BIGINT"
+    },
+    {
+     "name": "column_count",
+     "nullable": false,
+     "type": "BIGINT"
+    },
+    {
+     "name": "config_hash",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "model_version",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "sampled",
+     "nullable": false,
+     "type": "BOOLEAN"
+    },
+    {
+     "name": "sample_proportion",
+     "nullable": true,
+     "type": "DOUBLE"
+    },
+    {
+     "name": "sample_seed",
+     "nullable": true,
+     "type": "BIGINT"
+    },
+    {
+     "name": "duration_ms",
+     "nullable": false,
+     "type": "BIGINT"
+    },
+    {
+     "name": "captured_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
+    },
+    {
+     "name": "created_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
+    },
+    {
+     "name": "updated_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
+    }
+   ],
+   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.profile_runs (\n  id VARCHAR NOT NULL,\n  subject VARCHAR NOT NULL,\n  source_system VARCHAR NOT NULL,\n  snapshot BIGINT NOT NULL,\n  tier BIGINT NOT NULL,\n  ingest_batch_id VARCHAR,\n  corpus_digest VARCHAR NOT NULL,\n  row_count BIGINT NOT NULL,\n  column_count BIGINT NOT NULL,\n  config_hash VARCHAR,\n  model_version VARCHAR,\n  sampled BOOLEAN NOT NULL,\n  sample_proportion DOUBLE,\n  sample_seed BIGINT,\n  duration_ms BIGINT NOT NULL,\n  captured_at TIMESTAMP NOT NULL,\n  created_at TIMESTAMP NOT NULL,\n  updated_at TIMESTAMP NOT NULL\n);",
+   "enums": {},
+   "keys": [
+    {
+     "columns": [
+      "id"
+     ],
+     "where": null
+    },
+    {
+     "columns": [
+      "subject",
+      "source_system",
+      "corpus_digest",
+      "tier"
      ],
      "where": null
     }

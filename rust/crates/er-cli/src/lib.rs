@@ -18,6 +18,7 @@
 /// shipping three copies of statically-linked DuckDB — see `rust/Dockerfile`
 /// and the multicall dispatch in `er-server`'s `main`.
 pub mod cli;
+pub mod profile;
 pub mod related;
 
 use std::path::Path;

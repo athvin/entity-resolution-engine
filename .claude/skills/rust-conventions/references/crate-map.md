@@ -26,7 +26,7 @@ Bumping `arrow` or `datafusion` alone can never go green; dependabot is
 configured to leave them alone and the unblocker is upstream.
 
 <!-- BEGIN GENERATED: crate-map -->
-**32 crates.** The cargo workspace root is `rust/`, not the repo root.
+**33 crates.** The cargo workspace root is `rust/`, not the repo root.
 
 | Crate | Purpose |
 |---|---|
@@ -54,6 +54,7 @@ configured to leave them alone and the unblocker is upstream.
 | `er-mcp` | `er-mcp` — an MCP server over the control API, for one tenant (O10) |
 | `er-obs` | Observability: installing the subscriber, plus the S5.2 counter vocabulary and structured stage log line (ports of `src/er/obs/counters.py` and `src/er/obs/logging.py`) |
 | `er-pg-tls` | `er-pg-tls` — the TLS connector for every Postgres client in the workspace |
+| `er-profile` | The dataset profiler's findings pass |
 | `er-reconcile` | The reconcile / entity-resolution stage (port of `src/er/entities/*` + `src/er/review/*`, DesignDoc.md S4.5) |
 | `er-schema` | The S5 schema registry (Rust port of `src/er/lake/*`), dependency-free so `config`/`golden`/tests can consume it without pulling a DB into their graph |
 | `er-server` | `er-server` — the Rust control plane (P3), an axum port of the Python `erserver` FastAPI app (`server/src/erserver/api.py`) |
