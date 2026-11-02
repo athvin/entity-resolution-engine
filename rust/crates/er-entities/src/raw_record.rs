@@ -95,6 +95,12 @@ pub struct AppendRow {
 pub fn append_rows(conn: &::duckdb::Connection, rows: &[AppendRow]) -> ::duckdb::Result<usize> {
     const COLS: usize = 11;
     const CHUNK: usize = 500;
+    let __span = ::er_span::generator_span(
+        ::er_span::Store::Lake,
+        "raw_record.append_rows",
+        "INSERT INTO lake.main.raw_records VALUES (…)",
+    );
+    let __entered = __span.enter();
     for chunk in rows.chunks(CHUNK) {
         let mut tuples = Vec::with_capacity(chunk.len());
         for i in 0..chunk.len() {
@@ -122,8 +128,10 @@ pub fn append_rows(conn: &::duckdb::Connection, rows: &[AppendRow]) -> ::duckdb:
             params.push(&row.created_at);
             params.push(&row.updated_at);
         }
-        conn.execute(&sql, params.as_slice())?;
+        ::er_span::check(&__span, conn.execute(&sql, params.as_slice()))?;
     }
+    ::er_span::rows(&__span, rows.len() as u64);
+    drop(__entered);
     Ok(rows.len())
 }
 
@@ -133,7 +141,22 @@ pub mod delete {
     pub fn by_batch(conn: &::duckdb::Connection, ingest_batch_id: &str) -> ::duckdb::Result<usize> {
         const SQL: &str = "DELETE FROM lake.main.raw_records WHERE ingest_batch_id = $1
 ";
-        conn.execute(SQL, ::duckdb::params![ingest_batch_id])
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "raw_record",
+            "delete",
+            "by_batch",
+            "raw_records",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(
+            &__span,
+            conn.execute(SQL, ::duckdb::params![ingest_batch_id]),
+        )?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
     }
 }
 
@@ -230,10 +253,23 @@ SELECT
 FROM this_batch tb
 LEFT JOIN prior_latest p ON tb.source_record_id = p.source_record_id
 ";
-        let mut stmt = conn.prepare(SQL)?;
-        let batches = stmt
-            .query_arrow(::duckdb::params![source, batch, tombstone_hash])?
-            .collect::<Vec<_>>();
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "raw_record",
+            "read",
+            "batch_receipt_live",
+            "raw_records",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let mut stmt = ::er_span::check(&__span, conn.prepare(SQL))?;
+        let batches = ::er_span::check(
+            &__span,
+            stmt.query_arrow(::duckdb::params![source, batch, tombstone_hash]),
+        )?
+        .collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
         BatchReceiptLiveRow::from_batches(&batches)
     }
 
@@ -291,10 +327,21 @@ WHERE source_system = $1 AND ingest_batch_id <> $2
   )
 ORDER BY source_record_id
 ";
-        let mut stmt = conn.prepare(SQL)?;
-        let batches = stmt
-            .query_arrow(::duckdb::params![source, batch])?
-            .collect::<Vec<_>>();
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "raw_record",
+            "read",
+            "omitted_keys_live",
+            "raw_records",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let mut stmt = ::er_span::check(&__span, conn.prepare(SQL))?;
+        let batches =
+            ::er_span::check(&__span, stmt.query_arrow(::duckdb::params![source, batch]))?
+                .collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
         OmittedKeysLiveRow::from_batches(&batches)
     }
 }

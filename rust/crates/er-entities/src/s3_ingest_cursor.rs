@@ -84,8 +84,17 @@ ON CONFLICT (org_id, source) DO UPDATE SET
 RETURNING id, org_id, dataset_id, source, object_key, etag, size_bytes, delivery_id,
           created_at, updated_at
 ";
-        let rows = client
-            .query(
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "s3_ingest_cursor",
+            "create",
+            "advance",
+            "s3_ingest_cursors",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.query(
                 SQL,
                 &[
                     &cursor_id,
@@ -97,8 +106,12 @@ RETURNING id, org_id, dataset_id, source, object_key, etag, size_bytes, delivery
                     &size_bytes,
                     &delivery_id,
                 ],
-            )
-            .await?;
+            ),
+        )
+        .await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::S3IngestCursor {
@@ -138,7 +151,18 @@ FROM public.s3_ingest_cursors
 WHERE org_id = $1
 ORDER BY source
 ";
-        let rows = client.query(SQL, &[&org_id]).await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "s3_ingest_cursor",
+            "read",
+            "by_org",
+            "s3_ingest_cursors",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.query(SQL, &[&org_id])).await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::S3IngestCursor {
@@ -168,6 +192,18 @@ SET dataset_id = d.id, updated_at = now()
 FROM public.datasets d
 WHERE d.org_id = c.org_id AND d.name = 'default' AND c.dataset_id IS NULL
 ";
-        client.execute(SQL, &[]).await
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "s3_ingest_cursor",
+            "update",
+            "backfill_dataset",
+            "s3_ingest_cursors",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.execute(SQL, &[])).await;
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, __n);
+        Ok(__n)
     }
 }

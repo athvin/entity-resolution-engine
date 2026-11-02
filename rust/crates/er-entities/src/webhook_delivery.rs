@@ -90,8 +90,17 @@ VALUES ($1, $2, $3, $4, $5, $6, 'pending', 0, $7)
 RETURNING id, org_id, dataset_id, webhook_id, event_type, payload, state, attempt, max_attempts,
           next_attempt_at, response_code, error, delivered_at, created_at, updated_at
 ";
-        let rows = client
-            .query(
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "webhook_delivery",
+            "create",
+            "enqueue",
+            "webhook_deliveries",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.query(
                 SQL,
                 &[
                     &id,
@@ -102,8 +111,12 @@ RETURNING id, org_id, dataset_id, webhook_id, event_type, payload, state, attemp
                     &payload,
                     &max_attempts,
                 ],
-            )
-            .await?;
+            ),
+        )
+        .await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::WebhookDelivery {
@@ -151,9 +164,22 @@ WHERE org_id = $1
 ORDER BY created_at DESC, id DESC
 LIMIT $4
 ";
-        let rows = client
-            .query(SQL, &[&org_id, &webhook_id, &state, &limit])
-            .await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "webhook_delivery",
+            "read",
+            "page",
+            "webhook_deliveries",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.query(SQL, &[&org_id, &webhook_id, &state, &limit]),
+        )
+        .await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::WebhookDelivery {
@@ -196,7 +222,18 @@ WHERE id = (
 RETURNING id, org_id, dataset_id, webhook_id, event_type, payload, state, attempt, max_attempts,
           next_attempt_at, response_code, error, delivered_at, created_at, updated_at
 ";
-        let rows = client.query(SQL, &[]).await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "webhook_delivery",
+            "update",
+            "claim",
+            "webhook_deliveries",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.query(SQL, &[])).await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::WebhookDelivery {
@@ -250,12 +287,25 @@ WHERE id = $5
 RETURNING id, org_id, dataset_id, webhook_id, event_type, payload, state, attempt, max_attempts,
           next_attempt_at, response_code, error, delivered_at, created_at, updated_at
 ";
-        let rows = client
-            .query(
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "webhook_delivery",
+            "update",
+            "settle",
+            "webhook_deliveries",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.query(
                 SQL,
                 &[&delivered, &retryable, &response_code, &error, &delivery_id],
-            )
-            .await?;
+            ),
+        )
+        .await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::WebhookDelivery {

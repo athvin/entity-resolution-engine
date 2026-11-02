@@ -87,8 +87,20 @@ pub mod read {
         const SQL: &str = "SELECT count(*) AS n
 FROM lake.main.entities
 ";
-        let mut stmt = conn.prepare(SQL)?;
-        let batches = stmt.query_arrow(::duckdb::params![])?.collect::<Vec<_>>();
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "resolved_entity",
+            "read",
+            "count_live",
+            "entities",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let mut stmt = ::er_span::check(&__span, conn.prepare(SQL))?;
+        let batches =
+            ::er_span::check(&__span, stmt.query_arrow(::duckdb::params![]))?.collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
         CountLiveRow::from_batches(&batches)
     }
 
@@ -135,8 +147,20 @@ GROUP BY e.id
 HAVING count(m.record_key) = 0
 ORDER BY e.id
 ";
-        let mut stmt = conn.prepare(SQL)?;
-        let batches = stmt.query_arrow(::duckdb::params![])?.collect::<Vec<_>>();
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "resolved_entity",
+            "read",
+            "orphaned_live",
+            "entities",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let mut stmt = ::er_span::check(&__span, conn.prepare(SQL))?;
+        let batches =
+            ::er_span::check(&__span, stmt.query_arrow(::duckdb::params![]))?.collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
         OrphanedLiveRow::from_batches(&batches)
     }
 }
@@ -159,6 +183,21 @@ WHEN NOT MATCHED THEN INSERT
     VALUES (source.entity_id, source.status, source.merged_into,
             $1::timestamp, $1::timestamp, $2, $2)
 ";
-        conn.execute(SQL, ::duckdb::params![updated_at, run_id])
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "resolved_entity",
+            "update",
+            "upsert_from_src",
+            "entities",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(
+            &__span,
+            conn.execute(SQL, ::duckdb::params![updated_at, run_id]),
+        )?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
     }
 }

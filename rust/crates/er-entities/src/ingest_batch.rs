@@ -99,22 +99,37 @@ VALUES ($1, $2, $3, $4, $5, $6,
   $7, $8, $9, $10, $11::timestamp,
   $11::timestamp)
 ";
-        conn.execute(
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "ingest_batch",
+            "create",
+            "receipt",
+            "ingest_batches",
             SQL,
-            ::duckdb::params![
-                ingest_batch_id,
-                run_id,
-                source_system,
-                path,
-                new_count,
-                changed_count,
-                unchanged_count,
-                tombstone_count,
-                resurrected_count,
-                full_refresh_keys,
-                created_at
-            ],
-        )
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(
+            &__span,
+            conn.execute(
+                SQL,
+                ::duckdb::params![
+                    ingest_batch_id,
+                    run_id,
+                    source_system,
+                    path,
+                    new_count,
+                    changed_count,
+                    unchanged_count,
+                    tombstone_count,
+                    resurrected_count,
+                    full_refresh_keys,
+                    created_at
+                ],
+            ),
+        )?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
     }
 }
 
@@ -124,7 +139,19 @@ pub mod delete {
     pub fn by_run(conn: &::duckdb::Connection, run_id: &str) -> ::duckdb::Result<usize> {
         const SQL: &str = "DELETE FROM lake.main.ingest_batches WHERE run_id = $1
 ";
-        conn.execute(SQL, ::duckdb::params![run_id])
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "ingest_batch",
+            "delete",
+            "by_run",
+            "ingest_batches",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, conn.execute(SQL, ::duckdb::params![run_id]))?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
     }
 }
 
@@ -291,11 +318,24 @@ WHERE ($1 IS NULL OR source_system = $1)
 ORDER BY id
 LIMIT $3
 ";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "ingest_batch",
+            "read",
+            "page",
+            "ingest_batches",
+            SQL,
+        );
+        let __entered = __span.enter();
         let sql = SQL.replace("{snapshot}", &snapshot.to_string());
-        let mut stmt = conn.prepare(&sql)?;
-        let batches = stmt
-            .query_arrow(::duckdb::params![source, after, limit])?
-            .collect::<Vec<_>>();
+        let mut stmt = ::er_span::check(&__span, conn.prepare(&sql))?;
+        let batches = ::er_span::check(
+            &__span,
+            stmt.query_arrow(::duckdb::params![source, after, limit]),
+        )?
+        .collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
         PageRow::from_batches(&batches)
     }
 
@@ -458,11 +498,22 @@ WHERE ($1 IS NULL OR source_system = $1)
 ORDER BY created_at DESC, id DESC
 LIMIT $2
 ";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "ingest_batch",
+            "read",
+            "recent",
+            "ingest_batches",
+            SQL,
+        );
+        let __entered = __span.enter();
         let sql = SQL.replace("{snapshot}", &snapshot.to_string());
-        let mut stmt = conn.prepare(&sql)?;
-        let batches = stmt
-            .query_arrow(::duckdb::params![source, limit])?
-            .collect::<Vec<_>>();
+        let mut stmt = ::er_span::check(&__span, conn.prepare(&sql))?;
+        let batches =
+            ::er_span::check(&__span, stmt.query_arrow(::duckdb::params![source, limit]))?
+                .collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
         RecentRow::from_batches(&batches)
     }
 }
@@ -486,15 +537,30 @@ pub mod update {
        updated_at = $4::timestamp
  WHERE id = $5
 ";
-        conn.execute(
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "ingest_batch",
+            "update",
+            "screening",
+            "ingest_batches",
             SQL,
-            ::duckdb::params![
-                matched_count,
-                review_count,
-                unmatched_count,
-                screened_at,
-                ingest_batch_id
-            ],
-        )
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(
+            &__span,
+            conn.execute(
+                SQL,
+                ::duckdb::params![
+                    matched_count,
+                    review_count,
+                    unmatched_count,
+                    screened_at,
+                    ingest_batch_id
+                ],
+            ),
+        )?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
     }
 }

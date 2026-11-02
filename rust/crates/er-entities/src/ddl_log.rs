@@ -80,9 +80,22 @@ WHERE ($1::text IS NULL OR ddl_tag = $1)
 ORDER BY id DESC
 LIMIT $4
 ";
-        let rows = client
-            .query(SQL, &[&ddl_tag, &object_identity, &before_id, &limit])
-            .await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "ddl_log",
+            "read",
+            "page",
+            "ddl_log",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.query(SQL, &[&ddl_tag, &object_identity, &before_id, &limit]),
+        )
+        .await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::DdlLog {

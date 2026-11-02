@@ -202,6 +202,15 @@ fn emit_append_rows(out: &mut String, entity: &Entity) {
     out.push_str(") -> ::duckdb::Result<usize> {\n");
     out.push_str(&format!("    const COLS: usize = {cols};\n"));
     out.push_str("    const CHUNK: usize = 500;\n");
+    // One span for the whole append. The SQL here is assembled at runtime
+    // (500 placeholder tuples joined), so it can never be exported as
+    // `db.query.text` — `generator_span` carries a compile-time summary and the
+    // relation instead. See er-span's module docs for the three-class rule.
+    out.push_str(&format!(
+        "    let __span = ::er_span::generator_span(\n        ::er_span::Store::Lake,\n        \"{}.append_rows\",\n        \"INSERT INTO lake.main.{} VALUES (…)\",\n    );\n",
+        entity.name, entity.relation
+    ));
+    out.push_str("    let __entered = __span.enter();\n");
     out.push_str("    for chunk in rows.chunks(CHUNK) {\n");
     out.push_str("        let mut tuples = Vec::with_capacity(chunk.len());\n");
     out.push_str("        for i in 0..chunk.len() {\n");
@@ -222,8 +231,10 @@ fn emit_append_rows(out: &mut String, entity: &Entity) {
         out.push_str(&format!("            params.push(&row.{});\n", column.name));
     }
     out.push_str("        }\n");
-    out.push_str("        conn.execute(&sql, params.as_slice())?;\n");
+    out.push_str("        ::er_span::check(&__span, conn.execute(&sql, params.as_slice()))?;\n");
     out.push_str("    }\n");
+    out.push_str("    ::er_span::rows(&__span, rows.len() as u64);\n");
+    out.push_str("    drop(__entered);\n");
     out.push_str("    Ok(rows.len())\n");
     out.push_str("}\n");
 }

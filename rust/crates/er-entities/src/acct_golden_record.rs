@@ -198,11 +198,21 @@ pub mod read {
 FROM lake.main.acct_golden_records AT (VERSION => {snapshot})
 WHERE id = $1
 ";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "acct_golden_record",
+            "read",
+            "by_id",
+            "acct_golden_records",
+            SQL,
+        );
+        let __entered = __span.enter();
         let sql = SQL.replace("{snapshot}", &snapshot.to_string());
-        let mut stmt = conn.prepare(&sql)?;
-        let batches = stmt
-            .query_arrow(::duckdb::params![entity_id])?
+        let mut stmt = ::er_span::check(&__span, conn.prepare(&sql))?;
+        let batches = ::er_span::check(&__span, stmt.query_arrow(::duckdb::params![entity_id]))?
             .collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
         ByIdRow::from_batches(&batches)
     }
 
@@ -237,11 +247,24 @@ WHERE ($1 IS NULL OR id > $1)
 ORDER BY id
 LIMIT $3
 ";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "acct_golden_record",
+            "read",
+            "list_page",
+            "acct_golden_records",
+            SQL,
+        );
+        let __entered = __span.enter();
         let sql = SQL.replace("{snapshot}", &snapshot.to_string());
-        let mut stmt = conn.prepare(&sql)?;
-        let batches = stmt
-            .query_arrow(::duckdb::params![after, q, limit])?
-            .collect::<Vec<_>>();
+        let mut stmt = ::er_span::check(&__span, conn.prepare(&sql))?;
+        let batches = ::er_span::check(
+            &__span,
+            stmt.query_arrow(::duckdb::params![after, q, limit]),
+        )?
+        .collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
         Ok(batches)
     }
 
@@ -299,11 +322,21 @@ LIMIT $3
 FROM lake.main.acct_golden_records AT (VERSION => {snapshot})
 WHERE id >= $1 AND id <= $2
 ";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "acct_golden_record",
+            "read",
+            "preview_in_range",
+            "acct_golden_records",
+            SQL,
+        );
+        let __entered = __span.enter();
         let sql = SQL.replace("{snapshot}", &snapshot.to_string());
-        let mut stmt = conn.prepare(&sql)?;
-        let batches = stmt
-            .query_arrow(::duckdb::params![first, last])?
+        let mut stmt = ::er_span::check(&__span, conn.prepare(&sql))?;
+        let batches = ::er_span::check(&__span, stmt.query_arrow(::duckdb::params![first, last]))?
             .collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
         PreviewInRangeRow::from_batches(&batches)
     }
 }

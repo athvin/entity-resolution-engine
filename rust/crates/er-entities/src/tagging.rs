@@ -70,8 +70,17 @@ pub mod create {
 VALUES ($1, $2, $3, $4, $5, $6, $7)
 ON CONFLICT (org_id, tag_id, subject_type, subject_id) DO NOTHING
 ";
-        client
-            .execute(
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "tagging",
+            "create",
+            "apply",
+            "taggings",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.execute(
                 SQL,
                 &[
                     &tagging_id,
@@ -82,8 +91,13 @@ ON CONFLICT (org_id, tag_id, subject_type, subject_id) DO NOTHING
                     &subject_id,
                     &created_by,
                 ],
-            )
-            .await
+            ),
+        )
+        .await;
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, __n);
+        Ok(__n)
     }
 }
 
@@ -103,9 +117,23 @@ WHERE org_id = $1
   AND subject_type = $3
   AND subject_id = $4
 ";
-        client
-            .execute(SQL, &[&org_id, &tag_id, &subject_type, &subject_id])
-            .await
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "tagging",
+            "delete",
+            "unapply",
+            "taggings",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.execute(SQL, &[&org_id, &tag_id, &subject_type, &subject_id]),
+        )
+        .await;
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, __n);
+        Ok(__n)
     }
 }
 
@@ -127,9 +155,22 @@ WHERE org_id = $1
 ORDER BY subject_type, subject_id
 LIMIT $4
 ";
-        let rows = client
-            .query(SQL, &[&org_id, &tag_id, &subject_type, &limit])
-            .await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "tagging",
+            "read",
+            "subjects_by_tag",
+            "taggings",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.query(SQL, &[&org_id, &tag_id, &subject_type, &limit]),
+        )
+        .await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::Tagging {
@@ -158,6 +199,18 @@ SET dataset_id = d.id, updated_at = now()
 FROM public.datasets d
 WHERE d.org_id = c.org_id AND d.name = 'default' AND c.dataset_id IS NULL
 ";
-        client.execute(SQL, &[]).await
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "tagging",
+            "update",
+            "backfill_dataset",
+            "taggings",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.execute(SQL, &[])).await;
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, __n);
+        Ok(__n)
     }
 }

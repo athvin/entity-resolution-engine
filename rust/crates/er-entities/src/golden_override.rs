@@ -68,17 +68,32 @@ VALUES (sha256('golden_overrides:' || $1 || ':' || $2),
         $1, $2, $3, $4, $5::timestamp,
         $6, $5::timestamp)
 ";
-        conn.execute(
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "golden_override",
+            "create",
+            "set",
+            "golden_overrides",
             SQL,
-            ::duckdb::params![
-                entity_id,
-                attribute,
-                value,
-                created_by,
-                created_at,
-                source_action_id
-            ],
-        )
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(
+            &__span,
+            conn.execute(
+                SQL,
+                ::duckdb::params![
+                    entity_id,
+                    attribute,
+                    value,
+                    created_by,
+                    created_at,
+                    source_action_id
+                ],
+            ),
+        )?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
     }
 }
 
@@ -93,6 +108,21 @@ pub mod delete {
         const SQL: &str =
             "DELETE FROM lake.main.golden_overrides WHERE entity_id = $1 AND attribute = $2
 ";
-        conn.execute(SQL, ::duckdb::params![entity_id, attribute])
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "golden_override",
+            "delete",
+            "clear",
+            "golden_overrides",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(
+            &__span,
+            conn.execute(SQL, ::duckdb::params![entity_id, attribute]),
+        )?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
     }
 }

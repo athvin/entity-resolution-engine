@@ -2035,6 +2035,7 @@ dependencies = [
  "chrono",
  "duckdb",
  "er-entity-spec",
+ "er-span",
  "serde",
  "serde_json",
  "serde_norway",

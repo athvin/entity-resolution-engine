@@ -60,7 +60,19 @@ pub mod delete {
         const SQL: &str = "DELETE FROM lake.main.entity_membership
 WHERE record_key NOT IN (SELECT record_key FROM __membership_live)
 ";
-        conn.execute(SQL, ::duckdb::params![])
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "entity_membership",
+            "delete",
+            "absent_from_corpus",
+            "entity_membership",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, conn.execute(SQL, ::duckdb::params![]))?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
     }
 }
 
@@ -115,8 +127,20 @@ pub mod read {
 FROM lake.main.entity_membership
 ORDER BY entity_id, record_key
 ";
-        let mut stmt = conn.prepare(SQL)?;
-        let batches = stmt.query_arrow(::duckdb::params![])?.collect::<Vec<_>>();
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "entity_membership",
+            "read",
+            "all_pairs_live",
+            "entity_membership",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let mut stmt = ::er_span::check(&__span, conn.prepare(SQL))?;
+        let batches =
+            ::er_span::check(&__span, stmt.query_arrow(::duckdb::params![]))?.collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
         AllPairsLiveRow::from_batches(&batches)
     }
 
@@ -208,11 +232,21 @@ FROM lake.main.entity_membership AT (VERSION => {snapshot})
 WHERE entity_id = $1
 ORDER BY record_key
 ";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "entity_membership",
+            "read",
+            "by_entity",
+            "entity_membership",
+            SQL,
+        );
+        let __entered = __span.enter();
         let sql = SQL.replace("{snapshot}", &snapshot.to_string());
-        let mut stmt = conn.prepare(&sql)?;
-        let batches = stmt
-            .query_arrow(::duckdb::params![entity_id])?
+        let mut stmt = ::er_span::check(&__span, conn.prepare(&sql))?;
+        let batches = ::er_span::check(&__span, stmt.query_arrow(::duckdb::params![entity_id]))?
             .collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
         ByEntityRow::from_batches(&batches)
     }
 
@@ -270,9 +304,21 @@ FROM (
   HAVING count(*) >= 2
 ) g
 ";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "entity_membership",
+            "read",
+            "dup_group_stats",
+            "entity_membership",
+            SQL,
+        );
+        let __entered = __span.enter();
         let sql = SQL.replace("{snapshot}", &snapshot.to_string());
-        let mut stmt = conn.prepare(&sql)?;
-        let batches = stmt.query_arrow(::duckdb::params![])?.collect::<Vec<_>>();
+        let mut stmt = ::er_span::check(&__span, conn.prepare(&sql))?;
+        let batches =
+            ::er_span::check(&__span, stmt.query_arrow(::duckdb::params![]))?.collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
         DupGroupStatsRow::from_batches(&batches)
     }
 
@@ -334,11 +380,24 @@ HAVING count(*) >= CASE
 ORDER BY entity_id
 LIMIT $3
 ";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "entity_membership",
+            "read",
+            "duplicate_groups_page",
+            "entity_membership",
+            SQL,
+        );
+        let __entered = __span.enter();
         let sql = SQL.replace("{snapshot}", &snapshot.to_string());
-        let mut stmt = conn.prepare(&sql)?;
-        let batches = stmt
-            .query_arrow(::duckdb::params![after, min_members, limit])?
-            .collect::<Vec<_>>();
+        let mut stmt = ::er_span::check(&__span, conn.prepare(&sql))?;
+        let batches = ::er_span::check(
+            &__span,
+            stmt.query_arrow(::duckdb::params![after, min_members, limit]),
+        )?
+        .collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
         DuplicateGroupsPageRow::from_batches(&batches)
     }
 
@@ -385,11 +444,21 @@ LIMIT $3
 FROM lake.main.entity_membership AT (VERSION => {snapshot})
 WHERE record_key = $1
 ";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "entity_membership",
+            "read",
+            "entity_of_key",
+            "entity_membership",
+            SQL,
+        );
+        let __entered = __span.enter();
         let sql = SQL.replace("{snapshot}", &snapshot.to_string());
-        let mut stmt = conn.prepare(&sql)?;
-        let batches = stmt
-            .query_arrow(::duckdb::params![record_key])?
+        let mut stmt = ::er_span::check(&__span, conn.prepare(&sql))?;
+        let batches = ::er_span::check(&__span, stmt.query_arrow(::duckdb::params![record_key]))?
             .collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
         EntityOfKeyRow::from_batches(&batches)
     }
 
@@ -441,11 +510,21 @@ FROM lake.main.entity_membership AT (VERSION => {snapshot})
 WHERE entity_id = $1
 ORDER BY record_key
 ";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "entity_membership",
+            "read",
+            "member_keys",
+            "entity_membership",
+            SQL,
+        );
+        let __entered = __span.enter();
         let sql = SQL.replace("{snapshot}", &snapshot.to_string());
-        let mut stmt = conn.prepare(&sql)?;
-        let batches = stmt
-            .query_arrow(::duckdb::params![entity_id])?
+        let mut stmt = ::er_span::check(&__span, conn.prepare(&sql))?;
+        let batches = ::er_span::check(&__span, stmt.query_arrow(::duckdb::params![entity_id]))?
             .collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
         MemberKeysRow::from_batches(&batches)
     }
 
@@ -522,11 +601,21 @@ FROM lake.main.entity_membership AT (VERSION => {snapshot})
 WHERE entity_id >= $1 AND entity_id <= $2
 ORDER BY entity_id, record_key
 ";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "entity_membership",
+            "read",
+            "members_in_range",
+            "entity_membership",
+            SQL,
+        );
+        let __entered = __span.enter();
         let sql = SQL.replace("{snapshot}", &snapshot.to_string());
-        let mut stmt = conn.prepare(&sql)?;
-        let batches = stmt
-            .query_arrow(::duckdb::params![first, last])?
+        let mut stmt = ::er_span::check(&__span, conn.prepare(&sql))?;
+        let batches = ::er_span::check(&__span, stmt.query_arrow(::duckdb::params![first, last]))?
             .collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
         MembersInRangeRow::from_batches(&batches)
     }
 }
@@ -554,6 +643,21 @@ WHEN NOT MATCHED THEN INSERT
             source.entity_id, $1::timestamp, $2,
             $1::timestamp, $1::timestamp)
 ";
-        conn.execute(SQL, ::duckdb::params![assigned_at, run_id])
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "entity_membership",
+            "update",
+            "upsert_from_src",
+            "entity_membership",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(
+            &__span,
+            conn.execute(SQL, ::duckdb::params![assigned_at, run_id]),
+        )?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
     }
 }

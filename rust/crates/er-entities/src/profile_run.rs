@@ -119,7 +119,19 @@ WHEN NOT MATCHED THEN INSERT
      source.duration_ms, source.captured_at,
      source.captured_at, source.captured_at)
 ";
-        conn.execute(SQL, ::duckdb::params![])
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "profile_run",
+            "create",
+            "upsert",
+            "profile_runs",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, conn.execute(SQL, ::duckdb::params![]))?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
     }
 }
 
@@ -220,15 +232,28 @@ WHERE subject = $1
   AND corpus_digest = $3
   AND tier = $4
 ";
-        let mut stmt = conn.prepare(SQL)?;
-        let batches = stmt
-            .query_arrow(::duckdb::params![
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "profile_run",
+            "read",
+            "cached_live",
+            "profile_runs",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let mut stmt = ::er_span::check(&__span, conn.prepare(SQL))?;
+        let batches = ::er_span::check(
+            &__span,
+            stmt.query_arrow(::duckdb::params![
                 subject,
                 source_system,
                 corpus_digest,
                 tier
-            ])?
-            .collect::<Vec<_>>();
+            ]),
+        )?
+        .collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
         CachedLiveRow::from_batches(&batches)
     }
 }

@@ -126,19 +126,34 @@ pub mod create {
 VALUES ($1, $2, $3, $4, 'running', $5::timestamp, $6, $7,
         $8, $5::timestamp, $5::timestamp)
 ";
-        conn.execute(
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "run_stage",
+            "create",
+            "start",
+            "run_stages",
             SQL,
-            ::duckdb::params![
-                id,
-                run_id,
-                stage,
-                seq,
-                started_at,
-                snapshot_start,
-                try_number,
-                task_instance_id
-            ],
-        )
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(
+            &__span,
+            conn.execute(
+                SQL,
+                ::duckdb::params![
+                    id,
+                    run_id,
+                    stage,
+                    seq,
+                    started_at,
+                    snapshot_start,
+                    try_number,
+                    task_instance_id
+                ],
+            ),
+        )?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
     }
 }
 
@@ -209,10 +224,23 @@ FROM lake.main.run_stages
 WHERE run_id = $1 AND stage = $2 AND status = 'succeeded'
   AND task_instance_id IN (SELECT unnest(string_split($3, chr(31))))
 ";
-        let mut stmt = conn.prepare(SQL)?;
-        let batches = stmt
-            .query_arrow(::duckdb::params![run_id, stage, task_instance_ids])?
-            .collect::<Vec<_>>();
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "run_stage",
+            "read",
+            "succeeded_in_lineage",
+            "run_stages",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let mut stmt = ::er_span::check(&__span, conn.prepare(SQL))?;
+        let batches = ::er_span::check(
+            &__span,
+            stmt.query_arrow(::duckdb::params![run_id, stage, task_instance_ids]),
+        )?
+        .collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
         SucceededInLineageRow::from_batches(&batches)
     }
 }
@@ -235,17 +263,32 @@ SET status = $1, ended_at = $2::timestamp, snapshot_end = $3, counters = $4::jso
     error_class = $5, error_detail = $6, updated_at = $2::timestamp
 WHERE id = $7
 ";
-        conn.execute(
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "run_stage",
+            "update",
+            "finish",
+            "run_stages",
             SQL,
-            ::duckdb::params![
-                status,
-                ended_at,
-                snapshot_end,
-                counters,
-                error_class,
-                error_detail,
-                id
-            ],
-        )
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(
+            &__span,
+            conn.execute(
+                SQL,
+                ::duckdb::params![
+                    status,
+                    ended_at,
+                    snapshot_end,
+                    counters,
+                    error_class,
+                    error_detail,
+                    id
+                ],
+            ),
+        )?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
     }
 }

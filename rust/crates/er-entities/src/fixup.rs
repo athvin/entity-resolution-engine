@@ -48,7 +48,20 @@ pub mod create {
 VALUES ($1, $2, $3)
 ON CONFLICT (name) DO NOTHING
 ";
-        client.execute(SQL, &[&id, &name, &applied_by]).await
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "fixup",
+            "create",
+            "record",
+            "fixups",
+            SQL,
+        );
+        let __result =
+            ::er_span::instrument(&__span, client.execute(SQL, &[&id, &name, &applied_by])).await;
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, __n);
+        Ok(__n)
     }
 }
 
@@ -68,7 +81,18 @@ pub mod read {
 FROM public.fixups
 WHERE name = $1
 ";
-        let rows = client.query(SQL, &[&name]).await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "fixup",
+            "read",
+            "by_name",
+            "fixups",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.query(SQL, &[&name])).await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::Fixup {

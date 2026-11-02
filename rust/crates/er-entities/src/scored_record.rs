@@ -64,7 +64,19 @@ WHERE NOT EXISTS (
      AND m.tf_snapshot_id = lake.main.scored_records.tf_snapshot_id
 )
 ";
-        conn.execute(SQL, ::duckdb::params![])
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "scored_record",
+            "delete",
+            "absent_from_live_models",
+            "scored_records",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, conn.execute(SQL, ::duckdb::params![]))?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
     }
 
     /// Retire ledger rows for records the corpus no longer has (a tombstoned or withdrawn record), so the next pass does not keep treating them as scored. Reads __scored_live — the whole current corpus — which is deliberately a DIFFERENT staging table from the upsert's __scored_src: a partial pass scores only part of the corpus, so what it may claim to have scored and what still exists are two different sets.
@@ -72,7 +84,19 @@ WHERE NOT EXISTS (
         const SQL: &str = "DELETE FROM lake.main.scored_records
 WHERE record_key NOT IN (SELECT record_key FROM __scored_live)
 ";
-        conn.execute(SQL, ::duckdb::params![])
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "scored_record",
+            "delete",
+            "absent_from_std",
+            "scored_records",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, conn.execute(SQL, ::duckdb::params![]))?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
     }
 }
 
@@ -132,8 +156,20 @@ FROM lake.main.scored_records
 GROUP BY model_version, tf_snapshot_id
 ORDER BY model_version, tf_snapshot_id
 ";
-        let mut stmt = conn.prepare(SQL)?;
-        let batches = stmt.query_arrow(::duckdb::params![])?.collect::<Vec<_>>();
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "scored_record",
+            "read",
+            "identities",
+            "scored_records",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let mut stmt = ::er_span::check(&__span, conn.prepare(SQL))?;
+        let batches =
+            ::er_span::check(&__span, stmt.query_arrow(::duckdb::params![]))?.collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
         IdentitiesRow::from_batches(&batches)
     }
 
@@ -194,8 +230,20 @@ ORDER BY model_version, tf_snapshot_id
        min(tf_snapshot_id) AS tf_snapshot_id
 FROM lake.main.scored_records
 ";
-        let mut stmt = conn.prepare(SQL)?;
-        let batches = stmt.query_arrow(::duckdb::params![])?.collect::<Vec<_>>();
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "scored_record",
+            "read",
+            "state",
+            "scored_records",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let mut stmt = ::er_span::check(&__span, conn.prepare(SQL))?;
+        let batches =
+            ::er_span::check(&__span, stmt.query_arrow(::duckdb::params![]))?.collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
         StateRow::from_batches(&batches)
     }
 }
@@ -224,6 +272,18 @@ WHEN NOT MATCHED THEN INSERT
      source.tf_snapshot_id, source.run_id, source.scored_at,
      source.scored_at, source.scored_at)
 ";
-        conn.execute(SQL, ::duckdb::params![])
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "scored_record",
+            "update",
+            "upsert_from_std",
+            "scored_records",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, conn.execute(SQL, ::duckdb::params![]))?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
     }
 }

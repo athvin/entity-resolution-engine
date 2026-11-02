@@ -76,19 +76,34 @@ pub mod create {
 VALUES ($1, $2, $3, $4, $5, $6::json, $7, $8::timestamp,
   $8::timestamp, $8::timestamp)
 ";
-        conn.execute(
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "entity_event",
+            "create",
+            "append",
+            "entity_events",
             SQL,
-            ::duckdb::params![
-                event_id,
-                seq,
-                run_id,
-                entity_id,
-                event_type,
-                details,
-                details_hash,
-                occurred_at
-            ],
-        )
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(
+            &__span,
+            conn.execute(
+                SQL,
+                ::duckdb::params![
+                    event_id,
+                    seq,
+                    run_id,
+                    entity_id,
+                    event_type,
+                    details,
+                    details_hash,
+                    occurred_at
+                ],
+            ),
+        )?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
     }
 }
 
@@ -98,7 +113,19 @@ pub mod delete {
     pub fn by_run(conn: &::duckdb::Connection, run_id: &str) -> ::duckdb::Result<usize> {
         const SQL: &str = "DELETE FROM lake.main.entity_events WHERE run_id = $1
 ";
-        conn.execute(SQL, ::duckdb::params![run_id])
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "entity_event",
+            "delete",
+            "by_run",
+            "entity_events",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, conn.execute(SQL, ::duckdb::params![run_id]))?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
     }
 }
 
@@ -190,11 +217,21 @@ FROM lake.main.entity_events AT (VERSION => {snapshot})
 WHERE entity_id = $1
 ORDER BY occurred_at, seq
 ";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "entity_event",
+            "read",
+            "by_entity",
+            "entity_events",
+            SQL,
+        );
+        let __entered = __span.enter();
         let sql = SQL.replace("{snapshot}", &snapshot.to_string());
-        let mut stmt = conn.prepare(&sql)?;
-        let batches = stmt
-            .query_arrow(::duckdb::params![entity_id])?
+        let mut stmt = ::er_span::check(&__span, conn.prepare(&sql))?;
+        let batches = ::er_span::check(&__span, stmt.query_arrow(::duckdb::params![entity_id]))?
             .collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
         ByEntityRow::from_batches(&batches)
     }
 
@@ -290,11 +327,24 @@ WHERE run_id = $1
 ORDER BY seq
 LIMIT $4
 ";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "entity_event",
+            "read",
+            "by_run",
+            "entity_events",
+            SQL,
+        );
+        let __entered = __span.enter();
         let sql = SQL.replace("{snapshot}", &snapshot.to_string());
-        let mut stmt = conn.prepare(&sql)?;
-        let batches = stmt
-            .query_arrow(::duckdb::params![run_id, event_type, after, limit])?
-            .collect::<Vec<_>>();
+        let mut stmt = ::er_span::check(&__span, conn.prepare(&sql))?;
+        let batches = ::er_span::check(
+            &__span,
+            stmt.query_arrow(::duckdb::params![run_id, event_type, after, limit]),
+        )?
+        .collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
         ByRunRow::from_batches(&batches)
     }
 
@@ -352,10 +402,20 @@ WHERE run_id = $1
 GROUP BY event_type
 ORDER BY event_type
 ";
-        let mut stmt = conn.prepare(SQL)?;
-        let batches = stmt
-            .query_arrow(::duckdb::params![run_id])?
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "entity_event",
+            "read",
+            "counts_by_kind_live",
+            "entity_events",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let mut stmt = ::er_span::check(&__span, conn.prepare(SQL))?;
+        let batches = ::er_span::check(&__span, stmt.query_arrow(::duckdb::params![run_id]))?
             .collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
         CountsByKindLiveRow::from_batches(&batches)
     }
 }

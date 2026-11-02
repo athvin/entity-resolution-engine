@@ -140,8 +140,20 @@ pub mod read {
 FROM lake.main.acct_int_std_records
 ORDER BY record_key
 ";
-        let mut stmt = conn.prepare(SQL)?;
-        let batches = stmt.query_arrow(::duckdb::params![])?.collect::<Vec<_>>();
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "acct_int_std_record",
+            "read",
+            "all_keys_live",
+            "acct_int_std_records",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let mut stmt = ::er_span::check(&__span, conn.prepare(SQL))?;
+        let batches =
+            ::er_span::check(&__span, stmt.query_arrow(::duckdb::params![]))?.collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
         AllKeysLiveRow::from_batches(&batches)
     }
 
@@ -223,10 +235,23 @@ SELECT
   count(*) FILTER (WHERE best IS NULL OR best < $4) AS unmatched_count
 FROM verdict
 ";
-        let mut stmt = conn.prepare(SQL)?;
-        let batches = stmt
-            .query_arrow(::duckdb::params![source, batch, auto_merge, review_low])?
-            .collect::<Vec<_>>();
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "acct_int_std_record",
+            "read",
+            "screening_counts",
+            "acct_int_std_records",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let mut stmt = ::er_span::check(&__span, conn.prepare(SQL))?;
+        let batches = ::er_span::check(
+            &__span,
+            stmt.query_arrow(::duckdb::params![source, batch, auto_merge, review_low]),
+        )?
+        .collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
         ScreeningCountsRow::from_batches(&batches)
     }
 }

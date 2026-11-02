@@ -192,11 +192,21 @@ pub mod read {
 FROM lake.main.review_queue AT (VERSION => {snapshot})
 WHERE id = $1
 ";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "review",
+            "read",
+            "by_id",
+            "review_queue",
+            SQL,
+        );
+        let __entered = __span.enter();
         let sql = SQL.replace("{snapshot}", &snapshot.to_string());
-        let mut stmt = conn.prepare(&sql)?;
-        let batches = stmt
-            .query_arrow(::duckdb::params![review_id])?
+        let mut stmt = ::er_span::check(&__span, conn.prepare(&sql))?;
+        let batches = ::er_span::check(&__span, stmt.query_arrow(::duckdb::params![review_id]))?
             .collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
         ByIdRow::from_batches(&batches)
     }
 
@@ -242,9 +252,21 @@ WHERE id = $1
 FROM lake.main.review_queue AT (VERSION => {snapshot})
 WHERE status = 'open'
 ";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "review",
+            "read",
+            "open_count",
+            "review_queue",
+            SQL,
+        );
+        let __entered = __span.enter();
         let sql = SQL.replace("{snapshot}", &snapshot.to_string());
-        let mut stmt = conn.prepare(&sql)?;
-        let batches = stmt.query_arrow(::duckdb::params![])?.collect::<Vec<_>>();
+        let mut stmt = ::er_span::check(&__span, conn.prepare(&sql))?;
+        let batches =
+            ::er_span::check(&__span, stmt.query_arrow(::duckdb::params![]))?.collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
         OpenCountRow::from_batches(&batches)
     }
 
@@ -380,18 +402,31 @@ WHERE ($1 IS NULL OR id > $1)
 ORDER BY id
 LIMIT $6
 ";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "review",
+            "read",
+            "page",
+            "review_queue",
+            SQL,
+        );
+        let __entered = __span.enter();
         let sql = SQL.replace("{snapshot}", &snapshot.to_string());
-        let mut stmt = conn.prepare(&sql)?;
-        let batches = stmt
-            .query_arrow(::duckdb::params![
+        let mut stmt = ::er_span::check(&__span, conn.prepare(&sql))?;
+        let batches = ::er_span::check(
+            &__span,
+            stmt.query_arrow(::duckdb::params![
                 after,
                 status,
                 reason,
                 min_probability,
                 max_probability,
                 limit
-            ])?
-            .collect::<Vec<_>>();
+            ]),
+        )?
+        .collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
         PageRow::from_batches(&batches)
     }
 
@@ -443,10 +478,20 @@ LIMIT $6
 FROM lake.main.review_queue
 WHERE id = $1
 ";
-        let mut stmt = conn.prepare(SQL)?;
-        let batches = stmt
-            .query_arrow(::duckdb::params![review_id])?
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "review",
+            "read",
+            "pair_live",
+            "review_queue",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let mut stmt = ::er_span::check(&__span, conn.prepare(SQL))?;
+        let batches = ::er_span::check(&__span, stmt.query_arrow(::duckdb::params![review_id]))?
             .collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
         PairLiveRow::from_batches(&batches)
     }
 
@@ -492,9 +537,21 @@ WHERE id = $1
 FROM lake.main.review_queue AT (VERSION => {snapshot})
 WHERE status = 'open' AND match_probability IS NULL
 ";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "review",
+            "read",
+            "unscored_open_count",
+            "review_queue",
+            SQL,
+        );
+        let __entered = __span.enter();
         let sql = SQL.replace("{snapshot}", &snapshot.to_string());
-        let mut stmt = conn.prepare(&sql)?;
-        let batches = stmt.query_arrow(::duckdb::params![])?.collect::<Vec<_>>();
+        let mut stmt = ::er_span::check(&__span, conn.prepare(&sql))?;
+        let batches =
+            ::er_span::check(&__span, stmt.query_arrow(::duckdb::params![]))?.collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
         UnscoredOpenCountRow::from_batches(&batches)
     }
 }
@@ -513,7 +570,22 @@ pub mod update {
     updated_at = $2::timestamp
 WHERE id = $3
 ";
-        conn.execute(SQL, ::duckdb::params![status, resolved_at, review_id])
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "review",
+            "update",
+            "resolve",
+            "review_queue",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(
+            &__span,
+            conn.execute(SQL, ::duckdb::params![status, resolved_at, review_id]),
+        )?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
     }
 
     /// Upsert the gray-band pair reviews from active match scores in [review_low, auto_merge): a re-run refreshes probability/waterfall/last_seen_run_id and leaves review_id/first_seen_run_id/status intact.
@@ -549,10 +621,25 @@ WHEN NOT MATCHED THEN INSERT
      source.status, source.first_seen_run_id, source.last_seen_run_id,
      source.resolved_by, source.resolved_at, $2::timestamp, $2::timestamp)
 ";
-        conn.execute(
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "review",
+            "update",
+            "upsert_gray_band",
+            "review_queue",
             SQL,
-            ::duckdb::params![run_id, created_at, review_low, auto_merge],
-        )
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(
+            &__span,
+            conn.execute(
+                SQL,
+                ::duckdb::params![run_id, created_at, review_low, auto_merge],
+            ),
+        )?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
     }
 
     /// Upsert one never-unsatisfiable escalation as an open pair review: a re-run keeps review_id/first_seen_run_id and refreshes last_seen_run_id.
@@ -585,9 +672,24 @@ WHEN NOT MATCHED THEN INSERT
      source.status, source.first_seen_run_id, source.last_seen_run_id,
      source.resolved_by, source.resolved_at, $4::timestamp, $4::timestamp)
 ";
-        conn.execute(
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "review",
+            "update",
+            "upsert_never_unsatisfiable",
+            "review_queue",
             SQL,
-            ::duckdb::params![rec_a_key, rec_b_key, run_id, created_at],
-        )
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(
+            &__span,
+            conn.execute(
+                SQL,
+                ::duckdb::params![rec_a_key, rec_b_key, run_id, created_at],
+            ),
+        )?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
     }
 }

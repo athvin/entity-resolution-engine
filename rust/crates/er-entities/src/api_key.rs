@@ -60,9 +60,23 @@ pub mod create {
         const SQL: &str = "INSERT INTO public.api_keys (id, org_id, role, key_hash)
 VALUES ($1, $2, $3, $4)
 ";
-        client
-            .execute(SQL, &[&key_id, &org_id, &role, &key_hash])
-            .await
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "api_key",
+            "create",
+            "issue",
+            "api_keys",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.execute(SQL, &[&key_id, &org_id, &role, &key_hash]),
+        )
+        .await;
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, __n);
+        Ok(__n)
     }
 }
 
@@ -84,7 +98,18 @@ pub mod read {
 FROM public.api_keys
 WHERE id = $1 AND revoked_at IS NULL
 ";
-        let rows = client.query(SQL, &[&key_id]).await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "api_key",
+            "read",
+            "live_by_id",
+            "api_keys",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.query(SQL, &[&key_id])).await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::ApiKey {
@@ -111,6 +136,19 @@ pub mod update {
         const SQL: &str = "UPDATE public.api_keys SET revoked_at = now(), updated_at = now()
 WHERE id = $1 AND org_id = $2 AND revoked_at IS NULL
 ";
-        client.execute(SQL, &[&key_id, &org_id]).await
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "api_key",
+            "update",
+            "revoke",
+            "api_keys",
+            SQL,
+        );
+        let __result =
+            ::er_span::instrument(&__span, client.execute(SQL, &[&key_id, &org_id])).await;
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, __n);
+        Ok(__n)
     }
 }

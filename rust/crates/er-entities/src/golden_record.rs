@@ -231,11 +231,21 @@ pub mod read {
 FROM lake.main.golden_records AT (VERSION => {snapshot})
 WHERE id = $1
 ";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "golden_record",
+            "read",
+            "by_id",
+            "golden_records",
+            SQL,
+        );
+        let __entered = __span.enter();
         let sql = SQL.replace("{snapshot}", &snapshot.to_string());
-        let mut stmt = conn.prepare(&sql)?;
-        let batches = stmt
-            .query_arrow(::duckdb::params![entity_id])?
+        let mut stmt = ::er_span::check(&__span, conn.prepare(&sql))?;
+        let batches = ::er_span::check(&__span, stmt.query_arrow(::duckdb::params![entity_id]))?
             .collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
         ByIdRow::from_batches(&batches)
     }
 
@@ -339,9 +349,21 @@ WHERE id = $1
        count(birth_date) AS c_birth_date
 FROM lake.main.golden_records AT (VERSION => {snapshot})
 ";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "golden_record",
+            "read",
+            "completeness_counts",
+            "golden_records",
+            SQL,
+        );
+        let __entered = __span.enter();
         let sql = SQL.replace("{snapshot}", &snapshot.to_string());
-        let mut stmt = conn.prepare(&sql)?;
-        let batches = stmt.query_arrow(::duckdb::params![])?.collect::<Vec<_>>();
+        let mut stmt = ::er_span::check(&__span, conn.prepare(&sql))?;
+        let batches =
+            ::er_span::check(&__span, stmt.query_arrow(::duckdb::params![]))?.collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
         CompletenessCountsRow::from_batches(&batches)
     }
 
@@ -383,9 +405,21 @@ FROM lake.main.golden_records AT (VERSION => {snapshot})
         const SQL: &str = "SELECT count(*) AS n
 FROM lake.main.golden_records AT (VERSION => {snapshot})
 ";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "golden_record",
+            "read",
+            "count",
+            "golden_records",
+            SQL,
+        );
+        let __entered = __span.enter();
         let sql = SQL.replace("{snapshot}", &snapshot.to_string());
-        let mut stmt = conn.prepare(&sql)?;
-        let batches = stmt.query_arrow(::duckdb::params![])?.collect::<Vec<_>>();
+        let mut stmt = ::er_span::check(&__span, conn.prepare(&sql))?;
+        let batches =
+            ::er_span::check(&__span, stmt.query_arrow(::duckdb::params![]))?.collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
         CountRow::from_batches(&batches)
     }
 
@@ -424,11 +458,24 @@ WHERE ($1 IS NULL OR id > $1)
 ORDER BY id
 LIMIT $3
 ";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "golden_record",
+            "read",
+            "list_page",
+            "golden_records",
+            SQL,
+        );
+        let __entered = __span.enter();
         let sql = SQL.replace("{snapshot}", &snapshot.to_string());
-        let mut stmt = conn.prepare(&sql)?;
-        let batches = stmt
-            .query_arrow(::duckdb::params![after, q, limit])?
-            .collect::<Vec<_>>();
+        let mut stmt = ::er_span::check(&__span, conn.prepare(&sql))?;
+        let batches = ::er_span::check(
+            &__span,
+            stmt.query_arrow(::duckdb::params![after, q, limit]),
+        )?
+        .collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
         Ok(batches)
     }
 
@@ -490,11 +537,21 @@ LIMIT $3
 FROM lake.main.golden_records AT (VERSION => {snapshot})
 WHERE id >= $1 AND id <= $2
 ";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "golden_record",
+            "read",
+            "preview_in_range",
+            "golden_records",
+            SQL,
+        );
+        let __entered = __span.enter();
         let sql = SQL.replace("{snapshot}", &snapshot.to_string());
-        let mut stmt = conn.prepare(&sql)?;
-        let batches = stmt
-            .query_arrow(::duckdb::params![first, last])?
+        let mut stmt = ::er_span::check(&__span, conn.prepare(&sql))?;
+        let batches = ::er_span::check(&__span, stmt.query_arrow(::duckdb::params![first, last]))?
             .collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
         PreviewInRangeRow::from_batches(&batches)
     }
 }
@@ -513,7 +570,19 @@ pub mod update {
 WHERE golden_records.id IN (
   SELECT entity_id FROM lake.main.golden_overrides WHERE attribute = 'addr_city')
 ";
-        conn.execute(SQL, ::duckdb::params![updated_at])
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "golden_record",
+            "update",
+            "override_addr_city",
+            "golden_records",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, conn.execute(SQL, ::duckdb::params![updated_at]))?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
     }
 
     /// Apply the steward addr_number overrides over the assembled golden rows (NULL value = the steward cleared the field); zero overrides match zero rows, so the determinism contract holds.
@@ -528,7 +597,19 @@ WHERE golden_records.id IN (
 WHERE golden_records.id IN (
   SELECT entity_id FROM lake.main.golden_overrides WHERE attribute = 'addr_number')
 ";
-        conn.execute(SQL, ::duckdb::params![updated_at])
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "golden_record",
+            "update",
+            "override_addr_number",
+            "golden_records",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, conn.execute(SQL, ::duckdb::params![updated_at]))?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
     }
 
     /// Apply the steward addr_postal overrides over the assembled golden rows (NULL value = the steward cleared the field); zero overrides match zero rows, so the determinism contract holds.
@@ -543,7 +624,19 @@ WHERE golden_records.id IN (
 WHERE golden_records.id IN (
   SELECT entity_id FROM lake.main.golden_overrides WHERE attribute = 'addr_postal')
 ";
-        conn.execute(SQL, ::duckdb::params![updated_at])
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "golden_record",
+            "update",
+            "override_addr_postal",
+            "golden_records",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, conn.execute(SQL, ::duckdb::params![updated_at]))?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
     }
 
     /// Apply the steward addr_region overrides over the assembled golden rows (NULL value = the steward cleared the field); zero overrides match zero rows, so the determinism contract holds.
@@ -558,7 +651,19 @@ WHERE golden_records.id IN (
 WHERE golden_records.id IN (
   SELECT entity_id FROM lake.main.golden_overrides WHERE attribute = 'addr_region')
 ";
-        conn.execute(SQL, ::duckdb::params![updated_at])
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "golden_record",
+            "update",
+            "override_addr_region",
+            "golden_records",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, conn.execute(SQL, ::duckdb::params![updated_at]))?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
     }
 
     /// Apply the steward addr_street overrides over the assembled golden rows (NULL value = the steward cleared the field); zero overrides match zero rows, so the determinism contract holds.
@@ -573,7 +678,19 @@ WHERE golden_records.id IN (
 WHERE golden_records.id IN (
   SELECT entity_id FROM lake.main.golden_overrides WHERE attribute = 'addr_street')
 ";
-        conn.execute(SQL, ::duckdb::params![updated_at])
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "golden_record",
+            "update",
+            "override_addr_street",
+            "golden_records",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, conn.execute(SQL, ::duckdb::params![updated_at]))?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
     }
 
     /// Apply the steward addr_unit overrides over the assembled golden rows (NULL value = the steward cleared the field); zero overrides match zero rows, so the determinism contract holds.
@@ -588,7 +705,19 @@ WHERE golden_records.id IN (
 WHERE golden_records.id IN (
   SELECT entity_id FROM lake.main.golden_overrides WHERE attribute = 'addr_unit')
 ";
-        conn.execute(SQL, ::duckdb::params![updated_at])
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "golden_record",
+            "update",
+            "override_addr_unit",
+            "golden_records",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, conn.execute(SQL, ::duckdb::params![updated_at]))?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
     }
 
     /// Apply the steward birth_date overrides over the assembled golden rows (NULL value = the steward cleared the field); zero overrides match zero rows, so the determinism contract holds.
@@ -603,7 +732,19 @@ WHERE golden_records.id IN (
 WHERE golden_records.id IN (
   SELECT entity_id FROM lake.main.golden_overrides WHERE attribute = 'birth_date')
 ";
-        conn.execute(SQL, ::duckdb::params![updated_at])
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "golden_record",
+            "update",
+            "override_birth_date",
+            "golden_records",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, conn.execute(SQL, ::duckdb::params![updated_at]))?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
     }
 
     /// Apply the steward email overrides over the assembled golden rows (NULL value = the steward cleared the field); zero overrides match zero rows, so the determinism contract holds.
@@ -618,7 +759,19 @@ WHERE golden_records.id IN (
 WHERE golden_records.id IN (
   SELECT entity_id FROM lake.main.golden_overrides WHERE attribute = 'email')
 ";
-        conn.execute(SQL, ::duckdb::params![updated_at])
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "golden_record",
+            "update",
+            "override_email",
+            "golden_records",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, conn.execute(SQL, ::duckdb::params![updated_at]))?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
     }
 
     /// Apply the steward family_name overrides over the assembled golden rows (NULL value = the steward cleared the field); zero overrides match zero rows, so the determinism contract holds.
@@ -633,7 +786,19 @@ WHERE golden_records.id IN (
 WHERE golden_records.id IN (
   SELECT entity_id FROM lake.main.golden_overrides WHERE attribute = 'family_name')
 ";
-        conn.execute(SQL, ::duckdb::params![updated_at])
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "golden_record",
+            "update",
+            "override_family_name",
+            "golden_records",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, conn.execute(SQL, ::duckdb::params![updated_at]))?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
     }
 
     /// Apply the steward given_name overrides over the assembled golden rows (NULL value = the steward cleared the field); zero overrides match zero rows, so the determinism contract holds.
@@ -648,7 +813,19 @@ WHERE golden_records.id IN (
 WHERE golden_records.id IN (
   SELECT entity_id FROM lake.main.golden_overrides WHERE attribute = 'given_name')
 ";
-        conn.execute(SQL, ::duckdb::params![updated_at])
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "golden_record",
+            "update",
+            "override_given_name",
+            "golden_records",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, conn.execute(SQL, ::duckdb::params![updated_at]))?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
     }
 
     /// Apply the steward phone_e164 overrides over the assembled golden rows (NULL value = the steward cleared the field); zero overrides match zero rows, so the determinism contract holds.
@@ -663,6 +840,18 @@ WHERE golden_records.id IN (
 WHERE golden_records.id IN (
   SELECT entity_id FROM lake.main.golden_overrides WHERE attribute = 'phone_e164')
 ";
-        conn.execute(SQL, ::duckdb::params![updated_at])
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "golden_record",
+            "update",
+            "override_phone_e164",
+            "golden_records",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, conn.execute(SQL, ::duckdb::params![updated_at]))?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
     }
 }

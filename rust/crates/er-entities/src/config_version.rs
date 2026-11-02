@@ -91,12 +91,25 @@ RETURNING
   published_at,
   updated_at
 ";
-        let rows = client
-            .query(
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "config_version",
+            "create",
+            "draft",
+            "config_versions",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.query(
                 SQL,
                 &[&id, &org_id, &dataset_id, &yaml, &config_hash, &created_by],
-            )
-            .await?;
+            ),
+        )
+        .await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::ConfigVersion {
@@ -141,7 +154,19 @@ pub mod read {
 FROM public.config_versions
 WHERE org_id = $1 AND version = $2
 ";
-        let rows = client.query(SQL, &[&org_id, &version]).await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "config_version",
+            "read",
+            "by_version",
+            "config_versions",
+            SQL,
+        );
+        let __result =
+            ::er_span::instrument(&__span, client.query(SQL, &[&org_id, &version])).await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::ConfigVersion {
@@ -183,7 +208,18 @@ FROM public.config_versions
 WHERE org_id = $1
 ORDER BY version DESC
 ";
-        let rows = client.query(SQL, &[&org_id]).await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "config_version",
+            "read",
+            "list",
+            "config_versions",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.query(SQL, &[&org_id])).await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::ConfigVersion {
@@ -215,7 +251,19 @@ SET dataset_id = d.id, updated_at = now()
 FROM public.datasets d
 WHERE d.org_id = c.org_id AND d.name = 'default' AND c.dataset_id IS NULL
 ";
-        client.execute(SQL, &[]).await
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "config_version",
+            "update",
+            "backfill_dataset",
+            "config_versions",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.execute(SQL, &[])).await;
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, __n);
+        Ok(__n)
     }
 
     /// Mark a version published with its rollout tier (the config_versions half of publish).
@@ -229,6 +277,19 @@ WHERE d.org_id = c.org_id AND d.name = 'default' AND c.dataset_id IS NULL
     updated_at = now()
 WHERE org_id = $2 AND version = $3
 ";
-        client.execute(SQL, &[&tier, &org_id, &version]).await
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "config_version",
+            "update",
+            "publish",
+            "config_versions",
+            SQL,
+        );
+        let __result =
+            ::er_span::instrument(&__span, client.execute(SQL, &[&tier, &org_id, &version])).await;
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, __n);
+        Ok(__n)
     }
 }

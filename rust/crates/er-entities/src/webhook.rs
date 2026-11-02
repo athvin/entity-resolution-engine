@@ -69,12 +69,26 @@ pub mod create {
             "INSERT INTO public.webhooks (id, org_id, dataset_id, url, events, secret)
 VALUES ($1, $2, $3, $4, $5, $6)
 ";
-        client
-            .execute(
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "webhook",
+            "create",
+            "create",
+            "webhooks",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.execute(
                 SQL,
                 &[&webhook_id, &org_id, &dataset_id, &url, &events, &secret],
-            )
-            .await
+            ),
+        )
+        .await;
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, __n);
+        Ok(__n)
     }
 }
 
@@ -90,7 +104,18 @@ pub mod read {
 FROM public.webhooks
 WHERE id = $1 AND active
 ";
-        let rows = client.query(SQL, &[&webhook_id]).await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "webhook",
+            "read",
+            "by_id",
+            "webhooks",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.query(SQL, &[&webhook_id])).await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::Webhook {
@@ -128,7 +153,19 @@ WHERE org_id = $1 AND active
   AND (events @> to_jsonb($2::text) OR jsonb_array_length(events) = 0)
 ORDER BY created_at
 ";
-        let rows = client.query(SQL, &[&org_id, &event_type]).await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "webhook",
+            "read",
+            "for_delivery",
+            "webhooks",
+            SQL,
+        );
+        let __result =
+            ::er_span::instrument(&__span, client.query(SQL, &[&org_id, &event_type])).await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::Webhook {
@@ -163,7 +200,18 @@ FROM public.webhooks
 WHERE org_id = $1 AND active
 ORDER BY created_at
 ";
-        let rows = client.query(SQL, &[&org_id]).await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "webhook",
+            "read",
+            "list_active",
+            "webhooks",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.query(SQL, &[&org_id])).await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::Webhook {
@@ -193,6 +241,19 @@ pub mod update {
 SET active = false, updated_at = now()
 WHERE org_id = $1 AND id = $2 AND active
 ";
-        client.execute(SQL, &[&org_id, &webhook_id]).await
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "webhook",
+            "update",
+            "deactivate",
+            "webhooks",
+            SQL,
+        );
+        let __result =
+            ::er_span::instrument(&__span, client.execute(SQL, &[&org_id, &webhook_id])).await;
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, __n);
+        Ok(__n)
     }
 }

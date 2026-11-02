@@ -65,9 +65,22 @@ pub mod create {
 VALUES ($1, $2, $3, $4, $5)
 RETURNING id, org_id, name, description, active, created_by, created_at, updated_at
 ";
-        let rows = client
-            .query(SQL, &[&tag_id, &org_id, &name, &description, &created_by])
-            .await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "tag",
+            "create",
+            "create",
+            "tags",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.query(SQL, &[&tag_id, &org_id, &name, &description, &created_by]),
+        )
+        .await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::Tag {
@@ -97,7 +110,18 @@ pub mod read {
 FROM public.tags
 WHERE org_id = $1 AND id = $2 AND active
 ";
-        let rows = client.query(SQL, &[&org_id, &tag_id]).await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "tag",
+            "read",
+            "by_id",
+            "tags",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.query(SQL, &[&org_id, &tag_id])).await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::Tag {
@@ -129,9 +153,22 @@ WHERE t.org_id = $1
   AND t.active
 ORDER BY t.name
 ";
-        let rows = client
-            .query(SQL, &[&org_id, &subject_type, &subject_id])
-            .await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "tag",
+            "read",
+            "for_subject",
+            "tags",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.query(SQL, &[&org_id, &subject_type, &subject_id]),
+        )
+        .await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::Tag {
@@ -158,7 +195,18 @@ FROM public.tags
 WHERE org_id = $1 AND active
 ORDER BY name
 ";
-        let rows = client.query(SQL, &[&org_id]).await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "tag",
+            "read",
+            "list_active",
+            "tags",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.query(SQL, &[&org_id])).await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::Tag {
@@ -187,6 +235,19 @@ pub mod update {
 SET active = false, updated_at = now()
 WHERE org_id = $1 AND id = $2 AND active
 ";
-        client.execute(SQL, &[&org_id, &tag_id]).await
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "tag",
+            "update",
+            "retire",
+            "tags",
+            SQL,
+        );
+        let __result =
+            ::er_span::instrument(&__span, client.execute(SQL, &[&org_id, &tag_id])).await;
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, __n);
+        Ok(__n)
     }
 }

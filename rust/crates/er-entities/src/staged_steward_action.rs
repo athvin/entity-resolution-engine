@@ -71,12 +71,26 @@ pub mod create {
             "INSERT INTO public.staged_steward_actions (id, org_id, dataset_id, action, created_by)
 VALUES ($1, $2, $3, $4, $5)
 ";
-        client
-            .execute(
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "staged_steward_action",
+            "create",
+            "stage",
+            "staged_steward_actions",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.execute(
                 SQL,
                 &[&action_id, &org_id, &dataset_id, &action, &created_by],
-            )
-            .await
+            ),
+        )
+        .await;
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, __n);
+        Ok(__n)
     }
 }
 
@@ -101,7 +115,18 @@ FROM public.staged_steward_actions
 WHERE org_id = $1 AND state = 'pending'
 ORDER BY created_at, id
 ";
-        let rows = client.query(SQL, &[&org_id]).await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "staged_steward_action",
+            "read",
+            "pending",
+            "staged_steward_actions",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.query(SQL, &[&org_id])).await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::StagedStewardAction {
@@ -131,7 +156,19 @@ SET dataset_id = d.id, updated_at = now()
 FROM public.datasets d
 WHERE d.org_id = c.org_id AND d.name = 'default' AND c.dataset_id IS NULL
 ";
-        client.execute(SQL, &[]).await
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "staged_steward_action",
+            "update",
+            "backfill_dataset",
+            "staged_steward_actions",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.execute(SQL, &[])).await;
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, __n);
+        Ok(__n)
     }
 
     /// Mark a staged action applied after the dispatcher drains it to the lake.
@@ -144,6 +181,18 @@ WHERE d.org_id = c.org_id AND d.name = 'default' AND c.dataset_id IS NULL
     updated_at = now()
 WHERE id = $1
 ";
-        client.execute(SQL, &[&action_id]).await
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "staged_steward_action",
+            "update",
+            "mark_applied",
+            "staged_steward_actions",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.execute(SQL, &[&action_id])).await;
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, __n);
+        Ok(__n)
     }
 }

@@ -64,6 +64,38 @@ fn rust_string_escape(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
+/// Emit the statement span's construction line.
+///
+/// This is the one place a span is written for all 218 declared statements, and
+/// the reason the emitters are the right seam: the statement's identity — the
+/// `(entity, folder, stem)` triple that names its `.sql` file — is already in
+/// scope here, so every statement is attributed by construction. A statement
+/// added tomorrow is attributed without anyone remembering to.
+///
+/// The span takes no parameter values. `er_span::sql_span`'s signature has
+/// nowhere to put one, which is how §10.4's rule ("identifiers and counts,
+/// never attribute values") becomes a property rather than a convention — in a
+/// deduplication engine the bind values are the payload.
+///
+/// Costs nothing when no subscriber is listening: a span with no events emits
+/// no log line, so this adds context rather than volume. It becomes a real
+/// exported span once there is an exporter.
+fn push_statement_span(out: &mut String, store: &str, stmt: &LoadedStatement, relation: &str) {
+    out.push_str(&format!(
+        "        let __span = ::er_span::sql_span(\n            \
+         ::er_span::Store::{store},\n            \
+         \"{entity}\",\n            \"{folder}\",\n            \"{stem}\",\n            \
+         \"{relation}\",\n            SQL,\n        );\n",
+        entity = stmt.entity,
+        folder = stmt.operation.folder(),
+        stem = stmt
+            .path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("query"),
+    ));
+}
+
 /// The shared skeleton of a lake read function: its name, argument list, bind
 /// list, escaped SQL template, and the snapshot splice parameter (if the
 /// statement pins one by name — a `pin: live` read or a literal pin has none).
@@ -122,28 +154,43 @@ fn lake_read_parts(stmt: &LoadedStatement) -> LakeReadParts {
 
 /// Emit the statement's prepare + `query_arrow` body lines: the snapshot splice
 /// (when the pin is a parameter) and the positional binds.
-fn push_lake_query_body(out: &mut String, parts: &LakeReadParts) {
+fn push_lake_query_body(
+    out: &mut String,
+    parts: &LakeReadParts,
+    stmt: &LoadedStatement,
+    relation: &str,
+) {
     out.push_str(&format!(
         "        const SQL: &str = \"{}\";\n",
         parts.escaped
     ));
+    push_statement_span(out, "Lake", stmt, relation);
+    out.push_str("        let __entered = __span.enter();\n");
+    // `db.query.text` always carries the TEMPLATE, never the spliced copy: a
+    // snapshot version interpolated into the text would make the attribute
+    // unique per call, which is the attribute-cardinality mistake rather than
+    // the metric one but just as expensive in a span store.
     if let Some(name) = &parts.splice {
         out.push_str(&format!(
             "        let sql = SQL.replace(\"{{snapshot}}\", &{name}.to_string());\n"
         ));
-        out.push_str("        let mut stmt = conn.prepare(&sql)?;\n");
+        out.push_str("        let mut stmt = ::er_span::check(&__span, conn.prepare(&sql))?;\n");
     } else {
-        out.push_str("        let mut stmt = conn.prepare(SQL)?;\n");
+        out.push_str("        let mut stmt = ::er_span::check(&__span, conn.prepare(SQL))?;\n");
     }
     out.push_str(&format!(
-        "        let batches = stmt.query_arrow(::duckdb::params![{}])?.collect::<Vec<_>>();\n",
+        "        let batches = ::er_span::check(&__span, stmt.query_arrow(::duckdb::params![{}]))?\n            .collect::<Vec<_>>();\n",
         parts.bind_list
     ));
+    out.push_str(
+        "        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());\n",
+    );
+    out.push_str("        drop(__entered);\n");
 }
 
 /// Emit one `returns: entity` lake read function returning `Vec<RecordBatch>`
 /// (the Arrow-wire path).
-fn emit_lake_read_fn(stmt: &LoadedStatement) -> String {
+fn emit_lake_read_fn(entity: &Entity, stmt: &LoadedStatement) -> String {
     let parts = lake_read_parts(stmt);
     let mut out = String::new();
     out.push_str(&format!(
@@ -154,7 +201,7 @@ fn emit_lake_read_fn(stmt: &LoadedStatement) -> String {
         "    pub fn {}(\n{}    ) -> ::duckdb::Result<Vec<::arrow::record_batch::RecordBatch>> {{\n",
         parts.fn_name, parts.args
     ));
-    push_lake_query_body(&mut out, &parts);
+    push_lake_query_body(&mut out, &parts, stmt, &entity.relation);
     out.push_str("        Ok(batches)\n");
     out.push_str("    }\n");
     out
@@ -232,7 +279,11 @@ fn row_extract_expr(col: &ReturnColumn, var: &str) -> String {
 /// result schema compiled in, `from_batches` conversion that errors — never
 /// panics — on any shape/type/null violation) and the query function returning
 /// `Vec<Row>`.
-fn emit_lake_read_rows_fn(stmt: &LoadedStatement, cols: &[ReturnColumn]) -> String {
+fn emit_lake_read_rows_fn(
+    entity: &Entity,
+    stmt: &LoadedStatement,
+    cols: &[ReturnColumn],
+) -> String {
     let parts = lake_read_parts(stmt);
     let struct_name = format!("{}Row", to_pascal_case(&parts.fn_name));
     let description = stmt.description.replace(['\n', '\r'], " ");
@@ -325,7 +376,7 @@ fn emit_lake_read_rows_fn(stmt: &LoadedStatement, cols: &[ReturnColumn]) -> Stri
         "    pub fn {}(\n{}    ) -> ::duckdb::Result<Vec<{struct_name}>> {{\n",
         parts.fn_name, parts.args
     ));
-    push_lake_query_body(&mut out, &parts);
+    push_lake_query_body(&mut out, &parts, stmt, &entity.relation);
     out.push_str(&format!("        {struct_name}::from_batches(&batches)\n"));
     out.push_str("    }\n");
     out
@@ -335,7 +386,7 @@ fn emit_lake_read_rows_fn(stmt: &LoadedStatement, cols: &[ReturnColumn]) -> Stri
 /// (E006 is a read rule); every declared parameter binds positionally. Timestamps
 /// and JSON cross as text with an explicit `::timestamp` / `::json` cast in the
 /// statement SQL, matching the engine's string-typed logical timestamps.
-fn emit_lake_write_fn(stmt: &LoadedStatement) -> String {
+fn emit_lake_write_fn(entity: &Entity, stmt: &LoadedStatement) -> String {
     let fn_name = stmt
         .path
         .file_stem()
@@ -364,9 +415,14 @@ fn emit_lake_write_fn(stmt: &LoadedStatement) -> String {
         "    pub fn {fn_name}(\n{args}    ) -> ::duckdb::Result<usize> {{\n"
     ));
     out.push_str(&format!("        const SQL: &str = \"{escaped}\";\n"));
+    push_statement_span(&mut out, "Lake", stmt, &entity.relation);
+    out.push_str("        let __entered = __span.enter();\n");
     out.push_str(&format!(
-        "        conn.execute(SQL, ::duckdb::params![{bind_list}])\n"
+        "        let __n = ::er_span::check(&__span, conn.execute(SQL, ::duckdb::params![{bind_list}]))?;\n"
     ));
+    out.push_str("        ::er_span::rows(&__span, __n as u64);\n");
+    out.push_str("        drop(__entered);\n");
+    out.push_str("        Ok(__n)\n");
     out.push_str("    }\n");
     out
 }
@@ -428,8 +484,9 @@ fn emit_control_fn(entity: &Entity, stmt: &LoadedStatement) -> String {
             "    pub async fn {fn_name}(\n{args}    ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {{\n"
         ));
         out.push_str(&format!("        const SQL: &str = \"{escaped}\";\n"));
+        push_statement_span(&mut out, "Control", stmt, &entity.relation);
         out.push_str(&format!(
-            "        client.execute(SQL, &[{bind_list}]).await\n"
+            "        let __result = ::er_span::instrument(&__span, client.execute(SQL, &[{bind_list}])).await;\n        let __entered = __span.enter();\n        let __n = ::er_span::check(&__span, __result)?;\n        ::er_span::rows(&__span, __n);\n        Ok(__n)\n"
         ));
         out.push_str("    }\n");
         return out;
@@ -445,8 +502,9 @@ fn emit_control_fn(entity: &Entity, stmt: &LoadedStatement) -> String {
         "    pub async fn {fn_name}(\n{args}    ) -> ::std::result::Result<Vec<super::{struct_name}>, ::tokio_postgres::Error> {{\n"
     ));
     out.push_str(&format!("        const SQL: &str = \"{escaped}\";\n"));
+    push_statement_span(&mut out, "Control", stmt, &entity.relation);
     out.push_str(&format!(
-        "        let rows = client.query(SQL, &[{bind_list}]).await?;\n"
+        "        let __result = ::er_span::instrument(&__span, client.query(SQL, &[{bind_list}])).await;\n        let __entered = __span.enter();\n        let rows = ::er_span::check(&__span, __result)?;\n        ::er_span::rows(&__span, rows.len() as u64);\n"
     ));
     out.push_str("        Ok(rows\n            .iter()\n            .map(|row| super::");
     out.push_str(&format!(
@@ -476,12 +534,14 @@ pub fn emit_query_modules(entity: &Entity, statements: &[LoadedStatement]) -> Op
             // return rows has no emitter — loudly unsupported rather than
             // silently skipped.
             match (stmt.operation, &stmt.returns) {
-                (Operation::Read, Returns::Columns(cols)) => emit_lake_read_rows_fn(stmt, cols),
-                (Operation::Read, Returns::Entity) => emit_lake_read_fn(stmt),
+                (Operation::Read, Returns::Columns(cols)) => {
+                    emit_lake_read_rows_fn(entity, stmt, cols)
+                }
+                (Operation::Read, Returns::Entity) => emit_lake_read_fn(entity, stmt),
                 (Operation::Read, Returns::None) => {
                     unreachable!("rejected at load: a read cannot return none")
                 }
-                (_, Returns::None) => emit_lake_write_fn(stmt),
+                (_, Returns::None) => emit_lake_write_fn(entity, stmt),
                 _ => panic!(
                     "{}: a lake write must declare `returns: none` (RETURNING is not emitted for the lake)",
                     stmt.path.display()
@@ -549,7 +609,23 @@ mod tests {
         // Rows map into the struct by column name; params bind positionally.
         assert!(module.contains("id: row.get(\"id\"),"));
         assert!(module.contains("WHERE org_id = $1 AND id = $2"));
-        assert!(module.contains("client.query(SQL, &[&org_id, &job_id]).await?"));
+        // Instrumented: the await goes through `instrument`, never `.enter()`,
+        // because a span guard held across an await attributes other tasks'
+        // work to this span.
+        assert!(module.contains(
+            "::er_span::instrument(&__span, client.query(SQL, &[&org_id, &job_id])).await"
+        ));
+        assert!(
+            !module.contains("let _entered = __span.enter();\n        let rows = client.query"),
+            "the async path must not hold a span guard across .await"
+        );
+        // The statement identity, from the (entity, folder, stem) triple.
+        assert!(module.contains("::er_span::Store::Control"));
+        assert!(module.contains("\"job\",\n            \"read\",\n            \"by_id\","));
+        assert!(
+            module.contains("\"jobs\","),
+            "the declared relation rides the span"
+        );
     }
 
     #[test]
@@ -569,7 +645,7 @@ mod tests {
         assert!(module.contains("pub async fn claim("));
         assert!(module.contains("pub async fn mark("));
         assert!(module.contains("-> ::std::result::Result<u64, ::tokio_postgres::Error>"));
-        assert!(module.contains("client.execute(SQL,"));
+        assert!(module.contains("::er_span::instrument(&__span, client.execute(SQL,"));
     }
 
     #[test]
@@ -595,6 +671,17 @@ mod tests {
         assert!(!create_module.contains("{snapshot}"));
         assert!(!module[writes_start..].contains("{snapshot}"));
         assert!(module.contains("pub fn finish("));
+    }
+
+    /// The real `entity_membership` entity, which `columns_stmt`'s statements
+    /// claim to belong to. Loaded from the catalog rather than hand-built so the
+    /// relation the span records is the declared one.
+    fn membership_entity() -> Entity {
+        Catalog::load_dir(entities_dir())
+            .unwrap()
+            .by_name("entity_membership")
+            .expect("entity_membership is declared")
+            .clone()
     }
 
     fn columns_stmt(
@@ -660,10 +747,14 @@ mod tests {
             }],
             vec![varchar_col("record_key", false)],
         );
-        let f = emit_lake_read_rows_fn(&stmt, &[varchar_col("record_key", false)]);
+        let f = emit_lake_read_rows_fn(
+            &membership_entity(),
+            &stmt,
+            &[varchar_col("record_key", false)],
+        );
         assert!(!f.contains("{snapshot}"), "no splice marker: {f}");
         assert!(
-            f.contains("let mut stmt = conn.prepare(SQL)?;"),
+            f.contains("::er_span::check(&__span, conn.prepare(SQL))?"),
             "prepares the const: {f}"
         );
         assert!(f.contains("params![entity_id]"));
@@ -680,7 +771,11 @@ mod tests {
             }],
             vec![varchar_col("record_key", true)],
         );
-        let f = emit_lake_read_rows_fn(&stmt, &[varchar_col("record_key", true)]);
+        let f = emit_lake_read_rows_fn(
+            &membership_entity(),
+            &stmt,
+            &[varchar_col("record_key", true)],
+        );
         assert!(
             f.contains("let sql = SQL.replace(\"{snapshot}\", &snap.to_string());"),
             "the splice references the pin's own name: {f}"
@@ -713,7 +808,7 @@ mod tests {
             }],
             cols.clone(),
         );
-        let f = emit_lake_read_rows_fn(&stmt, &cols);
+        let f = emit_lake_read_rows_fn(&membership_entity(), &stmt, &cols);
         assert!(
             f.contains(
                 "#[serde(serialize_with = \"crate::batch::ser_duckdb_timestamp\")]\n        pub created_at:"
@@ -735,13 +830,17 @@ mod tests {
             vec![],
             vec![varchar_col("record_key", true)],
         );
-        let f = emit_lake_read_rows_fn(&stmt, &[varchar_col("record_key", true)]);
+        let f = emit_lake_read_rows_fn(
+            &membership_entity(),
+            &stmt,
+            &[varchar_col("record_key", true)],
+        );
         assert!(
             f.contains("AT (VERSION => 42)"),
             "literal pin survives: {f}"
         );
         assert!(!f.contains("{snapshot}"));
-        assert!(f.contains("let mut stmt = conn.prepare(SQL)?;"));
+        assert!(f.contains("::er_span::check(&__span, conn.prepare(SQL))?"));
     }
 
     #[test]

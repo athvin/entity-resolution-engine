@@ -177,13 +177,26 @@ WHERE is_active
 ORDER BY rec_a_key, rec_b_key
 LIMIT $5
 ";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "match_score",
+            "read",
+            "active_page",
+            "match_scores",
+            SQL,
+        );
+        let __entered = __span.enter();
         let sql = SQL.replace("{snapshot}", &snapshot.to_string());
-        let mut stmt = conn.prepare(&sql)?;
-        let batches = stmt
-            .query_arrow(::duckdb::params![
+        let mut stmt = ::er_span::check(&__span, conn.prepare(&sql))?;
+        let batches = ::er_span::check(
+            &__span,
+            stmt.query_arrow(::duckdb::params![
                 after_a, after_b, min_prob, max_prob, limit
-            ])?
-            .collect::<Vec<_>>();
+            ]),
+        )?
+        .collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
         ActivePageRow::from_batches(&batches)
     }
 
@@ -237,11 +250,21 @@ FROM lake.main.match_scores AT (VERSION => {snapshot})
 WHERE is_active AND match_probability >= $1
 GROUP BY run_id
 ";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "match_score",
+            "read",
+            "auto_merge_counts",
+            "match_scores",
+            SQL,
+        );
+        let __entered = __span.enter();
         let sql = SQL.replace("{snapshot}", &snapshot.to_string());
-        let mut stmt = conn.prepare(&sql)?;
-        let batches = stmt
-            .query_arrow(::duckdb::params![threshold])?
+        let mut stmt = ::er_span::check(&__span, conn.prepare(&sql))?;
+        let batches = ::er_span::check(&__span, stmt.query_arrow(::duckdb::params![threshold]))?
             .collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
         AutoMergeCountsRow::from_batches(&batches)
     }
 
@@ -303,10 +326,20 @@ FROM lake.main.match_scores
 WHERE is_active AND match_probability >= $1
 ORDER BY rec_a_key, rec_b_key
 ";
-        let mut stmt = conn.prepare(SQL)?;
-        let batches = stmt
-            .query_arrow(::duckdb::params![threshold])?
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "match_score",
+            "read",
+            "auto_merge_edges_live",
+            "match_scores",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let mut stmt = ::er_span::check(&__span, conn.prepare(SQL))?;
+        let batches = ::er_span::check(&__span, stmt.query_arrow(::duckdb::params![threshold]))?
             .collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
         AutoMergeEdgesLiveRow::from_batches(&batches)
     }
 
@@ -387,10 +420,21 @@ FROM lake.main.match_scores
 WHERE is_active AND match_probability >= $1
 ORDER BY rec_a_key, rec_b_key
 ";
-        let mut stmt = conn.prepare(SQL)?;
-        let batches = stmt
-            .query_arrow(::duckdb::params![min_threshold])?
-            .collect::<Vec<_>>();
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "match_score",
+            "read",
+            "auto_merge_edges_per_model",
+            "match_scores",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let mut stmt = ::er_span::check(&__span, conn.prepare(SQL))?;
+        let batches =
+            ::er_span::check(&__span, stmt.query_arrow(::duckdb::params![min_threshold]))?
+                .collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
         AutoMergeEdgesPerModelRow::from_batches(&batches)
     }
 
@@ -498,11 +542,24 @@ ORDER BY (CASE WHEN match_probability >= $1
          rec_a_key, rec_b_key
 LIMIT $4
 ";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "match_score",
+            "read",
+            "uncertain_page",
+            "match_scores",
+            SQL,
+        );
+        let __entered = __span.enter();
         let sql = SQL.replace("{snapshot}", &snapshot.to_string());
-        let mut stmt = conn.prepare(&sql)?;
-        let batches = stmt
-            .query_arrow(::duckdb::params![threshold, band_low, band_high, limit])?
-            .collect::<Vec<_>>();
+        let mut stmt = ::er_span::check(&__span, conn.prepare(&sql))?;
+        let batches = ::er_span::check(
+            &__span,
+            stmt.query_arrow(::duckdb::params![threshold, band_low, band_high, limit]),
+        )?
+        .collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
         UncertainPageRow::from_batches(&batches)
     }
 }
@@ -522,7 +579,19 @@ pub mod update {
    AND target.tf_snapshot_id = source.tf_snapshot_id
    AND (target.rec_a_key = source.record_key OR target.rec_b_key = source.record_key)
 ";
-        conn.execute(SQL, ::duckdb::params![])
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "match_score",
+            "update",
+            "invalidate_stale",
+            "match_scores",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, conn.execute(SQL, ::duckdb::params![]))?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
     }
 
     /// Deactivate every active score that came from a model identity this run is not using, from the session's __live_models staging (one row per live model) and __retire_stamp (exactly one row, the run's clock). Scores are keyed by model, so a run under a new version writes new rows and would otherwise leave the previous version's rows live forever — and no edge read filters by model, so both versions' verdicts would be clustered together.
@@ -539,7 +608,19 @@ pub mod update {
           WHERE m.model_version = target.model_version
             AND m.tf_snapshot_id = target.tf_snapshot_id)
 ";
-        conn.execute(SQL, ::duckdb::params![])
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "match_score",
+            "update",
+            "retire_other_models",
+            "match_scores",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, conn.execute(SQL, ::duckdb::params![]))?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
     }
 
     /// The S4.3.4 single write: MERGE the scored pairs (the session's __match_src staging) on the logical key; a re-scored pair is rewritten in place, clearing any invalidation.
@@ -571,6 +652,18 @@ WHEN NOT MATCHED THEN INSERT
      source.evidence, true, NULL, NULL, source.run_id, source.scored_at,
      source.scored_at, source.scored_at)
 ";
-        conn.execute(SQL, ::duckdb::params![])
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "match_score",
+            "update",
+            "upsert_from_scored",
+            "match_scores",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, conn.execute(SQL, ::duckdb::params![]))?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
     }
 }

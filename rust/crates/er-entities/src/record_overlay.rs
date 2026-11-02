@@ -70,10 +70,25 @@ VALUES (sha256('record_overlays:' || $1 || ':' || $2),
         $1, $2, true, $3, $4::timestamp,
         $5, NULL, $4::timestamp)
 ";
-        conn.execute(
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "record_overlay",
+            "create",
+            "set",
+            "record_overlays",
             SQL,
-            ::duckdb::params![record_key, kind, created_by, created_at, source_action_id],
-        )
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(
+            &__span,
+            conn.execute(
+                SQL,
+                ::duckdb::params![record_key, kind, created_by, created_at, source_action_id],
+            ),
+        )?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
     }
 }
 
@@ -88,7 +103,22 @@ pub mod delete {
         const SQL: &str =
             "DELETE FROM lake.main.record_overlays WHERE record_key = $1 AND kind = $2
 ";
-        conn.execute(SQL, ::duckdb::params![record_key, kind])
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "record_overlay",
+            "delete",
+            "clear",
+            "record_overlays",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(
+            &__span,
+            conn.execute(SQL, ::duckdb::params![record_key, kind]),
+        )?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
     }
 }
 
@@ -140,10 +170,20 @@ pub mod read {
 FROM lake.main.record_overlays
 WHERE kind = $1 AND active
 ";
-        let mut stmt = conn.prepare(SQL)?;
-        let batches = stmt
-            .query_arrow(::duckdb::params![kind])?
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "record_overlay",
+            "read",
+            "active_keys_by_kind_live",
+            "record_overlays",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let mut stmt = ::er_span::check(&__span, conn.prepare(SQL))?;
+        let batches = ::er_span::check(&__span, stmt.query_arrow(::duckdb::params![kind]))?
             .collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
         ActiveKeysByKindLiveRow::from_batches(&batches)
     }
 
@@ -189,8 +229,20 @@ FROM lake.main.record_overlays
 WHERE kind = 'protect' AND active
 LIMIT 1
 ";
-        let mut stmt = conn.prepare(SQL)?;
-        let batches = stmt.query_arrow(::duckdb::params![])?.collect::<Vec<_>>();
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "record_overlay",
+            "read",
+            "any_active_protect",
+            "record_overlays",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let mut stmt = ::er_span::check(&__span, conn.prepare(SQL))?;
+        let batches =
+            ::er_span::check(&__span, stmt.query_arrow(::duckdb::params![]))?.collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
         AnyActiveProtectRow::from_batches(&batches)
     }
 }
@@ -209,6 +261,21 @@ pub mod update {
     updated_at = $1::timestamp
 WHERE record_key = $2 AND kind = $3
 ";
-        conn.execute(SQL, ::duckdb::params![retracted_at, record_key, kind])
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "record_overlay",
+            "update",
+            "retract",
+            "record_overlays",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(
+            &__span,
+            conn.execute(SQL, ::duckdb::params![retracted_at, record_key, kind]),
+        )?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
     }
 }

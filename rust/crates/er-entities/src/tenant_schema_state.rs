@@ -74,12 +74,26 @@ ON CONFLICT (dataset_id) WHERE dataset_id IS NOT NULL DO UPDATE SET
   checked_at = now(),
   updated_at = now()
 ";
-        client
-            .execute(
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "tenant_schema_state",
+            "create",
+            "upsert",
+            "tenant_schema_states",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.execute(
                 SQL,
                 &[&id, &org_id, &dataset_id, &catalog_hash, &status, &detail],
-            )
-            .await
+            ),
+        )
+        .await;
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, __n);
+        Ok(__n)
     }
 
     /// Record an ORG-LEVEL lake reconciliation (provisioning, a pre-dataset position): one row per org among the rows whose dataset_id is NULL.
@@ -101,9 +115,23 @@ ON CONFLICT (org_id) WHERE dataset_id IS NULL DO UPDATE SET
   checked_at = now(),
   updated_at = now()
 ";
-        client
-            .execute(SQL, &[&id, &org_id, &catalog_hash, &status, &detail])
-            .await
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "tenant_schema_state",
+            "create",
+            "upsert_org_level",
+            "tenant_schema_states",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.execute(SQL, &[&id, &org_id, &catalog_hash, &status, &detail]),
+        )
+        .await;
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, __n);
+        Ok(__n)
     }
 }
 
@@ -117,7 +145,18 @@ pub mod read {
 FROM public.tenant_schema_states
 ORDER BY org_id
 ";
-        let rows = client.query(SQL, &[]).await?;
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "tenant_schema_state",
+            "read",
+            "list",
+            "tenant_schema_states",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.query(SQL, &[])).await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
         Ok(rows
             .iter()
             .map(|row| super::TenantSchemaState {
@@ -146,6 +185,18 @@ SET dataset_id = d.id, updated_at = now()
 FROM public.datasets d
 WHERE d.org_id = c.org_id AND d.name = 'default' AND c.dataset_id IS NULL
 ";
-        client.execute(SQL, &[]).await
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "tenant_schema_state",
+            "update",
+            "backfill_dataset",
+            "tenant_schema_states",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.execute(SQL, &[])).await;
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, __n);
+        Ok(__n)
     }
 }
