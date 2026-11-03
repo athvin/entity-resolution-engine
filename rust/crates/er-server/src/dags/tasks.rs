@@ -10,23 +10,22 @@
 //!
 //! What a body may NOT do: read the control plane. The pod holds no database
 //! credential (§6.4), so everything it needs — the tenant env, the delivery
-//! root, the resolved model registry — arrives in the order.
+//! root, the resolved model registry, the training labels, the drained staged
+//! actions — arrives in the order.
+//!
+//! Every body here is real. The `declare_task!` stub macro that stood in for
+//! them through Phases 1 and 2 is gone, which is the honest marker that the
+//! pod half of the design is built: there is no longer a task the executor
+//! declares but cannot run.
 
 use er_dag::{LakeRef, NodePolicy, Outcome, Plan, Task, TaskCtx, TaskError};
 
-use super::edges::{Assembled, Labeled, Landed, Profiled, Resolved, Scored, Standardized};
+use super::edges::{Assembled, Landed, Profiled, Resolved, Scored, Standardized};
 use super::plans::{
     DrainedActions, FinishReport, LakeInitialized, MaintenanceReport, RunPlan, SchemaReconciled,
     TrainedModel,
 };
 use super::{JobKind, Session};
-
-fn not_yet_runnable(task: &str) -> TaskError {
-    TaskError::Failed(er_errors::ErError::precondition(format!(
-        "task body '{task}' is declared but not yet runnable: it lands with the remaining \
-         Phase 3 kinds of batch-orchestration-design.md"
-    )))
-}
 
 /// Resolve this run's inputs from the order AND prepare this pod's session —
 /// the first thing every pipeline body does.
@@ -100,32 +99,6 @@ fn inputs_from_plan<'a>(
 /// unknown" marker — never a real snapshot, so it cannot be mistaken for one.
 fn head_or_unknown(session: &Session) -> i64 {
     session.latest_snapshot_version().unwrap_or(-1)
-}
-
-macro_rules! declare_task {
-    ($(#[$doc:meta])* $ty:ident, $name:literal, $input:ty, $output:ty, writes: $writes:literal $(, policy: $policy:expr)?) => {
-        $(#[$doc])*
-        #[derive(Default)]
-        pub struct $ty;
-
-        impl Task<Session> for $ty {
-            const NAME: &'static str = $name;
-            const VERSION: u32 = 1;
-            type Input = $input;
-            type Output = $output;
-            const WRITES_LAKE: bool = $writes;
-
-            $(fn policy() -> NodePolicy { $policy })?
-
-            fn run(
-                &mut self,
-                _ctx: &mut TaskCtx<'_, Session>,
-                _input: Self::Input,
-            ) -> Result<Outcome<Self::Output>, TaskError> {
-                Err(not_yet_runnable($name))
-            }
-        }
-    };
 }
 
 /// Opens the lake, makes the drift-guard mode decision ONCE, writes the `runs`
@@ -561,23 +534,216 @@ impl Task<Session> for CorrectReconcile {
     }
 }
 
-declare_task!(
-    /// `apply_corrections`' init: consumes the drained-action snapshot and
-    /// emits the pass's `RunPlan` (§3.5).
-    CorrectionsInit, "init", (Plan<DrainedActions>,), Plan<RunPlan>, writes: true
-);
+/// `apply_corrections`' init: consumes the drained-action snapshot and emits
+/// the pass's `RunPlan` (§3.5).
+///
+/// A correction pass, like `correct`: it pins the PRIOR run's model identity
+/// rather than resolving the registry, because it re-clusters scores that
+/// identity produced.
+#[derive(Default)]
+pub struct CorrectionsInit;
 
-declare_task!(
-    /// Applies the drained staged actions to the lake (assertions, review
-    /// resolutions): pod-side because the payload needs a lake open (§3.5).
-    ApplyStaged, "apply_staged", (Plan<RunPlan>,), LakeRef<Labeled>, writes: true
-);
+impl Task<Session> for CorrectionsInit {
+    const NAME: &'static str = "init";
+    const VERSION: u32 = 1;
+    type Input = (Plan<DrainedActions>,);
+    type Output = Plan<RunPlan>;
+    const WRITES_LAKE: bool = true;
 
-declare_task!(
-    /// `apply_corrections`' reconcile: consumes the freshly-landed labels.
-    CorrectionsReconcile, "reconcile", (Plan<RunPlan>, LakeRef<Labeled>), LakeRef<Resolved>, writes: true,
-    policy: NodePolicy { escalate_on_oom: true, ..NodePolicy::default() }
-);
+    fn run(
+        &mut self,
+        ctx: &mut TaskCtx<'_, Session>,
+        (drained,): Self::Input,
+    ) -> Result<Outcome<Self::Output>, TaskError> {
+        let run = context(ctx, false)?;
+        let run_at = crate::dispatcher::fmt_epoch(crate::dispatcher::unix_now());
+        let snapshot_start = ctx.session.latest_snapshot_version().ok();
+        let (model_version, tf_snapshot_id) =
+            er_cli::stage_correct_init(ctx.session, &run.config, &ctx.order.run_id, &run_at)
+                .map_err(|e| engine_error(&format!("{e:#}")))?;
+        Ok(Outcome::Done(
+            Plan(RunPlan {
+                mode: er_versions::MODE_CORRECTION_PASS.to_string(),
+                rebuild_reason: Some(er_versions::REBUILD_CORRECTION_PASS.to_string()),
+                model_version: Some(model_version),
+                tf_snapshot_id: Some(tf_snapshot_id),
+                lexicon_hash: None,
+                snapshot_start,
+                run_at,
+                corpus_records: None,
+            }),
+            er_dag::Counters(serde_json::json!({ "drained": drained.0.action_ids.len() })),
+        ))
+    }
+}
+
+/// Applies the drained staged actions to the lake (assertions, review
+/// resolutions): pod-side because the payload needs a lake open (§3.5).
+///
+/// Its output is a PLAN rather than a lake reference, which is a deliberate
+/// departure from the design sketch: applying derives pair labels and review
+/// resolutions that only Postgres can store, and a pod cannot store them
+/// (§6.4). The ledger is the only channel between the halves, so the receipt
+/// carries them to `settle_actions`.
+///
+/// Applying stops at the FIRST failing action: it and the rest stay pending
+/// for a later pass rather than being skipped, and the ids that did land are
+/// still reported so they are not applied twice.
+#[derive(Default)]
+pub struct ApplyStaged;
+
+impl Task<Session> for ApplyStaged {
+    const NAME: &'static str = "apply_staged";
+    const VERSION: u32 = 1;
+    type Input = (Plan<RunPlan>,);
+    type Output = Plan<super::plans::StagedApplied>;
+    const WRITES_LAKE: bool = true;
+
+    fn run(
+        &mut self,
+        ctx: &mut TaskCtx<'_, Session>,
+        (plan,): Self::Input,
+    ) -> Result<Outcome<Self::Output>, TaskError> {
+        // The actions themselves ride in the order's params: `drain_actions`
+        // snapshotted the ids, and the control plane put the payloads where a
+        // pod can read them without a database credential.
+        let pending = staged_actions(ctx)?;
+        let now = &plan.0.run_at;
+        let mut applied = Vec::new();
+        let mut labels = Vec::new();
+        let mut resolutions = Vec::new();
+        for staged in &pending {
+            match er_cli::apply_staged_action_labeled(ctx.session, &staged.id, &staged.action, now)
+            {
+                Ok(derived) => {
+                    labels.extend(derived.into_iter().map(|l| super::plans::DerivedPairLabel {
+                        rec_a_key: l.rec_a_key,
+                        rec_b_key: l.rec_b_key,
+                        verdict: l.verdict.to_string(),
+                        decided_by: staged.created_by.clone(),
+                    }));
+                }
+                Err(e) => {
+                    // The prefix that landed is still the receipt: failing
+                    // without it would re-apply those actions on the next pass.
+                    return Err(engine_error(&format!("apply {}: {e:#}", staged.id)));
+                }
+            }
+            // Recorded after the apply succeeded, so the event cannot claim a
+            // resolution the lake never took.
+            if staged
+                .action
+                .get("type")
+                .and_then(serde_json::Value::as_str)
+                == Some("resolve_review")
+            {
+                let field = |k: &str| {
+                    staged
+                        .action
+                        .get(k)
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or_default()
+                        .to_string()
+                };
+                resolutions.push((field("review_id"), field("resolution")));
+            }
+            applied.push(staged.id.clone());
+        }
+        let count = applied.len();
+        Ok(Outcome::Done(
+            Plan(super::plans::StagedApplied {
+                applied,
+                labels,
+                resolutions,
+                snapshot_end: ctx.session.latest_snapshot_version().ok(),
+            }),
+            er_dag::Counters(serde_json::json!({ "applied": count })),
+        ))
+    }
+}
+
+/// One staged action as the work order carries it.
+struct StagedAction {
+    id: String,
+    action: serde_json::Value,
+    created_by: Option<String>,
+}
+
+/// The staged actions this pass must apply, from the order's params.
+///
+/// A pod cannot read `staged_steward_actions` (§6.4), so the control plane
+/// puts the drained payloads in the params when it plans the job. An absent
+/// list is an empty pass, not a failure.
+fn staged_actions(ctx: &TaskCtx<'_, Session>) -> Result<Vec<StagedAction>, TaskError> {
+    let Some(items) = ctx
+        .order
+        .params
+        .get("staged_actions")
+        .and_then(serde_json::Value::as_array)
+    else {
+        return Ok(Vec::new());
+    };
+    items
+        .iter()
+        .map(|v| {
+            let id = v
+                .get("id")
+                .and_then(serde_json::Value::as_str)
+                .ok_or_else(|| {
+                    TaskError::Failed(er_errors::ErError::precondition(
+                        "a staged action in the work order has no id".to_string(),
+                    ))
+                })?
+                .to_string();
+            Ok(StagedAction {
+                id,
+                action: v.get("action").cloned().unwrap_or(serde_json::Value::Null),
+                created_by: v
+                    .get("created_by")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string),
+            })
+        })
+        .collect()
+}
+
+/// `apply_corrections`' reconcile: consumes the freshly-applied actions.
+///
+/// The same clustering pass as everywhere else — what differs is that the
+/// assertions it clusters under were written moments ago by `apply_staged`.
+#[derive(Default)]
+pub struct CorrectionsReconcile;
+
+impl Task<Session> for CorrectionsReconcile {
+    const NAME: &'static str = "reconcile";
+    const VERSION: u32 = 1;
+    type Input = (Plan<RunPlan>, Plan<super::plans::StagedApplied>);
+    type Output = LakeRef<Resolved>;
+    const WRITES_LAKE: bool = true;
+
+    fn policy() -> NodePolicy {
+        NodePolicy {
+            escalate_on_oom: true,
+            ..NodePolicy::default()
+        }
+    }
+
+    fn run(
+        &mut self,
+        ctx: &mut TaskCtx<'_, Session>,
+        (plan, _applied): Self::Input,
+    ) -> Result<Outcome<Self::Output>, TaskError> {
+        let run = context(ctx, false)?;
+        let model = run.model();
+        let inputs = inputs_from_plan(ctx, &run, &model, &plan.0);
+        er_cli::stage_reconcile(ctx.session, &run.config, &inputs)
+            .map_err(|e| engine_error(&format!("{e:#}")))?;
+        Ok(Outcome::Done(
+            LakeRef::new(head_or_unknown(ctx.session), 0),
+            er_dag::Counters::default(),
+        ))
+    }
+}
 
 /// The reconcile half of `init` for kinds with no run row (§3.5); for
 /// `lake_migrate` the reconcile IS the work. REAL since Phase 2: the first
@@ -833,9 +999,38 @@ fn models_dir(
     Ok(root.join(&ctx.order.run_id))
 }
 
-declare_task!(
-    /// Creates and reconciles the new tenant's lake (today's
-    /// `reconcile_lake_env` half of `provision_tenant`): anything opening a
-    /// lake is a pod task (§3.5).
-    LakeInit, "lake_init", (Plan<super::plans::CatalogCreated>,), Plan<LakeInitialized>, writes: true
-);
+/// Creates and reconciles the new tenant's lake: anything opening a lake is a
+/// pod task (§3.5), which is the whole reason `provision` was split in two.
+///
+/// Idempotent by construction — the reconciler applies only what is absent and
+/// ledgers what it applied, so a retry over a lake that already exists is a
+/// no-op that still reports the catalog hash.
+#[derive(Default)]
+pub struct LakeInit;
+
+impl Task<Session> for LakeInit {
+    const NAME: &'static str = "lake_init";
+    const VERSION: u32 = 1;
+    type Input = (Plan<super::plans::CatalogCreated>,);
+    type Output = Plan<LakeInitialized>;
+    const WRITES_LAKE: bool = true;
+
+    fn run(
+        &mut self,
+        ctx: &mut TaskCtx<'_, Session>,
+        _input: Self::Input,
+    ) -> Result<Outcome<Self::Output>, TaskError> {
+        // `reconcile_lake_env` opens its OWN session from the tenant env: the
+        // lake this task initialises may not have existed when the pod's ctx
+        // session was opened, so the probe handle is not the one to use.
+        let outcome = crate::schema::reconcile_lake_env(&ctx.order.lake_env);
+        let (_status, hash, detail) = crate::schema::tenant_state(&outcome);
+        match outcome {
+            Ok(_) => Ok(Outcome::Done(
+                Plan(LakeInitialized { catalog_hash: hash }),
+                er_dag::Counters(serde_json::json!({ "detail": detail })),
+            )),
+            Err(message) => Err(engine_error(&message)),
+        }
+    }
+}

@@ -54,14 +54,13 @@ impl LakeEdge for Profiled {
         &["profile_runs", "column_profiles", "profile_findings"];
 }
 
-/// What `apply_staged` writes: the steward's labels landed on the lake.
-pub struct Labeled;
-impl LakeEdge for Labeled {
-    const STABLE_NAME: &'static str = "labeled";
-    const RELATIONS: &'static [&'static str] = &["assertions", "review_queue"];
-}
-
 /// Every edge's `(STABLE_NAME, RELATIONS)`, for the assembly test.
+///
+/// `labeled` was here until `apply_staged`'s output became a plan: an edge
+/// exists to TYPE a task's lake output, and once nothing produced one it was a
+/// vocabulary entry describing nobody. The relations it named (`assertions`,
+/// `review_queue`) are still written — by `apply_staged`, which says so in its
+/// own doc comment.
 #[must_use]
 pub fn all() -> Vec<(&'static str, &'static [&'static str])> {
     vec![
@@ -71,6 +70,5 @@ pub fn all() -> Vec<(&'static str, &'static [&'static str])> {
         (Resolved::STABLE_NAME, Resolved::RELATIONS),
         (Assembled::STABLE_NAME, Assembled::RELATIONS),
         (Profiled::STABLE_NAME, Profiled::RELATIONS),
-        (Labeled::STABLE_NAME, Labeled::RELATIONS),
     ]
 }

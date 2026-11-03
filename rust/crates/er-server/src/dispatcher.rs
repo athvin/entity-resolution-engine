@@ -976,7 +976,7 @@ async fn apply_approved_merges(
 /// them merged over several ticks instead of one job holding the org's single
 /// writer slot for an hour. The remainder keeps its tag and is picked up next
 /// tick, which is why removing the tag as it is staged matters.
-const MAX_APPROVED: i64 = 200;
+pub(crate) const MAX_APPROVED: i64 = 200;
 
 /// Job kinds a run report is sent for: the ones whose outcome a steward is
 /// waiting on.
@@ -1915,7 +1915,7 @@ async fn provision_tenant(
 /// double-quoted here, because `CREATE DATABASE` takes no parameters and a
 /// hand-built identifier is exactly the shape that becomes an injection the day
 /// someone relaxes the folding.
-async fn create_tenant_database(maint_dsn: &str, database: &str) -> Result<(), String> {
+pub(crate) async fn create_tenant_database(maint_dsn: &str, database: &str) -> Result<(), String> {
     let client = pg::connect(maint_dsn)
         .await
         .map_err(|e| format!("connect to the provisioning maintenance DSN: {e}"))?;

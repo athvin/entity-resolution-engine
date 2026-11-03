@@ -12,62 +12,157 @@
 //! A control body is ASYNC (its work is Postgres) where a pod body is
 //! synchronous (its work is DuckDB) — the two halves of a kind are shaped by
 //! what they talk to.
+//!
+//! Every body here is real. The `declare_control_task!` stub macro that stood
+//! in for them is gone, which is the honest marker that the control half of
+//! the design is built: there is no longer a control task the dispatcher
+//! declares but cannot run.
 
 use er_dag::{ControlCtx, ControlTask, Outcome, Plan, TaskError};
 
 use super::PgClient;
 use super::plans::{
     CatalogCreated, DrainedActions, LakeInitialized, ModelRegistered, OrgActivated, SettledActions,
-    StagedApproved, TrainedModel,
+    StagedApplied, StagedApproved, TrainedModel,
 };
 
-fn not_yet_runnable(task: &str) -> TaskError {
-    TaskError::Failed(er_errors::ErError::precondition(format!(
-        "control task body '{task}' is declared but not yet runnable: the dispatcher's control \
-         loop is Phase 2 of batch-orchestration-design.md"
-    )))
-}
+/// Creates the tenant workspace and its catalog — the tenant database on the
+/// maintenance DSN, or the local lake directory. REAL since Phase 3.
+///
+/// Explicitly NON-transactional, and that is the design rather than an
+/// omission: `CREATE DATABASE` cannot run in a transaction, so the idempotency
+/// keys are the `pg_database` probe and `create_dir_all` instead (§3.6, §9.1).
+/// A retry over a workspace that already exists is a no-op.
+///
+/// The provisioning profile comes from the dispatcher's own environment, not
+/// from the job: it is deployment configuration, and the job outlives the
+/// request that made it — so a profile switched off in between is a stated
+/// refusal rather than a panic.
+#[derive(Default)]
+pub struct CreateCatalog;
 
-macro_rules! declare_control_task {
-    ($(#[$doc:meta])* $ty:ident, $name:literal, $input:ty, $output:ty) => {
-        $(#[$doc])*
-        #[derive(Default)]
-        pub struct $ty;
+impl ControlTask<PgClient> for CreateCatalog {
+    const NAME: &'static str = "create_catalog";
+    const VERSION: u32 = 1;
+    type Input = ();
+    type Output = Plan<CatalogCreated>;
 
-        impl ControlTask<PgClient> for $ty {
-            const NAME: &'static str = $name;
-            const VERSION: u32 = 1;
-            type Input = $input;
-            type Output = $output;
-
-            // A declared-but-unbuilt body has nothing to await, so the
-            // future is spelled out: an `async fn` with no `.await` is a
-            // clippy error, and the trait's method is async because the
-            // REAL bodies are.
-            fn run(
-                &mut self,
-                _ctx: &mut ControlCtx<'_, PgClient>,
-                _input: Self::Input,
-            ) -> impl ::std::future::Future<Output = Result<Outcome<Self::Output>, TaskError>> + Send
-            {
-                ::std::future::ready(Err(not_yet_runnable($name)))
+    async fn run(
+        &mut self,
+        ctx: &mut ControlCtx<'_, PgClient>,
+        (): Self::Input,
+    ) -> Result<Outcome<Self::Output>, TaskError> {
+        let org = crate::pg::get_org_by_id(ctx.client, &ctx.order.org_id)
+            .await
+            .map_err(|e| {
+                TaskError::Failed(
+                    er_errors::ErError::stage_failure(format!("reading the org: {e}"))
+                        .with_class(er_errors::ErrorClass::TransientIo),
+                )
+            })?
+            .ok_or_else(|| {
+                TaskError::Failed(er_errors::ErError::precondition(
+                    "the org this job provisions no longer exists".to_string(),
+                ))
+            })?;
+        let profile = match crate::provision::Profile::from_env() {
+            Ok(Some(p)) => p,
+            Ok(None) => {
+                return Err(TaskError::Failed(er_errors::ErError::config(
+                    "auto-provisioning is not configured on this dispatcher \
+                     (ER_PROVISION_MODE)"
+                        .to_string(),
+                )));
+            }
+            Err(e) => {
+                return Err(TaskError::Failed(er_errors::ErError::config(format!(
+                    "auto-provisioning is misconfigured: {e}"
+                ))));
+            }
+        };
+        let plan = profile.plan(&org.name);
+        crate::provision::create_workspace(&plan, &profile.config_template)
+            .map_err(|e| TaskError::Failed(er_errors::ErError::config(e)))?;
+        match profile.mode {
+            crate::provision::Mode::Local => crate::provision::create_local_lake(&plan)
+                .map_err(|e| TaskError::Failed(er_errors::ErError::config(e)))?,
+            crate::provision::Mode::Postgres => {
+                let database = plan.tenant.as_deref().ok_or_else(|| {
+                    TaskError::Failed(er_errors::ErError::config(
+                        "postgres mode produced no tenant database name".to_string(),
+                    ))
+                })?;
+                let maint = profile.maint_dsn.as_deref().ok_or_else(|| {
+                    TaskError::Failed(er_errors::ErError::config(
+                        "postgres mode has no ER_PROVISION_MAINT_DSN".to_string(),
+                    ))
+                })?;
+                crate::dispatcher::create_tenant_database(maint, database)
+                    .await
+                    .map_err(|e| {
+                        TaskError::Failed(
+                            er_errors::ErError::stage_failure(e)
+                                .with_class(er_errors::ErrorClass::TransientIo),
+                        )
+                    })?;
             }
         }
-    };
+        Ok(Outcome::Done(
+            Plan(CatalogCreated {
+                tenant: plan.tenant.unwrap_or_else(|| org.name.clone()),
+            }),
+            er_dag::Counters::default(),
+        ))
+    }
 }
 
-declare_control_task!(
-    /// Creates the tenant database on the maintenance DSN (or the local lake
-    /// dir) — explicitly non-transactional, with the `pg_database` probe and
-    /// `create_dir_all` as its idempotency keys (§3.6).
-    CreateCatalog, "create_catalog", (), Plan<CatalogCreated>
-);
+/// `set_org_state(provisioning → active)`. REAL since Phase 3.
+///
+/// A false return is SUCCESS when the org is already active: the transition is
+/// guarded on the previous state, so a retry of this task after a partial
+/// provision finds the work done rather than failing a tenant that is already
+/// serving (§3.6, §9.1).
+#[derive(Default)]
+pub struct Activate;
 
-declare_control_task!(
-    /// `set_org_state(provisioning → active)`; a false return with the state
-    /// already `active` is success (§3.6).
-    Activate, "activate", (Plan<LakeInitialized>,), Plan<OrgActivated>
-);
+impl ControlTask<PgClient> for Activate {
+    const NAME: &'static str = "activate";
+    const VERSION: u32 = 1;
+    type Input = (Plan<LakeInitialized>,);
+    type Output = Plan<OrgActivated>;
+
+    async fn run(
+        &mut self,
+        ctx: &mut ControlCtx<'_, PgClient>,
+        _input: Self::Input,
+    ) -> Result<Outcome<Self::Output>, TaskError> {
+        let org = crate::pg::get_org_by_id(ctx.client, &ctx.order.org_id)
+            .await
+            .map_err(|e| {
+                TaskError::Failed(
+                    er_errors::ErError::stage_failure(format!("reading the org: {e}"))
+                        .with_class(er_errors::ErrorClass::TransientIo),
+                )
+            })?
+            .ok_or_else(|| {
+                TaskError::Failed(er_errors::ErError::precondition(
+                    "the org this job provisions no longer exists".to_string(),
+                ))
+            })?;
+        let moved = crate::pg::set_org_state(ctx.client, &org.name, "active", "provisioning")
+            .await
+            .map_err(|e| {
+                TaskError::Failed(
+                    er_errors::ErError::stage_failure(format!("activating {}: {e}", org.name))
+                        .with_class(er_errors::ErrorClass::TransientIo),
+                )
+            })?;
+        Ok(Outcome::Done(
+            Plan(OrgActivated { activated: moved }),
+            er_dag::Counters(serde_json::json!({ "already_active": !moved })),
+        ))
+    }
+}
 
 /// Creates the draft `trained-{run_id}` registry row pointing at the per-run
 /// TF path. REAL since Phase 3: the first control body the dispatcher runs.
@@ -175,20 +270,305 @@ impl ControlTask<PgClient> for RegisterModel {
     }
 }
 
-declare_control_task!(
-    /// Snapshots the pending staged-action ids as `Plan<DrainedActions>`,
-    /// `init`'s upstream (§3.5).
-    DrainActions, "drain_actions", (), Plan<DrainedActions>
-);
+/// Snapshots the pending staged-action ids as `Plan<DrainedActions>`,
+/// `init`'s upstream (§3.5). REAL since Phase 3.
+///
+/// A re-run after a crash re-snapshots, which is correct because nothing
+/// downstream has run: the snapshot IS the idempotency boundary, and an action
+/// is only marked applied by `settle_actions` at the far end of the pass.
+///
+/// An empty snapshot is a success, not a refusal: an `apply_corrections`
+/// enqueued by a publish that staged nothing has nothing to do, and the
+/// downstream tasks skip over an empty set.
+#[derive(Default)]
+pub struct DrainActions;
 
-declare_control_task!(
-    /// Marks applied, writes reviewer labels, emits `review.resolved` — all
-    /// Postgres rows, in one transaction with its finish (§3.6).
-    SettleActions, "settle_actions", (Plan<DrainedActions>, er_dag::LakeRef<super::edges::Assembled>), Plan<SettledActions>
-);
+impl ControlTask<PgClient> for DrainActions {
+    const NAME: &'static str = "drain_actions";
+    const VERSION: u32 = 1;
+    type Input = ();
+    type Output = Plan<DrainedActions>;
 
-declare_control_task!(
-    /// Reads tags, stages actions, enqueues `apply_corrections`; never opens a
-    /// lake (§3.5).
-    StageApproved, "stage_approved", (), Plan<StagedApproved>
-);
+    async fn run(
+        &mut self,
+        ctx: &mut ControlCtx<'_, PgClient>,
+        (): Self::Input,
+    ) -> Result<Outcome<Self::Output>, TaskError> {
+        let pending = crate::pg::pending_actions(ctx.client, &ctx.order.org_id)
+            .await
+            .map_err(|e| {
+                TaskError::Failed(
+                    er_errors::ErError::stage_failure(format!("reading staged actions: {e}"))
+                        .with_class(er_errors::ErrorClass::TransientIo),
+                )
+            })?;
+        let action_ids: Vec<String> = pending.into_iter().map(|a| a.id).collect();
+        let count = action_ids.len();
+        Ok(Outcome::Done(
+            Plan(DrainedActions { action_ids }),
+            er_dag::Counters(serde_json::json!({ "drained": count })),
+        ))
+    }
+}
+
+/// Marks the applied actions applied and records the labels they implied —
+/// all Postgres rows, which is why this half exists at all. REAL since
+/// Phase 3.
+///
+/// Takes `apply_staged`'s receipt rather than the drained set: applying stops
+/// at the first failing action, so what LANDED is a prefix of what was
+/// drained, and marking the rest applied would lose them. It also takes the
+/// assembled edge, so the marks happen only once the whole pass succeeded.
+///
+/// The labels are written best-effort, after the marks and in that order: a
+/// label that fails to record is a lost training signal, while a mark that
+/// fails to record means the action is applied to the lake and still pending,
+/// which re-applies it on the next pass. The worse failure goes first.
+#[derive(Default)]
+pub struct SettleActions;
+
+impl ControlTask<PgClient> for SettleActions {
+    const NAME: &'static str = "settle_actions";
+    const VERSION: u32 = 1;
+    type Input = (
+        Plan<StagedApplied>,
+        er_dag::LakeRef<super::edges::Assembled>,
+    );
+    type Output = Plan<SettledActions>;
+
+    async fn run(
+        &mut self,
+        ctx: &mut ControlCtx<'_, PgClient>,
+        (applied, _assembled): Self::Input,
+    ) -> Result<Outcome<Self::Output>, TaskError> {
+        let receipt = applied.0;
+        for id in &receipt.applied {
+            crate::pg::mark_action_applied(ctx.client, id)
+                .await
+                .map_err(|e| {
+                    TaskError::Failed(
+                        er_errors::ErError::stage_failure(format!(
+                            "marking staged action {id} applied: {e}"
+                        ))
+                        .with_class(er_errors::ErrorClass::TransientIo),
+                    )
+                })?;
+        }
+        // Best-effort, and deliberately not fatal: the lake already took these
+        // actions, so failing the task here would re-run a pass whose work is
+        // done. A missing label costs a training signal, not correctness.
+        for label in &receipt.labels {
+            if let Err(e) = crate::pg::record_reviewer_label(
+                ctx.client,
+                &ctx.order.org_id,
+                ctx.order.dataset_id.as_deref(),
+                (&label.rec_a_key, &label.rec_b_key),
+                &label.verdict,
+                label.decided_by.as_deref().unwrap_or("reviewer"),
+            )
+            .await
+            {
+                eprintln!(
+                    "settle_actions: reviewer label for {}|{} not recorded: {e}",
+                    label.rec_a_key, label.rec_b_key
+                );
+            }
+        }
+        let applied_count = i64::try_from(receipt.applied.len()).unwrap_or(i64::MAX);
+        Ok(Outcome::Done(
+            Plan(SettledActions {
+                applied: applied_count,
+            }),
+            er_dag::Counters(serde_json::json!({
+                "applied": applied_count,
+                "labels": receipt.labels.len(),
+                "resolutions": receipt.resolutions.len(),
+            })),
+        ))
+    }
+}
+
+/// Reads the approval tag, stages a resolve action per approved review, and
+/// enqueues the `apply_corrections` that merges them. REAL since Phase 3.
+///
+/// Never opens a lake — it reads tags and writes staged actions, both
+/// Postgres, and the merging is the job it enqueues (§3.5). That is exactly
+/// why `apply_approved` is the one kind with no pod task at all.
+///
+/// Capped per tick rather than unbounded: a tenant that tags a thousand groups
+/// should see them merged over several ticks instead of one job holding the
+/// org's single writer slot for an hour. The tag is removed as each review is
+/// staged, which is what makes the remainder get picked up next tick and what
+/// makes this task idempotent — a second run with nothing newly approved
+/// stages nothing.
+///
+/// One unstageable review must not strand the rest, so a staging failure is
+/// logged and skipped rather than failing the task: the tag stays on it and
+/// the next tick retries exactly that one.
+#[derive(Default)]
+pub struct StageApproved;
+
+impl ControlTask<PgClient> for StageApproved {
+    const NAME: &'static str = "stage_approved";
+    const VERSION: u32 = 1;
+    type Input = ();
+    type Output = Plan<StagedApproved>;
+
+    async fn run(
+        &mut self,
+        ctx: &mut ControlCtx<'_, PgClient>,
+        (): Self::Input,
+    ) -> Result<Outcome<Self::Output>, TaskError> {
+        let org = crate::pg::get_org_by_id(ctx.client, &ctx.order.org_id)
+            .await
+            .map_err(|e| {
+                TaskError::Failed(
+                    er_errors::ErError::stage_failure(format!("reading the org: {e}"))
+                        .with_class(er_errors::ErrorClass::TransientIo),
+                )
+            })?
+            .ok_or_else(|| {
+                TaskError::Failed(er_errors::ErError::precondition(
+                    "the org this job serves no longer exists".to_string(),
+                ))
+            })?;
+        // The published config names the approval tag. Reading a YAML file is
+        // not opening a lake, so this stays a control task.
+        let config = load_published_config(&ctx.order.lake_env)?;
+        let name = config.approval.tag.trim().to_string();
+        if name.is_empty() {
+            // The ordinary case for a tenant that has not configured the gate.
+            return Ok(Outcome::NoOp(Plan(StagedApproved {
+                staged: 0,
+                enqueued: false,
+            })));
+        }
+        let Some(tag) = crate::pg::tag_by_name(ctx.client, &ctx.order.org_id, &name)
+            .await
+            .map_err(|e| {
+                TaskError::Failed(
+                    er_errors::ErError::stage_failure(format!("reading tag '{name}': {e}"))
+                        .with_class(er_errors::ErrorClass::TransientIo),
+                )
+            })?
+        else {
+            return Ok(Outcome::NoOp(Plan(StagedApproved {
+                staged: 0,
+                enqueued: false,
+            })));
+        };
+        let approved = crate::pg::subjects_for_tag(
+            ctx.client,
+            &ctx.order.org_id,
+            &tag.id,
+            Some("review"),
+            crate::dispatcher::MAX_APPROVED,
+        )
+        .await
+        .map_err(|e| {
+            TaskError::Failed(
+                er_errors::ErError::stage_failure(format!("reading approved reviews: {e}"))
+                    .with_class(er_errors::ErrorClass::TransientIo),
+            )
+        })?;
+
+        let actor = format!("schedule:approval:{name}");
+        let mut staged = 0usize;
+        for tagging in &approved {
+            let action = serde_json::json!({
+                "type": "resolve_review",
+                "review_id": tagging.subject_id,
+                "resolution": "match",
+            });
+            if let Err(e) = crate::pg::stage_action(
+                ctx.client,
+                &ctx.order.org_id,
+                ctx.order.dataset_id.as_deref(),
+                &action,
+                &actor,
+            )
+            .await
+            {
+                eprintln!(
+                    "stage_approved: staging review {} for {} failed: {e}",
+                    tagging.subject_id, org.name
+                );
+                continue;
+            }
+            if let Err(e) = crate::pg::unapply_tag(
+                ctx.client,
+                &ctx.order.org_id,
+                &tag.id,
+                "review",
+                &tagging.subject_id,
+            )
+            .await
+            {
+                // Staged but still tagged: the next tick would stage it again.
+                // Said out loud rather than swallowed — a duplicate staged
+                // resolve is a no-op on apply but noise in the ledger.
+                eprintln!(
+                    "stage_approved: review {} staged but its tag could not be removed: {e}",
+                    tagging.subject_id
+                );
+            }
+            staged += 1;
+        }
+
+        let mut enqueued = false;
+        if staged > 0 {
+            let params = serde_json::json!({ "skip_ingest": true });
+            let idem = format!("approval:{}:{}", ctx.order.org_id, approved.len());
+            crate::pg::enqueue(
+                ctx.client,
+                &ctx.order.org_id,
+                ctx.order.dataset_id.as_deref(),
+                "apply_corrections",
+                0,
+                Some(&idem),
+                Some(&params),
+                crate::pg::Provenance::actor(&actor),
+            )
+            .await
+            .map_err(|e| {
+                TaskError::Failed(
+                    er_errors::ErError::stage_failure(format!(
+                        "enqueueing the approved apply: {e}"
+                    ))
+                    .with_class(er_errors::ErrorClass::TransientIo),
+                )
+            })?;
+            enqueued = true;
+        }
+        let count = i64::try_from(staged).unwrap_or(i64::MAX);
+        Ok(Outcome::Done(
+            Plan(StagedApproved {
+                staged: count,
+                enqueued,
+            }),
+            er_dag::Counters(serde_json::json!({ "staged": count })),
+        ))
+    }
+}
+
+/// The tenant's published config, from the path its env names.
+///
+/// Deliberately a plain file read: a control task may not open a lake (§3.5),
+/// and a YAML file is not one.
+fn load_published_config(lake_env: &serde_json::Value) -> Result<er_config::Config, TaskError> {
+    let path = lake_env
+        .get("ER_CONFIG_PATH")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            TaskError::Failed(er_errors::ErError::config(
+                "org env missing ER_CONFIG_PATH".to_string(),
+            ))
+        })?;
+    let text = std::fs::read_to_string(path).map_err(|e| {
+        TaskError::Failed(er_errors::ErError::config(format!(
+            "read config {path}: {e}"
+        )))
+    })?;
+    er_config::load_config_str(&text)
+        .map_err(|e| TaskError::Failed(er_errors::ErError::config(crate::errfmt::chain(&e))))
+}
