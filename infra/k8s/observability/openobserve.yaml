@@ -1,0 +1,191 @@
+# The span store: one single-node OpenObserve, S3 for data, Aurora for metadata.
+#
+# ## Why a hand-written Deployment and not the chart
+#
+# `openobserve/openobserve` is the DISTRIBUTED chart. It renders a workload per
+# role — ingester, querier, router, scheduler, compactor, plus `o2ai` at two
+# replicas — and its defaults also enable a NATS subchart for coordination and
+# a BUNDLED Postgres we do not want, because metadata belongs in the Aurora
+# cluster this account already operates. Measured against this cluster: that is
+# roughly ten pods on **4 total vCPU** (two 2-vCPU nodes, against an account
+# quota of 8), beside er-api, er-dispatcher, the collector, Fluent Bit, the
+# OTel operator and external-secrets. It does not fit, and it never could.
+#
+# It also contradicted the design it was supposed to implement. The values file
+# that preceded this said "Not four services" and set `ZO_NODE_ROLE: all` — a
+# single-node configuration — while selecting the chart that cannot do that.
+# Three separate errors followed from the mismatch and none were caught,
+# because the deploy job that would have rendered the chart was being cancelled
+# by `images.yml`'s concurrency before it ever ran:
+#
+#   1. `replicaCount: 1` — the chart wants an OBJECT keyed by role, so the
+#      template failed with `can't evaluate field scheduler in type interface {}`.
+#   2. `ZO_LOCAL_MODE: "false"` — that is cluster mode, which REQUIRES the NATS
+#      coordinator. Single node is `true` with `ZO_LOCAL_MODE_STORAGE: s3`,
+#      which is remote storage without the coordination.
+#   3. The bundled Postgres and NATS subcharts were left at their enabled
+#      defaults.
+#
+# So this is the simpler thing that matches the stated design: one pod, no
+# coordinator, no subcharts, and a config surface we own rather than 1,365
+# lines of upstream values we do not.
+#
+# ## What makes one pod safe to run statelessly
+#
+# Data is Parquet in S3 and metadata is in Postgres, so the pod holds nothing
+# durable — there is no PVC and nothing to back up. The one exception is the
+# write-ahead log under `ZO_DATA_DIR`, which an `emptyDir` carries: a restart
+# loses whatever had not yet been flushed to S3. That is the right trade for
+# telemetry (bounded, recent, and not the system of record) and it is stated
+# here so nobody discovers it as a surprise.
+#
+# `Recreate` rather than a rolling update, deliberately. Two single-node
+# instances sharing one bucket and one metadata database would both believe
+# they owned compaction; a brief gap in ingest during a deploy is much cheaper
+# than two writers.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: openobserve
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: openobserve
+# No IRSA annotation. S3 access comes from the EKS **Pod Identity**
+# association in infra/terraform/envs/dev/observability.tf, which targets this
+# service account by name in this namespace — so the name below is load-bearing
+# and must change in lockstep with the Terraform if it ever changes.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: openobserve
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: openobserve
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: openobserve
+  ports:
+    - name: http
+      port: 5080
+      targetPort: http
+      protocol: TCP
+    - name: grpc
+      port: 5081
+      targetPort: grpc
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openobserve
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: openobserve
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: openobserve
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: openobserve
+    spec:
+      serviceAccountName: openobserve
+      # Pinned to the app pool so an ingest spike can never compete for the
+      # nodes sized for DuckDB spill. D-OTEL's rejected-alternative reasoning
+      # is the point: an observability stack that degrades when the system it
+      # observes gets busy is worse than none.
+      nodeSelector:
+        karpenter.sh/nodepool: app
+      securityContext:
+        fsGroup: 2000
+        runAsUser: 10000
+        runAsGroup: 3000
+        runAsNonRoot: true
+      containers:
+        - name: openobserve
+          # Pinned, and the registry the chart itself uses.
+          image: o2cr.ai/openobserve/openobserve:v1.1.2
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          ports:
+            - name: http
+              containerPort: 5080
+            - name: grpc
+              containerPort: 5081
+          env:
+            # Single node: no NATS, no etcd, no second workload.
+            - name: ZO_LOCAL_MODE
+              value: "true"
+            # …but NOT single-node *storage*. The whole point of this store is
+            # that its data lands as Parquet in our own S3, which DuckDB can
+            # then read directly.
+            - name: ZO_LOCAL_MODE_STORAGE
+              value: "s3"
+            - name: ZO_NODE_ROLE
+              value: "all"
+            - name: ZO_CLUSTER_NAME
+              value: "er"
+            - name: ZO_S3_PROVIDER
+              value: "s3"
+            - name: ZO_S3_REGION_NAME
+              value: "us-east-2"
+            - name: ZO_S3_BUCKET_NAME
+              value: "er-obs-797781631727"
+            # Metadata in the Aurora cluster, so the pod stays disposable. The
+            # DSN arrives in the secret below, not here.
+            - name: ZO_META_STORE
+              value: "postgres"
+            - name: ZO_DATA_DIR
+              value: "/data/"
+            - name: ZO_HTTP_PORT
+              value: "5080"
+            - name: ZO_GRPC_PORT
+              value: "5081"
+            # Retention. The bucket's own lifecycle rule (envs/core) is the
+            # backstop; this is what expires the index that points at it.
+            - name: ZO_COMPACT_DATA_RETENTION_DAYS
+              value: "30"
+            # No phoning home from a store that holds this account's telemetry.
+            - name: ZO_TELEMETRY
+              value: "false"
+          envFrom:
+            # ZO_ROOT_USER_EMAIL, ZO_ROOT_USER_PASSWORD, ZO_META_POSTGRES_DSN.
+            # Created by scripts/obs_up.sh from Secrets Manager, never in git.
+            - secretRef:
+                name: openobserve-env
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              memory: 2Gi
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+      volumes:
+        # The WAL only. See the header: a restart loses what S3 has not yet
+        # taken, which is the accepted trade for having nothing to back up.
+        - name: data
+          emptyDir:
+            sizeLimit: 2Gi

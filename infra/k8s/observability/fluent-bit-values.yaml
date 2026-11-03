@@ -75,3 +75,24 @@ additionalOutputs: |
       # CloudWatch output above is the durable path, so dropping here is the
       # right failure mode.
       Retry_Limit          2
+
+# The ingest credential for the span store.
+#
+# The OpenObserve output below authenticates with `HTTP_User ${OPENOBSERVE_USER}`
+# / `HTTP_Passwd ${OPENOBSERVE_PASSWORD}`, which Fluent Bit interpolates from
+# the ENVIRONMENT. Without these the variables resolve empty and every push is
+# a 401 — twice a second, visible only in OpenObserve's access log, which is
+# exactly how it was found on the first real deploy.
+#
+# Created by scripts/obs_up.sh from Secrets Manager; nothing secret is in git.
+env:
+  - name: OPENOBSERVE_USER
+    valueFrom:
+      secretKeyRef:
+        name: openobserve-ingest
+        key: OPENOBSERVE_USER
+  - name: OPENOBSERVE_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: openobserve-ingest
+        key: OPENOBSERVE_PASSWORD

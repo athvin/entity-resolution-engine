@@ -57,6 +57,23 @@ ports:
   jaeger-grpc: { enabled: false }
   zipkin: { enabled: false }
 
+# The ingest credential for the span store.
+#
+# `exporters.otlp_http/openobserve.headers.Authorization` is `${env:OPENOBSERVE_AUTH}`,
+# and without this the collector does NOT fail — it logs
+# `Configuration references unset environment variable` once and then sends an
+# EMPTY Authorization header, so every span is a 401 that only OpenObserve's
+# access log records. Observed exactly that way on the first real deploy.
+#
+# The secret is created by scripts/obs_up.sh from Secrets Manager, so no
+# credential is in this file or in git.
+extraEnvs:
+  - name: OPENOBSERVE_AUTH
+    valueFrom:
+      secretKeyRef:
+        name: openobserve-ingest
+        key: OPENOBSERVE_AUTH
+
 config:
   receivers:
     jaeger: null
@@ -117,7 +134,12 @@ config:
     # take logs as well as traces without crossing §8.5's boundary — the
     # constraint that forced §10.5's split-by-signal does not apply to a store
     # we run ourselves.
-    otlphttp/openobserve:
+    # `otlp_http`, not `otlphttp`. The collector chart renamed it and still
+    # auto-rewrites the old spelling, announcing on every install that
+    # "auto-rewrite will be removed in a future release" — so the old name is a
+    # chart bump away from failing. Surfaced by the first deploy that actually
+    # rendered these values.
+    otlp_http/openobserve:
       endpoint: http://openobserve.observability.svc.cluster.local:5080/api/default
       headers:
         Authorization: ${env:OPENOBSERVE_AUTH}
@@ -149,11 +171,11 @@ config:
       metrics:
         receivers: [otlp]
         processors: [memory_limiter, batch]
-        exporters: [awsemf, otlphttp/openobserve]
+        exporters: [awsemf, otlp_http/openobserve]
       traces:
         receivers: [otlp]
         processors: [memory_limiter, tail_sampling, batch]
-        exporters: [awsxray, otlphttp/openobserve]
+        exporters: [awsxray, otlp_http/openobserve]
       # Still no OTLP logs pipeline. Logs ride stdout -> Fluent Bit, which is
       # the reliable path for an ephemeral Job: the runtime captures both
       # streams however the process exits, so logs survive exactly the crash
