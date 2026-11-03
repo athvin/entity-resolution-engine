@@ -24,6 +24,7 @@ against it.
 - Measured: the second pass, and the workers=2 verdict (2026-11-02, later)
 - Measured: the flake's root cause, the flip, and the buildcache move (2026-11-02, evening)
 - Incident: rust-cache restored a partial target and broke main (2026-11-03)
+- The er-api image build, and the cargo-chef split (2026-11-03)
 
 ## Incident: rust-cache restored a partial target and broke main (2026-11-03)
 
@@ -86,6 +87,63 @@ no-cache run came in at 8–13m per job, in line with the sharded baseline.
 
 With sccache on S3, buildkit on ECR and this gone, nothing in the Rust gate
 writes the Actions cache at all — which retires the single-writer rule too.
+
+## The er-api image build, and the cargo-chef split (2026-11-03)
+
+This never touched PR latency — `images.yml` runs on push-to-main — but it was
+the largest single block of runner time in the repository, and it was invisible
+because nothing measured it until the buildcache work went looking.
+
+**Before.** `rust/Dockerfile` was `COPY . .` followed by one
+`cargo build --release --bin er-server`, so ANY change under `rust/` — a
+one-line handler edit — invalidated that layer and recompiled all 408 crates,
+bundled DuckDB's C++ included.
+
+| measurement | time |
+|---|---|
+| main build, run `41524220825` | **58m9s** |
+| cold no-cache build, #417's new verify job | **51m** |
+| er-web, same run (for scale) | 1–2m |
+
+Both image jobs also had **no `timeout-minutes`**, so the default was 360: a
+hung buildkit burned six runner-hours with `deploy-dev` queued behind it. Now
+90 (er-api) and 30 (er-web), each sized against the measurement above.
+
+**The split.** cargo-chef (pinned) reduces the workspace to a recipe
+(manifests + lockfile), cooks the dependency graph against stubbed crates, and
+takes the sources in a later layer. A local end-to-end validation measured the
+ratio the whole change rests on:
+
+| stage | local (arm64) |
+|---|---|
+| `cook` — every dependency, DuckDB included | 4909s (81.8m) |
+| `cargo build --bin er-server` — the 33 workspace crates | 195.6s (3.3m) |
+| `COPY . .`, strip, `install-extensions` | ~15s |
+
+**The workspace is 3.8% of the compile.** The other 96.2% is what `COPY . .`
+was re-doing on every merge, and what the ECR registry cache now carries
+between runs.
+
+**Cold chef build on CI: 31m30s** (#423's verify) — *faster* than the 51m cold
+monolith, not slower as the two-cargo-passes shape suggested it might be. So
+the split costs nothing even in the case it was expected to.
+
+Two details that would have silently undone it, both worth keeping:
+
+- `.cargo/config.toml` is copied BEFORE the cook. Its `CXXFLAGS` are part of
+  `libduckdb-sys`'s fingerprint, so cooking without it builds DuckDB in the
+  cook and AGAIN once the sources arrive — the most expensive crate in the
+  graph, twice, for nothing.
+- `--bin er-server` is passed to `cook` as well as `build`. Cargo resolves
+  features per selected target, so a whole-workspace cook unifies a different
+  feature set and every crate whose features differ recompiles.
+
+Nothing in the workspace has a `build.rs`, which is the usual thing that breaks
+chef's stub phase — checked before writing any of it.
+
+**The warm number** — a source-only merge against a populated cook layer — is
+what the split is actually for, and goes here once a second rust-touching merge
+has run.
 
 ## The measured baseline (2026-10-22)
 
