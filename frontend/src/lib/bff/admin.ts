@@ -5,6 +5,7 @@ import { db, schema } from "@/lib/db";
 import { seal } from "@/lib/db/crypto";
 import { env } from "@/lib/env";
 import { BffFailure, requireIdentity } from "./proxy";
+import { upstreamFetch } from "./upstream";
 
 /** Super-admin-only surfaces (the operator console). */
 export async function requireSuperAdmin(): Promise<Identity> {
@@ -22,20 +23,15 @@ export async function operatorFetch<T>(
   path: string,
   options: { method?: string; body?: unknown; searchParams?: URLSearchParams } = {},
 ): Promise<T> {
-  const url = new URL(path, env().ERSERVER_BASE_URL);
-  if (options.searchParams) url.search = options.searchParams.toString();
-  const headers: Record<string, string> = {
-    authorization: `Bearer ${env().ERSERVER_OPERATOR_TOKEN}`,
-    "x-acting-user": identity.user.email,
-  };
-  if (options.body !== undefined) headers["content-type"] = "application/json";
   let response: Response;
   try {
-    response = await fetch(url, {
-      method: options.method ?? "GET",
-      headers,
-      body: options.body === undefined ? null : JSON.stringify(options.body),
-      cache: "no-store",
+    response = await upstreamFetch({
+      path,
+      authorization: `Bearer ${env().ERSERVER_OPERATOR_TOKEN}`,
+      method: options.method,
+      searchParams: options.searchParams,
+      json: options.body,
+      actingUser: identity.user.email,
     });
   } catch {
     throw new BffFailure(502, "internal", "the control plane is unreachable");
