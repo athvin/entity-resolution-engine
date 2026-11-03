@@ -221,6 +221,83 @@ export function useJob(org: string, ds: string, jobId: string) {
   });
 }
 
+/**
+ * One try of one task, as the ledger records it
+ * (batch-orchestration-design §4.2).
+ *
+ * This is the per-stage progress `JobRow.progress` was shaped for and never
+ * had a producer for. It has one now — but it is a SEPARATE read rather than a
+ * field on the job, because a job has one row and a run has one row per task
+ * per try, and collapsing the second into the first is what made the old
+ * fabricated shape possible.
+ */
+export interface TaskRow {
+  id: string;
+  task_id: string;
+  kind: string;
+  state: string;
+  try_number: number;
+  /** `null` once the try is archived; `true` for the current one. */
+  live: boolean | null;
+  archived_reason: string | null;
+  error_class: string | null;
+  error_detail: string | null;
+  resource_class: string | null;
+  launches: number;
+  max_tries: number;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+/** The states a task can still leave on its own, so the list keeps polling. */
+const ACTIVE_TASK_STATES = new Set([
+  "none",
+  "scheduled",
+  "queued",
+  "running",
+  "up_for_retry",
+  "restarting",
+  "canceling",
+]);
+
+export function useJobTasks(org: string, ds: string, jobId: string) {
+  return useQuery({
+    queryKey: queryKeys.jobTasks(org, ds, jobId),
+    queryFn: () =>
+      bffFetch<{ tasks: TaskRow[] }>(`/api/orgs/${org}/datasets/${ds}/jobs/${jobId}/tasks`).then(
+        (r) => r.tasks,
+      ),
+    refetchInterval: (query) =>
+      (query.state.data ?? []).some((t) => t.live !== false && ACTIVE_TASK_STATES.has(t.state))
+        ? 1_500
+        : false,
+  });
+}
+
+/**
+ * Clear one task so it re-runs, without re-running the job (§5.4).
+ *
+ * The CLOSURE is the server's: it clears the named task plus everything
+ * downstream, because re-running a stage without re-running what consumed it
+ * would leave the lake describing two different runs. The caller names one
+ * task; the confirm copy says what that means.
+ */
+export function useClearTask(org: string, ds: string, jobId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (taskId: string) =>
+      bffFetch<{ cleared: string[] }>(
+        `/api/orgs/${org}/datasets/${ds}/jobs/${jobId}/tasks/${encodeURIComponent(taskId)}/clear`,
+        { method: "POST" },
+      ),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.jobTasks(org, ds, jobId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.job(org, ds, jobId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.jobs(org, ds) });
+    },
+  });
+}
+
 export function useJobAction(org: string, ds: string, jobId: string, action: "cancel" | "resume") {
   const queryClient = useQueryClient();
   return useMutation({
