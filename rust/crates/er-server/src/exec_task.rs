@@ -269,16 +269,21 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
             .unwrap_or_default()
             .to_string(),
         task_id: task_id.clone(),
+        kind: kind_str.clone(),
         try_number: order_body["try_number"].as_i64().unwrap_or(1),
         resource_class: order_body["resource_class"].as_str().map(str::to_string),
         segment: order_body["segment"].as_str().map(str::to_string),
         input: order_body["input"].clone(),
         params: order_body["params"].clone(),
         lake_env: order_body["lake_env"].clone(),
+        drop_root: order_body["drop_root"].as_str().map(str::to_string),
+        models: order_body["models"].clone(),
     };
 
-    // Step 3: report start (the fallback channel carries the identity in the
-    // body; the projected-token path derives it from claims in Phase 2b).
+    // Step 3: report start. The body carries this pod's identity for the
+    // fallback-token path; under the projected token the server IGNORES it and
+    // records the identity from the verified claims instead (§6.3 step 3), so
+    // what is sent here is advisory, never authority.
     let pod_uid = env_var("ER_POD_UID").unwrap_or_else(|| format!("pod-{attempt}"));
     let start = json!({
         "k8s_job_name": env_var("ER_K8S_JOB_NAME").unwrap_or_else(|| er_k8s::job_name(&attempt, 1)),

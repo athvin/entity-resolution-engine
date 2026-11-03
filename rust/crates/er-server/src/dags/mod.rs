@@ -200,10 +200,60 @@ pub fn run_pod_task(
             let schema = pin::<er_dag::Plan<plans::SchemaReconciled>>(ctx, 0)?;
             completed(tasks::Maintain.run(ctx, (schema,))?)
         }
+        (JobKind::Profile, "profile") => {
+            let schema = pin::<er_dag::Plan<plans::SchemaReconciled>>(ctx, 0)?;
+            completed(tasks::ProfileCorpus.run(ctx, (schema,))?)
+        }
+        // The pipeline stages (§11 Phase 3). Each rehydrates its upstream
+        // references POSITIONALLY, in the order the DAG wired them — which is
+        // what the typed `Input` tuples make checkable at compile time.
+        (JobKind::RunAllFull | JobKind::RunAllIncremental, "init") => {
+            completed(tasks::Init.run(ctx, ())?)
+        }
+        (JobKind::RunAllFull | JobKind::RunAllIncremental, "ingest") => {
+            let plan = pin::<er_dag::Plan<plans::RunPlan>>(ctx, 0)?;
+            completed(tasks::Ingest.run(ctx, (plan,))?)
+        }
+        (JobKind::RunAllFull | JobKind::RunAllIncremental, "standardize") => {
+            let plan = pin::<er_dag::Plan<plans::RunPlan>>(ctx, 0)?;
+            let landed = pin::<er_dag::LakeRef<edges::Landed>>(ctx, 1)?;
+            completed(tasks::Standardize.run(ctx, (plan, landed))?)
+        }
+        (JobKind::RunAllFull | JobKind::RunAllIncremental, "match") => {
+            let plan = pin::<er_dag::Plan<plans::RunPlan>>(ctx, 0)?;
+            let std = pin::<er_dag::LakeRef<edges::Standardized>>(ctx, 1)?;
+            completed(tasks::Match.run(ctx, (plan, std))?)
+        }
+        (JobKind::RunAllFull | JobKind::RunAllIncremental, "reconcile") => {
+            let plan = pin::<er_dag::Plan<plans::RunPlan>>(ctx, 0)?;
+            let scored = pin::<er_dag::LakeRef<edges::Scored>>(ctx, 1)?;
+            completed(tasks::Reconcile.run(ctx, (plan, scored))?)
+        }
+        // `assemble` is the SAME stage for a run and a correction pass: both
+        // hand it a `Resolved` partition and ask for golden records, reviews,
+        // metrics and quality over it.
+        (JobKind::RunAllFull | JobKind::RunAllIncremental | JobKind::Correct, "assemble") => {
+            let plan = pin::<er_dag::Plan<plans::RunPlan>>(ctx, 0)?;
+            let ents = pin::<er_dag::LakeRef<edges::Resolved>>(ctx, 1)?;
+            completed(tasks::Assemble.run(ctx, (plan, ents))?)
+        }
+        // The teardown takes NO input: it fires on whatever its upstreams did,
+        // including an `init` that failed before publishing a plan (§4.3).
+        (JobKind::RunAllFull | JobKind::RunAllIncremental | JobKind::Correct, "finish") => {
+            completed(tasks::Finish.run(ctx, ())?)
+        }
+        // `correct` shares `init` (which branches on the kind) with `run_all`;
+        // only its reconcile differs.
+        (JobKind::Correct, "init") => completed(tasks::Init.run(ctx, ())?),
+        (JobKind::Correct, "reconcile") => {
+            let plan = pin::<er_dag::Plan<plans::RunPlan>>(ctx, 0)?;
+            completed(tasks::CorrectReconcile.run(ctx, (plan,))?)
+        }
+
         (kind, task) => Err(er_dag::TaskError::Failed(er_errors::ErError::precondition(
             format!(
                 "the executor does not yet run task '{task}' of kind '{}' — its body arrives \
-                 with Phase 3 of batch-orchestration-design.md",
+                 with the remaining Phase 3 kinds of batch-orchestration-design.md",
                 kind.as_str()
             ),
         ))),
