@@ -155,7 +155,15 @@ async fn async_main(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>>
     // is proven end to end rather than assumed.
     tracing::info!(addr = %addr, "er-server listening");
     let state = er_server::state_from_env().await;
-    axum::serve(listener, er_server::app(state)).await?;
+    // Drain on SIGTERM rather than dying mid-response: axum stops accepting and
+    // finishes what it already took. The chart pairs this with a `preStop` sleep
+    // (endpoint removal propagates asynchronously, so the pod is still being
+    // routed to when the signal lands) and a grace period long enough to cover
+    // the drain. See `er_server::shutdown` for why SIGINT is deliberately left
+    // on its default handler.
+    axum::serve(listener, er_server::app(state))
+        .with_graceful_shutdown(er_server::shutdown::on_sigterm())
+        .await?;
     Ok(())
 }
 
