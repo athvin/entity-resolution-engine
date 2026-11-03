@@ -5,7 +5,19 @@ import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import { useQuery } from "@tanstack/react-query";
 import { Command } from "cmdk";
-import { Building2, Eye, LogOut, Moon, Play, ShieldCheck, Sun, User } from "lucide-react";
+import {
+  Building2,
+  Eye,
+  Layers,
+  LogOut,
+  Moon,
+  Play,
+  Plus,
+  Settings2,
+  ShieldCheck,
+  Sun,
+  User,
+} from "lucide-react";
 
 import { bffFetch } from "@/lib/api/client";
 import type { Membership, SessionUser } from "@/lib/auth/types";
@@ -13,6 +25,7 @@ import { useToast } from "@/components/ui/toaster";
 import { displayName } from "@/lib/domain/attributes";
 import { RUN_KINDS, type RunKind } from "@/lib/domain/run-kinds";
 import { NAV_ITEMS } from "@/lib/nav";
+import { useDatasets } from "@/lib/query/datasets";
 import { useDatasetSlug } from "@/lib/use-dataset-slug";
 import { useImpersonation, type AdminOrgRow } from "@/lib/query/admin";
 import { useOrgEntityType } from "@/lib/query/config";
@@ -66,6 +79,7 @@ export function CommandPalette({
   const [input, setInput] = useState("");
   const q = useDebounced(input.trim(), 200);
   const ds = useDatasetSlug();
+  const datasets = useDatasets(org);
   const submit = useSubmitJob(org, ds);
   const entityType = useOrgEntityType(org, ds);
   const toast = useToast();
@@ -233,6 +247,53 @@ export function CommandPalette({
               )}
             </Command.Item>
           ))}
+        </Command.Group>
+
+        <Command.Group heading="Datasets" className={GROUP_CLASS}>
+          {(datasets.data ?? [])
+            .filter((dataset) => dataset.name !== ds)
+            .map((dataset) => (
+              <Command.Item
+                key={dataset.name}
+                onSelect={() => {
+                  run(() => {
+                    router.push(`/${org}/${dataset.name}/dashboard`);
+                  });
+                }}
+                className={ITEM_CLASS}
+                data-testid={`palette-dataset-${dataset.name}`}
+              >
+                <Layers className="size-4" />
+                {dataset.display_name ?? dataset.name}
+                <span className="text-muted-foreground ml-auto text-[10px] tracking-wide uppercase">
+                  {dataset.entity_type}
+                </span>
+              </Command.Item>
+            ))}
+          <Command.Item
+            onSelect={() => {
+              run(() => {
+                router.push(`/${org}/datasets`);
+              });
+            }}
+            className={ITEM_CLASS}
+            data-testid="palette-manage-datasets"
+          >
+            <Settings2 className="size-4" />
+            Manage datasets
+          </Command.Item>
+          <Command.Item
+            onSelect={() => {
+              run(() => {
+                router.push(`/${org}/datasets/new`);
+              });
+            }}
+            className={ITEM_CLASS}
+            data-testid="palette-new-dataset"
+          >
+            <Plus className="size-4" />
+            New dataset
+          </Command.Item>
         </Command.Group>
 
         {memberships.length > 1 && (

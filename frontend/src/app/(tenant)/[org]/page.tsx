@@ -1,12 +1,15 @@
-import { redirect } from "next/navigation";
+import type { Metadata } from "next";
+
+import { DatasetDispatcher } from "@/components/datasets/dataset-dispatcher";
+
+export const metadata: Metadata = { title: "Workspace" };
 
 /**
- * The org home. For now it lands on the `default` dataset's dashboard — every
- * org has one (the convergence sweep for pre-dataset orgs, provisioning for
- * new ones). The management-UX phase replaces this with the real dispatcher:
- * last-used cookie → sole dataset → the datasets list.
+ * The org home. It renders nothing of its own: a workspace is a set of
+ * datasets, and this decides which one you meant. See
+ * [`DatasetDispatcher`] for the order it tries.
  */
 export default async function OrgHome({ params }: { params: Promise<{ org: string }> }) {
   const { org } = await params;
-  redirect(`/${org}/default/dashboard`);
+  return <DatasetDispatcher org={org} />;
 }

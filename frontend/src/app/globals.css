@@ -269,6 +269,34 @@
   body {
     @apply bg-background text-foreground;
   }
+  /* Keep scrolled-to content clear of the two fixed bars.
+   *
+   * The shell pins a 3.5rem header to the top on every viewport and a tab bar
+   * to the bottom below `lg`. `main`'s padding keeps content clear of them AT
+   * REST, but says nothing about where a scroll LANDS: `scrollIntoView`,
+   * focusing a control with the keyboard, and following a `#fragment` all
+   * scroll the minimum distance, which parks the target flush against the
+   * viewport edge — underneath a bar. The person then has to scroll again to
+   * reach what the browser just took them to, and a keyboard user may not see
+   * the focused control at all.
+   *
+   * Caught by a Playwright failure that is the same bug seen from outside: a
+   * checkbox scrolled into view had the bottom tab bar intercept the click.
+   *
+   * Scoped to the shell rather than set on `html` outright, because the bars
+   * belong to the shell: the marketing pages have none, and padding their
+   * scrolls for bars that are not there moved where an element screenshot
+   * lands — far enough to shift subpixel text rendering and fail two landing
+   * baselines that had nothing to do with this change. */
+  html:has([data-app-shell]) {
+    scroll-padding-top: 4rem;
+    scroll-padding-bottom: 5rem;
+  }
+  @media (width >= 64rem) {
+    html:has([data-app-shell]) {
+      scroll-padding-bottom: 2rem;
+    }
+  }
   @media (prefers-reduced-motion: reduce) {
     *,
     *::before,

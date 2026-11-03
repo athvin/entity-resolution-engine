@@ -71,6 +71,8 @@ below `lg`.
 - `/[org]/settings/ai`
 - `/[org]/settings/members`
 - `/[org]/settings/webhooks`
+- `/datasets-dev/datasets`
+- `/datasets-dev/datasets/new`
 
 ### Routes NOT in the axe gate
 
@@ -83,6 +85,8 @@ for the three categories that legitimately sit outside the sweep.
 - `/[org]/[ds]/runs/schedules`
 - `/[org]/[ds]/settings`
 - `/[org]/[ds]/sources/new`
+- `/[org]/datasets`
+- `/[org]/datasets/new`
 - `/[org]/settings`
 - `/[org]/settings/audit`
 - `/[org]/settings/profile`

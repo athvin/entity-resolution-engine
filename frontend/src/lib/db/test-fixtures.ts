@@ -67,6 +67,13 @@ export const TRIAGE_ORGS = [
   // read-only (duplicates view + wizard up to the Map step, no publish), so a
   // single shared org is race-safe and is never pixel-compared.
   "orgs-dev",
+  // The multi-dataset tenants: two datasets each, so the switcher, the manage
+  // table and the org-home dispatcher have a real choice to make. One per
+  // device project because creating and suspending datasets mutates the
+  // shared mock, exactly like the registry and the tag vocabulary above.
+  "datasets-dev",
+  "datasets-ios",
+  "datasets-android",
   // Creating a tag changes the vocabulary every other test on that org sees.
   "tags-dev",
   "tags-ios",

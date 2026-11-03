@@ -1,5 +1,8 @@
 "use client";
 
+import { useEffect } from "react";
+
+import { rememberDataset } from "@/lib/last-dataset";
 import { useDataset } from "@/lib/query/datasets";
 
 /**
@@ -21,6 +24,13 @@ export function DatasetGuard({
   children: React.ReactNode;
 }) {
   const dataset = useDataset(org, ds);
+
+  // Remember where you were, but only once the dataset has answered for
+  // itself: a typo'd URL must not become the org's landing place.
+  const reachable = dataset.data !== undefined;
+  useEffect(() => {
+    if (reachable) rememberDataset(org, ds);
+  }, [reachable, org, ds]);
 
   if (dataset.isPending) {
     return (
