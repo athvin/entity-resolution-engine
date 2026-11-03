@@ -243,6 +243,7 @@ impl Executor {
         for (name, result) in [
             ("cancel sweep", self.cancel_sweep().await),
             ("readiness pass", self.readiness_pass().await),
+            ("control pass", self.control_pass().await),
             ("launcher", self.launch_pass().await),
             ("zombie sweep", self.zombie_sweep().await),
             ("stuck-pending sweep", self.stuck_pending_sweep().await),
@@ -392,6 +393,96 @@ impl Executor {
             let _ = webhook::emit_job_event(&self.client, &settled).await;
         }
         Ok(worked)
+    }
+
+    // ---- control tasks ------------------------------------------------------
+
+    /// Claim and run every runnable CONTROL task (§3.6).
+    ///
+    /// In-process, not in a pod, and that is the whole distinction: a control
+    /// body's work IS the control plane — a registry row, an org state change
+    /// — so it runs where the credential already is. A pod could not do it
+    /// without holding a database credential, which §6.4 forbids.
+    ///
+    /// Claim → run → finish, one at a time: these are short Postgres writes,
+    /// so there is no capacity argument for concurrency, and running them
+    /// serially keeps the failure story simple.
+    async fn control_pass(&mut self) -> Result<bool, tokio_postgres::Error> {
+        let mut worked = false;
+        loop {
+            let claimed =
+                er_entities::task_instance::update::claim_control(&self.client, &self.epoch)
+                    .await?;
+            let Some(row) = claimed.into_iter().next() else {
+                return Ok(worked);
+            };
+            worked = true;
+            self.run_one_control(&row).await;
+        }
+    }
+
+    async fn run_one_control(&mut self, row: &TaskInstance) {
+        let Some(kind) = JobKind::parse_row_kind(&self.client, row).await else {
+            let _ = taskpg::fail_or_retry_task(
+                &mut self.client,
+                &row.id,
+                &taskpg::TaskFailure {
+                    terminal_state: "failed",
+                    retryable: false,
+                    escalate: false,
+                    exit_code: None,
+                    termination_reason: Some("config"),
+                    error_class: Some("config"),
+                    error_detail: Some("the job's kind does not parse into the DAG registry"),
+                    k8s_job_name: None,
+                    backoff: taskpg::POD_BACKOFF,
+                },
+            )
+            .await;
+            return;
+        };
+        // The order a control body reads: the same shape a pod's work order
+        // has, built here rather than fetched over HTTP — this half IS the
+        // control plane, so there is nothing to fetch from.
+        let order = er_dag::WorkOrder {
+            org_id: row.org_id.clone(),
+            dataset_id: row.dataset_id.clone(),
+            job_id: row.job_id.clone(),
+            run_id: row.job_id.clone(),
+            task_id: row.task_id.clone(),
+            kind: kind.as_str().to_string(),
+            try_number: row.try_number,
+            resource_class: row.resource_class.clone(),
+            segment: row.segment.clone(),
+            input: row.input.clone().unwrap_or(Value::Null),
+            params: Value::Null,
+            lake_env: Value::Null,
+            drop_root: None,
+            models: Value::Null,
+            labels: Value::Null,
+        };
+        let mut ctx = er_dag::ControlCtx {
+            order: &order,
+            client: &self.client,
+        };
+        match dags::run_control_task(kind, &row.task_id, &mut ctx).await {
+            Ok(run) => {
+                let _ = er_entities::task_instance::update::finish_control(
+                    &self.client,
+                    run.skipped,
+                    run.outcome,
+                    Some(&run.output),
+                    run.counters.as_ref(),
+                    &row.id,
+                    &self.epoch,
+                )
+                .await;
+            }
+            Err(e) => {
+                let failure = taskpg::control_failure(&e);
+                let _ = taskpg::fail_or_retry_task(&mut self.client, &row.id, &failure).await;
+            }
+        }
     }
 
     // ---- the launcher -------------------------------------------------------

@@ -260,6 +260,7 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
             .as_str()
             .unwrap_or_default()
             .to_string(),
+        dataset_id: order_body["dataset_id"].as_str().map(str::to_string),
         job_id: order_body["job_id"]
             .as_str()
             .unwrap_or_default()
@@ -278,6 +279,7 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
         lake_env: order_body["lake_env"].clone(),
         drop_root: order_body["drop_root"].as_str().map(str::to_string),
         models: order_body["models"].clone(),
+        labels: order_body["labels"].clone(),
     };
 
     // Step 3: report start. The body carries this pod's identity for the

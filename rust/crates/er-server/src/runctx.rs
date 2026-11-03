@@ -129,6 +129,22 @@ fn load_lexicon(path: &str) -> Vec<(String, String)> {
         .collect()
 }
 
+/// The MATCH labels a training pass learns from, as the control plane filtered
+/// them and the work order carries them.
+///
+/// Filtered server-side, and the filter is the point: only `verdict = "match"`
+/// rows, and never `origin = "llm"` — a model must not be trained on its own
+/// suggestions, and the exclusion is by ORIGIN rather than by `labeled_by` so
+/// that a future second LLM producer is caught by it too.
+///
+/// A pod cannot read `pair_labels` (§6.4), and an empty list is not a failure:
+/// EM is a complete training method on its own and is what every train did
+/// before labels existed.
+#[must_use]
+pub fn labels_from_order(labels: &Value) -> Vec<(String, String)> {
+    serde_json::from_value(labels.clone()).unwrap_or_default()
+}
+
 /// The work order's `models` field as the resolver takes it.
 ///
 /// A malformed or absent list resolves to empty rather than failing: empty is

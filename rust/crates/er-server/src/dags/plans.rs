@@ -57,8 +57,22 @@ impl PlanDoc for SchemaReconciled {
 pub struct TrainedModel {
     pub model_version: String,
     pub tf_snapshot_id: String,
+    /// Where the pod wrote the settings document, on the shared filesystem
+    /// both halves mount — the plan carries the PATH rather than the document
+    /// because a registry row is the control task's write, not the pod's.
     pub model_path: String,
     pub tf_path: String,
+    /// `person | account`, from the config the pod read. The registry row
+    /// needs it and the control task has no config in scope.
+    #[serde(default)]
+    pub entity_type: String,
+    /// Provenance the registry row records: which config produced this
+    /// version, and how many labels the `m` estimate actually USED (zero means
+    /// the EM estimate stands).
+    #[serde(default)]
+    pub config_hash: String,
+    #[serde(default)]
+    pub labels_used: usize,
 }
 impl PlanDoc for TrainedModel {
     const STABLE_NAME: &'static str = "trained_model";

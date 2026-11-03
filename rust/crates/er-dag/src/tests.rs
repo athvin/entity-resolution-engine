@@ -104,15 +104,18 @@ impl ControlTask<()> for Register {
     const VERSION: u32 = 1;
     type Input = (Plan<TestPlan>,);
     type Output = Plan<TestPlan>;
+    // A real control body awaits Postgres; this one has nothing to await, so
+    // the future is spelled out rather than written as an `async fn` clippy
+    // would then call pointless.
     fn run(
         &mut self,
         _ctx: &mut ControlCtx<'_, ()>,
         _input: Self::Input,
-    ) -> Result<Outcome<Self::Output>, TaskError> {
-        Ok(Outcome::Done(
+    ) -> impl std::future::Future<Output = Result<Outcome<Self::Output>, TaskError>> + Send {
+        std::future::ready(Ok(Outcome::Done(
             Plan(TestPlan { mode: "x".into() }),
             Counters::default(),
-        ))
+        )))
     }
 }
 

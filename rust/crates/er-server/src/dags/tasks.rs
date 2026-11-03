@@ -713,11 +713,125 @@ fn engine_error(message: &str) -> TaskError {
     TaskError::Failed(err)
 }
 
-declare_task!(
-    /// Trains and writes `models/<run_id>/{model.json,tf.csv}` on EFS; no lake
-    /// write and no run row (§3.5, §9.1).
-    Train, "train", (Plan<SchemaReconciled>,), Plan<TrainedModel>, writes: false
-);
+/// Trains and writes `models/<run_id>/{model.json,tf.csv}` on the shared
+/// filesystem; no lake write and no run row (§3.5, §9.1).
+///
+/// The artifacts go to EFS rather than into the plan because the REGISTRY
+/// write is the control task's half (`register_model`), and a settings
+/// document on the ledger row would put a multi-kilobyte blob in Postgres for
+/// no reason. Both halves mount the same filesystem, so a path is enough.
+///
+/// The per-run directory is the §9.1 idempotency key: a re-run overwrites its
+/// own artifacts and nobody else's.
+#[derive(Default)]
+pub struct Train;
+
+impl Task<Session> for Train {
+    const NAME: &'static str = "train";
+    const VERSION: u32 = 1;
+    type Input = (Plan<SchemaReconciled>,);
+    type Output = Plan<TrainedModel>;
+    const WRITES_LAKE: bool = false;
+
+    fn run(
+        &mut self,
+        ctx: &mut TaskCtx<'_, Session>,
+        _input: Self::Input,
+    ) -> Result<Outcome<Self::Output>, TaskError> {
+        let run = context(ctx, false)?;
+        let training = run.config.training.clone();
+        // One label per training run, derived from the run id so two trains
+        // cannot collide and so a registry row traces back to the job.
+        let label = format!("trained-{}", ctx.order.run_id);
+        let tf_snapshot_id = format!("tf-{}", ctx.order.run_id);
+
+        // The TEMPLATE is the structure to retrain: the active version's, so
+        // training refines what is LIVE rather than whatever is on disk. The
+        // resolver already picked it (registry first, env file second), which
+        // is the same precedence the in-process arm uses.
+        let template = run.settings_json.clone();
+        let labels = crate::runctx::labels_from_order(&ctx.order.labels);
+
+        let dir = models_dir(ctx, &run)?;
+        std::fs::create_dir_all(&dir)
+            .map_err(|e| engine_error(&format!("train artifact dir {}: {e}", dir.display())))?;
+        let out_model = dir.join("model.json");
+        let out_tf = dir.join("tf.csv");
+        er_cli::run_train(
+            ctx.session,
+            &er_cli::TrainInputs {
+                template_settings_json: &template,
+                deterministic_rules: &training.deterministic_rules,
+                em_rules: &training.em_blocking_rules,
+                recall: training.recall,
+                #[expect(
+                    clippy::cast_precision_loss,
+                    reason = "a pair budget's magnitude is what matters, and f64 holds every \
+                              value an i64 budget can usefully take"
+                )]
+                u_max_pairs: training.u_max_pairs as f64,
+                model_version: &label,
+                tf_snapshot_id: &tf_snapshot_id,
+                match_labels: &labels,
+            },
+            &out_model,
+            &out_tf,
+        )
+        .map_err(|e| engine_error(&format!("training: {e:#}")))?;
+
+        // Append this snapshot's rows to the shared frozen-TF CSV: the file is
+        // keyed by (model_version, tf_snapshot_id, column), so snapshots
+        // coexist and each model reads only its own rows.
+        let tf_rows = std::fs::read_to_string(&out_tf)
+            .map_err(|e| engine_error(&format!("read trained tf: {e}")))?;
+        let shared_tf = run.tf_path.to_string_lossy().to_string();
+        crate::dispatcher::append_tf_snapshot(&shared_tf, &tf_rows)
+            .map_err(|e| engine_error(&e))?;
+
+        Ok(Outcome::Done(
+            Plan(TrainedModel {
+                model_version: label,
+                tf_snapshot_id,
+                model_path: out_model.to_string_lossy().to_string(),
+                tf_path: shared_tf,
+                entity_type: if run.config.entity_type.is_person() {
+                    "person".to_string()
+                } else {
+                    "account".to_string()
+                },
+                config_hash: er_config::config_hash(&run.config),
+                labels_used: labels.len(),
+            }),
+            er_dag::Counters(serde_json::json!({ "labels_used": labels.len() })),
+        ))
+    }
+}
+
+/// Where a training pass writes its artifacts: `<models root>/<run_id>/`.
+///
+/// `ER_MODELS_ROOT` when the tenant env names one, else the directory holding
+/// the shared TF file — which is on the same shared filesystem by construction,
+/// since that is where the frozen snapshots already live.
+fn models_dir(
+    ctx: &TaskCtx<'_, Session>,
+    run: &crate::runctx::RunContext,
+) -> Result<std::path::PathBuf, TaskError> {
+    let root = ctx
+        .order
+        .lake_env
+        .get("ER_MODELS_ROOT")
+        .and_then(serde_json::Value::as_str)
+        .map(std::path::PathBuf::from)
+        .or_else(|| run.tf_path.parent().map(|p| p.join("models")))
+        .ok_or_else(|| {
+            TaskError::Failed(er_errors::ErError::config(
+                "no ER_MODELS_ROOT and ER_TF_PATH has no parent directory, so a trained \
+                 model has nowhere to land"
+                    .to_string(),
+            ))
+        })?;
+    Ok(root.join(&ctx.order.run_id))
+}
 
 declare_task!(
     /// Creates and reconciles the new tenant's lake (today's

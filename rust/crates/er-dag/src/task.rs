@@ -285,6 +285,10 @@ pub enum TaskError {
 #[derive(Debug, Clone, Serialize, serde::Deserialize)]
 pub struct WorkOrder {
     pub org_id: String,
+    /// The job's dataset, when it names one: every tenant surface lives under
+    /// a dataset, and a row a control task writes must carry the same one.
+    #[serde(default)]
+    pub dataset_id: Option<String>,
     pub job_id: String,
     /// `jobs.id == run_id` is load-bearing (§4.1).
     pub run_id: String,
@@ -307,6 +311,12 @@ pub struct WorkOrder {
     /// key inside it. `None` for a kind that never ingests.
     #[serde(default)]
     pub drop_root: Option<String>,
+    /// The `(rec_a_key, rec_b_key)` MATCH labels a training pass learns from,
+    /// filtered by the control plane (`verdict = match`, never `origin =
+    /// llm`). Empty for every kind but `train`, and empty is not a failure —
+    /// EM trains without labels.
+    #[serde(default)]
+    pub labels: serde_json::Value,
     /// The dataset's ACTIVE model versions, resolved by the control plane:
     /// the pod holds no database credential and cannot read the registry
     /// itself (batch-orchestration-design §6.4). Absent for a kind that does
@@ -423,13 +433,20 @@ pub trait ControlTask<C>: Default + 'static {
         NodePolicy::control()
     }
 
+    /// ASYNC, unlike [`Task::run`]: a control body's work IS Postgres, and the
+    /// control plane's client is async. A pod body is synchronous for the
+    /// mirror-image reason — its work is DuckDB, which is not.
+    ///
+    /// Static dispatch only (the dispatch table matches on kind and task id),
+    /// so an `async fn` in the trait needs no erasure machinery.
+    ///
     /// # Errors
     /// A classified failure, or `Skip`.
     fn run(
         &mut self,
         ctx: &mut ControlCtx<'_, C>,
         input: Self::Input,
-    ) -> Result<Outcome<Self::Output>, TaskError>;
+    ) -> impl std::future::Future<Output = Result<Outcome<Self::Output>, TaskError>> + Send;
 }
 
 #[cfg(test)]

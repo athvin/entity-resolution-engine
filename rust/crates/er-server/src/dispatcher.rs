@@ -1704,7 +1704,7 @@ async fn register_half(
 ///
 /// The file is keyed by `(model_version, tf_snapshot_id, column_name)`, so
 /// snapshots coexist and each model reads only its own rows.
-fn append_tf_snapshot(tf_path: &str, tf_rows: &str) -> Result<(), String> {
+pub(crate) fn append_tf_snapshot(tf_path: &str, tf_rows: &str) -> Result<(), String> {
     use std::io::Write;
     let existing = std::fs::metadata(tf_path).is_ok_and(|m| m.len() > 0);
     let mut lines = tf_rows.lines();
