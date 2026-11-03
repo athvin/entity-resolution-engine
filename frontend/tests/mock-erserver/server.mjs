@@ -1475,6 +1475,41 @@ const server = http.createServer((req, res) => {
           usage: { input_tokens: 60, output_tokens: 40 },
         });
       }
+      // The profile narrative: prose, plus an optional trailing BLOCKING line
+      // the route splits off into draft suggestions.
+      //
+      // This arm also ASSERTS the redaction, which is the only place in the
+      // mock tier that can: the real prompt is built here, by the real
+      // `narratable`, so if a value-bearing field ever reaches it the reply
+      // below says so and the test that reads it fails. A mock that merely
+      // returned prose would be green while the feature shipped customer data.
+      if (
+        body.stream !== true &&
+        String(body.system ?? "").includes("You are reading a data profile")
+      ) {
+        const prompt = JSON.stringify(body.messages ?? []);
+        const leaked = ["top_values", "lex_min", "lex_max", "num_min", "num_max"].filter((f) =>
+          prompt.includes(f),
+        );
+        return send(res, 200, {
+          id: "msg_mock_profile_narrative",
+          type: "message",
+          role: "assistant",
+          model: String(body.model ?? "mock"),
+          content: [
+            {
+              type: "text",
+              text:
+                leaked.length > 0
+                  ? `REDACTION FAILED: the prompt carried ${leaked.join(", ")}`
+                  : "This corpus is 800 rows across three columns and is mostly complete.\n\nTwo things will hurt matching: one postcode value covers 31% of the rows, so blocking on it would put 248 records in a single block, and the email column holds four placeholder values that compare equal to each other.\n\nMap the placeholders to NULL at standardisation, and prefer email over postcode as the blocking key.\n\nBLOCKING: email, postcode + family_name",
+            },
+          ],
+          stop_reason: "end_turn",
+          stop_sequence: null,
+          usage: { input_tokens: 420, output_tokens: 180 },
+        });
+      }
       if (body.stream !== true && String(body.system ?? "").includes("adjudicator")) {
         const recommendation = {
           verdict: "match",

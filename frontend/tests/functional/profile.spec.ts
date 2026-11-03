@@ -142,4 +142,43 @@ test.describe("profile", () => {
     await page.getByTestId("profile-subject-raw").click();
     await expect(page.getByTestId("profile-source")).toBeVisible();
   });
+
+  test("the narrative is opt-in, says what it sent, and marks its drafts as drafts", async ({
+    page,
+  }) => {
+    await login(page, USERS.viewer);
+    await page.goto(`/${ORG}/${DS}/profile`);
+
+    // Deterministic first, prose second — and not only in the copy: the
+    // narrative card is empty until asked, because nobody should pay a model
+    // call for a page view.
+    await expect(page.getByTestId("profile-narrative-idle")).toContainText(
+      "no values from your data are sent",
+    );
+
+    await page.getByTestId("profile-narrative-ask").click();
+    const narrative = page.getByTestId("profile-narrative");
+    await expect(narrative).toBeVisible();
+
+    // The mock arm inspects the REAL prompt, built by the real `narratable`,
+    // and answers "REDACTION FAILED" naming the field if a value-bearing one
+    // reached it. So this assertion is a live check on the redaction, not a
+    // restatement of the fixture.
+    await expect(narrative).not.toContainText("REDACTION FAILED");
+
+    await expect(narrative).toContainText("mostly complete");
+
+    // The blocking suggestions are drafts. They must read as something to take
+    // to the config studio, never as a change that happened: blocking decides
+    // the cost and the recall of every run.
+    const drafts = page.getByTestId("profile-narrative-blocking");
+    await expect(drafts).toContainText("a draft to review, not a change");
+    await expect(drafts).toContainText("email");
+    await expect(drafts).toContainText("Nothing is applied");
+
+    // ...and the prose is attributed, with the number given precedence.
+    await expect(page.getByTestId("profile-narrative-provenance")).toContainText(
+      "trust the number",
+    );
+  });
 });

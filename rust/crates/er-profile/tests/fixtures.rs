@@ -576,3 +576,54 @@ fn p012_is_quiet_when_the_column_set_is_unchanged() {
     let reported = drift_codes(healthy("email"), Some(&before));
     assert!(!reported.contains(&"P012"), "got {reported:?}");
 }
+
+// ---------------------------------------------------------------------------
+// Message safety: what a finding's prose may contain.
+// ---------------------------------------------------------------------------
+
+/// A finding's `message` may name a value ONLY from the closed placeholder set.
+///
+/// This is load-bearing outside the registry. The profile's AI narrative sends
+/// findings to a third-party model, and it sends the prose because a code alone
+/// ("P004 on email") is not enough for the model to say anything useful. That is
+/// only safe while the single rule that interpolates a raw value — P004 — draws
+/// it from a hardcoded list of twelve absence markers rather than matching a
+/// pattern. The plan for this rule originally proposed `test@*`; had that
+/// shipped, the message would carry a real address and the narrative would ship
+/// customer data to answer a question about data quality.
+///
+/// So the property is asserted rather than trusted: given a column whose top
+/// values include both a real-looking address and a placeholder, the finding
+/// must name the placeholder and must not name the address.
+#[test]
+fn a_finding_message_names_placeholders_and_never_real_values() {
+    let mut column = healthy("email");
+    column.row_count = 1000;
+    let top = vec![
+        freq("email", "jane.doe@acme.com", 400, 0.40, 1),
+        freq("email", "n/a", 120, 0.12, 2),
+    ];
+
+    let found = findings(&[(column, top)]);
+    assert!(
+        !found.is_empty(),
+        "the fixture should trip at least the placeholder rule"
+    );
+    for finding in &found {
+        assert!(
+            !finding.message.contains("jane.doe@acme.com"),
+            "{} put a real value in its message: {}",
+            finding.code.0,
+            finding.message
+        );
+    }
+    let placeholder = found
+        .iter()
+        .find(|f| f.code == Code("P004"))
+        .expect("P004 should fire on a 12% placeholder share");
+    assert!(
+        placeholder.message.contains("n/a"),
+        "P004 must name WHICH placeholder, or the reader cannot find it: {}",
+        placeholder.message
+    );
+}

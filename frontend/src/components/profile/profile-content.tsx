@@ -10,13 +10,20 @@ import type { ReceiptRow } from "@/components/sources/sources-content";
 import { bffFetch } from "@/lib/api/client";
 import { effectiveRole, useJob, useSession } from "@/lib/query/hooks";
 import { queryKeys } from "@/lib/query/keys";
-import { isProfiled, useProfile, useRunProfile, type ProfileSubject } from "@/lib/query/profile";
+import {
+  isProfiled,
+  useProfile,
+  useProfileNarrative,
+  useRunProfile,
+  type ProfileSubject,
+} from "@/lib/query/profile";
 import { useDatasetSlug } from "@/lib/use-dataset-slug";
 import { cn } from "@/lib/utils";
 import { BlockingKeys } from "./blocking-keys";
 import { ColumnTable } from "./column-table";
 import { count, stamp } from "./format";
 import { ProfileFindings } from "./profile-findings";
+import { ProfileNarrative } from "./profile-narrative";
 import { ProfileInterstitial, type TierStep } from "./profile-interstitial";
 
 /**
@@ -98,6 +105,7 @@ export function ProfileContent({ org }: { org: string }) {
 
   const profile = useProfile(org, ds, subject, subject === "raw" ? source : null, tier);
   const run = useRunProfile(org, ds);
+  const narrative = useProfileNarrative(org, ds);
   const job = useJob(org, ds, jobId ?? "");
   const jobState = jobId ? job.data?.state : undefined;
 
@@ -295,6 +303,28 @@ export function ProfileContent({ org }: { org: string }) {
             </CardHeader>
             <CardContent className="p-4 pt-0 lg:p-6 lg:pt-0">
               <ProfileFindings findings={profile.data.findings} />
+            </CardContent>
+          </Card>
+
+          <Card data-testid="profile-narrative-card">
+            <CardHeader className="p-4 pb-1 lg:p-6 lg:pb-2">
+              <CardTitle className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+                What this means together
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-4 pt-0 lg:p-6 lg:pt-0">
+              <ProfileNarrative
+                narrative={narrative.data}
+                pending={narrative.isPending}
+                error={narrative.isError ? String(narrative.error) : null}
+                onAsk={() => {
+                  narrative.mutate({
+                    subject,
+                    ...(subject === "raw" && source ? { source } : {}),
+                    tier,
+                  });
+                }}
+              />
             </CardContent>
           </Card>
 

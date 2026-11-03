@@ -34,6 +34,7 @@ export function usageLabel(kind: string): string {
     ai_config_author: "Config authoring",
     ai_config_explain: "Rule explanations",
     ai_schema_map: "Schema mapping",
+    ai_profile_narrative: "Profile narratives",
   };
   return named[kind] ?? kind;
 }
