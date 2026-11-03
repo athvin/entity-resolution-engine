@@ -14,6 +14,10 @@ const artifactsDir = process.env.PLAYWRIGHT_ARTIFACTS_DIR;
 
 export default defineConfig({
   testDir: "./tests/functional",
+  // Refuses to run against a server that is serving code older than the
+  // working tree — the failure mode `reuseExistingServer` below creates. It is
+  // local-only, because CI never reuses.
+  globalSetup: "./tests/functional/global-setup.ts",
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
@@ -88,6 +92,11 @@ export default defineConfig({
       // runs, so a server left over from an earlier build keeps serving old code
       // — the same is true of the mock erserver above. `pnpm test:e2e:fresh`
       // is the one-command way out: it kills both and starts over.
+      //
+      // `globalSetup` above now DETECTS both halves instead of leaving the
+      // reader to remember this paragraph: a stale server fails the run with
+      // the remedy named, because the old symptom was tests that disagree with
+      // CI for no visible reason.
       command: process.env.CI
         ? "node_modules/.bin/next start --port 3100"
         : "node_modules/.bin/next build && node_modules/.bin/next start --port 3100",
