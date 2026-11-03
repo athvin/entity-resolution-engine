@@ -210,8 +210,12 @@ pub fn init(role: Role) -> Guard {
     // subscriber entirely rather than installed-and-disabled when no endpoint
     // is set. A disabled layer still costs a per-span branch, and this path runs
     // in every test binary in the workspace.
-    let provider = crate::otlp::build_provider(role);
-    let otel = provider
+    // Built BEFORE the subscriber, because the provider becomes one of its
+    // layers — which is why its diagnostics are deferred to `report()` below
+    // rather than emitted here, where nothing would be listening yet.
+    let outcome = crate::otlp::build_provider(role);
+    let otel = outcome
+        .provider
         .as_ref()
         .map(|provider| tracing_opentelemetry::layer().with_tracer(crate::otlp::tracer(provider)));
 
@@ -220,6 +224,9 @@ pub fn init(role: Role) -> Guard {
         .with(json)
         .with(otel)
         .init();
+
+    // Now there is somewhere for it to go.
+    outcome.report(role);
 
     // A process-lifetime span carries the service identity onto every record,
     // which `with_current_span` then includes. Pod identity is not duplicated
@@ -236,7 +243,7 @@ pub fn init(role: Role) -> Guard {
 
     Guard {
         _process: Some(process),
-        provider,
+        provider: outcome.provider,
     }
 }
 

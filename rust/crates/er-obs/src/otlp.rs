@@ -271,36 +271,79 @@ pub fn provider_for(
         .build())
 }
 
+/// What `build_provider` decided, so it can be REPORTED after the subscriber
+/// exists rather than into a void.
+///
+/// This type exists because of a bug it now prevents. `build_provider` is
+/// called from `init` BEFORE `tracing_subscriber::...init()` — it has to be,
+/// since the provider becomes a layer of that subscriber — so every
+/// `tracing::debug!`/`warn!` it emitted went to a subscriber that did not exist
+/// yet and was silently discarded. The practical cost was real: with an
+/// endpoint set and nothing arriving at the collector, there was no way to tell
+/// "no endpoint configured" from "the exporter failed to build" from "it built
+/// and the spans went somewhere else". Found while verifying the pipeline
+/// end to end, which is exactly when a silent diagnostic hurts most.
+pub(crate) struct Outcome {
+    pub provider: Option<SdkTracerProvider>,
+    /// The endpoint resolved, if any. `None` means none was configured.
+    endpoint: Option<String>,
+    /// Why the build failed, when it did.
+    error: Option<String>,
+}
+
+impl Outcome {
+    /// Emit what was decided. Call AFTER the subscriber is installed.
+    pub fn report(&self, role: Role) {
+        match (&self.endpoint, &self.error) {
+            (Some(endpoint), None) => tracing::debug!(
+                endpoint = %endpoint,
+                role = role.as_str(),
+                "OTLP span export installed"
+            ),
+            (Some(endpoint), Some(error)) => tracing::warn!(
+                endpoint = %endpoint,
+                error = %error,
+                "building the OTLP span exporter failed; traces will not be exported"
+            ),
+            // No endpoint is the normal case for a build tool or a test binary,
+            // and saying so on every invocation would be noise.
+            (None, _) => {}
+        }
+    }
+}
+
 /// Build the tracer provider, or `None` when no endpoint is configured.
 ///
 /// Failures degrade to "no telemetry" rather than propagating: observation must
 /// never change a run — the same contract `reporter.rs` states for itself — and
 /// this is called from the first statement of `main`, where returning an error
 /// means a pod that will not boot for a reason unrelated to its job.
-pub(crate) fn build_provider(role: Role) -> Option<SdkTracerProvider> {
-    let endpoint = traces_endpoint()?;
+///
+/// Emits nothing itself; see [`Outcome`].
+pub(crate) fn build_provider(role: Role) -> Outcome {
+    let Some(endpoint) = traces_endpoint() else {
+        return Outcome {
+            provider: None,
+            endpoint: None,
+            error: None,
+        };
+    };
     let timeout = parse_secs(
         non_empty("ER_OTEL_TIMEOUT_SECS").as_deref(),
         DEFAULT_TIMEOUT_SECS,
     );
 
     match provider_for(role, &endpoint, timeout) {
-        Ok(provider) => {
-            tracing::debug!(
-                endpoint = %endpoint,
-                role = role.as_str(),
-                "OTLP span export installed"
-            );
-            Some(provider)
-        }
-        Err(error) => {
-            tracing::warn!(
-                error = %error,
-                endpoint = %endpoint,
-                "building the OTLP span exporter failed; traces will not be exported"
-            );
-            None
-        }
+        Ok(provider) => Outcome {
+            provider: Some(provider),
+            endpoint: Some(endpoint),
+            error: None,
+        },
+        Err(error) => Outcome {
+            provider: None,
+            endpoint: Some(endpoint),
+            error: Some(error.to_string()),
+        },
     }
 }
 
