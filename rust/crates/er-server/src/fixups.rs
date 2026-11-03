@@ -196,15 +196,17 @@ pub(crate) async fn ensure_default_dataset_for(
     org: &er_entities::org::Org,
 ) -> Result<(), SchemaError> {
     let entity_type = match org.active_config_version {
-        Some(version) => er_entities::config_version::read::by_version(client, &org.id, version)
-            .await?
-            .into_iter()
-            .next()
-            .and_then(|row| er_config::load_config_str(&row.yaml).ok())
-            .map_or("person", |c| match c.entity_type {
-                er_config::EntityType::Person => "person",
-                er_config::EntityType::Account => "account",
-            }),
+        Some(version) => {
+            er_entities::config_version::read::by_org_version(client, &org.id, version)
+                .await?
+                .into_iter()
+                .next()
+                .and_then(|row| er_config::load_config_str(&row.yaml).ok())
+                .map_or("person", |c| match c.entity_type {
+                    er_config::EntityType::Person => "person",
+                    er_config::EntityType::Account => "account",
+                })
+        }
         None => "person",
     };
     er_entities::dataset::create::ensure(

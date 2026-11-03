@@ -192,7 +192,7 @@ async fn drain_and_correct_applies_through_dispatcher() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     assert_eq!(
-        pg::pending_count(&client, &oid(&client, "acme").await)
+        pg::pending_count(&client, &common::default_dataset(&client, "acme").await)
             .await
             .unwrap(),
         2
@@ -202,7 +202,7 @@ async fn drain_and_correct_applies_through_dispatcher() {
     dispatcher::drain_and_correct(
         &client,
         &oid(&client, "acme").await,
-        None,
+        Some(&common::default_dataset(&client, "acme").await),
         &env,
         "01DISPCORRECT0000000000000001",
         None,
@@ -212,7 +212,7 @@ async fn drain_and_correct_applies_through_dispatcher() {
 
     // Everything applied + marked.
     assert_eq!(
-        pg::pending_count(&client, &oid(&client, "acme").await)
+        pg::pending_count(&client, &common::default_dataset(&client, "acme").await)
             .await
             .unwrap(),
         0
@@ -248,10 +248,15 @@ async fn drain_and_correct_applies_through_dispatcher() {
     // so the coverage endpoint reported a category that could not fill. A
     // steward looking at a pair and deciding is the strongest signal a model
     // can get, and it was being thrown away.
-    let labels =
-        er_entities::pair_label::read::page(&client, &oid(&client, "acme").await, None, None, 100)
-            .await
-            .unwrap();
+    let labels = er_entities::pair_label::read::page(
+        &client,
+        &common::default_dataset(&client, "acme").await,
+        None,
+        None,
+        100,
+    )
+    .await
+    .unwrap();
     let reviewer: Vec<_> = labels.iter().filter(|l| l.origin == "reviewer").collect();
     assert_eq!(
         reviewer.len(),

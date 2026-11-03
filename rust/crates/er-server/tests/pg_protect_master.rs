@@ -275,7 +275,7 @@ async fn protect_pins_master_and_retract_restores_policy() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::CREATED);
     assert_eq!(
-        pg::pending_count(&client, &oid(&client, "acme").await)
+        pg::pending_count(&client, &common::default_dataset(&client, "acme").await)
             .await
             .unwrap(),
         1
@@ -283,7 +283,7 @@ async fn protect_pins_master_and_retract_restores_policy() {
     dispatcher::drain_and_correct(
         &client,
         &oid(&client, "acme").await,
-        None,
+        Some(&common::default_dataset(&client, "acme").await),
         &env,
         "01PROTECTCORRECT0000000000001",
         None,
@@ -311,7 +311,7 @@ async fn protect_pins_master_and_retract_restores_policy() {
     dispatcher::drain_and_correct(
         &client,
         &oid(&client, "acme").await,
-        None,
+        Some(&common::default_dataset(&client, "acme").await),
         &env,
         "01PROTECTCORRECT0000000000002",
         None,

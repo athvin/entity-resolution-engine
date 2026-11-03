@@ -99,7 +99,7 @@ pub mod read {
     /// An org's pending steward actions, oldest first (the dispatcher drain read; its count is the pending gauge).
     pub async fn pending(
         client: &impl ::tokio_postgres::GenericClient,
-        org_id: &str,
+        dataset_id: &str,
     ) -> ::std::result::Result<Vec<super::StagedStewardAction>, ::tokio_postgres::Error> {
         const SQL: &str = "SELECT
   id,
@@ -112,7 +112,7 @@ pub mod read {
   applied_at,
   updated_at
 FROM public.staged_steward_actions
-WHERE org_id = $1 AND state = 'pending'
+WHERE dataset_id = $1 AND state = 'pending'
 ORDER BY created_at, id
 ";
         let __span = ::er_span::sql_span(
@@ -123,7 +123,7 @@ ORDER BY created_at, id
             "staged_steward_actions",
             SQL,
         );
-        let __result = ::er_span::instrument(&__span, client.query(SQL, &[&org_id])).await;
+        let __result = ::er_span::instrument(&__span, client.query(SQL, &[&dataset_id])).await;
         let __entered = __span.enter();
         let rows = ::er_span::check(&__span, __result)?;
         ::er_span::rows(&__span, rows.len() as u64);

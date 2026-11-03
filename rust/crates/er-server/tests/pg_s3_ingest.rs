@@ -132,11 +132,17 @@ async fn s3_ingest_columns_sweep_and_cursor() {
 
     // --- phase 3: the cursor corrects rather than stacking.
     let org_id = watched.id.clone();
+    // Cursors are the dataset's now; the fixture uses the same default
+    // dataset the poller resolves.
+    let ds = pg::default_dataset_id(&client, &org_id)
+        .await
+        .unwrap()
+        .expect("the org's default dataset");
     er_entities::s3_ingest_cursor::create::advance(
         &client,
         &er_ids::new_v7(),
         &org_id,
-        None,
+        Some(&ds),
         "crm",
         "tenants/watched/crm/day1.csv",
         Some("etag-1"),
@@ -145,7 +151,7 @@ async fn s3_ingest_columns_sweep_and_cursor() {
     )
     .await
     .unwrap();
-    let first = er_entities::s3_ingest_cursor::read::by_org(&client, &org_id)
+    let first = er_entities::s3_ingest_cursor::read::by_org(&client, &ds)
         .await
         .unwrap();
     assert_eq!(first.len(), 1);
@@ -155,7 +161,7 @@ async fn s3_ingest_columns_sweep_and_cursor() {
         &client,
         &er_ids::new_v7(),
         &org_id,
-        None,
+        Some(&ds),
         "crm",
         "tenants/watched/crm/day2.csv",
         Some("etag-2"),
@@ -164,7 +170,7 @@ async fn s3_ingest_columns_sweep_and_cursor() {
     )
     .await
     .unwrap();
-    let rows = er_entities::s3_ingest_cursor::read::by_org(&client, &org_id)
+    let rows = er_entities::s3_ingest_cursor::read::by_org(&client, &ds)
         .await
         .unwrap();
     assert_eq!(
@@ -193,7 +199,7 @@ async fn s3_ingest_columns_sweep_and_cursor() {
         &client,
         &er_ids::new_v7(),
         &org_id,
-        None,
+        Some(&ds),
         "billing",
         "tenants/watched/billing/day1.csv",
         None,
@@ -202,7 +208,7 @@ async fn s3_ingest_columns_sweep_and_cursor() {
     )
     .await
     .unwrap();
-    let rows = er_entities::s3_ingest_cursor::read::by_org(&client, &org_id)
+    let rows = er_entities::s3_ingest_cursor::read::by_org(&client, &ds)
         .await
         .unwrap();
     assert_eq!(rows.len(), 2);

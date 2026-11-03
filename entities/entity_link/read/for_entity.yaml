@@ -3,6 +3,6 @@ operation: read
 mode: full
 description: "Every link touching one entity, from either side. BOTH sides in one read because the entity view asks one question — 'what is this entity related to' — and answering it with two queries would make the caller decide which side it is on, which is exactly what it does not know yet. The direction is recoverable from the rows: the caller compares the entity id against parent_entity_id."
 params:
-  - { name: org_id, type: varchar }
+  - { name: dataset_id, type: varchar }
   - { name: entity_id, type: varchar }
 returns: entity

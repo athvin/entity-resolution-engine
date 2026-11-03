@@ -127,13 +127,16 @@ async fn run_all_full_runs_as_seven_pods_and_reproduces_base_10() {
         .unwrap();
     executor.adopt().await;
 
-    // No dataset id: `upsert_org_byo` created the org's default dataset and an
-    // org-level job resolves the org's own env, which is the one this test
-    // wrote the lake into.
+    // `upsert_org_byo` deliberately does NOT converge a default dataset — the
+    // sweep's own test needs an unconverged org — so this fixture converges
+    // one the way boot does, and runs the job inside it. The dataset's env is
+    // the org's verbatim, which is the lake this test wrote.
+    pg::converge_default_datasets(&mut client).await.unwrap();
+    let ds = common::default_dataset(&client, "acme").await;
     let queued = pg::enqueue(
         &client,
         &org_id,
-        None,
+        Some(&ds),
         "run_all_full",
         0,
         None,
@@ -302,7 +305,7 @@ async fn run_all_full_runs_as_seven_pods_and_reproduces_base_10() {
     let trained = pg::enqueue(
         &client,
         &org_id,
-        None,
+        Some(&ds),
         "train",
         0,
         None,
@@ -362,9 +365,12 @@ async fn run_all_full_runs_as_seven_pods_and_reproduces_base_10() {
 
     // And it wrote a DRAFT registry row, labelled from the job id so it traces
     // back to the training pass that produced it.
-    let versions = er_entities::matching_model::read::list(&client, &org_id)
-        .await
-        .unwrap();
+    let versions = er_entities::matching_model::read::list(
+        &client,
+        &common::default_dataset(&client, "acme").await,
+    )
+    .await
+    .unwrap();
     let draft = versions
         .iter()
         .find(|m| m.model_version_label == format!("trained-{}", trained.id))

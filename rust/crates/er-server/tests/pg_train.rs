@@ -119,13 +119,20 @@ async fn training_registers_a_draft_and_leaves_the_active_model_alone() {
         .await
         .unwrap()
         .expect("org exists");
+    // The model registry is the dataset's now, so the fixture gives the org
+    // its default dataset the way provisioning does.
+    pg::converge_default_datasets(&mut client).await.unwrap();
+    let ds = pg::default_dataset_id(&client, &org_id)
+        .await
+        .unwrap()
+        .expect("the converged default dataset");
 
     // An active starter version, exactly as provisioning seeds one.
     let starter = std::fs::read_to_string(repo_fixture("model_test_v1.json")).unwrap();
     let seeded = pg::create_model_version(
         &client,
         &org_id,
-        None,
+        Some(&ds),
         pg::DEFAULT_MODEL_NAME,
         "person",
         &starter,
@@ -152,7 +159,7 @@ async fn training_registers_a_draft_and_leaves_the_active_model_alone() {
     dispatcher::train_and_register(
         &client,
         &org_id,
-        None,
+        Some(&ds),
         &env,
         "01TRAINJOB00000000000000000",
         None,
@@ -161,7 +168,7 @@ async fn training_registers_a_draft_and_leaves_the_active_model_alone() {
     .expect("training should succeed");
 
     // A registry version, not a file nobody reads.
-    let versions = pg::list_model_versions(&client, &org_id).await.unwrap();
+    let versions = pg::list_model_versions(&client, &ds).await.unwrap();
     assert_eq!(versions.len(), 2, "the starter plus the trained one");
     let trained = versions
         .iter()
@@ -191,7 +198,7 @@ async fn training_registers_a_draft_and_leaves_the_active_model_alone() {
     );
 
     // And the active version is still the starter, byte for byte.
-    let active = pg::active_model_version(&client, &org_id)
+    let active = pg::active_model_version(&client, &ds)
         .await
         .unwrap()
         .expect("something is still active");
@@ -296,7 +303,7 @@ async fn training_registers_a_draft_and_leaves_the_active_model_alone() {
             &client,
             &format!("01JLABEL000000000000000{i:03}"),
             &org_id,
-            None,
+            Some(&ds),
             a,
             b,
             verdict,
@@ -313,7 +320,7 @@ async fn training_registers_a_draft_and_leaves_the_active_model_alone() {
     dispatcher::train_and_register(
         &client,
         &org_id,
-        None,
+        Some(&ds),
         &env,
         "01TRAINJOB00000000000000001",
         None,
@@ -321,7 +328,7 @@ async fn training_registers_a_draft_and_leaves_the_active_model_alone() {
     .await
     .expect("training with labels should succeed");
 
-    let with_labels = pg::list_model_versions(&client, &org_id)
+    let with_labels = pg::list_model_versions(&client, &ds)
         .await
         .unwrap()
         .into_iter()

@@ -198,7 +198,7 @@ async fn mass_update_overrides_and_clears_golden_fields() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     assert_eq!(
-        pg::pending_count(&client, &oid(&client, "acme").await)
+        pg::pending_count(&client, &common::default_dataset(&client, "acme").await)
             .await
             .unwrap(),
         1
@@ -206,7 +206,7 @@ async fn mass_update_overrides_and_clears_golden_fields() {
     dispatcher::drain_and_correct(
         &client,
         &oid(&client, "acme").await,
-        None,
+        Some(&common::default_dataset(&client, "acme").await),
         &env,
         "01MUCORRECT00000000000000001",
         None,
@@ -236,7 +236,7 @@ async fn mass_update_overrides_and_clears_golden_fields() {
     dispatcher::drain_and_correct(
         &client,
         &oid(&client, "acme").await,
-        None,
+        Some(&common::default_dataset(&client, "acme").await),
         &env,
         "01MUCORRECT00000000000000002",
         None,

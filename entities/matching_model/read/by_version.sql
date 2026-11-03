@@ -16,4 +16,4 @@ SELECT
   created_at,
   updated_at
 FROM public.matching_models
-WHERE org_id = $org_id AND name = $name AND version = $version
+WHERE dataset_id = $dataset_id AND name = $name AND version = $version

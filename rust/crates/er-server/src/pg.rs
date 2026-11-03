@@ -1046,9 +1046,9 @@ pub async fn create_config_version(
 /// Propagates the query error.
 pub async fn list_config_versions(
     client: &Client,
-    org_id: &str,
+    dataset_id: &str,
 ) -> Result<Vec<ConfigVersionRow>, PgError> {
-    Ok(er_entities::config_version::read::list(client, org_id)
+    Ok(er_entities::config_version::read::list(client, dataset_id)
         .await?
         .into_iter()
         .map(|v| ConfigVersionRow {
@@ -1069,11 +1069,11 @@ pub async fn list_config_versions(
 /// Propagates the query error.
 pub async fn get_config_version(
     client: &Client,
-    org_id: &str,
+    dataset_id: &str,
     version: i64,
 ) -> Result<Option<ConfigVersionDetail>, PgError> {
     Ok(
-        er_entities::config_version::read::by_version(client, org_id, version)
+        er_entities::config_version::read::by_version(client, dataset_id, version)
             .await?
             .into_iter()
             .next()
@@ -1115,9 +1115,12 @@ pub async fn stage_action(
 ///
 /// # Errors
 /// Propagates the query error.
-pub async fn pending_actions(client: &Client, org_id: &str) -> Result<Vec<PendingAction>, PgError> {
+pub async fn pending_actions(
+    client: &Client,
+    dataset_id: &str,
+) -> Result<Vec<PendingAction>, PgError> {
     Ok(
-        er_entities::staged_steward_action::read::pending(client, org_id)
+        er_entities::staged_steward_action::read::pending(client, dataset_id)
             .await?
             .into_iter()
             .map(|a| PendingAction {
@@ -1190,10 +1193,10 @@ pub async fn mark_action_applied(client: &Client, action_id: &str) -> Result<(),
 ///
 /// # Errors
 /// Propagates the query error.
-pub async fn pending_count(client: &Client, org_id: &str) -> Result<i64, PgError> {
+pub async fn pending_count(client: &Client, dataset_id: &str) -> Result<i64, PgError> {
     // The pending set is small by construction (drained each dispatcher pass),
     // so counting the drain read keeps this on the one declared statement.
-    let pending = er_entities::staged_steward_action::read::pending(client, org_id).await?;
+    let pending = er_entities::staged_steward_action::read::pending(client, dataset_id).await?;
     Ok(pending.len() as i64)
 }
 
@@ -1284,8 +1287,11 @@ pub async fn create_schedule(
 ///
 /// # Errors
 /// Propagates the query error.
-pub async fn list_schedules(client: &Client, org_id: &str) -> Result<Vec<ScheduleRow>, PgError> {
-    Ok(er_entities::schedule::read::list(client, org_id)
+pub async fn list_schedules(
+    client: &Client,
+    dataset_id: &str,
+) -> Result<Vec<ScheduleRow>, PgError> {
+    Ok(er_entities::schedule::read::list(client, dataset_id)
         .await?
         .into_iter()
         .map(|s| ScheduleRow {
@@ -1400,9 +1406,9 @@ pub async fn create_model_version(
 /// Propagates the query error.
 pub async fn list_model_versions(
     client: &Client,
-    org_id: &str,
+    dataset_id: &str,
 ) -> Result<Vec<er_entities::matching_model::MatchingModel>, PgError> {
-    er_entities::matching_model::read::list(client, org_id).await
+    er_entities::matching_model::read::list(client, dataset_id).await
 }
 
 /// The tenant's active model version, if it has one.
@@ -1411,12 +1417,14 @@ pub async fn list_model_versions(
 /// Propagates the query error.
 pub async fn active_model_version(
     client: &Client,
-    org_id: &str,
+    dataset_id: &str,
 ) -> Result<Option<er_entities::matching_model::MatchingModel>, PgError> {
-    Ok(er_entities::matching_model::read::active(client, org_id)
-        .await?
-        .into_iter()
-        .next())
+    Ok(
+        er_entities::matching_model::read::active(client, dataset_id)
+            .await?
+            .into_iter()
+            .next(),
+    )
 }
 
 /// Every active model version for the tenant, one per name — the ensemble a run
@@ -1431,9 +1439,9 @@ pub async fn active_model_version(
 /// Propagates the query error.
 pub async fn active_models(
     client: &Client,
-    org_id: &str,
+    dataset_id: &str,
 ) -> Result<Vec<er_entities::matching_model::MatchingModel>, PgError> {
-    er_entities::matching_model::read::active_all(client, org_id).await
+    er_entities::matching_model::read::active_all(client, dataset_id).await
 }
 
 /// One model version by its natural key.
@@ -1442,12 +1450,12 @@ pub async fn active_models(
 /// Propagates the query error.
 pub async fn model_version(
     client: &Client,
-    org_id: &str,
+    dataset_id: &str,
     name: &str,
     version: i64,
 ) -> Result<Option<er_entities::matching_model::MatchingModel>, PgError> {
     Ok(
-        er_entities::matching_model::read::by_version(client, org_id, name, version)
+        er_entities::matching_model::read::by_version(client, dataset_id, name, version)
             .await?
             .into_iter()
             .next(),
@@ -1487,7 +1495,10 @@ pub async fn ensure_correction_schedule(
     dataset_id: Option<&str>,
     cadence: &str,
 ) -> Result<(), PgError> {
-    er_entities::schedule::update::set_config_cron(client, cadence, org_id, CORRECTION_PASS_SOURCE)
+    // The cron update is scoped to the dataset whose config declared the
+    // cadence; `org_id` below still stamps the row the insert creates.
+    let scope = dataset_id.unwrap_or(org_id);
+    er_entities::schedule::update::set_config_cron(client, cadence, scope, CORRECTION_PASS_SOURCE)
         .await?;
     er_entities::schedule::create::ensure_config_owned(
         client,
@@ -1530,12 +1541,12 @@ pub async fn mark_schedule_enqueued(client: &Client, schedule_id: &str) -> Resul
 /// Propagates the update error.
 pub async fn set_schedule_enabled(
     client: &Client,
-    org_id: &str,
+    dataset_id: &str,
     schedule_id: &str,
     enabled: bool,
 ) -> Result<bool, PgError> {
-    let n =
-        er_entities::schedule::update::set_enabled(client, enabled, schedule_id, org_id).await?;
+    let n = er_entities::schedule::update::set_enabled(client, enabled, schedule_id, dataset_id)
+        .await?;
     Ok(n == 1)
 }
 
@@ -1545,10 +1556,10 @@ pub async fn set_schedule_enabled(
 /// Propagates the delete error.
 pub async fn delete_schedule(
     client: &Client,
-    org_id: &str,
+    dataset_id: &str,
     schedule_id: &str,
 ) -> Result<bool, PgError> {
-    let n = er_entities::schedule::delete::delete(client, org_id, schedule_id).await?;
+    let n = er_entities::schedule::delete::delete(client, dataset_id, schedule_id).await?;
     Ok(n == 1)
 }
 
@@ -1675,13 +1686,12 @@ pub async fn delete_webhook(
 /// Propagates either update error.
 pub async fn publish_config_version(
     client: &Client,
-    org_id: &str,
     org_name: &str,
     dataset_id: &str,
     version: i64,
     tier: Option<&str>,
 ) -> Result<(), PgError> {
-    er_entities::config_version::update::publish(client, tier, org_id, version).await?;
+    er_entities::config_version::update::publish(client, tier, dataset_id, version).await?;
     // Both pointers move: the dataset's is what every dataset-scoped read
     // (`dataset_active_config`, delivery preconditions) consults; the org's is
     // the deprecated mirror the clean-break phase retires.
@@ -1807,13 +1817,13 @@ pub async fn apply_tag(
 /// Propagates the delete error.
 pub async fn unapply_tag(
     client: &Client,
-    org_id: &str,
+    dataset_id: &str,
     tag_id: &str,
     subject_type: &str,
     subject_id: &str,
 ) -> Result<bool, PgError> {
     Ok(
-        er_entities::tagging::delete::unapply(client, org_id, tag_id, subject_type, subject_id)
+        er_entities::tagging::delete::unapply(client, dataset_id, tag_id, subject_type, subject_id)
             .await?
             > 0,
     )
@@ -1825,12 +1835,13 @@ pub async fn unapply_tag(
 /// Propagates the query error.
 pub async fn subjects_for_tag(
     client: &Client,
-    org_id: &str,
+    dataset_id: &str,
     tag_id: &str,
     subject_type: Option<&str>,
     limit: i64,
 ) -> Result<Vec<er_entities::tagging::Tagging>, PgError> {
-    er_entities::tagging::read::subjects_by_tag(client, org_id, tag_id, subject_type, limit).await
+    er_entities::tagging::read::subjects_by_tag(client, dataset_id, tag_id, subject_type, limit)
+        .await
 }
 
 /// One live tag by NAME, for resolving a config's approval gate.

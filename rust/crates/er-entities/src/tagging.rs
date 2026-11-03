@@ -106,13 +106,13 @@ pub mod delete {
     /// Remove one application. A real DELETE, unlike retiring a tag: nothing references a tagging, so there is no foreign key to fail on — the distinction D11's sweep made explicit. The history companion keeps the row image, so who removed it is still answerable.
     pub async fn unapply(
         client: &impl ::tokio_postgres::GenericClient,
-        org_id: &str,
+        dataset_id: &str,
         tag_id: &str,
         subject_type: &str,
         subject_id: &str,
     ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
         const SQL: &str = "DELETE FROM public.taggings
-WHERE org_id = $1
+WHERE dataset_id = $1
   AND tag_id = $2
   AND subject_type = $3
   AND subject_id = $4
@@ -127,7 +127,7 @@ WHERE org_id = $1
         );
         let __result = ::er_span::instrument(
             &__span,
-            client.execute(SQL, &[&org_id, &tag_id, &subject_type, &subject_id]),
+            client.execute(SQL, &[&dataset_id, &tag_id, &subject_type, &subject_id]),
         )
         .await;
         let __entered = __span.enter();
@@ -142,14 +142,14 @@ pub mod read {
     /// What carries a tag — the filter, and the scope every bulk action by tag will read. Optionally narrowed to one subject kind. The explicit ::varchar casts are needed because Postgres cannot infer a parameter's type from `$x IS NULL` alone and resolves left to right.
     pub async fn subjects_by_tag(
         client: &impl ::tokio_postgres::GenericClient,
-        org_id: &str,
+        dataset_id: &str,
         tag_id: &str,
         subject_type: Option<&str>,
         limit: i64,
     ) -> ::std::result::Result<Vec<super::Tagging>, ::tokio_postgres::Error> {
         const SQL: &str = "SELECT id, org_id, dataset_id, tag_id, subject_type, subject_id, created_by, created_at, updated_at
 FROM public.taggings
-WHERE org_id = $1
+WHERE dataset_id = $1
   AND tag_id = $2
   AND ($3::varchar IS NULL OR subject_type = $3::varchar)
 ORDER BY subject_type, subject_id
@@ -165,7 +165,7 @@ LIMIT $4
         );
         let __result = ::er_span::instrument(
             &__span,
-            client.query(SQL, &[&org_id, &tag_id, &subject_type, &limit]),
+            client.query(SQL, &[&dataset_id, &tag_id, &subject_type, &limit]),
         )
         .await;
         let __entered = __span.enter();

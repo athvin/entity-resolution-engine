@@ -135,7 +135,7 @@ pub mod read {
     /// Everything this tenant has already auto-ingested, so one poll can decide what is new without a query per source. Unbounded on purpose: the row count is the number of configured sources, which is small and bounded by the config rather than by the corpus.
     pub async fn by_org(
         client: &impl ::tokio_postgres::GenericClient,
-        org_id: &str,
+        dataset_id: &str,
     ) -> ::std::result::Result<Vec<super::S3IngestCursor>, ::tokio_postgres::Error> {
         const SQL: &str = "SELECT
   id,
@@ -148,7 +148,7 @@ pub mod read {
   created_at,
   updated_at
 FROM public.s3_ingest_cursors
-WHERE org_id = $1
+WHERE dataset_id = $1
 ORDER BY source
 ";
         let __span = ::er_span::sql_span(
@@ -159,7 +159,7 @@ ORDER BY source
             "s3_ingest_cursors",
             SQL,
         );
-        let __result = ::er_span::instrument(&__span, client.query(SQL, &[&org_id])).await;
+        let __result = ::er_span::instrument(&__span, client.query(SQL, &[&dataset_id])).await;
         let __entered = __span.enter();
         let rows = ::er_span::check(&__span, __result)?;
         ::er_span::rows(&__span, rows.len() as u64);

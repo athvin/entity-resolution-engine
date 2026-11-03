@@ -143,10 +143,10 @@ pub mod delete {
     /// Delete a schedule; zero rows removed means absent or another org's.
     pub async fn delete(
         client: &impl ::tokio_postgres::GenericClient,
-        org_id: &str,
+        dataset_id: &str,
         schedule_id: &str,
     ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
-        const SQL: &str = "DELETE FROM public.schedules WHERE org_id = $1 AND id = $2
+        const SQL: &str = "DELETE FROM public.schedules WHERE dataset_id = $1 AND id = $2
 ";
         let __span = ::er_span::sql_span(
             ::er_span::Store::Control,
@@ -157,7 +157,7 @@ pub mod delete {
             SQL,
         );
         let __result =
-            ::er_span::instrument(&__span, client.execute(SQL, &[&org_id, &schedule_id])).await;
+            ::er_span::instrument(&__span, client.execute(SQL, &[&dataset_id, &schedule_id])).await;
         let __entered = __span.enter();
         let __n = ::er_span::check(&__span, __result)?;
         ::er_span::rows(&__span, __n);
@@ -220,7 +220,7 @@ ORDER BY s.id
     /// An org's schedules, oldest first.
     pub async fn list(
         client: &impl ::tokio_postgres::GenericClient,
-        org_id: &str,
+        dataset_id: &str,
     ) -> ::std::result::Result<Vec<super::Schedule>, ::tokio_postgres::Error> {
         const SQL: &str = "SELECT
   id,
@@ -234,7 +234,7 @@ ORDER BY s.id
   created_at,
   updated_at
 FROM public.schedules
-WHERE org_id = $1
+WHERE dataset_id = $1
 ORDER BY created_at
 ";
         let __span = ::er_span::sql_span(
@@ -245,7 +245,7 @@ ORDER BY created_at
             "schedules",
             SQL,
         );
-        let __result = ::er_span::instrument(&__span, client.query(SQL, &[&org_id])).await;
+        let __result = ::er_span::instrument(&__span, client.query(SQL, &[&dataset_id])).await;
         let __entered = __span.enter();
         let rows = ::er_span::check(&__span, __result)?;
         ::er_span::rows(&__span, rows.len() as u64);
@@ -321,11 +321,11 @@ WHERE id = $1
     pub async fn set_config_cron(
         client: &impl ::tokio_postgres::GenericClient,
         cron: &str,
-        org_id: &str,
+        dataset_id: &str,
         source: &str,
     ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
         const SQL: &str = "UPDATE public.schedules SET cron = $1, updated_at = now()
-WHERE org_id = $2 AND source = $3 AND cron <> $1
+WHERE dataset_id = $2 AND source = $3 AND cron <> $1
 ";
         let __span = ::er_span::sql_span(
             ::er_span::Store::Control,
@@ -336,7 +336,8 @@ WHERE org_id = $2 AND source = $3 AND cron <> $1
             SQL,
         );
         let __result =
-            ::er_span::instrument(&__span, client.execute(SQL, &[&cron, &org_id, &source])).await;
+            ::er_span::instrument(&__span, client.execute(SQL, &[&cron, &dataset_id, &source]))
+                .await;
         let __entered = __span.enter();
         let __n = ::er_span::check(&__span, __result)?;
         ::er_span::rows(&__span, __n);
@@ -348,10 +349,10 @@ WHERE org_id = $2 AND source = $3 AND cron <> $1
         client: &impl ::tokio_postgres::GenericClient,
         enabled: bool,
         schedule_id: &str,
-        org_id: &str,
+        dataset_id: &str,
     ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
         const SQL: &str = "UPDATE public.schedules SET enabled = $1, updated_at = now()
-WHERE id = $2 AND org_id = $3 AND source = 'api'
+WHERE id = $2 AND dataset_id = $3 AND source = 'api'
 ";
         let __span = ::er_span::sql_span(
             ::er_span::Store::Control,
@@ -363,7 +364,7 @@ WHERE id = $2 AND org_id = $3 AND source = 'api'
         );
         let __result = ::er_span::instrument(
             &__span,
-            client.execute(SQL, &[&enabled, &schedule_id, &org_id]),
+            client.execute(SQL, &[&enabled, &schedule_id, &dataset_id]),
         )
         .await;
         let __entered = __span.enter();

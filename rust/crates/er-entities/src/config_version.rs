@@ -132,8 +132,8 @@ RETURNING
 
 pub mod read {
     //! @generated query functions for this entity + operation.
-    /// One config version with its yaml body.
-    pub async fn by_version(
+    /// One config version addressed by ORG, for the one caller that has no dataset yet: the convergence sweep reads a pre-dataset org's published config to learn the entity type the dataset it is about to create should carry. Every other reader addresses a dataset — see `by_version`.
+    pub async fn by_org_version(
         client: &impl ::tokio_postgres::GenericClient,
         org_id: &str,
         version: i64,
@@ -158,7 +158,7 @@ WHERE org_id = $1 AND version = $2
             ::er_span::Store::Control,
             "config_version",
             "read",
-            "by_version",
+            "by_org_version",
             "config_versions",
             SQL,
         );
@@ -186,10 +186,11 @@ WHERE org_id = $1 AND version = $2
             .collect())
     }
 
-    /// An org's config versions, newest first.
-    pub async fn list(
+    /// One config version with its yaml body.
+    pub async fn by_version(
         client: &impl ::tokio_postgres::GenericClient,
-        org_id: &str,
+        dataset_id: &str,
+        version: i64,
     ) -> ::std::result::Result<Vec<super::ConfigVersion>, ::tokio_postgres::Error> {
         const SQL: &str = "SELECT
   id,
@@ -205,7 +206,60 @@ WHERE org_id = $1 AND version = $2
   published_at,
   updated_at
 FROM public.config_versions
-WHERE org_id = $1
+WHERE dataset_id = $1 AND version = $2
+";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "config_version",
+            "read",
+            "by_version",
+            "config_versions",
+            SQL,
+        );
+        let __result =
+            ::er_span::instrument(&__span, client.query(SQL, &[&dataset_id, &version])).await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
+        Ok(rows
+            .iter()
+            .map(|row| super::ConfigVersion {
+                id: row.get("id"),
+                org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
+                version: row.get("version"),
+                yaml: row.get("yaml"),
+                config_hash: row.get("config_hash"),
+                state: row.get("state"),
+                tier: row.get("tier"),
+                created_by: row.get("created_by"),
+                created_at: row.get("created_at"),
+                published_at: row.get("published_at"),
+                updated_at: row.get("updated_at"),
+            })
+            .collect())
+    }
+
+    /// A dataset's config versions, newest first.
+    pub async fn list(
+        client: &impl ::tokio_postgres::GenericClient,
+        dataset_id: &str,
+    ) -> ::std::result::Result<Vec<super::ConfigVersion>, ::tokio_postgres::Error> {
+        const SQL: &str = "SELECT
+  id,
+  org_id,
+  dataset_id,
+  version,
+  yaml,
+  config_hash,
+  state,
+  tier,
+  created_by,
+  created_at,
+  published_at,
+  updated_at
+FROM public.config_versions
+WHERE dataset_id = $1
 ORDER BY version DESC
 ";
         let __span = ::er_span::sql_span(
@@ -216,7 +270,7 @@ ORDER BY version DESC
             "config_versions",
             SQL,
         );
-        let __result = ::er_span::instrument(&__span, client.query(SQL, &[&org_id])).await;
+        let __result = ::er_span::instrument(&__span, client.query(SQL, &[&dataset_id])).await;
         let __entered = __span.enter();
         let rows = ::er_span::check(&__span, __result)?;
         ::er_span::rows(&__span, rows.len() as u64);
@@ -270,12 +324,12 @@ WHERE d.org_id = c.org_id AND d.name = 'default' AND c.dataset_id IS NULL
     pub async fn publish(
         client: &impl ::tokio_postgres::GenericClient,
         tier: Option<&str>,
-        org_id: &str,
+        dataset_id: &str,
         version: i64,
     ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
         const SQL: &str = "UPDATE public.config_versions SET state = 'published', tier = $1, published_at = now(),
     updated_at = now()
-WHERE org_id = $2 AND version = $3
+WHERE dataset_id = $2 AND version = $3
 ";
         let __span = ::er_span::sql_span(
             ::er_span::Store::Control,
@@ -285,8 +339,11 @@ WHERE org_id = $2 AND version = $3
             "config_versions",
             SQL,
         );
-        let __result =
-            ::er_span::instrument(&__span, client.execute(SQL, &[&tier, &org_id, &version])).await;
+        let __result = ::er_span::instrument(
+            &__span,
+            client.execute(SQL, &[&tier, &dataset_id, &version]),
+        )
+        .await;
         let __entered = __span.enter();
         let __n = ::er_span::check(&__span, __result)?;
         ::er_span::rows(&__span, __n);
