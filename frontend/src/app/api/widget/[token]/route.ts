@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { viewerCredentialFor } from "@/lib/bff/credentials";
-import { env } from "@/lib/env";
+import { upstreamFetch } from "@/lib/bff/upstream";
 import { verifyWidgetToken } from "@/lib/widget/token";
 
 /** One shape for every failure. A forged, expired, malformed or unknown token
@@ -38,14 +38,13 @@ export async function GET(
   const { org, dataset, recordKey } = verified.claims;
   try {
     const bearer = await viewerCredentialFor(org);
-    const url = new URL(
-      `/v1/orgs/${org}/datasets/${encodeURIComponent(dataset)}/duplicates`,
-      env().ERSERVER_BASE_URL,
-    );
-    url.search = new URLSearchParams({ record_key: recordKey, limit: "10" }).toString();
-    const response = await fetch(url, {
-      headers: { authorization: `Bearer ${bearer}` },
-      cache: "no-store",
+    const response = await upstreamFetch({
+      path: `/v1/orgs/${org}/datasets/${encodeURIComponent(dataset)}/duplicates`,
+      authorization: `Bearer ${bearer}`,
+      searchParams: new URLSearchParams({ record_key: recordKey, limit: "10" }),
+      // No `actingUser`: there is no logged-in person here. The signed widget
+      // token IS the credential, and this endpoint is reachable by anyone
+      // holding the URL, so there is no identity to forward.
     });
     if (!response.ok) return notFound();
     const page = (await response.json()) as { items?: unknown[] };

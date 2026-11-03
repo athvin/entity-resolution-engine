@@ -2,8 +2,8 @@ import "server-only";
 import { NextResponse } from "next/server";
 
 import { identityFromCookies, type Identity, type Membership } from "@/lib/auth/session";
-import { env } from "@/lib/env";
 import type { BffError, BffErrorCode } from "./errors";
+import { upstreamFetch } from "./upstream";
 
 /**
  * The heart of the BFF: session → effective identity → credential → typed
@@ -220,22 +220,17 @@ async function rawFetch(
   }
   const { credentialForAccess } = await import("./credentials");
   const bearer = await credentialForAccess(access, role);
-  const url = new URL(path, env().ERSERVER_BASE_URL);
-  if (options.searchParams) url.search = options.searchParams.toString();
-  const headers: Record<string, string> = {
-    authorization: `Bearer ${bearer}`,
-    "x-acting-user": access.identity.user.email,
-  };
-  if (options.body !== undefined) headers["content-type"] = "application/json";
-  if (options.idempotencyKey) headers["idempotency-key"] = options.idempotencyKey;
 
   let response: Response;
   try {
-    response = await fetch(url, {
-      method: options.method ?? "GET",
-      headers,
-      body: options.body === undefined ? null : JSON.stringify(options.body),
-      cache: "no-store",
+    response = await upstreamFetch({
+      path,
+      authorization: `Bearer ${bearer}`,
+      method: options.method,
+      searchParams: options.searchParams,
+      json: options.body,
+      idempotencyKey: options.idempotencyKey,
+      actingUser: access.identity.user.email,
     });
   } catch {
     throw new BffFailure(502, "internal", "the control plane is unreachable");

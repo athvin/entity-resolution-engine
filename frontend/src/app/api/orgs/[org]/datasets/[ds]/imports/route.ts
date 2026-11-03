@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 
-import { BffFailure, requireDatasetAccess, respond } from "@/lib/bff/proxy";
+import { BffFailure, datasetPath, requireDatasetAccess, respond } from "@/lib/bff/proxy";
 import { credentialForAccess } from "@/lib/bff/credentials";
-import { env } from "@/lib/env";
+import { upstreamFetch } from "@/lib/bff/upstream";
 
 /** 256 MiB — mirror erserver's cap client-side so oversize uploads fail fast. */
 const MAX_IMPORT_BYTES = 256 * 1024 * 1024;
@@ -32,21 +32,20 @@ export async function POST(
     }
 
     const bearer = await credentialForAccess(access, "steward");
-    const upstream = new URL(`/v1/orgs/${org}/datasets/${ds}/imports`, env().ERSERVER_BASE_URL);
-    upstream.searchParams.set("source", source);
     const body = new FormData();
     body.set("file", file, file.name);
 
     let response: Response;
     try {
-      response = await fetch(upstream, {
+      response = await upstreamFetch({
+        path: datasetPath(access, "/imports"),
         method: "POST",
-        headers: {
-          authorization: `Bearer ${bearer}`,
-          "x-acting-user": access.identity.user.email,
-        },
+        authorization: `Bearer ${bearer}`,
+        searchParams: new URLSearchParams({ source }),
+        // `body`, not `json`: upstreamFetch passes this through without a
+        // content-type so `fetch` generates the multipart boundary itself.
         body,
-        cache: "no-store",
+        actingUser: access.identity.user.email,
       });
     } catch {
       throw new BffFailure(502, "internal", "the control plane is unreachable");

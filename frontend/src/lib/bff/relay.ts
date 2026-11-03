@@ -2,6 +2,8 @@ import "server-only";
 
 import { env } from "@/lib/env";
 
+import { upstreamFetch } from "./upstream";
+
 /**
  * The BFF's one path to email: erserver's operator relay (`POST /v1/email`).
  *
@@ -18,13 +20,13 @@ export async function relayEmail(message: {
   org?: string;
 }): Promise<boolean> {
   try {
-    const response = await fetch(`${env().ERSERVER_BASE_URL}/v1/email`, {
+    const response = await upstreamFetch({
+      path: "/v1/email",
       method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${env().ERSERVER_OPERATOR_TOKEN}`,
-      },
-      body: JSON.stringify(message),
+      authorization: `Bearer ${env().ERSERVER_OPERATOR_TOKEN}`,
+      json: message,
+      // No `actingUser`: the relay is the platform sending on its own behalf,
+      // and `message.to` is the recipient rather than an acting person.
     });
     return response.ok;
   } catch {
