@@ -49,6 +49,12 @@ job instead — `terraform plan` is the worked example.
 | `agent` | agent | 100 | `always` |
 | `publish` | publish | 10 | `always() && needs.agent.outputs.task_id != ''` |
 
+### `deploy.yml`
+
+| Job | Status-check context | Timeout | Condition |
+|---|---|---|---|
+| `deploy-dev` | deploy dev (ci namespace) | 30 | `github.event_name == 'workflow_dispatch' \|\| (github.event.workflow_run.conclusion == 'su …` |
+
 ### `drift.yml`
 
 | Job | Status-check context | Timeout | Condition |
@@ -82,7 +88,6 @@ job instead — `terraform plan` is the worked example.
 | `er-api` | er-api | 90 | `github.event_name != 'pull_request' && needs.detect.outputs.rust == 'true'` |
 | `er-web` | er-web | 30 | `github.event_name != 'pull_request' && needs.detect.outputs.frontend == 'true'` |
 | `verify` | image builds (${{ matrix.image }}, no push) | 90 | `github.event_name == 'pull_request'` |
-| `deploy-dev` | deploy dev (ci namespace) | 30 | `always() && !cancelled() && github.ref == 'refs/heads/main'` |
 
 ### `infra.yml`
 
