@@ -187,9 +187,11 @@ also the one thing they have that `rust.yml` and `frontend.yml` do not: because
 they are not required, they *are* allowed `paths:` and `if:` filters. The rule
 in CLAUDE.md is about required workflows specifically.
 
-They also hold the repo's only GitHub write scopes. `contents: write`,
-`pull-requests: write` and `issues: write` appear nowhere else — the four
-hand-written workflows are `contents: read` plus `id-token: write` for OIDC.
+They also hold almost all of the repo's GitHub write scopes.
+`pull-requests: write` and `issues: write` appear nowhere else, and
+`contents: write` appears in one other place: the `agent` job of
+`agent-task.yml` (below). The other hand-written workflows are `contents: read`
+plus `id-token: write` for OIDC.
 
 **The model's own job holds none of them.** gh-aw compiles each workflow into
 five or six jobs, and the `agent` job that runs the model gets only read scopes;
@@ -258,6 +260,28 @@ counts these paths as agent-only, so a prompt edit skips the backend gate —
 which is safe precisely because the always-on `skills` job is not gated on
 `detect` and still catches generated-reference drift. And the SHA-pin rule
 applies to the generated lock files too; `gh aw compile` pins them for you.
+
+## The dispatched agent (`agent-task.yml`)
+
+`agent-task.yml` is the fire-and-forget agent: `workflow_dispatch` only, one
+task per run, ending in a pull request. It is a plain workflow running
+`anthropics/claude-code-action`, not gh-aw, because it authenticates with a
+Claude subscription token. It copies gh-aw's split instead. The `agent` job
+holds only the workflow token, with `contents: write`, and checkpoints to
+`agent-wip/<task>`. A separate `publish` job, on a fresh runner that never
+checks out the agent's tree, mints a GitHub App token and opens the PR. Design
+and rationale: `docs/agent-fleet.md`.
+
+It carries two stored secrets beyond the gh-aw agents' `ANTHROPIC_API_KEY`, and
+unlike that one they are **environment-scoped**: `CLAUDE_CODE_OAUTH_TOKEN` in the
+`agent` environment and `AGENT_APP_KEY` in `agent-publish`, both restricted to
+`main`, so a PR branch that edits a workflow cannot read them. Do not move either
+to repository scope, and do not let the `agent` job reference `AGENT_APP_KEY`.
+
+**Its `agent` job must not gain `id-token: write`.** `er-ci-tf-plan` trusts any
+ref of this repository, so a job that can mint an OIDC token can read Terraform
+state. That is why it restores `rust-cache` but not the S3 sccache, and why its
+`CARGO*`/`RUST*` env must stay identical to `rust.yml`'s `lint` job.
 
 ## The supply-chain gates
 

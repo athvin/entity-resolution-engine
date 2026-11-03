@@ -89,8 +89,8 @@ also has no builder credential and no secrets stack, which is deliberate.
 `infra.yml` runs four tiers and **CI owns every apply**: `fmt + validate`
 (credential-free, all five stacks) → `plan` per stack under the read-only
 `er-ci-tf-plan` role → one sticky PR comment carrying the add/change/destroy
-table and the diffs → `apply` on `main` only, unattended. There are no
-repository secrets; every identity is a federated OIDC role. Do not run a
+table and the diffs → `apply` on `main` only, unattended. It reads no stored
+secret; every identity is a federated OIDC role. Do not run a
 recurring `terraform apply` by hand — merge is the trigger.
 
 Four roles, and which one does what is not uniform:
