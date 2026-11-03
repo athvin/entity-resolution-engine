@@ -79,9 +79,12 @@ import is a build error. The set includes:
 
 - `src/lib/env.ts` — the environment reader
 - `src/lib/api/erserver.ts` — the upstream client with the bearer
-- all of `src/lib/bff/*`
-- `src/lib/auth/{session,password,redirect}.ts`
-- `src/lib/db/*`
+- all of `src/lib/bff/*` except `errors.ts`, the error envelope the browser
+  client shares
+- `src/lib/auth/{session,password}.ts` — `redirect.ts` is deliberately
+  shared, because the login page is a client component
+- `src/lib/db/*` except `schema.ts`, which `drizzle-kit generate` loads in
+  plain Node, where `server-only` throws
 - `src/lib/assistant/tools.ts`
 
 **If you write a module that holds a credential, reads env, or touches the
@@ -109,6 +112,9 @@ The database layer branches on the URL: a `pglite:` URL dynamically imports
 PGlite and its drizzle adapter instead of connecting to Postgres, which is what
 lets the functional tier and some unit tests run with no database process. See
 the frontend-testing skill.
+
+Only `src/lib/db/` constructs that connection; the data-boundary lint rule
+rejects a `postgres`, PGlite or `drizzle-orm/<driver>` import anywhere else.
 
 Do **not** reach into the Rust control plane's tables from drizzle. The two
 schemas are separate on purpose; cross-reading them couples two deploy

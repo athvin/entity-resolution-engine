@@ -1,6 +1,6 @@
 ---
 name: frontend-bff
-description: Explains the Next.js backend-for-frontend boundary in this repo — that the browser never reaches the Rust control plane, the split between the server-only upstream client and the browser's same-origin client, where authorization actually happens and why the proxy cannot do it, and the three gates that enforce the boundary (the authz script, the semgrep rules including the no-NEXT_PUBLIC policy, and `server-only`). Use when adding or reviewing a route handler under `src/app/api`, wiring a component to data, handling sessions or impersonation, adding an environment variable, or touching anything that crosses the browser/server line. For tokens, styling and interface copy see frontend-design-system; for tables, charts and dense data surfaces see frontend-data-ui; for the public marketing surface, its metadata routes and PUBLIC_PATHS entries see landing-page; for the generated API types see api-contract; for test tiers and gates see frontend-testing.
+description: Explains the Next.js backend-for-frontend boundary in this repo — that the browser never reaches the Rust control plane, the split between the server-only upstream client and the browser's same-origin client, where authorization actually happens and why the proxy cannot do it, and the four gates that enforce the boundary (the authz script, the semgrep rules with the no-NEXT_PUBLIC policy, `server-only`, and a lint rule against direct DuckDB, S3 or Postgres access). Use when adding or reviewing a route handler under `src/app/api`, wiring a component to data, handling sessions or impersonation, adding an environment variable, or touching anything that crosses the browser/server line. For tokens, styling and interface copy see frontend-design-system; for tables, charts and dense data surfaces see frontend-data-ui; for the public marketing surface, its metadata routes and PUBLIC_PATHS entries see landing-page; for the generated API types see api-contract; for test tiers and gates see frontend-testing.
 ---
 
 # The BFF boundary
@@ -12,7 +12,7 @@ defining property:
 > a Next.js route handler, which authorizes it and then calls upstream with a
 > privileged credential.
 
-That is why the boundary has three independent enforcement mechanisms rather
+That is why the boundary has four independent enforcement mechanisms rather
 than a convention.
 
 ## Two clients, one set of types
@@ -57,7 +57,7 @@ this list without the same kind of justification.
 Security headers (including the CSP report-only policy) live in
 `next.config.ts`'s `headers()`, deliberately **not** in the proxy.
 
-## The three gates
+## The four gates
 
 **1. `scripts/check-bff-authz.mjs`** (`pnpm authz:check`, inside `pnpm check`).
 A file-level textual gate: every `route.ts` under `src/app/api/orgs` must
@@ -87,6 +87,26 @@ a flaky required check is worse than none. It still runs; read it.
 **3. `server-only`.** Server modules import the `server-only` package, which
 makes a browser import a build error. Vitest aliases it to a stub so unit tests
 can import those modules — see the frontend-testing skill.
+
+**4. `eslint-rules/data-boundary.mjs`** (inside `pnpm lint`). The frontend
+reaches data only through er-server, and this rule makes that a lint error
+rather than a review finding:
+
+| Where | Forbidden |
+|---|---|
+| anywhere in `src/` | DuckDB / DuckLake / MotherDuck, Parquet readers, the AWS SDK, any other Postgres client (`pg`, Neon, Vercel) |
+| outside `src/lib/db/` | constructing the Postgres connection: `postgres`, PGlite, any `drizzle-orm/<driver>` subpath |
+| a `"use client"` module | importing `drizzle-orm`, `@/lib/db`, `erserver.ts`, `@/lib/bff/*` (except `errors`) or `@/lib/env`; calling `fetch`/`EventSource`/`WebSocket`/`sendBeacon` with an absolute URL |
+
+Type-only imports pass, because they are erased. The lake rule has no
+exception, even under `src/lib/db/`: a tenant's lake is isolated by catalog
+separation that er-server enforces, and a DuckDB-WASM import in a component
+would build, run and bypass it. If a screen needs lake data, er-server serves
+it — the Arrow read surface exists for that. The rule is tested in both
+directions by `tests/unit/data-boundary-rule.test.ts`.
+
+A module both sides need, such as a request cap the UI displays and the handler
+enforces, belongs in `src/lib/domain/`, not `src/lib/bff/`.
 
 ## The UI is strictly black and white
 

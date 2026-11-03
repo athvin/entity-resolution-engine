@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { resolveAiConfig } from "@/lib/ai/config";
 import { adjudicateReview } from "@/lib/adjudicate/run";
-import { parseBulkAdjudicate } from "@/lib/bff/adjudicate-bulk";
+import { parseBulkAdjudicate } from "@/lib/domain/adjudicate-bulk";
 import { BffFailure, requireDatasetAccess, respond } from "@/lib/bff/proxy";
 
 /** One pair's outcome. A failure is per-item, never fatal to the batch. */

@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { MAX_BULK, parseBulkAdjudicate } from "@/lib/bff/adjudicate-bulk";
+import { MAX_BULK, parseBulkAdjudicate } from "@/lib/domain/adjudicate-bulk";
 
 const ids = (n: number) =>
   Array.from({ length: n }, (_, i) => `01REVIEW${String(i).padStart(3, "0")}`);
