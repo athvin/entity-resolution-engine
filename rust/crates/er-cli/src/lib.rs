@@ -4204,7 +4204,50 @@ pub fn stage_standardize(
     inputs: &PipelineInputs<'_>,
 ) -> Result<()> {
     run_standardize(session, config, inputs.run_at)?;
+    auto_profile_standardized(session, config, inputs.run_id, inputs.run_at);
     Ok(())
+}
+
+/// Profile the standardized corpus the rebuild just produced, best-effort.
+///
+/// **Why this corpus and not only the deliveries.** Blocking and comparison
+/// both operate on standardized columns, so this is the profile that can say
+/// anything about the config a tenant is about to publish — a delivery's
+/// profile describes a source's raw columns, which are one mapping away from
+/// what the matcher reads. It is also the only subject where a column can
+/// genuinely appear or disappear: the standardized column set comes from the
+/// config's attribute mapping, so P012 has a real trigger here and none on the
+/// raw subject.
+///
+/// **Approximate distinct counts, unlike the delivery profile.** That one turns
+/// exact counts on because the uniqueness verdict is the whole point of looking
+/// at a freshly landed file. Nothing here needs it: the advisories read fill
+/// rates and value shares, and an exact `count(distinct)` is a per-column sort
+/// over the whole corpus on every single run. The cheap tier has to stay cheap
+/// at corpus scale or it stops running.
+///
+/// Best-effort for the same reason as everything else that describes a run's
+/// output: the standardized table is already rebuilt and committed, so failing
+/// to describe it must not fail the run that produced it.
+fn auto_profile_standardized(session: &Session, config: &Config, run_id: &str, run_at: &str) {
+    let options = dedupe_core::profile::ProfileOptions {
+        exact_distinct: false,
+        sample: None,
+    };
+    let inputs = crate::profile::ProfileInputs {
+        subject: crate::profile::Subject::Standardized,
+        source: None,
+        tier: 1,
+        options: &options,
+        account: !config.entity_type.is_person(),
+        captured_at: run_at,
+        // Not a delivery: this describes the whole standardized corpus, which
+        // every source contributed to.
+        ingest_batch_id: None,
+    };
+    if let Err(e) = crate::profile::run_profile(session, &inputs) {
+        eprintln!("run {run_id}: profiling the standardized corpus failed: {e:#}");
+    }
 }
 
 /// The `match` stage: score the corpus (full, incremental or segment), then

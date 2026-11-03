@@ -1564,6 +1564,56 @@ pub fn insight_sources(
     }
 }
 
+/// What the latest standardized profile says about the columns a config blocks
+/// on, for the publish-time advisories.
+///
+/// Tier 1, because that is what every run writes automatically; the advisories
+/// need fill rates and value shares, neither of which tier 2 adds.
+///
+/// # Errors
+/// Propagates the lake read. The CALLER is expected to treat an error as "no
+/// advice" rather than as a failed publish — a publish must not depend on the
+/// profiler having run, and an advisory that can refuse a publish is a gate
+/// wearing a suggestion's clothes.
+pub fn profiled_standardized_columns(
+    session: &Session,
+    snapshot: i64,
+) -> Result<Vec<crate::config_check::ProfiledColumn>, String> {
+    let runs = er_entities::profile_run::read::latest(
+        session.connection(),
+        snapshot,
+        "standardized",
+        er_cli::profile::NO_SOURCE,
+        1,
+    )
+    .map_err(|e| e.to_string())?;
+    let Some(run) = runs.first() else {
+        return Ok(Vec::new());
+    };
+    let columns =
+        er_entities::column_profile::read::for_run(session.connection(), snapshot, &run.id)
+            .map_err(|e| e.to_string())?;
+    Ok(columns
+        .iter()
+        .map(|c| crate::config_check::ProfiledColumn {
+            column_name: c.column_name.clone(),
+            row_count: c.row_count,
+            non_null_count: c.non_null_count,
+            blank_count: c.blank_count,
+            // The profile stores the top values as JSON; only the leading
+            // share is wanted here, and reaching past it would pull a real
+            // value into the publish path for no reason.
+            top_share: c
+                .top_values
+                .as_ref()
+                .and_then(|v| v.as_array())
+                .and_then(|a| a.first())
+                .and_then(|first| first.get("share"))
+                .and_then(serde_json::Value::as_f64),
+        })
+        .collect())
+}
+
 /// One corpus stage's profile: the run, every column's shape, and the findings.
 ///
 /// `include_values` gates every field that echoes a value **as stored** — see

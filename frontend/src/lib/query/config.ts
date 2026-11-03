@@ -26,6 +26,16 @@ export interface PublishResult {
   tier: string | null;
   changed_blocks: string[];
   jobs_enqueued: string[];
+  /**
+   * What the latest profile says about the config that just went live —
+   * advice, never a refusal.
+   *
+   * Optional because an older backend does not send it, and because the server
+   * sends `[]` for "nothing has profiled this corpus" as well as for "measured,
+   * nothing to say". Both render as no advisories, which is correct: the
+   * difference belongs on the profile screen, not in a publish toast.
+   */
+  advisories?: string[];
 }
 
 /** The whole config family: active, the version list, and each version.

@@ -60,6 +60,18 @@ test.describe("config studio", () => {
 
     await expect(page.getByTestId("publish-result")).toContainText("v2 published (tier A)");
     await expect(page.getByTestId("publish-result")).toContainText("1 job enqueued");
+
+    // Profile-derived advice, BELOW the confirmation and never instead of it.
+    // The publish succeeded; these are things the latest profile says about the
+    // config that is now live. A blocking rule on a nearly-empty column passes
+    // every validation there is and then reaches almost no pairs, which nothing
+    // in the product said until this landed.
+    const advisories = page.getByTestId("publish-advisories");
+    await expect(advisories).toContainText("measured, not blocking");
+    await expect(advisories).toContainText("cannot reach");
+    // The wording must not read as a refusal: the version IS published, and a
+    // reader who thinks otherwise will publish again.
+    await expect(page.getByTestId("publish-result")).toContainText("published");
     // The history shows both versions with a working diff.
     await page.getByTestId("diff-2").click();
     await expect(page.getByTestId("version-diff")).toContainText("+ ");

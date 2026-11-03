@@ -5451,6 +5451,49 @@ fn ingesting_a_delivery_profiles_it_automatically() {
         0,
         "tier 1 measures no candidate keys"
     );
+
+    // Standardize profiles its own output too, and that subject is the one the
+    // publish-time advisories read: blocking and comparison both operate on
+    // standardized columns, so a delivery's profile cannot speak to a config.
+    er_cli::stage_standardize(
+        &session,
+        &config,
+        &er_cli::PipelineInputs {
+            mode: "full",
+            rebuild_reason: None,
+            segment: None,
+            lexicon: &lexicon_pairs(),
+            deliveries: &deliveries,
+            model: &er_cli::MatchModel {
+                settings_json: &model_json,
+                tf_csv_path: std::path::Path::new(&tf_csv),
+                model_version: "v0001",
+                tf_snapshot_id: "01JWMDTFSNAP00000000000001",
+            },
+            run_id,
+            ingested_at: "2026-01-01 00:00:00",
+            scored_at: "2026-01-01 00:00:00",
+            run_at: "2026-01-01 00:00:00",
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        lake_count_where(&session, "profile_runs", "subject = 'standardized'"),
+        1,
+        "the standardized corpus profiles itself after the rebuild"
+    );
+    // Approximate distinct counts here, unlike the delivery profile: an exact
+    // `count(distinct)` is a per-column sort over the whole corpus on every
+    // run, and nothing the advisories need wants it.
+    assert_eq!(
+        lake_count_where(
+            &session,
+            "column_profiles cp join lake.main.profile_runs pr on pr.id = cp.profile_run_id",
+            "pr.subject = 'standardized' and cp.distinct_exact is not null"
+        ),
+        0,
+        "the standardized auto-profile stays on the cheap path"
+    );
     // ...but it does profile columns, so the auto-run is useful on its own and
     // not just a row in a ledger.
     assert!(
