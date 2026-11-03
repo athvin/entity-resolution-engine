@@ -669,7 +669,10 @@ pub fn run_match(
 /// The registry name a single-model run reports for its one member. Never
 /// rendered into the run ledger (a one-member ensemble records its bare
 /// `model_version`; see [`ensemble_identity`]), so this is diagnostics only.
-const SOLE_MEMBER_NAME: &str = "default";
+/// The implicit single member's name: a config with no `models:` list scores
+/// as a one-member ensemble called this. Public because both orchestrators
+/// build that slice — the composed entry here and the DAG's `init` body.
+pub const SOLE_MEMBER_NAME: &str = "default";
 
 /// S4.3 match (full mode) for an ENSEMBLE: every member scores the whole
 /// corpus, and each member's pairs at or above `review_low` are merged into
@@ -3868,139 +3871,302 @@ pub fn run_all_ensemble_observed(
     );
 
     observed(session, observer, "init", || {
-        // The run ledger records the ENSEMBLE's identity, not one member's,
-        // because that string is what the drift guard compares across runs —
-        // see `ensemble_identity`.
-        let (model_version, tf_snapshot_id) = ensemble_identity(members);
-        let resolved = resolve_ensemble(config, members);
-        let resolved_json = resolved.map(|r| serde_json::to_string(&r).unwrap_or_default());
-        write_run_row(
-            session,
-            config,
-            inputs.run_id,
-            inputs.run_at,
-            inputs.mode,
-            &model_version,
-            &tf_snapshot_id,
-            Some(&lexicon_fingerprint(inputs.lexicon)),
-            inputs.rebuild_reason,
-            resolved_json.as_deref(),
-        )?;
-        seed_lexicon(session, inputs.lexicon)?;
-        Ok(())
+        stage_init(session, config, inputs, members)
     })?;
     observed(session, observer, "ingest", || {
-        for (source, csv) in inputs.deliveries {
-            run_ingest(
-                session,
-                config,
-                source,
-                csv,
-                inputs.run_id,
-                inputs.ingested_at,
-                false,
-            )?;
-            write_ingest_batch(
-                session,
-                inputs.run_id,
-                source,
-                source,
-                false,
-                inputs.ingested_at,
-            )?;
-        }
-        Ok(())
+        stage_ingest(session, config, inputs)
     })?;
     observed(session, observer, "standardize", || {
-        run_standardize(session, config, inputs.run_at)?;
-        Ok(())
+        stage_standardize(session, config, inputs)
     })?;
     observed(session, observer, "match", || {
-        // Incremental now covers ensembles too (E5b-2b); see
-        // `run_match_ensemble_incremental` for what had to change.
-        if inputs.mode == er_versions::MODE_INCREMENTAL || inputs.segment.is_some() {
-            let deltas = run_match_ensemble_incremental(
-                session,
-                config,
-                members,
-                config.thresholds.review_low,
-                inputs.run_id,
-                inputs.scored_at,
-                inputs.segment.map(|(_, predicate)| predicate),
-            )?;
-            for (member, delta) in members.iter().zip(&deltas) {
-                eprintln!(
-                    "run {}: {} match for member '{}' over {}/{} records, {} scores invalidated{}{}",
-                    inputs.run_id,
-                    delta.mode,
-                    member.name,
-                    delta.delta_records,
-                    delta.corpus_records,
-                    delta.invalidated_scores,
-                    inputs
-                        .segment
-                        .map(|(name, _)| format!(", segment {name}"))
-                        .unwrap_or_default(),
-                    delta
-                        .full_reason
-                        .as_ref()
-                        .map(|r| format!(" ({r})"))
-                        .unwrap_or_default(),
-                );
-            }
-        } else {
-            run_match_ensemble(
-                session,
-                config,
-                members,
-                config.thresholds.review_low,
-                inputs.run_id,
-                inputs.scored_at,
-            )?;
-        }
-        // Screening, between match and reconcile: the first moment the verdicts
-        // exist (the receipt is written during ingest, where they cannot) and
-        // before reconcile changes the entity shape they describe.
-        if !inputs.deliveries.is_empty() {
-            screen_deliveries(session, config, inputs);
-        }
-        Ok(())
+        stage_match(session, config, inputs, members)
     })?;
-    // Reconcile and golden stay whole-corpus in both modes. That is a choice,
-    // not an omission: clustering is a function of the edge set, and connected
-    // components over the whole (small) above-threshold graph is linear in edges
-    // and exactly reproducible, while the cost incremental mode exists to avoid
-    // is the QUADRATIC pair generation in match. Re-clustering from the full
-    // edge set also means the partition cannot drift from what a full run would
-    // produce, which is the property the equivalence gate asserts.
     observed(session, observer, "reconcile", || {
-        run_reconcile(session, config, inputs.run_id, inputs.run_at)?;
-        Ok(())
+        stage_reconcile(session, config, inputs)
     })?;
     observed(session, observer, "assemble", || {
-        run_golden(session, config, inputs.run_at)?;
-        write_reviews(session, config, inputs.run_id, inputs.run_at)?;
-        // Metrics last, and best-effort: the run's results are already written,
-        // so a failure to describe them must not fail the run that produced
-        // them.
-        if let Err(e) = write_metric_snapshot(session, config, inputs.run_id, inputs.run_at) {
-            eprintln!("run {}: metric snapshot failed: {e:#}", inputs.run_id);
-        }
-        // Quality scoring, when configured. Best-effort: the run's results are
-        // already in the lake, so failing to DESCRIBE them must not fail the
-        // run that produced them.
-        if let Err(e) = write_record_quality(session, config, inputs.run_id, inputs.run_at) {
-            eprintln!("run {}: quality scoring failed: {e:#}", inputs.run_id);
-        }
-        Ok(())
+        stage_assemble(session, config, inputs)
     })?;
     observed(session, observer, "finish", || {
-        write_run_end(session, inputs.run_id, inputs.run_at)?;
-        Ok(())
+        stage_finish(session, inputs)
     })?;
     Ok(())
 }
 
+// --- the stages, one public function each -----------------------------------
+//
+// Why these are functions rather than closures inside the composed entry: the
+// Kubernetes executor runs each stage in its OWN pod (one task per stage,
+// batch-orchestration-design §3.1), so both orchestrators — this file's
+// `run_all_ensemble_observed` and er-server's compiled DAG — must drive the
+// same code. A stage reimplemented on the DAG side would be the class of bug
+// where a run behaves differently depending on which executor claimed it,
+// invisible until the two disagree in production. One implementation per
+// stage, two orchestrators.
+
+/// The `init` stage: the run ledger row and the lexicon seed.
+///
+/// The ledger records the ENSEMBLE's identity, not one member's, because that
+/// string is what the drift guard compares across runs — see
+/// [`ensemble_identity`].
+///
+/// # Errors
+/// Propagates the `runs` write and the lexicon seed.
+pub fn stage_init(
+    session: &Session,
+    config: &Config,
+    inputs: &PipelineInputs<'_>,
+    members: &[EnsembleMember<'_>],
+) -> Result<()> {
+    // The run ledger records the ENSEMBLE's identity, not one member's,
+    // because that string is what the drift guard compares across runs —
+    // see `ensemble_identity`.
+    let (model_version, tf_snapshot_id) = ensemble_identity(members);
+    let resolved = resolve_ensemble(config, members);
+    let resolved_json = resolved.map(|r| serde_json::to_string(&r).unwrap_or_default());
+    write_run_row(
+        session,
+        config,
+        inputs.run_id,
+        inputs.run_at,
+        inputs.mode,
+        &model_version,
+        &tf_snapshot_id,
+        Some(&lexicon_fingerprint(inputs.lexicon)),
+        inputs.rebuild_reason,
+        resolved_json.as_deref(),
+    )?;
+    seed_lexicon(session, inputs.lexicon)?;
+    Ok(())
+}
+
+/// The `ingest` stage: land every delivery and record its batch.
+///
+/// Fan-out over N deliveries is this loop, not N tasks (§3.1): a delivery is
+/// not independently retryable — the whole stage is pre-imaged and re-run.
+///
+/// # Errors
+/// Propagates the first delivery's ingest or batch write.
+pub fn stage_ingest(session: &Session, config: &Config, inputs: &PipelineInputs<'_>) -> Result<()> {
+    for (source, csv) in inputs.deliveries {
+        run_ingest(
+            session,
+            config,
+            source,
+            csv,
+            inputs.run_id,
+            inputs.ingested_at,
+            false,
+        )?;
+        write_ingest_batch(
+            session,
+            inputs.run_id,
+            source,
+            source,
+            false,
+            inputs.ingested_at,
+        )?;
+    }
+    Ok(())
+}
+
+/// The `standardize` stage: drop-and-rebuild of `int_std_records`.
+///
+/// # Errors
+/// Propagates the rebuild.
+pub fn stage_standardize(
+    session: &Session,
+    config: &Config,
+    inputs: &PipelineInputs<'_>,
+) -> Result<()> {
+    run_standardize(session, config, inputs.run_at)?;
+    Ok(())
+}
+
+/// The `match` stage: score the corpus (full, incremental or segment), then
+/// screen the deliveries.
+///
+/// Screening sits between match and reconcile: the first moment the verdicts
+/// exist (the receipt is written during ingest, where they cannot) and before
+/// reconcile changes the entity shape they describe.
+///
+/// # Errors
+/// Propagates the scoring pass; screening is best-effort and cannot fail it.
+pub fn stage_match(
+    session: &Session,
+    config: &Config,
+    inputs: &PipelineInputs<'_>,
+    members: &[EnsembleMember<'_>],
+) -> Result<()> {
+    // Incremental now covers ensembles too (E5b-2b); see
+    // `run_match_ensemble_incremental` for what had to change.
+    if inputs.mode == er_versions::MODE_INCREMENTAL || inputs.segment.is_some() {
+        let deltas = run_match_ensemble_incremental(
+            session,
+            config,
+            members,
+            config.thresholds.review_low,
+            inputs.run_id,
+            inputs.scored_at,
+            inputs.segment.map(|(_, predicate)| predicate),
+        )?;
+        for (member, delta) in members.iter().zip(&deltas) {
+            eprintln!(
+                "run {}: {} match for member '{}' over {}/{} records, {} scores invalidated{}{}",
+                inputs.run_id,
+                delta.mode,
+                member.name,
+                delta.delta_records,
+                delta.corpus_records,
+                delta.invalidated_scores,
+                inputs
+                    .segment
+                    .map(|(name, _)| format!(", segment {name}"))
+                    .unwrap_or_default(),
+                delta
+                    .full_reason
+                    .as_ref()
+                    .map(|r| format!(" ({r})"))
+                    .unwrap_or_default(),
+            );
+        }
+    } else {
+        run_match_ensemble(
+            session,
+            config,
+            members,
+            config.thresholds.review_low,
+            inputs.run_id,
+            inputs.scored_at,
+        )?;
+    }
+    // Screening, between match and reconcile: the first moment the verdicts
+    // exist (the receipt is written during ingest, where they cannot) and
+    // before reconcile changes the entity shape they describe.
+    if !inputs.deliveries.is_empty() {
+        screen_deliveries(session, config, inputs);
+    }
+    Ok(())
+}
+
+/// The `reconcile` stage: cluster the above-threshold graph into entities.
+///
+/// Whole-corpus in BOTH modes, deliberately: clustering is a function of the
+/// edge set, connected components over the whole (small) above-threshold graph
+/// is linear in edges and exactly reproducible, and the cost incremental mode
+/// exists to avoid is the QUADRATIC pair generation in match. Re-clustering
+/// from the full edge set also means the partition cannot drift from what a
+/// full run would produce, which is the property the equivalence gate asserts.
+///
+/// # Errors
+/// Propagates the clustering pass.
+pub fn stage_reconcile(
+    session: &Session,
+    config: &Config,
+    inputs: &PipelineInputs<'_>,
+) -> Result<()> {
+    run_reconcile(session, config, inputs.run_id, inputs.run_at)?;
+    Ok(())
+}
+
+/// The `assemble` stage: golden records, the review queue, then metrics and
+/// quality.
+///
+/// The last two are best-effort: the run's results are already written, so
+/// failing to DESCRIBE them must not fail the run that produced them.
+///
+/// # Errors
+/// Propagates golden or the review queue.
+pub fn stage_assemble(
+    session: &Session,
+    config: &Config,
+    inputs: &PipelineInputs<'_>,
+) -> Result<()> {
+    run_golden(session, config, inputs.run_at)?;
+    write_reviews(session, config, inputs.run_id, inputs.run_at)?;
+    // Metrics last, and best-effort: the run's results are already written,
+    // so a failure to describe them must not fail the run that produced
+    // them.
+    if let Err(e) = write_metric_snapshot(session, config, inputs.run_id, inputs.run_at) {
+        eprintln!("run {}: metric snapshot failed: {e:#}", inputs.run_id);
+    }
+    // Quality scoring, when configured. Best-effort: the run's results are
+    // already in the lake, so failing to DESCRIBE them must not fail the
+    // run that produced them.
+    if let Err(e) = write_record_quality(session, config, inputs.run_id, inputs.run_at) {
+        eprintln!("run {}: quality scoring failed: {e:#}", inputs.run_id);
+    }
+    Ok(())
+}
+
+/// The `finish` stage: close the run's ledger row.
+///
+/// # Errors
+/// Propagates the `runs` update.
+pub fn stage_finish(session: &Session, inputs: &PipelineInputs<'_>) -> Result<()> {
+    write_run_end(session, inputs.run_id, inputs.run_at)?;
+    Ok(())
+}
+
+/// `correct`'s `init` stage: pin the PRIOR run's model identity and open a
+/// `correct`-mode run row. Returns that identity, so a caller composing the
+/// pass as a DAG can publish it in the run plan.
+///
+/// A correction pass has only the lake in scope — no registry — which is why
+/// the resolved ensemble travels on the run row rather than being looked up:
+/// re-reading today's config would re-cluster yesterday's scores under a
+/// threshold that was never applied to them (E5b-2c).
+///
+/// # Errors
+/// There is no prior run to correct, or the `runs` write failed.
+pub fn stage_correct_init(
+    session: &Session,
+    config: &Config,
+    run_id: &str,
+    run_at: &str,
+) -> Result<(String, String)> {
+    let latest = er_entities::run::read::latest_live(session.connection()).map_err(|e| {
+        if is_missing_table(&e.to_string()) {
+            anyhow::anyhow!("no prior run to correct; run a full run first")
+        } else {
+            e.into()
+        }
+    })?;
+    // A trained run always stamps both; an untrained prior run corrects with
+    // empty identity rather than the old stringified-NULL literal.
+    let (model_version, tf_snapshot_id, resolved) = latest
+        .into_iter()
+        .next()
+        .map(|r| {
+            (
+                r.model_version.unwrap_or_default(),
+                r.tf_snapshot_id.unwrap_or_default(),
+                // E5b-2c: the thresholds travel with the run that applied them.
+                // THIS is why the resolved ensemble is on the run row rather
+                // than looked up from the registry — a correction pass has only
+                // the lake in scope, so a registry lookup is not available to
+                // it, and re-reading today's config would re-cluster yesterday's
+                // scores under a threshold that was never applied to them.
+                r.resolved_ensemble.map(|v| v.to_string()),
+            )
+        })
+        .ok_or_else(|| anyhow::anyhow!("no prior run to correct; run a full run first"))?;
+
+    write_run_row(
+        session,
+        config,
+        run_id,
+        run_at,
+        "correct",
+        &model_version,
+        &tf_snapshot_id,
+        None,
+        Some(er_versions::REBUILD_CORRECTION_PASS),
+        resolved.as_deref(),
+    )?;
+    Ok((model_version, tf_snapshot_id))
+}
 /// The "apply staged corrections" pass (`er correct`; the data-plane op behind a
 /// `run_all_incremental { skip_ingest: true }` job): re-run reconcile
 /// (assertion-adjusted) → golden → reviews over the EXISTING `match_scores`, so
@@ -4028,46 +4194,7 @@ pub fn run_correct_observed(
     observer: &dyn StageObserver,
 ) -> Result<()> {
     observed(session, observer, "init", || {
-        let latest = er_entities::run::read::latest_live(session.connection()).map_err(|e| {
-            if is_missing_table(&e.to_string()) {
-                anyhow::anyhow!("no prior run to correct; run a full run first")
-            } else {
-                e.into()
-            }
-        })?;
-        // A trained run always stamps both; an untrained prior run corrects with
-        // empty identity rather than the old stringified-NULL literal.
-        let (model_version, tf_snapshot_id, resolved) = latest
-            .into_iter()
-            .next()
-            .map(|r| {
-                (
-                    r.model_version.unwrap_or_default(),
-                    r.tf_snapshot_id.unwrap_or_default(),
-                    // E5b-2c: the thresholds travel with the run that applied them.
-                    // THIS is why the resolved ensemble is on the run row rather
-                    // than looked up from the registry — a correction pass has only
-                    // the lake in scope, so a registry lookup is not available to
-                    // it, and re-reading today's config would re-cluster yesterday's
-                    // scores under a threshold that was never applied to them.
-                    r.resolved_ensemble.map(|v| v.to_string()),
-                )
-            })
-            .ok_or_else(|| anyhow::anyhow!("no prior run to correct; run a full run first"))?;
-
-        write_run_row(
-            session,
-            config,
-            run_id,
-            run_at,
-            "correct",
-            &model_version,
-            &tf_snapshot_id,
-            None,
-            Some(er_versions::REBUILD_CORRECTION_PASS),
-            resolved.as_deref(),
-        )?;
-        Ok(())
+        stage_correct_init(session, config, run_id, run_at).map(|_| ())
     })?;
     observed(session, observer, "reconcile", || {
         run_reconcile(session, config, run_id, run_at)?;

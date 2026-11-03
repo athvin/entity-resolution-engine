@@ -1,26 +1,105 @@
-//! The pod task types: the typed shapes `dag_for`'s wiring is checked against.
+//! The pod task types: the typed shapes `dag_for`'s wiring is checked against,
+//! and the bodies the executor runs.
 //!
-//! **Phase 1 declares, Phase 2 executes.** Every body here refuses with a
-//! `precondition` failure naming the missing executor; nothing routes a job to
-//! these bodies until `er-server exec-task` lands. The declared `Input`/
-//! `Output` types are load-bearing now — they are what makes a mis-wired edge
-//! a compile error — and the bodies become real by calling the `er_cli` stage
-//! functions behind the same signatures.
+//! **One implementation per stage.** Each pipeline body here calls the SAME
+//! `er_cli::stage_*` function the composed `run_all_ensemble_observed` entry
+//! calls, over a [`RunContext`](crate::runctx::RunContext) resolved from the
+//! work order — so a run cannot behave differently depending on which
+//! executor claimed it. The declared `Input`/`Output` types are what makes a
+//! mis-wired edge a compile error; the bodies are what makes the DAG real.
+//!
+//! What a body may NOT do: read the control plane. The pod holds no database
+//! credential (§6.4), so everything it needs — the tenant env, the delivery
+//! root, the resolved model registry — arrives in the order.
 
 use er_dag::{LakeRef, NodePolicy, Outcome, Plan, Task, TaskCtx, TaskError};
 
-use super::Session;
 use super::edges::{Assembled, Labeled, Landed, Profiled, Resolved, Scored, Standardized};
 use super::plans::{
     DrainedActions, FinishReport, LakeInitialized, MaintenanceReport, RunPlan, SchemaReconciled,
     TrainedModel,
 };
+use super::{JobKind, Session};
 
 fn not_yet_runnable(task: &str) -> TaskError {
     TaskError::Failed(er_errors::ErError::precondition(format!(
-        "task body '{task}' is declared but not yet runnable: the Kubernetes executor is Phase 2 \
-         of batch-orchestration-design.md"
+        "task body '{task}' is declared but not yet runnable: it lands with the remaining \
+         Phase 3 kinds of batch-orchestration-design.md"
     )))
+}
+
+/// Resolve this run's inputs from the order AND prepare this pod's session —
+/// the first thing every pipeline body does.
+///
+/// `wants_deliveries` is false for every stage but `ingest`: re-reading the
+/// drop directory in `match` would make a stage fail because a delivery was
+/// cleaned up after it landed, which is the bug `skip_ingest` was added for.
+///
+/// **The lexicon is seeded here, not only in `init`.** `er_cli::seed_lexicon`
+/// writes a SESSION-LOCAL table (its own doc comment says so), and under the
+/// executor every stage is its own process with its own session — so the table
+/// `init` seeded died with `init`'s pod and `standardize` failed with
+/// "Table with name nickname_variants does not exist". Seeding during
+/// resolution rather than per body is deliberate: a body cannot forget to do
+/// it, because it cannot run without a context. The seed is re-seedable and
+/// derived from the file the order points at, so every pod builds the same
+/// table.
+fn context(
+    ctx: &TaskCtx<'_, Session>,
+    wants_deliveries: bool,
+) -> Result<crate::runctx::RunContext, TaskError> {
+    let models = crate::runctx::models_from_order(&ctx.order.models);
+    let run = crate::runctx::RunContext::resolve(&crate::runctx::ResolveRequest {
+        lake_env: &ctx.order.lake_env,
+        params: &ctx.order.params,
+        models: &models,
+        drop_root: ctx.order.drop_root.as_deref(),
+        wants_deliveries,
+    })
+    .map_err(|e| {
+        // Every resolution refusal is terminal: the same job against the same
+        // tenant state would refuse again, so this is `config`, never a retry.
+        TaskError::Failed(er_errors::ErError::config(crate::errfmt::chain(&e)))
+    })?;
+    er_cli::seed_lexicon(ctx.session, &run.lexicon)
+        .map_err(|e| engine_error(&format!("seeding the lexicon: {e:#}")))?;
+    Ok(run)
+}
+
+/// The engine inputs for one stage, rebuilt from the plan `init` published.
+///
+/// Every stage after `init` takes its mode, clock and rebuild reason from the
+/// PLAN rather than deciding again: the drift guard ran once, in `init`, and a
+/// second verdict mid-run could disagree with the ledger row already written
+/// (§9.5). That is why `RunPlan` carries them at all.
+fn inputs_from_plan<'a>(
+    ctx: &'a TaskCtx<'_, Session>,
+    run: &'a crate::runctx::RunContext,
+    model: &'a er_cli::MatchModel<'a>,
+    plan: &'a RunPlan,
+) -> er_cli::PipelineInputs<'a> {
+    er_cli::PipelineInputs {
+        lexicon: &run.lexicon,
+        deliveries: &run.deliveries,
+        model,
+        run_id: &ctx.order.run_id,
+        ingested_at: &plan.run_at,
+        scored_at: &plan.run_at,
+        run_at: &plan.run_at,
+        mode: &plan.mode,
+        rebuild_reason: plan.rebuild_reason.as_deref(),
+        segment: run.segment_ref(),
+    }
+}
+
+/// The lake head after a stage's last commit, as a `LakeRef`'s snapshot.
+///
+/// A head that cannot be read is NOT an error: the stage committed, and the
+/// reference's purpose is to prove existence to the next stage, which probes
+/// the relation rather than the number. `-1` is the documented "committed, head
+/// unknown" marker — never a real snapshot, so it cannot be mistaken for one.
+fn head_or_unknown(session: &Session) -> i64 {
+    session.latest_snapshot_version().unwrap_or(-1)
 }
 
 macro_rules! declare_task {
@@ -49,59 +128,438 @@ macro_rules! declare_task {
     };
 }
 
-declare_task!(
-    /// Opens the lake, reconciles the schema once, makes the drift-guard mode
-    /// decision once, deletes-then-inserts the `runs` row, and emits the
-    /// `RunPlan` every downstream task consumes (§3.5).
-    Init, "init", (), Plan<RunPlan>, writes: true
-);
+/// Opens the lake, makes the drift-guard mode decision ONCE, writes the `runs`
+/// row, seeds the lexicon, and emits the `RunPlan` every downstream task
+/// consumes (§3.5).
+///
+/// The mode decision lives here and nowhere else. An incremental run may only
+/// extend a corpus scored under the same config / model / standardize /
+/// survivorship / lexicon fingerprint; when any of those moved, the run is
+/// PROMOTED to full rather than refused — a refusal is just a failed job,
+/// while a promotion is what the operator actually wants — and the plan
+/// records why, so the ledger and every later stage agree on one answer.
+#[derive(Default)]
+pub struct Init;
 
-declare_task!(
-    /// Pre-images the whole run (`raw_record/delete/by_batch` +
-    /// `ingest_batch/delete/by_run`), then lands every delivery; fan-out over
-    /// N deliveries is the task looping internally (§3.1, §9.1).
-    Ingest, "ingest", (Plan<RunPlan>,), LakeRef<Landed>, writes: true
-);
+impl Task<Session> for Init {
+    const NAME: &'static str = "init";
+    const VERSION: u32 = 1;
+    type Input = ();
+    type Output = Plan<RunPlan>;
+    const WRITES_LAKE: bool = true;
 
-declare_task!(
-    /// Drop-and-rebuild of `int_std_records`.
-    Standardize, "standardize", (Plan<RunPlan>, LakeRef<Landed>), LakeRef<Standardized>, writes: true
-);
+    fn run(
+        &mut self,
+        ctx: &mut TaskCtx<'_, Session>,
+        (): Self::Input,
+    ) -> Result<Outcome<Self::Output>, TaskError> {
+        let run = context(ctx, false)?;
+        let model = run.model();
+        let members = run.ensemble();
 
-declare_task!(
-    /// The memory and thread consumer; re-asserts the plan's fingerprint
-    /// inside its own transaction and fails `precondition` on a straddled
-    /// config publish (§9.5). `screen_deliveries` is its tail.
-    Match, "match", (Plan<RunPlan>, LakeRef<Standardized>), LakeRef<Scored>, writes: true,
-    policy: NodePolicy { escalate_on_oom: true, ..NodePolicy::default() }
-);
+        // A CORRECTION pass has a different init: it pins the PRIOR run's
+        // model identity rather than resolving the registry and asking the
+        // drift guard, because it re-clusters yesterday's scores and must not
+        // re-cluster them under a threshold that was never applied to them
+        // (E5b-2c). Same task type, same DAG position, different stage
+        // function — which is why the order carries the kind.
+        if ctx.order.kind == JobKind::Correct.as_str() {
+            let run_at = crate::dispatcher::fmt_epoch(crate::dispatcher::unix_now());
+            let snapshot_start = ctx.session.latest_snapshot_version().ok();
+            let (model_version, tf_snapshot_id) =
+                er_cli::stage_correct_init(ctx.session, &run.config, &ctx.order.run_id, &run_at)
+                    .map_err(|e| engine_error(&format!("{e:#}")))?;
+            return Ok(Outcome::Done(
+                Plan(RunPlan {
+                    mode: er_versions::MODE_CORRECTION_PASS.to_string(),
+                    rebuild_reason: Some(er_versions::REBUILD_CORRECTION_PASS.to_string()),
+                    model_version: Some(model_version),
+                    tf_snapshot_id: Some(tf_snapshot_id),
+                    lexicon_hash: None,
+                    snapshot_start,
+                    run_at,
+                    corpus_records: None,
+                }),
+                er_dag::Counters::default(),
+            ));
+        }
 
-declare_task!(
-    /// Membership/entities MERGE plus the run's `entity_events`, pre-imaged by
-    /// `entity_event/delete/by_run` (§9.1).
-    Reconcile, "reconcile", (Plan<RunPlan>, LakeRef<Scored>), LakeRef<Resolved>, writes: true,
-    policy: NodePolicy { escalate_on_oom: true, ..NodePolicy::default() }
-);
+        // The §9.5 baseline: the head BEFORE this run writes anything, which
+        // is what a straddled config publish is detected against.
+        let snapshot_start = ctx.session.latest_snapshot_version().ok();
 
-declare_task!(
-    /// golden + reviews + metrics + quality (`RUN_STAGES`' `assemble`).
-    Assemble, "assemble", (Plan<RunPlan>, LakeRef<Resolved>), LakeRef<Assembled>, writes: true
-);
+        let asked = mode_asked(&ctx.order.kind);
+        let prior =
+            er_cli::prior_fingerprint(ctx.session).map_err(|e| engine_error(&format!("{e:#}")))?;
+        let current = er_cli::current_fingerprint(&run.config, model.model_version, &run.lexicon);
+        let decision = er_versions::check_mode_preconditions(prior.as_ref(), &current, asked, true)
+            .map_err(|e| {
+                TaskError::Failed(er_errors::ErError::precondition(format!("mode guard: {e}")))
+            })?;
+        let rebuild_reason = decision
+            .escalated()
+            .then(|| er_versions::REBUILD_OPERATOR.to_string());
+        let run_at = crate::dispatcher::fmt_epoch(crate::dispatcher::unix_now());
 
-declare_task!(
-    /// The teardown epilogue: composes the leaf verdicts the readiness pass
-    /// hands it and writes `runs.status` (`run/update/fail` for a non-success)
-    /// — which is why it runs under `canceling` too (§4.3, §5.6).
-    Finish, "finish", (), Plan<FinishReport>, writes: true,
-    policy: NodePolicy { teardown: true, ..NodePolicy::default() }
-);
+        let inputs = er_cli::PipelineInputs {
+            lexicon: &run.lexicon,
+            deliveries: &run.deliveries,
+            model: &model,
+            run_id: &ctx.order.run_id,
+            ingested_at: &run_at,
+            scored_at: &run_at,
+            run_at: &run_at,
+            mode: &decision.mode,
+            rebuild_reason: rebuild_reason.as_deref(),
+            segment: run.segment_ref(),
+        };
+        let sole = [er_cli::EnsembleMember {
+            model: er_cli::MatchModel { ..model },
+            name: er_cli::SOLE_MEMBER_NAME,
+        }];
+        let scoring = if members.is_empty() {
+            &sole[..]
+        } else {
+            &members[..]
+        };
+        er_cli::stage_init(ctx.session, &run.config, &inputs, scoring)
+            .map_err(|e| engine_error(&format!("{e:#}")))?;
 
-declare_task!(
-    /// `correct`'s reconcile: re-clusters from the lake's own scores, pinned
-    /// to the model identity `init` read from `run/read/latest_live` (§3.5).
-    CorrectReconcile, "reconcile", (Plan<RunPlan>,), LakeRef<Resolved>, writes: true,
-    policy: NodePolicy { escalate_on_oom: true, ..NodePolicy::default() }
-);
+        let (model_version, tf_snapshot_id) = run.identity();
+        Ok(Outcome::Done(
+            Plan(RunPlan {
+                mode: decision.mode.clone(),
+                rebuild_reason,
+                model_version: Some(model_version),
+                tf_snapshot_id: Some(tf_snapshot_id),
+                lexicon_hash: None,
+                snapshot_start,
+                run_at,
+                corpus_records: None,
+            }),
+            er_dag::Counters(serde_json::json!({
+                "deliveries": run.deliveries.len(),
+                "members": scoring.len(),
+                "promoted": decision.escalated(),
+            })),
+        ))
+    }
+}
+
+/// The mode the job asked for, by kind — the same `job.kind == "…_incremental"`
+/// test the in-process arm makes, reading the kind the order carries.
+fn mode_asked(kind: &str) -> &'static str {
+    if kind.ends_with("_incremental") {
+        er_versions::MODE_INCREMENTAL
+    } else {
+        er_versions::MODE_FULL
+    }
+}
+
+/// Lands every delivery and records its batch; fan-out over N deliveries is
+/// this task looping internally (§3.1), because a single delivery is not
+/// independently retryable — the stage is re-run whole.
+///
+/// This is the one stage that reads the drop root, so it is the one that asks
+/// the resolver for deliveries. Under `{"skip_ingest": true}` — every
+/// publish-triggered rebuild — the corpus is already landed and the stage is a
+/// no-op over zero deliveries, which is a SUCCESS: refusing would fail a
+/// rebuild because its deliveries were cleaned up after landing.
+#[derive(Default)]
+pub struct Ingest;
+
+impl Task<Session> for Ingest {
+    const NAME: &'static str = "ingest";
+    const VERSION: u32 = 1;
+    type Input = (Plan<RunPlan>,);
+    type Output = LakeRef<Landed>;
+    const WRITES_LAKE: bool = true;
+
+    fn run(
+        &mut self,
+        ctx: &mut TaskCtx<'_, Session>,
+        (plan,): Self::Input,
+    ) -> Result<Outcome<Self::Output>, TaskError> {
+        let run = context(ctx, true)?;
+        let model = run.model();
+        let inputs = inputs_from_plan(ctx, &run, &model, &plan.0);
+        if run.deliveries.is_empty() {
+            // `NoOp` is exit 10 with `outcome = no_op`, which is a SUCCESS the
+            // ledger records as "nothing to do" — not a skip of the graph. A
+            // rebuild whose corpus is already landed must leave `ingest`
+            // satisfied so `standardize` can fire from it.
+            return Ok(Outcome::NoOp(LakeRef::new(head_or_unknown(ctx.session), 0)));
+        }
+        er_cli::stage_ingest(ctx.session, &run.config, &inputs)
+            .map_err(|e| engine_error(&format!("{e:#}")))?;
+        Ok(Outcome::Done(
+            LakeRef::new(head_or_unknown(ctx.session), 0),
+            er_dag::Counters(serde_json::json!({ "deliveries": run.deliveries.len() })),
+        ))
+    }
+}
+
+/// Drop-and-rebuild of `int_std_records`.
+#[derive(Default)]
+pub struct Standardize;
+
+impl Task<Session> for Standardize {
+    const NAME: &'static str = "standardize";
+    const VERSION: u32 = 1;
+    type Input = (Plan<RunPlan>, LakeRef<Landed>);
+    type Output = LakeRef<Standardized>;
+    const WRITES_LAKE: bool = true;
+
+    fn run(
+        &mut self,
+        ctx: &mut TaskCtx<'_, Session>,
+        (plan, _landed): Self::Input,
+    ) -> Result<Outcome<Self::Output>, TaskError> {
+        let run = context(ctx, false)?;
+        let model = run.model();
+        let inputs = inputs_from_plan(ctx, &run, &model, &plan.0);
+        er_cli::stage_standardize(ctx.session, &run.config, &inputs)
+            .map_err(|e| engine_error(&format!("{e:#}")))?;
+        Ok(Outcome::Done(
+            LakeRef::new(head_or_unknown(ctx.session), 0),
+            er_dag::Counters::default(),
+        ))
+    }
+}
+
+/// The memory and thread consumer: scores the corpus (full, incremental or
+/// segment), then screens the deliveries.
+///
+/// Takes its mode from the PLAN, never from a second drift-guard call: the
+/// guard ran in `init`, the ledger row already records its verdict, and a
+/// second opinion mid-run could disagree with it (§9.5).
+#[derive(Default)]
+pub struct Match;
+
+impl Task<Session> for Match {
+    const NAME: &'static str = "match";
+    const VERSION: u32 = 1;
+    type Input = (Plan<RunPlan>, LakeRef<Standardized>);
+    type Output = LakeRef<Scored>;
+    const WRITES_LAKE: bool = true;
+
+    fn policy() -> NodePolicy {
+        NodePolicy {
+            escalate_on_oom: true,
+            ..NodePolicy::default()
+        }
+    }
+
+    fn run(
+        &mut self,
+        ctx: &mut TaskCtx<'_, Session>,
+        (plan, _std): Self::Input,
+    ) -> Result<Outcome<Self::Output>, TaskError> {
+        let run = context(ctx, false)?;
+        let model = run.model();
+        let members = run.ensemble();
+        let inputs = inputs_from_plan(ctx, &run, &model, &plan.0);
+        let sole = [er_cli::EnsembleMember {
+            model: er_cli::MatchModel { ..model },
+            name: er_cli::SOLE_MEMBER_NAME,
+        }];
+        let scoring = if members.is_empty() {
+            &sole[..]
+        } else {
+            &members[..]
+        };
+        er_cli::stage_match(ctx.session, &run.config, &inputs, scoring)
+            .map_err(|e| engine_error(&format!("{e:#}")))?;
+        Ok(Outcome::Done(
+            LakeRef::new(head_or_unknown(ctx.session), 0),
+            er_dag::Counters(serde_json::json!({
+                "mode": plan.0.mode,
+                "members": scoring.len(),
+                "segment": run.segment.as_ref().map(|(name, _)| name.clone()),
+            })),
+        ))
+    }
+}
+
+/// Clusters the above-threshold graph into entities: the membership/entities
+/// MERGE plus the run's `entity_events`.
+///
+/// Whole-corpus in BOTH modes — see `er_cli::stage_reconcile` for why that is
+/// a choice rather than an omission.
+#[derive(Default)]
+pub struct Reconcile;
+
+impl Task<Session> for Reconcile {
+    const NAME: &'static str = "reconcile";
+    const VERSION: u32 = 1;
+    type Input = (Plan<RunPlan>, LakeRef<Scored>);
+    type Output = LakeRef<Resolved>;
+    const WRITES_LAKE: bool = true;
+
+    fn policy() -> NodePolicy {
+        NodePolicy {
+            escalate_on_oom: true,
+            ..NodePolicy::default()
+        }
+    }
+
+    fn run(
+        &mut self,
+        ctx: &mut TaskCtx<'_, Session>,
+        (plan, _scored): Self::Input,
+    ) -> Result<Outcome<Self::Output>, TaskError> {
+        let run = context(ctx, false)?;
+        let model = run.model();
+        let inputs = inputs_from_plan(ctx, &run, &model, &plan.0);
+        er_cli::stage_reconcile(ctx.session, &run.config, &inputs)
+            .map_err(|e| engine_error(&format!("{e:#}")))?;
+        Ok(Outcome::Done(
+            LakeRef::new(head_or_unknown(ctx.session), 0),
+            er_dag::Counters::default(),
+        ))
+    }
+}
+
+/// Golden records, the review queue, then metrics and quality (the last two
+/// best-effort — see `er_cli::stage_assemble`).
+#[derive(Default)]
+pub struct Assemble;
+
+impl Task<Session> for Assemble {
+    const NAME: &'static str = "assemble";
+    const VERSION: u32 = 1;
+    type Input = (Plan<RunPlan>, LakeRef<Resolved>);
+    type Output = LakeRef<Assembled>;
+    const WRITES_LAKE: bool = true;
+
+    fn run(
+        &mut self,
+        ctx: &mut TaskCtx<'_, Session>,
+        (plan, _resolved): Self::Input,
+    ) -> Result<Outcome<Self::Output>, TaskError> {
+        let run = context(ctx, false)?;
+        let model = run.model();
+        let inputs = inputs_from_plan(ctx, &run, &model, &plan.0);
+        er_cli::stage_assemble(ctx.session, &run.config, &inputs)
+            .map_err(|e| engine_error(&format!("{e:#}")))?;
+        Ok(Outcome::Done(
+            LakeRef::new(head_or_unknown(ctx.session), 0),
+            er_dag::Counters::default(),
+        ))
+    }
+}
+
+/// The teardown epilogue: closes the run's ledger row.
+///
+/// Runs under `canceling` too (§4.3, §5.6) — which is the whole point of a
+/// teardown node: a canceled or failed run must still have its `runs` row
+/// closed, or the UI shows it running forever. The outcome it records is this
+/// task's own view: `er_cli::stage_finish` writes the end stamp, and a run
+/// whose body failed was already marked by the dispatcher's settle.
+#[derive(Default)]
+pub struct Finish;
+
+impl Task<Session> for Finish {
+    const NAME: &'static str = "finish";
+    const VERSION: u32 = 1;
+    type Input = ();
+    type Output = Plan<FinishReport>;
+    const WRITES_LAKE: bool = true;
+
+    fn policy() -> NodePolicy {
+        NodePolicy {
+            teardown: true,
+            ..NodePolicy::default()
+        }
+    }
+
+    fn run(
+        &mut self,
+        ctx: &mut TaskCtx<'_, Session>,
+        (): Self::Input,
+    ) -> Result<Outcome<Self::Output>, TaskError> {
+        // No `RunPlan` upstream: a teardown node fires whatever its upstreams
+        // did, including a failed `init` that never published one. The run
+        // clock therefore comes from this task rather than from the plan.
+        let run_at = crate::dispatcher::fmt_epoch(crate::dispatcher::unix_now());
+        let ended = er_cli::stage_finish(
+            ctx.session,
+            &er_cli::PipelineInputs {
+                lexicon: &[],
+                deliveries: &[],
+                model: &er_cli::MatchModel {
+                    settings_json: "{}",
+                    tf_csv_path: std::path::Path::new(""),
+                    model_version: "",
+                    tf_snapshot_id: "",
+                },
+                run_id: &ctx.order.run_id,
+                ingested_at: &run_at,
+                scored_at: &run_at,
+                run_at: &run_at,
+                mode: er_versions::MODE_FULL,
+                rebuild_reason: None,
+                segment: None,
+            },
+        );
+        // A run row that was never written (a failed `init`) has nothing to
+        // close, and saying so must not fail the teardown — the job's own
+        // outcome is already settled by then.
+        let closed = match ended {
+            Ok(()) => true,
+            Err(e) => {
+                eprintln!("finish: the run row could not be closed: {e:#}");
+                false
+            }
+        };
+        Ok(Outcome::Done(
+            Plan(FinishReport {
+                settled: if closed { "closed" } else { "no_run_row" }.to_string(),
+            }),
+            er_dag::Counters::default(),
+        ))
+    }
+}
+
+/// `correct`'s reconcile: re-clusters from the lake's OWN scores, pinned to
+/// the model identity `init` read from `run/read/latest_live` (§3.5).
+///
+/// The same clustering pass `run_all` uses — the difference is upstream, not
+/// here: nothing re-scored, so the edge set is yesterday's and the identity on
+/// the run row is the one that produced it.
+#[derive(Default)]
+pub struct CorrectReconcile;
+
+impl Task<Session> for CorrectReconcile {
+    const NAME: &'static str = "reconcile";
+    const VERSION: u32 = 1;
+    type Input = (Plan<RunPlan>,);
+    type Output = LakeRef<Resolved>;
+    const WRITES_LAKE: bool = true;
+
+    fn policy() -> NodePolicy {
+        NodePolicy {
+            escalate_on_oom: true,
+            ..NodePolicy::default()
+        }
+    }
+
+    fn run(
+        &mut self,
+        ctx: &mut TaskCtx<'_, Session>,
+        (plan,): Self::Input,
+    ) -> Result<Outcome<Self::Output>, TaskError> {
+        let run = context(ctx, false)?;
+        let model = run.model();
+        let inputs = inputs_from_plan(ctx, &run, &model, &plan.0);
+        er_cli::stage_reconcile(ctx.session, &run.config, &inputs)
+            .map_err(|e| engine_error(&format!("{e:#}")))?;
+        Ok(Outcome::Done(
+            LakeRef::new(head_or_unknown(ctx.session), 0),
+            er_dag::Counters::default(),
+        ))
+    }
+}
 
 declare_task!(
     /// `apply_corrections`' init: consumes the drained-action snapshot and

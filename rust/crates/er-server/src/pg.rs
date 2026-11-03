@@ -846,6 +846,33 @@ pub async fn merge_dataset_envs(
 ///
 /// # Errors
 /// Propagates the query error.
+/// The lake env and delivery root one job runs against: its DATASET's when it
+/// names one — each dataset is its own lake — and the org's for org-level
+/// kinds (provision) and pre-dataset rows.
+///
+/// `Ok(None)` means the job names a dataset id that no longer exists, which is
+/// a job failure rather than a fallback: silently running an org-level lake
+/// for a deleted dataset would write the wrong tenant's data.
+///
+/// Shared by the in-process dispatcher and the attempt channel's work order,
+/// because a pod resolving the ORG's env for a dataset job would open the
+/// wrong lake — invisible until a second dataset exists.
+///
+/// # Errors
+/// Propagates the dataset/org read.
+pub async fn lake_env_for_job(
+    client: &Client,
+    org: &OrgDetail,
+    dataset_id: Option<&str>,
+) -> Result<Option<(serde_json::Value, Option<String>)>, PgError> {
+    match dataset_id {
+        Some(id) => Ok(get_dataset_by_id(client, id)
+            .await?
+            .map(|ds| (ds.env, ds.drop_root))),
+        None => Ok(Some((org.env.clone(), org.drop_root.clone()))),
+    }
+}
+
 pub async fn get_dataset_by_id(
     client: &Client,
     id: &str,

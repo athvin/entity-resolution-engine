@@ -231,6 +231,19 @@ async fn the_task_ledger_statements_hold_their_contracts() {
     assert_eq!(order["run_id"], job.id);
     assert_eq!(order["kind"], "run_all_full");
     assert_eq!(order["lineage"], json!([init_id]));
+    // The registry crosses the wire, because the pod cannot read it (§6.4):
+    // this org has no active model, so the list is present and EMPTY — which
+    // is what `runctx` falls back from, not what it fails on. Absent entirely
+    // would be indistinguishable from "the server forgot".
+    assert_eq!(
+        order["models"],
+        json!([]),
+        "the resolved registry is carried"
+    );
+    assert!(
+        er_server::runctx::models_from_order(&order["models"]).is_empty(),
+        "and the resolver reads it"
+    );
 
     let resp = app
         .clone()

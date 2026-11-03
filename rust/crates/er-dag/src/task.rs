@@ -289,6 +289,11 @@ pub struct WorkOrder {
     /// `jobs.id == run_id` is load-bearing (§4.1).
     pub run_id: String,
     pub task_id: String,
+    /// The job's kind (`run_all_full`, `correct`, …). The body needs it where
+    /// two kinds share a task name but not its meaning — `init`'s asked mode
+    /// is full or incremental by kind, and the two are distinct compiled DAGs.
+    #[serde(default)]
+    pub kind: String,
     pub try_number: i64,
     pub resource_class: Option<String>,
     pub segment: Option<String>,
@@ -298,6 +303,17 @@ pub struct WorkOrder {
     pub params: serde_json::Value,
     /// The tenant's lake env (`ER_LAKE_CATALOG`, …) from `orgs.env`.
     pub lake_env: serde_json::Value,
+    /// The dataset's (or org's) delivery root: a column beside the env, not a
+    /// key inside it. `None` for a kind that never ingests.
+    #[serde(default)]
+    pub drop_root: Option<String>,
+    /// The dataset's ACTIVE model versions, resolved by the control plane:
+    /// the pod holds no database credential and cannot read the registry
+    /// itself (batch-orchestration-design §6.4). Absent for a kind that does
+    /// not score, and for an order minted before this field existed — which
+    /// is why it defaults rather than being required.
+    #[serde(default)]
+    pub models: serde_json::Value,
 }
 
 /// Where a running task leaves its latest counter snapshot for the heartbeat
