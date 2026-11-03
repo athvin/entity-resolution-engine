@@ -4208,8 +4208,33 @@ async fn attempt_work_order(
                 .collect(),
             Err(e) => return pg_err(e),
         };
+    // A training pass learns from the tenant's MATCH labels, which live in
+    // Postgres the pod cannot read (§6.4). Filtered here, and only for the one
+    // kind that trains: every other order would carry the payload for nothing.
+    // A read failure degrades to EM-only rather than failing the attempt —
+    // which is exactly what the in-process arm does.
+    let labels: Vec<(String, String)> = if job.kind == "train" {
+        match er_entities::pair_label::read::all(&client, &current.org_id).await {
+            Ok(rows) => rows
+                .into_iter()
+                .filter(|l| {
+                    l.dataset_id.as_deref() == job.dataset_id.as_deref()
+                        && l.verdict == "match"
+                        && l.origin != "llm"
+                })
+                .map(|l| (l.rec_a_key, l.rec_b_key))
+                .collect(),
+            Err(e) => {
+                eprintln!("work order: reading labels failed, the train falls back to EM: {e}");
+                Vec::new()
+            }
+        }
+    } else {
+        Vec::new()
+    };
     let order = json!({
         "org_id": current.org_id,
+        "dataset_id": job.dataset_id,
         "job_id": current.job_id,
         // jobs.id == run_id is load-bearing (§4.1); planning writes it.
         "run_id": job.run_id.clone().unwrap_or_else(|| job.id.clone()),
@@ -4230,6 +4255,7 @@ async fn attempt_work_order(
         // rides beside the env rather than inside it.
         "drop_root": drop_root,
         "models": models,
+        "labels": labels,
     });
     (StatusCode::OK, Json(json!(order))).into_response()
 }

@@ -155,6 +155,44 @@ pub struct TaskFailure<'a> {
     pub backoff: (i64, i64),
 }
 
+/// How a control body's error becomes a ledger failure (§3.6, §5.5).
+///
+/// Control retries are CHEAP and fast (`CONTROL_BACKOFF` is 5s–60s against the
+/// pod's 30s–900s): the work is one Postgres write, so a transient connection
+/// loss should be retried in seconds rather than left for a quarter of an
+/// hour. `escalate` is always false — a control task has no resource class to
+/// escalate to, since it never runs in a pod.
+///
+/// `Skip` is the task branching, never the graph (§3.3), so it settles the row
+/// `skipped` rather than failing it; the caller maps that state.
+#[must_use]
+pub fn control_failure(error: &er_dag::TaskError) -> TaskFailure<'_> {
+    match error {
+        er_dag::TaskError::Skip => TaskFailure {
+            terminal_state: "skipped",
+            retryable: false,
+            escalate: false,
+            exit_code: None,
+            termination_reason: Some("skipped"),
+            error_class: None,
+            error_detail: None,
+            k8s_job_name: None,
+            backoff: CONTROL_BACKOFF,
+        },
+        er_dag::TaskError::Failed(e) => TaskFailure {
+            terminal_state: "failed",
+            retryable: e.retryable(),
+            escalate: false,
+            exit_code: Some(i64::from(e.code())),
+            termination_reason: Some("control_error"),
+            error_class: Some(e.classify().as_str()),
+            error_detail: None,
+            k8s_job_name: None,
+            backoff: CONTROL_BACKOFF,
+        },
+    }
+}
+
 /// `fail_or_retry` = `archive_try` + `insert_retry_try`, one transaction
 /// (§4.5): archive the live row forced to a failure-like terminal state, and
 /// when the archive came back `live IS NULL`, insert the successor with the

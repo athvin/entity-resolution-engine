@@ -66,6 +66,8 @@ async fn run_all_full_runs_as_seven_pods_and_reproduces_base_10() {
     std::fs::write(&config_path, TEST_YAML).unwrap();
     let lexicon_path = tmp.join("lexicon.csv");
     std::fs::write(&lexicon_path, LEXICON).unwrap();
+    let tf_path = tmp.join("model_test_v1.tf.csv");
+    std::fs::copy(repo_fixture("model_test_v1.tf.csv"), &tf_path).unwrap();
     for source in ["crm", "billing", "webforms"] {
         std::fs::copy(
             repo_fixture(&format!("base_10/base/{source}.csv")),
@@ -79,7 +81,10 @@ async fn run_all_full_runs_as_seven_pods_and_reproduces_base_10() {
         "ER_CONFIG_PATH": config_path.to_string_lossy(),
         "ER_LEXICON_PATH": lexicon_path.to_string_lossy(),
         "ER_MODEL_PATH": repo_fixture("model_test_v1.json").to_string_lossy(),
-        "ER_TF_PATH": repo_fixture("model_test_v1.tf.csv").to_string_lossy(),
+        // A COPY of the TF fixture, never the fixture itself: `train` APPENDS
+        // its snapshot to the shared frozen-TF file, so pointing a tenant at
+        // a committed file would have the test mutate the repo. It did, once.
+        "ER_TF_PATH": tf_path.to_string_lossy(),
         "ER_MODEL_VERSION": "v0001",
         "ER_TF_SNAPSHOT_ID": "01JWMDTFSNAP00000000000001",
     });
@@ -110,7 +115,9 @@ async fn run_all_full_runs_as_seven_pods_and_reproduces_base_10() {
     let (api, mut frames) = FakePodApi::new(format!("http://{addr}"), tmp.clone());
     let api = Arc::new(api);
     let cfg = ExecutorConfig {
-        dag_kinds: ["run_all_full".to_string()].into_iter().collect(),
+        dag_kinds: ["run_all_full".to_string(), "train".to_string()]
+            .into_iter()
+            .collect(),
         in_flight_cap: 2,
         template: er_k8s::manifest::REFERENCE_TEMPLATE.to_string(),
         image_digest: None,
@@ -224,13 +231,26 @@ async fn run_all_full_runs_as_seven_pods_and_reproduces_base_10() {
     // all_pairs_live`), not freeform SQL: er-server may not name
     // `lake.main.*` itself, and the generated reader is the same one the
     // engine's own reconcile diffs against.
-    let session = er_cli::open_lake(
-        tmp.join("catalog.ducklake").to_str().unwrap(),
-        tmp.join("data").to_str().unwrap(),
-    )
-    .expect("re-open the lake the pods wrote");
-    let pairs =
-        er_entities::entity_membership::read::all_pairs_live(session.connection()).expect("pairs");
+    //
+    // SCOPED, and that matters: this handle is a WRITER on the tenant's
+    // catalog, and the next phase's pods need it. Holding it across them
+    // failed their lake open with a bare "database error" — the
+    // one-writer-per-tenant rule (§4.6) biting the harness rather than the
+    // product, but the same rule either way.
+    let pairs = {
+        let session = er_cli::open_lake(
+            tmp.join("catalog.ducklake").to_str().unwrap(),
+            tmp.join("data").to_str().unwrap(),
+        )
+        .expect("re-open the lake the pods wrote");
+        let pairs = er_entities::entity_membership::read::all_pairs_live(session.connection())
+            .expect("pairs");
+        let run_rows =
+            er_entities::run::read::by_id(session.connection(), &queued.id).expect("run");
+        assert_eq!(run_rows.len(), 1, "exactly one run row for this job");
+        assert_eq!(run_rows[0].model_version, Some("v0001".to_string()));
+        pairs
+    };
 
     // Compare the PARTITION, not the labels: entity ids are minted per run, so
     // what must agree is which records group together. This is the identical
@@ -270,11 +290,95 @@ async fn run_all_full_runs_as_seven_pods_and_reproduces_base_10() {
         got_owned, want,
         "the SEVEN-POD partition differs from the golden the monolithic path reproduces"
     );
-    // `init` opened the run row and `finish` closed it: one row, carrying the
-    // model identity the plan published.
-    let run_rows = er_entities::run::read::by_id(session.connection(), &queued.id).expect("run");
-    assert_eq!(run_rows.len(), 1, "exactly one run row for this job");
-    assert_eq!(run_rows[0].model_version, Some("v0001".to_string()));
+
+    // ---- phase 2: `train` — the first kind with BOTH halves ----------------
+    //
+    // Here rather than in its own file because training needs a standardized
+    // corpus, and the run above just produced one. Three tasks:
+    // `reconcile_schema` and `train` in pods, then `register_model` as a
+    // CONTROL task — which runs in-process, because its work is a Postgres
+    // write and a pod holds no database credential (§6.4). This is the first
+    // test of the executor's control pass.
+    let trained = pg::enqueue(
+        &client,
+        &org_id,
+        None,
+        "train",
+        0,
+        None,
+        None,
+        pg::Provenance::default(),
+    )
+    .await
+    .unwrap();
+    assert!(
+        dispatcher::dispatch_once(&client, None, Some(&mut executor))
+            .await
+            .unwrap(),
+        "the executor claims and plans a train"
+    );
+    let mut state = String::new();
+    for _ in 0..900 {
+        pump(&mut executor, &mut frames).await;
+        state = pg::get_job(&client, &org_id, &trained.id)
+            .await
+            .unwrap()
+            .map(|j| j.state)
+            .unwrap_or_default();
+        if state != "running" && state != "dispatching" {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
+    let rows = er_entities::task_instance::read::by_job(&client, &org_id, &trained.id)
+        .await
+        .unwrap();
+    if state != "succeeded" {
+        for r in rows.iter().filter(|r| r.live == Some(true)) {
+            eprintln!(
+                "  train/{} {} kind={} detail={:?}",
+                r.task_id, r.state, r.kind, r.error_detail
+            );
+        }
+    }
+    assert_eq!(state, "succeeded", "the train settled");
+
+    // The control task ran as a CONTROL row — never in a pod.
+    let register = rows
+        .iter()
+        .find(|r| r.task_id == "register_model" && r.live == Some(true))
+        .expect("the register_model row");
+    assert_eq!(register.kind, "control");
+    assert_eq!(register.state, "succeeded");
+    assert!(
+        register.k8s_job_name.is_none(),
+        "a control task has no Kubernetes Job: {:?}",
+        register.k8s_job_name
+    );
+    assert_eq!(
+        register.output.as_ref().expect("output")["plan"],
+        "model_registered"
+    );
+
+    // And it wrote a DRAFT registry row, labelled from the job id so it traces
+    // back to the training pass that produced it.
+    let versions = er_entities::matching_model::read::list(&client, &org_id)
+        .await
+        .unwrap();
+    let draft = versions
+        .iter()
+        .find(|m| m.model_version_label == format!("trained-{}", trained.id))
+        .expect("the trained draft is registered");
+    assert_eq!(
+        draft.state, "draft",
+        "a fresh version is never auto-activated"
+    );
+    assert_eq!(draft.entity_type, "person");
+    assert_eq!(draft.provenance["source"], "train");
+    assert_eq!(
+        draft.provenance["job_id"], trained.id,
+        "the draft names the job that trained it"
+    );
 
     let _ = std::fs::remove_dir_all(&tmp);
 }

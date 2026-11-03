@@ -186,6 +186,60 @@ fn completed<O: er_dag::DurableOutput>(
 ///
 /// # Errors
 /// The task's own classified failure, or a malformed input reference.
+/// Run one CONTROL task body (§3.6): the Postgres half of a kind, executed
+/// inside the dispatcher with the control plane's own credentials.
+///
+/// Mirrors [`run_pod_task`] and is deliberately separate: a control body is
+/// structurally unable to open a lake (`tests/control_tasks_no_engine.rs`
+/// enforces that by source scan), and a pod body is structurally unable to
+/// reach Postgres. The dispatch table is what decides which half a task is.
+///
+/// # Errors
+/// The body's own failure, or a precondition refusal for a task this build
+/// does not run.
+pub async fn run_control_task(
+    kind: JobKind,
+    task_id: &str,
+    ctx: &mut er_dag::ControlCtx<'_, PgClient>,
+) -> Result<PodTaskRun, er_dag::TaskError> {
+    use er_dag::ControlTask as _;
+    match (kind, task_id) {
+        (JobKind::Train, "register_model") => {
+            let trained = control_pin::<er_dag::Plan<plans::TrainedModel>>(ctx, 0)?;
+            completed(control::RegisterModel.run(ctx, (trained,)).await?)
+        }
+        (kind, task) => Err(er_dag::TaskError::Failed(er_errors::ErError::precondition(
+            format!(
+                "the dispatcher does not yet run control task '{task}' of kind '{}' — the \
+                 remaining control bodies arrive with the rest of Phase 3",
+                kind.as_str()
+            ),
+        ))),
+    }
+}
+
+/// Rehydrate the i-th positional input pin of a CONTROL task.
+///
+/// The same `input.pins` array a pod task reads — a control body's upstream is
+/// a durable output like any other, and `register_model` consuming `train`'s
+/// `TrainedModel` plan is exactly that.
+fn control_pin<T: er_dag::DurableOutput>(
+    ctx: &er_dag::ControlCtx<'_, PgClient>,
+    index: usize,
+) -> Result<T, er_dag::TaskError> {
+    let pins = ctx.order.input.get("pins").and_then(|p| p.as_array());
+    let Some(v) = pins.and_then(|p| p.get(index)) else {
+        return Err(er_dag::TaskError::Failed(er_errors::ErError::precondition(
+            format!("control input pin {index} is missing from the work order"),
+        )));
+    };
+    T::rehydrate(v).map_err(|e| {
+        er_dag::TaskError::Failed(er_errors::ErError::precondition(format!(
+            "control input pin {index} is not the declared shape: {e}"
+        )))
+    })
+}
+
 pub fn run_pod_task(
     kind: JobKind,
     task_id: &str,
@@ -199,6 +253,10 @@ pub fn run_pod_task(
         (JobKind::LakeMaintain, "maintain") => {
             let schema = pin::<er_dag::Plan<plans::SchemaReconciled>>(ctx, 0)?;
             completed(tasks::Maintain.run(ctx, (schema,))?)
+        }
+        (JobKind::Train, "train") => {
+            let schema = pin::<er_dag::Plan<plans::SchemaReconciled>>(ctx, 0)?;
+            completed(tasks::Train.run(ctx, (schema,))?)
         }
         (JobKind::Profile, "profile") => {
             let schema = pin::<er_dag::Plan<plans::SchemaReconciled>>(ctx, 0)?;
