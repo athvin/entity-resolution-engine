@@ -20,19 +20,26 @@ KUBE_CONTEXT="${ER_DEV_CONTEXT:-}"
 ctx=()
 if [ -n "$KUBE_CONTEXT" ]; then ctx=(--kube-context "$KUBE_CONTEXT"); fi
 
+# `${ctx[@]+"${ctx[@]}"}` rather than `"${ctx[@]}"`, which looks like noise and
+# is not. macOS ships **bash 3.2**, where expanding an EMPTY array under
+# `set -u` is an "unbound variable" error; bash 4.4+ (every CI runner) treats it
+# as nothing. So the plain form worked in CI and failed on line 1 for anyone
+# running `make obs-up` on a Mac — which is the entire human half of the "one
+# script, two callers" promise this file opens with. It went unnoticed because
+# the CI deploy job was being cancelled by images.yml's concurrency before it
+# ran, so this script had never successfully executed anywhere.
+
 FLUENT_BIT_VERSION=0.2.0
 COLLECTOR_VERSION=0.175.1
 OPERATOR_VERSION=0.124.1
-OPENOBSERVE_VERSION=1.1.3
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 values="$here/infra/k8s/observability"
 
-kubectl "${ctx[@]}" apply -f "$values/namespace.yaml"
+kubectl ${ctx[@]+"${ctx[@]}"} apply -f "$values/namespace.yaml"
 
 helm repo add eks https://aws.github.io/eks-charts --force-update
 helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts --force-update
-helm repo add openobserve https://charts.openobserve.ai --force-update
 
 # --- the span store, first --------------------------------------------------
 #
@@ -48,37 +55,41 @@ oo_email="$(printf '%s' "$secret" | python3 -c 'import json,sys; print(json.load
 oo_password="$(printf '%s' "$secret" | python3 -c 'import json,sys; print(json.load(sys.stdin)["root_password"])')"
 oo_dsn="$(printf '%s' "$secret" | python3 -c 'import json,sys; print(json.load(sys.stdin)["meta_dsn"])')"
 
-helm "${ctx[@]}" upgrade --install openobserve openobserve/openobserve \
-  --version "$OPENOBSERVE_VERSION" --namespace observability \
-  -f "$values/openobserve-values.yaml" \
-  --set "auth.ZO_ROOT_USER_EMAIL=$oo_email" \
-  --set "auth.ZO_ROOT_USER_PASSWORD=$oo_password" \
-  --set "auth.ZO_META_POSTGRES_DSN=$oo_dsn" \
-  --wait --timeout 5m
+# The store is a plain Deployment, not a chart — openobserve.yaml's header
+# carries the measurement that decided it (the distributed chart is ~10 pods
+# plus NATS plus a bundled Postgres, on a 4-vCPU cluster).
+kubectl ${ctx[@]+"${ctx[@]}"} -n observability create secret generic openobserve-env \
+  --from-literal="ZO_ROOT_USER_EMAIL=$oo_email" \
+  --from-literal="ZO_ROOT_USER_PASSWORD=$oo_password" \
+  --from-literal="ZO_META_POSTGRES_DSN=$oo_dsn" \
+  --dry-run=client -o yaml | kubectl ${ctx[@]+"${ctx[@]}"} apply -f -
+
+kubectl ${ctx[@]+"${ctx[@]}"} apply -f "$values/openobserve.yaml"
+kubectl ${ctx[@]+"${ctx[@]}"} -n observability rollout status deploy/openobserve --timeout=5m
 
 # The collector and the log shipper authenticate to the store as that root
 # user, over HTTP Basic. A dedicated ingest-only user replaces this once the
 # store is up and its own user management is reachable; one managed credential
 # now beats a second unmanaged one.
 oo_basic="$(printf '%s:%s' "$oo_email" "$oo_password" | base64 | tr -d '\n')"
-kubectl "${ctx[@]}" -n observability create secret generic openobserve-ingest \
+kubectl ${ctx[@]+"${ctx[@]}"} -n observability create secret generic openobserve-ingest \
   --from-literal="OPENOBSERVE_AUTH=Basic $oo_basic" \
   --from-literal="OPENOBSERVE_USER=$oo_email" \
   --from-literal="OPENOBSERVE_PASSWORD=$oo_password" \
-  --dry-run=client -o yaml | kubectl "${ctx[@]}" apply -f -
+  --dry-run=client -o yaml | kubectl ${ctx[@]+"${ctx[@]}"} apply -f -
 
 # --- shippers ---------------------------------------------------------------
 
-helm "${ctx[@]}" upgrade --install fluent-bit eks/aws-for-fluent-bit \
+helm ${ctx[@]+"${ctx[@]}"} upgrade --install fluent-bit eks/aws-for-fluent-bit \
   --version "$FLUENT_BIT_VERSION" --namespace observability \
   -f "$values/fluent-bit-values.yaml"
 
-helm "${ctx[@]}" upgrade --install otel-collector open-telemetry/opentelemetry-collector \
+helm ${ctx[@]+"${ctx[@]}"} upgrade --install otel-collector open-telemetry/opentelemetry-collector \
   --version "$COLLECTOR_VERSION" --namespace observability \
   -f "$values/otel-collector-values.yaml"
 
-helm "${ctx[@]}" upgrade --install otel-operator open-telemetry/opentelemetry-operator \
+helm ${ctx[@]+"${ctx[@]}"} upgrade --install otel-operator open-telemetry/opentelemetry-operator \
   --version "$OPERATOR_VERSION" --namespace observability \
   -f "$values/otel-operator-values.yaml"
 
-echo "obs-up: ok (openobserve $OPENOBSERVE_VERSION, collector $COLLECTOR_VERSION)"
+echo "obs-up: ok (openobserve v1.1.2 Deployment, collector $COLLECTOR_VERSION)"
