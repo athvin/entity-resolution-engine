@@ -150,6 +150,54 @@ see `TEST_CONFIG` there; the generator fn lives beside its domain crate, the
 way merge plans live in er-golden and standardize in er-standardize). Model-derived SQL inside dedupe-core stays under
 its golden fixtures — do not add analyser coverage there.
 
+## Tenancy: a row belongs to a dataset, not to an org
+
+A **dataset** is an independent resolution domain inside an org — its own
+lake, config, models, entity ids and golden records. A new table whose rows
+belong to one corpus therefore declares BOTH:
+
+```yaml
+natural_key: [dataset_id, …]        # the dataset is part of identity
+columns:
+  - name: org_id                    # denormalized: keeps a scope-safe
+    type: varchar                   # lookup to one query, and is what the
+    nullable: false                 # org-level surfaces (audit, webhooks)
+    references: { relation: orgs, column: id }
+  - name: dataset_id
+    type: varchar
+    nullable: false
+    references: { relation: datasets, column: id }
+```
+
+**V17** checks that shape. Reads filter on `dataset_id`; `org_id` is there for
+scope-safety and for the genuinely org-level surfaces.
+
+Three things stay org-scoped, and the reasons are worth knowing before you
+copy the pattern: `jobs` and `task_instances` keep a NULLABLE `dataset_id`
+because org-level kinds (`provision`, the migrate sweep) have no dataset;
+`tenant_schema_states` likewise, because provisioning records a lake position
+before any dataset exists; and the tag VOCABULARY is org-wide while tag
+*application* is not.
+
+**A backfill cannot be a declared statement.** Once `dataset_id` is in a
+natural key, E005 rightly refuses an UPDATE that assigns it. A migration is
+the exception, and it lives as raw SQL in `er-server/src/fixups.rs` with the
+rest of the migration SQL — see `0004_dataset_id_required`, which also shows
+the ordering constraint worth remembering: the reconciler treats
+nullable → NOT NULL as BREAKING and stops the boot, so a tightening runs in
+`Phase::BeforeReconcile` and must do its own add-and-fill first.
+
+**Every fixup must also classify itself.** The registry is a triple, so it
+cannot be appended to without choosing a `Kind`: `Safe` for additive or
+data-only work, or `Contract { after }` for anything that removes or tightens
+— where `after` is the catalog hash of the release that STOPPED READING the
+thing. That is what makes "you cannot contract in the same release that
+expanded" mechanical instead of a convention, and `contract_allowed` refuses a
+boot whose store has history but not that release. `0004_dataset_id_required`
+is the first gated contract and the worked example; getting an older release's
+hash does not need a build at that commit, since `Catalog::load_dir` over a
+`git archive` of its `entities/` reproduces it.
+
 ## The rules that bite
 
 - **E006**: lake reads pin a snapshot, or justify `pin: live`. Never both.

@@ -76,6 +76,15 @@ A consequence for the frontend: `openapi-fetch` gives you typed *schemas*, and
 route paths are still typed from whatever the document does carry — check
 before assuming a path is validated.
 
+**This is why a route move is invisible to this gate.** When the tenant
+surface moved under `/v1/orgs/{org}/datasets/{ds}/…`, `openapi.json` did not
+change by a single byte — it carries no paths. What actually pins the route
+shape is elsewhere, and all of it has to be regenerated together: the utoipa
+doc paths in `lib.rs`, `er-mcp/tools.json`, `envelopes.json`, and the mock in
+`frontend/tests/mock-erserver/server.mjs` that `mock_contract.rs` holds to
+the router in both directions. Do not read a clean `openapi.json` diff as
+evidence that a path change is contained.
+
 ## Breaking changes
 
 `er-openapi-check` compares the document this build emits against a base and

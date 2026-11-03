@@ -125,6 +125,25 @@ await api("POST", "/v1/orgs", {
 });
 log(`org ${ORG} upserted (starter model seeded from ER_MODEL_PATH)`);
 
+// Creating an org converges its `default` dataset inline, and everything
+// below addresses that dataset. Wait for it rather than assuming it: if the
+// converge ever stops happening at create time, every request after this
+// point would 404 on the dataset and the failure would read as a routing
+// bug a long way from its cause.
+for (let i = 0; ; i += 1) {
+  const ds = await api("GET", `/v1/orgs/${ORG}/datasets/${DS}`).catch(() => null);
+  if (ds?.state === "active") {
+    log(`dataset ${ORG}/${DS} is active (${ds.entity_type})`);
+    break;
+  }
+  if (i >= 60) {
+    throw new Error(
+      `dataset ${ORG}/${DS} never became active (last state: ${ds?.state ?? "absent"})`,
+    );
+  }
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+}
+
 // --------------------------------------------------------------------- keys
 const keys = {};
 for (const role of ["admin", "steward", "viewer"]) {
@@ -280,6 +299,10 @@ for (const [, sourceSystem, sourceRecordId, entityLabel] of membership) {
 const clusterMembers = Object.values(clusters);
 const expected = {
   org: ORG,
+  // The corpus belongs to a dataset, not to the org: an org can hold several
+  // and they resolve independently, so a consumer of this file has to know
+  // which one these numbers describe.
+  dataset: DS,
   metrics: {
     records: membership.length,
     entities: clusterMembers.length,
