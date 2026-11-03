@@ -1,0 +1,204 @@
+# The dev deploy, in its own workflow so it cannot be starved.
+#
+# ## Why this is not a job inside images.yml any more
+#
+# It was, and it was structurally unreachable on a busy day. `images.yml` sets
+# `cancel-in-progress: true`, and `deploy-dev` was `needs: [detect, er-api,
+# er-web]` behind the ~58-minute er-api build. So any merge to main within an
+# hour of the previous one cancelled the earlier run **before its deploy job
+# started**.
+#
+# Measured on 2026-11-03: four merges inside one hour produced three
+# consecutive cancelled deploys, and `scripts/obs_up.sh` — the only installer
+# for the span store, the collector and Fluent Bit — had therefore never run,
+# despite the PR that added it having merged. Nothing reported it, because a
+# cancelled run is not a failure. "Merged" did not mean "deployed", and five
+# defects in those unexecuted values survived review as a direct result.
+#
+# A job-level `concurrency` cannot fix that: the workflow-level cancel kills
+# the job before it ever starts. The deploy has to be a separate run, which is
+# what this file is.
+#
+# ## What the queueing semantics buy
+#
+# `cancel-in-progress: false` is the point of the whole change. Deploys QUEUE
+# instead of cancelling, so a merge landing while a deploy is in flight waits
+# its turn rather than aborting it half-applied.
+#
+# A cancelled `images` run still produces no deploy, and that is correct rather
+# than a remnant of the old bug: a superseded build should not roll out, and
+# the newest run — the one that was not cancelled — completes and deploys. The
+# difference is that its deploy can no longer be killed by whatever merges
+# next.
+#
+# ## The property the old comment claimed, and why it survives
+#
+# images.yml said the deploy lived there "so ordering is structural — a deploy
+# cannot start before the images it deploys are pushed." That ordering is NOT
+# given up here. `workflow_run` fires only on `completed`, and the `if` below
+# additionally requires `conclusion == 'success'`, so a deploy still cannot
+# begin before the images exist. What changes is only that the wait now happens
+# in a run of its own, outside the concurrency group that was cancelling it.
+#
+# ## It targets one namespace
+#
+# `ci`, which CI owns. `er-platform` is otherwise only ever installed into a
+# per-developer namespace by `make dev-up`, and redeploying those on every
+# merge would restart a pod someone is mid-debug on — which also contradicts
+# §14.2's own next clause, "`make dev-up` stays a human command". The reasoning
+# is in infra/terraform/envs/dev/ci-deploy.tf.
+name: deploy
+
+on:
+  workflow_run:
+    workflows: [images]
+    types: [completed]
+  # The manual path, for redeploying a sha whose images already exist.
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Commit sha to deploy (must already be built in ECR)
+        required: true
+
+concurrency:
+  group: deploy-dev
+  # Never cancel a deploy. See the header: cancelling one is how the previous
+  # arrangement silently skipped deploying at all.
+  cancel-in-progress: false
+
+jobs:
+  deploy-dev:
+    name: deploy dev (ci namespace)
+    # Only a SUCCESSFUL images run on main deploys.
+    #
+    # This replaces the old "Refuse to deploy a failed build" step, and is
+    # strictly better than it was: a rust-only commit legitimately SKIPS the
+    # er-web job, which leaves the workflow conclusion `success`, while a
+    # genuinely failed image build makes it `failure`. The distinction the old
+    # step had to make by inspecting `needs.*.result` is already encoded in the
+    # conclusion — and `cancelled` and `skipped` conclusions fall through to no
+    # deploy, which is what they should mean.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write # OIDC exchange for er-ci-deploy-dev
+    env:
+      CI_NAMESPACE: ci
+      CLUSTER: er-dev
+      AWS_REGION: us-east-2
+      # The commit being deployed. `workflow_run` does not check out anything
+      # by default and `github.sha` here is the DEFAULT BRANCH tip, not the
+      # built commit — using it would deploy whatever main happens to be now
+      # rather than what was built, which is the subtle way this kind of split
+      # goes wrong.
+      DEPLOY_SHA: ${{ github.event.inputs.sha || github.event.workflow_run.head_sha }}
+    steps:
+      - name: Name the commit being deployed
+        run: echo "deploying $DEPLOY_SHA"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.DEPLOY_SHA }}
+      - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
+        with:
+          # The OIDC subject is pinned to `ref:refs/heads/main`
+          # (infra/terraform/modules/github-oidc). A `workflow_run` workflow
+          # runs in the DEFAULT BRANCH context, so the claim still matches —
+          # and if it ever stops matching, this step fails closed before
+          # anything is applied.
+          role-to-assume: arn:aws:iam::797781631727:role/er-ci-deploy-dev
+          aws-region: us-east-2
+      - name: Resolve image digests
+        id: digests
+        # §14.2: a deploy passes a DIGEST, never a tag, and gates on that digest
+        # being present in the registry first. Promotion-by-digest is only a
+        # property if the thing being deployed is identified by content.
+        #
+        # Images are tagged by full sha and built only when their own tree
+        # moved, so for any given commit one of them may legitimately have no
+        # sha tag. In that case reuse the newest digest already in the repo —
+        # that IS what is running — and say so in the log. Nothing is deployed
+        # by tag either way, and an empty result is fatal.
+        run: |
+          set -euo pipefail
+          for repo in er-api er-web; do
+            d="$(aws ecr describe-images --repository-name "$repo" \
+                   --image-ids "imageTag=$DEPLOY_SHA" \
+                   --query 'imageDetails[0].imageDigest' --output text 2>/dev/null || true)"
+            if [ -z "$d" ] || [ "$d" = "None" ]; then
+              d="$(aws ecr describe-images --repository-name "$repo" \
+                     --query 'reverse(sort_by(imageDetails,&imagePushedAt))[0].imageDigest' \
+                     --output text 2>/dev/null || true)"
+              echo "$repo: no image tagged $DEPLOY_SHA — reusing newest digest $d"
+            else
+              echo "$repo: $DEPLOY_SHA -> $d"
+            fi
+            if [ -z "$d" ] || [ "$d" = "None" ]; then
+              echo "::error::no digest in ECR for $repo; refusing to deploy by tag"
+              exit 1
+            fi
+            echo "${repo//-/_}=$d" >> "$GITHUB_OUTPUT"
+          done
+      - name: Install helm
+        # Version-pinned tarball rather than a third-party action, the same
+        # choice the disk-reclaim step in rust.yml documents: every `uses:` in
+        # this repo is SHA-pinned, and a pinned download needs no SHA to keep
+        # current. `helm version` is the check that the install worked.
+        env:
+          HELM_VERSION: v3.19.0
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz" \
+            | sudo tar xz --strip-components=1 -C /usr/local/bin linux-amd64/helm
+          helm version --short
+      - name: kubeconfig
+        run: aws eks update-kubeconfig --name "$CLUSTER" --region "$AWS_REGION"
+      - name: Provision the namespace's EFS access point and secrets
+        # Same script `make dev-up` uses, so CI and a human provision a
+        # namespace identically rather than by two drifting paths. Idempotent:
+        # it finds an existing access point and existing secrets.
+        id: env
+        run: |
+          set -euo pipefail
+          eval "$(bash scripts/dev_env.sh up "$CI_NAMESPACE")"
+          echo "fs=$ER_EFS_FS_ID" >> "$GITHUB_OUTPUT"
+          echo "ap=$ER_EFS_AP_ID" >> "$GITHUB_OUTPUT"
+      - name: Install the observability stack
+        # Cluster-scoped, not per-namespace: the log shipper, the OTLP
+        # collector gateway and the shared span store serve every namespace on
+        # this cluster. It runs here because it ran NOWHERE before — `make
+        # obs-up` was the only path, which meant the stack was hand-installed,
+        # absent from every GitOps loop, and invisible to the drift check.
+        #
+        # The same script a human runs (scripts/obs_up.sh), for the reason the
+        # namespace step above gives: two paths drift, one does not. Every
+        # release is `upgrade --install`, so this is a no-op when nothing moved.
+        #
+        # Deliberately NOT `continue-on-error`: a telemetry stack that silently
+        # fails to install is worse than a red deploy, because the absence of
+        # spans reads as "nothing happened" rather than as a broken deploy.
+        run: bash scripts/obs_up.sh
+      - name: Roll the release
+        # `--atomic` is the difference between a failed deploy and a broken
+        # namespace: it rolls back on failure instead of leaving half a release.
+        run: |
+          set -euo pipefail
+          kubectl apply -f infra/k8s/storage/ebs-gp3.yaml
+          helm upgrade --install "$CI_NAMESPACE" infra/k8s/charts/er-dev-namespace \
+            --namespace default --set "developer=$CI_NAMESPACE" --wait
+          # The executor allowlist (batch-orchestration-design §11): the two
+          # Phase 2 kinds run as per-attempt Kubernetes Jobs in this namespace.
+          # Enabled HERE, not in the chart default, so a developer namespace
+          # opts in deliberately.
+          helm upgrade --install er-platform infra/k8s/charts/er-platform \
+            --namespace "$CI_NAMESPACE" --set "developer=$CI_NAMESPACE" \
+            --set "images.api.digest=${{ steps.digests.outputs.er_api }}" \
+            --set "images.web.digest=${{ steps.digests.outputs.er_web }}" \
+            --set "efs.fileSystemId=${{ steps.env.outputs.fs }}" \
+            --set "efs.accessPointId=${{ steps.env.outputs.ap }}" \
+            --set 'executor.dagKinds=lake_maintain\,lake_migrate' \
+            --atomic --wait --timeout 10m
