@@ -267,15 +267,7 @@ dev-down:
 # the AWS side (log groups, Pod Identity roles) is
 # infra/terraform/envs/dev/observability.tf. Idempotent, like dev-up.
 obs-up:
-	kubectl --context $(ER_DEV_CONTEXT) apply -f infra/k8s/observability/namespace.yaml
-	helm repo add eks https://aws.github.io/eks-charts --force-update
-	helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts --force-update
-	helm --kube-context $(ER_DEV_CONTEXT) upgrade --install fluent-bit eks/aws-for-fluent-bit \
-	  --version 0.2.0 --namespace observability -f infra/k8s/observability/fluent-bit-values.yaml
-	helm --kube-context $(ER_DEV_CONTEXT) upgrade --install otel-collector open-telemetry/opentelemetry-collector \
-	  --version 0.175.1 --namespace observability -f infra/k8s/observability/otel-collector-values.yaml
-	helm --kube-context $(ER_DEV_CONTEXT) upgrade --install otel-operator open-telemetry/opentelemetry-operator \
-	  --version 0.124.1 --namespace observability -f infra/k8s/observability/otel-operator-values.yaml
+	bash scripts/obs_up.sh
 
 # Rebuildable local caches only.
 clean:

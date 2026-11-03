@@ -106,6 +106,18 @@ data:
                   value: /var/run/er/token
                 # D-SIZING invariants: threads == requests.cpu, DuckDB memory
                 # strictly below limits.memory, all from the one class entry.
+                {{/* Telemetry for the pod verb. ER_RESOURCE_CLASS is a Helm
+                     value, NOT an ${ER_…} placeholder: er_k8s's render_job
+                     refuses any placeholder it did not substitute, so a
+                     placeholder here would fail every launch. */}}
+                - name: ER_RESOURCE_CLASS
+                  value: {{ $class | quote }}
+                - name: OTEL_EXPORTER_OTLP_ENDPOINT
+                  value: {{ $.Values.otel.endpoint | quote }}
+                {{- with $.Values.otel.logLevel }}
+                - name: RUST_LOG
+                  value: {{ . | quote }}
+                {{- end }}
                 - name: ER_DUCKDB_THREADS
                   value: {{ $c.cpu | quote }}
                 - name: ER_DUCKDB_MEMORY_LIMIT
