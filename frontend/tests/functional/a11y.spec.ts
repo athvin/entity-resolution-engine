@@ -59,6 +59,24 @@ const SCREENS: {
     },
   },
   {
+    // The manage screen and the create wizard are org-level: they are ABOUT
+    // datasets rather than inside one. `datasets-dev` is the only fixture
+    // with more than one, so it is the only place the table has rows worth
+    // auditing.
+    name: "datasets",
+    path: `/datasets-dev/datasets`,
+    ready: async (page) => {
+      await expect(page.getByTestId("datasets")).toContainText("Accounts");
+    },
+  },
+  {
+    name: "new-dataset",
+    path: `/datasets-dev/datasets/new`,
+    ready: async (page) => {
+      await expect(page.getByTestId("new-dataset-form")).toBeVisible();
+    },
+  },
+  {
     name: "members",
     path: `/${ORG}/settings/members`,
     ready: async (page) => {

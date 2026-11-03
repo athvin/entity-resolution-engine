@@ -86,6 +86,20 @@ export function labelingOrg(projectName: string): string {
   return org;
 }
 
+/** The multi-dataset org per project: the manage screen creates, suspends and
+ * resumes datasets, and all three projects share one mock server, so a
+ * project that suspends would freeze a dataset another is asserting is live. */
+export function datasetsOrg(projectName: string): string {
+  const byProject: Record<string, string> = {
+    "desktop-chromium": "datasets-dev",
+    "mobile-safari": "datasets-ios",
+    "mobile-chrome": "datasets-android",
+  };
+  const org = byProject[projectName];
+  if (!org) throw new Error(`no datasets org for project ${projectName}`);
+  return org;
+}
+
 /** The webhook page's own org per project: subscribing and removing both
  * mutate the list, and all three projects share one mock server, so a project
  * that removes would delete the row another is asserting about. */

@@ -9,7 +9,9 @@ import {
   Layers,
   LogOut,
   Moon,
+  Plus,
   Search,
+  Settings2,
   ShieldCheck,
   Sun,
 } from "lucide-react";
@@ -92,47 +94,55 @@ export function TopBar({ org, user, memberships, impersonating, onOpenPalette }:
       )}
 
       {/* Dataset switcher (or a plain label while the org has just one). */}
-      {(datasets.data?.length ?? 0) > 1 ? (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="gap-2 font-medium"
-              data-testid="dataset-switcher"
+      {/* Always a menu, even at one dataset: its footer is the only route to
+          the manage page and the create flow from inside a dataset, and an
+          org with a single dataset is exactly the one that needs to find
+          them. The org switcher stays conditional — you cannot create an org
+          from here. */}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="gap-2 font-medium"
+            data-testid="dataset-switcher"
+          >
+            <Layers className="size-4" />
+            {ds}
+            <ChevronsUpDown className="text-muted-foreground size-3" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start">
+          <DropdownMenuLabel>Switch dataset</DropdownMenuLabel>
+          {datasets.data?.map((dataset) => (
+            <DropdownMenuItem
+              key={dataset.name}
+              onSelect={() => {
+                router.push(`/${org}/${dataset.name}/dashboard`);
+              }}
             >
-              <Layers className="size-4" />
-              {ds}
-              <ChevronsUpDown className="text-muted-foreground size-3" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start">
-            <DropdownMenuLabel>Switch dataset</DropdownMenuLabel>
-            {datasets.data?.map((dataset) => (
-              <DropdownMenuItem
-                key={dataset.name}
-                onSelect={() => {
-                  router.push(`/${org}/${dataset.name}/dashboard`);
-                }}
-              >
-                <Layers />
-                {dataset.display_name ?? dataset.name}
-                <span className="text-muted-foreground ml-auto text-[10px] tracking-wide uppercase">
-                  {dataset.entity_type}
-                </span>
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      ) : (
-        <span
-          className="text-muted-foreground flex items-center gap-2 px-2 text-sm font-medium"
-          data-testid="dataset-label"
-        >
-          <Layers className="size-4" />
-          {ds}
-        </span>
-      )}
+              <Layers />
+              {dataset.display_name ?? dataset.name}
+              <span className="text-muted-foreground ml-auto text-[10px] tracking-wide uppercase">
+                {dataset.entity_type}
+              </span>
+            </DropdownMenuItem>
+          ))}
+          <DropdownMenuSeparator />
+          <DropdownMenuItem asChild data-testid="manage-datasets">
+            <Link href={`/${org}/datasets`}>
+              <Settings2 />
+              Manage datasets
+            </Link>
+          </DropdownMenuItem>
+          <DropdownMenuItem asChild data-testid="new-dataset-menu">
+            <Link href={`/${org}/datasets/new`}>
+              <Plus />
+              New dataset
+            </Link>
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
 
       <div className="flex-1" />
 

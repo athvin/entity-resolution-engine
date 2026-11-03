@@ -218,6 +218,36 @@ export function initialState() {
     /// the cleared suffix pending again rather than silently re-reporting the
     /// old states.
     clearedFrom: {},
+    // Per-org dataset rows; `datasetsFor` seeds each org's on first read.
+    // Only `datasets-dev` declares its own, because it is the one org with
+    // more than the convergence sweep's single `default`.
+    datasets: Object.fromEntries(
+      ["datasets-dev", "datasets-ios", "datasets-android"].map((name) => [
+        name,
+        [
+          {
+            name: "default",
+            display_name: null,
+            entity_type: "person",
+            state: "active",
+            active_config_version: 1,
+            created_at: "2026-09-23T12:00:00Z",
+            updated_at: "2026-09-23T12:00:00Z",
+          },
+          {
+            name: "accounts",
+            display_name: "Accounts — EMEA",
+            entity_type: "account",
+            state: "active",
+            active_config_version: 3,
+            created_at: "2026-09-25T09:30:00Z",
+            updated_at: "2026-09-25T09:30:00Z",
+          },
+        ],
+      ]),
+    ),
+    // `org/dataset` -> polls remaining before a provisioning dataset flips.
+    datasetPollsUntilActive: {},
     orgs: {
       "acme-dev": {
         id: "uuid-acme-dev",
@@ -250,6 +280,26 @@ export function initialState() {
         created_at: "2026-09-22T12:00:00Z",
         resources: { duckdb_threads: 2, duckdb_memory_limit: "4GB" },
       },
+      // The multi-dataset tenants: the only fixture orgs with more than one,
+      // so the switcher, the manage table and the org-home dispatcher have a
+      // real choice to make. One per device project, like every other
+      // mutating journey — creating and suspending datasets here would
+      // otherwise race across the three projects sharing this server. Their
+      // datasets are declared below rather than seeded from the org.
+      ...Object.fromEntries(
+        ["datasets-dev", "datasets-ios", "datasets-android"].map((name) => [
+          name,
+          {
+            id: `uuid-${name}`,
+            name,
+            state: "active",
+            active_config_version: 1,
+            drop_root: `/dev/drop/${name}`,
+            created_at: "2026-09-23T12:00:00Z",
+            resources: { duckdb_threads: 2, duckdb_memory_limit: "4GB" },
+          },
+        ]),
+      ),
     },
     pollsUntilActive: {},
     metrics: {
@@ -1249,6 +1299,21 @@ const mockDataset = (org) => ({
   updated_at: org.created_at,
 });
 
+/**
+ * The org's dataset rows, seeded on first read from the org itself.
+ *
+ * Lazy rather than seeded up front because every fixture org — including the
+ * per-project mutation orgs minted in a loop — has exactly one dataset named
+ * `default`, mirroring the backend's convergence sweep. `datasets-dev` is the
+ * one exception and declares its own rows below.
+ */
+function datasetsFor(state, orgName) {
+  const org = state.orgs[orgName];
+  if (!org) return null;
+  state.datasets[orgName] ??= [mockDataset(org)];
+  return state.datasets[orgName];
+}
+
 const server = http.createServer((req, res) => {
   void (async () => {
     const url = new URL(req.url, `http://localhost:${PORT}`);
@@ -1669,19 +1734,86 @@ const server = http.createServer((req, res) => {
       );
       return send(res, 200, rows);
     }
-    // Datasets (the switchover): every fixture org carries exactly one, named
-    // `default`, mirroring the backend's convergence sweep. The entity_type
-    // follows the org fixture so orgs-dev reads as an account dataset.
+    // Datasets (the switchover): every fixture org carries one named
+    // `default`, mirroring the backend's convergence sweep, except
+    // `datasets-dev` which carries two so the switcher and manage journeys
+    // have something to switch between. The entity_type follows the org
+    // fixture so orgs-dev reads as an account dataset.
     if ((match = /^\/v1\/orgs\/([^/]+)\/datasets$/.exec(path)) && req.method === "GET") {
-      const org = state.orgs[match[1]];
-      if (!org) return send(res, 404, { detail: "not found" });
-      return send(res, 200, [mockDataset(org)]);
+      const rows = datasetsFor(state, match[1]);
+      if (!rows) return send(res, 404, { detail: "not found" });
+      return send(res, 200, rows);
+    }
+    if ((match = /^\/v1\/orgs\/([^/]+)\/datasets$/.exec(path)) && req.method === "POST") {
+      const rows = datasetsFor(state, match[1]);
+      if (!rows) return send(res, 404, { detail: "not found" });
+      const body = await readBody(req);
+      const name = String(body.name ?? "").trim();
+      if (name === "") return send(res, 422, { detail: "name is required" });
+      if (rows.some((d) => d.name === name)) {
+        return send(res, 409, { detail: `dataset '${name}' already exists in org '${match[1]}'` });
+      }
+      const row = {
+        name,
+        display_name: body.display_name ?? null,
+        entity_type: body.entity_type === "account" ? "account" : "person",
+        // Born provisioning, exactly as the real create does: the wizard
+        // polls the detail endpoint from here. `pollsUntilActive` lets a spec
+        // watch the pending state before it flips.
+        state: "provisioning",
+        active_config_version: null,
+        created_at: "2026-09-24T07:00:00Z",
+        updated_at: "2026-09-24T07:00:00Z",
+      };
+      rows.push(row);
+      state.datasetPollsUntilActive[`${match[1]}/${name}`] = 1;
+      return send(res, 202, {
+        name,
+        state: "provisioning",
+        job_id: `01jmdsprov${name.slice(0, 8)}`,
+      });
     }
     if ((match = /^\/v1\/orgs\/([^/]+)\/datasets\/([^/]+)$/.exec(path)) && req.method === "GET") {
-      const org = state.orgs[match[1]];
-      if (!org) return send(res, 404, { detail: "not found" });
-      if (match[2] !== "default") return send(res, 404, { detail: "not found" });
-      return send(res, 200, mockDataset(org));
+      const rows = datasetsFor(state, match[1]);
+      if (!rows) return send(res, 404, { detail: "not found" });
+      const row = rows.find((d) => d.name === match[2]);
+      if (!row) return send(res, 404, { detail: "not found" });
+      // Provisioning resolves on a later poll, the way the org detail does,
+      // so the wizard's pending state is observable rather than theoretical.
+      if (row.state === "provisioning") {
+        const key = `${match[1]}/${row.name}`;
+        const left = (state.datasetPollsUntilActive[key] ?? 0) - 1;
+        state.datasetPollsUntilActive[key] = left;
+        if (left <= 0) {
+          row.state = "active";
+          row.active_config_version = 1;
+        }
+      }
+      return send(res, 200, row);
+    }
+    if ((match = /^\/v1\/orgs\/([^/]+)\/datasets\/([^/]+)$/.exec(path)) && req.method === "PATCH") {
+      const rows = datasetsFor(state, match[1]);
+      const row = rows?.find((d) => d.name === match[2]);
+      if (!row) return send(res, 404, { detail: "not found" });
+      const body = await readBody(req);
+      row.display_name = body.display_name ?? null;
+      return send(res, 200, row);
+    }
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/([^/]+)\/(suspend|resume)$/.exec(path)) &&
+      req.method === "POST"
+    ) {
+      const rows = datasetsFor(state, match[1]);
+      const row = rows?.find((d) => d.name === match[2]);
+      if (!row) return send(res, 404, { detail: "not found" });
+      const want = match[3] === "suspend" ? "active" : "suspended";
+      if (row.state !== want) {
+        return send(res, 409, {
+          detail: `dataset '${row.name}' is ${row.state}; nothing to ${match[3]}`,
+        });
+      }
+      row.state = match[3] === "suspend" ? "suspended" : "active";
+      return send(res, 200, row);
     }
     if ((match = /^\/v1\/orgs\/([^/]+)$/.exec(path)) && req.method === "GET") {
       const org = state.orgs[match[1]];
