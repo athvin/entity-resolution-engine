@@ -283,77 +283,12 @@ jobs:
           aws-region: us-east-2
           role-to-assume: ${{ github.ref == 'refs/heads/main' && 'arn:aws:iam::797781631727:role/er-ci-sccache-write' || 'arn:aws:iam::797781631727:role/er-ci-sccache-read' }}
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-        with:
-          workspaces: rust
-          shared-key: rust
-          # Busts the stale entry, and makes the next profile edit bust it
-          # automatically. rust-cache keys on `Cargo.lock`, the rustc version and
-          # `.cargo/config.toml` — NOT on `Cargo.toml`, so the
-          # `[profile.dev.package."*"] debug = false` added in #251 was invisible
-          # to it. The symptom, from main run 39779467231: `Cache hit for:
-          # v0-rust-rust-Linux-x64-8556beb2-...` then `Cache up-to-date.` — an
-          # exact key hit, so rust-cache skipped the save and the pre-profile
-          # entry became immortal. Every run then restored ~1.3 GB of
-          # full-debug-info dependency artifacts whose fingerprints cargo
-          # immediately rejected, and rebuilt them anyway.
-          #
-          # `prefix-key` makes the v0 entries unreachable (restore-keys are
-          # prefixed too) so they age out instead of being downloaded for
-          # nothing. Hashing Cargo.toml into `key` is the durable half: a future
-          # profile or lint change lands on a new key and therefore SAVES, while
-          # restore-keys still prefix-match the previous entry for a partial
-          # restore. Bump `prefix-key` by hand only for a change neither file
-          # records.
-          #
-          # v1 -> v2 (2026-11-03): the duckdb `=1.20000.0` -> `=1.20000.1` bump
-          # in #376 poisoned the v1 entry. `libduckdb-sys`'s build script
-          # unpacks the bundled C++ sources into its `OUT_DIR` and panics if
-          # that directory is not empty:
-          #
-          #   unpacking bundled DuckDB sources:
-          #   Os { code: 39, kind: DirectoryNotEmpty }
-          #
-          # The saved `target/` carries a populated
-          # `debug/build/libduckdb-sys-<hash>/out`. On restore cargo re-runs the
-          # build script but does not clear that directory, so every job that
-          # compiles duckdb fails. Main's run for the bump went green because
-          # its jobs restored the PRE-bump entry and `lint` only wrote the
-          # poisoned one at the end — so the breakage lands on every PR
-          # afterwards and never on the commit that caused it, which is why it
-          # looks like the PR's fault.
-          #
-          # Bumping the prefix is the lever the paragraph above describes:
-          # restore-keys are prefixed too, so v1 becomes unreachable rather than
-          # being resurrected by a partial restore. One cold cycle, then normal.
-          prefix-key: "v2-rust"
-          key: ${{ hashFiles('rust/Cargo.toml') }}
-          # THIS job is the single writer of `shared-key: rust`. The other four
-          # compile jobs restore from it and set `save-if: false`, because the
-          # 10 GB per-repository Actions cache is a shared, capped resource and
-          # this workspace does not fit in it twice.
-          #
-          # What went wrong without this: five jobs all saved the same key, PR
-          # branches minted their own ~1.5 GB entries, and sccache's GHA backend
-          # — one cache entry per compilation object, nothing capping it — added
-          # ~2,700 entries and 4.3 GiB. Measured at 10,653,007,178 bytes across
-          # 2,594 entries, i.e. at the ceiling, so GitHub evicted LRU and the
-          # victim was the big rust-cache entry. That is why cold runs kept
-          # happening with no dependency change to explain them, and cold is a
-          # 3x penalty on this job (42m27 vs 14m15).
-          #
-          # Writing only from `main` is the other half: a PR must not be able to
-          # evict the entry every other PR depends on.
-          #
-          # The trade-off, stated so it is not discovered later: a PR that
-          # changes `Cargo.lock` no longer saves its own entry, so every push to
-          # it restores main's by `restore-keys` prefix match and rebuilds the
-          # changed crates again. It is a partial restore, not a cold build, and
-          # sccache covers what the prefix match misses — but a duckdb bump will
-          # feel it on each push. `sccache --show-stats` below is how to tell
-          # whether that is actually costing anything before trading the budget
-          # back for it.
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+      # No rust-cache. A restored `target/` carries a populated
+      # `build/libduckdb-sys-*/out`, cargo re-runs the build script without
+      # clearing it, and 1.20000.1 panics rather than unpacking over it —
+      # `DirectoryNotEmpty`, on every restoring job. Re-keying does not fix
+      # that: v2 was restored `full match: true` and failed identically. See
+      # this file's header.
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - name: rustdoc (deny warnings)
@@ -462,19 +397,12 @@ jobs:
           aws-region: us-east-2
           role-to-assume: ${{ github.ref == 'refs/heads/main' && 'arn:aws:iam::797781631727:role/er-ci-sccache-write' || 'arn:aws:iam::797781631727:role/er-ci-sccache-read' }}
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-        with:
-          workspaces: rust
-          shared-key: rust
-          # Keyed to include a hash of Cargo.toml, which rust-cache does not
-          # hash by default — see the `lint` job for the stale-entry failure that
-          # cost. Keep these identical across jobs or they stop sharing.
-          prefix-key: "v2-rust"
-          key: ${{ hashFiles('rust/Cargo.toml') }}
-          # Restore-only. `lint` is the single writer of this key — see the long
-          # comment there for why five writers on a 10 GB capped cache is what
-          # kept producing cold runs.
-          save-if: false
+      # No rust-cache. A restored `target/` carries a populated
+      # `build/libduckdb-sys-*/out`, cargo re-runs the build script without
+      # clearing it, and 1.20000.1 panics rather than unpacking over it —
+      # `DirectoryNotEmpty`, on every restoring job. Re-keying does not fix
+      # that: v2 was restored `full match: true` and failed identically. See
+      # this file's header.
       - name: entity framework verify (stale-output + analyser passes)
         run: cargo run -q -p er-entity-cli -- verify --root ..
       - name: API breaking-change gate (advisory)
@@ -602,19 +530,12 @@ jobs:
           aws-region: us-east-2
           role-to-assume: ${{ github.ref == 'refs/heads/main' && 'arn:aws:iam::797781631727:role/er-ci-sccache-write' || 'arn:aws:iam::797781631727:role/er-ci-sccache-read' }}
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-        with:
-          workspaces: rust
-          shared-key: rust
-          # Keyed to include a hash of Cargo.toml, which rust-cache does not
-          # hash by default — see the `lint` job for the stale-entry failure that
-          # cost. Keep these identical across jobs or they stop sharing.
-          prefix-key: "v2-rust"
-          key: ${{ hashFiles('rust/Cargo.toml') }}
-          # Restore-only. `lint` is the single writer of this key — see the long
-          # comment there for why five writers on a 10 GB capped cache is what
-          # kept producing cold runs.
-          save-if: false
+      # No rust-cache. A restored `target/` carries a populated
+      # `build/libduckdb-sys-*/out`, cargo re-runs the build script without
+      # clearing it, and 1.20000.1 panics rather than unpacking over it —
+      # `DirectoryNotEmpty`, on every restoring job. Re-keying does not fix
+      # that: v2 was restored `full match: true` and failed identically. See
+      # this file's header.
       - name: Run the test suite
         # `cargo test`, not nextest, and that is a measured choice. nextest runs
         # each test in its own PROCESS; with 586 tests across ~147 binaries that
@@ -812,14 +733,12 @@ jobs:
           aws-region: us-east-2
           role-to-assume: ${{ github.ref == 'refs/heads/main' && 'arn:aws:iam::797781631727:role/er-ci-sccache-write' || 'arn:aws:iam::797781631727:role/er-ci-sccache-read' }}
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-        with:
-          workspaces: rust
-          shared-key: rust
-          prefix-key: "v2-rust"
-          key: ${{ hashFiles('rust/Cargo.toml') }}
-          # Restore-only. `lint` is the single writer of this key.
-          save-if: false
+      # No rust-cache. A restored `target/` carries a populated
+      # `build/libduckdb-sys-*/out`, cargo re-runs the build script without
+      # clearing it, and 1.20000.1 panics rather than unpacking over it —
+      # `DirectoryNotEmpty`, on every restoring job. Re-keying does not fix
+      # that: v2 was restored `full match: true` and failed identically. See
+      # this file's header.
       - name: Cache DuckDB extensions
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -954,19 +873,12 @@ jobs:
           aws-region: us-east-2
           role-to-assume: ${{ github.ref == 'refs/heads/main' && 'arn:aws:iam::797781631727:role/er-ci-sccache-write' || 'arn:aws:iam::797781631727:role/er-ci-sccache-read' }}
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-        with:
-          workspaces: rust
-          shared-key: rust
-          # Keyed to include a hash of Cargo.toml, which rust-cache does not
-          # hash by default — see the `lint` job for the stale-entry failure that
-          # cost. Keep these identical across jobs or they stop sharing.
-          prefix-key: "v2-rust"
-          key: ${{ hashFiles('rust/Cargo.toml') }}
-          # Restore-only. `lint` is the single writer of this key — see the long
-          # comment there for why five writers on a 10 GB capped cache is what
-          # kept producing cold runs.
-          save-if: false
+      # No rust-cache. A restored `target/` carries a populated
+      # `build/libduckdb-sys-*/out`, cargo re-runs the build script without
+      # clearing it, and 1.20000.1 panics rather than unpacking over it —
+      # `DirectoryNotEmpty`, on every restoring job. Re-keying does not fix
+      # that: v2 was restored `full match: true` and failed identically. See
+      # this file's header.
       - name: Cache DuckDB extensions
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -1119,20 +1031,12 @@ jobs:
           aws-region: us-east-2
           role-to-assume: ${{ github.ref == 'refs/heads/main' && 'arn:aws:iam::797781631727:role/er-ci-sccache-write' || 'arn:aws:iam::797781631727:role/er-ci-sccache-read' }}
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-        with:
-          workspaces: rust
-          shared-key: rust
-          # Keyed to include a hash of Cargo.toml, which rust-cache does not
-          # hash by default — see the `lint` job for the stale-entry failure that
-          # cost. Keep these identical across jobs or they stop sharing.
-          prefix-key: "v2-rust"
-          key: ${{ hashFiles('rust/Cargo.toml') }}
-          # Restore-only. `lint` is the single writer of this key — see the long
-          # comment there for why five writers on a 10 GB capped cache is what
-          # kept producing cold runs.
-          save-if: false
-      # Keep benches building; running them is manual (they take minutes).
+      # No rust-cache. A restored `target/` carries a populated
+      # `build/libduckdb-sys-*/out`, cargo re-runs the build script without
+      # clearing it, and 1.20000.1 panics rather than unpacking over it —
+      # `DirectoryNotEmpty`, on every restoring job. Re-keying does not fix
+      # that: v2 was restored `full match: true` and failed identically. See
+      # this file's header.
       - run: cargo bench -p dedupe-core --no-run
       - name: Build cost (sccache stats, target size)
         # See the `lint` job's copy for why.
@@ -1187,20 +1091,12 @@ jobs:
           aws-region: us-east-2
           role-to-assume: ${{ github.ref == 'refs/heads/main' && 'arn:aws:iam::797781631727:role/er-ci-sccache-write' || 'arn:aws:iam::797781631727:role/er-ci-sccache-read' }}
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-        with:
-          workspaces: rust
-          shared-key: rust
-          # Keyed to include a hash of Cargo.toml, which rust-cache does not
-          # hash by default — see the `lint` job for the stale-entry failure that
-          # cost. Keep these identical across jobs or they stop sharing.
-          prefix-key: "v2-rust"
-          key: ${{ hashFiles('rust/Cargo.toml') }}
-          # Restore-only. `lint` is the single writer of this key — see the long
-          # comment there for why five writers on a 10 GB capped cache is what
-          # kept producing cold runs.
-          save-if: false
-      # `--test main <filter>` — see the e2e job's copy for why.
+      # No rust-cache. A restored `target/` carries a populated
+      # `build/libduckdb-sys-*/out`, cargo re-runs the build script without
+      # clearing it, and 1.20000.1 panics rather than unpacking over it —
+      # `DirectoryNotEmpty`, on every restoring job. Re-keying does not fix
+      # that: v2 was restored `full match: true` and failed identically. See
+      # this file's header.
       - run: cargo test -p dedupe-core --test main golden_historical_50k
       - name: Build cost (sccache stats, target size)
         # See the `lint` job's copy for why.
