@@ -3481,6 +3481,9 @@ async fn publish_config_version(
     {
         eprintln!("config.published for {org} v{version} not queued: {e}");
     }
+    // Computed after everything that can fail has already succeeded, so the
+    // ordering itself guarantees an advisory cannot cost a tenant a publish.
+    let advisories = publish_advisories(&state, &org, &ds, &new_config).await;
     (
         StatusCode::OK,
         Json(json!({
@@ -3490,9 +3493,47 @@ async fn publish_config_version(
             "changed_blocks": changed,
             "jobs_enqueued": jobs_enqueued,
             "published_by": principal.actor,
+            // What the latest profile says about the config that just went
+            // live — advice, never a refusal, and computed AFTER the publish
+            // committed so it cannot affect it even by failing.
+            "advisories": advisories,
         })),
     )
         .into_response()
+}
+
+/// What the latest standardized profile says about a config's blocking columns.
+///
+/// Best-effort to the point of being uninterruptible: every failure path
+/// returns an empty list. A publish must not depend on the profiler having run,
+/// on the lake being openable, or on a read succeeding — the config is already
+/// committed by the time this is called, so the only thing an error here could
+/// do is turn a successful publish into a failed request.
+///
+/// Logged rather than silent, because "no advisories" and "the advisory read
+/// failed" look identical in the response and only one of them is worth
+/// investigating.
+async fn publish_advisories(
+    state: &AppState,
+    org: &str,
+    ds: &str,
+    config: &er_config::Config,
+) -> Vec<String> {
+    // The config just published, passed in rather than re-read: advising on a
+    // re-fetch would race the write and could describe the previous version.
+    let Ok(session) = dataset_lake(state, org, ds).await else {
+        return Vec::new();
+    };
+    let Ok(snapshot) = session.latest_snapshot_version() else {
+        return Vec::new();
+    };
+    match read::profiled_standardized_columns(&session, snapshot) {
+        Ok(columns) => config_check::profile_advisories(config, &columns),
+        Err(e) => {
+            eprintln!("publish advisories for {org}/{ds}: profile read failed: {e}");
+            Vec::new()
+        }
+    }
 }
 
 #[derive(Deserialize)]

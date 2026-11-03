@@ -196,6 +196,8 @@ export function ConfigStudio({ org }: { org: string }) {
     version: number;
     tier: string | null;
     jobs: string[];
+    /** Profile-derived advice about the config that just went live. */
+    advisories: string[];
   } | null>(null);
 
   // Seed the edit state from the active config exactly once per load.
@@ -242,7 +244,14 @@ export function ConfigStudio({ org }: { org: string }) {
     try {
       const draft = await createDraft.mutateAsync(yaml);
       const result = await publish.mutateAsync(draft.version);
-      setPublished({ version: result.version, tier: result.tier, jobs: result.jobs_enqueued });
+      setPublished({
+        version: result.version,
+        tier: result.tier,
+        jobs: result.jobs_enqueued,
+        // `?? []` because an older backend sends no such field, and because
+        // the empty list already means "no advice" either way.
+        advisories: result.advisories ?? [],
+      });
     } catch (error) {
       if (error instanceof BffRequestError) {
         // A validation pointer like /blocking/2/expr lands on the row it names.
@@ -308,6 +317,30 @@ export function ConfigStudio({ org }: { org: string }) {
               watch in Runs
             </Link>
           </CardContent>
+          {/* Advice, below the confirmation and never instead of it: the
+              publish SUCCEEDED, and these are things the latest profile says
+              about the config that is now live. A blocking rule on an empty
+              column passes every validation there is and then reaches almost
+              no pairs — which nothing in the product said until now, and which
+              nobody connects to a config change an hour later. */}
+          {published.advisories.length > 0 && (
+            <CardContent className="flex flex-col gap-1 p-3 pt-0" data-testid="publish-advisories">
+              <span className="text-muted-foreground text-[11px] tracking-wide uppercase">
+                Worth knowing about this config — measured, not blocking
+              </span>
+              {published.advisories.map((advisory) => (
+                <p key={advisory} className="text-xs">
+                  {advisory}
+                </p>
+              ))}
+              <Link
+                href={`/${org}/${ds}/profile`}
+                className="self-start text-[11px] underline underline-offset-2"
+              >
+                see the full profile
+              </Link>
+            </CardContent>
+          )}
         </Card>
       )}
 

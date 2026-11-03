@@ -3633,6 +3633,12 @@ const server = http.createServer((req, res) => {
           changed_blocks: ["blocking"],
           jobs_enqueued: ["01jmpublishmatchrebuild0j1"],
           published_by: "user:mock via key:mock",
+          // Sent on EVERY publish arm: the field is not conditional
+          // upstream, and a mock that omitted it on one tier would let a
+          // consumer read `undefined` on exactly the path nothing tested.
+          advisories: [
+            "blocking key `email` reads `email`, which is 71% populated — an equality is never true of a NULL, so this rule cannot reach 50% of all pairs",
+          ],
         });
       }
       if (tierC) {
@@ -3662,6 +3668,12 @@ const server = http.createServer((req, res) => {
           changed_blocks: ["sources"],
           jobs_enqueued: enqueued.map((job) => job.id),
           published_by: "user:mock via key:mock",
+          // Sent on EVERY publish arm: the field is not conditional
+          // upstream, and a mock that omitted it on one tier would let a
+          // consumer read `undefined` on exactly the path nothing tested.
+          advisories: [
+            "blocking key `email` reads `email`, which is 71% populated — an equality is never true of a NULL, so this rule cannot reach 50% of all pairs",
+          ],
         });
       }
       return send(res, 200, {
@@ -3671,6 +3683,12 @@ const server = http.createServer((req, res) => {
         changed_blocks: ["thresholds"],
         jobs_enqueued: ["01jmpublishjob0000000000j1"],
         published_by: "user:mock via key:mock",
+        // Sent on EVERY publish arm: the field is not conditional
+        // upstream, and a mock that omitted it on one tier would let a
+        // consumer read `undefined` on exactly the path nothing tested.
+        advisories: [
+          "blocking key `email` reads `email`, which is 71% populated — an equality is never true of a NULL, so this rule cannot reach 50% of all pairs",
+        ],
       });
     }
     if (

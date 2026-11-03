@@ -18,6 +18,121 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use er_config::{Config, EntityType, canonical_attributes};
 
+/// What a profile says about one standardized column, as the advisories need it.
+///
+/// A narrow struct rather than the generated row, so the advisory logic is pure
+/// and testable from literals — the same reason
+/// [`config_reference_problems`] takes a `Config` and nothing else.
+#[derive(Debug, Clone)]
+pub struct ProfiledColumn {
+    pub column_name: String,
+    pub row_count: i64,
+    pub non_null_count: i64,
+    pub blank_count: i64,
+    /// The most frequent value's share, when values were counted.
+    pub top_share: Option<f64>,
+}
+
+impl ProfiledColumn {
+    /// Non-null, non-blank proportion. `None` for an empty corpus, where a fill
+    /// rate has no meaning and `0.0` would assert one.
+    fn fill_rate(&self) -> Option<f64> {
+        if self.row_count == 0 {
+            return None;
+        }
+        Some((self.non_null_count - self.blank_count) as f64 / self.row_count as f64)
+    }
+}
+
+/// The share of a column's pairs lost to NULLs below which nothing is said.
+///
+/// Both endpoints of a pair must be present for an equality to hold, so a key
+/// on a column that is 60% populated reaches only 36% of pairs. At 0.5 the
+/// column still reaches half of them, which is a trade a tenant may be making
+/// on purpose; above it, the rule is mostly not running.
+const ADVISE_PAIR_LOSS_ABOVE: f64 = 0.5;
+
+/// The dominant-value share above which a blocking key's cost is worth naming.
+const ADVISE_MODE_SHARE_ABOVE: f64 = 0.2;
+
+/// What the latest profile says about the config being published — advice, never
+/// a refusal.
+///
+/// **Why this is separate from [`config_reference_problems`] rather than more
+/// of it.** That function's output refuses a publish, and it can, because a
+/// column either exists or does not. Everything here is a judgement about data
+/// that will be different next week: a column 97% empty today may be the one a
+/// tenant is about to start populating, and refusing the publish would make the
+/// profile a gate on work it cannot see. The findings registry draws the same
+/// line — "recommendations, never silent changes" — and `er-compile` already
+/// has the channel for it in `Compiled.notes`.
+///
+/// It closes a real hole even so. Until now the validator checked that a
+/// blocking column EXISTS and stopped there, so a rule keyed on a column that
+/// is empty, or whose single dominant value puts half the corpus in one block,
+/// published cleanly and then destroyed either recall or runtime on the first
+/// run — with nothing anywhere connecting the symptom to the config change that
+/// caused it.
+///
+/// Returns an empty vec when nothing has profiled the corpus, which is the
+/// honest answer: no profile means no advice, not "nothing is wrong".
+#[must_use]
+pub fn profile_advisories(config: &Config, profiled: &[ProfiledColumn]) -> Vec<String> {
+    let by_name: BTreeMap<&str, &ProfiledColumn> = profiled
+        .iter()
+        .map(|c| (c.column_name.as_str(), c))
+        .collect();
+    let mut advisories = Vec::new();
+
+    for rule in &config.blocking {
+        // A rule whose SQL does not parse is already a refusal above; here it
+        // simply has no columns to advise about.
+        let Ok(refs) = dedupe_core::sql::columns::columns_used(&rule.expr, "blocking") else {
+            continue;
+        };
+        for col in refs {
+            let Some(stats) = by_name.get(col.column.as_str()) else {
+                continue;
+            };
+            let Some(fill) = stats.fill_rate() else {
+                continue;
+            };
+            // Both endpoints must be present, hence the square.
+            let pair_loss = 1.0 - fill * fill;
+            if pair_loss > ADVISE_PAIR_LOSS_ABOVE {
+                advisories.push(format!(
+                    "blocking key `{}` reads `{}`, which is {:.0}% populated — an equality is \
+                     never true of a NULL, so this rule cannot reach {:.0}% of all pairs",
+                    rule.key_type,
+                    col.column,
+                    fill * 100.0,
+                    pair_loss * 100.0
+                ));
+            }
+            if let Some(share) = stats.top_share
+                && share > ADVISE_MODE_SHARE_ABOVE
+            {
+                // Pairs from one value are quadratic in its count, which is the
+                // part that surprises people: one value on 20% of a 100k corpus
+                // is 200 million comparisons from that block alone.
+                let rows = share * stats.row_count as f64;
+                let pairs = rows * (rows - 1.0) / 2.0;
+                advisories.push(format!(
+                    "blocking key `{}` reads `{}`, whose most common value covers {:.0}% of rows \
+                     ({:.0} of them) — that one block alone is about {:.0} comparisons",
+                    rule.key_type,
+                    col.column,
+                    share * 100.0,
+                    rows,
+                    pairs
+                ));
+            }
+        }
+    }
+
+    advisories
+}
+
 /// The problems found in a config's column references (empty = the config is
 /// consistent with the standardized schema). Each is a human-readable reason the
 /// publish should be refused.
@@ -561,5 +676,123 @@ mod tests {
                 "{block:?} must be refused with {needle:?}, got {problems:?}"
             );
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Publish-time advisories: what the profile says about this config.
+    // -----------------------------------------------------------------------
+
+    fn profiled(name: &str, rows: i64, present: i64, top_share: Option<f64>) -> ProfiledColumn {
+        ProfiledColumn {
+            column_name: name.to_string(),
+            row_count: rows,
+            non_null_count: present,
+            blank_count: 0,
+            top_share,
+        }
+    }
+
+    /// Which standardized columns the fixture config actually blocks on, so the
+    /// tests below advise about real keys rather than invented ones.
+    fn blocking_columns(config: &Config) -> Vec<String> {
+        let mut out = Vec::new();
+        for rule in &config.blocking {
+            if let Ok(refs) = dedupe_core::sql::columns::columns_used(&rule.expr, "blocking") {
+                out.extend(refs.into_iter().map(|c| c.column));
+            }
+        }
+        out.sort_unstable();
+        out.dedup();
+        out
+    }
+
+    #[test]
+    fn no_profile_means_no_advice_not_a_clean_bill() {
+        // The distinction matters because the publish response shows these to a
+        // human: an empty list has to mean "nothing measured this" and not
+        // "measured, all fine", which is why the handler sends the list rather
+        // than a boolean.
+        assert_eq!(profile_advisories(&load(GOOD), &[]), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_well_populated_blocking_column_is_silent() {
+        let config = load(GOOD);
+        let columns: Vec<ProfiledColumn> = blocking_columns(&config)
+            .iter()
+            .map(|name| profiled(name, 100_000, 99_000, Some(0.02)))
+            .collect();
+        assert_eq!(profile_advisories(&config, &columns), Vec::<String>::new());
+    }
+
+    #[test]
+    fn an_empty_blocking_column_names_the_pair_loss() {
+        // The hole this closes: `config_reference_problems` checks the column
+        // EXISTS and stops, so a rule keyed on a 10%-populated column published
+        // cleanly and then reached 1% of pairs.
+        let config = load(GOOD);
+        let first = blocking_columns(&config)
+            .first()
+            .expect("the fixture blocks on something")
+            .clone();
+        let columns = vec![profiled(&first, 100_000, 10_000, None)];
+        let advisories = profile_advisories(&config, &columns);
+        assert!(
+            advisories
+                .iter()
+                .any(|a| a.contains(&first) && a.contains("99%")),
+            "a 10% populated column loses 99% of pairs; got {advisories:?}"
+        );
+    }
+
+    #[test]
+    fn a_dominant_value_names_the_block_it_creates() {
+        let config = load(GOOD);
+        let first = blocking_columns(&config)
+            .first()
+            .expect("the fixture blocks on something")
+            .clone();
+        // Fully populated, so the NULL advisory stays quiet and only the skew
+        // one speaks — otherwise this would pass on the wrong advisory.
+        let columns = vec![profiled(&first, 100_000, 100_000, Some(0.30))];
+        let advisories = profile_advisories(&config, &columns);
+        assert_eq!(
+            advisories.len(),
+            1,
+            "only the skew advisory: {advisories:?}"
+        );
+        assert!(
+            advisories[0].contains("30%") && advisories[0].contains("comparisons"),
+            "the advisory must name the share AND what it costs; got {advisories:?}"
+        );
+    }
+
+    #[test]
+    fn a_column_the_config_does_not_block_on_is_not_advised_about() {
+        // A profile describes every column; only the ones a rule reads can
+        // affect the run. Advising about the rest would bury the ones that
+        // matter under a list nobody can act on.
+        let config = load(GOOD);
+        let columns = vec![profiled(
+            "a_column_nothing_blocks_on",
+            100_000,
+            1,
+            Some(0.99),
+        )];
+        assert_eq!(profile_advisories(&config, &columns), Vec::<String>::new());
+    }
+
+    #[test]
+    fn an_empty_corpus_is_not_reported_as_an_empty_column() {
+        // `row_count` of zero makes the fill rate undefined. Reporting 0% there
+        // would advise a tenant to fix a column in a corpus that has no rows at
+        // all, which is the ThresholdEditor's "0 of 0 pairs" mistake again.
+        let config = load(GOOD);
+        let first = blocking_columns(&config)
+            .first()
+            .expect("the fixture blocks on something")
+            .clone();
+        let columns = vec![profiled(&first, 0, 0, None)];
+        assert_eq!(profile_advisories(&config, &columns), Vec::<String>::new());
     }
 }
