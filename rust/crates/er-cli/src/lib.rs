@@ -566,36 +566,54 @@ pub fn estimate_blocking(
             match_key: c.match_key,
             marginal_pairs: c.marginal_comparison_count,
             cumulative_pairs: c.cumulative_comparison_count,
+            // Set below, once the block breakdown is attempted per rule.
+            has_block_breakdown: false,
         })
         .collect();
     let total_possible = counts
         .first()
         .map_or(0, |c| c.total_possible_comparison_count);
 
-    // The largest blocks of the FIRST rule. Only a pure equi-join has blocks to
-    // report, and a rule with a filter is not an error — it just has no
-    // breakdown, so an estimate is still returned.
-    let largest_blocks = match rules.first() {
-        Some(rule) if n_largest > 0 => dedupe_core::blocking_analysis::n_largest_blocks(
-            session, &settings, &concat, rule, n_largest,
-        )
-        .map(|blocks| {
-            // `None` (not a pure equi-join) and `Ok([])` both render as no
-            // breakdown here, preserving this endpoint's current wire shape.
-            // Telling the two apart on the wire is a response-shape change and
-            // belongs with the contract regen, not in this change.
-            blocks
-                .unwrap_or_default()
-                .into_iter()
-                .map(|b| LargestBlockEstimate {
-                    key_values: b.key_values,
-                    pairs: b.block_count,
-                })
-                .collect()
-        })
-        .unwrap_or_default(),
-        _ => Vec::new(),
-    };
+    // The largest blocks of EVERY rule, not just the first.
+    //
+    // Only a pure equi-join has blocks to report; a rule carrying a filter
+    // condition has no breakdown, which is a limitation rather than a finding.
+    // That distinction now reaches the wire as `has_block_breakdown`, because
+    // an absent breakdown and an empty one used to be indistinguishable — and
+    // "no large blocks" reads as reassurance when nothing was measured.
+    let mut largest_blocks: Vec<LargestBlockEstimate> = Vec::new();
+    let mut per_rule = per_rule;
+    if n_largest > 0 {
+        for entry in &mut per_rule {
+            let index = usize::try_from(entry.match_key).unwrap_or(usize::MAX);
+            let Some(rule) = rules.get(index) else {
+                continue;
+            };
+            match dedupe_core::blocking_analysis::n_largest_blocks(
+                session, &settings, &concat, rule, n_largest,
+            ) {
+                Ok(Some(blocks)) => {
+                    entry.has_block_breakdown = true;
+                    largest_blocks.extend(blocks.into_iter().map(|b| LargestBlockEstimate {
+                        match_key: entry.match_key,
+                        // `scored_pairs` borrows, so take it before the move.
+                        pairs: b.scored_pairs(settings.link_type),
+                        rows: b.count_l,
+                        key_values: b.key_values,
+                    }));
+                }
+                // A rule with no breakdown leaves `has_block_breakdown` false.
+                Ok(None) => {}
+                // A block read failing is not worth losing the whole estimate:
+                // the per-rule counts are the number that decides the run's
+                // cost, and they are already computed.
+                Err(e) => eprintln!(
+                    "blocking estimate: no block breakdown for rule {}: {e}",
+                    entry.match_key
+                ),
+            }
+        }
+    }
 
     Ok(BlockingEstimate {
         total_possible_pairs: total_possible,
@@ -614,13 +632,30 @@ pub struct BlockingRuleEstimate {
     /// that says whether the rule is pulling its weight.
     pub marginal_pairs: i64,
     pub cumulative_pairs: i64,
+    /// Whether this rule's largest blocks could be enumerated. False for a rule
+    /// carrying a filter condition, which has no block breakdown at all.
+    ///
+    /// On the wire because the alternative is silence: with no flag, a rule
+    /// that CANNOT be broken down looks exactly like one that was examined and
+    /// found to have no large blocks, which reads as reassurance about a rule
+    /// nobody measured.
+    pub has_block_breakdown: bool,
 }
 
 /// A blocking key whose block is large enough to dominate a run.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct LargestBlockEstimate {
+    /// Which rule this block belongs to, since every rule is now broken down
+    /// rather than only the first.
+    pub match_key: i64,
     pub key_values: Vec<String>,
+    /// The pairs a run SCORES in this block, under this model's link type.
     pub pairs: i64,
+    /// Rows carrying this key value. Reported beside the pairs because the two
+    /// answer different questions — how much work, and how lopsided the data —
+    /// and because `pairs` is quadratic in `rows`, which is the whole reason one
+    /// value can dominate a run.
+    pub rows: i64,
 }
 
 /// What a run would cost, before running it.

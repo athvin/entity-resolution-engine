@@ -109,7 +109,8 @@ export function RunCost({ org }: { org: string }) {
                   <tr className="text-muted-foreground border-b text-left text-xs uppercase">
                     <th className="py-1.5 pr-4 font-medium">Blocking rule</th>
                     <th className="py-1.5 pr-4 font-medium">Adds</th>
-                    <th className="py-1.5 font-medium">Running total</th>
+                    <th className="py-1.5 pr-4 font-medium">Running total</th>
+                    <th className="py-1.5 font-medium">Blocks</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -119,8 +120,17 @@ export function RunCost({ org }: { org: string }) {
                       <td className="py-2 pr-4 font-medium tabular-nums">
                         {count(rule.marginal_pairs)}
                       </td>
-                      <td className="text-muted-foreground py-2 tabular-nums">
+                      <td className="text-muted-foreground py-2 pr-4 tabular-nums">
                         {count(rule.cumulative_pairs)}
+                      </td>
+                      <td className="text-muted-foreground py-2 text-xs">
+                        {rule.has_block_breakdown
+                          ? count(
+                              estimate.data.largest_blocks.filter(
+                                (b) => b.match_key === rule.match_key,
+                              ).length,
+                            )
+                          : "not countable"}
                       </td>
                     </tr>
                   ))}
@@ -138,20 +148,30 @@ export function RunCost({ org }: { org: string }) {
                 <p className="text-muted-foreground pb-1 text-xs uppercase">Largest blocks</p>
                 <ul className="flex flex-col gap-1 text-sm">
                   {estimate.data.largest_blocks.map((block) => (
-                    <li key={block.key_values.join("|")} className="flex items-baseline gap-2">
+                    <li
+                      key={`${String(block.match_key)}:${block.key_values.join("|")}`}
+                      className="flex items-baseline gap-2"
+                    >
+                      <span className="text-muted-foreground text-xs tabular-nums">
+                        rule {count(block.match_key)}
+                      </span>
                       <span className="font-mono text-xs">
                         {block.key_values.join(" | ") || "(blank)"}
                       </span>
                       <span className="text-muted-foreground tabular-nums">
-                        {count(block.pairs)} pairs
+                        {count(block.rows)} rows &rarr; {count(block.pairs)} pairs
                       </span>
                     </li>
                   ))}
                 </ul>
                 <p className="text-muted-foreground pt-2 text-xs">
-                  One oversized block dominates a run on its own. A rule that keys on a value most
-                  records share is the usual cause — restricting the run to a segment, or blocking
-                  on something more selective, is the fix.
+                  One oversized block dominates a run on its own. Pairs grow with the SQUARE of the
+                  rows in a block, which is why a single shared value costs so much more than its
+                  row count suggests. A rule that keys on a value most records share is the usual
+                  cause — restricting the run to a segment, or blocking on something more selective,
+                  is the fix. A rule shown as &ldquo;not countable&rdquo; carries a filter
+                  condition, so its blocks cannot be enumerated at all; that is a limitation of the
+                  estimate, not a clean bill of health.
                 </p>
               </div>
             )}
