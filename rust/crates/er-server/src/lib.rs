@@ -50,6 +50,7 @@ pub mod runctx;
 pub mod s3_ingest;
 pub mod satoken;
 pub mod schema;
+pub mod shutdown;
 pub mod taskpg;
 pub mod telemetry;
 pub mod urlguard;
