@@ -33,12 +33,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // current-thread runtimes), so it also must not run inside the runtime.
     if program_name(&args) != "er" && args.get(1).map(String::as_str) == Some("exec-task") {
         // The guard is bound rather than dropped, so it lives as long as the
-        // verb. It will also be the flush point once there is an exporter:
+        // verb — and this is the flush point, now that there is an exporter.
         // `exec_task::run` funnels all eleven of its early returns through one
         // wrapper, and a pod exits immediately after its last span, so the tail
-        // of every run — including every failure — depends on flushing here.
-        let _telemetry = er_obs::init(er_obs::Role::Task);
-        std::process::exit(er_server::exec_task::run(&args[2..]));
+        // of every run — including every failure, which is the part worth
+        // having — depends on flushing here.
+        //
+        // The flush cannot be left to `Drop`: `process::exit` does not run
+        // destructors, so the guard going out of scope here never happens. That
+        // is the whole reason this is three statements rather than one.
+        let telemetry = er_obs::init(er_obs::Role::Task);
+        let code = er_server::exec_task::run(&args[2..]);
+        telemetry.force_flush();
+        std::process::exit(code);
     }
     // `er`: synchronous, so it must not run inside the runtime. Note that this
     // arm has no tokio runtime at all, which is why `init` must never need one.
