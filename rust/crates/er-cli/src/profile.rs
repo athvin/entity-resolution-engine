@@ -128,25 +128,57 @@ pub struct FindingOut {
     pub message: String,
 }
 
-/// Profile one corpus stage, record it, and return what was found.
+/// Everything one profile needs to know, grouped — the `PipelineInputs` idiom,
+/// for the same reason it exists there.
 ///
-/// `captured_at` is the run's logical clock rather than wall time, so a replayed
-/// fixture produces the same row.
+/// This was seven positional parameters behind an `#[allow(too_many_arguments)]`
+/// that gave no reason. Adding provenance would have made it eight, and a
+/// suppression with a justification attached is still worse than not needing
+/// one: at this arity a caller transposing `account` and a bool is a silent
+/// wrong answer, where a named field cannot be.
+pub struct ProfileInputs<'a> {
+    /// Which corpus: as delivered, standardized, or golden.
+    pub subject: Subject,
+    /// Required for `raw` and meaningless otherwise — a raw profile is per
+    /// source, because two sources landing in one dataset have different
+    /// columns.
+    pub source: Option<&'a str>,
+    /// 1 for column shapes, 2 to also measure blocking cost.
+    pub tier: i64,
+    pub options: &'a ProfileOptions,
+    /// Account-shaped corpus (`entity_type: account`), which changes which
+    /// standardized and golden relations exist.
+    pub account: bool,
+    /// The run's logical clock rather than wall time, so a replayed fixture
+    /// produces the same row.
+    pub captured_at: &'a str,
+    /// For a `raw` profile, the delivery it describes.
+    ///
+    /// Provenance, and ONLY provenance — it is not the cache key, whatever the
+    /// column's description said before this change. The key is the corpus
+    /// digest, which is strictly better here: two deliveries carrying identical
+    /// content share a digest and so share a profile, where keying on the batch
+    /// would recompute the same answer for every redelivery of an unchanged
+    /// file.
+    pub ingest_batch_id: Option<&'a str>,
+}
+
+/// Profile one corpus stage, record it, and return what was found.
 ///
 /// # Errors
 /// Propagates the lake read and write. Refuses a subject whose relation is
 /// absent, rather than recording an empty profile that would read as "this
 /// corpus has no columns".
-#[allow(clippy::too_many_arguments)]
-pub fn run_profile(
-    session: &Session,
-    subject: Subject,
-    source: Option<&str>,
-    tier: i64,
-    options: &ProfileOptions,
-    account: bool,
-    captured_at: &str,
-) -> Result<ProfileReport> {
+pub fn run_profile(session: &Session, inputs: &ProfileInputs<'_>) -> Result<ProfileReport> {
+    let &ProfileInputs {
+        subject,
+        source,
+        tier,
+        options,
+        account,
+        captured_at,
+        ingest_batch_id,
+    } = inputs;
     let started = std::time::Instant::now();
     for relation in [
         "profile_runs",
@@ -219,6 +251,7 @@ pub fn run_profile(
         duration_ms,
         corpus_digest: &corpus_digest,
         captured_at,
+        ingest_batch_id,
     };
     let profile_run_id = write_profile(session, &run, &shapes, &tops, &found, &candidates)?;
     // `input` is a snapshot-pinned temp VIEW, not a table, so it is left for the
@@ -476,6 +509,7 @@ struct ProfileRunRow<'a> {
     duration_ms: i64,
     corpus_digest: &'a str,
     captured_at: &'a str,
+    ingest_batch_id: Option<&'a str>,
 }
 
 /// Stage and MERGE the three tables, returning the profile run's id.
@@ -499,7 +533,7 @@ fn write_profile(
              '{source}' as source_system,
              cast({snapshot} as bigint) as snapshot,
              cast({tier} as bigint) as tier,
-             cast(null as varchar) as ingest_batch_id,
+             {batch} as ingest_batch_id,
              '{digest}' as corpus_digest,
              cast({row_count} as bigint) as row_count,
              cast({column_count} as bigint) as column_count,
@@ -512,6 +546,10 @@ fn write_profile(
              cast('{at}' as timestamp) as captured_at",
         snapshot = run.snapshot,
         tier = run.tier,
+        batch = run.ingest_batch_id.map_or_else(
+            || "cast(null as varchar)".to_string(),
+            |id| format!("'{}'", id.replace('\'', "''")),
+        ),
         row_count = run.row_count,
         column_count = run.column_count,
         sampled = run.sampled,

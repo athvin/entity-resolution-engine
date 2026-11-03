@@ -598,6 +598,30 @@ export function NewSourceWizard({ org }: { org: string }) {
                 ))}
               </tbody>
             </table>
+            {/* Where the real profile lives, and the honest limits of this one.
+             *
+             * The distinction is load-bearing in both directions. This table is
+             * the first 200 rows counted in the browser, which is why the step
+             * above can promise the file is not uploaded yet — and why a fill
+             * rate here is a sample statistic that a wider corpus can
+             * contradict. The full profile measures every row, but only once
+             * the file has actually landed, which is a different moment and a
+             * different privacy position.
+             *
+             * It names tier 1's contents specifically rather than saying "a
+             * full profile": blocking cost is tier 2 and is NOT automatic, so
+             * promising it here would promise something no import performs. */}
+            <p className="text-muted-foreground mt-3 text-xs" data-testid="wizard-profile-pointer">
+              Counted in your browser, from the sample above — so a fill rate here is what this
+              sample shows, not what the source holds. Once this source has imported, every row of
+              the delivery is profiled automatically (exact distinct counts, value distributions,
+              placeholder detection) under{" "}
+              <Link href={`/${org}/${ds}/profile`} className="underline">
+                Profile
+              </Link>
+              , where you can also run the deeper tier that measures what each column would cost as
+              a blocking key.
+            </p>
           </CardContent>
         </Card>
       )}

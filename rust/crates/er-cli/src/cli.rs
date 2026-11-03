@@ -446,17 +446,24 @@ pub fn run() -> Result<()> {
                 Some(p) => anyhow::bail!("--sample must be in (0, 1], got {p}"),
                 None => None,
             };
+            let options = dedupe_core::profile::ProfileOptions {
+                exact_distinct,
+                sample,
+            };
             let report = crate::profile::run_profile(
                 &session,
-                subject,
-                source.as_deref(),
-                tier,
-                &dedupe_core::profile::ProfileOptions {
-                    exact_distinct,
-                    sample,
+                &crate::profile::ProfileInputs {
+                    subject,
+                    source: source.as_deref(),
+                    tier,
+                    options: &options,
+                    account: !config.entity_type.is_person(),
+                    captured_at: &run_at,
+                    // An operator profiling by hand is not describing one
+                    // delivery, even for the raw subject: they are asking about
+                    // whatever is landed now, which may be many batches.
+                    ingest_batch_id: None,
                 },
-                !config.entity_type.is_person(),
-                &run_at,
             )?;
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
