@@ -1,0 +1,379 @@
+# Fire-and-forget coding agent: one dispatch, one task, one pull request.
+#
+#   gh workflow run agent-task.yml -f prompt="…"     (or `agent "…"`, scripts/agent.sh)
+#
+# Design and the reasoning behind every departure from a stock
+# claude-code-action workflow: docs/agent-fleet.md. The three properties that
+# matter, each enforced by the job split rather than by the prompt:
+#
+#   1. The model's job holds no GitHub App credential and no write scope beyond
+#      `contents: write` on the workflow token. That token cannot push a change
+#      to `.github/workflows/**` (GitHub refuses it without the `workflows`
+#      permission, which GITHUB_TOKEN cannot be granted), and branch protection
+#      keeps it off `main`.
+#   2. Checkpoints go to `agent-wip/<task>`, which has no pull request, so a
+#      checkpoint costs nothing in CI. Only `publish` moves `agent/<task>` and
+#      opens the PR, as the App, so CI runs once per publish and runs like a
+#      human's PR: events caused by GITHUB_TOKEN start no workflows at all.
+#   3. `publish` runs on a fresh runner and never checks out the agent's tree.
+#      The App private key is never on the machine where the model ran Bash, and
+#      the token is minted at publish time, so its one-hour lifetime cannot
+#      expire mid-task.
+#
+# NOT a required check and never should be: a model run is non-deterministic
+# and rate-limited (see the ci-and-supply-chain skill). It only runs on
+# `workflow_dispatch`, so it never reports on a pull request anyway.
+name: agent-task
+
+on:
+  workflow_dispatch:
+    inputs:
+      prompt:
+        description: "Task for the agent (or, with resume, what to do next)"
+        required: true
+        type: string
+      resume:
+        description: "Task id to continue: the run id of the dispatch that started it. Empty starts a new task."
+        required: false
+        default: ""
+        type: string
+      model:
+        description: "Model alias. `default` lets the account choose."
+        required: false
+        default: default
+        type: choice
+        options: [default, opus, sonnet, haiku]
+      max_turns:
+        description: "Agent turn cap"
+        required: false
+        default: 80
+        type: number
+
+# The workflow token's ceiling. Each job narrows it again below.
+permissions:
+  contents: read
+
+concurrency:
+  # One run per TASK, not per run: two resumes of the same task would race on
+  # `agent-wip/<task>`. Queued rather than cancelled, because a cancelled agent
+  # run discards up to an hour of model work.
+  group: agent-task-${{ inputs.resume || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  agent:
+    name: agent
+    runs-on: ubuntu-latest # Phase 3: the ARC scale set (docs/agent-fleet.md §5)
+    timeout-minutes: 100
+    # Restricted to `main` in repository settings; holds CLAUDE_CODE_OAUTH_TOKEN.
+    environment: agent
+    permissions:
+      contents: write # push to agent-wip/<task>; nothing else
+      pull-requests: read # read the PR when resuming
+      # DELIBERATELY NO `id-token: write`. `er-ci-tf-plan` trusts any ref of
+      # this repository (infra/terraform/envs/core/ci-terraform.tf), so a job
+      # that can mint an OIDC token can read Terraform state, and state holds
+      # sensitive values in cleartext. The sccache read role is not worth that;
+      # the rust-cache restore below supplies the warm dependency tree instead.
+    outputs:
+      task_id: ${{ steps.ids.outputs.task_id }}
+      base: ${{ steps.ids.outputs.base }}
+      outcome: ${{ steps.claude.outcome }}
+      result: ${{ steps.claude.outputs.structured_output }}
+    env:
+      # Must match rust.yml's `lint` job EXACTLY. rust-cache keys on every
+      # CARGO*/RUST* variable, so one differing flag misses the warm entry
+      # `lint` writes on `main` and the agent waits out a cold duckdb build.
+      # SCCACHE_BUCKET is left unset: with no AWS credential sccache falls back
+      # to its local disk cache, which is all a single job can use anyway.
+      CARGO_INCREMENTAL: "0"
+      RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
+      RUSTC_WRAPPER: sccache
+    steps:
+      - name: Resolve task id and branches
+        id: ids
+        env:
+          RESUME: ${{ inputs.resume }}
+          RUN_ID: ${{ github.run_id }}
+          BASE: ${{ github.event.repository.default_branch }}
+        run: |
+          # Every value below ends up in a git ref and in the prompt, so it is
+          # validated here and only the validated copy is used downstream.
+          if [ -n "$RESUME" ]; then
+            if ! printf '%s' "$RESUME" | grep -Eq '^[0-9]{1,20}$'; then
+              echo "::error::resume must be the numeric run id that started the task, got '$RESUME'"
+              exit 1
+            fi
+            task_id="$RESUME"
+            checkout_ref="refs/heads/agent-wip/$RESUME"
+          else
+            task_id="$RUN_ID"
+            checkout_ref="refs/heads/$BASE"
+          fi
+          {
+            echo "task_id=$task_id"
+            echo "wip=agent-wip/$task_id"
+            echo "base=$BASE"
+            echo "checkout_ref=$checkout_ref"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.ids.outputs.checkout_ref }}
+          fetch-depth: 0
+
+      - name: Create or track the checkpoint branch
+        id: branch
+        env:
+          WIP: ${{ steps.ids.outputs.wip }}
+        run: |
+          git checkout -B "$WIP"
+          # Creating the ref up front gives the agent an upstream, so a bare
+          # `git push` checkpoints, and makes a resume of a run that died
+          # before its first commit find the branch rather than fail checkout.
+          git push -u origin "HEAD:refs/heads/$WIP"
+
+      # --- toolchain: the prelude of .github/workflows/shared/rust-gate.md,
+      # minus the AWS role (see `permissions:` above). Keep the two in step.
+      - name: Install stable toolchain
+        working-directory: rust
+        run: rustup update stable --no-self-update && rustup default stable && rustup component add rustfmt clippy
+      - name: Install mold
+        timeout-minutes: 13
+        run: |
+          for i in 1 2 3; do
+            if timeout 120 sudo apt-get update && timeout 120 sudo apt-get install -y mold; then
+              exit 0
+            fi
+            echo "mold install attempt $i failed or timed out; retrying"
+            sleep 5
+          done
+          exit 1
+      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: rust
+          shared-key: rust
+          prefix-key: "v1-rust"
+          key: ${{ hashFiles('rust/Cargo.toml') }}
+          # `lint` on `main` is the single writer of this key; an agent must not
+          # be able to evict the entry every PR depends on.
+          save-if: false
+      - uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68 # v2.88.1
+        with:
+          tool: cargo-deny
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_wrapper: false
+
+      - name: Run Claude
+        id: claude
+        # Below the job's timeout so the checkpoint step still gets to run.
+        timeout-minutes: 85
+        uses: anthropics/claude-code-action@e4a6faad497d33dbc7144135c75e41f82f0bf6c0 # v1.0.255
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # The workflow token, explicitly. Left empty, the action would
+          # exchange an OIDC token for its own App's token, which needs
+          # `id-token: write` (refused above) and would push as an identity
+          # whose events DO start workflows, on every checkpoint.
+          github_token: ${{ github.token }}
+          # Agent mode: a `prompt` makes the action run it directly. The prompt
+          # is passed to the action as an env var and written to a file; it is
+          # never interpolated into a shell, so the task text is safe here.
+          prompt: |
+            You are an autonomous coding agent working in this repository with no
+            human available until review. Solve the task below completely, then stop.
+
+            <task>
+            ${{ inputs.prompt }}
+            </task>
+
+            ${{ inputs.resume != '' && format('This is a RESUMED task. Before anything else, read `git log {0}..HEAD` and the pull request whose head is `agent/{1}` (`gh pr list --head agent/{1} --state all`, then `gh pr view`) to see what is already done and what review asked for, then continue from there.', steps.ids.outputs.base, steps.ids.outputs.task_id) || '' }}
+
+            Task id: ${{ steps.ids.outputs.task_id }}
+            Working branch: ${{ steps.ids.outputs.wip }} (based on ${{ steps.ids.outputs.base }})
+
+            How to work here:
+            - Read CLAUDE.md first and load the skill its table names for what you are
+              doing. Those rules override general habits; in particular, schema and SQL
+              changes go through entities/, generated files are regenerated and never
+              hand-edited, and `cargo` runs from rust/, not the repository root.
+            - Commit and `git push` after every meaningful step. This machine can be
+              reclaimed without warning; anything not pushed is lost.
+            - Verify before finishing, using the cheap half of the gate described in
+              .github/workflows/shared/rust-gate.md for Rust changes (fmt, clippy with
+              -D warnings, cargo deny, `er-entity verify`, `scripts/skills-check.sh
+              check`). Do NOT run `make check`, `cargo test --workspace` or `make
+              check-e2e` here: the pull request's CI runs them, and this runner lacks
+              the disk for them. For frontend changes run lint, types and the unit tier
+              (see the frontend-testing skill); for Terraform, `terraform fmt -check
+              -recursive` and `init -backend=false && validate` in the stack you changed.
+            - Do not open, edit or comment on pull requests; a later job publishes your
+              branch. Do not edit .github/workflows/: the push will be refused.
+            - Never use AWS, kubectl or helm against real infrastructure, and never
+              commit secrets.
+
+            When you are done, or cannot make further progress, answer with the
+            structured result: `status` is `complete` only if the task is done and
+            verified; `title` is a conventional-commit style PR title; `body` is the
+            PR description in Markdown: what changed, why, how you verified it, and
+            anything unresolved or that a reviewer should look at first.
+          claude_args: >-
+            --max-turns ${{ inputs.max_turns }}
+            ${{ inputs.model != 'default' && format('--model {0}', inputs.model) || '' }}
+            --allowedTools "Bash,Read,Edit,Write,Glob,Grep,TodoWrite,Task,Skill"
+            --json-schema '{"type":"object","additionalProperties":false,"required":["status","title","body"],"properties":{"status":{"type":"string","enum":["complete","partial","blocked"]},"title":{"type":"string","maxLength":120},"body":{"type":"string","maxLength":60000}}}'
+
+      - name: Checkpoint whatever is left
+        # Runs on failure, turn exhaustion and step timeout. It cannot run on a
+        # hard node loss (spot reclaim), which is why the prompt asks for a push
+        # after every step rather than relying on this.
+        if: always() && steps.branch.outcome == 'success'
+        env:
+          WIP: ${{ steps.ids.outputs.wip }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          git add -A
+          if ! git diff --cached --quiet; then
+            git -c user.name="github-actions[bot]" \
+                -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+                commit -m "wip: agent checkpoint (run $RUN_ID)"
+          fi
+          git push origin "HEAD:refs/heads/$WIP"
+
+      - name: Summary
+        if: always() && steps.ids.outputs.task_id != ''
+        env:
+          TASK_ID: ${{ steps.ids.outputs.task_id }}
+          WIP: ${{ steps.ids.outputs.wip }}
+          OUTCOME: ${{ steps.claude.outcome }}
+          RESULT: ${{ steps.claude.outputs.structured_output }}
+        run: |
+          status=none
+          if [ -n "$RESULT" ]; then
+            status=$(printf '%s' "$RESULT" | jq -r '.status // "none"' 2>/dev/null || echo unparseable)
+          fi
+          {
+            echo "### Agent task \`$TASK_ID\`"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Agent step | \`$OUTCOME\` |"
+            echo "| Reported status | \`$status\` |"
+            echo "| Checkpoint branch | \`$WIP\` |"
+            echo "| Resume with | \`agent-resume $TASK_ID\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  publish:
+    name: publish
+    needs: agent
+    # `always()` so a failed, exhausted or timed-out agent still yields a draft
+    # PR of whatever it pushed. Skipped only when the agent never got as far as
+    # creating its branch.
+    if: always() && needs.agent.outputs.task_id != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Restricted to `main`; holds AGENT_APP_KEY and AGENT_APP_CLIENT_ID. A
+    # separate environment from `agent` so the key is never offered to the job
+    # that runs the model.
+    environment: agent-publish
+    permissions: {} # everything below uses the App token, not GITHUB_TOKEN
+    steps:
+      - name: Mint the App token
+        id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.AGENT_APP_CLIENT_ID }}
+          private-key: ${{ secrets.AGENT_APP_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Move agent/<task> and open or update the PR
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          REPO: ${{ github.repository }}
+          TASK_ID: ${{ needs.agent.outputs.task_id }}
+          BASE: ${{ needs.agent.outputs.base }}
+          OUTCOME: ${{ needs.agent.outputs.outcome }}
+          RESULT: ${{ needs.agent.outputs.result }}
+          TASK: ${{ inputs.prompt }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          # Defence in depth: the agent job validated this, but this job holds
+          # the App token and re-checks anything that reaches a ref name.
+          printf '%s' "$TASK_ID" | grep -Eq '^[0-9]{1,20}$'
+          head="agent/$TASK_ID"
+
+          if ! sha=$(gh api "repos/$REPO/git/ref/heads/agent-wip/$TASK_ID" --jq .object.sha 2>/dev/null); then
+            echo "No agent-wip/$TASK_ID branch (the agent failed before creating it, or resume named an unknown task); nothing to publish." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          ahead=$(gh api "repos/$REPO/compare/$BASE...$sha" --jq .ahead_by)
+          if [ "$ahead" -eq 0 ]; then
+            echo "The agent pushed nothing beyond $BASE; no pull request." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # Fast-forward only. A resume continues from agent-wip/<task>, which
+          # always descends from what was last published; anything else is a
+          # rewritten history that a reviewer should see rather than have
+          # silently force-pushed over the PR they are reading.
+          if gh api "repos/$REPO/git/ref/heads/$head" >/dev/null 2>&1; then
+            gh api -X PATCH "repos/$REPO/git/refs/heads/$head" -f sha="$sha" -F force=false >/dev/null
+          else
+            gh api -X POST "repos/$REPO/git/refs" -f ref="refs/heads/$head" -f sha="$sha" >/dev/null
+          fi
+
+          # The agent's structured result is data, read with jq and passed on
+          # through files and arguments, never evaluated.
+          field() {
+            [ -n "$RESULT" ] || return 0
+            printf '%s' "$RESULT" | jq -r --arg k "$1" '.[$k] // empty' 2>/dev/null || true
+          }
+          status=$(field status)
+          [ -n "$status" ] || status=none
+          title=$(field title)
+          [ -n "$title" ] || title="[agent] task $TASK_ID (no summary returned)"
+          title=$(printf '%s' "$title" | head -n1 | cut -c1-120)
+          draft=true
+          if [ "$OUTCOME" = success ] && [ "$status" = complete ]; then draft=false; fi
+
+          body_file=$(mktemp)
+          {
+            field body
+            echo
+            echo "---"
+            echo "**Agent task \`$TASK_ID\`** · agent step \`$OUTCOME\` · reported status \`$status\` · [run log]($RUN_URL)"
+            echo
+            echo "Continue it with \`agent-resume $TASK_ID \"…\"\` (scripts/agent.sh)."
+            echo
+            echo "<details><summary>Task as dispatched</summary>"
+            echo
+            echo '````text'
+            printf '%s\n' "$TASK"
+            echo '````'
+            echo "</details>"
+          } > "$body_file"
+
+          number=$(gh api "repos/$REPO/pulls?head=${REPO%%/*}:$head&state=open" --jq '.[0].number // empty')
+          if [ -z "$number" ]; then
+            url=$(gh api -X POST "repos/$REPO/pulls" \
+              -f title="$title" -f head="$head" -f base="$BASE" \
+              -F draft="$draft" -F body=@"$body_file" --jq .html_url)
+          else
+            url=$(gh api -X PATCH "repos/$REPO/pulls/$number" \
+              -f title="$title" -F body=@"$body_file" --jq .html_url)
+            if [ "$draft" = false ]; then
+              # Draft -> ready has no REST endpoint; it is a GraphQL mutation.
+              node_id=$(gh api "repos/$REPO/pulls/$number" --jq .node_id)
+              gh api graphql -f query='mutation($id:ID!){markPullRequestReadyForReview(input:{pullRequestId:$id}){clientMutationId}}' \
+                -f id="$node_id" >/dev/null ||
+                echo "::warning::could not mark #$number ready for review; it stays a draft"
+            fi
+          fi
+          echo "Pull request: $url (draft: $draft)" >> "$GITHUB_STEP_SUMMARY"

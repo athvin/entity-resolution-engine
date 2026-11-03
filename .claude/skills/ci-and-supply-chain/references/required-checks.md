@@ -42,6 +42,13 @@ uninterpolated name shown here, so the per-leg contexts never report and
 a PR that skips the tier blocks forever. Require a non-matrix aggregator
 job instead — `terraform plan` is the worked example.
 
+### `agent-task.yml`
+
+| Job | Status-check context | Timeout | Condition |
+|---|---|---|---|
+| `agent` | agent | 100 | `always` |
+| `publish` | publish | 10 | `always() && needs.agent.outputs.task_id != ''` |
+
 ### `drift.yml`
 
 | Job | Status-check context | Timeout | Condition |

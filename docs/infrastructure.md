@@ -660,7 +660,9 @@ The live tracker with acceptance criteria is [plan-to-aws.md](plan-to-aws.md); t
 
 **Phase 4 — Hardening and the audit run-up.** The IRSA credential chain (§9.2) — the SES API port that was to retire the SMTP key is **done**, and the key was never created (§9.3) — per-tenant scoped ServiceAccounts (§6.4), `ER_PROFILE_*` as span events, dashboards for the [backend-design.md](backend-design.md) §14 metric list, alerting, automated snapshot sharing, GuardDuty in prod, and the point-in-time SOC 2 artifacts (policies, risk assessment, subprocessor inventory including the Anthropic flow, vendor assessments, break-glass procedure, a restore test with its record — §8.6).
 
-*A follow-up worth noting:* an EKS cluster unlocks the GitHub Actions Runner Controller, which resolves a recorded blocker — [benchmarks/scales.yaml](../benchmarks/scales.yaml) asks for `ubuntu-latest-8-cores` and `ubuntu-latest-16-cores` at the `100k` and `1m` scales, neither available today. A `runner-l` node serves them natively.
+*A follow-up worth noting:* an EKS cluster unlocks the GitHub Actions Runner Controller, which resolves a recorded blocker — [benchmarks/scales.yaml](../benchmarks/scales.yaml) asks for `ubuntu-latest-8-cores` and `ubuntu-latest-16-cores` at the `100k` and `1m` scales, neither available today. A `runner-l` node serves them natively. The
+dispatched coding agent's Phase 3 ([agent-fleet.md](agent-fleet.md) §5) is the
+other consumer, and it carries the same vCPU-quota prerequisite.
 
 ## 16. Cost
 
