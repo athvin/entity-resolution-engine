@@ -2683,6 +2683,219 @@ const server = http.createServer((req, res) => {
           .slice(0, largest),
       });
     }
+    // The profile: column shapes, deterministic findings, and what each column
+    // would cost as a blocking key.
+    //
+    // Every field below is one `read::profile` actually sends, and the column
+    // objects carry exactly the 26 the statement projects — NOT the full entity
+    // row, which also has id/profile_run_id/created_at/updated_at that the read
+    // does not select. Getting that wrong is the whole bug class this mock has
+    // caused seven times: a shape the frontend believes in and the server never
+    // sends.
+    //
+    // One thing this mock CANNOT represent: the five value-bearing fields are
+    // gated by ROLE upstream, and the mock sees an API key rather than a role.
+    // So it serves the steward view, with values present — and a Playwright
+    // assertion that a viewer sees them redacted would be a false green against
+    // this file. The redaction is covered where it can be covered honestly: a
+    // component test that passes the nulled shape directly
+    // (`tests/component/profile-redaction.test.tsx`).
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/profile$/.exec(path)) &&
+      req.method === "GET"
+    ) {
+      const subject = url.searchParams.get("subject") ?? "standardized";
+      const tier = Number(url.searchParams.get("tier") ?? 1);
+      // A corpus nobody has profiled. Not a 404 and not an error — the dataset
+      // exists and the question is fair, so the answer is "not yet" and the UI
+      // renders the run affordance.
+      if (match[1] === "fresh-dev") {
+        return send(res, 200, { profiled: false, subject, tier });
+      }
+      return send(res, 200, {
+        profiled: true,
+        profile_run_id: "pr_01JMOCK0000000000000000001",
+        subject,
+        source_system: url.searchParams.get("source") ?? "",
+        tier,
+        data_snapshot: 42,
+        corpus_digest: "sha256:9f1c2d",
+        row_count: 800,
+        column_count: 3,
+        ingest_batch_id: null,
+        config_hash: "cfg_7a21",
+        model_version: null,
+        sampled: false,
+        sample_proportion: null,
+        sample_seed: null,
+        duration_ms: 1840,
+        captured_at: "2026-11-02T18:04:11",
+        columns: [
+          {
+            column_name: "email",
+            row_count: 800,
+            total_row_count: 800,
+            non_null_count: 736,
+            blank_count: 12,
+            distinct_approx: 721,
+            distinct_exact: 724,
+            distinct_normalized: 719,
+            len_min: 9,
+            len_max: 34,
+            len_avg: 18.7,
+            len_p50: 18,
+            len_p95: 28,
+            lex_min: "aaron@example.com",
+            lex_max: "zoe@example.net",
+            num_min: null,
+            num_max: null,
+            num_avg: null,
+            num_std: null,
+            cast_bigint: 0,
+            cast_double: 0,
+            cast_date: 0,
+            cast_timestamp: 0,
+            cast_boolean: 0,
+            entropy_bits: 9.4,
+            top_values: [
+              { value: "sam@example.com", count: 6, share: 0.0082, rank: 1 },
+              { value: "test@test.com", count: 4, share: 0.0054, rank: 2 },
+            ],
+          },
+          {
+            // A column whose top value dominates: the P003 shape, and the one
+            // that destroys a blocking key.
+            column_name: "postcode",
+            row_count: 800,
+            total_row_count: 800,
+            non_null_count: 800,
+            blank_count: 0,
+            distinct_approx: 96,
+            distinct_exact: 97,
+            distinct_normalized: 97,
+            len_min: 5,
+            len_max: 5,
+            len_avg: 5,
+            len_p50: 5,
+            len_p95: 5,
+            lex_min: "01002",
+            lex_max: "99501",
+            num_min: 1002,
+            num_max: 99501,
+            num_avg: 48213.5,
+            num_std: 28104.2,
+            cast_bigint: 800,
+            cast_double: 800,
+            cast_date: 0,
+            cast_timestamp: 0,
+            cast_boolean: 0,
+            entropy_bits: 4.1,
+            top_values: [{ value: "94103", count: 248, share: 0.31, rank: 1 }],
+          },
+          {
+            // Almost entirely empty. The cheapest blocking key on this corpus
+            // and the worst one, which is why the table shows both numbers.
+            column_name: "middle_name",
+            row_count: 800,
+            total_row_count: 800,
+            non_null_count: 24,
+            blank_count: 3,
+            distinct_approx: 21,
+            distinct_exact: 21,
+            distinct_normalized: 20,
+            len_min: 3,
+            len_max: 9,
+            len_avg: 5.1,
+            len_p50: 5,
+            len_p95: 8,
+            lex_min: "Ann",
+            lex_max: "Wilhelm",
+            num_min: null,
+            num_max: null,
+            num_avg: null,
+            num_std: null,
+            cast_bigint: 0,
+            cast_double: 0,
+            cast_date: 0,
+            cast_timestamp: 0,
+            cast_boolean: 0,
+            entropy_bits: 4.3,
+            top_values: [{ value: "Ann", count: 3, share: 0.125, rank: 1 }],
+          },
+        ],
+        findings: [
+          {
+            code: "P002",
+            severity: "warning",
+            column_name: "middle_name",
+            message:
+              "`middle_name` is 97% empty, so a blocking rule keyed on it would discard 99.9% of pairs before scoring",
+            detail: { null_rate: 0.97, pair_loss_from_nulls: 0.999 },
+          },
+          {
+            code: "P003",
+            severity: "warning",
+            column_name: "postcode",
+            message:
+              "`postcode` has one value covering 31% of rows (248 of 800), which alone would produce 30,628 comparisons",
+            detail: { mode_share: 0.31, mode_count: 248 },
+          },
+          {
+            code: "P004",
+            severity: "error",
+            column_name: "email",
+            message:
+              "`email` contains 4 placeholder values (test@test.com), which match each other",
+            detail: { sentinel_count: 4 },
+          },
+          {
+            code: "P010",
+            severity: "info",
+            column_name: "email",
+            message:
+              "`email` is the most selective usable blocking key: 1,203 pairs, 99.0% of comparisons eliminated, 8% of pairs unreachable to NULLs",
+            detail: { key: ["email"], expected_pairs: 1203 },
+          },
+        ],
+        // Empty at tier 1: that tier measures no keys, and an empty array is
+        // what "measured nothing" looks like rather than an absent field.
+        candidate_keys:
+          tier >= 2
+            ? [
+                {
+                  key_columns: ["email"],
+                  row_count: 800,
+                  covered_rows: 736,
+                  distinct_values: 724,
+                  expected_pairs: 1203,
+                  largest_block_pairs: 15,
+                  largest_block_rows: 6,
+                  entropy_bits: 9.4,
+                  pair_loss_from_nulls: 0.153,
+                },
+                {
+                  key_columns: ["postcode"],
+                  row_count: 800,
+                  covered_rows: 800,
+                  distinct_values: 97,
+                  expected_pairs: 34210,
+                  largest_block_pairs: 30628,
+                  largest_block_rows: 248,
+                  entropy_bits: 4.1,
+                  pair_loss_from_nulls: 0,
+                },
+              ]
+            : [],
+      });
+    }
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/profile$/.exec(path)) &&
+      req.method === "POST"
+    ) {
+      // 202 and a job id: the work has not happened yet, and the caller follows
+      // it through the jobs read like every other queued kind.
+      return send(res, 202, { job_id: "job_01JMOCKPROFILE000000000001" });
+    }
     if (
       (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/segments$/.exec(path)) &&
       req.method === "GET"

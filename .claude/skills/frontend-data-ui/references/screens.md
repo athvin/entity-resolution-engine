@@ -62,6 +62,7 @@ below `lg`.
 - `/[org]/[ds]/duplicates`
 - `/[org]/[ds]/insights`
 - `/[org]/[ds]/labeling`
+- `/[org]/[ds]/profile`
 - `/[org]/[ds]/records`
 - `/[org]/[ds]/reviews`
 - `/[org]/[ds]/runs`

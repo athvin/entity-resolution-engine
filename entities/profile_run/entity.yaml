@@ -7,7 +7,11 @@ key: [id]
 natural_key: [subject, source_system, corpus_digest, tier]
 generate:
   stores: [duckdb]
-  languages: [rust]
+  # typescript: the screen's top-level profile shape mirrors this row,
+  # with three fields renamed and three composed — all declared in the
+  # wire-contract table rather than assumed.
+  languages: [rust, typescript]
+  wire: [json]
 columns:
   - name: id
     type: varchar

@@ -388,7 +388,9 @@ key: [id]
 natural_key: [profile_run_id, key_columns]
 generate:
   stores: [duckdb]
-  languages: [rust]
+  # typescript: the blocking-cost table renders this row as-is.
+  languages: [rust, typescript]
+  wire: [json]
 columns:
   - name: id
     type: varchar
@@ -455,7 +457,13 @@ key: [id]
 natural_key: [profile_run_id, column_name]
 generate:
   stores: [duckdb]
-  languages: [rust]
+  # `languages` gained typescript when the profile screen landed, for the
+  # reason E9b gave `ingest_batch` its binding: the UI mirrors this row
+  # field-for-field (the handler serializes it verbatim), and with no
+  # binding there was nothing for `tests/unit/wire-contract.test.ts` to
+  # check that mirror against. Thirty fields is where drift hides.
+  languages: [rust, typescript]
+  wire: [json]
 columns:
   - name: id
     type: varchar
@@ -2021,7 +2029,9 @@ key: [id]
 natural_key: [profile_run_id, code, column_name]
 generate:
   stores: [duckdb]
-  languages: [rust]
+  # typescript: the findings panel renders a subset of this row.
+  languages: [rust, typescript]
+  wire: [json]
 columns:
   - name: id
     type: varchar
@@ -2071,7 +2081,11 @@ key: [id]
 natural_key: [subject, source_system, corpus_digest, tier]
 generate:
   stores: [duckdb]
-  languages: [rust]
+  # typescript: the screen's top-level profile shape mirrors this row,
+  # with three fields renamed and three composed — all declared in the
+  # wire-contract table rather than assumed.
+  languages: [rust, typescript]
+  wire: [json]
 columns:
   - name: id
     type: varchar

@@ -89,6 +89,23 @@ const EXPLAINED: Record<string, string> = {
   "matching_model.overall": "the evaluation's confusion matrix, computed by label_evaluation",
   "matching_model.by_origin": "the per-origin split, computed by label_evaluation",
   "matching_model.curve": "the threshold curve, computed by label_evaluation",
+  // The profile response. Six names, all one object: `read::profile`
+  // (er-server/src/read.rs) returns a `profile_run` row plus its three joined
+  // child collections, with two columns renamed — so best-match attribution
+  // calls the whole envelope a `profile_run` row with six invented fields. The
+  // same six are declared in `wire-contract.test.ts`'s `profile` pair; both
+  // gates ask the same question of different artifacts, the mock here and the
+  // UI type there.
+  "profile_run.profiled":
+    "the handler's discriminant: false for a corpus nobody has profiled, which carries no run row at all",
+  "profile_run.profile_run_id":
+    "a wire rename of the row's `id`, because `id` is ambiguous at the top level of this response",
+  "profile_run.data_snapshot":
+    "a wire rename of the row's `snapshot`, to distinguish it from the read's own snapshot param",
+  "profile_run.columns": "the joined column_profile rows (checked as their own entity)",
+  "profile_run.findings": "the joined profile_finding rows (checked as their own entity)",
+  "profile_run.candidate_keys":
+    "the joined candidate_key rows, empty at tier 1 (checked as their own entity)",
 };
 
 /** entity name -> declared column names, from the generated-from source of truth. */
