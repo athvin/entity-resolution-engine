@@ -7,7 +7,9 @@ key: [id]
 natural_key: [profile_run_id, key_columns]
 generate:
   stores: [duckdb]
-  languages: [rust]
+  # typescript: the blocking-cost table renders this row as-is.
+  languages: [rust, typescript]
+  wire: [json]
 columns:
   - name: id
     type: varchar

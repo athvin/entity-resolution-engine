@@ -58,6 +58,33 @@ export const queryKeys = {
     ["org", org, "webhook-deliveries", params ?? {}] as const,
   blockingEstimate: (org: string, dataset: string) =>
     [...ds(org, dataset), "blocking-estimate"] as const,
+  // Subject, source and tier are all part of the key: they identify DIFFERENT
+  // profiles of the same dataset, not parameters of one, so caching them
+  // together would serve a golden profile to a request for the raw one.
+  profile: (org: string, dataset: string, subject: string, source: string | null, tier: number) =>
+    [...ds(org, dataset), "profile", subject, source ?? "", tier] as const,
+  /**
+   * The prefix every profile of one dataset shares — for invalidating after a
+   * profile job finishes.
+   *
+   * A prefix rather than the dataset subtree: a profile job writes the three
+   * profile relations and nothing else, so invalidating `["org", org, "ds", ds]`
+   * would refetch metrics, runs, records and reviews to pick up a change none
+   * of them saw.
+   */
+  profilesAll: (org: string, dataset: string) => [...ds(org, dataset), "profile"] as const,
+  /**
+   * Delivery receipts as the profile screen reads them — which sources have
+   * actually delivered, so the "as delivered" switcher offers only corpora that
+   * exist.
+   *
+   * Dataset-scoped, deliberately, even though `sources-content.tsx` keys the
+   * same upstream read under `["org", org, "receipts"]`. Receipts belong to a
+   * dataset; two datasets under one org share that org-level key and would
+   * serve each other's deliveries.
+   */
+  profileSources: (org: string, dataset: string) =>
+    [...ds(org, dataset), "profile-sources"] as const,
   configSegments: (org: string, dataset: string) =>
     [...ds(org, dataset), "config-segments"] as const,
   aiSettings: (org: string) => ["org", org, "ai-settings"] as const,

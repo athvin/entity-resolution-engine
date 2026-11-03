@@ -149,6 +149,17 @@ const SCREENS: {
     },
   },
   {
+    // Listed in the change that adds it, per the models rule above: a screen
+    // absent from this array is silently unchecked, which is indistinguishable
+    // from a screen that passes. This one carries a tablist and an expandable
+    // table — both ARIA state axe can actually arbitrate.
+    name: "profile",
+    path: `/${ORG}/${DS}/profile`,
+    ready: async (page) => {
+      await expect(page.getByTestId("column-table")).toBeVisible();
+    },
+  },
+  {
     // Same rule as the models page above: listed in the change that adds it.
     // This one has the most form controls of any settings screen — a checkbox
     // per catalogued event and two filter selects — so it is the one most

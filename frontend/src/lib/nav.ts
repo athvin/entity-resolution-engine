@@ -5,6 +5,7 @@ import {
   Inbox,
   LayoutDashboard,
   Megaphone,
+  Microscope,
   Play,
   Settings,
   Sparkles,
@@ -79,6 +80,18 @@ export const NAV_ITEMS: NavItem[] = [
     label: "Insights",
     icon: LineChart,
     path: (org, ds) => `/${org}/${ds}/insights`,
+    enabled: true,
+  },
+  {
+    // Beside Insights rather than under Sources: Insights is how the resolution
+    // has been trending, Profile is what the data itself looks like, and both
+    // are questions about the corpus as a whole. Filed under a single source it
+    // would be invisible for the standardised and golden corpora, which have no
+    // source to sit under.
+    id: "profile",
+    label: "Profile",
+    icon: Microscope,
+    path: (org, ds) => `/${org}/${ds}/profile`,
     enabled: true,
   },
   {

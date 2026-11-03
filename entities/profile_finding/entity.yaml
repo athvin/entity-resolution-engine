@@ -7,7 +7,9 @@ key: [id]
 natural_key: [profile_run_id, code, column_name]
 generate:
   stores: [duckdb]
-  languages: [rust]
+  # typescript: the findings panel renders a subset of this row.
+  languages: [rust, typescript]
+  wire: [json]
 columns:
   - name: id
     type: varchar

@@ -50,6 +50,10 @@ import type { GoldenLineage } from "@/lib/entities/bindings/GoldenLineage";
 import type { IngestBatch } from "@/lib/entities/bindings/IngestBatch";
 import type { Job } from "@/lib/entities/bindings/Job";
 import type { MetricSnapshot } from "@/lib/entities/bindings/MetricSnapshot";
+import type { CandidateKey } from "@/lib/entities/bindings/CandidateKey";
+import type { ColumnProfile } from "@/lib/entities/bindings/ColumnProfile";
+import type { ProfileFinding } from "@/lib/entities/bindings/ProfileFinding";
+import type { ProfileRun } from "@/lib/entities/bindings/ProfileRun";
 import type { MatchingModel } from "@/lib/entities/bindings/MatchingModel";
 import type { Org } from "@/lib/entities/bindings/Org";
 import type { Schedule } from "@/lib/entities/bindings/Schedule";
@@ -58,6 +62,12 @@ import type { WebhookDelivery } from "@/lib/entities/bindings/WebhookDelivery";
 import type { AdminOrgRow } from "@/lib/query/admin";
 import type { ConfigVersionRow } from "@/lib/query/config";
 import type { InsightRow } from "@/lib/query/insights";
+import type {
+  CandidateKeyRow,
+  ColumnProfileRow,
+  ProfileFindingRow,
+  ProfilePresent,
+} from "@/lib/query/profile";
 import type { ReceiptRow } from "@/components/sources/sources-content";
 import type { JobRow, LineageRow } from "@/lib/query/hooks";
 import type { ModelVersionDetail, ModelVersionRow } from "@/lib/query/models";
@@ -159,6 +169,37 @@ const PAIRS = {
   configVersion: true satisfies NoUndeclaredFields<ConfigVersionRow, ConfigVersion>,
   lineage: true satisfies NoUndeclaredFields<LineageRow, GoldenLineage>,
   schedule: true satisfies NoUndeclaredFields<ScheduleRow, Schedule>,
+
+  /**
+   * The column shape — thirty fields, serialized from the generated row
+   * verbatim by `read::profile`, which is exactly the case this gate exists
+   * for: a hand-written mirror of thirty fields is a place drift hides, and
+   * five of them are role-gated, so a field the UI invents would render as a
+   * permanent "—" that looks like a redaction rather than a bug.
+   */
+  columnProfile: true satisfies NoUndeclaredFields<ColumnProfileRow, ColumnProfile>,
+
+  profileFinding: true satisfies NoUndeclaredFields<ProfileFindingRow, ProfileFinding>,
+  candidateKey: true satisfies NoUndeclaredFields<CandidateKeyRow, CandidateKey>,
+
+  /**
+   * The profile envelope. Six names are not `profile_run` fields and each is
+   * declared here with where it comes from:
+   *
+   * - `profiled` — the handler's own discriminant, true on this branch and
+   *   false for a corpus nobody has profiled (which carries no run at all).
+   * - `profile_run_id` and `data_snapshot` — the row's `id` and `snapshot`,
+   *   RENAMED at the handler because both are ambiguous at the top level of a
+   *   response that also carries the read's own snapshot. Listed as composed
+   *   because that is what the gate can express; the rename is the reason.
+   * - `columns`, `findings`, `candidate_keys` — the three joined child
+   *   collections, which are rows of their own entities and checked above.
+   */
+  profile: true satisfies NoUndeclaredFields<
+    ProfilePresent,
+    ProfileRun,
+    "profiled" | "profile_run_id" | "data_snapshot" | "columns" | "findings" | "candidate_keys"
+  >,
 } as const;
 
 describe("wire contract: UI response shapes vs the generated entity bindings", () => {
@@ -170,12 +211,16 @@ describe("wire contract: UI response shapes vs the generated entity bindings", (
     // compiler error must fail here rather than shrink the gate in silence.
     expect(Object.keys(PAIRS).sort()).toEqual([
       "adminOrg",
+      "candidateKey",
+      "columnProfile",
       "configVersion",
       "insight",
       "job",
       "lineage",
       "modelVersion",
       "modelVersionDetail",
+      "profile",
+      "profileFinding",
       "receipt",
       "schedule",
       "webhook",
