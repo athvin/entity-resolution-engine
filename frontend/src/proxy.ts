@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { SESSION_COOKIE } from "@/lib/auth/constants";
 import { MARKETING_PUBLIC_PATHS } from "@/lib/site/routes";
+import { TRACEPARENT_HEADER, resolveTraceparent } from "@/lib/telemetry/traceparent";
 
 // Reachable without a session. The invite and reset flows are how someone
 // GETS one, and in both the token in the URL is the credential — a redirect to
@@ -39,11 +40,30 @@ const PUBLIC_PATHS = [
  * handlers and server layouts (the proxy runtime has no database access).
  * Pages redirect to /login; API routes answer with the JSON envelope.
  * Next 16's `proxy` file convention — the renamed `middleware`.
+ *
+ * It also guarantees every request carries a usable `traceparent`, which is
+ * what lets a click be joined to the SQL it causes. Done HERE because it is
+ * the one place every request passes through — including the public ones that
+ * return early above, since a trace that starts at /login is still a trace.
+ *
+ * The incoming header is validated rather than trusted: erserver rejects
+ * anything that is not W3C version `00` and stores `None` instead, silently,
+ * so forwarding a newer client's `01-` context would break the chain with
+ * nothing logged. See resolveTraceparent.
  */
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  // Established once, then attached to whichever response this returns.
+  const { traceparent } = resolveTraceparent(request.headers.get(TRACEPARENT_HEADER));
+  const traced = () => {
+    const headers = new Headers(request.headers);
+    headers.set(TRACEPARENT_HEADER, traceparent);
+    return NextResponse.next({ request: { headers } });
+  };
+
   if (PUBLIC_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`))) {
-    return NextResponse.next();
+    return traced();
   }
   if (!request.cookies.has(SESSION_COOKIE)) {
     if (pathname.startsWith("/api/")) {
@@ -61,7 +81,7 @@ export function proxy(request: NextRequest) {
     login.search = `?next=${encodeURIComponent(pathname)}`;
     return NextResponse.redirect(login);
   }
-  return NextResponse.next();
+  return traced();
 }
 
 export const config = {

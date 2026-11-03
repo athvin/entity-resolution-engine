@@ -293,13 +293,41 @@ export async function forwardStream(
   };
 }
 
-/** Wrap a route handler body so every BffFailure becomes its envelope response. */
+/**
+ * Wrap a route handler body so every BffFailure becomes its envelope response —
+ * and so the request's trace context is visible to everything it awaits.
+ *
+ * The signature is deliberately unchanged. ~101 handler files call this, and
+ * threading a context argument through all of them (and through every function
+ * between them and `upstreamFetch`) would mean a handler that forgot loses the
+ * trace with no error. `withRequestContext` puts it in an `AsyncLocalStorage`
+ * instead, so no route file changes and a handler that bypasses `respond()`
+ * degrades to a fresh trace rather than to none.
+ *
+ * `headers()` is read HERE rather than in `upstreamFetch` because it is a
+ * Request-time API: calling it opts its caller into dynamic rendering, and
+ * `forward` is reachable from a server component. A route handler is already
+ * dynamic, so reading it at this boundary costs nothing.
+ */
 export async function respond(run: () => Promise<NextResponse>): Promise<NextResponse> {
-  try {
-    return await run();
-  } catch (error) {
-    if (error instanceof BffFailure) return error.response();
-    console.error("bff: unhandled failure", error);
-    return new BffFailure(500, "internal", "internal error").response();
-  }
+  const { headers } = await import("next/headers");
+  const { withRequestContext } = await import("@/lib/telemetry/context");
+  const { TRACEPARENT_HEADER, resolveTraceparent } = await import("@/lib/telemetry/traceparent");
+
+  // The proxy already put a validated context on the request. Resolving again
+  // is not redundant: a handler reachable without passing the proxy matcher
+  // would otherwise have none, and minting here is cheaper than a trace that
+  // silently stops.
+  const incoming = (await headers()).get(TRACEPARENT_HEADER);
+  const context = resolveTraceparent(incoming);
+
+  return withRequestContext(context, async () => {
+    try {
+      return await run();
+    } catch (error) {
+      if (error instanceof BffFailure) return error.response();
+      console.error("bff: unhandled failure", error);
+      return new BffFailure(500, "internal", "internal error").response();
+    }
+  });
 }

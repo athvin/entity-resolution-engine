@@ -1,6 +1,8 @@
 import "server-only";
 
 import { env } from "@/lib/env";
+import { currentRequestContext } from "@/lib/telemetry/context";
+import { TRACEPARENT_HEADER } from "@/lib/telemetry/traceparent";
 
 /**
  * The one place the BFF builds a request to erserver.
@@ -41,12 +43,11 @@ import { env } from "@/lib/env";
  *
  * ## Where trace context attaches, and why not here yet
  *
- * P19 adds `traceparent` and the session id, and they must arrive through
- * `AsyncLocalStorage` (`node:async_hooks`) rather than being read here from
- * `next/headers`. `headers()` is a Request-time API in Next 16: calling it opts
- * its caller into dynamic rendering, and `forward` is reachable from a server
- * component, so reading it inside this function would change rendering
- * behaviour for pages that merely fetch. Verified against
+ * `traceparent` arrives through `AsyncLocalStorage`, established by `respond()`
+ * — NOT read here from `next/headers`. `headers()` is a Request-time API in
+ * Next 16: calling it opts its caller into dynamic rendering, and `forward` is
+ * reachable from a server component, so reading it inside this function would
+ * change rendering behaviour for pages that merely fetch. Verified against
  * `node_modules/next/dist/docs/01-app/03-api-reference/04-functions/headers.md`
  * rather than assumed — this Next major differs from training data and
  * `AGENTS.md` says to read the shipped docs.
@@ -99,6 +100,14 @@ export async function upstreamFetch(call: UpstreamCall): Promise<Response> {
   if (call.searchParams) url.search = call.searchParams.toString();
 
   const headers: Record<string, string> = { authorization: call.authorization };
+
+  // The trace context, if this call is inside a request. `undefined` is a
+  // normal answer — a cron or a handler outside `respond()` has none — and in
+  // that case nothing is attached rather than a fabricated parent being
+  // invented, because that would assert a causal link that does not exist.
+  const context = currentRequestContext();
+  if (context) headers[TRACEPARENT_HEADER] = context.traceparent;
+
   if (call.actingUser !== undefined) headers["x-acting-user"] = call.actingUser;
   if (call.json !== undefined) headers["content-type"] = "application/json";
   if (call.idempotencyKey !== undefined) headers["idempotency-key"] = call.idempotencyKey;
