@@ -116,3 +116,36 @@ export async function upstreamFetch(call: UpstreamCall): Promise<Response> {
     cache: "no-store",
   });
 }
+
+/**
+ * The upstream origin, for the one consumer that must NOT build a request.
+ *
+ * This module owns the knowledge of where erserver is — that is the invariant
+ * `scripts/check-bff-upstream.mjs` enforces, and it still holds: nothing else
+ * names `ERSERVER_BASE_URL`. What this adds is a second, deliberate consumer of
+ * that knowledge, and it is worth reading why it is not a sixth `upstreamFetch`
+ * caller.
+ *
+ * The readiness probe (`src/lib/bff/readiness.ts`, served at `/api/healthz`) is
+ * the opposite of every call above in three ways, each of which `upstreamFetch`
+ * would get wrong:
+ *
+ * - **It carries no credential.** `/readyz` is anonymous by design, and
+ *   `authorization` here is a required parameter precisely so a real call
+ *   cannot forget one. Making it optional to fit a probe would weaken that for
+ *   every caller, to accommodate the one case that must not have it — a bad
+ *   trade, and the reason this is an accessor rather than a new parameter.
+ * - **It needs a deadline.** A probe that hangs is a probe that says nothing;
+ *   `upstreamFetch` has no timeout because a tenant request should not be cut
+ *   off at an arbitrary one.
+ * - **It must not carry trace context.** When P19 attaches `traceparent` to
+ *   every upstream call, a probe running every few seconds would be ~780k
+ *   no-information spans a month — which is why er-server's own `is_probe`
+ *   already drops them at the source.
+ *
+ * So: one module still knows the address, and the probe stays the thing it has
+ * to be.
+ */
+export function upstreamOrigin(): string {
+  return env().ERSERVER_BASE_URL;
+}

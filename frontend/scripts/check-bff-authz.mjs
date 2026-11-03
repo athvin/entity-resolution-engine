@@ -79,6 +79,8 @@ const UNAUTHENTICATED_DIRS = {
   invites: "the token in the URL is the credential; a session does not exist yet",
   "csp-report": "the browser posts these with no credentials, and the pre-login ones matter most",
   widget: "O11's embeddable widget: a signed, record-scoped, expiring token is the credential",
+  healthz:
+    "the container's own readiness probe — a kubelet carries no session, and the body is a boolean plus a reason class",
 };
 
 function walk(dir) {

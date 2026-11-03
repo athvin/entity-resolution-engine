@@ -731,10 +731,17 @@ async fn healthz() -> Json<Value> {
 
 /// Public: readiness (`GET /readyz`) — can this process actually serve?
 ///
-/// Both chart probes point at `/healthz` today, which is a static literal, so a
-/// Postgres outage leaves the pod reporting ready while every `/v1` request
-/// 500s — the pod stays in the Service and keeps taking traffic it cannot
+/// The chart's readiness and startup probes read this; liveness keeps
+/// [`healthz`]. Both used to point at `/healthz`, which is a static literal, so
+/// a Postgres outage left the pod reporting ready while every `/v1` request
+/// 500s — the pod stayed in the Service and kept taking traffic it could not
 /// serve. This is the probe that answers the question readiness is asking.
+///
+/// Readiness carries `failureThreshold: 6` in the chart because of the 2 s
+/// timeout below: dev Aurora sets `min_capacity = 0`, so the first probe after
+/// an idle period times out while the cluster resumes, and at one replica a pod
+/// leaving the Service is a hard 503 at the edge. Thirty seconds of consecutive
+/// failure is the bar, not one.
 ///
 /// Anonymous, like `/healthz`: a probe has no credential. It therefore reports
 /// only a boolean, the backing store and a reason class — never a DSN, a host

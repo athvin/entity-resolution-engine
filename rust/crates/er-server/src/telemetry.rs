@@ -43,10 +43,13 @@ pub const REQUEST_ID_HEADER: &str = "x-request-id";
 
 /// Whether a route is a Kubernetes probe, and therefore not worth a span.
 ///
-/// The chart probes `/healthz` every 5 s for readiness and every 10 s for
-/// liveness, which at one replica is roughly 780k spans a month carrying no
+/// The chart probes `/readyz` every 5 s for readiness and `/healthz` every 10 s
+/// for liveness, which at one replica is roughly 780k spans a month carrying no
 /// information. Dropping them here rather than in the collector means we never
-/// pay to ship them.
+/// pay to ship them. (`/readyz` is also the startup probe, every 3 s, but only
+/// until the pod starts — a bounded burst, not a rate.) Both paths have been in
+/// this match since before the chart read either one, which is why swapping
+/// which probe reads which needed no change here.
 ///
 /// Split out from [`make_span`] so the rule is testable without a request —
 /// `MatchedPath` has no public constructor, so a unit test cannot build the

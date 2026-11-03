@@ -1154,6 +1154,13 @@ const server = http.createServer((req, res) => {
     const path = url.pathname;
 
     if (path === "/healthz") return send(res, 200, { status: "ok" });
+    // The BFF's own readiness probe (/api/healthz) calls this. Answered here so
+    // the mock is not asymmetric with the real router, which has carried both
+    // since before the chart read either one: a mock serving /healthz but not
+    // /readyz would make a readiness check look broken under test for a reason
+    // that has nothing to do with the code under test. The real handler reports
+    // its backing store, so this does too.
+    if (path === "/readyz") return send(res, 200, { ready: true, store: "mock", reason: null });
 
     // ---- scripted Anthropic endpoint (ANTHROPIC_BASE_URL points here) ------
     // Turn 1 (no tool_result yet): a get_metrics tool_use. Turn 2: the answer.

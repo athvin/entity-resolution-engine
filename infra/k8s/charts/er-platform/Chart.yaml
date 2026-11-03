@@ -7,9 +7,9 @@
 apiVersion: v2
 name: er-platform
 description: >-
-  The er control plane and BFF: er-api, er-dispatcher (replicas 1, Recreate,
-  init-gated on the API's /healthz), er-web, External Secrets projections of
-  the §9 Secrets Manager entries, and the shared EFS config/drop roots.
+  The er control plane and BFF: er-api, er-dispatcher (replicas 1, Recreate),
+  er-web, External Secrets projections of the §9 Secrets Manager entries, and
+  the shared EFS config/drop roots.
 type: application
 version: 0.1.0
 # appVersion is deliberately absent: images are pinned per install by tag or
