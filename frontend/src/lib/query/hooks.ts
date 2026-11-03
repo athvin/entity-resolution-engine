@@ -260,7 +260,18 @@ const ACTIVE_TASK_STATES = new Set([
   "canceling",
 ]);
 
-export function useJobTasks(org: string, ds: string, jobId: string) {
+/**
+ * `jobActive` gates the polling, and it has to come from the JOB rather than
+ * from the tasks themselves.
+ *
+ * Keying the interval off task states instead looks equivalent and is not: a
+ * task row only leaves an active state when something moves it, so any backend
+ * that reports a running task without advancing it — the Playwright mock
+ * derives its ledger from the job row and never settles a running one — gets
+ * polled every 1.5s forever, on every job page, for the length of the test
+ * run. That showed up as unrelated specs timing out under the extra load.
+ */
+export function useJobTasks(org: string, ds: string, jobId: string, jobActive: boolean) {
   return useQuery({
     queryKey: queryKeys.jobTasks(org, ds, jobId),
     queryFn: () =>
@@ -268,8 +279,9 @@ export function useJobTasks(org: string, ds: string, jobId: string) {
         (r) => r.tasks,
       ),
     refetchInterval: (query) =>
+      jobActive &&
       (query.state.data ?? []).some((t) => t.live !== false && ACTIVE_TASK_STATES.has(t.state))
-        ? 1_500
+        ? 3_000
         : false,
   });
 }

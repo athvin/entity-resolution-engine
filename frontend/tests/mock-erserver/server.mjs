@@ -114,105 +114,105 @@ const encodeCursor = (snapshot, key) =>
   Buffer.from(JSON.stringify({ s: snapshot, k: key })).toString("base64url");
 const decodeCursor = (cursor) => JSON.parse(Buffer.from(cursor, "base64url").toString());
 
+/**
+ * The compiled graph of each kind, as the real server's `dags` module declares
+ * it (batch-orchestration-design §3.5). Linear here because the real graphs are
+ * linear apart from the teardown edge, and a mock that invented a diamond would
+ * be claiming something about the server that is not true.
+ */
+const MOCK_STAGES = {
+  run_all_full: ["init", "ingest", "standardize", "match", "reconcile", "assemble", "finish"],
+  run_all_incremental: [
+    "init",
+    "ingest",
+    "standardize",
+    "match",
+    "reconcile",
+    "assemble",
+    "finish",
+  ],
+  correct: ["init", "reconcile", "assemble", "finish"],
+  lake_maintain: ["reconcile_schema", "maintain"],
+  lake_migrate: ["reconcile_schema"],
+  profile: ["reconcile_schema", "profile"],
+  train: ["reconcile_schema", "train", "register_model"],
+  apply_corrections: [
+    "drain_actions",
+    "init",
+    "apply_staged",
+    "reconcile",
+    "assemble",
+    "settle_actions",
+    "finish",
+  ],
+  apply_approved: ["stage_approved"],
+};
+
+/** The tasks that run in the dispatcher rather than a pod (§3.6). */
+const MOCK_CONTROL_TASKS = new Set([
+  "register_model",
+  "drain_actions",
+  "settle_actions",
+  "create_catalog",
+  "activate",
+  "stage_approved",
+]);
+
+/**
+ * One job's task ledger, derived from the job's own state.
+ *
+ * Derived rather than stored on purpose: a stored ledger drifts from the job
+ * row it describes, and a mock whose ledger disagreed with its job would be
+ * the fabrication class this tier has been bitten by (see `JobRow.progress`).
+ * A succeeded job has every task succeeded; a failed one fails at its last
+ * stage with the job's own error class; a running one is mid-way.
+ */
+function mockTasks(job, clearedFrom) {
+  const stages = MOCK_STAGES[job.kind];
+  if (!stages) return [];
+  const cleared = clearedFrom?.[job.id];
+  const clearedAt = cleared ? stages.indexOf(cleared) : -1;
+  // Where the run has got to. A cleared job is back at the cleared task.
+  const frontier =
+    clearedAt >= 0
+      ? clearedAt
+      : job.state === "succeeded"
+        ? stages.length
+        : job.state === "failed" || job.state === "canceled"
+          ? stages.length - 1
+          : Math.min(2, stages.length - 1);
+  return stages.map((task, i) => {
+    const settled = i < frontier;
+    const isFrontier = i === frontier;
+    let taskState = "none";
+    if (settled) taskState = "succeeded";
+    else if (isFrontier) {
+      if (job.state === "failed") taskState = "failed";
+      else if (job.state === "canceled") taskState = "canceled";
+      else if (job.state === "succeeded") taskState = "succeeded";
+      else taskState = "running";
+    }
+    return {
+      id: `${job.id}-${task}`,
+      task_id: task,
+      kind: MOCK_CONTROL_TASKS.has(task) ? "control" : "pod",
+      state: taskState,
+      try_number: 1,
+      live: true,
+      archived_reason: null,
+      error_class: taskState === "failed" ? (job.error_class ?? "internal") : null,
+      error_detail: taskState === "failed" ? (job.error_detail ?? null) : null,
+      resource_class: MOCK_CONTROL_TASKS.has(task) ? null : "M",
+      launches: taskState === "none" ? 0 : 1,
+      max_tries: 2,
+      started_at: taskState === "none" ? null : "2026-01-01T00:00:00Z",
+      finished_at: settled ? "2026-01-01T00:00:05Z" : null,
+    };
+  });
+}
+
 /** Deterministic base fixtures — all timestamps fixed for visual snapshots. */
 export function initialState() {
-  /**
-   * The compiled graph of each kind, as the real server's `dags` module declares
-   * it (batch-orchestration-design §3.5). Linear here because the real graphs are
-   * linear apart from the teardown edge, and a mock that invented a diamond would
-   * be claiming something about the server that is not true.
-   */
-  const MOCK_STAGES = {
-    run_all_full: ["init", "ingest", "standardize", "match", "reconcile", "assemble", "finish"],
-    run_all_incremental: [
-      "init",
-      "ingest",
-      "standardize",
-      "match",
-      "reconcile",
-      "assemble",
-      "finish",
-    ],
-    correct: ["init", "reconcile", "assemble", "finish"],
-    lake_maintain: ["reconcile_schema", "maintain"],
-    lake_migrate: ["reconcile_schema"],
-    profile: ["reconcile_schema", "profile"],
-    train: ["reconcile_schema", "train", "register_model"],
-    apply_corrections: [
-      "drain_actions",
-      "init",
-      "apply_staged",
-      "reconcile",
-      "assemble",
-      "settle_actions",
-      "finish",
-    ],
-    apply_approved: ["stage_approved"],
-  };
-
-  /** The tasks that run in the dispatcher rather than a pod (§3.6). */
-  const MOCK_CONTROL_TASKS = new Set([
-    "register_model",
-    "drain_actions",
-    "settle_actions",
-    "create_catalog",
-    "activate",
-    "stage_approved",
-  ]);
-
-  /**
-   * One job's task ledger, derived from the job's own state.
-   *
-   * Derived rather than stored on purpose: a stored ledger drifts from the job
-   * row it describes, and a mock whose ledger disagreed with its job would be
-   * the fabrication class this tier has been bitten by (see `JobRow.progress`).
-   * A succeeded job has every task succeeded; a failed one fails at its last
-   * stage with the job's own error class; a running one is mid-way.
-   */
-  function mockTasks(job, clearedFrom) {
-    const stages = MOCK_STAGES[job.kind];
-    if (!stages) return [];
-    const cleared = clearedFrom?.[job.id];
-    const clearedAt = cleared ? stages.indexOf(cleared) : -1;
-    // Where the run has got to. A cleared job is back at the cleared task.
-    const frontier =
-      clearedAt >= 0
-        ? clearedAt
-        : job.state === "succeeded"
-          ? stages.length
-          : job.state === "failed" || job.state === "canceled"
-            ? stages.length - 1
-            : Math.min(2, stages.length - 1);
-    return stages.map((task, i) => {
-      const settled = i < frontier;
-      const isFrontier = i === frontier;
-      let taskState = "none";
-      if (settled) taskState = "succeeded";
-      else if (isFrontier) {
-        if (job.state === "failed") taskState = "failed";
-        else if (job.state === "canceled") taskState = "canceled";
-        else if (job.state === "succeeded") taskState = "succeeded";
-        else taskState = "running";
-      }
-      return {
-        id: `${job.id}-${task}`,
-        task_id: task,
-        kind: MOCK_CONTROL_TASKS.has(task) ? "control" : "pod",
-        state: taskState,
-        try_number: 1,
-        live: true,
-        archived_reason: null,
-        error_class: taskState === "failed" ? (job.error_class ?? "internal") : null,
-        error_detail: taskState === "failed" ? (job.error_detail ?? null) : null,
-        resource_class: MOCK_CONTROL_TASKS.has(task) ? null : "M",
-        launches: taskState === "none" ? 0 : 1,
-        max_tries: 2,
-        started_at: taskState === "none" ? null : "2026-01-01T00:00:00Z",
-        finished_at: settled ? "2026-01-01T00:00:05Z" : null,
-      };
-    });
-  }
-
   const state = {
     /// Which task a clear started from, per job — so a cleared ledger shows
     /// the cleared suffix pending again rather than silently re-reporting the

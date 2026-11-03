@@ -61,7 +61,7 @@ function mount(tasks: TaskRow[], canRetry: boolean) {
   });
   return render(
     <QueryClientProvider client={client}>
-      <TaskList org="acme" ds="default" jobId="job-1" canRetry={canRetry} />
+      <TaskList org="acme" ds="default" jobId="job-1" canRetry={canRetry} jobActive={false} />
     </QueryClientProvider>,
   );
 }

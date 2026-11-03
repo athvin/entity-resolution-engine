@@ -223,7 +223,13 @@ export function JobDetail({ org, jobId }: { org: string; jobId: string }) {
        * ledger records it. The Stages card above reads `job.progress`, which
        * has no producer — this is the surface that does, so it sits directly
        * under it rather than below the failure card. */}
-      <TaskList org={org} ds={ds} jobId={jobId} canRetry={isSteward} />
+      <TaskList
+        org={org}
+        ds={ds}
+        jobId={jobId}
+        canRetry={isSteward}
+        jobActive={ACTIVE.has(data.state)}
+      />
 
       {data.state === "succeeded" && RESOLVING_KINDS.has(data.kind) && (
         /* The one flourish on this surface, and it is affordable because the

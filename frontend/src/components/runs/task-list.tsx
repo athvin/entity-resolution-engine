@@ -41,14 +41,17 @@ export function TaskList({
   ds,
   jobId,
   canRetry,
+  jobActive,
 }: {
   org: string;
   ds: string;
   jobId: string;
   /** Steward+; clearing re-runs work, so it is not a viewer's button. */
   canRetry: boolean;
+  /** Whether the JOB can still move — what gates the polling, see the hook. */
+  jobActive: boolean;
 }) {
-  const tasks = useJobTasks(org, ds, jobId);
+  const tasks = useJobTasks(org, ds, jobId, jobActive);
   const clear = useClearTask(org, ds, jobId);
   const [confirming, setConfirming] = useState<string | null>(null);
 
