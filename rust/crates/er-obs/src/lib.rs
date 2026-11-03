@@ -11,8 +11,10 @@
 //! [`init()`] is the one call an entry point makes. The [`mod@init`] module
 //! documents why there is no OTLP exporter in it yet.
 
+pub mod blocking;
 pub mod counters;
 pub mod init;
 pub mod logging;
 
+pub use blocking::spawn_blocking_in_span;
 pub use init::{Guard, Role, init};

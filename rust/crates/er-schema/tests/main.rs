@@ -13,3 +13,4 @@
 mod declared_names;
 mod freeform_sql;
 mod model_registry;
+mod span_boundaries;

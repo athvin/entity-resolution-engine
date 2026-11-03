@@ -5566,7 +5566,7 @@ async fn match_preview(
         .try_into()
         .unwrap_or(50usize);
 
-    match tokio::task::spawn_blocking(move || match_preview_blocking(&env, limit)).await {
+    match er_obs::spawn_blocking_in_span(move || match_preview_blocking(&env, limit)).await {
         Ok(Ok(body)) => Json(body).into_response(),
         Ok(Err(msg)) => detail_err(StatusCode::CONFLICT, msg),
         Err(e) => detail_err(
@@ -5649,7 +5649,8 @@ async fn resolve_record(
     let source = body.source.clone();
     let record = body.record.clone();
 
-    match tokio::task::spawn_blocking(move || resolve_blocking(&env, &source, &record, limit)).await
+    match er_obs::spawn_blocking_in_span(move || resolve_blocking(&env, &source, &record, limit))
+        .await
     {
         Ok(Ok(body)) => Json(body).into_response(),
         Ok(Err(msg)) => detail_err(StatusCode::CONFLICT, msg),
@@ -5766,7 +5767,7 @@ async fn blocking_estimate(
         .unwrap_or(5)
         .min(50);
 
-    match tokio::task::spawn_blocking(move || blocking_estimate_blocking(&env, largest)).await {
+    match er_obs::spawn_blocking_in_span(move || blocking_estimate_blocking(&env, largest)).await {
         Ok(Ok(body)) => Json(body).into_response(),
         Ok(Err(msg)) => detail_err(StatusCode::CONFLICT, msg),
         Err(e) => detail_err(
