@@ -2,14 +2,14 @@
 # `rust/`); the Python/dbt implementation has been removed, so this is the whole
 # backend gate — effectively unfiltered (the frontend keeps its own pnpm gate).
 #
-# Two exceptions: a PR that touches nothing but `.claude/**` (agent/skill prose)
-# and/or `infra/terraform/**` runs none of the compile jobs. Because the required
-# jobs below are REQUIRED status checks, a workflow-level path filter would leave
-# them "pending" forever and block the PR; instead a `detect` job computes
-# whether any file outside those two trees changed and the required jobs gate on
-# it with `if:`. A job skipped by `if:` reports a "skipped" conclusion, which
-# branch protection accepts as satisfied — so the PR stays mergeable with zero
-# compute.
+# Three exceptions: a PR that touches nothing but `.claude/**` (agent/skill
+# prose), `infra/terraform/**`, and/or the `gh aw` agentic-workflow files runs
+# none of the compile jobs. Because the required jobs below are REQUIRED status
+# checks, a workflow-level path filter would leave them "pending" forever and
+# block the PR; instead a `detect` job computes whether any file outside those
+# sets changed and the required jobs gate on it with `if:`. A job skipped by
+# `if:` reports a "skipped" conclusion, which branch protection accepts as
+# satisfied — so the PR stays mergeable with zero compute.
 #
 # Why `infra/terraform/**` is safe to skip, which is not obvious: nothing in the
 # Rust gate reads it. No crate or manifest references it (the two mentions under
@@ -20,6 +20,13 @@
 # That is covered, and by design: the `skills` job below runs the same drift
 # check and is deliberately NOT gated on `detect`, which is the whole reason it
 # exists as a separate job. The terraform gate itself lives in `infra.yml`.
+#
+# The agentic workflows (`.github/workflows/*.md`, the `*.lock.yml` compiled from
+# each, and `shared/`) qualify on the same two grounds: nothing in `make check`
+# reads them, and the drift they CAN cause — `skills-check.sh` derives the
+# agentic-workflow table in `required-checks.md` from those `.md` files — is
+# caught by the ungated `skills` job. Note those are matched per FILE rather than
+# as a directory, because this file and its three siblings live there too.
 #
 # The skip stops there. `docs/**` must still run the gate, because `entities`
 # runs `er-entity verify` (docs/erd.md staleness) and `lint` verifies the
@@ -108,11 +115,12 @@ env:
   SCCACHE_REGION: us-east-2
 
 jobs:
-  # Did anything outside `.claude/**` and `infra/terraform/**` change? The
-  # required compile jobs below gate on this so a skills-only or terraform-only
-  # PR skips them (a skipped required check still satisfies branch protection).
-  # Non-PR events (push to main, nightly) always report `true` — the gate never
-  # self-skips on the branch it protects.
+  # Did anything outside `.claude/**`, `infra/terraform/**` and the agentic
+  # workflow files change? The required compile jobs below gate on this, so a
+  # skills-only, terraform-only or prompt-only PR skips them (a skipped required
+  # check still satisfies branch protection). Non-PR events (push to main,
+  # nightly) always report `true` — the gate never self-skips on the branch it
+  # protects.
   detect:
     name: detect changes
     runs-on: ubuntu-latest
@@ -140,13 +148,14 @@ jobs:
           # seeing — only add something nothing in `make check` reads (the
           # header explains why each qualifies, and why `docs/` does not).
           #
-          # `infra.yml` and `drift.yml` are named FILE BY FILE and not as
-          # `^\.github/workflows/`, which matters: `rust.yml`, `frontend.yml` and
-          # `images.yml` must keep triggering the gates they define, or a change
-          # to a gate would stop reporting on exactly the PR most likely to break
-          # it. The two terraform workflows define no Rust job and cannot affect
-          # the workspace build, and an infra-only PR was paying the full
-          # ~40-minute backend gate — `test` plus the DuckLake e2e — to prove it.
+          # `infra.yml`, `drift.yml` and the `gh aw` agentic set are named FILE
+          # BY FILE and not as `^\.github/workflows/`, which matters: `rust.yml`,
+          # `frontend.yml` and `images.yml` must keep triggering the gates they
+          # define, or a change to a gate would stop reporting on exactly the PR
+          # most likely to break it. The two terraform workflows define no Rust
+          # job and cannot affect the workspace build, and an infra-only PR was
+          # paying the full ~40-minute backend gate — `test` plus the DuckLake
+          # e2e — to prove it.
           #
           # Enumerating rather than exempting the directory and listing
           # exceptions is the FAIL-SAFE direction: a workflow added later runs
@@ -156,10 +165,22 @@ jobs:
           # `grep -c` reads all input (unlike `grep -q`, which closes the pipe
           # early and can SIGPIPE `git diff` under `pipefail` → a flaky false
           # skip); `|| true` absorbs grep's exit-1-on-zero-matches under `set -e`.
+          #
+          # The agentic entries are named or extension-matched, never the whole
+          # directory — the one place this pattern needs care, because `rust.yml`,
+          # `frontend.yml` and `images.yml` live in `.github/workflows/` too and
+          # must keep triggering the gate they define. `^\.github/workflows/`
+          # would be the `paths:`-filter trap in CLAUDE.md wearing a different
+          # hat. So: the `.md` a human edits, the `.lock.yml` `gh aw compile`
+          # emits from it, the `shared/` imports they pull in, and
+          # `agentics-maintenance.yml`, which that compile also generates.
+          # `.github/aw/` is gh-aw's own metadata (the resolved action SHAs).
+          # None of those shapes can capture a hand-written `.yml` workflow, so
+          # they cannot widen the exemption past what is argued for above.
           changed="$(git diff --name-only "$BASE_SHA...$HEAD_SHA")"
           printf 'changed paths:\n%s\n' "$changed"
-          noncode="$(printf '%s\n' "$changed" \
-                      | grep -cvE '^(\.claude/|infra/terraform/|scripts/ci/tf-|\.github/workflows/(infra|drift)\.yml$)' || true)"
+          exempt='^(\.claude/|infra/terraform/|scripts/ci/tf-|\.github/aw/|\.github/workflows/((infra|drift)\.yml$|shared/|agentics-maintenance\.yml$|[A-Za-z0-9._-]+\.md$|[A-Za-z0-9._-]+\.lock\.yml$))'
+          noncode="$(printf '%s\n' "$changed" | grep -cvE "$exempt" || true)"
           if [ "${noncode:-0}" -gt 0 ]; then
             echo "code=true" >> "$GITHUB_OUTPUT"
           else
