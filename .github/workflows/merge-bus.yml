@@ -1,0 +1,540 @@
+# The merge bus — batch the pull requests that are ready, prove the COMBINATION
+# green, then land them.
+#
+# WHY THIS EXISTS. `main`'s branch protection has `strict: false`, so "require
+# branches up to date before merging" is off and a PR may merge on a green it
+# earned against a base that has since moved. With five or six PRs open at once
+# that is not a theoretical hazard: four PRs each green against an older `main`
+# can all merge and leave `main` red, and nothing in the gate notices, because no
+# run ever examined the combination. The bus is the missing run.
+#
+# WHY NOT GITHUB'S MERGE QUEUE. Merge queue is exactly this feature, and it
+# cannot be enabled here: it is offered only for organization-owned repositories
+# — public on any plan, private on Enterprise Cloud. This repository is private
+# and owned by a user account. Probed rather than assumed:
+# `gh api repos/:owner/:repo/rulesets` returns `[]`, and
+# `repository(owner:"athvin", name:"entity-resolution-engine").mergeQueue(branch:"main")`
+# returns `null`. The only route to the native feature is transferring the
+# repository to an organization on GHEC.
+#
+# Nor a self-hosted one. bors-ng — the original, which batches AND bisects — was
+# archived 2024-04-04 and its README now points at GitHub's merge queue.
+# rust-lang/bors and Prow's `tide` are alive and capable, but each is a
+# long-running GitHub App needing a hosted service, a public webhook endpoint and
+# an App private key: MORE standing credential than this file, not less. Each
+# also replaces branch protection as the merge authority, restating the required
+# checks in bot configuration where they can drift from it silently.
+#
+# WHY A PULL REQUEST AND NOT A QUEUE BRANCH. The bus opens an ordinary pull
+# request from its batch branch, and that is what makes it free to integrate:
+# `rust.yml`, `frontend.yml` and `infra.yml` all trigger on bare `pull_request`,
+# so the batch earns every required context with correct `detect` behaviour and
+# NO change to any of them. Wiring the native merge queue would have been more
+# work, not less — `merge_group` is not a `pull_request` event, so all three
+# `detect` jobs would fall through to their fail-safe default (`code=true`,
+# `frontend=true`, "assuming infra changed") and every merge-group build would
+# run every gate at full cost.
+#
+# THIS JOB MUST NEVER BE A REQUIRED STATUS CHECK. A job's `name:` is its
+# branch-protection context, and this one runs only on `workflow_dispatch`, so it
+# can never report on a pull request — requiring it would leave every PR pending
+# forever, the same failure mode a `paths:` filter causes.
+#
+# IT IS THE FIRST HAND-WRITTEN WORKFLOW HERE WITH GITHUB WRITE SCOPES. The other
+# four are `contents: read` plus `id-token: write` for OIDC; `contents: write` and
+# `pull-requests: write` previously appeared only in the gh-aw `safe_outputs`
+# jobs. The bus needs both, because it pushes a branch and merges pull requests,
+# and it adds no repository secret to get them — `GITHUB_TOKEN` is minted per run.
+#
+# It is deliberately NOT an admin, and that is a tightening rather than a
+# compromise: every merge it performs must satisfy the required checks, whereas a
+# human running `gh pr merge --admin` bypasses all of them.
+#
+# ONE-TIME REPOSITORY CONFIGURATION this file depends on, none of it a secret:
+#
+#   gh api -X PUT repos/:owner/:repo/actions/permissions/workflow \
+#     -f default_workflow_permissions=read -F can_approve_pull_request_reviews=true
+#   gh api -X PATCH repos/:owner/:repo/branches/main/protection/required_pull_request_reviews \
+#     -F required_approving_review_count=0
+#   gh label create merge-bus   --description "eligible for the merge bus"
+#   gh label create bus-failed  --description "merge bus batch went red"
+#   gh label create bus-conflict --description "conflicted with its merge-bus batch"
+#   gh variable set MERGE_BUS_MAX_BATCH --body 4
+#
+# The first is required because `GITHUB_TOKEN` cannot open a pull request while
+# "Allow GitHub Actions to create and approve pull requests" is off. The second
+# is what lets the bus merge at all, and it is why `mergeStateStatus == CLEAN`
+# becomes a usable readiness signal (see the select step).
+name: merge bus
+
+on:
+  # Dispatch only, deliberately. The repository's rule is that a gate is trusted
+  # only after it has been observed failing, and a bus on a cron that nobody has
+  # yet watched reject a bad batch would be merging on an untested predicate. Add
+  # `schedule:` once the manual path has been exercised.
+  workflow_dispatch:
+    inputs:
+      max_batch:
+        description: "Maximum PRs on one bus (blank = the MERGE_BUS_MAX_BATCH variable, else 4)"
+        required: false
+        default: ""
+      dry_run:
+        description: "Select and report only — create nothing, merge nothing"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  # ONE bus at a time, and never cancelled. `cancel-in-progress: true` here would
+  # be able to kill a run between its first and last `gh pr merge`, which is the
+  # one window in which the batch is half-landed.
+  group: merge-bus
+  cancel-in-progress: false
+
+jobs:
+  bus:
+    name: merge bus
+    runs-on: ubuntu-latest
+    # Sized for one full gate (~10m wall clock today) plus a wide margin for a
+    # cold `Cargo.lock`-touching batch, which is the case batching helps most and
+    # also the slowest: the PR role holds only `er-ci-sccache-read`, so such a
+    # branch pays a full bundled-DuckDB rebuild on every job until it merges.
+    timeout-minutes: 75
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      # ---------------------------------------------------------------------
+      # 1. Who is riding?
+      # ---------------------------------------------------------------------
+      - id: select
+        name: choose the batch
+        env:
+          MAX_BATCH_INPUT: ${{ inputs.max_batch }}
+          MAX_BATCH_VAR: ${{ vars.MERGE_BUS_MAX_BATCH }}
+        # ELIGIBILITY ASKS GITHUB; IT DOES NOT RESTATE THE REQUIRED SET. With the
+        # review requirement at zero, a PR whose required checks are all
+        # satisfied is reported by GitHub as `mergeStateStatus: CLEAN`, so that
+        # one field IS the verdict. Enumerating the required contexts here
+        # instead would duplicate branch protection into a place it can drift
+        # from — the exact defect `references/required-checks.md` refuses to
+        # commit — and would need an admin-scoped protection read that
+        # `GITHUB_TOKEN` does not have.
+        #
+        # Every rejection prints its reason. A gate that cannot say why it
+        # excluded something is a gate that passes by examining nothing.
+        run: |
+          set -euo pipefail
+
+          limit="${MAX_BATCH_INPUT:-}"
+          [ -n "$limit" ] || limit="${MAX_BATCH_VAR:-}"
+          [ -n "$limit" ] || limit=4
+          case "$limit" in
+            ''|*[!0-9]*) echo "::error::max_batch must be a positive integer, got '$limit'"; exit 1 ;;
+          esac
+          [ "$limit" -ge 1 ] || { echo "::error::max_batch must be at least 1, got '$limit'"; exit 1; }
+          echo "batch limit: $limit"
+
+          # Opt-in by label, oldest first. Ascending PR number makes the queue
+          # predictable and stops a long-waiting PR being starved by newer ones.
+          candidates=()
+          while IFS= read -r n; do
+            [ -n "$n" ] && candidates+=("$n")
+          done < <(gh pr list --state open --base main --label merge-bus \
+                     --limit 100 --json number --jq '.[].number' | sort -n)
+
+          if [ "${#candidates[@]}" -eq 0 ]; then
+            echo "no open PR carries the merge-bus label; nothing to do"
+            echo "members=" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          chosen=()
+          printf '\n%-6s  %-9s  %s\n' "PR" "VERDICT" "REASON"
+          printf -- '------  ---------  ------------------------------------------\n'
+
+          for n in "${candidates[@]}"; do
+            # `gh pr list` reports mergeStateStatus UNKNOWN for a PR whose
+            # mergeability GitHub has not computed, and LISTING DOES NOT TRIGGER
+            # THE COMPUTATION — `gh pr view` does. Measured 2026-11-03: every PR
+            # in a fresh `list` read UNKNOWN, and the same PRs read
+            # DIRTY/BLOCKED through `view`. So the authoritative read is per-PR,
+            # and UNKNOWN is retried rather than believed in either direction.
+            state=""; draft=""; base=""; head=""
+            for _ in 1 2 3 4 5; do
+              IFS='|' read -r state draft base head < <(gh pr view "$n" \
+                --json mergeStateStatus,isDraft,baseRefName,headRefName \
+                --jq '[.mergeStateStatus, (.isDraft|tostring), .baseRefName, .headRefName] | join("|")')
+              [ "$state" = "UNKNOWN" ] || break
+              sleep 5
+            done
+
+            reason=""
+            if [ "$draft" != "false" ]; then
+              reason="draft"
+            elif [ "$base" != "main" ]; then
+              # A stacked PR. Its diff is against its parent, so putting it on a
+              # batch branch cut from `main` would stage its parent's changes
+              # under its name.
+              reason="stacked on '$base', not main"
+            elif [ "${head#merge-bus/}" != "$head" ]; then
+              # Without this the bus batches its own bus PR on the next run.
+              reason="is itself a bus branch"
+            else
+              case "$state" in
+                CLEAN) ;;
+                DIRTY)
+                  # A conflicted PR runs ZERO workflows and reports "no checks
+                  # reported". Any predicate phrased as "nothing is failing"
+                  # reads that as green, so DIRTY is rejected by name.
+                  reason="conflicts with main (runs no CI, so reports no checks)" ;;
+                BLOCKED)
+                  reason="a required check is missing, failing or still pending" ;;
+                UNSTABLE)
+                  # Deliberately conservative. UNSTABLE also covers a PR red only
+                  # on the non-required `semgrep (static analysis)` context, which
+                  # a human may merge. The bus takes only what GitHub calls fully
+                  # clean; widen this with an explicit input rather than by
+                  # loosening the predicate.
+                  reason="a non-required check is red (UNSTABLE)" ;;
+                BEHIND)
+                  reason="behind main and protection demands an update" ;;
+                UNKNOWN)
+                  reason="GitHub would not compute mergeability after 5 attempts" ;;
+                *)
+                  reason="unrecognised mergeStateStatus '$state'" ;;
+              esac
+            fi
+
+            if [ -n "$reason" ]; then
+              printf '%-6s  %-9s  %s\n' "#$n" "skip" "$reason"
+            elif [ "${#chosen[@]}" -ge "$limit" ]; then
+              printf '%-6s  %-9s  %s\n' "#$n" "defer" "ready, but the batch is full at $limit"
+            else
+              chosen+=("$n")
+              printf '%-6s  %-9s  %s\n' "#$n" "RIDE" "clean"
+            fi
+          done
+
+          echo ""
+          if [ "${#chosen[@]}" -eq 0 ]; then
+            echo "no eligible PR this round"
+            echo "members=" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "batch: ${chosen[*]}"
+          echo "members=${chosen[*]}" >>"$GITHUB_OUTPUT"
+
+      # ---------------------------------------------------------------------
+      # 2. Build the combination and put it up for the ordinary gate
+      # ---------------------------------------------------------------------
+      - id: build
+        name: build the batch branch and open the bus PR
+        if: ${{ steps.select.outputs.members != '' && !inputs.dry_run }}
+        env:
+          MEMBERS: ${{ steps.select.outputs.members }}
+          BRANCH: merge-bus/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+
+          # PRE-FLIGHT: IS GITHUB ALLOCATING RUNNERS AT ALL? When the account
+          # hits its Actions minutes or spending limit, every job fails within
+          # seconds having executed NOTHING — `steps: []`, and the log is a
+          # `BlobNotFound`. GitHub Status reads "operational" throughout, so it
+          # looks exactly like a broken diff. Observed on this account
+          # 2026-11-03, repository-wide and sustained for hours.
+          #
+          # A bus PR opened in that state could only ever fail, and would then
+          # accuse the batch of a failure the batch did not cause. So check
+          # before creating anything, and read it from EXECUTION rather than
+          # from conclusions: a starved run and a legitimately failing one are
+          # both `failure`, but only one of them ran a step. Measured on this
+          # repo: starved runs summed to 0 steps, real ones to 5, 5 and 202.
+          #
+          # Several runs rather than one, because a single starved run may just
+          # be a run that lost a race for capacity — only an unbroken streak is
+          # evidence of the account-level block.
+          starved=0; checked=0
+          for rid in $(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?status=completed&per_page=5" \
+                         --jq '.workflow_runs[].id'); do
+            steps="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${rid}/jobs?per_page=100" \
+                       --jq '[.jobs[].steps | length] | add // 0')"
+            checked=$((checked + 1))
+            [ "$steps" -eq 0 ] && starved=$((starved + 1))
+          done
+          if [ "$checked" -gt 0 ] && [ "$starved" -eq "$checked" ]; then
+            echo "::error::None of the last ${checked} completed runs executed a single step. GitHub is not allocating runners for this account — an Actions minutes or spending limit, not a problem with any PR. A bus PR could only fail for that reason, so nothing was created."
+            exit 1
+          fi
+          echo "pre-flight: runners are being allocated (${starved}/${checked} recent runs starved)"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git fetch --no-tags origin main
+          base_sha="$(git rev-parse origin/main)"
+          echo "base: $base_sha"
+          git switch --detach "$base_sha"
+
+          riding=(); ejected=()
+          for n in $MEMBERS; do
+            # `refs/pull/<n>/head` rather than the branch name: it is immune to a
+            # branch rename between selection and now, and it is what the PR
+            # actually proposes.
+            git fetch --no-tags origin "refs/pull/$n/head:refs/remotes/pr/$n"
+            title="$(gh pr view "$n" --json title --jq .title)"
+            if git merge --no-ff -m "merge-bus: #$n $title" "refs/remotes/pr/$n"; then
+              riding+=("$n")
+            else
+              # EJECTING A CONFLICT IS NOT THE SAME DECISION AS STOPPING ON RED.
+              # A conflict is found before any CI is spent and it names the
+              # culprit exactly, so there is nothing to attribute and nothing to
+              # gain by abandoning the other members. Report-and-stop governs CI
+              # failure, where blame genuinely is ambiguous.
+              git merge --abort || true
+              ejected+=("$n")
+              echo "::warning::#$n conflicts with the batch and was ejected"
+              gh pr comment "$n" --body "Ejected from merge-bus batch \`${BRANCH}\` — this branch conflicts with the other PRs in the batch. Rebase on \`main\` and re-add the \`merge-bus\` label." || true
+              gh pr edit "$n" --add-label bus-conflict || echo "::warning::could not add the bus-conflict label to #$n"
+            fi
+          done
+
+          if [ "${#riding[@]}" -eq 0 ]; then
+            echo "::error::every candidate conflicted with the batch; nothing to validate"
+            exit 1
+          fi
+
+          batch_tree="$(git rev-parse "HEAD^{tree}")"
+
+          # NOT `-q`. A quiet push suppresses exactly the line that says it did
+          # not go, and the remote ref is read back below because a push's own
+          # exit code is not proof the remote moved.
+          git push origin "HEAD:refs/heads/${BRANCH}"
+          remote_sha="$(git ls-remote origin "refs/heads/${BRANCH}" | cut -f1)"
+          local_sha="$(git rev-parse HEAD)"
+          if [ "$remote_sha" != "$local_sha" ]; then
+            echo "::error::push did not land — ${BRANCH} is '$remote_sha' on the remote, '$local_sha' locally"
+            exit 1
+          fi
+
+          refs=""; for n in "${riding[@]}"; do refs="${refs} #${n}"; done
+          {
+            echo "Batch of ${#riding[@]}:${refs}"
+            echo ""
+            echo "This PR exists so the ordinary gate runs against the **combination** of those"
+            echo "PRs rather than against each one separately against a base that has since moved."
+            echo "If it goes green the members are squash-merged in order; if it goes red nothing"
+            echo "merges. Opened by \`merge-bus.yml\`, run \`${GITHUB_RUN_ID}\`."
+            if [ "${#ejected[@]}" -gt 0 ]; then
+              echo ""
+              echo "Ejected for conflicting with the batch: ${ejected[*]}"
+            fi
+          } >/tmp/bus-body.md
+
+          # NEVER PREDICT A PR NUMBER. `gh pr create` prints the URL of the PR it
+          # made; the number is read back from that and from nowhere else.
+          # Guessing one here once merged an unrelated PR under `--admin`.
+          url="$(gh pr create --base main --head "${BRANCH}" \
+                   --title "merge bus:${refs}" --body-file /tmp/bus-body.md)"
+          echo "created: $url"
+          bus="${url##*/}"
+          case "$bus" in
+            ''|*[!0-9]*) echo "::error::could not read a PR number out of '$url'"; exit 1 ;;
+          esac
+
+          {
+            echo "bus=$bus"
+            echo "base_sha=$base_sha"
+            echo "batch_tree=$batch_tree"
+            echo "riding=${riding[*]}"
+            echo "branch=${BRANCH}"
+          } >>"$GITHUB_OUTPUT"
+
+      # ---------------------------------------------------------------------
+      # 3. Wait for the combination's verdict
+      # ---------------------------------------------------------------------
+      - id: verdict
+        name: wait for the gate
+        if: ${{ steps.build.outputs.bus != '' }}
+        env:
+          BUS: ${{ steps.build.outputs.bus }}
+        # WAITING FOR `CLEAN` IS WHAT MAKES "NO CHECKS YET" SAFE. A freshly
+        # opened PR has reported nothing, so a predicate phrased as "nothing is
+        # failing" would call it green within seconds of creation. CLEAN is
+        # reachable only once every required context has reported success, so the
+        # wait cannot end early — and an explicit failed conclusion short-circuits
+        # it, so a genuine red does not cost the whole timeout either.
+        run: |
+          set -euo pipefail
+
+          failure_states='FAILURE|TIMED_OUT|CANCELLED|ACTION_REQUIRED|STARTUP_FAILURE|ERROR'
+          deadline=$(( SECONDS + 60 * 60 ))
+          verdict="timeout"; failed=""
+
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            state="$(gh pr view "$BUS" --json mergeStateStatus --jq .mergeStateStatus)"
+            if [ "$state" = "CLEAN" ]; then
+              verdict="green"; break
+            fi
+            failed="$(gh pr view "$BUS" --json statusCheckRollup --jq \
+              "[.statusCheckRollup[]? | select(((.conclusion // .state) // \"\") | test(\"${failure_states}\")) | (.name // .context)] | unique | join(\", \")")"
+            if [ -n "$failed" ]; then
+              verdict="red"; break
+            fi
+            echo "  $(date -u +%H:%M:%S) ${state} — waiting"
+            sleep 30
+          done
+
+          # DISTINGUISH "THE BATCH IS BAD" FROM "NO RUNNER WAS ALLOCATED".
+          # Both present as `failure`, and blaming the batch for the second is
+          # the misattribution the pre-flight above describes — it just arrives
+          # from the other direction, when capacity runs out mid-validation.
+          # Authoritative here because it reads the bus PR's OWN runs.
+          if [ "$verdict" != "green" ]; then
+            head_sha="$(gh pr view "$BUS" --json headRefOid --jq .headRefOid)"
+            executed=0
+            for rid in $(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${head_sha}&per_page=20" \
+                           --jq '.workflow_runs[].id'); do
+              steps="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${rid}/jobs?per_page=100" \
+                         --jq '[.jobs[].steps | length] | add // 0')"
+              executed=$((executed + steps))
+            done
+            echo "steps executed across the bus PR's runs: ${executed}"
+            [ "$executed" -eq 0 ] && verdict="starved"
+          fi
+
+          echo "verdict: $verdict"
+          {
+            echo "verdict=$verdict"
+            echo "failed=$failed"
+          } >>"$GITHUB_OUTPUT"
+
+      # ---------------------------------------------------------------------
+      # 4a. Red, or never concluded: report and stop
+      # ---------------------------------------------------------------------
+      - name: report and stop
+        if: ${{ steps.verdict.outputs.verdict != '' && steps.verdict.outputs.verdict != 'green' }}
+        env:
+          BUS: ${{ steps.build.outputs.bus }}
+          RIDING: ${{ steps.build.outputs.riding }}
+          VERDICT: ${{ steps.verdict.outputs.verdict }}
+          FAILED: ${{ steps.verdict.outputs.failed }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        # The bus PR is left OPEN on purpose. Its branch is the only place the
+        # failing combination exists, so closing it would delete the evidence
+        # before anyone had read the logs.
+        run: |
+          set -euo pipefail
+
+          # `starved` is NOT a verdict about the batch, so it is worded and
+          # labelled differently. Calling it a red batch would send someone
+          # debugging a diff that was never compiled.
+          case "$VERDICT" in
+            red)
+              headline="went **red** on: ${FAILED}"
+              blame="batch" ;;
+            starved)
+              headline="never ran — GitHub allocated no runner for any job (an Actions minutes or spending limit on the account, not a problem with any PR in the batch)"
+              blame="account" ;;
+            *)
+              headline="did not conclude within the hour the bus waits"
+              blame="batch" ;;
+          esac
+
+          if [ "$blame" = "batch" ]; then
+            gh pr edit "$BUS" --add-label bus-failed || echo "::warning::could not label #$BUS"
+          fi
+          gh pr comment "$BUS" --body "The batch ${headline}. Nothing was merged. Left open so the combination stays inspectable — [run log](${RUN_URL})." || true
+
+          # Only tell the members something happened to them when something
+          # did. During a runner outage every PR in the repository is equally
+          # stuck, and a comment on each would be noise about nothing.
+          if [ "$blame" = "batch" ]; then
+            for n in $RIDING; do
+              gh pr comment "$n" --body "Held: the merge-bus batch in #${BUS} ${headline}, so nothing in that batch merged. This PR is untouched — see the [run log](${RUN_URL}). It may or may not be the cause; the batch was not bisected." || true
+            done
+          fi
+
+          echo "::error::batch ${headline}; nothing merged"
+          exit 1
+
+      # ---------------------------------------------------------------------
+      # 4b. Green: land it
+      # ---------------------------------------------------------------------
+      - name: land the batch
+        if: ${{ steps.verdict.outputs.verdict == 'green' }}
+        env:
+          BUS: ${{ steps.build.outputs.bus }}
+          RIDING: ${{ steps.build.outputs.riding }}
+          BASE_SHA: ${{ steps.build.outputs.base_sha }}
+          BATCH_TREE: ${{ steps.build.outputs.batch_tree }}
+          BRANCH: ${{ steps.build.outputs.branch }}
+        run: |
+          set -euo pipefail
+
+          # THE INVARIANT THE WHOLE DESIGN RESTS ON. The green just earned
+          # describes `main@BASE_SHA` plus these members and nothing else. If
+          # `main` moved while the gate ran, that green no longer describes what
+          # landing would produce, and the bus is back to merging a stale pass —
+          # the very thing it exists to prevent.
+          git fetch --no-tags origin main
+          now="$(git rev-parse origin/main)"
+          if [ "$now" != "$BASE_SHA" ]; then
+            echo "::error::main moved from ${BASE_SHA} to ${now} while the batch validated; abandoning"
+            gh pr comment "$BUS" --body "Abandoned: \`main\` moved from \`${BASE_SHA}\` to \`${now}\` while this batch was validating, so its green no longer describes what merging would produce. Nothing was merged. Re-run the bus." || true
+            exit 1
+          fi
+
+          # RETARGET STACKED CHILDREN BEFORE THE PARENT MERGES. Deleting a merged
+          # PR's branch makes GitHub resolve any PR based on it by marking it
+          # MERGED — with a real `mergeCommit` oid — rather than retargeting it.
+          # Observed 2026-11-03 on #438: marked merged, code absent from `main`,
+          # and it could not be reopened, so the only recovery was a new PR.
+          # `gh pr edit --base` fails afterwards ("Cannot change the base branch
+          # of a closed pull request"), so before is the only time this works.
+          for n in $RIDING; do
+            head_ref="$(gh pr view "$n" --json headRefName --jq .headRefName)"
+            while IFS= read -r child; do
+              [ -n "$child" ] || continue
+              echo "retargeting #${child} from '${head_ref}' onto main before #${n} merges"
+              gh pr edit "$child" --base main
+              gh pr comment "$child" --body "Retargeted onto \`main\`: its base branch \`${head_ref}\` (#${n}) is being merged by the merge bus, and deleting that branch would otherwise mark this PR merged without its code reaching \`main\`. Rebase with \`git rebase --onto origin/main <old-base-sha> <branch>\`." || true
+            done < <(gh pr list --state open --base "$head_ref" --json number --jq '.[].number')
+          done
+
+          landed=()
+          for n in $RIDING; do
+            if gh pr merge "$n" --squash --delete-branch; then
+              landed+=("$n")
+              echo "landed #$n"
+            else
+              # A PARTIAL LANDING IS POSSIBLE AND MUST NOT READ AS A CLEAN RUN.
+              echo "::error::#${n} failed to merge. Landed: ${landed[*]:-none}. NOT landed: this and everything after it."
+              gh pr comment "$BUS" --body "Partial landing: ${landed[*]:-none} merged, then #${n} failed. The remaining members did not merge." || true
+              exit 1
+            fi
+          done
+
+          # PROOF BY CONTENT, NOT BY STATUS. `state: MERGED` is not evidence a
+          # change reached `main` — a squash makes the member's head unreachable,
+          # and a stacked PR can report MERGED with a mergeCommit while its code
+          # is absent entirely. The batch branch's tree is what the gate actually
+          # examined, so comparing `main`'s tree against it is the only check
+          # that proves the validated content is what landed.
+          git fetch --no-tags origin main
+          main_tree="$(git rev-parse "origin/main^{tree}")"
+          if [ "$main_tree" = "$BATCH_TREE" ]; then
+            echo "main's tree matches the validated batch tree (${BATCH_TREE})"
+          else
+            echo "::error::main's tree is ${main_tree} but the gate validated ${BATCH_TREE}. Something did not land as tested — inspect before merging anything else."
+            exit 1
+          fi
+
+          gh pr close "$BUS" --comment "Landed ${landed[*]} by squash, in order. \`main\`'s tree matches the tree this batch validated." --delete-branch
+          echo "bus done: ${landed[*]}"
