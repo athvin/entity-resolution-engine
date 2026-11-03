@@ -27,6 +27,19 @@ sqlparser = { workspace = true }
 thiserror = { workspace = true }
 regex = { workspace = true }
 petgraph = "0.8"
+# dedupe-core's FIRST `er-*` dependency, which is deliberate and worth the note.
+#
+# The engine core has stayed free of the product crates on purpose, and this
+# does not change that: `er-span` is a leaf whose only dependency is `tracing`,
+# so it carries no catalog, no config and no entity types — nothing that could
+# let the engine start depending on the product's shape.
+#
+# It is needed because the engine executes SQL the declared-statement emitters
+# never see. `standardize` alone was 63% of a measured run (12,991 ms of
+# 20,550) and contributed ZERO attributed statements, because it works through
+# `Session::execute_batch` rather than through generated functions. Without a
+# span here the slowest stage in the pipeline is the one nobody can see.
+er-span = { version = "0.1.0", path = "../er-span" }
 
 [dev-dependencies]
 anyhow = { workspace = true }

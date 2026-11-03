@@ -184,6 +184,28 @@ pub fn generator_span(
     span
 }
 
+/// Mark a span's outcome without touching its message, for a `Result` whose
+/// error text must not reach the span at all.
+///
+/// [`check`] gates the message behind `ER_TRACE_SQL_TEXT`, and that flag's
+/// contract is about DECLARED statements — whose literals are provably bound,
+/// which is why admitting their text is a cost decision rather than a safety
+/// one. Runtime-assembled SQL has no such guarantee: `Session::materialize`
+/// builds its error as `"materializing {table}: {e}\nSQL:\n{sql}"`, and that
+/// SQL can embed config-derived literals. So the engine-core seams record the
+/// outcome by hand and leave the message to the in-account log.
+///
+/// Same fields as [`check`]'s, so a dashboard cannot tell which one marked a
+/// span — only the message differs, and only in the direction of carrying less.
+pub fn outcome(span: &tracing::Span, ok: bool) {
+    if ok {
+        span.record(attr::OUTCOME, Outcome::Ok.as_str());
+    } else {
+        span.record(attr::OUTCOME, Outcome::Error.as_str());
+        span.record("otel.status_code", "ERROR");
+    }
+}
+
 /// Record the row count on a span.
 pub fn rows(span: &tracing::Span, n: u64) {
     span.record(attr::ROWS, n);

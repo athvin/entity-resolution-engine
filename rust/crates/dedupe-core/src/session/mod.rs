@@ -457,7 +457,17 @@ impl Session {
                 parts = quote_ident_list(&opts.partition_by),
             )
         };
-        self.conn.execute_batch(&sql)?;
+        let span = er_span::generator_span(
+            er_span::Store::Lake,
+            "Session::write_to_lake_with",
+            "CREATE OR REPLACE TABLE lake.<target> AS SELECT …",
+        );
+        let _entered = span.enter();
+        er_span::check(&span, self.conn.execute_batch(&sql))?;
+        // Deliberately outside the span: `latest_snapshot_version` is called on
+        // every stage's success path too, and giving it a span of its own would
+        // roughly double the span count for a value already carried on the
+        // stage. Its cost belongs to this write, which is where it is measured.
         self.latest_snapshot_version()
     }
 
@@ -472,10 +482,19 @@ impl Session {
         } else {
             format!(" ORDER BY {}", quote_ident_list(order_by))
         };
-        self.conn.execute_batch(&format!(
-            "INSERT INTO {}.{}.{target} SELECT * FROM {}{order};",
-            lake.alias, lake.schema, src.physical
-        ))?;
+        let span = er_span::generator_span(
+            er_span::Store::Lake,
+            "Session::lake_append",
+            "INSERT INTO lake.<target> SELECT … [ORDER BY …]",
+        );
+        let _entered = span.enter();
+        er_span::check(
+            &span,
+            self.conn.execute_batch(&format!(
+                "INSERT INTO {}.{}.{target} SELECT * FROM {}{order};",
+                lake.alias, lake.schema, src.physical
+            )),
+        )?;
         Ok(())
     }
 
@@ -711,8 +730,28 @@ impl Session {
         format!("{templated}_{}_{seq}", self.run_id)
     }
 
+    /// Execute a runtime-assembled SQL batch.
+    ///
+    /// The engine's widest seam — 131 call sites — and where `standardize`
+    /// spends 63% of a run. Instrumented here rather than at the callers for
+    /// exactly that reason: one span covers all of them, and the ambient
+    /// `stage` span gives each one its context without a signature change.
+    ///
+    /// `generator_span`, never `sql_span`: this SQL is assembled at runtime and
+    /// interpolates physical relation names and config-derived values, so the
+    /// text may not be recorded. The summary is `&'static str`, so runtime data
+    /// structurally cannot reach it.
     pub fn execute_batch(&self, sql: &str) -> Result<()> {
-        self.conn.execute_batch(sql).map_err(DedupeError::from)
+        let span = er_span::generator_span(
+            er_span::Store::Lake,
+            "Session::execute_batch",
+            "a runtime-assembled SQL batch",
+        );
+        let _entered = span.enter();
+        er_span::check(
+            &span,
+            self.conn.execute_batch(sql).map_err(DedupeError::from),
+        )
     }
 
     fn table_columns(&self, table: &str) -> Result<Vec<String>> {
@@ -781,10 +820,24 @@ impl Session {
     /// Render and execute a pipeline, materializing the result as a temp
     /// table named after the pipeline's final output.
     pub fn materialize(&self, pipeline: &CtePipeline) -> Result<TableHandle> {
+        let span = er_span::generator_span(
+            er_span::Store::Lake,
+            "Session::materialize",
+            "CREATE TEMP TABLE … AS <CTE pipeline>",
+        );
+        let _entered = span.enter();
         let templated = pipeline.output_name().to_string();
         let physical = self.next_physical(&templated);
         let sql = format!("CREATE TEMP TABLE {physical} AS\n{}", pipeline.render());
-        self.conn.execute_batch(&sql).map_err(|e| {
+        // Deliberately NOT wrapped in `er_span::check`. This error embeds the
+        // whole assembled SQL for the caller's log, and `check` would put that
+        // text on the span under ER_TRACE_SQL_TEXT — which is the one flag that
+        // is supposed to admit DECLARED statement text, whose literals are
+        // provably bound. Runtime-assembled SQL has no such guarantee, so the
+        // outcome is recorded by hand and the message stays in-account.
+        let result = self.conn.execute_batch(&sql);
+        er_span::outcome(&span, result.is_ok());
+        result.map_err(|e| {
             DedupeError::Other(format!("materializing {templated}: {e}\nSQL:\n{sql}"))
         })?;
         let columns = self.table_columns(&physical)?;
@@ -802,11 +855,22 @@ impl Session {
     }
 
     pub fn count(&self, table: &str) -> Result<i64> {
-        let n = self
-            .conn
-            .query_row(&format!("SELECT count(*) FROM {table}"), [], |r| {
-                r.get::<_, i64>(0)
-            })?;
+        let span = er_span::generator_span(
+            er_span::Store::Lake,
+            "Session::count",
+            "SELECT count(*) FROM <relation>",
+        );
+        let _entered = span.enter();
+        let n = er_span::check(
+            &span,
+            self.conn
+                .query_row(&format!("SELECT count(*) FROM {table}"), [], |r| {
+                    r.get::<_, i64>(0)
+                }),
+        )?;
+        // The counted value IS the result here, so it is the row count in the
+        // sense the attribute means: a magnitude, never a record.
+        er_span::rows(&span, n.try_into().unwrap_or(0));
         Ok(n)
     }
 
@@ -826,6 +890,12 @@ impl Session {
     }
 
     pub fn query_strings(&self, sql: &str) -> Result<Vec<Vec<String>>> {
+        let span = er_span::generator_span(
+            er_span::Store::Lake,
+            "Session::query_strings",
+            "SELECT … (rows rendered as strings)",
+        );
+        let _entered = span.enter();
         let mut stmt = self.conn.prepare(sql)?;
         let ncols = {
             let rows = stmt.query([])?;
