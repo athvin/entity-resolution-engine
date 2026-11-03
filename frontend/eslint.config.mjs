@@ -2,6 +2,8 @@ import { defineConfig, globalIgnores } from "eslint/config";
 import nextPlugin from "@next/eslint-plugin-next";
 import tseslint from "typescript-eslint";
 
+import dataBoundary from "./eslint-rules/data-boundary.mjs";
+
 export default defineConfig([
   globalIgnores([
     ".next/**",
@@ -70,6 +72,16 @@ export default defineConfig([
         { checksVoidReturn: { attributes: false } },
       ],
     },
+  },
+  // The data boundary (eslint-rules/data-boundary.mjs): no DuckDB, DuckLake,
+  // S3 or foreign-database client anywhere in src/; the Postgres connection only
+  // from src/lib/db/; and a "use client" module imports no server code and calls
+  // nothing but the same-origin BFF. Everything else reaches data through
+  // er-server.
+  {
+    files: ["src/**/*.ts", "src/**/*.tsx"],
+    plugins: { "er-data-boundary": dataBoundary },
+    rules: { "er-data-boundary/data-boundary": "error" },
   },
   {
     files: ["**/*.mjs", "**/*.js"],

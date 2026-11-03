@@ -19,7 +19,7 @@ import {
 } from "@/lib/query/reviews";
 import { BffRequestError } from "@/lib/api/client";
 import { ViewsBar } from "@/components/views/views-bar";
-import { MAX_BULK } from "@/lib/bff/adjudicate-bulk";
+import { MAX_BULK } from "@/lib/domain/adjudicate-bulk";
 import { useDeleteView, useSaveView, useSavedViews } from "@/lib/query/views";
 import {
   useRecommendBulk,
