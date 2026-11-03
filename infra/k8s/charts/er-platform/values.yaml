@@ -100,6 +100,17 @@ dispatcher:
   # `dispatching`/`running` row holding the org's partial unique index; an
   # executor-kind run shows up as `er-t-…` Jobs and task_instances rows.
   pollSeconds: "" # ERSERVER_POLL_SECONDS; empty keeps the erserver default (2s)
+  # How long the SIGTERM drain gets to finish the in-flight job before the
+  # kubelet SIGKILLs it (deployment-dispatcher.yaml has the full reasoning). A
+  # killed legacy run strands its row holding the dataset's writer lock, and
+  # only an operator can clear that — so 30s, the Kubernetes default this was
+  # silently using, is far too short for a whole pipeline.
+  #
+  # It is NOT sized to the longest possible run, because `Recreate` makes the
+  # deploy wait for it: the CI deploy's `helm upgrade --wait --timeout 10m`
+  # would fail outright if this approached it. Raise both together, or not at
+  # all.
+  terminationGracePeriodSeconds: 300
   resources:
     # The dispatcher runs whole legacy pipelines in-process (DuckDB included),
     # so it keeps the API container's defensive memory ceiling until Phase 4
