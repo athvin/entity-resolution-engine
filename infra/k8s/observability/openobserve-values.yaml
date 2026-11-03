@@ -1,0 +1,133 @@
+# OpenObserve: the span store every environment ships to.
+#
+# ONE deployment for dev, prod and local. The environment is a FIELD on the
+# data (`deployment.environment.name`, a resource attribute `er_obs::init`
+# already sets), not a separate stack — see envs/core/observability.tf for why
+# that follows the single-account model rather than fighting it.
+#
+# ## Why self-hosting is defensible here when D-OTEL rejected it
+#
+# D-OTEL rejected self-hosting with: "Four stateful services to operate and
+# back up for a two-person team, running on the same cluster and competing for
+# the nodes §5.3 sized for 141 GiB of spill. An observability stack that
+# degrades when the system it observes gets busy is worse than none."
+#
+# Each clause is answered rather than ignored:
+#
+#   - **Not four services.** Data is Parquet in S3 (envs/core), metadata is in
+#     the Postgres this account already runs. Nothing new is stateful, so there
+#     is no PVC to back up. Upstream dropped its etcd requirement, which is
+#     what moved this from four services to one.
+#   - **It does not compete with the runner nodes.** No runner toleration, so
+#     the scheduler cannot place it on a tainted spill node. The log DaemonSet
+#     tolerates that taint because it must collect FROM those nodes; a store
+#     has no such reason.
+#   - **An ingest spike hits object storage, not a local disk**, so the
+#     degrade-under-load failure mode is bounded by S3 rather than by a volume
+#     filling underneath the thing being observed.
+#
+# ## Why this can hold logs as well as traces
+#
+# §8.5 and D-OTEL rejected SaaS log backends because "logs are the signal that
+# could carry record values" — which is why §10.5 splits the signals. A
+# SELF-HOSTED store on our own S3 in our own account is in-account by
+# construction, so that boundary does not apply and all three signals share one
+# destination. Without it, traces would live here and logs in CloudWatch: two
+# places, which is the opposite of the point.
+#
+# ## Status
+#
+# Values are checked against `helm show values openobserve/openobserve
+# --version 1.1.3` — every key below exists in that schema. They have NOT been
+# applied to a cluster, so this is schema-verified and not runtime-verified;
+# the first `make obs-up` is the real test.
+#
+# Chart: openobserve/openobserve 1.1.3 (app v1.1.2), pinned in `make obs-up`.
+
+replicaCount: 1
+
+serviceAccount:
+  create: true
+  # Pinned: the Pod Identity association in envs/dev binds the role to THIS
+  # name, and a generated name would break that binding silently.
+  name: openobserve
+  # Deliberately no `eks.amazonaws.com/role-arn` annotation. That is the IRSA
+  # convention; this account uses EKS **Pod Identity** everywhere (§9, and
+  # efs.tf / secrets.tf / ses.tf all do the same), which binds through an
+  # `aws_eks_pod_identity_association` rather than an annotation. Adding the
+  # annotation as well would be a second, conflicting credential path.
+  annotations: {}
+
+config:
+  # Single node doing every job. The chart can split into
+  # ingester/querier/compactor for HA; at this footprint that is three things
+  # to operate for one developer's telemetry, and the §5.3 argument against
+  # four stateful services applies to three as well.
+  ZO_NODE_ROLE: "all"
+  ZO_CLUSTER_NAME: "er"
+
+  # Object storage, not local disk. This is what makes the pod replaceable and
+  # keeps an ingest spike off a volume.
+  ZO_LOCAL_MODE: "false"
+  ZO_S3_PROVIDER: "s3"
+  ZO_S3_REGION_NAME: "us-east-2"
+  ZO_S3_BUCKET_NAME: "er-obs-797781631727"
+
+  # Metadata in the Postgres this account already runs, in its own database —
+  # not a schema inside a tenant catalog, so the store is unreachable from a
+  # tenant's own credentials. The DSN itself is a secret and arrives at install
+  # time (see `make obs-up`), never from this file.
+  ZO_META_STORE: "postgres"
+
+  # No usage reporting out of the account.
+  ZO_TELEMETRY: "false"
+
+  # Retention is set in BOTH places, because they do different things: this
+  # expires the index, and the bucket lifecycle rule (envs/core) expires the
+  # bytes. Setting only this one leaves paid-for objects behind forever.
+  #
+  # 30 days matches the §10.4 debug tier `/er/dev/containers` already uses. The
+  # 400-day audit tier is deliberately NOT here — those trails are CloudTrail
+  # and Postgres tables (D-RETENTION), and a compliance artifact must not
+  # depend on a service we operate.
+  ZO_COMPACT_DATA_RETENTION_DAYS: "30"
+
+# `auth:` is where the chart takes its root credentials, the metadata DSN and
+# any static S3 keys. **Nothing is set here**: this file is in git, and the
+# chart offers no existing-secret indirection, so every value lands at install
+# time via `--set` from Secrets Manager (`make obs-up`). The S3 keys stay empty
+# permanently — the pod signs with its Pod Identity credentials.
+auth: {}
+
+service:
+  type: ClusterIP
+  http_port: 5080
+  grpc_port: 5081
+
+# Cluster-internal only, and not an oversight. The browser reaches RUM through
+# a same-origin BFF beacon route (the frontend half of this programme), and a
+# human reaches the UI by port-forward until §4.1's edge exists. A public,
+# unauthenticated telemetry ingest in front of the one component that bills per
+# byte is a volumetric-abuse surface, not a convenience.
+ingress:
+  enabled: false
+
+resources:
+  requests:
+    cpu: 200m
+    memory: 512Mi
+  limits:
+    memory: 2Gi
+
+# The namespace cannot enforce PSS — the log DaemonSet hostPath-mounts
+# /var/log — so this pod carries the restricted profile itself. Same reasoning
+# the collector's values give for the same namespace.
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]

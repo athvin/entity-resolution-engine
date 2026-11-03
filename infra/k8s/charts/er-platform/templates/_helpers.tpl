@@ -50,6 +50,22 @@ app.kubernetes.io/instance: {{ .root.Release.Name }}
      erserver processes read (settings.py); secrets arrive via envFrom from
      the ExternalSecret-projected er-erserver-env. */}}
 {{- define "er-platform.erserverEnv" -}}
+{{/* Telemetry. RUST_LOG is the §10.4 "log level is environment-configured"
+     knob, which no chart has carried until now — an empty value leaves the
+     compiled default (er_obs::init::DEFAULT_FILTER), which already pins
+     hyper/kube/rustls down so the first deploy with a subscriber installed
+     does not bill by the gigabyte.
+
+     OTEL_EXPORTER_OTLP_ENDPOINT is read by er-obs only when set, so shipping
+     it now is what makes the exporter a no-deploy change later. */}}
+{{- with .Values.otel.logLevel }}
+- name: RUST_LOG
+  value: {{ . | quote }}
+{{- end }}
+- name: OTEL_EXPORTER_OTLP_ENDPOINT
+  value: {{ .Values.otel.endpoint | quote }}
+- name: OTEL_SERVICE_NAMESPACE
+  value: "er"
 - name: ERSERVER_ENV
   value: {{ .Values.environment | quote }}
 - name: ERSERVER_CONFIG_ROOT

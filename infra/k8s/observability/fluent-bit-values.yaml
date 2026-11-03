@@ -25,6 +25,16 @@ tolerations:
     operator: Exists
     effect: NoSchedule
 
+# Two outputs, deliberately. CloudWatch is the in-account tier §10.4 already
+# relies on and the one the PII-grep probe reads; OpenObserve is where the
+# traces are, so sending logs there too is what makes "all my logs in one
+# place" true rather than "traces in one place and logs in another".
+#
+# Both, not one, until OpenObserve has earned the CloudWatch leg's retirement:
+# the debug tier can move once it has, but the audit trails never do — those
+# are CloudTrail and Postgres tables (D-RETENTION), and a compliance artifact
+# must not depend on a service we operate.
+
 cloudWatchLogs:
   enabled: true
   match: "*"
@@ -43,3 +53,25 @@ cloudWatchLogs:
 resources:
   requests: { cpu: 50m, memory: 64Mi }
   limits: { memory: 256Mi }
+
+# The span store, over the same OTLP/HTTP endpoint the collector uses. Fluent
+# Bit's http output is used rather than an OTLP plugin because the shipped
+# aws-for-fluent-bit image carries it unconditionally; the ingest path accepts
+# newline-delimited JSON, which is exactly what the Rust subscriber writes.
+additionalOutputs: |
+  [OUTPUT]
+      Name                 http
+      Match                *
+      Host                 openobserve.observability.svc.cluster.local
+      Port                 5080
+      URI                  /api/default/containers/_json
+      Format               json
+      Json_date_key        timestamp
+      Json_date_format     iso8601
+      compress             gzip
+      HTTP_User            ${OPENOBSERVE_USER}
+      HTTP_Passwd          ${OPENOBSERVE_PASSWORD}
+      # A store that is down must not block the shipper or fill its buffer: the
+      # CloudWatch output above is the durable path, so dropping here is the
+      # right failure mode.
+      Retry_Limit          2

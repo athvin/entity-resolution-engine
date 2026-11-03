@@ -152,3 +152,24 @@ resource "aws_eks_pod_identity_association" "otel_collector" {
   service_account = "otel-collector"
   role_arn        = aws_iam_role.otel_collector.arn
 }
+
+# --- the shared span store's cluster binding --------------------------------
+#
+# The OpenObserve role and bucket live in `envs/core` because ONE store serves
+# every environment (core/observability.tf). The Pod Identity association has
+# to live here, though: it names a cluster, and the cluster is a dev resource.
+#
+# Looked up by name rather than hardcoded or read through remote state —
+# `envs/dev` has no remote-state link to core (eks.tf hardcodes the one ARN it
+# needs), and a lookup fails loudly with "role not found" if core has not
+# applied yet, which is the right order of operations to enforce.
+data "aws_iam_role" "openobserve" {
+  name = "er-openobserve"
+}
+
+resource "aws_eks_pod_identity_association" "openobserve" {
+  cluster_name    = module.eks.cluster_name
+  namespace       = "observability"
+  service_account = "openobserve"
+  role_arn        = data.aws_iam_role.openobserve.arn
+}
