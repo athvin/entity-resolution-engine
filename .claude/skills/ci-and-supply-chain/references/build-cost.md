@@ -23,6 +23,60 @@ against it.
 - Measured: the sharded tiers, same day (2026-11-02)
 - Measured: the second pass, and the workers=2 verdict (2026-11-02, later)
 - Measured: the flake's root cause, the flip, and the buildcache move (2026-11-02, evening)
+- Incident: rust-cache restored a partial target and broke main (2026-11-03)
+
+## Incident: rust-cache restored a partial target and broke main (2026-11-03)
+
+**Symptom.** Nearly every compile job on `main` failed inside a build script:
+
+```
+error: failed to run custom build command for `libduckdb-sys v1.20000.1`
+  panicked at build_bundled_cc.rs:65:
+  unpacking bundled DuckDB sources: Os { code: 39, kind: DirectoryNotEmpty }
+```
+
+**Mechanism** (and #422's header comment in `rust.yml` says the same): rust-cache
+caches `target/`, which carries a populated
+`debug/build/libduckdb-sys-<hash>/out`. On restore, cargo re-runs the build
+script when the fingerprint does not match but does **not** clear that
+directory, and `libduckdb-sys` 1.20000.1 panics rather than unpacking over it.
+
+**The trail**, which is worth keeping because the breakage never lands on the
+commit that causes it:
+
+| run | `Cargo.toml` | cache | result |
+|---|---|---|---|
+| `29e29a3a` (#376, the duckdb `=1.20000.0` → `=1.20000.1` bump) | changed → new key | restored the PRE-bump entry; `lint` wrote the poisoned one at the end | **green** |
+| `52bec4a1` (#359) | unchanged | restored that entry | **red, ~12 jobs** |
+| `8e950b33` (#417) | unchanged | same entry | **red, same jobs** |
+| `8578f995` (#422, `prefix-key` v1 → v2) | — | new key, nothing to restore | **green** |
+
+So the commit that poisons the cache passes, and the next unrelated PR wears it.
+
+**Fixed by #422**, which bumped `prefix-key` to `v2-rust` so the poisoned entry
+becomes unreachable (restore-keys are prefixed too).
+
+**The open question, stated so it can be settled by observation rather than
+argument.** The mechanism above does not depend on the bump — it needs only a
+restored populated `out/` plus a fingerprint mismatch, and jobs here legitimately
+differ in fingerprint (`lint` is the only writer, but `test`, the lake shards and
+the e2e slices each select different packages and features). Two readings
+follow:
+
+- **Transitional** — the mismatch only arises at a dependency bump, so v2 holds
+  until the next duckdb change, and bumping the prefix is simply what one does
+  then.
+- **Structural** — `lint`'s saved tree can never satisfy the other jobs'
+  fingerprints for this crate, so the next run that restores v2 breaks the same
+  way.
+
+They differ on one observable: **the first main run that RESTORES the v2 entry**
+(i.e. the next merge whose `Cargo.toml` is unchanged). Green → transitional,
+and nothing more is needed. Red → structural, and the remedy is to stop caching
+`target/` for these jobs: sccache is content-addressed, never touches `target/`,
+and already carries the work at a 99% hit rate, so the removal costs nothing
+measurable. `coverage` would keep its own entry regardless — it opts out of
+sccache, where the trade really is 1.8 GiB against a timeout.
 
 ## The measured baseline (2026-10-22)
 
@@ -425,7 +479,7 @@ rust-cache entry, so making the profile real buys cache headroom twice.
 | `.cargo/config.toml` for local mold/sccache | no | helps laptops, not CI; worth doing, not yet scoped |
 | cargo-chef + cache mounts in `rust/Dockerfile` | no | `COPY . .` + one `cargo build --release` means any source change rebuilds DuckDB in release mode; real, separate |
 | More cores per job | **blocked** | not reachable by editing `runs-on:` on a user-owned repo — see below |
-| Drop rust-cache from the Rust jobs | **open — next experiment** | two runs completed in 8m03 and 8m45 with `No cache found.` and sccache at 99%; it holds ~1.3 GB and contributed nothing measurable |
+| Drop rust-cache from the Rust jobs | **open — now also a correctness question** | two runs completed in 8m03 and 8m45 with `No cache found.` and sccache at 99%; it holds ~1.3 GB and contributed nothing measurable. Since 2026-11-03 it is also the thing that broke `main` — see the incident below for the open question about whether re-keying is a durable fix |
 | headstart | no | see below |
 
 ## Rejected: headstart
