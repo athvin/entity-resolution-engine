@@ -30,6 +30,26 @@ on:
       # in the registry, which is what is running.
       - "infra/k8s/**"
       - "scripts/dev_env.sh"
+  # A Dockerfile change was UNVALIDATABLE before merge: this workflow ran on
+  # `push` to main only, so the first exercise of a restructured build was the
+  # merge itself, and a break blocked dev deploys until someone reverted it.
+  # The `verify` job below closes that, and the path list is deliberately
+  # narrow — the builds' own STRUCTURE, not their sources. A source change
+  # that breaks compilation is already caught by rust.yml and frontend.yml;
+  # what nothing else covers is a Dockerfile, a .dockerignore (the er-api
+  # build reads `.cargo/config.toml` out of its context) or this file.
+  # Widening this to `rust/**` would put a cold ~1h build on ordinary PRs.
+  #
+  # Legal here only because NO job in this workflow is a required status
+  # check — a `paths:` filter on a required one never reports and blocks the
+  # PR forever (see the ci-and-supply-chain skill).
+  pull_request:
+    paths:
+      - "rust/Dockerfile"
+      - "rust/.dockerignore"
+      - "frontend/Dockerfile"
+      - "frontend/.dockerignore"
+      - ".github/workflows/images.yml"
   workflow_dispatch:
     inputs:
       ref:
@@ -100,7 +120,10 @@ jobs:
 
   er-api:
     needs: detect
-    if: needs.detect.outputs.rust == 'true'
+    # Never on a pull_request: this job PUSHES, and the ECR role's OIDC trust
+    # pins `sub` to refs/heads/main, so a PR could not assume it anyway. PRs
+    # get the no-push `verify` job instead.
+    if: github.event_name != 'pull_request' && needs.detect.outputs.rust == 'true'
     runs-on: ubuntu-latest
     # 90, against a measured 58m9s of real build (run 41524220825) — this
     # Dockerfile's `COPY . .` means any rust/ change rebuilds all 408 crates,
@@ -149,7 +172,8 @@ jobs:
 
   er-web:
     needs: detect
-    if: needs.detect.outputs.frontend == 'true'
+    # Push-only, same reason as er-api above.
+    if: github.event_name != 'pull_request' && needs.detect.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     # 30, against 2m30s warm off the registry cache (run 41524220825). Same
     # reason as er-api's: the default was 360.
@@ -187,6 +211,49 @@ jobs:
           # comment for the full reasoning.
           cache-from: "type=registry,ref=${{ env.ECR }}/er-buildcache:er-web"
           cache-to: "type=registry,ref=${{ env.ECR }}/er-buildcache:er-web,mode=max,image-manifest=true,oci-mediatypes=true"
+
+  # Does each image still BUILD? PR-only, no push, no cache.
+  #
+  # This is the job that makes a Dockerfile change reviewable. It cannot reuse
+  # the registry layer cache — reading it needs the ECR role, whose OIDC trust
+  # is pinned to refs/heads/main — so it is a cold build and slow by
+  # construction. That is the trade: an hour on the handful of PRs that touch
+  # a Dockerfile, against shipping a broken build to main and blocking dev
+  # deploys until someone reverts.
+  #
+  # `fail-fast: false` so one image's failure still reports the other's
+  # result, which is most of the diagnostic value when a shared change (this
+  # workflow, a base-image bump) breaks one of them.
+  verify:
+    name: image builds (${{ matrix.image }}, no push)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: er-api
+            context: rust
+            file: rust/Dockerfile
+          - image: er-web
+            context: frontend
+            file: frontend/Dockerfile
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build ${{ matrix.image }} (not pushed)
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          platforms: linux/amd64
+          # The whole point: prove the build, publish nothing. No `load`
+          # either — nothing here runs the image, and loading a multi-GB
+          # image into the daemon is disk this runner does not have spare.
+          push: false
 
   # §14.2's Helm half: "Dev platform releases apply from CI on `main`". Lives
   # here rather than in its own workflow so ordering is structural — a deploy
