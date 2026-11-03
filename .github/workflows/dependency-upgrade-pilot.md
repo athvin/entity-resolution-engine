@@ -29,14 +29,20 @@ permissions:
   vulnerability-alerts: read
   id-token: write # required by shared/rust-gate.md; an import cannot escalate
 
-# SDK mode, unlike plain `engine: copilot`, because this is the one agent here
-# that must read the outside world. Copilot's native `web-fetch` is unavailable
-# under offline BYOK mode (`COPILOT_OFFLINE=true`) and the compiler rejects it;
-# SDK mode supplies the proxy-aware fetch tool instead. On `engine: claude`
-# `web-fetch` is native and this nesting can collapse back to a single line.
+# `copilot-sdk: true` is gone, exactly as the note it replaces predicted: it
+# existed only to get a proxy-aware fetch tool, because Copilot's native
+# `web-fetch` is unavailable under offline BYOK mode. On `engine: claude`
+# `web-fetch` is native, so the workaround collapses.
+#
+# Sonnet rather than Haiku because this is the judgement agent: it reads a
+# whole version range's release notes and decides `safe-to-merge` vs
+# `needs-companion-change` vs `schedule-as-migration`. #376 is the worked
+# example of the cost of getting that wrong — a bump whose release notes
+# named the companion edit, merged without it, red main for three PRs. A
+# cheaper model that reaches that verdict confidently is worse than no agent.
 engine:
-  id: copilot
-  copilot-sdk: true
+  id: claude
+  model: claude-sonnet-5
 timeout-minutes: 30
 max-turns: 60
 
