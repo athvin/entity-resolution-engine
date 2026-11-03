@@ -297,6 +297,72 @@ jobs:
               ;;
           esac
 
+  # The ONLY job here that loads postgres.js. Every other tier — the unit files
+  # and both Playwright webServers — points ERWEB_DATABASE_URL at
+  # `pglite://memory`, so `db()` takes its PGlite branch and the real driver is
+  # never constructed. The consequence was measured, not theorised: the
+  # postgres 3.4.9 -> 4.0.0 major (#378) passed all eight required contexts
+  # without the driver being executed once, and was verified by hand instead.
+  #
+  # This closes that specific hole and nothing more. It is a driver contract,
+  # not a second unit tier: five cases over the types v4's `infer: false`
+  # change can actually reach (boolean, Buffer/bytea, jsonb, Date/timestamptz),
+  # plus a transaction commit/rollback pair and the migrator. `bytea` is the
+  # consequential one — `org_credentials` holds each tenant's sealed erserver
+  # key, so a driver that mangles it loses tenant access rather than failing a
+  # test.
+  #
+  # Deliberately NOT the full-stack tier (playwright.e2e.config.ts), which
+  # needs the Rust backend and stays a release gate. A Postgres service and a
+  # 10-second vitest run is the cheapest thing that makes the next driver bump
+  # a gated change rather than a hand-verified one.
+  #
+  # `pnpm db:migrate` is a precondition AND part of the contract: only the
+  # PGlite branch applies migrations itself, and the migrator is what exercises
+  # `client.begin()` and the DDL path.
+  driver:
+    name: postgres.js driver contract
+    needs: detect
+    if: needs.detect.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        # 17 to match the frontend dev stack's control-plane container; the
+        # driver contract is not version-sensitive, but drifting from what
+        # developers run locally would make a failure here hard to reproduce.
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: er
+          POSTGRES_DB: postgres
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      ERWEB_DATABASE_URL: postgresql://postgres:er@localhost:5433/postgres
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 22
+      - name: Enable corepack (pnpm from packageManager)
+        run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - name: Apply migrations (the postgres.js branch does not)
+        run: pnpm db:migrate
+      # vitest.driver.config.ts pins `environment: node`, which is
+      # load-bearing: postgres v4 detects binary with `x instanceof
+      # Uint8Array`, and under jsdom a Node Buffer fails that against jsdom's
+      # realm, so bytea is sent as text and rejected `22P02`. Observed both
+      # ways before this job was trusted — jsdom fails exactly the vault case,
+      # node passes 5/5.
+      - run: pnpm test:driver
+
   # The frontend's mirror of rust.yml's `cargo-deny (advisories + licenses +
   # bans)`. `pnpm audit` is the advisories half; scripts/check-licenses.mjs is
   # the licenses half, against the same permissive allowlist rust/deny.toml uses.
