@@ -16,6 +16,12 @@ const PUBLIC_PATHS = [
   // CSP violation reports: the browser posts these with no credentials, and the
   // ones from the login page — before any session exists — are the most useful.
   "/api/csp-report",
+  // The container's own readiness probe. A kubelet carries no session cookie, so
+  // without this entry the probe gets a 401 and the pod never becomes ready —
+  // and the cutover gate that reads it would be waiting on a 401 forever. Safe
+  // to expose because the handler answers a boolean and a reason class only; see
+  // src/app/api/healthz/route.ts for what it deliberately does not check.
+  "/api/healthz",
   // O11's embeddable widget. Both halves are public because the signed,
   // record-scoped, expiring token in the path IS the credential — a redirect to
   // /login would break the iframe for the tenant who embedded it deliberately.

@@ -85,13 +85,38 @@ spec:
           envFrom:
             - secretRef:
                 name: er-erserver-env
+          # Readiness answers "can this process serve", which is the question a
+          # Service selector — and a blue/green cutover gate — actually asks.
+          # Both probes used to point at /healthz, which is a static literal, so
+          # a pod whose control plane was unreachable reported ready and kept
+          # taking traffic it could only 500 on. /readyz connects and says so.
+          #
+          # Liveness stays on /healthz deliberately, and that split is the whole
+          # point: a liveness probe that fails on a *dependency* outage restarts
+          # a healthy pod and makes the outage worse. The reasoning is written
+          # out at the two handlers in er-server/src/lib.rs.
+          #
+          # The startupProbe is what lets the other two drop initialDelaySeconds:
+          # both are disabled until it passes, so the boot — which runs
+          # ensure_schema — gets its own budget instead of a guessed delay.
+          # 3s x 40 = 120s covers a cold Rust boot plus an Aurora resume from
+          # 0 ACU (dev sets min_capacity 0, so an idle cluster takes ~15s).
+          startupProbe:
+            httpGet: { path: /readyz, port: api }
+            periodSeconds: 3
+            failureThreshold: 40
+          # 6 x 5s = 30s of CONSECUTIVE failure before the pod leaves the
+          # Service. With one replica, leaving is a hard 503 at the edge, and
+          # /readyz times out after 2s — so an idle dev Aurora resuming would
+          # otherwise flip a working pod out of rotation for the ~15s it takes to
+          # wake. Long enough to ride that out, short enough that a genuinely
+          # unreachable control plane is still reported.
           readinessProbe:
-            httpGet: { path: /healthz, port: api }
-            initialDelaySeconds: 5
+            httpGet: { path: /readyz, port: api }
             periodSeconds: 5
+            failureThreshold: 6
           livenessProbe:
             httpGet: { path: /healthz, port: api }
-            initialDelaySeconds: 15
             periodSeconds: 10
           resources:
             {{- toYaml .Values.api.resources | nindent 12 }}
@@ -138,13 +163,29 @@ spec:
           envFrom:
             - secretRef:
                 name: er-erweb-env
+          # Same split as er-server above, for the same reason. `/` is the
+          # marketing page: a static route, so it answered 200 from a container
+          # whose environment was unusable and whose in-pod upstream had not
+          # booted — useless as a cutover gate. /api/healthz validates the env
+          # and probes er-server's /readyz over localhost.
+          #
+          # Liveness keeps `/`, and here the static page is exactly right: the
+          # question is whether the node process is wedged, and nothing about a
+          # dependency should restart it.
+          #
+          # The startup budget matches er-server's, because /api/healthz cannot
+          # pass until er-server does — the pod takes no traffic until BOTH
+          # halves work, which is the property the merged pod exists to give.
+          startupProbe:
+            httpGet: { path: /api/healthz, port: http }
+            periodSeconds: 3
+            failureThreshold: 40
           readinessProbe:
-            httpGet: { path: /, port: http }
-            initialDelaySeconds: 5
+            httpGet: { path: /api/healthz, port: http }
             periodSeconds: 5
+            failureThreshold: 6
           livenessProbe:
             httpGet: { path: /, port: http }
-            initialDelaySeconds: 15
             periodSeconds: 10
           resources:
             {{- toYaml .Values.web.resources | nindent 12 }}

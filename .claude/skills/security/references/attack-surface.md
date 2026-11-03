@@ -46,7 +46,10 @@ internet ──▶ BFF (Next.js, frontend/src/)  ──erk_ key / operator token
   limiting is for), and that `Backend::Log` writes the rendered body, which carries a single-use
   credential, to the pod log. `Log` is dev-only for exactly that reason.
 - **No middleware**: no CORS, no rate limiting, no request timeout, no concurrency limit, no explicit
-  body-size layer beyond axum's 2 MB `Json` default. `/healthz` is the only anonymous route.
+  body-size layer beyond axum's 2 MB `Json` default. `/healthz` and `/readyz` are the only anonymous
+  routes — a probe carries no credential. `/readyz` connects to the control store, so it is also the
+  one anonymous route that does work: it answers a boolean, a store name and a reason class, never a
+  DSN or an error chain, and that discipline is what keeps it safe to expose.
 - **Connect-per-request Postgres** (`connect_pg`) — no pool. A connection-exhaustion lever.
 - **Pre-routing URI rewrite** `rewrite_action_path` (`lib.rs`, in an outer `fallback_service`) maps
   `.../x:verb` → `.../x/verb` for 8 `ACTION_VERBS`. A route-confusion primitive — fuzz ids with `:`,
