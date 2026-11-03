@@ -4,7 +4,7 @@ name: config_version
 relation: config_versions
 description: "A versioned config document for a tenant: its YAML, hash and publish state."
 key: [id]
-natural_key: [org_id, version]
+natural_key: [dataset_id, version]
 generate:
   stores: [postgres]
   languages: [rust, typescript]
@@ -22,8 +22,9 @@ columns:
     description: "The tenant this config version belongs to."
   - name: dataset_id
     type: varchar
+    nullable: false
     references: { relation: datasets, column: id }
-    description: "The dataset this config version belongs to. Backfilled to the org's default dataset; joins the natural key at the clean break."
+    description: "The dataset this config version belongs to. Part of the natural key: rows belong to a dataset, not to the org at large."
   - name: version
     type: bigint
     nullable: false

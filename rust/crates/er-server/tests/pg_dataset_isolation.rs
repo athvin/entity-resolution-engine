@@ -72,10 +72,10 @@ async fn one_orgs_datasets_do_not_see_each_others_rows() {
 
     // ---- config versions ---------------------------------------------------
     //
-    // Two drafts in `people`, one in `accounts`. Version NUMBERING stays
-    // org-wide until the natural key flips (the live `UNIQUE (org_id,
-    // version)` forbids restarting at 1 per dataset), so this asserts on
-    // which rows each dataset SEES, not on what they are numbered.
+    // Two drafts in `people`, one in `accounts`. Each dataset numbers its own
+    // sequence now: the natural key is `(dataset_id, version)` and the
+    // org-keyed unique that used to forbid two version 1s in one org is
+    // dropped by `0004_dataset_id_required`.
     for yaml in ["a: 1", "a: 2"] {
         pg::create_config_version(&client, &org_id, Some(&people), yaml, "hash", "tester")
             .await
@@ -97,6 +97,19 @@ async fn one_orgs_datasets_do_not_see_each_others_rows() {
     assert_eq!(
         account_versions[0].version, only_accounts,
         "the one it sees is its own"
+    );
+    assert_eq!(
+        only_accounts, 1,
+        "a new dataset's first config is v1 — version numbering is per DATASET, \
+         not a continuation of whatever the sibling had reached"
+    );
+    assert_eq!(
+        people_versions
+            .iter()
+            .map(|v| v.version)
+            .collect::<Vec<_>>(),
+        vec![2, 1],
+        "and the sibling kept its own 1, 2 (newest first)"
     );
     assert!(
         pg::get_config_version(&client, &accounts, people_versions[0].version)

@@ -8,7 +8,7 @@ export interface EntityLink {
   /** The tenant. Every read is scoped by it. */
   org_id: string;
   /** The dataset whose entities this link relates — entity ids are lake-local. */
-  dataset_id: string | null;
+  dataset_id: string;
   /** The entity on the owning side — the household, the parent company. Deliberately NOT a foreign key, for the reason `taggings.subject_id` gives: an entity lives in the LAKE and this table is Postgres, so a database-level reference would point at a row this store does not own. The id is stable across runs because reconcile carries ids forward by membership overlap (INV-PERM) rather than re-deriving them, and an entity that loses that contest records `merged_into` — so a link survives its entity gaining members, and a merged-away side is followable rather than dangling. */
   parent_entity_id: string;
   /** The entity on the member side — the person in the household, the subsidiary. */

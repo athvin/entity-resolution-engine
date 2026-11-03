@@ -10,8 +10,8 @@ pub struct ConfigVersion {
     pub id: String,
     /// The tenant this config version belongs to.
     pub org_id: String,
-    /// The dataset this config version belongs to. Backfilled to the org's default dataset; joins the natural key at the clean break.
-    pub dataset_id: Option<String>,
+    /// The dataset this config version belongs to. Part of the natural key: rows belong to a dataset, not to the org at large.
+    pub dataset_id: String,
     /// The monotonic version number within the tenant.
     pub version: i64,
     /// The config document source.
@@ -76,7 +76,7 @@ pub mod create {
     ) -> ::std::result::Result<Vec<super::ConfigVersion>, ::tokio_postgres::Error> {
         const SQL: &str = "INSERT INTO public.config_versions (id, org_id, dataset_id, version, yaml, config_hash, created_by)
 SELECT $1, $2, $3, coalesce(max(version), 0) + 1, $4, $5, $6
-FROM public.config_versions WHERE org_id = $2
+FROM public.config_versions WHERE dataset_id = $3
 RETURNING
   id,
   org_id,
@@ -132,60 +132,6 @@ RETURNING
 
 pub mod read {
     //! @generated query functions for this entity + operation.
-    /// One config version addressed by ORG, for the one caller that has no dataset yet: the convergence sweep reads a pre-dataset org's published config to learn the entity type the dataset it is about to create should carry. Every other reader addresses a dataset — see `by_version`.
-    pub async fn by_org_version(
-        client: &impl ::tokio_postgres::GenericClient,
-        org_id: &str,
-        version: i64,
-    ) -> ::std::result::Result<Vec<super::ConfigVersion>, ::tokio_postgres::Error> {
-        const SQL: &str = "SELECT
-  id,
-  org_id,
-  dataset_id,
-  version,
-  yaml,
-  config_hash,
-  state,
-  tier,
-  created_by,
-  created_at,
-  published_at,
-  updated_at
-FROM public.config_versions
-WHERE org_id = $1 AND version = $2
-";
-        let __span = ::er_span::sql_span(
-            ::er_span::Store::Control,
-            "config_version",
-            "read",
-            "by_org_version",
-            "config_versions",
-            SQL,
-        );
-        let __result =
-            ::er_span::instrument(&__span, client.query(SQL, &[&org_id, &version])).await;
-        let __entered = __span.enter();
-        let rows = ::er_span::check(&__span, __result)?;
-        ::er_span::rows(&__span, rows.len() as u64);
-        Ok(rows
-            .iter()
-            .map(|row| super::ConfigVersion {
-                id: row.get("id"),
-                org_id: row.get("org_id"),
-                dataset_id: row.get("dataset_id"),
-                version: row.get("version"),
-                yaml: row.get("yaml"),
-                config_hash: row.get("config_hash"),
-                state: row.get("state"),
-                tier: row.get("tier"),
-                created_by: row.get("created_by"),
-                created_at: row.get("created_at"),
-                published_at: row.get("published_at"),
-                updated_at: row.get("updated_at"),
-            })
-            .collect())
-    }
-
     /// One config version with its yaml body.
     pub async fn by_version(
         client: &impl ::tokio_postgres::GenericClient,
@@ -296,30 +242,6 @@ ORDER BY version DESC
 
 pub mod update {
     //! @generated query functions for this entity + operation.
-    /// The dataset_id backfill (fixup 0002): stamp every pre-dataset row with its org's default dataset. Idempotent — only NULL rows are touched, so a re-run after new writes (which stamp themselves) is a no-op.
-    pub async fn backfill_dataset(
-        client: &impl ::tokio_postgres::GenericClient,
-    ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
-        const SQL: &str = "UPDATE public.config_versions c
-SET dataset_id = d.id, updated_at = now()
-FROM public.datasets d
-WHERE d.org_id = c.org_id AND d.name = 'default' AND c.dataset_id IS NULL
-";
-        let __span = ::er_span::sql_span(
-            ::er_span::Store::Control,
-            "config_version",
-            "update",
-            "backfill_dataset",
-            "config_versions",
-            SQL,
-        );
-        let __result = ::er_span::instrument(&__span, client.execute(SQL, &[])).await;
-        let __entered = __span.enter();
-        let __n = ::er_span::check(&__span, __result)?;
-        ::er_span::rows(&__span, __n);
-        Ok(__n)
-    }
-
     /// Mark a version published with its rollout tier (the config_versions half of publish).
     pub async fn publish(
         client: &impl ::tokio_postgres::GenericClient,

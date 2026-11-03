@@ -124,6 +124,12 @@ pub async fn ensure_schema(client: &mut Client) -> Result<(), SchemaError> {
     // to the DDL event triggers.
     // Constraint surgery the reconciler would refuse (a SET NOT NULL against a
     // tightened declaration) runs before it; see `crate::fixups`.
+    // The convergence sweep runs HERE, ahead of both the fixups and the
+    // reconciler, because `0004_dataset_id_required` fills `dataset_id` from
+    // each org's `default` dataset and cannot do that before the dataset
+    // exists. It is an every-boot DO-NOTHING-on-existing converge either way,
+    // so running it earlier costs nothing and orders the dependency properly.
+    crate::fixups::ensure_default_datasets(client).await?;
     crate::fixups::apply_fixups(client, crate::fixups::Phase::BeforeReconcile).await?;
     let reconciled = er_entity_diff::reconcile_postgres(
         client,
@@ -174,7 +180,9 @@ pub async fn ensure_schema(client: &mut Client) -> Result<(), SchemaError> {
     // Data work that needs the reconciler's ADD COLUMNs (backfills) runs after
     // it, and then the convergence ensures (every boot, not semantics-once).
     crate::fixups::apply_fixups(client, crate::fixups::Phase::AfterReconcile).await?;
-    crate::fixups::ensure_default_datasets(client).await?;
+    // An org created by THIS boot's reconcile cannot exist (reconcile does
+    // not create orgs), so one converge per boot is enough — but it is kept
+    // idempotent so moving it never becomes a correctness question.
     Ok(())
 }
 
@@ -530,6 +538,19 @@ pub async fn list_jobs_all(
 /// pass `ensure_schema` runs at boot, callable after minting orgs below the
 /// HTTP layer (`upsert_org_byo`), which deliberately does not converge so the
 /// sweep's own tests keep an unconverged org to exercise.
+/// Stamp orphan rows with their org's `default` dataset — the body fixup
+/// `0004` applies once at boot, exposed so the sweep's own test can drive it
+/// directly. Idempotent: only NULL rows are touched.
+///
+/// # Errors
+/// Propagates the update error.
+pub async fn backfill_dataset_ids(client: &mut Client) -> Result<(), SchemaError> {
+    let tx = client.transaction().await?;
+    crate::fixups::backfill_dataset_ids(&tx).await?;
+    tx.commit().await?;
+    Ok(())
+}
+
 pub async fn converge_default_datasets(client: &mut Client) -> Result<(), SchemaError> {
     crate::fixups::ensure_default_datasets(client).await
 }
@@ -1491,10 +1512,10 @@ pub async fn model_version(
 /// Propagates the update error.
 pub async fn activate_model_version(
     client: &Client,
-    org_id: &str,
+    dataset_id: &str,
     model_id: &str,
 ) -> Result<(), PgError> {
-    er_entities::matching_model::update::activate(client, model_id, org_id).await?;
+    er_entities::matching_model::update::activate(client, model_id, dataset_id).await?;
     Ok(())
 }
 

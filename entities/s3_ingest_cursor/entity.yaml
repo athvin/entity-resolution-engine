@@ -4,7 +4,7 @@ name: s3_ingest_cursor
 relation: s3_ingest_cursors
 description: "What the auto-ingest poller has already read, one row per (org, source). The poller runs on every dispatcher tick and the newest object under a prefix stays the newest until a new one arrives, so without this row the same CSV would be re-ingested every few seconds forever — an unbounded run loop over the tenant's own lake. An upsert rather than a log: the question it answers is 'what is already in', not 'what has ever been in', and the audit log already answers the second."
 key: [id]
-natural_key: [org_id, source]
+natural_key: [dataset_id, source]
 generate:
   stores: [postgres]
   languages: [rust, typescript]
@@ -21,6 +21,7 @@ columns:
     description: "The tenant whose prefix was polled; every read is scoped by it."
   - name: dataset_id
     type: varchar
+    nullable: false
     references: { relation: datasets, column: id }
     description: "The dataset the polled source lands in."
   - name: source

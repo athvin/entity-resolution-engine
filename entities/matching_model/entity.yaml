@@ -4,7 +4,7 @@ name: matching_model
 relation: matching_models
 description: "An immutable version of a tenant's matching model: the settings document the engine scores against, its hash, provenance and activation state."
 key: [id]
-natural_key: [org_id, name, version]
+natural_key: [dataset_id, name, version]
 generate:
   stores: [postgres]
   languages: [rust, typescript]
@@ -22,6 +22,7 @@ columns:
     description: "The tenant this model version belongs to."
   - name: dataset_id
     type: varchar
+    nullable: false
     references: { relation: datasets, column: id }
     description: "The dataset whose corpus this model was trained for."
   - name: name

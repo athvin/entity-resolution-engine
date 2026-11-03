@@ -109,19 +109,27 @@ async fn every_org_converges_to_a_default_dataset() {
         .await
         .unwrap()
         .unwrap();
-    let drafted = er_entities::config_version::create::draft(
-        &client,
-        &er_ids::new_v7(),
-        &orgs_inc,
-        None,
-        ACCOUNT_YAML,
-        "deadbeef",
-        "pg_dataset_sweep",
-    )
-    .await
-    .unwrap();
-    let version = drafted[0].version;
-    er_entities::config_version::update::publish(&client, None, &orgs_inc, version)
+    // A pre-dataset row, written as raw SQL on purpose. Reading
+    // `entity_type` from a published config is something the converge only
+    // ever has to do for an org that has a config and NO dataset, and since
+    // `0004` made `dataset_id` required that shape can no longer be built
+    // through the generated writers — which is the point: it is the shape an
+    // UPGRADING deployment arrives in, not one a current store can reach.
+    client
+        .batch_execute(
+            "ALTER TABLE public.config_versions ALTER COLUMN dataset_id DROP NOT NULL;
+             DELETE FROM public.fixups WHERE name = '0004_dataset_id_required';",
+        )
+        .await
+        .unwrap();
+    let version: i64 = 1;
+    client
+        .execute(
+            "INSERT INTO public.config_versions
+               (id, org_id, dataset_id, version, yaml, config_hash, state, created_by)
+             VALUES ($1, $2, NULL, $3, $4, 'deadbeef', 'published', 'pg_dataset_sweep')",
+            &[&er_ids::new_v7(), &orgs_inc, &version, &ACCOUNT_YAML],
+        )
         .await
         .unwrap();
     er_entities::org::update::set_active_config(&client, version, "orgs-inc")
@@ -168,9 +176,7 @@ async fn every_org_converges_to_a_default_dataset() {
         orphan.dataset_id.is_none(),
         "created as a pre-dataset row would be"
     );
-    er_entities::job::update::backfill_dataset(&client)
-        .await
-        .unwrap();
+    pg::backfill_dataset_ids(&mut client).await.unwrap();
     let healed = er_entities::job::read::by_id(&client, &acme, &orphan.id)
         .await
         .unwrap()

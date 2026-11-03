@@ -30,7 +30,7 @@ statements is read or written only through the engine's own stage SQL, not
 through a typed query function.
 
 <!-- BEGIN GENERATED: entities-index -->
-**49 entities, 252 declared statements.**
+**49 entities, 240 declared statements.**
 
 | Entity | Relation | Store | Key | Natural key | History |
 |---|---|---|---|---|---|
@@ -42,11 +42,11 @@ through a typed query function.
 | `audit_log` | `audit_log` | postgres | `id` | — | — |
 | `candidate_key` | `candidate_keys` | duckdb | `id` | `profile_run_id, key_columns` | — |
 | `column_profile` | `column_profiles` | duckdb | `id` | `profile_run_id, column_name` | — |
-| `config_version` | `config_versions` | postgres | `id` | `org_id, version` | yes |
+| `config_version` | `config_versions` | postgres | `id` | `dataset_id, version` | yes |
 | `dataset` | `datasets` | postgres | `id` | `org_id, name` | yes |
 | `ddl_log` | `ddl_log` | postgres | `id` | — | — |
 | `entity_event` | `entity_events` | duckdb | `id` | `run_id, entity_id, event_type, details_hash` | — |
-| `entity_link` | `entity_links` | postgres | `id` | `org_id, parent_entity_id, child_entity_id, kind` | yes |
+| `entity_link` | `entity_links` | postgres | `id` | `dataset_id, parent_entity_id, child_entity_id, kind` | yes |
 | `entity_membership` | `entity_membership` | duckdb | `id` | `source_system, source_record_id` | — |
 | `fixup` | `fixups` | postgres | `id` | `name` | — |
 | `golden_lineage` | `golden_lineage` | duckdb | `id` | `entity_id, attribute` | — |
@@ -57,11 +57,11 @@ through a typed query function.
 | `job` | `jobs` | postgres | `id` | — | — |
 | `lake_schema_migration` | `schema_migrations` | duckdb | `id` | — | — |
 | `match_score` | `match_scores` | duckdb | `id` | `rec_a_key, rec_b_key, model_version, tf_snapshot_id` | — |
-| `matching_model` | `matching_models` | postgres | `id` | `org_id, name, version` | yes |
+| `matching_model` | `matching_models` | postgres | `id` | `dataset_id, name, version` | yes |
 | `metric_snapshot` | `metric_snapshots` | duckdb | `id` | `run_id` | — |
 | `metric_snapshot_source` | `metric_snapshot_sources` | duckdb | `id` | `run_id, source_system` | — |
 | `org` | `orgs` | postgres | `id` | `name` | yes |
-| `pair_label` | `pair_labels` | postgres | `id` | `org_id, rec_a_key, rec_b_key` | — |
+| `pair_label` | `pair_labels` | postgres | `id` | `dataset_id, rec_a_key, rec_b_key` | — |
 | `profile_finding` | `profile_findings` | duckdb | `id` | `profile_run_id, code, column_name` | — |
 | `profile_run` | `profile_runs` | duckdb | `id` | `subject, source_system, corpus_digest, tier` | — |
 | `raw_record` | `raw_records` | duckdb | `id` | `source_system, source_record_id, content_hash` | — |
@@ -71,7 +71,7 @@ through a typed query function.
 | `review` | `review_queue` | duckdb | `id` | `rec_a_key, rec_b_key, reason` | — |
 | `run` | `runs` | duckdb | `id` | — | — |
 | `run_stage` | `run_stages` | duckdb | `id` | `run_id, stage, try_number` | — |
-| `s3_ingest_cursor` | `s3_ingest_cursors` | postgres | `id` | `org_id, source` | — |
+| `s3_ingest_cursor` | `s3_ingest_cursors` | postgres | `id` | `dataset_id, source` | — |
 | `schedule` | `schedules` | postgres | `id` | — | yes |
 | `schema_migration` | `schema_migrations` | postgres | `id` | — | — |
 | `scored_record` | `scored_records` | duckdb | `id` | `record_key, model_version, tf_snapshot_id` | — |
@@ -96,11 +96,11 @@ Declared statements per entity and operation:
 | `audit_log` | 1 | 1 | 0 | 0 |
 | `candidate_key` | 1 | 1 | 0 | 0 |
 | `column_profile` | 1 | 2 | 0 | 0 |
-| `config_version` | 1 | 3 | 2 | 0 |
+| `config_version` | 1 | 2 | 1 | 0 |
 | `dataset` | 1 | 3 | 4 | 0 |
 | `ddl_log` | 0 | 1 | 0 | 0 |
 | `entity_event` | 1 | 3 | 0 | 1 |
-| `entity_link` | 1 | 1 | 1 | 1 |
+| `entity_link` | 1 | 1 | 0 | 1 |
 | `entity_membership` | 0 | 7 | 1 | 1 |
 | `fixup` | 1 | 1 | 0 | 0 |
 | `golden_lineage` | 0 | 1 | 0 | 0 |
@@ -108,14 +108,14 @@ Declared statements per entity and operation:
 | `golden_record` | 0 | 5 | 11 | 0 |
 | `ingest_batch` | 1 | 2 | 1 | 1 |
 | `int_std_record` | 0 | 5 | 0 | 0 |
-| `job` | 2 | 4 | 11 | 0 |
+| `job` | 2 | 4 | 10 | 0 |
 | `lake_schema_migration` | 1 | 1 | 0 | 0 |
 | `match_score` | 0 | 5 | 3 | 0 |
-| `matching_model` | 1 | 4 | 2 | 0 |
+| `matching_model` | 1 | 4 | 1 | 0 |
 | `metric_snapshot` | 1 | 1 | 0 | 0 |
 | `metric_snapshot_source` | 1 | 1 | 0 | 0 |
 | `org` | 2 | 4 | 3 | 0 |
-| `pair_label` | 1 | 2 | 1 | 0 |
+| `pair_label` | 1 | 2 | 0 | 0 |
 | `profile_finding` | 1 | 1 | 0 | 0 |
 | `profile_run` | 1 | 2 | 0 | 0 |
 | `raw_record` | 0 | 2 | 0 | 1 |
@@ -125,15 +125,15 @@ Declared statements per entity and operation:
 | `review` | 0 | 5 | 3 | 0 |
 | `run` | 1 | 4 | 2 | 1 |
 | `run_stage` | 1 | 1 | 1 | 0 |
-| `s3_ingest_cursor` | 1 | 1 | 1 | 0 |
-| `schedule` | 2 | 2 | 4 | 1 |
+| `s3_ingest_cursor` | 1 | 1 | 0 | 0 |
+| `schedule` | 2 | 2 | 3 | 1 |
 | `schema_migration` | 1 | 2 | 0 | 0 |
 | `scored_record` | 0 | 2 | 1 | 2 |
-| `staged_steward_action` | 1 | 1 | 2 | 0 |
+| `staged_steward_action` | 1 | 1 | 1 | 0 |
 | `tag` | 1 | 3 | 1 | 0 |
-| `tagging` | 1 | 1 | 1 | 1 |
-| `task_instance` | 3 | 4 | 23 | 0 |
-| `tenant_schema_state` | 2 | 1 | 1 | 0 |
+| `tagging` | 1 | 1 | 0 | 1 |
+| `task_instance` | 3 | 4 | 22 | 0 |
+| `tenant_schema_state` | 2 | 1 | 0 | 0 |
 | `webhook` | 1 | 3 | 1 | 0 |
 | `webhook_delivery` | 1 | 1 | 2 | 0 |
 <!-- END GENERATED: entities-index -->

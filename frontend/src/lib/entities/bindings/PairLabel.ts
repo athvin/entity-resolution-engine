@@ -8,7 +8,7 @@ export interface PairLabel {
   /** The tenant whose corpus the pair belongs to; every read is scoped by it. */
   org_id: string;
   /** The dataset whose record pair this verdict is about — record keys are lake-local. */
-  dataset_id: string | null;
+  dataset_id: string;
   /** The pair's lower record key, canonical order — the same ordering match_scores uses, so a label and a score describe the same pair. */
   rec_a_key: string;
   /** The pair's higher record key, canonical order. */

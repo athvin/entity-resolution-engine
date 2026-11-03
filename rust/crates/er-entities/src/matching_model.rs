@@ -11,7 +11,7 @@ pub struct MatchingModel {
     /// The tenant this model version belongs to.
     pub org_id: String,
     /// The dataset whose corpus this model was trained for.
-    pub dataset_id: Option<String>,
+    pub dataset_id: String,
     /// The model's name within the tenant; versions are monotonic within a name, so one tenant can keep several models (a classic rule model beside a trained one) and switch between them.
     pub name: String,
     /// The monotonic version number within (org, name). Versions are immutable: a retrain or a weight override mints the next one rather than editing this.
@@ -97,7 +97,7 @@ pub mod create {
 VALUES
   ($1, $2, $3, $4,
    coalesce((SELECT max(version) FROM public.matching_models
-             WHERE org_id = $2 AND name = $4), 0) + 1,
+             WHERE dataset_id = $3 AND name = $4), 0) + 1,
    $5, $6, $7,
    $8, $9, $10, $11)
 RETURNING
@@ -426,24 +426,24 @@ ORDER BY name, version DESC
 
 pub mod update {
     //! @generated query functions for this entity + operation.
-    /// Activate one version and archive whichever version of THE SAME NAME was active, in a single statement. One statement rather than two so there is no window in which the tenant has no active model, and no transaction needed around the generated query functions. Scoped by name, not by org: this used to archive every active row for the org, so a tenant that activated a second named model silently retired the first — and an ensemble is exactly a list of named models active at once (E5b). The name comes from a subquery on `$model_id` rather than a parameter so the caller cannot pass one that disagrees with the row, and so the whole thing stays one atomic statement. `matching_models_one_active_per_name` makes the resulting invariant structural.
+    /// Activate one version and archive whichever version of THE SAME NAME was active, in a single statement. One statement rather than two so there is no window in which the tenant has no active model, and no transaction needed around the generated query functions. Scoped by name within the DATASET: this used to archive every active row for the org, so a tenant that activated a second named model silently retired the first — and an ensemble is exactly a list of named models active at once (E5b). The name comes from a subquery on `$model_id` rather than a parameter so the caller cannot pass one that disagrees with the row, and so the whole thing stays one atomic statement. `matching_models_one_active_per_name` makes the resulting invariant structural.
     pub async fn activate(
         client: &impl ::tokio_postgres::GenericClient,
         model_id: &str,
-        org_id: &str,
+        dataset_id: &str,
     ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
         const SQL: &str = "UPDATE public.matching_models
 SET state = CASE WHEN id = $1 THEN 'active' ELSE 'archived' END,
     activated_at = CASE WHEN id = $1 THEN now() ELSE activated_at END,
     updated_at = now()
-WHERE org_id = $2
+WHERE dataset_id = $2
   AND (
     id = $1
     OR (
       state = 'active'
       AND name = (
         SELECT name FROM public.matching_models
-        WHERE id = $1 AND org_id = $2
+        WHERE id = $1 AND dataset_id = $2
       )
     )
   )
@@ -457,31 +457,7 @@ WHERE org_id = $2
             SQL,
         );
         let __result =
-            ::er_span::instrument(&__span, client.execute(SQL, &[&model_id, &org_id])).await;
-        let __entered = __span.enter();
-        let __n = ::er_span::check(&__span, __result)?;
-        ::er_span::rows(&__span, __n);
-        Ok(__n)
-    }
-
-    /// The dataset_id backfill (fixup 0002): stamp every pre-dataset row with its org's default dataset. Idempotent — only NULL rows are touched, so a re-run after new writes (which stamp themselves) is a no-op.
-    pub async fn backfill_dataset(
-        client: &impl ::tokio_postgres::GenericClient,
-    ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
-        const SQL: &str = "UPDATE public.matching_models c
-SET dataset_id = d.id, updated_at = now()
-FROM public.datasets d
-WHERE d.org_id = c.org_id AND d.name = 'default' AND c.dataset_id IS NULL
-";
-        let __span = ::er_span::sql_span(
-            ::er_span::Store::Control,
-            "matching_model",
-            "update",
-            "backfill_dataset",
-            "matching_models",
-            SQL,
-        );
-        let __result = ::er_span::instrument(&__span, client.execute(SQL, &[])).await;
+            ::er_span::instrument(&__span, client.execute(SQL, &[&model_id, &dataset_id])).await;
         let __entered = __span.enter();
         let __n = ::er_span::check(&__span, __result)?;
         ::er_span::rows(&__span, __n);

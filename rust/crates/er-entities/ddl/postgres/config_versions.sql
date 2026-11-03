@@ -1,7 +1,7 @@
 CREATE TABLE IF NOT EXISTS public.config_versions (
   id text NOT NULL,
   org_id text NOT NULL REFERENCES orgs(id),
-  dataset_id text REFERENCES datasets(id),
+  dataset_id text NOT NULL REFERENCES datasets(id),
   version bigint NOT NULL,
   yaml text NOT NULL,
   config_hash text NOT NULL,
@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS public.config_versions (
   published_at timestamptz,
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (id),
-  UNIQUE (org_id, version)
+  UNIQUE (dataset_id, version)
 );
 CREATE INDEX IF NOT EXISTS config_versions_dataset ON public.config_versions (dataset_id, version);
 CREATE TABLE IF NOT EXISTS public.config_versions_history (

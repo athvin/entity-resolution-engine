@@ -4,7 +4,7 @@ name: pair_label
 relation: pair_labels
 description: "A human (or model) verdict on one candidate pair — the training signal the engine has always been able to learn from and never had. One row per (org, pair): a re-label corrects the previous verdict rather than stacking another."
 key: [id]
-natural_key: [org_id, rec_a_key, rec_b_key]
+natural_key: [dataset_id, rec_a_key, rec_b_key]
 generate:
   stores: [postgres]
   languages: [rust, typescript]
@@ -21,6 +21,7 @@ columns:
     description: "The tenant whose corpus the pair belongs to; every read is scoped by it."
   - name: dataset_id
     type: varchar
+    nullable: false
     references: { relation: datasets, column: id }
     description: "The dataset whose record pair this verdict is about — record keys are lake-local."
   - name: rec_a_key

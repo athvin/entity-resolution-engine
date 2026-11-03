@@ -123,4 +123,49 @@ async fn a_live_older_store_boots_through_the_deferred_replay() {
         converged, 1,
         "the aged org converged to its default dataset"
     );
+
+    // ---- phase 3: an APPLIED contract fixup must not refuse a boot ---------
+    //
+    // `0004_dataset_id_required` is the registry's first gated `Kind::Contract`:
+    // it may only run on a store that recorded the release which stopped
+    // addressing these rows by org. Give the guard a history it cannot possibly
+    // satisfy — a catalog version no build ever carried — while leaving the
+    // ledger row phase 2 wrote in place.
+    //
+    // Boot must still succeed. Once the ledger says the fixup ran, the removal
+    // has already happened, so a refusal could not undo it; it would only
+    // strand a store that migrated correctly, permanently and on every
+    // subsequent boot. That is why the ledger is consulted before the guard.
+    let foreign = "0".repeat(64);
+    client
+        .execute(
+            "INSERT INTO public.schema_migrations (id, catalog_hash, kind, applied_by)
+             VALUES ($1, $2, 'verified', 'pg_schema_replay')",
+            &[&er_ids::new_v7(), &foreign],
+        )
+        .await
+        .unwrap();
+    pg::ensure_schema(&mut client).await.unwrap();
+
+    // ---- phase 4: ...because that history really is unsatisfiable ----------
+    //
+    // The control for phase 3. Drop only the one ledger row and the same boot
+    // now refuses, which is what makes phase 3's success attributable to the
+    // ordering rather than to a guard that never fires.
+    client
+        .execute(
+            "DELETE FROM public.fixups WHERE name = $1",
+            &[&"0004_dataset_id_required"],
+        )
+        .await
+        .unwrap();
+    let err = pg::ensure_schema(&mut client).await.expect_err(
+        "an unapplied contract fixup on a store missing its expand release must refuse",
+    );
+    match err {
+        pg::SchemaError::ContractNotReady { fixup, .. } => {
+            assert_eq!(fixup, "0004_dataset_id_required");
+        }
+        other => panic!("expected ContractNotReady, got {other}"),
+    }
 }

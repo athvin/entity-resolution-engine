@@ -1,7 +1,7 @@
 CREATE TABLE IF NOT EXISTS public.s3_ingest_cursors (
   id text NOT NULL,
   org_id text NOT NULL REFERENCES orgs(id),
-  dataset_id text REFERENCES datasets(id),
+  dataset_id text NOT NULL REFERENCES datasets(id),
   source text NOT NULL,
   object_key text NOT NULL,
   etag text,
@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS public.s3_ingest_cursors (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (id),
-  UNIQUE (org_id, source)
+  UNIQUE (dataset_id, source)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS s3_ingest_cursors_org_source ON public.s3_ingest_cursors (org_id, source);
 CREATE INDEX IF NOT EXISTS s3_ingest_cursors_dataset ON public.s3_ingest_cursors (dataset_id, source);

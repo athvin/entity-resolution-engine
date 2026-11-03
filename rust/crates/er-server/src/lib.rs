@@ -1220,7 +1220,7 @@ async fn seed_starter_model(
     .await;
     match created {
         Ok(m) => {
-            if let Err(e) = pg::activate_model_version(client, &org_row.id, &m.id).await {
+            if let Err(e) = pg::activate_model_version(client, &ds_id, &m.id).await {
                 return json!({ "seeded": false, "reason": format!("activate failed: {e}") });
             }
             json!({
@@ -2710,7 +2710,7 @@ async fn activate_model_version(
         );
     }
     let _ = pg::set_actor(&client, &principal.actor).await;
-    if let Err(e) = pg::activate_model_version(&client, &org_row.id, &target.id).await {
+    if let Err(e) = pg::activate_model_version(&client, &d.id, &target.id).await {
         return pg_err(e);
     }
     let _ = pg::audit(
@@ -4416,7 +4416,6 @@ async fn attempt_work_order(
         match pg::active_models(&client, &current.org_id).await {
             Ok(rows) => rows
                 .into_iter()
-                .filter(|m| m.dataset_id.as_deref() == job.dataset_id.as_deref())
                 .map(|m| crate::runctx::ActiveModelSpec {
                     name: m.name,
                     version: m.version,
@@ -4436,11 +4435,7 @@ async fn attempt_work_order(
         match er_entities::pair_label::read::all(&client, &current.org_id).await {
             Ok(rows) => rows
                 .into_iter()
-                .filter(|l| {
-                    l.dataset_id.as_deref() == job.dataset_id.as_deref()
-                        && l.verdict == "match"
-                        && l.origin != "llm"
-                })
+                .filter(|l| l.verdict == "match" && l.origin != "llm")
                 .map(|l| (l.rec_a_key, l.rec_b_key))
                 .collect(),
             Err(e) => {
@@ -10008,7 +10003,7 @@ mod evaluation_tests {
         PairLabel {
             id: format!("l-{verdict}-{origin}-{score:?}"),
             org_id: "o1".into(),
-            dataset_id: None,
+            dataset_id: "d1".into(),
             rec_a_key: "a".into(),
             rec_b_key: "b".into(),
             verdict: verdict.into(),

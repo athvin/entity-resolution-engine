@@ -139,8 +139,8 @@ export interface components {
             created_at: string;
             /** @description Principal that created the version. */
             created_by: string;
-            /** @description The dataset this config version belongs to. Backfilled to the org's default dataset; joins the natural key at the clean break. */
-            dataset_id?: string | null;
+            /** @description The dataset this config version belongs to. Part of the natural key: rows belong to a dataset, not to the org at large. */
+            dataset_id: string;
             /** @description The version row's unique id (UUIDv7, minted at draft). */
             id: string;
             /** @description The tenant this config version belongs to. */
@@ -418,7 +418,7 @@ export interface components {
             /** @description The cron expression. */
             cron: string;
             /** @description The dataset this schedule enqueues for. */
-            dataset_id?: string | null;
+            dataset_id: string;
             /** @description Whether the schedule is active. */
             enabled: boolean;
             /** @description The schedule's unique id. */
@@ -459,7 +459,7 @@ export interface components {
             /** @description Principal that staged the action. */
             created_by: string;
             /** @description The dataset whose lake this action drains into. */
-            dataset_id?: string | null;
+            dataset_id: string;
             /** @description The failure reason, if the action failed. */
             error?: string | null;
             /** @description The staged action's unique id. */
