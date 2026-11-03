@@ -8,7 +8,11 @@
  * cancel/resume, and the provision lifecycle (provisioning → active on the
  * second poll). POST /__reset restores the initial state between suites.
  */
+import { createHash } from "node:crypto";
+import { readFileSync, readdirSync } from "node:fs";
 import http from "node:http";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { encodeAccountGolden, encodePersonGolden } from "./arrow.mjs";
 
@@ -1098,6 +1102,24 @@ export function initialState() {
   return state;
 }
 
+/**
+ * A hash of this directory's sources as loaded, matching what
+ * `tests/support/stale-servers.ts` computes from disk. Read at startup, so it
+ * describes the code this process is actually running rather than the code on
+ * disk now.
+ */
+const SOURCE_HASH = (() => {
+  const dir = dirname(fileURLToPath(import.meta.url));
+  const hash = createHash("sha256");
+  for (const name of readdirSync(dir)
+    .filter((n) => n.endsWith(".mjs") || n.endsWith(".json"))
+    .sort()) {
+    hash.update(name);
+    hash.update(readFileSync(join(dir, name)));
+  }
+  return hash.digest("hex");
+})();
+
 let state = initialState();
 
 function send(res, status, body) {
@@ -1541,6 +1563,14 @@ const server = http.createServer((req, res) => {
       }
       res.end();
       return;
+    }
+    // Identity, for the functional tier's staleness guard: a hash of the
+    // sources THIS process loaded. `reuseExistingServer` adopts whatever is
+    // listening, so a server from an earlier code state would otherwise serve
+    // confident wrong answers with no symptom — see
+    // `tests/support/stale-servers.ts`.
+    if (path === "/__source" && req.method === "GET") {
+      return send(res, 200, { hash: SOURCE_HASH });
     }
     if (path === "/__reset" && req.method === "POST") {
       state = initialState();
