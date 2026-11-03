@@ -23,6 +23,8 @@ export const queryKeys = {
     [...ds(org, dataset), "jobs", params ?? {}] as const,
   job: (org: string, dataset: string, jobId: string) =>
     [...ds(org, dataset), "job", jobId] as const,
+  jobTasks: (org: string, dataset: string, jobId: string) =>
+    [...ds(org, dataset), "job", jobId, "tasks"] as const,
   reviews: (org: string, dataset: string) => [...ds(org, dataset), "reviews"] as const,
   goldenRecords: (org: string, dataset: string, q: string) =>
     [...ds(org, dataset), "golden-records", q] as const,

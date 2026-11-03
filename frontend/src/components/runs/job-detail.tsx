@@ -10,6 +10,7 @@ import { Working } from "@/components/ui/working";
 import { effectiveRole, useJob, useJobAction, useSession } from "@/lib/query/hooks";
 import { cn } from "@/lib/utils";
 import { StateChip } from "./runs-content";
+import { TaskList } from "./task-list";
 import { useDatasetSlug } from "@/lib/use-dataset-slug";
 
 const ACTIVE = new Set(["queued", "dispatching", "running", "retrying", "canceling"]);
@@ -217,6 +218,18 @@ export function JobDetail({ org, jobId }: { org: string; jobId: string }) {
           )}
         </CardContent>
       </Card>
+
+      {/* The task ledger: where the run actually is, at the resolution the
+       * ledger records it. The Stages card above reads `job.progress`, which
+       * has no producer — this is the surface that does, so it sits directly
+       * under it rather than below the failure card. */}
+      <TaskList
+        org={org}
+        ds={ds}
+        jobId={jobId}
+        canRetry={isSteward}
+        jobActive={ACTIVE.has(data.state)}
+      />
 
       {data.state === "succeeded" && RESOLVING_KINDS.has(data.kind) && (
         /* The one flourish on this surface, and it is affordable because the
