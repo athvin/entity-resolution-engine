@@ -127,6 +127,14 @@ pub fn sql_span(
         { attr::DB_QUERY_TEXT } = Empty,
         { attr::ROWS } = Empty,
         { attr::OUTCOME } = Empty,
+        // Declared, not merely recorded later. `tracing` only accepts fields
+        // present at the callsite, so `span.record` on an undeclared name is a
+        // SILENT no-op — which is what these two were. `otel.status_code` is
+        // the one the collector's `errors` tail-sampling policy reads, so
+        // without it a failed statement was indistinguishable from a successful
+        // one and fell to the 10% residual.
+        otel.status_code = Empty,
+        error.type = Empty,
     );
     // Formatting the identity is only worth it when something is listening.
     if !span.is_disabled() {
@@ -164,6 +172,14 @@ pub fn generator_span(
         { attr::DB_QUERY_SUMMARY } = summary,
         { attr::ROWS } = Empty,
         { attr::OUTCOME } = Empty,
+        // Declared, not merely recorded later. `tracing` only accepts fields
+        // present at the callsite, so `span.record` on an undeclared name is a
+        // SILENT no-op — which is what these two were. `otel.status_code` is
+        // the one the collector's `errors` tail-sampling policy reads, so
+        // without it a failed statement was indistinguishable from a successful
+        // one and fell to the 10% residual.
+        otel.status_code = Empty,
+        error.type = Empty,
     );
     span
 }
@@ -176,11 +192,32 @@ pub fn rows(span: &tracing::Span, n: u64) {
 /// Mark a span's outcome from a `Result` and hand the `Result` straight back,
 /// so a `?` site becomes one wrapping call rather than a match.
 ///
-/// The error's *text* is recorded, not the error itself: the message belongs on
-/// the span for debugging, while the chain stays with the propagated error for
-/// the caller to flatten in the workspace's usual way. Nothing here interpolates
-/// a source — that rule governs `Display` on error types and is enforced by
-/// `er-errors/tests/display_no_source.rs`.
+/// ## The error MESSAGE is not exported by default, and that is a PII rule
+///
+/// A database error message routinely contains the offending record value.
+/// Measured, not supposed — DuckDB on a primary-key violation says:
+///
+/// ```text
+/// Constraint Error: Duplicate key "email: robert.chen@example.com"
+/// violates primary key constraint.
+/// ```
+///
+/// Postgres is the same shape, putting the conflicting key in its `DETAIL`.
+/// This is a deduplication engine, so an email, a name or an address IS the
+/// payload — and a span goes to an exportable store. Recording that text
+/// unconditionally made every constraint violation a §10.4 breach, waiting on
+/// a duplicate to fire. The PII probe over a clean run cannot catch it, because
+/// nothing failed.
+///
+/// So the span always carries the FACT of the failure — `er.outcome` and
+/// `otel.status_code`, which is what dashboards and the collector's `errors`
+/// sampling policy actually read — and carries the message only under
+/// `ER_TRACE_SQL_TEXT=1`, the same flag that admits statement text, for the
+/// same reason: both can carry payload.
+///
+/// Nothing is lost for debugging. The message still reaches stderr through the
+/// subscriber's structured layer and the caller still gets the whole error to
+/// flatten in the workspace's usual way; both of those stay in-account.
 pub fn check<T, E: core::fmt::Display>(span: &tracing::Span, result: Result<T, E>) -> Result<T, E> {
     match &result {
         Ok(_) => {
@@ -189,7 +226,9 @@ pub fn check<T, E: core::fmt::Display>(span: &tracing::Span, result: Result<T, E
         Err(e) => {
             span.record(attr::OUTCOME, Outcome::Error.as_str());
             span.record("otel.status_code", "ERROR");
-            span.record("error.type", tracing::field::display(e));
+            if sql_text_enabled() {
+                span.record("error.type", tracing::field::display(e));
+            }
         }
     }
     result

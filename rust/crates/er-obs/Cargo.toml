@@ -45,6 +45,7 @@ reqwest.workspace = true
 workspace = true
 
 [dev-dependencies]
+er-span = { path = "../er-span" }
 opentelemetry = "0.31"
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 

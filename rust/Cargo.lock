@@ -2226,6 +2226,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "er-schema",
+ "er-span",
  "indexmap",
  "opentelemetry",
  "opentelemetry-http",
