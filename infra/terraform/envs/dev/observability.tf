@@ -159,19 +159,24 @@ resource "aws_eks_pod_identity_association" "otel_collector" {
 # every environment (core/observability.tf). The Pod Identity association has
 # to live here, though: it names a cluster, and the cluster is a dev resource.
 #
-# Looked up by name rather than hardcoded or read through remote state —
-# `envs/dev` has no remote-state link to core (eks.tf hardcodes the one ARN it
-# needs), and a lookup fails loudly with "role not found" if core has not
-# applied yet, which is the right order of operations to enforce.
-data "aws_iam_role" "openobserve" {
-  name = "er-openobserve"
-}
-
+# The ARN is CONSTRUCTED, not looked up, and that is a correction rather than a
+# shortcut. A `data "aws_iam_role"` here failed `plan (dev)` outright with
+# "couldn't find resource": a data source resolves at PLAN time, core and dev
+# plan in the same CI run, so dev could never plan until core had already
+# applied — a chicken-and-egg that red-lights the PR permanently rather than
+# "enforcing an order of operations", which is what an earlier version of this
+# comment claimed.
+#
+# A constructed ARN is plan-safe because it is a string. The cost is that a
+# missing role surfaces at APPLY rather than at plan, which is the right place
+# for it: apply is where the dependency actually matters, and `envs/core`
+# applies before `envs/dev` in the same workflow. eks.tf constructs the one ARN
+# it needs from core the same way.
 resource "aws_eks_pod_identity_association" "openobserve" {
   cluster_name    = module.eks.cluster_name
   namespace       = "observability"
   service_account = "openobserve"
-  role_arn        = data.aws_iam_role.openobserve.arn
+  role_arn        = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/er-openobserve"
 }
 
 # --- the span store's credentials --------------------------------------------
