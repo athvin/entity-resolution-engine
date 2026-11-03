@@ -72,6 +72,7 @@ job instead — `terraform plan` is the worked example.
 | `audit` | pnpm audit + licenses | 10 | `needs.detect.outputs.frontend == 'true'` |
 | `semgrep` | semgrep (static analysis) | 15 | `needs.detect.outputs.frontend == 'true'` |
 | `coverage` | coverage (vitest) | 15 | `github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch'` |
+| `record-pass` | record pass marker | 5 | `${{ !cancelled() && github.event_name == 'pull_request' && needs.detect.outputs.frontend = …` |
 
 ### `images.yml`
 
@@ -115,10 +116,11 @@ job instead — `terraform plan` is the worked example.
 | `lake-e2e` | DuckLake e2e shard (${{ matrix.partition }}) | 45 | `needs.detect.outputs.code == 'true'` |
 | `ducklake-e2e` | DuckLake e2e server (${{ matrix.slice }}) | 45 | `needs.detect.outputs.code == 'true'` |
 | `ducklake-gate` | DuckLake + extensions e2e | 5 | `${{ !cancelled() && needs.detect.outputs.code == 'true' }}` |
-| `bench-compile` | benchmarks (compile) | 30 | `github.event_name != 'pull_request'` |
-| `scale-tests` | scale golden (50k) | 30 | `github.event_name != 'pull_request'` |
+| `bench-compile` | benchmarks (compile) | 30 | `github.event_name != 'pull_request' && github.event_name != 'merge_group'` |
+| `scale-tests` | scale golden (50k) | 30 | `github.event_name != 'pull_request' && github.event_name != 'merge_group'` |
 | `coverage` | coverage (llvm-cov) | 60 | `github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch'` |
 | `cache-prune` | prune the Actions cache to budget | 30 | `github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch'` |
+| `record-pass` | record pass marker | 5 | `${{ !cancelled() && github.event_name == 'pull_request' && needs.detect.outputs.code == 't …` |
 
 ### Agentic workflows (`gh aw`)
 

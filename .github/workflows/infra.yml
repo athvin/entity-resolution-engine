@@ -72,6 +72,12 @@ name: infra
 
 on:
   pull_request:
+  # The merge queue (see rust.yml's trigger block). `terraform plan` is a
+  # required context, so this workflow must report on queue runs or every queued
+  # PR waits forever. `detect` diffs the queue's base...head like a PR; `plan`
+  # itself skips here (its `if:` admits only push and same-repo PRs), which
+  # `plan-gate` accepts — the PR already ran its plan, and `validate` still runs.
+  merge_group:
   push:
     branches: [main]
 
@@ -111,6 +117,8 @@ jobs:
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
           PUSH_BEFORE: ${{ github.event.before }}
           PUSH_AFTER: ${{ github.sha }}
+          MQ_BASE: ${{ github.event.merge_group.base_sha }}
+          MQ_HEAD: ${{ github.event.merge_group.head_sha }}
         # THE PUSH PATH FAILS SAFE, and the asymmetry is deliberate. A
         # wrongly-skipped *plan* is cosmetic — the PR simply shows nothing. A
         # wrongly-skipped *apply* silently diverges the account from its
@@ -122,6 +130,9 @@ jobs:
           case "$EVENT" in
             pull_request)
               range="$PR_BASE...$PR_HEAD"
+              ;;
+            merge_group)
+              range="$MQ_BASE...$MQ_HEAD"
               ;;
             push)
               if [ -z "$PUSH_BEFORE" ] \
@@ -396,7 +407,7 @@ jobs:
               # Single quotes: backticks inside a double-quoted string are
               # command substitution, and the first draft of this line silently
               # ran `validate` and printed its empty output instead of the word.
-              echo 'plan tier skipped — a fork PR gets no id-token, so fmt + validate is its gate'
+              echo 'plan tier skipped — a fork PR (no id-token) or a merge-queue run (the PR already planned); fmt + validate is the gate'
               ;;
             *)
               echo "::error::the terraform plan tier did not succeed (result: $RESULT)"
