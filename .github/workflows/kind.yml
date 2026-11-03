@@ -66,5 +66,11 @@ jobs:
         run: |
           kubectl --context kind-er-kind -n er-kind get pods,jobs -o wide || true
           kubectl --context kind-er-kind -n er-kind logs deploy/er-dispatcher --tail=200 || true
-          kubectl --context kind-er-kind -n er-kind logs deploy/web-api -c er-server --tail=200 || true
+          # By LABEL, not by Deployment name: web-api is two Deployments now
+          # (one per colour) and `deploy/web-api` no longer resolves. The label
+          # is stable across both and across a cutover, which is the point — a
+          # diagnostic that silently prints nothing is worse than none, and this
+          # one only runs when something has already failed.
+          kubectl --context kind-er-kind -n er-kind logs -l app.kubernetes.io/name=web-api \
+            -c er-server --tail=200 --prefix || true
           kubectl --context kind-er-kind -n er-kind get events --sort-by=.lastTimestamp | tail -40 || true

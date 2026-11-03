@@ -245,17 +245,26 @@ dev-suspend:
 # replica counts at zero. Aurora resumes from 0 ACU on the first connection
 # (~15s).
 #
-# BOTH Deployments, because `dev-suspend` scales `--all` to zero. This used to
-# resume only web-api — written when the dispatcher ran in-process inside that
+# The dispatcher too, because `dev-suspend` scales `--all` to zero. Resume used
+# to name only web-api — written when the dispatcher ran in-process inside that
 # pod — so after the §6.7 split a suspend/resume cycle left `er-dispatcher` at
 # zero replicas permanently, and the queue stopped draining with nothing in the
-# web-api pod's events or logs to say why. `--all` on the way back down and a
-# named subset on the way back up is the asymmetry that did it; resuming
-# `--all` keeps the two halves in step by construction.
+# web-api pod's events or logs to say why.
+#
+# But NOT `--all`, now that web-api is two Deployments: that would wake the
+# inactive colour as well, so both colours would serve and the preview Service
+# would be pointing at a live pod. The live colour is READ from the Service
+# selector rather than assumed — the same single source of truth the cutover
+# uses, so this cannot drift from whichever colour is actually serving.
 dev-resume:
 	@test -n "$(DEV)" || { echo "usage: make dev-resume DEV=<name>"; exit 2; }
-	kubectl --context $(ER_DEV_CONTEXT) -n $(DEV) scale deployment --all --replicas=1
-	kubectl --context $(ER_DEV_CONTEXT) -n $(DEV) rollout status deployment/web-api --timeout=300s
+	set -e; \
+	colour=$$(kubectl --context $(ER_DEV_CONTEXT) -n $(DEV) get svc er-web \
+	  -o jsonpath='{.spec.selector.er\.dupezero\.com/color}'); \
+	test -n "$$colour" || { echo "could not read the live colour from svc/er-web — is er-platform installed?"; exit 1; }; \
+	echo "resuming the live colour: $$colour"; \
+	kubectl --context $(ER_DEV_CONTEXT) -n $(DEV) scale deployment web-api-$$colour er-dispatcher --replicas=1; \
+	kubectl --context $(ER_DEV_CONTEXT) -n $(DEV) rollout status deployment/web-api-$$colour --timeout=300s; \
 	kubectl --context $(ER_DEV_CONTEXT) -n $(DEV) rollout status deployment/er-dispatcher --timeout=300s
 
 # The purge path (§12): releases gone, namespace (and with it the Postgres PVC,
