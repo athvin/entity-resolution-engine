@@ -441,6 +441,28 @@ impl Executor {
             .await;
             return;
         };
+        // The tenant env and params a control body may need: `stage_approved`
+        // reads the published config's approval tag, `create_catalog` reads
+        // the provisioning plan. Reading a YAML file is not opening a lake, so
+        // this does not make a control task a pod task (§3.5 draws that line
+        // at the lake, and `control_tasks_no_engine.rs` enforces it).
+        let (lake_env, drop_root, params) = match pg::get_org_by_id(&self.client, &row.org_id).await
+        {
+            Ok(Some(org)) => {
+                let pair = pg::lake_env_for_job(&self.client, &org, row.dataset_id.as_deref())
+                    .await
+                    .ok()
+                    .flatten()
+                    .unwrap_or((Value::Null, None));
+                let params = pg::get_job(&self.client, &row.org_id, &row.job_id)
+                    .await
+                    .ok()
+                    .flatten()
+                    .map_or(Value::Null, |j| j.params);
+                (pair.0, pair.1, params)
+            }
+            _ => (Value::Null, None, Value::Null),
+        };
         // The order a control body reads: the same shape a pod's work order
         // has, built here rather than fetched over HTTP — this half IS the
         // control plane, so there is nothing to fetch from.
@@ -455,9 +477,9 @@ impl Executor {
             resource_class: row.resource_class.clone(),
             segment: row.segment.clone(),
             input: row.input.clone().unwrap_or(Value::Null),
-            params: Value::Null,
-            lake_env: Value::Null,
-            drop_root: None,
+            params,
+            lake_env,
+            drop_root,
             models: Value::Null,
             labels: Value::Null,
         };

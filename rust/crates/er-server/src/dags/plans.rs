@@ -132,6 +132,46 @@ impl PlanDoc for SettledActions {
     const STABLE_NAME: &'static str = "settled_actions";
 }
 
+/// `apply_staged`'s receipt: what the lake took, and what Postgres must still
+/// record for it.
+///
+/// Carries a payload because the derived pair labels and review resolutions
+/// are POSTGRES writes and `apply_staged` is a pod — it cannot make them
+/// (§6.4). The ledger is the only channel between the two halves, so they
+/// ride here to `settle_actions`, which is the control task that can.
+///
+/// `applied` is the ids that landed, in order. Applying stops at the first
+/// failing action, so this is a prefix of the drained set: the rest stay
+/// pending for a later pass rather than being lost.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StagedApplied {
+    pub applied: Vec<String>,
+    /// The pair labels the actions implied, with the actor who decided each:
+    /// a label must name the PERSON, not the role (the D7 lesson).
+    #[serde(default)]
+    pub labels: Vec<DerivedPairLabel>,
+    /// `(review_id, resolution)` for the actions that were review resolutions.
+    #[serde(default)]
+    pub resolutions: Vec<(String, String)>,
+    pub snapshot_end: Option<i64>,
+}
+impl PlanDoc for StagedApplied {
+    const STABLE_NAME: &'static str = "staged_applied";
+}
+
+/// One derived pair label as it crosses the ledger: the engine's
+/// `er_cli::DerivedLabel` plus the actor, flattened so the plan document is
+/// self-describing JSON rather than a tuple nobody can read in a row.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DerivedPairLabel {
+    pub rec_a_key: String,
+    pub rec_b_key: String,
+    /// `match` or `no_match`. A dismissal yields no label at all — "not worth
+    /// my time" is not a verdict about whether the pair is the same person.
+    pub verdict: String,
+    pub decided_by: Option<String>,
+}
+
 /// `stage_approved`'s receipt.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StagedApproved {
