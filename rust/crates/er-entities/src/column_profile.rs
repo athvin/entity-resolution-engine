@@ -406,4 +406,127 @@ ORDER BY column_name
         drop(__entered);
         ForRunRow::from_batches(&batches)
     }
+
+    /// One row of `previous_for_subject`: The column shapes of the most recent FULL profile of one corpus — what the drift rules compare the profile being written against. Read before the new run is MERGEd, so the newest row is genuinely the previous one; a re-profile of unchanged content finds its own earlier row and reports no drift, which is correct. `sampled = false` is the load-bearing predicate: a sampled profile's fill rate is an estimate, and comparing it against an exact one would manufacture drift out of sampling error. Tier is deliberately NOT matched — fill is measured identically at both tiers, so excluding tier 2 would discard a perfectly good comparison.
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct PreviousForSubjectRow {
+        pub column_name: String,
+        pub row_count: i64,
+        pub non_null_count: i64,
+        pub blank_count: i64,
+        #[serde(serialize_with = "crate::batch::ser_duckdb_timestamp")]
+        pub captured_at: ::chrono::DateTime<::chrono::Utc>,
+    }
+
+    impl PreviousForSubjectRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![
+                ("column_name", ::arrow::datatypes::DataType::Utf8),
+                ("row_count", ::arrow::datatypes::DataType::Int64),
+                ("non_null_count", ::arrow::datatypes::DataType::Int64),
+                ("blank_count", ::arrow::datatypes::DataType::Int64),
+                (
+                    "captured_at",
+                    ::arrow::datatypes::DataType::Timestamp(
+                        ::arrow::datatypes::TimeUnit::Microsecond,
+                        None,
+                    ),
+                ),
+            ]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "column_name")?;
+                let c1: &::arrow::array::Int64Array = crate::batch::col(batch, 1, "row_count")?;
+                let c2: &::arrow::array::Int64Array =
+                    crate::batch::col(batch, 2, "non_null_count")?;
+                let c3: &::arrow::array::Int64Array = crate::batch::col(batch, 3, "blank_count")?;
+                let c4: &::arrow::array::TimestampMicrosecondArray =
+                    crate::batch::col(batch, 4, "captured_at")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        column_name: crate::batch::req(
+                            crate::batch::opt_str(c0, i),
+                            "column_name",
+                            i,
+                        )?,
+                        row_count: crate::batch::req(crate::batch::opt_i64(c1, i), "row_count", i)?,
+                        non_null_count: crate::batch::req(
+                            crate::batch::opt_i64(c2, i),
+                            "non_null_count",
+                            i,
+                        )?,
+                        blank_count: crate::batch::req(
+                            crate::batch::opt_i64(c3, i),
+                            "blank_count",
+                            i,
+                        )?,
+                        captured_at: crate::batch::req(
+                            crate::batch::opt_ts(c4, i),
+                            "captured_at",
+                            i,
+                        )?,
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// The column shapes of the most recent FULL profile of one corpus — what the drift rules compare the profile being written against. Read before the new run is MERGEd, so the newest row is genuinely the previous one; a re-profile of unchanged content finds its own earlier row and reports no drift, which is correct. `sampled = false` is the load-bearing predicate: a sampled profile's fill rate is an estimate, and comparing it against an exact one would manufacture drift out of sampling error. Tier is deliberately NOT matched — fill is measured identically at both tiers, so excluding tier 2 would discard a perfectly good comparison.
+    pub fn previous_for_subject(
+        conn: &::duckdb::Connection,
+        snapshot: i64,
+        subject: &str,
+        source_system: &str,
+    ) -> ::duckdb::Result<Vec<PreviousForSubjectRow>> {
+        const SQL: &str = "WITH latest AS (
+  SELECT id, captured_at
+  FROM lake.main.profile_runs AT (VERSION => {snapshot})
+  WHERE subject = $1
+    AND source_system = $2
+    AND sampled = false
+  ORDER BY captured_at DESC, id DESC
+  LIMIT 1
+),
+shapes AS (
+  SELECT profile_run_id, column_name, row_count, non_null_count, blank_count
+  FROM lake.main.column_profiles AT (VERSION => {snapshot})
+)
+SELECT shapes.column_name, shapes.row_count, shapes.non_null_count,
+       shapes.blank_count, latest.captured_at
+FROM shapes
+JOIN latest ON latest.id = shapes.profile_run_id
+ORDER BY shapes.column_name
+";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "column_profile",
+            "read",
+            "previous_for_subject",
+            "column_profiles",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let sql = SQL.replace("{snapshot}", &snapshot.to_string());
+        let mut stmt = ::er_span::check(&__span, conn.prepare(&sql))?;
+        let batches = ::er_span::check(
+            &__span,
+            stmt.query_arrow(::duckdb::params![subject, source_system]),
+        )?
+        .collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
+        PreviousForSubjectRow::from_batches(&batches)
+    }
 }

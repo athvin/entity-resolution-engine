@@ -68,6 +68,14 @@ impl Severity {
 }
 
 /// Everything a rule declares about itself.
+///
+/// `Clone` because a rule may report at more than one severity: P012 answers
+/// "did the column set change" in both directions, and a column ARRIVING is
+/// information where one VANISHING changes what can be matched. Cloning the
+/// declaration and overriding `severity` keeps that a single rule with a single
+/// code — one question, both halves of the answer — rather than splitting it
+/// into two codes a reader has to join back together.
+#[derive(Clone)]
 pub struct RuleInfo {
     pub code: Code,
     /// The invariant, as a single lower-case clause.
@@ -156,6 +164,58 @@ pub struct CorpusContext<'a> {
     /// Candidate keys, as measured. Empty when the tier that measures them did
     /// not run, which a rule must treat as "unknown" rather than "none viable".
     pub candidate_keys: &'a [CandidateKeyEstimate],
+    /// The previous profile of this same corpus, when there is one.
+    ///
+    /// `Option` rather than an empty collection, for the reason the empty slice
+    /// above has a comment: "no previous profile" and "a previous profile with
+    /// no columns" are different facts, and a drift rule that confused them
+    /// would report every column of a first-ever profile as newly appeared.
+    pub previous: Option<&'a PreviousProfile>,
+}
+
+/// The parts of an earlier profile a drift rule needs.
+///
+/// Deliberately not a whole `ProfileReport`: the comparison is presence and
+/// fill, so carrying the rest would invite a rule to compare numbers that are
+/// not comparable across runs — a tier-2 entropy against a tier-1 absence, or
+/// an exact distinct count against a sketch.
+#[derive(Debug, Clone)]
+pub struct PreviousProfile {
+    /// When it was taken, so a finding can say *since when* rather than just
+    /// "it changed". A drift finding without a date is unactionable: the reader
+    /// cannot tell whether to look at today's delivery or last quarter's.
+    pub captured_at: String,
+    pub columns: Vec<PreviousColumn>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PreviousColumn {
+    pub column_name: String,
+    pub row_count: i64,
+    pub non_null_count: i64,
+    pub blank_count: i64,
+}
+
+impl PreviousColumn {
+    /// Non-null, non-blank proportion — the same arithmetic as
+    /// [`ColumnShape::fill_rate`], including returning `None` for an empty read
+    /// rather than asserting 0.0. If these two ever disagree, every drift
+    /// finding is measuring one thing against another.
+    #[must_use]
+    pub fn fill_rate(&self) -> Option<f64> {
+        if self.row_count == 0 {
+            return None;
+        }
+        Some((self.non_null_count - self.blank_count) as f64 / self.row_count as f64)
+    }
+}
+
+impl PreviousProfile {
+    /// The named column as it was, or `None` if it did not exist then.
+    #[must_use]
+    pub fn column(&self, name: &str) -> Option<&PreviousColumn> {
+        self.columns.iter().find(|c| c.column_name == name)
+    }
 }
 
 /// A rule that judges the corpus as a whole.
@@ -186,6 +246,22 @@ pub fn findings_with(
     columns: &[(ColumnShape, Vec<ValueFrequency>)],
     candidate_keys: &[CandidateKeyEstimate],
 ) -> Vec<Finding> {
+    findings_against(columns, candidate_keys, None)
+}
+
+/// As [`findings_with`], plus the drift rules, which need the previous profile.
+///
+/// A third entry point for the same reason there is a second: `None` has to
+/// mean "there is no previous profile" and be impossible to confuse with "the
+/// previous profile was empty". A caller that has not looked passes `None` and
+/// gets silence, which is the right answer — "has this changed?" has none when
+/// there is nothing to compare against.
+#[must_use]
+pub fn findings_against(
+    columns: &[(ColumnShape, Vec<ValueFrequency>)],
+    candidate_keys: &[CandidateKeyEstimate],
+    previous: Option<&PreviousProfile>,
+) -> Vec<Finding> {
     let mut out = Vec::new();
     for (shape, top_values) in columns {
         let ctx = ColumnContext { shape, top_values };
@@ -196,6 +272,7 @@ pub fn findings_with(
     let corpus = CorpusContext {
         columns,
         candidate_keys,
+        previous,
     };
     for rule in rules::corpus_rules() {
         out.extend(rule.check(&corpus));

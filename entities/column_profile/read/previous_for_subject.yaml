@@ -1,0 +1,17 @@
+kind: statement
+operation: read
+description: "The column shapes of the most recent FULL profile of one corpus — what the drift rules compare the profile being written against. Read before the new run is MERGEd, so the newest row is genuinely the previous one; a re-profile of unchanged content finds its own earlier row and reports no drift, which is correct. `sampled = false` is the load-bearing predicate: a sampled profile's fill rate is an estimate, and comparing it against an exact one would manufacture drift out of sampling error. Tier is deliberately NOT matched — fill is measured identically at both tiers, so excluding tier 2 would discard a perfectly good comparison."
+reads: [profile_run]
+params:
+  - { name: snapshot, type: bigint }
+  - { name: subject, type: varchar }
+  - { name: source_system, type: varchar }
+returns:
+  - { name: column_name, type: varchar, nullable: false }
+  - { name: row_count, type: bigint, nullable: false }
+  - { name: non_null_count, type: bigint, nullable: false }
+  - { name: blank_count, type: bigint, nullable: false }
+  # Repeated on every row because the join carries it, and worth the repetition:
+  # a drift finding that cannot say SINCE WHEN is unactionable — the reader
+  # cannot tell whether to look at today's delivery or last quarter's.
+  - { name: captured_at, type: timestamp, nullable: false }

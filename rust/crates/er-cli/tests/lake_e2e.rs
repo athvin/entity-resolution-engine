@@ -5008,6 +5008,17 @@ fn scores_at_threads(tag: &str, threads: u32) -> BTreeMap<(String, String), Stri
 }
 
 /// Count rows in a lake relation, for the cache assertions below.
+/// `count(*)` over one relation under a predicate.
+fn lake_count_where(session: &Session, relation: &str, predicate: &str) -> i64 {
+    session
+        .query_strings(&format!(
+            "select count(*) from lake.main.{relation} where {predicate}"
+        ))
+        .unwrap()[0][0]
+        .parse()
+        .unwrap()
+}
+
 fn lake_count(session: &Session, relation: &str) -> i64 {
     session
         .query_strings(&format!("select count(*) from lake.main.{relation}"))
@@ -5445,6 +5456,136 @@ fn ingesting_a_delivery_profiles_it_automatically() {
     assert!(
         lake_count(&session, "column_profiles") > 0,
         "the delivery's columns were profiled"
+    );
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+/// Drift fires across two deliveries of the same source (P011).
+///
+/// The unit fixtures prove the rules decide correctly given a previous profile.
+/// They cannot prove the previous profile is ever FOUND — that is the read
+/// statement's job, and it is the part most likely to be wrong: it has to pick
+/// the right prior run before the current one is MERGEd, and it joins two
+/// snapshot-pinned relations, which no other statement in the catalog did until
+/// now. So this walks the real path: ingest, ingest again with the corpus
+/// changed, and read what the registry said.
+///
+/// It also pins the mechanism that this test DISCOVERED. Both columns the
+/// second delivery changes — one emptied, one removed from the file entirely —
+/// come back as P011, and **neither** as a column-set change: landing writes a
+/// payload key for every column the config maps, so a raw profile's column set
+/// is the config's and not the file's. A column only appears or disappears when
+/// the mapping does, which is why P012 has no case here. The first draft of
+/// this test asserted a P012 for the removed column and was wrong about the
+/// product, not about the rule.
+#[test]
+fn a_second_delivery_reports_drift_against_the_first() {
+    if !enabled() {
+        return;
+    }
+    let (session, config, tmp) = open_seeded_lake("drift");
+
+    let first = std::fs::read_to_string(repo_fixture("base_10/base/crm.csv")).unwrap();
+
+    // The same records with `email_address` emptied on all but one row, and the
+    // `persona_id` column dropped from the file entirely. Both are the shapes
+    // this is for: a field arriving empty, and a column a source stops sending.
+    let mut lines = first.lines();
+    let header = lines.next().unwrap();
+    let keep: Vec<&str> = header.split(',').filter(|c| *c != "phone").collect();
+    let email_at = keep.iter().position(|c| *c == "email_address").unwrap();
+    let drop_at = header.split(',').position(|c| c == "phone").unwrap();
+    // `phone` is MAPPED by the test config; `persona_id` would not be, and an
+    // unmapped column never reaches a profile at all.
+    let mut second = String::new();
+    second.push_str(&keep.join(","));
+    second.push('\n');
+    for (row, line) in lines.filter(|l| !l.is_empty()).enumerate() {
+        let mut cells: Vec<String> = line.split(',').map(str::to_string).collect();
+        cells.remove(drop_at);
+        // Row 0 keeps its address, so the column is PRESENT-but-emptier rather
+        // than absent — P011's case, not P012's.
+        if row > 0 {
+            cells[email_at] = String::new();
+        }
+        second.push_str(&cells.join(","));
+        second.push('\n');
+    }
+
+    let model_json = std::fs::read_to_string(repo_fixture("model_test_v1.json")).unwrap();
+    let tf_csv = repo_fixture("model_test_v1.tf.csv");
+    let deliver = |run_id: &str, csv: &str, ts: &str| {
+        let deliveries = vec![("crm".to_string(), csv.to_string())];
+        er_cli::stage_ingest(
+            &session,
+            &config,
+            &er_cli::PipelineInputs {
+                mode: "full",
+                rebuild_reason: None,
+                segment: None,
+                lexicon: &lexicon_pairs(),
+                deliveries: &deliveries,
+                model: &er_cli::MatchModel {
+                    settings_json: &model_json,
+                    tf_csv_path: std::path::Path::new(&tf_csv),
+                    model_version: "v0001",
+                    tf_snapshot_id: "01JWMDTFSNAP00000000000001",
+                },
+                run_id,
+                ingested_at: ts,
+                scored_at: ts,
+                run_at: ts,
+            },
+        )
+        .unwrap();
+    };
+
+    deliver("01DRIFT000000000000000001", &first, "2026-01-01 00:00:00");
+    // The first profile has nothing to compare against, so it must report NO
+    // drift — not "everything appeared", which is the failure mode of reading
+    // an absent previous profile as an empty one.
+    let after_first = lake_count_where(&session, "profile_findings", "code in ('P011','P012')");
+    assert_eq!(
+        after_first, 0,
+        "the first profile of a corpus cannot have drifted"
+    );
+
+    deliver("01DRIFT000000000000000002", &second, "2026-01-02 00:00:00");
+
+    let found = session
+        .query_strings(
+            "select code, column_name from lake.main.profile_findings \
+             where code in ('P011','P012') order by code, column_name",
+        )
+        .unwrap();
+    assert_eq!(
+        found,
+        vec![
+            vec!["P011".to_string(), "email_address".to_string()],
+            vec!["P011".to_string(), "phone".to_string()],
+        ],
+        "both the emptied and the removed column report as a fill collapse, got {found:?}"
+    );
+    // ...and the column set is unchanged, because the config defines it. An
+    // assertion rather than an omission: a P012 appearing here would mean the
+    // raw profile had started tracking the file's columns instead, which would
+    // make every optional column look like a schema change.
+    assert_eq!(
+        lake_count_where(&session, "profile_findings", "code = 'P012'"),
+        0,
+        "a raw profile's column set follows the mapping, not the delivery"
+    );
+
+    // The message has to say SINCE WHEN, or a reader cannot tell whether to
+    // look at today's delivery or last quarter's.
+    let message = session
+        .query_strings("select message from lake.main.profile_findings where code = 'P011' limit 1")
+        .unwrap();
+    assert!(
+        message[0][0].contains("2026-01-01"),
+        "P011 must name the profile it compared against, got {:?}",
+        message[0][0]
     );
 
     let _ = std::fs::remove_dir_all(&tmp);

@@ -21,7 +21,7 @@ use dedupe_core::profile::{
     ColumnShape, ProfileOptions, ValueFrequency, column_shape, read_column_shapes, top_values,
 };
 use dedupe_core::session::{Session, TableHandle};
-use er_profile::{Finding, findings_with};
+use er_profile::Finding;
 
 use crate::create_ddl_table;
 
@@ -233,7 +233,12 @@ pub fn run_profile(session: &Session, inputs: &ProfileInputs<'_>) -> Result<Prof
     } else {
         Vec::new()
     };
-    let found = findings_with(&paired, &candidates);
+    // The previous FULL profile of this same corpus, for the drift rules. Read
+    // before the new run is MERGEd, so "most recent" is genuinely the previous
+    // one; `None` means this is the first, which the rules read as "no answer"
+    // rather than "nothing changed".
+    let previous = previous_profile(session, snapshot, subject.as_str(), &source_system)?;
+    let found = er_profile::findings_against(&paired, &candidates, previous.as_ref());
 
     let row_count = shapes.first().map_or(0, |s| s.row_count);
     let duration_ms = i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX);
@@ -510,6 +515,48 @@ struct ProfileRunRow<'a> {
     corpus_digest: &'a str,
     captured_at: &'a str,
     ingest_batch_id: Option<&'a str>,
+}
+
+/// The column shapes of the most recent full profile of this corpus.
+///
+/// `None` when there has never been one — which is a different fact from "the
+/// previous profile had no columns", and the reason this returns an `Option`
+/// rather than an empty vector: a drift rule handed an empty previous profile
+/// would report every column of a first-ever profile as newly appeared.
+fn previous_profile(
+    session: &Session,
+    snapshot: i64,
+    subject: &str,
+    source_system: &str,
+) -> Result<Option<er_profile::PreviousProfile>> {
+    let rows = er_entities::column_profile::read::previous_for_subject(
+        session.connection(),
+        snapshot,
+        subject,
+        source_system,
+    )
+    .context("reading the previous profile of this corpus")?;
+    let Some(first) = rows.first() else {
+        return Ok(None);
+    };
+    Ok(Some(er_profile::PreviousProfile {
+        // Formatted here rather than carried as a `DateTime`: this string
+        // exists only to be read inside a finding message, and the generated
+        // row's `Display` appends " UTC" — accurate and noise, since
+        // `captured_at` is the run's logical clock rather than wall time. The
+        // shape matches the UI's own `stamp()`, so a date in a finding reads
+        // the same as the date beside it on the screen.
+        captured_at: first.captured_at.format("%Y-%m-%d %H:%M").to_string(),
+        columns: rows
+            .iter()
+            .map(|r| er_profile::PreviousColumn {
+                column_name: r.column_name.clone(),
+                row_count: r.row_count,
+                non_null_count: r.non_null_count,
+                blank_count: r.blank_count,
+            })
+            .collect(),
+    }))
 }
 
 /// Stage and MERGE the three tables, returning the profile run's id.

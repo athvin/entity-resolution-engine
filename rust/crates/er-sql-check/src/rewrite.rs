@@ -91,17 +91,30 @@ pub struct Rewritten {
     pub snapshot_param: Option<String>,
 }
 
-/// Remove a DuckLake `AT (VERSION => ..)` clause before planning, recording the
+/// Remove DuckLake `AT (VERSION => ..)` clauses before planning, recording the
 /// snapshot parameter name. The snapshot is spliced into the statement text at
 /// emit time, never bound, because DuckLake does not accept a parameter inside
 /// `AT (VERSION => ..)`.
+///
+/// **Every** pin is stripped, not just the first. This was `replace` until a
+/// statement joined two pinned relations — the first lake read in the catalog to
+/// do so — and the second clause survived into sqlparser, which cannot read
+/// `=>`, producing an `[E001] parse error ... Expected: ), found: =>` that
+/// pointed at valid SQL. The emit side was already correct: it templates from
+/// the original text, so both clauses receive the spliced snapshot.
+///
+/// Only the first parameter NAME is recorded, which is right rather than
+/// convenient: a snapshot-pinned read is pinned to one snapshot, so two pins
+/// naming different parameters would not be a shape to support — it would be a
+/// statement asking to read two relations at two different versions, and E006
+/// exists to make a read reproducible, not to offer that.
 #[must_use]
 pub fn rewrite_lake(sql: &str) -> Rewritten {
     if let Some(caps) = SNAPSHOT_PIN.captures(sql) {
         let snapshot_param = caps
             .get(1)
             .map(|m| m.as_str().trim_start_matches('$').to_string());
-        let sql = SNAPSHOT_PIN.replace(sql, "").to_string();
+        let sql = SNAPSHOT_PIN.replace_all(sql, "").to_string();
         Rewritten {
             sql,
             snapshot_param,
@@ -136,6 +149,29 @@ mod tests {
         let r = rewrite_lake("SELECT entity_id FROM lake.main.golden_records AT (VERSION => 42)");
         assert_eq!(r.snapshot_param.as_deref(), Some("42"));
         assert!(!r.sql.contains("VERSION"));
+    }
+
+    #[test]
+    fn strips_every_pin_not_only_the_first() {
+        // The shape that found this: a CTE over one pinned relation joined to a
+        // second. With `replace` the trailing clause survived and sqlparser
+        // reported a parse error against SQL that was perfectly valid.
+        let r = rewrite_lake(
+            "WITH latest AS (SELECT id FROM lake.main.profile_runs AT (VERSION => $snapshot)) \
+             SELECT c.column_name FROM lake.main.column_profiles AT (VERSION => $snapshot) c \
+             JOIN latest ON latest.id = c.profile_run_id",
+        );
+        assert_eq!(r.snapshot_param.as_deref(), Some("snapshot"));
+        assert!(
+            !r.sql.contains("VERSION"),
+            "a surviving pin reaches the parser as `=>`: {}",
+            r.sql
+        );
+        assert_eq!(
+            r.sql.matches("lake.main.").count(),
+            2,
+            "both relations still referenced"
+        );
     }
 
     #[test]

@@ -1,19 +1,20 @@
 //! The findings registry.
 //!
 //! Adding a rule is three edits and no more: write the value in one of the
-//! modules below, add one line to the `COLUMN_RULES` slice in this file, and add
-//! a case to `tests/fixtures.rs`. Everything else — the findings pass, the
-//! generated reference, and the doc gate — reads that slice.
+//! modules below, add one line to the `COLUMN_RULES` or `CORPUS_RULES` slice in
+//! this file, and add a case to `tests/fixtures.rs`. Everything else — the
+//! findings pass, the generated reference, and the doc gate — reads those slices.
 //!
 //! Codes are append-only. A retired rule leaves its code behind rather than
 //! freeing it for reuse, so a stored finding keeps meaning what it said.
-//! The next free code is **P011**.
+//! The next free code is **P013**.
 
 use crate::{ColumnRule, CorpusRule};
 
 pub mod blocking;
 pub mod completeness;
 pub mod distribution;
+pub mod drift;
 pub mod typing;
 
 /// Rules that judge one column, in code order.
@@ -29,8 +30,12 @@ static COLUMN_RULES: &[&dyn ColumnRule] = &[
 ];
 
 /// Rules that need the whole corpus at once, in code order.
-static CORPUS_RULES: &[&dyn CorpusRule] =
-    &[&blocking::NoViableBlockingKey, &blocking::BestBlockingKey];
+static CORPUS_RULES: &[&dyn CorpusRule] = &[
+    &blocking::NoViableBlockingKey,
+    &blocking::BestBlockingKey,
+    &drift::FillRateDropped,
+    &drift::ColumnSetChanged,
+];
 
 /// Every column-scoped rule.
 #[must_use]

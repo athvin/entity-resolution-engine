@@ -17,6 +17,8 @@ A profile describes a corpus; a finding says what about it is worth acting on. N
 | P008 | error | a near-unique column is actually unique |
 | P009 | warning | at least one column is a usable blocking key on its own |
 | P010 | info | the most selective usable blocking key is named with its cost |
+| P011 | warning | a column's fill rate dropped enough to cost real matching reach |
+| P012 | warning | a column appeared or disappeared since the previous profile |
 
 ## P001 — a profiled column holds at least one value
 
@@ -117,3 +119,23 @@ A findings panel that only ever reports problems is a panel people learn to drea
 **Quiet on:** (Nothing to report: this rule only speaks when a viable key exists, and what it says is which one.)
 
 **Fires on:** `email` is the most selective usable key: 2,140,882 pairs, 99.6% of comparisons eliminated, 8% of pairs unreachable because the column is NULL.
+
+## P011 — a column's fill rate dropped enough to cost real matching reach
+
+*warning*
+
+A source that starts sending a field less often is the most common way a pipeline silently stops matching: nothing errors, every stage succeeds, and the only evidence is that fewer records find their pair. Note the altitude — a raw profile covers everything that source has ever landed, not just the newest batch, so this reports the CORPUS moving rather than one delivery's composition. That damps the noise a small delivery would otherwise create, and it means a fill rate that moves here has moved for good. This fires on the DROP only — a column filling UP is good news and needs no warning — and it states the loss in pairs rather than in percentage points of fill, because reach is quadratic in fill and five points at the top of the range is a tenth of the column's usefulness. It stays quiet below 20% previous fill, where P002 has already said the column is mostly empty and saying it again as drift would be the same problem twice. A source that stops sending a mapped column entirely lands HERE and not in P012, which is worth knowing because it is the opposite of what the names suggest: landing writes a payload key for every column the config maps, whether or not the file carried it, so the column goes on existing with nothing in it. Measured, not assumed — dropping a mapped column from a delivery produces this finding and never a column-set change.
+
+**Quiet on:** `email` was 94% filled in the previous profile and is 93% filled now — well inside the noise a delivery's composition creates.
+
+**Fires on:** `email` fill fell from 95% to 71% since the previous profile, which costs 44% of the pairs a rule keyed on it could reach.
+
+## P012 — a column appeared or disappeared since the previous profile
+
+*warning*
+
+What this does NOT fire on is the obvious guess, and the distinction was measured rather than reasoned about: a source that stops sending a mapped column still has that column in its profile, present and empty, because landing writes a payload key for every column the config maps. That case is P011. What reaches here is a change to the SHAPE the config declares — a mapping gaining or losing a column, or an entity's attribute set changing under the standardized and golden subjects. A disappearance is a warning because every comparison naming that attribute silently stops contributing and the corpus just resolves worse, with nothing failing. An appearance is `info`: not a problem, but a newly mapped column is the most likely thing to be worth checking, and nothing else in the product mentions it.
+
+**Quiet on:** (Nothing to report: the delivery carried the same columns as the one before it.)
+
+**Fires on:** `phone_e164` was in the previous profile and is absent from this one — any comparison or blocking rule naming it now has nothing to read.
