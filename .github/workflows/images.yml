@@ -30,6 +30,9 @@ on:
       # in the registry, which is what is running.
       - "infra/k8s/**"
       - "scripts/dev_env.sh"
+      # The observability stack installer. A change to it IS a dev platform
+      # release for the same reason a chart change is.
+      - "scripts/obs_up.sh"
   # A Dockerfile change was UNVALIDATABLE before merge: this workflow ran on
   # `push` to main only, so the first exercise of a restructured build was the
   # merge itself, and a break blocked dev deploys until someone reverted it.
@@ -366,6 +369,22 @@ jobs:
           eval "$(bash scripts/dev_env.sh up "$CI_NAMESPACE")"
           echo "fs=$ER_EFS_FS_ID" >> "$GITHUB_OUTPUT"
           echo "ap=$ER_EFS_AP_ID" >> "$GITHUB_OUTPUT"
+      - name: Install the observability stack
+        # Cluster-scoped, not per-namespace: the log shipper, the OTLP
+        # collector gateway and the shared span store serve every namespace on
+        # this cluster. It runs here because it ran NOWHERE before — `make
+        # obs-up` was the only path, which meant the stack was hand-installed,
+        # absent from every GitOps loop, and invisible to the drift check.
+        #
+        # The same script a human runs (scripts/obs_up.sh), for the reason the
+        # namespace step above gives: two paths drift, one does not. Every
+        # release is `upgrade --install`, so this is a no-op when nothing moved.
+        #
+        # Deliberately NOT `continue-on-error`: a telemetry stack that silently
+        # fails to install is worse than a red deploy, because the absence of
+        # spans reads as "nothing happened" rather than as a broken deploy.
+        run: bash scripts/obs_up.sh
+
       - name: Roll the release
         # `--atomic` is the difference between a failed deploy and a broken
         # namespace: it rolls back on failure instead of leaving half a release.

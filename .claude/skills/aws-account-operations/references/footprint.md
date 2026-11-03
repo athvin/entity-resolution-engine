@@ -56,12 +56,12 @@ Distinct `resource "aws_*"` blocks across `infra/terraform/`, by count:
    6  aws_eks_pod_identity_association
    6  aws_s3_bucket_server_side_encryption_configuration
    5  aws_s3_bucket_policy
+   5  aws_secretsmanager_secret
+   5  aws_secretsmanager_secret_version
    4  aws_eks_addon
    4  aws_kms_alias
    4  aws_kms_key
    4  aws_s3_bucket_lifecycle_configuration
-   4  aws_secretsmanager_secret
-   4  aws_secretsmanager_secret_version
    4  aws_ssoadmin_account_assignment
    4  aws_ssoadmin_permission_set
    3  aws_s3_bucket_versioning

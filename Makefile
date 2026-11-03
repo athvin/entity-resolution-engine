@@ -267,26 +267,7 @@ dev-down:
 # the AWS side (log groups, Pod Identity roles) is
 # infra/terraform/envs/dev/observability.tf. Idempotent, like dev-up.
 obs-up:
-	kubectl --context $(ER_DEV_CONTEXT) apply -f infra/k8s/observability/namespace.yaml
-	helm repo add eks https://aws.github.io/eks-charts --force-update
-	helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts --force-update
-	helm --kube-context $(ER_DEV_CONTEXT) upgrade --install fluent-bit eks/aws-for-fluent-bit \
-	  --version 0.2.0 --namespace observability -f infra/k8s/observability/fluent-bit-values.yaml
-	helm --kube-context $(ER_DEV_CONTEXT) upgrade --install otel-collector open-telemetry/opentelemetry-collector \
-	  --version 0.175.1 --namespace observability -f infra/k8s/observability/otel-collector-values.yaml
-	helm --kube-context $(ER_DEV_CONTEXT) upgrade --install otel-operator open-telemetry/opentelemetry-operator \
-	  --version 0.124.1 --namespace observability -f infra/k8s/observability/otel-operator-values.yaml
-	helm repo add openobserve https://charts.openobserve.ai --force-update
-	@# The chart takes its root credentials and metadata DSN through `auth:`
-	@# values and offers no existing-secret indirection, so they arrive here
-	@# from Secrets Manager rather than from the values file (which is in git).
-	@# The S3 keys stay unset on purpose: the pod signs with its Pod Identity
-	@# credentials, bound by the association in envs/dev/observability.tf.
-	helm --kube-context $(ER_DEV_CONTEXT) upgrade --install openobserve openobserve/openobserve \
-	  --version 1.1.3 --namespace observability -f infra/k8s/observability/openobserve-values.yaml \
-	  --set auth.ZO_ROOT_USER_EMAIL="$$(aws secretsmanager get-secret-value --secret-id er/shared/openobserve --query SecretString --output text | python3 -c 'import json,sys; print(json.load(sys.stdin)["root_email"])')" \
-	  --set auth.ZO_ROOT_USER_PASSWORD="$$(aws secretsmanager get-secret-value --secret-id er/shared/openobserve --query SecretString --output text | python3 -c 'import json,sys; print(json.load(sys.stdin)["root_password"])')" \
-	  --set auth.ZO_META_POSTGRES_DSN="$$(aws secretsmanager get-secret-value --secret-id er/shared/openobserve --query SecretString --output text | python3 -c 'import json,sys; print(json.load(sys.stdin)["meta_dsn"])')"
+	bash scripts/obs_up.sh
 
 # Rebuildable local caches only.
 clean:
