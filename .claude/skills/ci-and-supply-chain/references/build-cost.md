@@ -23,6 +23,127 @@ against it.
 - Measured: the sharded tiers, same day (2026-11-02)
 - Measured: the second pass, and the workers=2 verdict (2026-11-02, later)
 - Measured: the flake's root cause, the flip, and the buildcache move (2026-11-02, evening)
+- Incident: rust-cache restored a partial target and broke main (2026-11-03)
+- The er-api image build, and the cargo-chef split (2026-11-03)
+
+## Incident: rust-cache restored a partial target and broke main (2026-11-03)
+
+**Symptom.** Nearly every compile job on `main` failed inside a build script:
+
+```
+error: failed to run custom build command for `libduckdb-sys v1.20000.1`
+  panicked at build_bundled_cc.rs:65:
+  unpacking bundled DuckDB sources: Os { code: 39, kind: DirectoryNotEmpty }
+```
+
+**Mechanism** (and #422's header comment in `rust.yml` says the same): rust-cache
+caches `target/`, which carries a populated
+`debug/build/libduckdb-sys-<hash>/out`. On restore, cargo re-runs the build
+script when the fingerprint does not match but does **not** clear that
+directory, and `libduckdb-sys` 1.20000.1 panics rather than unpacking over it.
+
+**The trail**, which is worth keeping because the breakage never lands on the
+commit that causes it:
+
+| run | `Cargo.toml` | cache | result |
+|---|---|---|---|
+| `29e29a3a` (#376, the duckdb `=1.20000.0` → `=1.20000.1` bump) | changed → new key | restored the PRE-bump entry; `lint` wrote the poisoned one at the end | **green** |
+| `52bec4a1` (#359) | unchanged | restored that entry | **red, ~12 jobs** |
+| `8e950b33` (#417) | unchanged | same entry | **red, same jobs** |
+| `8578f995` (#422, `prefix-key` v1 → v2) | — | new key, nothing to restore | **green** |
+
+So the commit that poisons the cache passes, and the next unrelated PR wears it.
+
+**Fixed by #422**, which bumped `prefix-key` to `v2-rust` so the poisoned entry
+becomes unreachable (restore-keys are prefixed too).
+
+**SETTLED, structural — re-keying is not a durable fix.** The mechanism does
+not depend on the bump: it needs a restored populated `out/` plus a cargo
+fingerprint mismatch, and this repo's jobs legitimately differ in fingerprint
+(`lint` is the only writer, while `test`, the lake shards and the e2e slices
+each select different packages and features). The first run to RESTORE the v2
+entry — PR #423's, with an unchanged `Cargo.toml` — failed identically:
+
+```
+Cache hit for: v2-rust-rust-Linux-x64-8556beb2-11e7c23f
+Restored from cache key "v2-rust-..." full match: true.
+  unpacking bundled DuckDB sources: Os { code: 39, kind: DirectoryNotEmpty }
+```
+
+Note `full match: true`. The rust-cache KEY matched exactly; what did not match
+is cargo's own fingerprint for the build script, which the key does not model.
+Two different notions of "the cache is valid", and only one of them is checked.
+So a prefix bump buys exactly one cold green run per bump — `8578f995` was that
+run — and the next restore breaks again, on PRs as well as main.
+
+**Remedy applied:** rust-cache removed from all seven sccache-backed compile
+jobs. sccache is content-addressed per compilation unit and never touches
+`target/`, so it cannot fail this way, and it was already carrying the work:
+two runs with `No cache found.` finished in 8m03 and 8m45 at a 99% hit rate
+while the entry held ~1.3 GB. The removal was measured, not assumed — the
+no-cache run came in at 8–13m per job, in line with the sharded baseline.
+`coverage` keeps its own entry: it opts out of sccache (llvm-cov owns
+`RUSTFLAGS`), so there the trade really is 1.8 GiB against a timeout.
+
+With sccache on S3, buildkit on ECR and this gone, nothing in the Rust gate
+writes the Actions cache at all — which retires the single-writer rule too.
+
+## The er-api image build, and the cargo-chef split (2026-11-03)
+
+This never touched PR latency — `images.yml` runs on push-to-main — but it was
+the largest single block of runner time in the repository, and it was invisible
+because nothing measured it until the buildcache work went looking.
+
+**Before.** `rust/Dockerfile` was `COPY . .` followed by one
+`cargo build --release --bin er-server`, so ANY change under `rust/` — a
+one-line handler edit — invalidated that layer and recompiled all 408 crates,
+bundled DuckDB's C++ included.
+
+| measurement | time |
+|---|---|
+| main build, run `41524220825` | **58m9s** |
+| cold no-cache build, #417's new verify job | **51m** |
+| er-web, same run (for scale) | 1–2m |
+
+Both image jobs also had **no `timeout-minutes`**, so the default was 360: a
+hung buildkit burned six runner-hours with `deploy-dev` queued behind it. Now
+90 (er-api) and 30 (er-web), each sized against the measurement above.
+
+**The split.** cargo-chef (pinned) reduces the workspace to a recipe
+(manifests + lockfile), cooks the dependency graph against stubbed crates, and
+takes the sources in a later layer. A local end-to-end validation measured the
+ratio the whole change rests on:
+
+| stage | local (arm64) |
+|---|---|
+| `cook` — every dependency, DuckDB included | 4909s (81.8m) |
+| `cargo build --bin er-server` — the 33 workspace crates | 195.6s (3.3m) |
+| `COPY . .`, strip, `install-extensions` | ~15s |
+
+**The workspace is 3.8% of the compile.** The other 96.2% is what `COPY . .`
+was re-doing on every merge, and what the ECR registry cache now carries
+between runs.
+
+**Cold chef build on CI: 31m30s** (#423's verify) — *faster* than the 51m cold
+monolith, not slower as the two-cargo-passes shape suggested it might be. So
+the split costs nothing even in the case it was expected to.
+
+Two details that would have silently undone it, both worth keeping:
+
+- `.cargo/config.toml` is copied BEFORE the cook. Its `CXXFLAGS` are part of
+  `libduckdb-sys`'s fingerprint, so cooking without it builds DuckDB in the
+  cook and AGAIN once the sources arrive — the most expensive crate in the
+  graph, twice, for nothing.
+- `--bin er-server` is passed to `cook` as well as `build`. Cargo resolves
+  features per selected target, so a whole-workspace cook unifies a different
+  feature set and every crate whose features differ recompiles.
+
+Nothing in the workspace has a `build.rs`, which is the usual thing that breaks
+chef's stub phase — checked before writing any of it.
+
+**The warm number** — a source-only merge against a populated cook layer — is
+what the split is actually for, and goes here once a second rust-touching merge
+has run.
 
 ## The measured baseline (2026-10-22)
 
@@ -425,7 +546,7 @@ rust-cache entry, so making the profile real buys cache headroom twice.
 | `.cargo/config.toml` for local mold/sccache | no | helps laptops, not CI; worth doing, not yet scoped |
 | cargo-chef + cache mounts in `rust/Dockerfile` | no | `COPY . .` + one `cargo build --release` means any source change rebuilds DuckDB in release mode; real, separate |
 | More cores per job | **blocked** | not reachable by editing `runs-on:` on a user-owned repo — see below |
-| Drop rust-cache from the Rust jobs | **open — next experiment** | two runs completed in 8m03 and 8m45 with `No cache found.` and sccache at 99%; it holds ~1.3 GB and contributed nothing measurable |
+| Drop rust-cache from the Rust jobs | **done 2026-11-03 — forced by correctness** | it holds ~1.3 GB, contributed nothing measurable (8m03/8m45 with `No cache found.` at 99% sccache), and restoring a partial `target/` broke every compile job. Re-keying was tried first (#422) and buys one cold run per bump; see the incident |
 | headstart | no | see below |
 
 ## Rejected: headstart

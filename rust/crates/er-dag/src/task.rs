@@ -285,10 +285,19 @@ pub enum TaskError {
 #[derive(Debug, Clone, Serialize, serde::Deserialize)]
 pub struct WorkOrder {
     pub org_id: String,
+    /// The job's dataset, when it names one: every tenant surface lives under
+    /// a dataset, and a row a control task writes must carry the same one.
+    #[serde(default)]
+    pub dataset_id: Option<String>,
     pub job_id: String,
     /// `jobs.id == run_id` is load-bearing (§4.1).
     pub run_id: String,
     pub task_id: String,
+    /// The job's kind (`run_all_full`, `correct`, …). The body needs it where
+    /// two kinds share a task name but not its meaning — `init`'s asked mode
+    /// is full or incremental by kind, and the two are distinct compiled DAGs.
+    #[serde(default)]
+    pub kind: String,
     pub try_number: i64,
     pub resource_class: Option<String>,
     pub segment: Option<String>,
@@ -298,6 +307,23 @@ pub struct WorkOrder {
     pub params: serde_json::Value,
     /// The tenant's lake env (`ER_LAKE_CATALOG`, …) from `orgs.env`.
     pub lake_env: serde_json::Value,
+    /// The dataset's (or org's) delivery root: a column beside the env, not a
+    /// key inside it. `None` for a kind that never ingests.
+    #[serde(default)]
+    pub drop_root: Option<String>,
+    /// The `(rec_a_key, rec_b_key)` MATCH labels a training pass learns from,
+    /// filtered by the control plane (`verdict = match`, never `origin =
+    /// llm`). Empty for every kind but `train`, and empty is not a failure —
+    /// EM trains without labels.
+    #[serde(default)]
+    pub labels: serde_json::Value,
+    /// The dataset's ACTIVE model versions, resolved by the control plane:
+    /// the pod holds no database credential and cannot read the registry
+    /// itself (batch-orchestration-design §6.4). Absent for a kind that does
+    /// not score, and for an order minted before this field existed — which
+    /// is why it defaults rather than being required.
+    #[serde(default)]
+    pub models: serde_json::Value,
 }
 
 /// Where a running task leaves its latest counter snapshot for the heartbeat
@@ -407,13 +433,20 @@ pub trait ControlTask<C>: Default + 'static {
         NodePolicy::control()
     }
 
+    /// ASYNC, unlike [`Task::run`]: a control body's work IS Postgres, and the
+    /// control plane's client is async. A pod body is synchronous for the
+    /// mirror-image reason — its work is DuckDB, which is not.
+    ///
+    /// Static dispatch only (the dispatch table matches on kind and task id),
+    /// so an `async fn` in the trait needs no erasure machinery.
+    ///
     /// # Errors
     /// A classified failure, or `Skip`.
     fn run(
         &mut self,
         ctx: &mut ControlCtx<'_, C>,
         input: Self::Input,
-    ) -> Result<Outcome<Self::Output>, TaskError>;
+    ) -> impl std::future::Future<Output = Result<Outcome<Self::Output>, TaskError>> + Send;
 }
 
 #[cfg(test)]

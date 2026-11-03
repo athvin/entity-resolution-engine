@@ -46,6 +46,7 @@ pub mod profile_params;
 pub mod provision;
 pub mod read;
 pub mod reporter;
+pub mod runctx;
 pub mod s3_ingest;
 pub mod satoken;
 pub mod schema;
@@ -4169,13 +4170,71 @@ async fn attempt_work_order(
         Ok(None) => return detail_err(StatusCode::NOT_FOUND, "no job behind this attempt"),
         Err(e) => return pg_err(e),
     };
-    let lake_env = match pg::get_org_by_id(&client, &current.org_id).await {
-        Ok(Some(org)) => org.env,
-        Ok(None) => serde_json::Value::Null,
+    // The job's DATASET env, not the org's: each dataset is its own lake, so a
+    // pod handed the org-level env for a dataset job would open the wrong one.
+    // Same resolver the in-process dispatcher uses (`pg::lake_env_for_job`).
+    let (lake_env, drop_root) = match pg::get_org_by_id(&client, &current.org_id).await {
+        Ok(Some(org)) => {
+            match pg::lake_env_for_job(&client, &org, job.dataset_id.as_deref()).await {
+                Ok(Some(pair)) => pair,
+                Ok(None) => {
+                    return detail_err(StatusCode::CONFLICT, "the job's dataset no longer exists");
+                }
+                Err(e) => return pg_err(e),
+            }
+        }
+        Ok(None) => (serde_json::Value::Null, None),
         Err(e) => return pg_err(e),
+    };
+    // The model registry, resolved HERE because the pod holds no
+    // control-plane credential (§6.4) and therefore cannot read it. The
+    // dataset's own active versions only: each dataset trains and scores
+    // against its own corpus. `runctx::RunContext::resolve` turns these plus
+    // the lake env and params into everything a stage needs, and the legacy
+    // in-process arm calls the same function with the same rows — so the two
+    // executors cannot disagree about what a job means.
+    let models: Vec<crate::runctx::ActiveModelSpec> =
+        match pg::active_models(&client, &current.org_id).await {
+            Ok(rows) => rows
+                .into_iter()
+                .filter(|m| m.dataset_id.as_deref() == job.dataset_id.as_deref())
+                .map(|m| crate::runctx::ActiveModelSpec {
+                    name: m.name,
+                    version: m.version,
+                    model_json: m.model_json,
+                    model_version_label: m.model_version_label,
+                    tf_snapshot_id: m.tf_snapshot_id,
+                })
+                .collect(),
+            Err(e) => return pg_err(e),
+        };
+    // A training pass learns from the tenant's MATCH labels, which live in
+    // Postgres the pod cannot read (§6.4). Filtered here, and only for the one
+    // kind that trains: every other order would carry the payload for nothing.
+    // A read failure degrades to EM-only rather than failing the attempt —
+    // which is exactly what the in-process arm does.
+    let labels: Vec<(String, String)> = if job.kind == "train" {
+        match er_entities::pair_label::read::all(&client, &current.org_id).await {
+            Ok(rows) => rows
+                .into_iter()
+                .filter(|l| {
+                    l.dataset_id.as_deref() == job.dataset_id.as_deref()
+                        && l.verdict == "match"
+                        && l.origin != "llm"
+                })
+                .map(|l| (l.rec_a_key, l.rec_b_key))
+                .collect(),
+            Err(e) => {
+                eprintln!("work order: reading labels failed, the train falls back to EM: {e}");
+                Vec::new()
+            }
+        }
+    } else {
+        Vec::new()
     };
     let order = json!({
         "org_id": current.org_id,
+        "dataset_id": job.dataset_id,
         "job_id": current.job_id,
         // jobs.id == run_id is load-bearing (§4.1); planning writes it.
         "run_id": job.run_id.clone().unwrap_or_else(|| job.id.clone()),
@@ -4192,6 +4251,11 @@ async fn attempt_work_order(
         "structural_fingerprint": job.structural_fingerprint,
         "lineage": lineage.iter().map(|t| t.id.clone()).collect::<Vec<_>>(),
         "lake_env": lake_env,
+        // The delivery root is a dataset/org COLUMN, not an env key, so it
+        // rides beside the env rather than inside it.
+        "drop_root": drop_root,
+        "models": models,
+        "labels": labels,
     });
     (StatusCode::OK, Json(json!(order))).into_response()
 }

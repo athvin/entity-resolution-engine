@@ -433,6 +433,21 @@ gen_required_checks() {
 	echo
 	local wf
 	for wf in .github/workflows/*.yml; do
+		# Skip COMPILER OUTPUT. `gh aw compile` writes `*.lock.yml` plus
+		# `agentics-maintenance.yml`, all of which match this glob, carry a
+		# dozen machine-generated jobs each, and are rewritten by every gh-aw
+		# version bump — so enumerating them would churn this file and fail
+		# both the `skills` job and `lint`'s drift step for no reader's
+		# benefit. The agentic workflows are summarised from their `.md`
+		# sources below instead, which is the file a human actually edits.
+		#
+		# Detected by the generated-file marker rather than by filename:
+		# `*.lock.yml` alone missed `agentics-maintenance.yml`, and a
+		# filename list would miss whatever the next gh-aw release adds.
+		# Both markers are checked because the two files word it differently.
+		if head -3 "$wf" | grep -qiE 'DO NOT EDIT|automatically generated'; then
+			continue
+		fi
 		echo "### \`$(basename "$wf")\`"
 		echo
 		echo "| Job | Status-check context | Timeout | Condition |"
@@ -482,6 +497,79 @@ gen_required_checks() {
 		' "$wf"
 		echo
 	done
+
+	# Agentic workflows, summarised from the `.md` sources rather than from the
+	# `.lock.yml` the compiler emits. Two columns, because they are the two
+	# questions a reviewer has: what fires it, and what it is permitted to do.
+	# None of these may ever be a required check — they are non-deterministic by
+	# construction, so a required one would make every merge wait on a model.
+	# That is also why they are the only workflows here allowed a `paths:`
+	# filter, which `rust.yml` and `frontend.yml` may not have.
+	if compgen -G ".github/workflows/*.md" >/dev/null; then
+		echo "### Agentic workflows (\`gh aw\`)"
+		echo
+		echo "Compiled to \`*.lock.yml\` by \`gh aw compile\`; edit the \`.md\`. **Never"
+		echo "required checks** — a required check that waits on a model would gate every"
+		echo "merge on a non-deterministic run, which is also why these are the only"
+		echo "workflows in this repo permitted a \`paths:\` filter."
+		echo
+		echo "**Mode** is \`staged\` when the workflow sets \`safe-outputs.staged\`, meaning"
+		echo "every output below is previewed in the run summary rather than applied: no"
+		echo "comment posted, no branch pushed, no issue opened. That is how an agent is"
+		echo "watched before it is trusted — remove the key to make it act."
+		echo
+		echo "| Workflow | Mode | Triggers | Safe outputs |"
+		echo "|---|---|---|---|"
+		local awf
+		for awf in .github/workflows/*.md; do
+			awk -v file="$(basename "$awf")" '
+				# Frontmatter only. The body below the closing `---` is prose
+				# and may legitimately contain lines that look like YAML keys.
+				NR == 1 && /^---[[:space:]]*$/ { infm = 1; next }
+				infm && /^---[[:space:]]*$/ { exit }
+				!infm { next }
+				# A column-0 key ends whichever section was being collected.
+				/^[a-z][a-z0-9_-]*:/ {
+					key = $0; sub(/:.*$/, "", key)
+					section = (key == "on" || key == "safe-outputs") ? key : ""
+					# `on: push` — an inline value, so there are no children.
+					if (section == "on" && $0 ~ /^on:[[:space:]]*[^[:space:]]/) {
+						val = $0; sub(/^on:[[:space:]]*/, "", val)
+						add("on", val)
+						section = ""
+					}
+					next
+				}
+				section != "" && /^  [a-z][a-z0-9_-]*:/ {
+					k = $1; sub(/:$/, "", k)
+					add(section, k)
+				}
+				END {
+					printf "| `%s` | %s | %s | %s |\n", file,
+						(staged ? "**staged**" : "live"),
+						(trig == "" ? "—" : trig), (out == "" ? "—" : out)
+				}
+				function add(sec, v) {
+					if (sec == "on") {
+						trig = trig (trig == "" ? "" : ", ") "`" v "`"
+						return
+					}
+					# `staged` previews every output instead of applying it, so
+					# it belongs in the Mode column — it is the difference
+					# between an agent that acts and one that rehearses.
+					if (v == "staged") { staged = 1; return }
+					# Config keys that can appear under `safe-outputs:` but are
+					# not outputs. Not exhaustive by design: if a new one shows
+					# up in the Safe outputs column of the generated table, that
+					# is the signal to add it here.
+					if (v ~ /^(github-token|github-app|target-repo|allowed-repos|allowed-domains|env|messages|jobs|scripts|steps|threat-detection|environment|max-bot-mentions|failure-issue-repo|report-failure-as-issue|report-failed-jobs)$/) return
+					out = out (out == "" ? "" : ", ") "`" v "`"
+				}
+			' "$awf"
+		done
+		echo
+	fi
+
 	echo "### Advisory ignores in \`rust/deny.toml\`"
 	echo
 	echo "Each entry carries a prose justification in the file itself. These gates are"

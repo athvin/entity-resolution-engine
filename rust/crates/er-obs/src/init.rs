@@ -5,26 +5,25 @@
 //! `kube` already emit, since `tracing` has been in the lock file all along — is
 //! discarded. This module is what starts listening.
 //!
-//! ## Why there is no OTLP exporter here yet
+//! ## Two layers, and why the second one is conditional
 //!
-//! The span pipeline needs a destination, and there is not one: the collector
-//! lives at a cluster-internal address, OpenObserve is not stood up, and
-//! CloudWatch Transaction Search is not enabled on the account. Shipping an
-//! exporter now would add a dependency with nowhere to send.
+//! Always: one structured JSON object per event on **stderr**, which Fluent Bit
+//! already tails into CloudWatch from every pod.
 //!
-//! It would also break the image. `opentelemetry-otlp`'s `reqwest-rustls`
-//! feature resolves a **second** `reqwest` (0.13 beside the workspace's 0.12)
-//! and selects `aws-lc-rs` as rustls' crypto provider, which pulls
-//! `aws-lc-sys` — and `aws-lc-sys` needs a cmake the `rust:1-bookworm` build
-//! image does not carry. Measured on this branch: adding it took the lock from
-//! zero `aws-lc-sys` entries to one and from one `reqwest` to two. That is the
-//! pin `rust-conventions` says must not be relaxed, so the exporter lands with
-//! the collector instead, over the `reqwest` the workspace already links.
+//! Additionally, when an OTLP endpoint is configured: a
+//! `tracing-opentelemetry` bridge that exports the same spans over HTTP. The
+//! condition is the whole design — `er-entity` and `dedupe` are build tools and
+//! the test binaries run thousands of times locally, so an exporter must be
+//! opt-in by the presence of [`crate::traces_endpoint`] rather than opt-out by
+//! a flag. Nothing opens a socket unless something asked it to.
 //!
-//! What ships now is the half that needs none of that and works today: one
-//! structured JSON object per event on **stderr**, which Fluent Bit already
-//! tails into CloudWatch from every pod. [`Guard`] exists in its final shape so
-//! the exporter can be added later without touching a single call site.
+//! An earlier revision of this module explained at length why the exporter
+//! could not be added: `opentelemetry-otlp`'s `reqwest-rustls` feature pulls a
+//! second `reqwest` and `aws-lc-sys`, which needs a cmake the build image lacks.
+//! That measurement was right about the feature it tested and wrong as a verdict
+//! on the exporter. Supplying our own HTTP client avoids the client features
+//! entirely; [`mod@crate::otlp`] carries the re-measurement and the reactor trap
+//! that shapes it.
 
 use std::sync::OnceLock;
 
@@ -109,26 +108,53 @@ pub const DEFAULT_FILTER: &str = concat!(
     ",aws_sdk_sesv2=warn,tower=warn,kube=info,kube_client=warn",
 );
 
-/// Held for the life of the process. Dropping it releases the process span.
-///
-/// Deliberately shaped for a flush it cannot yet perform: when the OTLP
-/// exporter lands, [`Guard::force_flush`] gains a body and `Drop` gains a
-/// shutdown, and no call site changes. That matters most for the pod verb,
-/// where the batch exporter drops unflushed spans at process exit and the tail
-/// of every run — including every failure — would vanish without an explicit
-/// flush on each exit path.
+/// Held for the life of the process. Dropping it releases the process span and
+/// flushes whatever the exporter still holds.
 #[must_use = "dropping the guard immediately ends the process span; bind it for the life of main"]
 pub struct Guard {
     _process: Option<tracing::span::EnteredSpan>,
+    provider: Option<opentelemetry_sdk::trace::SdkTracerProvider>,
 }
 
 impl Guard {
     /// Export everything buffered, blocking up to `ER_OTEL_FLUSH_SECS`.
     ///
-    /// A no-op while there is no exporter. Call it anyway on every path that
-    /// may `process::exit` or hang — the call sites are the hard part to get
-    /// right, not the flush, and they are easier to add now than to find later.
-    pub fn force_flush(&self) {}
+    /// A no-op when no exporter is installed, so it is always safe to call.
+    /// Call it on **every** path that may `process::exit`: the batch exporter
+    /// drops whatever it still holds when the process ends, and a runner pod
+    /// exits immediately after its last span, so the tail of every run —
+    /// including every failure, which is the part worth having — would vanish.
+    ///
+    /// `exec_task::run` is the single wrapper all eleven of the pod verb's
+    /// early returns funnel through, which is why covering them costs one call
+    /// rather than eleven.
+    ///
+    /// SIGKILL and OOM cannot be covered by anything here. The terminal message
+    /// and stdout→Fluent Bit are that path.
+    pub fn force_flush(&self) {
+        if let Some(provider) = &self.provider {
+            // Deliberately not propagated. A failed flush must not change a
+            // run's outcome, and the one thing worse than losing the tail of a
+            // trace is failing a job because telemetry could not be delivered.
+            if let Err(error) = provider.force_flush() {
+                tracing::debug!(error = %error, "flushing buffered spans failed");
+            }
+        }
+    }
+}
+
+impl Drop for Guard {
+    fn drop(&mut self) {
+        // Flush before shutdown, and both before the process span's own `Drop`
+        // runs — struct fields drop after the body, so the ancestry is still
+        // intact for anything emitted here.
+        self.force_flush();
+        if let Some(provider) = &self.provider
+            && let Err(error) = provider.shutdown()
+        {
+            tracing::debug!(error = %error, "shutting down the span exporter failed");
+        }
+    }
 }
 
 /// Install the subscriber. Idempotent: a second call returns an inert guard.
@@ -150,7 +176,14 @@ pub fn init(role: Role) -> Guard {
         // twice, and from a test binary whose modules are threads in one
         // process — `er-server`'s ~50 test modules share a process, so a second
         // install would poison the first.
-        return Guard { _process: None };
+        //
+        // The inert guard carries no provider, so its `force_flush` and `Drop`
+        // do nothing. That matters: the first caller owns the exporter, and a
+        // second guard going out of scope must not shut it down underneath it.
+        return Guard {
+            _process: None,
+            provider: None,
+        };
     }
 
     let filter =
@@ -173,9 +206,19 @@ pub fn init(role: Role) -> Guard {
         .with_target(true)
         .with_writer(std::io::stderr);
 
+    // `Option<Layer>` is itself a `Layer`, so the exporter is absent from the
+    // subscriber entirely rather than installed-and-disabled when no endpoint
+    // is set. A disabled layer still costs a per-span branch, and this path runs
+    // in every test binary in the workspace.
+    let provider = crate::otlp::build_provider(role);
+    let otel = provider
+        .as_ref()
+        .map(|provider| tracing_opentelemetry::layer().with_tracer(crate::otlp::tracer(provider)));
+
     tracing_subscriber::registry()
         .with(filter)
         .with(json)
+        .with(otel)
         .init();
 
     // A process-lifetime span carries the service identity onto every record,
@@ -193,6 +236,7 @@ pub fn init(role: Role) -> Guard {
 
     Guard {
         _process: Some(process),
+        provider,
     }
 }
 

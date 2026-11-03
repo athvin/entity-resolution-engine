@@ -173,6 +173,54 @@ fails to parse**, indistinguishable from clean.
 The nightly and main-only jobs (coverage, benchmark compile, scale goldens) are
 not required either, by construction.
 
+## Agentic workflows
+
+`.github/workflows/*.md` are [`gh aw`](https://github.github.io/gh-aw/) agentic
+workflows. **Edit the `.md`; `gh aw compile` emits the `.lock.yml` beside it.**
+A `.lock.yml` is compiler output — treat it exactly like any other generated
+file here and never hand-edit it. `references/required-checks.md` tabulates
+which ones exist, what fires each, and what each is permitted to do.
+
+**None of them may ever be a required check.** A model run is non-deterministic
+and rate-limited, so requiring one would gate every merge on a retry. That is
+also the one thing they have that `rust.yml` and `frontend.yml` do not: because
+they are not required, they *are* allowed `paths:` and `if:` filters. The rule
+in CLAUDE.md is about required workflows specifically.
+
+They also hold the repo's only GitHub write scopes. `contents: write`,
+`pull-requests: write` and `issues: write` appear nowhere else — the four
+hand-written workflows are `contents: read` plus `id-token: write` for OIDC.
+
+**The model's own job holds none of them.** gh-aw compiles each workflow into
+five or six jobs, and the `agent` job that runs the model gets only read scopes;
+`contents: write` and friends live in the separate `safe_outputs` and
+`conclusion` jobs that run after it exits. gh-aw's **safe outputs** are declared,
+capped operations (`add-comment`, `push-to-pull-request-branch`, …) which those
+jobs validate — so the model's output is data they check rather than commands
+they obey. Worth verifying rather than trusting, and easy to: extract the
+per-job `permissions:` blocks from a `.lock.yml`.
+
+One exception, stated because "the agent never writes" is otherwise an
+over-claim: the two agents that compile Rust carry `id-token: write` *on the
+agent job*, because `shared/rust-gate.md` exchanges it for the sccache role.
+That mints an AWS credential, not a GitHub one, and the role is
+`er-ci-sccache-read` — `s3:GetObject` and `s3:ListBucket` on one bucket, with no
+`DeleteObject` in the policy at all. Read access to compiler output is the whole
+blast radius, and it is read, so an agent cannot plant object code a later
+`main` build consumes.
+
+The zero-repository-secrets invariant survives them. `engine: copilot` draws on
+`copilot-requests: write` against the job token, so there is still no
+`secrets.*` reference in any workflow. Swapping to `engine: claude` would need
+an `ANTHROPIC_API_KEY` secret — a deliberate trade to make explicitly, not a
+detail to discover. gh-aw does not accept a Claude subscription OAuth token.
+
+Two interactions with the gates above worth knowing. `rust.yml`'s `detect`
+counts these paths as agent-only, so a prompt edit skips the backend gate —
+which is safe precisely because the always-on `skills` job is not gated on
+`detect` and still catches generated-reference drift. And the SHA-pin rule
+applies to the generated lock files too; `gh aw compile` pins them for you.
+
 ## The supply-chain gates
 
 | Gate | Enforces |

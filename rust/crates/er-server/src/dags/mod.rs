@@ -186,6 +186,88 @@ fn completed<O: er_dag::DurableOutput>(
 ///
 /// # Errors
 /// The task's own classified failure, or a malformed input reference.
+/// Run one CONTROL task body (§3.6): the Postgres half of a kind, executed
+/// inside the dispatcher with the control plane's own credentials.
+///
+/// Mirrors [`run_pod_task`] and is deliberately separate: a control body is
+/// structurally unable to open a lake (`tests/control_tasks_no_engine.rs`
+/// enforces that by source scan), and a pod body is structurally unable to
+/// reach Postgres. The dispatch table is what decides which half a task is.
+///
+/// # Errors
+/// The body's own failure, or a precondition refusal for a task this build
+/// does not run.
+pub async fn run_control_task(
+    kind: JobKind,
+    task_id: &str,
+    ctx: &mut er_dag::ControlCtx<'_, PgClient>,
+) -> Result<PodTaskRun, er_dag::TaskError> {
+    use er_dag::ControlTask as _;
+    match (kind, task_id) {
+        // `provision`: create_catalog and activate are control halves, with
+        // lake_init the pod between them — the split §3.5 made because
+        // anything opening a lake is a pod task.
+        (JobKind::Provision | JobKind::DatasetProvision, "create_catalog") => {
+            completed(control::CreateCatalog.run(ctx, ()).await?)
+        }
+        (JobKind::Provision | JobKind::DatasetProvision, "activate") => {
+            let lake = control_pin::<er_dag::Plan<plans::LakeInitialized>>(ctx, 0)?;
+            completed(control::Activate.run(ctx, (lake,)).await?)
+        }
+        // `apply_approved` is the ONE kind with no pod task at all: it reads
+        // tags and stages actions, both Postgres, and the merging is the
+        // `apply_corrections` job it enqueues.
+        (JobKind::ApplyApproved, "stage_approved") => {
+            completed(control::StageApproved.run(ctx, ()).await?)
+        }
+        (JobKind::ApplyCorrections, "drain_actions") => {
+            completed(control::DrainActions.run(ctx, ()).await?)
+        }
+        (JobKind::ApplyCorrections, "settle_actions") => {
+            let applied = control_pin::<er_dag::Plan<plans::StagedApplied>>(ctx, 0)?;
+            let assembled = control_pin::<er_dag::LakeRef<edges::Assembled>>(ctx, 1)?;
+            completed(
+                control::SettleActions
+                    .run(ctx, (applied, assembled))
+                    .await?,
+            )
+        }
+        (JobKind::Train, "register_model") => {
+            let trained = control_pin::<er_dag::Plan<plans::TrainedModel>>(ctx, 0)?;
+            completed(control::RegisterModel.run(ctx, (trained,)).await?)
+        }
+        (kind, task) => Err(er_dag::TaskError::Failed(er_errors::ErError::precondition(
+            format!(
+                "the dispatcher does not yet run control task '{task}' of kind '{}' — the \
+                 remaining control bodies arrive with the rest of Phase 3",
+                kind.as_str()
+            ),
+        ))),
+    }
+}
+
+/// Rehydrate the i-th positional input pin of a CONTROL task.
+///
+/// The same `input.pins` array a pod task reads — a control body's upstream is
+/// a durable output like any other, and `register_model` consuming `train`'s
+/// `TrainedModel` plan is exactly that.
+fn control_pin<T: er_dag::DurableOutput>(
+    ctx: &er_dag::ControlCtx<'_, PgClient>,
+    index: usize,
+) -> Result<T, er_dag::TaskError> {
+    let pins = ctx.order.input.get("pins").and_then(|p| p.as_array());
+    let Some(v) = pins.and_then(|p| p.get(index)) else {
+        return Err(er_dag::TaskError::Failed(er_errors::ErError::precondition(
+            format!("control input pin {index} is missing from the work order"),
+        )));
+    };
+    T::rehydrate(v).map_err(|e| {
+        er_dag::TaskError::Failed(er_errors::ErError::precondition(format!(
+            "control input pin {index} is not the declared shape: {e}"
+        )))
+    })
+}
+
 pub fn run_pod_task(
     kind: JobKind,
     task_id: &str,
@@ -200,10 +282,93 @@ pub fn run_pod_task(
             let schema = pin::<er_dag::Plan<plans::SchemaReconciled>>(ctx, 0)?;
             completed(tasks::Maintain.run(ctx, (schema,))?)
         }
+        // `apply_corrections`: init, apply_staged and reconcile in pods, with
+        // drain_actions and settle_actions as the control halves above.
+        (JobKind::Provision | JobKind::DatasetProvision, "lake_init") => {
+            let created = pin::<er_dag::Plan<plans::CatalogCreated>>(ctx, 0)?;
+            completed(tasks::LakeInit.run(ctx, (created,))?)
+        }
+        (JobKind::ApplyCorrections, "init") => {
+            let drained = pin::<er_dag::Plan<plans::DrainedActions>>(ctx, 0)?;
+            completed(tasks::CorrectionsInit.run(ctx, (drained,))?)
+        }
+        (JobKind::ApplyCorrections, "apply_staged") => {
+            let plan = pin::<er_dag::Plan<plans::RunPlan>>(ctx, 0)?;
+            completed(tasks::ApplyStaged.run(ctx, (plan,))?)
+        }
+        (JobKind::ApplyCorrections, "reconcile") => {
+            let plan = pin::<er_dag::Plan<plans::RunPlan>>(ctx, 0)?;
+            let applied = pin::<er_dag::Plan<plans::StagedApplied>>(ctx, 1)?;
+            completed(tasks::CorrectionsReconcile.run(ctx, (plan, applied))?)
+        }
+        (JobKind::Train, "train") => {
+            let schema = pin::<er_dag::Plan<plans::SchemaReconciled>>(ctx, 0)?;
+            completed(tasks::Train.run(ctx, (schema,))?)
+        }
+        (JobKind::Profile, "profile") => {
+            let schema = pin::<er_dag::Plan<plans::SchemaReconciled>>(ctx, 0)?;
+            completed(tasks::ProfileCorpus.run(ctx, (schema,))?)
+        }
+        // The pipeline stages (§11 Phase 3). Each rehydrates its upstream
+        // references POSITIONALLY, in the order the DAG wired them — which is
+        // what the typed `Input` tuples make checkable at compile time.
+        (JobKind::RunAllFull | JobKind::RunAllIncremental, "init") => {
+            completed(tasks::Init.run(ctx, ())?)
+        }
+        (JobKind::RunAllFull | JobKind::RunAllIncremental, "ingest") => {
+            let plan = pin::<er_dag::Plan<plans::RunPlan>>(ctx, 0)?;
+            completed(tasks::Ingest.run(ctx, (plan,))?)
+        }
+        (JobKind::RunAllFull | JobKind::RunAllIncremental, "standardize") => {
+            let plan = pin::<er_dag::Plan<plans::RunPlan>>(ctx, 0)?;
+            let landed = pin::<er_dag::LakeRef<edges::Landed>>(ctx, 1)?;
+            completed(tasks::Standardize.run(ctx, (plan, landed))?)
+        }
+        (JobKind::RunAllFull | JobKind::RunAllIncremental, "match") => {
+            let plan = pin::<er_dag::Plan<plans::RunPlan>>(ctx, 0)?;
+            let std = pin::<er_dag::LakeRef<edges::Standardized>>(ctx, 1)?;
+            completed(tasks::Match.run(ctx, (plan, std))?)
+        }
+        (JobKind::RunAllFull | JobKind::RunAllIncremental, "reconcile") => {
+            let plan = pin::<er_dag::Plan<plans::RunPlan>>(ctx, 0)?;
+            let scored = pin::<er_dag::LakeRef<edges::Scored>>(ctx, 1)?;
+            completed(tasks::Reconcile.run(ctx, (plan, scored))?)
+        }
+        // `assemble` is the SAME stage for a run and a correction pass: both
+        // hand it a `Resolved` partition and ask for golden records, reviews,
+        // metrics and quality over it.
+        (
+            JobKind::RunAllFull
+            | JobKind::RunAllIncremental
+            | JobKind::Correct
+            | JobKind::ApplyCorrections,
+            "assemble",
+        ) => {
+            let plan = pin::<er_dag::Plan<plans::RunPlan>>(ctx, 0)?;
+            let ents = pin::<er_dag::LakeRef<edges::Resolved>>(ctx, 1)?;
+            completed(tasks::Assemble.run(ctx, (plan, ents))?)
+        }
+        // The teardown takes NO input: it fires on whatever its upstreams did,
+        // including an `init` that failed before publishing a plan (§4.3).
+        (
+            JobKind::RunAllFull
+            | JobKind::RunAllIncremental
+            | JobKind::Correct
+            | JobKind::ApplyCorrections,
+            "finish",
+        ) => completed(tasks::Finish.run(ctx, ())?),
+        // `correct` shares `init` (which branches on the kind) with `run_all`;
+        // only its reconcile differs.
+        (JobKind::Correct, "init") => completed(tasks::Init.run(ctx, ())?),
+        (JobKind::Correct, "reconcile") => {
+            let plan = pin::<er_dag::Plan<plans::RunPlan>>(ctx, 0)?;
+            completed(tasks::CorrectReconcile.run(ctx, (plan,))?)
+        }
+
         (kind, task) => Err(er_dag::TaskError::Failed(er_errors::ErError::precondition(
             format!(
                 "the executor does not yet run task '{task}' of kind '{}' — its body arrives \
-                 with Phase 3 of batch-orchestration-design.md",
+                 with the remaining Phase 3 kinds of batch-orchestration-design.md",
                 kind.as_str()
             ),
         ))),
@@ -287,10 +452,16 @@ fn apply_corrections() -> Dag {
     let mut d = Builder::new(JobKind::ApplyCorrections.dag_name());
     let drained = d.control::<DrainActions>(());
     let plan = d.then::<CorrectionsInit>((drained,));
-    let labeled = d.then::<ApplyStaged>((plan,));
-    let ents = d.then::<CorrectionsReconcile>((plan, labeled));
+    let applied = d.then::<ApplyStaged>((plan,));
+    let ents = d.then::<CorrectionsReconcile>((plan, applied));
     let done = d.then::<Assemble>((plan, ents));
-    let settled = d.control::<SettleActions>((drained, done));
+    // `settle_actions` takes the APPLIED receipt, not just the drained set:
+    // `apply_staged` derives pair labels and review resolutions that only
+    // Postgres can store, and a pod cannot store them (§6.4). It also takes
+    // `done` so the actions are marked applied only once the whole pass
+    // succeeded — a correction marked applied over a failed reconcile would
+    // be unrecoverable, since nothing would re-drain it.
+    let settled = d.control::<SettleActions>((applied, done));
     d.epilogue::<Finish>(&[settled.id()], TriggerRule::AllTerminal);
     d.build().expect("the apply_corrections DAG assembles")
 }

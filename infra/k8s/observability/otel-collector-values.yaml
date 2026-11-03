@@ -62,7 +62,78 @@ config:
     jaeger: null
     zipkin: null
     prometheus: null
+  processors:
+    # Tail sampling: the main cost lever, and config rather than code so it can
+    # be retuned without a deploy. It MUST come before `batch` — batching first
+    # would hand the sampler fragments of traces to decide on.
+    #
+    # TRAP, and a silent one: tail sampling requires every span of a trace to
+    # reach ONE collector instance. `replicaCount: 1` above is load-bearing for
+    # that. Scaling to 2 splits traces across sampling decisions with no error
+    # anywhere — fix it with a two-tier gateway and a `loadbalancing` exporter
+    # keyed on trace id, not by bumping the replica count.
+    tail_sampling:
+      decision_wait: 10s
+      num_traces: 50000
+      expected_new_traces_per_sec: 200
+      policies:
+        # §10.2: "always sample pipeline runs" — hundreds a day, each the unit
+        # the whole product is about.
+        - name: pipeline-runs
+          type: string_attribute
+          string_attribute:
+            key: er.job_kind
+            values: [run_all_full, run_all_incremental, correct, train, lake_migrate, provision]
+        - name: errors
+          type: status_code
+          status_code:
+            status_codes: [ERROR]
+        - name: slow
+          type: latency
+          latency:
+            threshold_ms: 2000
+        # Every mutation. A read you lose is a sample; a write you lose is a
+        # hole in the only record of what changed.
+        - name: mutations
+          type: string_attribute
+          string_attribute:
+            key: http.request.method
+            values: [POST, PATCH, PUT, DELETE]
+        # Never sample away a super admin acting as a tenant.
+        - name: impersonation
+          type: boolean_attribute
+          boolean_attribute:
+            key: er.impersonating
+            value: true
+        # Everything else — the GET read path, where the volume is.
+        - name: residual
+          type: probabilistic
+          probabilistic:
+            sampling_percentage: 10
+
   exporters:
+    # --- the queryable half -------------------------------------------------
+    # Self-hosted, in-account, on our own S3. Being in-account is what lets it
+    # take logs as well as traces without crossing §8.5's boundary — the
+    # constraint that forced §10.5's split-by-signal does not apply to a store
+    # we run ourselves.
+    otlphttp/openobserve:
+      endpoint: http://openobserve.observability.svc.cluster.local:5080/api/default
+      headers:
+        Authorization: ${env:OPENOBSERVE_AUTH}
+
+    # --- the in-account fallback -------------------------------------------
+    # Kept wired deliberately, past the trial period. One shared store is one
+    # point of failure, and the fallback is only a fallback while it is still
+    # connected.
+    #
+    # NOTE: the X-Ray OTLP endpoint requires CloudWatch Transaction Search to
+    # be ENABLED on the account (a one-time setting; it also auto-creates the
+    # vended `aws/spans` group, which cannot be created by hand). Until then
+    # this exporter returns errors and the collector logs them — which is
+    # noisy but not data loss, because OpenObserve has the spans.
+    awsxray:
+      region: us-east-2
     awsemf:
       region: us-east-2
       # §10.3: operational metrics under one namespace; resource_class — never
@@ -72,19 +143,23 @@ config:
       # CloudWatch extracts the metric data on ingest.
       log_group_name: /er/dev/metrics
       log_stream_name: otel-collector
-    awsxray:
-      region: us-east-2
+
   service:
     pipelines:
       metrics:
         receivers: [otlp]
         processors: [memory_limiter, batch]
-        exporters: [awsemf]
+        exporters: [awsemf, otlphttp/openobserve]
       traces:
         receivers: [otlp]
-        processors: [memory_limiter, batch]
-        exporters: [awsxray]
-      # No OTLP logs pipeline: logs ride stdout -> Fluent Bit (§10.5).
+        processors: [memory_limiter, tail_sampling, batch]
+        exporters: [awsxray, otlphttp/openobserve]
+      # Still no OTLP logs pipeline. Logs ride stdout -> Fluent Bit, which is
+      # the reliable path for an ephemeral Job: the runtime captures both
+      # streams however the process exits, so logs survive exactly the crash
+      # that loses unflushed OTLP spans (§10.5). Fluent Bit gains an
+      # OpenObserve output beside its CloudWatch one, so the logs land in the
+      # same store as the traces without this pipeline existing.
       logs: null
 
 resources:

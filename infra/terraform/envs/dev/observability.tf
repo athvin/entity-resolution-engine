@@ -152,3 +152,82 @@ resource "aws_eks_pod_identity_association" "otel_collector" {
   service_account = "otel-collector"
   role_arn        = aws_iam_role.otel_collector.arn
 }
+
+# --- the shared span store's cluster binding --------------------------------
+#
+# The OpenObserve role and bucket live in `envs/core` because ONE store serves
+# every environment (core/observability.tf). The Pod Identity association has
+# to live here, though: it names a cluster, and the cluster is a dev resource.
+#
+# The ARN is CONSTRUCTED, not looked up, and that is a correction rather than a
+# shortcut. A `data "aws_iam_role"` here failed `plan (dev)` outright with
+# "couldn't find resource": a data source resolves at PLAN time, core and dev
+# plan in the same CI run, so dev could never plan until core had already
+# applied — a chicken-and-egg that red-lights the PR permanently rather than
+# "enforcing an order of operations", which is what an earlier version of this
+# comment claimed.
+#
+# A constructed ARN is plan-safe because it is a string. The cost is that a
+# missing role surfaces at APPLY rather than at plan, which is the right place
+# for it: apply is where the dependency actually matters, and `envs/core`
+# applies before `envs/dev` in the same workflow. eks.tf constructs the one ARN
+# it needs from core the same way.
+resource "aws_eks_pod_identity_association" "openobserve" {
+  cluster_name    = module.eks.cluster_name
+  namespace       = "observability"
+  service_account = "openobserve"
+  role_arn        = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/er-openobserve"
+}
+
+# --- the span store's credentials --------------------------------------------
+#
+# Terraform mints these so there is no manual step before the first deploy.
+# They live in `envs/dev` rather than beside the bucket in `envs/core` for one
+# reason: the metadata DSN names a Postgres, and the only Postgres in this
+# account is the dev Aurora (rds.tf). The STORE is shared across environments;
+# its metadata happens to live in the one database that exists.
+#
+# The database itself is NOT created here. OpenObserve creates its own tables
+# on first boot, and `er` is the only database Aurora was provisioned with — a
+# dedicated `openobserve` database would need a CREATE DATABASE this stack has
+# no connection to run. Keeping it in `er` under its own tables is the honest
+# trade: still unreachable from a tenant's credentials (a tenant gets
+# `er_t_<org>`), and one less bootstrap step.
+
+resource "random_password" "openobserve_root" {
+  length = 32
+  # The chart's own default is "Complexpass#123"; OpenObserve requires a
+  # mixed-class password, so the character set is pinned rather than left to
+  # chance on a regenerate.
+  override_special = "!#$%*()-_=+[]{}<>:?"
+  min_upper        = 2
+  min_lower        = 2
+  min_numeric      = 2
+  min_special      = 2
+}
+
+resource "aws_secretsmanager_secret" "openobserve" {
+  name        = "er/shared/openobserve"
+  description = "Root credentials and metadata DSN for the shared span store; consumed by scripts/obs_up.sh (and the CI deploy that calls it)."
+}
+
+resource "aws_secretsmanager_secret_version" "openobserve" {
+  secret_id = aws_secretsmanager_secret.openobserve.id
+
+  secret_string = jsonencode({
+    root_email    = "observability@dupezero.com"
+    root_password = random_password.openobserve_root.result
+    # URI form, which is what OpenObserve's ZO_META_POSTGRES_DSN expects —
+    # not the libpq keyword form the control plane uses.
+    meta_dsn = "postgres://er:${random_password.db.result}@${aws_rds_cluster.dev.endpoint}:5432/er"
+  })
+}
+
+# The collector authenticates to the store with the same root credential, as
+# HTTP Basic. Scoped down to an ingest-only user once the store is up and its
+# own user management is reachable; until then this is one credential rather
+# than a second unmanaged one.
+output "openobserve_secret_arn" {
+  description = "er/shared/openobserve — read by scripts/obs_up.sh at deploy time."
+  value       = aws_secretsmanager_secret.openobserve.arn
+}

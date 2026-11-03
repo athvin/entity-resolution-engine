@@ -416,13 +416,11 @@ pub async fn schedule_tick(
 
 /// A tenant's active registry model, resolved before the blocking half runs.
 /// Owned rather than borrowed because it crosses a `spawn_blocking` boundary.
-struct ActiveModel {
-    model_json: String,
-    model_version_label: String,
-    tf_snapshot_id: Option<String>,
-    name: String,
-    version: i64,
-}
+/// The registry rows a run resolves against: the SHARED shape
+/// `runctx::ActiveModelSpec`, which is also what the work order carries to a
+/// pod (§6.4 — the pod cannot read the registry itself). One type, so the wire
+/// form and the in-process form cannot drift.
+use crate::runctx::ActiveModelSpec as ActiveModel;
 
 /// Claim + run one job. `Ok(true)` ran a job (outcome persisted), `Ok(false)`
 /// the queue was empty, `Err` a Postgres failure (fatal to the caller).
@@ -570,18 +568,19 @@ async fn dispatch_claimed(
     // kinds (provision) and pre-dataset rows, exactly as before. The default
     // dataset's copies are kept in step by the explicit-mutation fan-out
     // (`pg::merge_dataset_envs`), never by a boot rewrite.
-    let (lake_env, lake_drop_root) = if let Some(ds_id) = job.dataset_id.as_deref() {
-        let Some(ds) = pg::get_dataset_by_id(client, ds_id).await? else {
-            pg::mark(client, &job.id, "failed").await?;
-            if let Some(rr) = report.as_mut() {
-                rr.settle(false).await;
-            }
-            eprintln!("job {} failed: dataset id '{ds_id}' not found", job.id);
-            return Ok(true);
-        };
-        (ds.env, ds.drop_root)
-    } else {
-        (org.env.clone(), org.drop_root.clone())
+    let Some((lake_env, lake_drop_root)) =
+        pg::lake_env_for_job(client, &org, job.dataset_id.as_deref()).await?
+    else {
+        pg::mark(client, &job.id, "failed").await?;
+        if let Some(rr) = report.as_mut() {
+            rr.settle(false).await;
+        }
+        eprintln!(
+            "job {} failed: dataset id '{}' not found",
+            job.id,
+            job.dataset_id.as_deref().unwrap_or("")
+        );
+        return Ok(true);
     };
 
     // Every lake job reconciles its lake first, under the one-active-job-per-org
@@ -762,6 +761,8 @@ async fn dispatch_claimed(
                     name: m.name,
                     version: m.version,
                 })
+                // The field order above is the struct's; `ActiveModelSpec`
+                // declares them in wire order, which the compiler reconciles.
                 .collect(),
             Err(e) => {
                 pg::mark(client, &job.id, "failed").await?;
@@ -975,7 +976,7 @@ async fn apply_approved_merges(
 /// them merged over several ticks instead of one job holding the org's single
 /// writer slot for an hour. The remainder keeps its tag and is picked up next
 /// tick, which is why removing the tag as it is staged matters.
-const MAX_APPROVED: i64 = 200;
+pub(crate) const MAX_APPROVED: i64 = 200;
 
 /// Job kinds a run report is sent for: the ones whose outcome a steward is
 /// waiting on.
@@ -1194,19 +1195,6 @@ fn env_str<'a>(env: &'a Value, key: &str) -> Option<&'a str> {
     env.get(key).and_then(Value::as_str)
 }
 
-fn load_lexicon(path: &str) -> Vec<(String, String)> {
-    std::fs::read_to_string(path)
-        .unwrap_or_default()
-        .lines()
-        .skip(1)
-        .filter(|l| !l.is_empty())
-        .filter_map(|l| {
-            l.split_once(',')
-                .map(|(a, b)| (a.to_string(), b.to_string()))
-        })
-        .collect()
-}
-
 /// Dispatch one job to its `er-cli` op over the org's lake. Synchronous (runs on
 /// a blocking thread). Returns a human error string on any failure.
 fn run_job(
@@ -1283,127 +1271,23 @@ fn run_job(
             }
         }
         "run_all_full" | "run_all_incremental" => {
-            let config = load_config()?;
-            // `{"skip_ingest": true}` — set by every publish-triggered rebuild —
-            // means "re-run the pipeline over the corpus already landed". It was
-            // written by six call sites and read by none, so a rebuild re-read the
-            // drop directory and FAILED with "no source deliveries found" whenever
-            // the deliveries had been cleaned up after landing.
-            let skip_ingest = job
-                .params
-                .get("skip_ingest")
-                .and_then(Value::as_bool)
-                .unwrap_or(false);
-            let deliveries: Vec<(String, String)> = if skip_ingest {
-                Vec::new()
-            } else {
-                let drop_root = drop_root.ok_or("org has no drop_root for a run_all")?;
-                let found: Vec<(String, String)> = config
-                    .sources
-                    .keys()
-                    .filter_map(|source| {
-                        std::fs::read_to_string(format!("{drop_root}/{source}.csv"))
-                            .ok()
-                            .map(|csv| (source.clone(), csv))
-                    })
-                    .collect();
-                if found.is_empty() {
-                    return Err(format!("no source deliveries found under {drop_root}"));
-                }
-                found
-            };
-            // The TF snapshot is still a file on disk: the registry stores the
-            // settings document and the identity it stamps, not the frozen term
-            // frequencies, so `ER_TF_PATH` stays the source for those.
-            let tf_path = env_str(env, "ER_TF_PATH").ok_or("org env missing ER_TF_PATH")?;
-            let lexicon = env_str(env, "ER_LEXICON_PATH")
-                .map(load_lexicon)
-                .unwrap_or_default();
-            // Registry first, env file second. The fallback is what keeps an org
-            // created before the registry existed scoring exactly as it did.
-            // With no `models:` block the org scores against its ONE active
-            // version, which is what every config written before ensembles
-            // means. Several active names and no block is not a default we may
-            // pick for the tenant — activation became per-name in E5b-1, so this
-            // state is reachable, and silently choosing one model is the class of
-            // bug this program keeps closing.
-            let active_model = if config.models.is_empty() {
-                if active_models.len() > 1 {
-                    let names: Vec<&str> = active_models.iter().map(|m| m.name.as_str()).collect();
-                    return Err(format!(
-                        "the registry has {} active models ({}) but the published config \
-                         declares no `models:` list, so which one scores is undefined; \
-                         declare the ensemble or archive the versions you do not want",
-                        active_models.len(),
-                        names.join(", ")
-                    ));
-                }
-                active_models.first()
-            } else {
-                None
-            };
-            let from_env;
-            let settings_json: &str = if let Some(m) = active_model {
-                eprintln!(
-                    "run {run_id}: model {}/{} ({})",
-                    m.name, m.version, m.model_version_label
-                );
-                &m.model_json
-            } else {
-                let model_path =
-                    env_str(env, "ER_MODEL_PATH").ok_or("org env missing ER_MODEL_PATH")?;
-                from_env =
-                    std::fs::read_to_string(model_path).map_err(|e| format!("read model: {e}"))?;
-                &from_env
-            };
-            let model = er_cli::MatchModel {
-                settings_json,
-                tf_csv_path: Path::new(tf_path),
-                model_version: active_model.map_or_else(
-                    || env_str(env, "ER_MODEL_VERSION").unwrap_or("v0001"),
-                    |m| m.model_version_label.as_str(),
-                ),
-                tf_snapshot_id: active_model
-                    .and_then(|m| m.tf_snapshot_id.as_deref())
-                    .or_else(|| env_str(env, "ER_TF_SNAPSHOT_ID"))
-                    .unwrap_or("tf"),
-            };
-            // The ensemble: the published config's `models:` list resolved
-            // against the registry's active set, in CONFIG order — the config is
-            // the selector, the registry supplies the versions. So retraining a
-            // member is an activate, not a publish.
-            let members: Vec<er_cli::EnsembleMember<'_>> = config
-                .models
-                .iter()
-                .map(|spec| {
-                    let found = active_models
-                        .iter()
-                        .find(|m| m.name == spec.name)
-                        .ok_or_else(|| {
-                            let active: Vec<&str> =
-                                active_models.iter().map(|m| m.name.as_str()).collect();
-                            format!(
-                                "the config declares model '{}' but the registry has no ACTIVE \
-                                 version of that name (active: {})",
-                                spec.name,
-                                if active.is_empty() {
-                                    "none".to_string()
-                                } else {
-                                    active.join(", ")
-                                }
-                            )
-                        })?;
-                    Ok(er_cli::EnsembleMember {
-                        model: er_cli::MatchModel {
-                            settings_json: &found.model_json,
-                            tf_csv_path: Path::new(tf_path),
-                            model_version: &found.model_version_label,
-                            tf_snapshot_id: found.tf_snapshot_id.as_deref().unwrap_or("tf"),
-                        },
-                        name: &found.name,
-                    })
-                })
-                .collect::<Result<Vec<_>, String>>()?;
+            // One resolution path, shared with the executor's task bodies
+            // (`runctx`): deliveries, the TF path, the lexicon, the sole
+            // model or the declared ensemble, and the named segment. The pod
+            // cannot read the model registry, so the SERVER resolves it and
+            // the work order carries the result — which is why the registry
+            // rows arrive here as `ActiveModelSpec` rather than being read
+            // again inside the resolution.
+            let ctx = crate::runctx::RunContext::resolve(&crate::runctx::ResolveRequest {
+                lake_env: env,
+                params: &job.params,
+                models: active_models,
+                drop_root,
+                wants_deliveries: true,
+            })
+            .map_err(|e| crate::errfmt::chain(&e))?;
+            let model = ctx.model();
+            let members = ctx.ensemble();
             if !members.is_empty() {
                 let listed: Vec<String> = members
                     .iter()
@@ -1424,7 +1308,8 @@ fn run_job(
                 er_versions::MODE_FULL
             };
             let prior = er_cli::prior_fingerprint(&session).map_err(|e| format!("{e:#}"))?;
-            let current = er_cli::current_fingerprint(&config, model.model_version, &lexicon);
+            let current =
+                er_cli::current_fingerprint(&ctx.config, model.model_version, &ctx.lexicon);
             let decision =
                 er_versions::check_mode_preconditions(prior.as_ref(), &current, asked, true)
                     .map_err(|e| format!("mode guard: {e}"))?;
@@ -1436,36 +1321,14 @@ fn run_job(
             } else {
                 None
             };
-
-            // `{"segment": "<name>"}` restricts the match pass to a slice of the
-            // corpus (#54). The job carries the NAME; the predicate is looked up
-            // in the org's own config, which was parsed and column-checked at
-            // publish. A job carrying SQL would be an injection surface, and the
-            // enqueueing endpoint validates the name too — this is the second
-            // check, because a schedule stores its params and the config can be
-            // republished without it.
-            let segment_name = job.params.get("segment").and_then(Value::as_str);
-            let segment = match segment_name {
-                Some(name) => {
-                    let predicate = config.segments.get(name).ok_or_else(|| {
-                        let known: Vec<&str> = config.segments.keys().map(String::as_str).collect();
-                        format!(
-                            "segment '{name}' is not in the active config (known: {})",
-                            if known.is_empty() {
-                                "none declared".to_string()
-                            } else {
-                                known.join(", ")
-                            }
-                        )
-                    })?;
-                    Some((name, predicate.as_str()))
-                }
-                None => None,
-            };
+            let config = &ctx.config;
+            let lexicon = &ctx.lexicon;
+            let deliveries = &ctx.deliveries;
+            let segment = ctx.segment_ref();
 
             let inputs = er_cli::PipelineInputs {
-                lexicon: &lexicon,
-                deliveries: &deliveries,
+                lexicon,
+                deliveries,
                 model: &model,
                 run_id,
                 ingested_at: &now,
@@ -1480,9 +1343,9 @@ fn run_job(
             // itself — so the single-model path stays one call deep and cannot
             // drift from what it did before ensembles existed.
             let outcome = if members.is_empty() {
-                er_cli::run_all_observed(&session, &config, &inputs, observer)
+                er_cli::run_all_observed(&session, config, &inputs, observer)
             } else {
-                er_cli::run_all_ensemble_observed(&session, &config, &inputs, &members, observer)
+                er_cli::run_all_ensemble_observed(&session, config, &inputs, &members, observer)
             }
             .map_err(|e| format!("{e:#}"));
 
@@ -1502,7 +1365,7 @@ fn run_job(
             // Tier 1 only, and no exact distinct counts — this runs on every
             // delivery, so it has to be the cheap pass.
             if outcome.is_ok() {
-                for (source, _) in &deliveries {
+                for (source, _) in deliveries {
                     let request = crate::profile_params::ProfileRequest {
                         subject: er_cli::profile::Subject::Raw,
                         source: Some(source.clone()),
@@ -1841,7 +1704,7 @@ async fn register_half(
 ///
 /// The file is keyed by `(model_version, tf_snapshot_id, column_name)`, so
 /// snapshots coexist and each model reads only its own rows.
-fn append_tf_snapshot(tf_path: &str, tf_rows: &str) -> Result<(), String> {
+pub(crate) fn append_tf_snapshot(tf_path: &str, tf_rows: &str) -> Result<(), String> {
     use std::io::Write;
     let existing = std::fs::metadata(tf_path).is_ok_and(|m| m.len() > 0);
     let mut lines = tf_rows.lines();
@@ -2052,7 +1915,7 @@ async fn provision_tenant(
 /// double-quoted here, because `CREATE DATABASE` takes no parameters and a
 /// hand-built identifier is exactly the shape that becomes an injection the day
 /// someone relaxes the folding.
-async fn create_tenant_database(maint_dsn: &str, database: &str) -> Result<(), String> {
+pub(crate) async fn create_tenant_database(maint_dsn: &str, database: &str) -> Result<(), String> {
     let client = pg::connect(maint_dsn)
         .await
         .map_err(|e| format!("connect to the provisioning maintenance DSN: {e}"))?;

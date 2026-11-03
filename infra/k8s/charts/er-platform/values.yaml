@@ -171,19 +171,25 @@ web:
     requests: { cpu: 100m, memory: 256Mi }
     limits: { cpu: 500m, memory: 1Gi }
 
-# §10.6 Phase 1 (plan 1.8): API RED metrics via the OTel operator's Python
-# auto-instrumentation — er-api carries no OTel libraries, so the operator's
-# webhook injects them (init container + PYTHONPATH sitecustomize) into pods
-# annotated inject-python. OFF by default: the annotation and the
-# Instrumentation CR only render when the operator (infra/k8s/observability/
-# otel-operator-values.yaml) is installed, which is an er-dev-cluster fact,
-# not a chart fact. Dev flips it on:
-#   helm -n alice upgrade er-platform ... --reuse-values --set otel.autoInstrument=true
+# Telemetry. `autoInstrument` and its Instrumentation CR are GONE: they
+# injected a PYTHON agent into a pod that has run a Rust binary since the
+# all-Rust cutover, into a deployment (`deployment-api.yaml`) that no longer
+# exists, behind an annotation no template carried. It could never have worked,
+# and left `traces`/`metrics` pipelines with zero producers while reading as
+# though Phase 1 were done.
+#
+# What replaced it is in the binary: every entry point installs a `tracing`
+# subscriber, the HTTP layer spans each request, and the generated query
+# functions span each of the 245 declared statements. `endpoint` is where that
+# goes once the exporter lands — 4318 because OTLP/HTTP is what the Rust
+# exporter will speak (and the reason is now the dependency graph rather than a
+# Python agent's limitation: gRPC would pull a second TLS stack).
 otel:
-  autoInstrument: false
-  # The §10.5 gateway. Must stay the http/protobuf port (4318) — the Python
-  # agent does not speak OTLP/gRPC.
   endpoint: http://otel-collector.observability.svc.cluster.local:4318
+  # The default filter lives in `er_obs::init::DEFAULT_FILTER` and already pins
+  # the noisy dependencies; this is the environment override §10.4 asks for and
+  # which no chart has ever carried. Empty means "use the compiled default".
+  logLevel: ""
 
 # The §4.1 edge: internal ALB shared across dev namespaces via group.name,
 # hostname published by external-dns into Cloudflare (unproxied). DISABLED by

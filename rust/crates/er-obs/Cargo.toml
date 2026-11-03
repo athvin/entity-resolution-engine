@@ -5,6 +5,9 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+# Every file in tests/ is a module of tests/main.rs, not a target of its own
+# (sccache cannot cache a final link). See tests/main.rs.
+autotests = false
 
 [dependencies]
 er-schema = { path = "../er-schema" }
@@ -15,6 +18,37 @@ tracing.workspace = true
 tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "json", "fmt", "registry", "std"] }
 tokio.workspace = true
 
+# The OpenTelemetry crates move as ONE line, the way `arrow` must match
+# whatever `duckdb` pulls (see .github/dependabot.yml). They are pre-1.0, so
+# 0.31 -> 0.32 is breaking despite reading as a minor bump, and the four
+# `opentelemetry*` crates exchange types with each other while
+# `tracing-opentelemetry` sits exactly ONE minor ahead — 0.32 pairs with
+# opentelemetry 0.31. Bump them in one commit or the mismatch surfaces as a
+# trait that is not implemented for a type of the same name.
+#
+# `default-features = false` on `opentelemetry-otlp` is load-bearing, not
+# tidiness. Its client features (`reqwest-rustls` and friends) resolve a SECOND
+# `reqwest` and select `aws-lc-rs` as rustls' provider, which pulls
+# `aws-lc-sys`, which needs a cmake the build image does not carry. We supply
+# the HTTP client instead — see src/otlp.rs, which carries the measurement.
+opentelemetry = "0.31"
+opentelemetry_sdk = "0.31"
+opentelemetry-otlp = { version = "0.31", default-features = false, features = ["http-proto", "trace"] }
+opentelemetry-http = { version = "0.31", default-features = false }
+tracing-opentelemetry = "0.32"
+# `opentelemetry_http::HttpClient` is declared with `#[async_trait]` and the
+# crate does not re-export the macro, so implementing it needs this directly.
+async-trait = "0.1.92"
+reqwest.workspace = true
+
 [lints]
 workspace = true
 
+[dev-dependencies]
+opentelemetry = "0.31"
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+
+
+[[test]]
+name = "main"
+path = "tests/main.rs"

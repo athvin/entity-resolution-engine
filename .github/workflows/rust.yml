@@ -2,14 +2,14 @@
 # `rust/`); the Python/dbt implementation has been removed, so this is the whole
 # backend gate — effectively unfiltered (the frontend keeps its own pnpm gate).
 #
-# Two exceptions: a PR that touches nothing but `.claude/**` (agent/skill prose)
-# and/or `infra/terraform/**` runs none of the compile jobs. Because the required
-# jobs below are REQUIRED status checks, a workflow-level path filter would leave
-# them "pending" forever and block the PR; instead a `detect` job computes
-# whether any file outside those two trees changed and the required jobs gate on
-# it with `if:`. A job skipped by `if:` reports a "skipped" conclusion, which
-# branch protection accepts as satisfied — so the PR stays mergeable with zero
-# compute.
+# Three exceptions: a PR that touches nothing but `.claude/**` (agent/skill
+# prose), `infra/terraform/**`, and/or the `gh aw` agentic-workflow files runs
+# none of the compile jobs. Because the required jobs below are REQUIRED status
+# checks, a workflow-level path filter would leave them "pending" forever and
+# block the PR; instead a `detect` job computes whether any file outside those
+# sets changed and the required jobs gate on it with `if:`. A job skipped by
+# `if:` reports a "skipped" conclusion, which branch protection accepts as
+# satisfied — so the PR stays mergeable with zero compute.
 #
 # Why `infra/terraform/**` is safe to skip, which is not obvious: nothing in the
 # Rust gate reads it. No crate or manifest references it (the two mentions under
@@ -20,6 +20,13 @@
 # That is covered, and by design: the `skills` job below runs the same drift
 # check and is deliberately NOT gated on `detect`, which is the whole reason it
 # exists as a separate job. The terraform gate itself lives in `infra.yml`.
+#
+# The agentic workflows (`.github/workflows/*.md`, the `*.lock.yml` compiled from
+# each, and `shared/`) qualify on the same two grounds: nothing in `make check`
+# reads them, and the drift they CAN cause — `skills-check.sh` derives the
+# agentic-workflow table in `required-checks.md` from those `.md` files — is
+# caught by the ungated `skills` job. Note those are matched per FILE rather than
+# as a directory, because this file and its three siblings live there too.
 #
 # The skip stops there. `docs/**` must still run the gate, because `entities`
 # runs `er-entity verify` (docs/erd.md staleness) and `lint` verifies the
@@ -108,11 +115,12 @@ env:
   SCCACHE_REGION: us-east-2
 
 jobs:
-  # Did anything outside `.claude/**` and `infra/terraform/**` change? The
-  # required compile jobs below gate on this so a skills-only or terraform-only
-  # PR skips them (a skipped required check still satisfies branch protection).
-  # Non-PR events (push to main, nightly) always report `true` — the gate never
-  # self-skips on the branch it protects.
+  # Did anything outside `.claude/**`, `infra/terraform/**` and the agentic
+  # workflow files change? The required compile jobs below gate on this, so a
+  # skills-only, terraform-only or prompt-only PR skips them (a skipped required
+  # check still satisfies branch protection). Non-PR events (push to main,
+  # nightly) always report `true` — the gate never self-skips on the branch it
+  # protects.
   detect:
     name: detect changes
     runs-on: ubuntu-latest
@@ -140,13 +148,14 @@ jobs:
           # seeing — only add something nothing in `make check` reads (the
           # header explains why each qualifies, and why `docs/` does not).
           #
-          # `infra.yml` and `drift.yml` are named FILE BY FILE and not as
-          # `^\.github/workflows/`, which matters: `rust.yml`, `frontend.yml` and
-          # `images.yml` must keep triggering the gates they define, or a change
-          # to a gate would stop reporting on exactly the PR most likely to break
-          # it. The two terraform workflows define no Rust job and cannot affect
-          # the workspace build, and an infra-only PR was paying the full
-          # ~40-minute backend gate — `test` plus the DuckLake e2e — to prove it.
+          # `infra.yml`, `drift.yml` and the `gh aw` agentic set are named FILE
+          # BY FILE and not as `^\.github/workflows/`, which matters: `rust.yml`,
+          # `frontend.yml` and `images.yml` must keep triggering the gates they
+          # define, or a change to a gate would stop reporting on exactly the PR
+          # most likely to break it. The two terraform workflows define no Rust
+          # job and cannot affect the workspace build, and an infra-only PR was
+          # paying the full ~40-minute backend gate — `test` plus the DuckLake
+          # e2e — to prove it.
           #
           # Enumerating rather than exempting the directory and listing
           # exceptions is the FAIL-SAFE direction: a workflow added later runs
@@ -156,10 +165,22 @@ jobs:
           # `grep -c` reads all input (unlike `grep -q`, which closes the pipe
           # early and can SIGPIPE `git diff` under `pipefail` → a flaky false
           # skip); `|| true` absorbs grep's exit-1-on-zero-matches under `set -e`.
+          #
+          # The agentic entries are named or extension-matched, never the whole
+          # directory — the one place this pattern needs care, because `rust.yml`,
+          # `frontend.yml` and `images.yml` live in `.github/workflows/` too and
+          # must keep triggering the gate they define. `^\.github/workflows/`
+          # would be the `paths:`-filter trap in CLAUDE.md wearing a different
+          # hat. So: the `.md` a human edits, the `.lock.yml` `gh aw compile`
+          # emits from it, the `shared/` imports they pull in, and
+          # `agentics-maintenance.yml`, which that compile also generates.
+          # `.github/aw/` is gh-aw's own metadata (the resolved action SHAs).
+          # None of those shapes can capture a hand-written `.yml` workflow, so
+          # they cannot widen the exemption past what is argued for above.
           changed="$(git diff --name-only "$BASE_SHA...$HEAD_SHA")"
           printf 'changed paths:\n%s\n' "$changed"
-          noncode="$(printf '%s\n' "$changed" \
-                      | grep -cvE '^(\.claude/|infra/terraform/|scripts/ci/tf-|\.github/workflows/(infra|drift)\.yml$)' || true)"
+          exempt='^(\.claude/|infra/terraform/|scripts/ci/tf-|\.github/aw/|\.github/workflows/((infra|drift)\.yml$|shared/|agentics-maintenance\.yml$|[A-Za-z0-9._-]+\.md$|[A-Za-z0-9._-]+\.lock\.yml$))'
+          noncode="$(printf '%s\n' "$changed" | grep -cvE "$exempt" || true)"
           if [ "${noncode:-0}" -gt 0 ]; then
             echo "code=true" >> "$GITHUB_OUTPUT"
           else
@@ -262,56 +283,15 @@ jobs:
           aws-region: us-east-2
           role-to-assume: ${{ github.ref == 'refs/heads/main' && 'arn:aws:iam::797781631727:role/er-ci-sccache-write' || 'arn:aws:iam::797781631727:role/er-ci-sccache-read' }}
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-        with:
-          workspaces: rust
-          shared-key: rust
-          # Busts the stale entry, and makes the next profile edit bust it
-          # automatically. rust-cache keys on `Cargo.lock`, the rustc version and
-          # `.cargo/config.toml` — NOT on `Cargo.toml`, so the
-          # `[profile.dev.package."*"] debug = false` added in #251 was invisible
-          # to it. The symptom, from main run 39779467231: `Cache hit for:
-          # v0-rust-rust-Linux-x64-8556beb2-...` then `Cache up-to-date.` — an
-          # exact key hit, so rust-cache skipped the save and the pre-profile
-          # entry became immortal. Every run then restored ~1.3 GB of
-          # full-debug-info dependency artifacts whose fingerprints cargo
-          # immediately rejected, and rebuilt them anyway.
-          #
-          # `prefix-key` makes the v0 entries unreachable (restore-keys are
-          # prefixed too) so they age out instead of being downloaded for
-          # nothing. Hashing Cargo.toml into `key` is the durable half: a future
-          # profile or lint change lands on a new key and therefore SAVES, while
-          # restore-keys still prefix-match the previous entry for a partial
-          # restore. Bump `prefix-key` by hand only for a change neither file
-          # records.
-          prefix-key: "v1-rust"
-          key: ${{ hashFiles('rust/Cargo.toml') }}
-          # THIS job is the single writer of `shared-key: rust`. The other four
-          # compile jobs restore from it and set `save-if: false`, because the
-          # 10 GB per-repository Actions cache is a shared, capped resource and
-          # this workspace does not fit in it twice.
-          #
-          # What went wrong without this: five jobs all saved the same key, PR
-          # branches minted their own ~1.5 GB entries, and sccache's GHA backend
-          # — one cache entry per compilation object, nothing capping it — added
-          # ~2,700 entries and 4.3 GiB. Measured at 10,653,007,178 bytes across
-          # 2,594 entries, i.e. at the ceiling, so GitHub evicted LRU and the
-          # victim was the big rust-cache entry. That is why cold runs kept
-          # happening with no dependency change to explain them, and cold is a
-          # 3x penalty on this job (42m27 vs 14m15).
-          #
-          # Writing only from `main` is the other half: a PR must not be able to
-          # evict the entry every other PR depends on.
-          #
-          # The trade-off, stated so it is not discovered later: a PR that
-          # changes `Cargo.lock` no longer saves its own entry, so every push to
-          # it restores main's by `restore-keys` prefix match and rebuilds the
-          # changed crates again. It is a partial restore, not a cold build, and
-          # sccache covers what the prefix match misses — but a duckdb bump will
-          # feel it on each push. `sccache --show-stats` below is how to tell
-          # whether that is actually costing anything before trading the budget
-          # back for it.
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+      # No rust-cache. A restored `target/` carries a populated
+      # `duckdb-sources/<key>/` with its `.complete` sentinel stripped, so
+      # `libduckdb-sys` tries to `fs::rename` a fresh unpack over it and gets
+      # ENOTEMPTY — `DirectoryNotEmpty`, on every restoring job. Re-keying does
+      # not fix that: v2 was restored `full match: true` and failed
+      # identically. NB the panic text blames the unpack; the failing syscall
+      # is the publish rename. The `coverage` job keeps rust-cache and repairs
+      # the tree instead — its step carries the full mechanism. See also this
+      # file's header.
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - name: rustdoc (deny warnings)
@@ -420,19 +400,15 @@ jobs:
           aws-region: us-east-2
           role-to-assume: ${{ github.ref == 'refs/heads/main' && 'arn:aws:iam::797781631727:role/er-ci-sccache-write' || 'arn:aws:iam::797781631727:role/er-ci-sccache-read' }}
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-        with:
-          workspaces: rust
-          shared-key: rust
-          # Keyed to include a hash of Cargo.toml, which rust-cache does not
-          # hash by default — see the `lint` job for the stale-entry failure that
-          # cost. Keep these identical across jobs or they stop sharing.
-          prefix-key: "v1-rust"
-          key: ${{ hashFiles('rust/Cargo.toml') }}
-          # Restore-only. `lint` is the single writer of this key — see the long
-          # comment there for why five writers on a 10 GB capped cache is what
-          # kept producing cold runs.
-          save-if: false
+      # No rust-cache. A restored `target/` carries a populated
+      # `duckdb-sources/<key>/` with its `.complete` sentinel stripped, so
+      # `libduckdb-sys` tries to `fs::rename` a fresh unpack over it and gets
+      # ENOTEMPTY — `DirectoryNotEmpty`, on every restoring job. Re-keying does
+      # not fix that: v2 was restored `full match: true` and failed
+      # identically. NB the panic text blames the unpack; the failing syscall
+      # is the publish rename. The `coverage` job keeps rust-cache and repairs
+      # the tree instead — its step carries the full mechanism. See also this
+      # file's header.
       - name: entity framework verify (stale-output + analyser passes)
         run: cargo run -q -p er-entity-cli -- verify --root ..
       - name: API breaking-change gate (advisory)
@@ -560,19 +536,15 @@ jobs:
           aws-region: us-east-2
           role-to-assume: ${{ github.ref == 'refs/heads/main' && 'arn:aws:iam::797781631727:role/er-ci-sccache-write' || 'arn:aws:iam::797781631727:role/er-ci-sccache-read' }}
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-        with:
-          workspaces: rust
-          shared-key: rust
-          # Keyed to include a hash of Cargo.toml, which rust-cache does not
-          # hash by default — see the `lint` job for the stale-entry failure that
-          # cost. Keep these identical across jobs or they stop sharing.
-          prefix-key: "v1-rust"
-          key: ${{ hashFiles('rust/Cargo.toml') }}
-          # Restore-only. `lint` is the single writer of this key — see the long
-          # comment there for why five writers on a 10 GB capped cache is what
-          # kept producing cold runs.
-          save-if: false
+      # No rust-cache. A restored `target/` carries a populated
+      # `duckdb-sources/<key>/` with its `.complete` sentinel stripped, so
+      # `libduckdb-sys` tries to `fs::rename` a fresh unpack over it and gets
+      # ENOTEMPTY — `DirectoryNotEmpty`, on every restoring job. Re-keying does
+      # not fix that: v2 was restored `full match: true` and failed
+      # identically. NB the panic text blames the unpack; the failing syscall
+      # is the publish rename. The `coverage` job keeps rust-cache and repairs
+      # the tree instead — its step carries the full mechanism. See also this
+      # file's header.
       - name: Run the test suite
         # `cargo test`, not nextest, and that is a measured choice. nextest runs
         # each test in its own PROCESS; with 586 tests across ~147 binaries that
@@ -770,14 +742,15 @@ jobs:
           aws-region: us-east-2
           role-to-assume: ${{ github.ref == 'refs/heads/main' && 'arn:aws:iam::797781631727:role/er-ci-sccache-write' || 'arn:aws:iam::797781631727:role/er-ci-sccache-read' }}
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-        with:
-          workspaces: rust
-          shared-key: rust
-          prefix-key: "v1-rust"
-          key: ${{ hashFiles('rust/Cargo.toml') }}
-          # Restore-only. `lint` is the single writer of this key.
-          save-if: false
+      # No rust-cache. A restored `target/` carries a populated
+      # `duckdb-sources/<key>/` with its `.complete` sentinel stripped, so
+      # `libduckdb-sys` tries to `fs::rename` a fresh unpack over it and gets
+      # ENOTEMPTY — `DirectoryNotEmpty`, on every restoring job. Re-keying does
+      # not fix that: v2 was restored `full match: true` and failed
+      # identically. NB the panic text blames the unpack; the failing syscall
+      # is the publish rename. The `coverage` job keeps rust-cache and repairs
+      # the tree instead — its step carries the full mechanism. See also this
+      # file's header.
       - name: Cache DuckDB extensions
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -912,19 +885,15 @@ jobs:
           aws-region: us-east-2
           role-to-assume: ${{ github.ref == 'refs/heads/main' && 'arn:aws:iam::797781631727:role/er-ci-sccache-write' || 'arn:aws:iam::797781631727:role/er-ci-sccache-read' }}
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-        with:
-          workspaces: rust
-          shared-key: rust
-          # Keyed to include a hash of Cargo.toml, which rust-cache does not
-          # hash by default — see the `lint` job for the stale-entry failure that
-          # cost. Keep these identical across jobs or they stop sharing.
-          prefix-key: "v1-rust"
-          key: ${{ hashFiles('rust/Cargo.toml') }}
-          # Restore-only. `lint` is the single writer of this key — see the long
-          # comment there for why five writers on a 10 GB capped cache is what
-          # kept producing cold runs.
-          save-if: false
+      # No rust-cache. A restored `target/` carries a populated
+      # `duckdb-sources/<key>/` with its `.complete` sentinel stripped, so
+      # `libduckdb-sys` tries to `fs::rename` a fresh unpack over it and gets
+      # ENOTEMPTY — `DirectoryNotEmpty`, on every restoring job. Re-keying does
+      # not fix that: v2 was restored `full match: true` and failed
+      # identically. NB the panic text blames the unpack; the failing syscall
+      # is the publish rename. The `coverage` job keeps rust-cache and repairs
+      # the tree instead — its step carries the full mechanism. See also this
+      # file's header.
       - name: Cache DuckDB extensions
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -1077,20 +1046,15 @@ jobs:
           aws-region: us-east-2
           role-to-assume: ${{ github.ref == 'refs/heads/main' && 'arn:aws:iam::797781631727:role/er-ci-sccache-write' || 'arn:aws:iam::797781631727:role/er-ci-sccache-read' }}
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-        with:
-          workspaces: rust
-          shared-key: rust
-          # Keyed to include a hash of Cargo.toml, which rust-cache does not
-          # hash by default — see the `lint` job for the stale-entry failure that
-          # cost. Keep these identical across jobs or they stop sharing.
-          prefix-key: "v1-rust"
-          key: ${{ hashFiles('rust/Cargo.toml') }}
-          # Restore-only. `lint` is the single writer of this key — see the long
-          # comment there for why five writers on a 10 GB capped cache is what
-          # kept producing cold runs.
-          save-if: false
-      # Keep benches building; running them is manual (they take minutes).
+      # No rust-cache. A restored `target/` carries a populated
+      # `duckdb-sources/<key>/` with its `.complete` sentinel stripped, so
+      # `libduckdb-sys` tries to `fs::rename` a fresh unpack over it and gets
+      # ENOTEMPTY — `DirectoryNotEmpty`, on every restoring job. Re-keying does
+      # not fix that: v2 was restored `full match: true` and failed
+      # identically. NB the panic text blames the unpack; the failing syscall
+      # is the publish rename. The `coverage` job keeps rust-cache and repairs
+      # the tree instead — its step carries the full mechanism. See also this
+      # file's header.
       - run: cargo bench -p dedupe-core --no-run
       - name: Build cost (sccache stats, target size)
         # See the `lint` job's copy for why.
@@ -1145,20 +1109,15 @@ jobs:
           aws-region: us-east-2
           role-to-assume: ${{ github.ref == 'refs/heads/main' && 'arn:aws:iam::797781631727:role/er-ci-sccache-write' || 'arn:aws:iam::797781631727:role/er-ci-sccache-read' }}
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-        with:
-          workspaces: rust
-          shared-key: rust
-          # Keyed to include a hash of Cargo.toml, which rust-cache does not
-          # hash by default — see the `lint` job for the stale-entry failure that
-          # cost. Keep these identical across jobs or they stop sharing.
-          prefix-key: "v1-rust"
-          key: ${{ hashFiles('rust/Cargo.toml') }}
-          # Restore-only. `lint` is the single writer of this key — see the long
-          # comment there for why five writers on a 10 GB capped cache is what
-          # kept producing cold runs.
-          save-if: false
-      # `--test main <filter>` — see the e2e job's copy for why.
+      # No rust-cache. A restored `target/` carries a populated
+      # `duckdb-sources/<key>/` with its `.complete` sentinel stripped, so
+      # `libduckdb-sys` tries to `fs::rename` a fresh unpack over it and gets
+      # ENOTEMPTY — `DirectoryNotEmpty`, on every restoring job. Re-keying does
+      # not fix that: v2 was restored `full match: true` and failed
+      # identically. NB the panic text blames the unpack; the failing syscall
+      # is the publish rename. The `coverage` job keeps rust-cache and repairs
+      # the tree instead — its step carries the full mechanism. See also this
+      # file's header.
       - run: cargo test -p dedupe-core --test main golden_historical_50k
       - name: Build cost (sccache stats, target size)
         # See the `lint` job's copy for why.
@@ -1211,7 +1170,7 @@ jobs:
           # Keyed to include a hash of Cargo.toml, which rust-cache does not
           # hash by default — see the `lint` job for the stale-entry failure that
           # cost. Keep these identical across jobs or they stop sharing.
-          prefix-key: "v1-rust"
+          prefix-key: "v2-rust"
           key: ${{ hashFiles('rust/Cargo.toml') }}
           # This key KEEPS its writer, unlike the four restore-only jobs above,
           # and the reasoning is worth recording because the opposite looks
@@ -1231,6 +1190,61 @@ jobs:
           # rlib. The single-writer rule, the nightly sccache cap and that shrink
           # free enough on their own; check the real number here before
           # considering anything more aggressive.
+      - name: Repair the restored libduckdb-sys source tree
+        # #424 cured the eight compile jobs by DELETING rust-cache. This job is
+        # the one that keeps it — for the reasons directly above — so it is the
+        # one place the poisoning survives, and it needs the repair instead.
+        #
+        # The mechanism, from the crate source rather than the symptom.
+        # `libduckdb-sys` does not unpack into `OUT_DIR`: `src/build_paths.rs:40`
+        # walks UP from it to a tree shared across the whole target dir,
+        # `target/duckdb-sources/<key>/`, guarded by a `.complete` DOTFILE.
+        # Present, the build script returns early. Absent, it unpacks into a
+        # fresh staging dir and `fs::rename`s that over `<key>/` — and renaming
+        # onto a non-empty directory is ENOTEMPTY, which is Linux errno 39:
+        #
+        #   unpacking bundled DuckDB sources: Os { code: 39, kind: DirectoryNotEmpty }
+        #
+        # That panic message names the wrong operation. `fs::rename` in
+        # `publish()` is the ONLY syscall in that function that can return 39 —
+        # the staging dir is uniquely minted, so `archive.unpack` cannot — and
+        # the `?` carries it to an `.expect("unpacking bundled DuckDB sources")`
+        # at `build_bundled_cc.rs:65`. Reading that string as the location is
+        # what sent two earlier fixes at `OUT_DIR`, where they verifiably
+        # deleted `.o` files while the panic happened anyway.
+        #
+        # So the poisoned state is a POPULATED `<key>/` with NO `.complete`,
+        # which is what a rust-cache save/restore round-trip leaves behind. The
+        # repair cannot go before the save — rust-cache writes in its POST-step,
+        # after every step this workflow can declare — so after the restore is
+        # the only place it can go.
+        #
+        # Dated prediction this step exists to stop: #376 bumped duckdb at
+        # 01:07 on 2026-11-03, after that day's nightly. The next scheduled run
+        # therefore gets a NEW `<key>`, unpacks cleanly, passes, and SAVES the
+        # stripped tree; the run after that restores it and dies before a test.
+        # Breakage never lands on the run that caused it.
+        #
+        # The test below is exactly the build script's own precondition, so an
+        # intact tree is left alone and keeps the fast path. Dropping one costs
+        # the tarball unpack (seconds), not the compile (minutes) — the C++
+        # objects come from sccache. It echoes per tree because both earlier
+        # fixes went GREEN having done nothing: "it ran" and "it did something"
+        # have to be distinguishable in the log.
+        run: |
+          shopt -s nullglob
+          trees=(target/duckdb-sources/*/)
+          if [ ${#trees[@]} -eq 0 ]; then
+            echo "none     target/duckdb-sources/ absent - build script unpacks cold"
+          fi
+          for tree in "${trees[@]}"; do
+            if [ -f "$tree.complete" ]; then
+              echo "intact   $tree"
+            else
+              echo "REPAIRED $tree (no .complete - would panic ENOTEMPTY)"
+              rm -rf "$tree"
+            fi
+          done
       - uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68 # v2.88.1
         with:
           tool: cargo-llvm-cov

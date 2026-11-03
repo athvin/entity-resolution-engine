@@ -21,9 +21,10 @@
 //!
 //! ## What is deliberately absent
 //!
-//! No metric instruments. The collector's `metrics` pipeline has no producer
-//! yet and there is no exporter in the build (see `er_obs::init`), so a
-//! histogram here would have nowhere to go. The spans carry the latency and the
+//! No metric instruments. Spans now export over OTLP (see `er_obs::otlp`) but
+//! the collector's `metrics` pipeline still has no producer, so a histogram here
+//! would have nowhere to go — and the cardinality decision it would commit to
+//! is the one worth deferring longest. The spans carry the latency and the
 //! status in the meantime, which the subscriber writes as structured records —
 //! and RED metrics derived from spans are a `spanmetrics` connector in the
 //! collector's config rather than Rust code, which is the cheaper place to put

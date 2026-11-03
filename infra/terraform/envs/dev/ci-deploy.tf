@@ -131,6 +131,19 @@ data "aws_iam_policy_document" "ci_deploy_dev" {
     resources = ["arn:aws:secretsmanager:us-east-2:${data.aws_caller_identity.current.account_id}:secret:er/dev/shared/postgres-*"]
   }
 
+  # The span store's root credentials and metadata DSN, read by
+  # scripts/obs_up.sh when the deploy installs the observability stack.
+  #
+  # Named exactly, for the same reason the statement above is: `er/shared/*`
+  # would be a standing grant over every future shared secret, and the whole
+  # point of the comment above is that a namespace deploy role must not become
+  # a path to anything it was not given deliberately.
+  statement {
+    effect    = "Allow"
+    actions   = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
+    resources = ["arn:aws:secretsmanager:us-east-2:${data.aws_caller_identity.current.account_id}:secret:er/shared/openobserve-*"]
+  }
+
   # Resolve an image digest from a tag. §14.2 requires the deploy to pass a
   # DIGEST and to gate on that digest being present, which is a read.
   statement {
