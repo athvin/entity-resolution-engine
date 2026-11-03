@@ -20,7 +20,9 @@ export interface ShellProps {
 export function AppShell({ org, user, memberships, impersonation, children }: ShellProps) {
   const [paletteOpen, setPaletteOpen] = useState(false);
   return (
-    <div className="flex min-h-dvh flex-col">
+    // `data-app-shell` is the hook `globals.css` keys the fixed-bar scroll
+    // padding off — those bars exist only inside this shell.
+    <div className="flex min-h-dvh flex-col" data-app-shell>
       {impersonation && <ImpersonationBanner impersonation={impersonation} />}
       <TopBar
         org={org}
