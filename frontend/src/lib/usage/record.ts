@@ -33,6 +33,7 @@ export const USAGE_KINDS = [
   "ai_config_author",
   "ai_config_explain",
   "ai_schema_map",
+  "ai_profile_narrative",
 ] as const;
 export type UsageKind = (typeof USAGE_KINDS)[number];
 
@@ -44,6 +45,7 @@ export const UNIT_FOR: Record<UsageKind, string> = {
   ai_config_author: "tokens",
   ai_config_explain: "tokens",
   ai_schema_map: "tokens",
+  ai_profile_narrative: "tokens",
 };
 
 /** The `usage` block every Anthropic reply carries. */

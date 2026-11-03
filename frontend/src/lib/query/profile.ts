@@ -190,3 +190,24 @@ export function useRunProfile(org: string, ds: string) {
     },
   });
 }
+
+/** The model's briefing over a profile, plus any draft blocking rules. */
+export interface ProfileNarrative {
+  summary: string;
+  blocking: string[];
+}
+
+/**
+ * Ask for the narrative. A mutation rather than a query, because it is a
+ * REQUEST: it costs a model call, so nothing should fire it on render, and
+ * re-asking is an explicit act rather than a cache miss.
+ */
+export function useProfileNarrative(org: string, ds: string) {
+  return useMutation({
+    mutationFn: (body: { subject: ProfileSubject; source?: string; tier: number }) =>
+      bffFetch<ProfileNarrative>(`/api/orgs/${org}/datasets/${ds}/profile/explain`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+  });
+}

@@ -137,3 +137,50 @@ describe("summing usage for a window", () => {
     expect(typeof rows[0]?.events).toBe("number");
   });
 });
+
+describe("the usage catalog is true, not just written", () => {
+  /**
+   * Every kind in `USAGE_KINDS` has something that emits it.
+   *
+   * `record.ts` states the principle in its own comment — "a kind nobody emits
+   * is a line on a usage panel that always reads zero, which a reader
+   * interprets as 'I am not using this' rather than 'nothing records it'" —
+   * and then nothing enforced it. The list and the emitters were kept in step
+   * by hand, which works until the first time somebody adds a kind ahead of
+   * the feature.
+   *
+   * Checked mechanically rather than by eye, in the direction that can rot:
+   * the gate cannot catch an emitter with no kind (that is a type error
+   * already), only a kind with no emitter.
+   */
+  it("has an emitter for every declared kind", async () => {
+    const { readdirSync, readFileSync, statSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { USAGE_KINDS } = await import("@/lib/usage/record");
+
+    const sources: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir)) {
+        const full = join(dir, entry);
+        if (statSync(full).isDirectory()) {
+          walk(full);
+        } else if (entry.endsWith(".ts") || entry.endsWith(".tsx")) {
+          // The registry files name every kind by definition; counting them
+          // would make the gate vacuous.
+          if (full.endsWith(join("usage", "record.ts"))) continue;
+          if (full.endsWith(join("query", "usage.ts"))) continue;
+          sources.push(readFileSync(full, "utf8"));
+        }
+      }
+    };
+    walk("src");
+
+    const orphans = USAGE_KINDS.filter(
+      (kind) => !sources.some((source) => source.includes(`"${kind}"`)),
+    );
+    expect(
+      orphans,
+      `declared but emitted by nothing: ${orphans.join(", ")} — either wire the emitter or drop the kind`,
+    ).toEqual([]);
+  });
+});
