@@ -2109,7 +2109,7 @@ columns:
     description: "Profiling depth: 1 shape (one aggregate pass), 2 entity-resolution readiness (blocking cost, skew, coverage), 3 model readiness (agreement rates, u-probability pre-flight). Kept in the key so a cheap profile is never mistaken for a deep one, and so asking for tier 3 does not read a tier 1 row and report it as complete."
   - name: ingest_batch_id
     type: varchar
-    description: "For a `raw` subject, the delivery this profile describes — the per-delivery cache key, and what lets drift be measured between two consecutive batches. NULL for the standardized and golden subjects, which describe the whole corpus rather than one landing."
+    description: "For a `raw` subject profiled automatically as a delivery lands, the delivery it describes — which lets drift be read between two consecutive batches. Provenance and ONLY provenance: this described itself as the per-delivery cache key until the auto-profile was built, and it was neither, because the key is `corpus_digest` and nothing populated this column at all. The digest is the better key anyway — two deliveries carrying identical content share it, where keying on the batch recomputes the same answer for every redelivery of an unchanged file. NULL for the standardized and golden subjects, which describe the whole corpus rather than one landing, and NULL for a profile an operator or a schedule asked for, which describes whatever is landed now rather than one batch."
   - name: corpus_digest
     type: varchar
     nullable: false

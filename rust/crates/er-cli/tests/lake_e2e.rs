@@ -5025,15 +5025,18 @@ fn profile_persists_a_corpus_stage_and_caches_it() {
 
     let first = er_cli::profile::run_profile(
         &session,
-        er_cli::profile::Subject::Standardized,
-        None,
-        1,
-        &dedupe_core::profile::ProfileOptions {
-            exact_distinct: true,
-            sample: None,
+        &er_cli::profile::ProfileInputs {
+            subject: er_cli::profile::Subject::Standardized,
+            source: None,
+            tier: 1,
+            options: &dedupe_core::profile::ProfileOptions {
+                exact_distinct: true,
+                sample: None,
+            },
+            account: false,
+            captured_at: "2026-01-03 00:00:00",
+            ingest_batch_id: None,
         },
-        false,
-        "2026-01-03 00:00:00",
     )
     .unwrap();
 
@@ -5069,15 +5072,18 @@ fn profile_persists_a_corpus_stage_and_caches_it() {
     // profile would show it twice.
     let second = er_cli::profile::run_profile(
         &session,
-        er_cli::profile::Subject::Standardized,
-        None,
-        1,
-        &dedupe_core::profile::ProfileOptions {
-            exact_distinct: true,
-            sample: None,
+        &er_cli::profile::ProfileInputs {
+            subject: er_cli::profile::Subject::Standardized,
+            source: None,
+            tier: 1,
+            options: &dedupe_core::profile::ProfileOptions {
+                exact_distinct: true,
+                sample: None,
+            },
+            account: false,
+            captured_at: "2026-01-04 00:00:00",
+            ingest_batch_id: None,
         },
-        false,
-        "2026-01-04 00:00:00",
     )
     .unwrap();
     assert_eq!(
@@ -5098,12 +5104,15 @@ fn profile_persists_a_corpus_stage_and_caches_it() {
     // A different tier is a different profile, not an overwrite of the first.
     er_cli::profile::run_profile(
         &session,
-        er_cli::profile::Subject::Standardized,
-        None,
-        2,
-        &dedupe_core::profile::ProfileOptions::default(),
-        false,
-        "2026-01-05 00:00:00",
+        &er_cli::profile::ProfileInputs {
+            subject: er_cli::profile::Subject::Standardized,
+            source: None,
+            tier: 2,
+            options: &dedupe_core::profile::ProfileOptions::default(),
+            account: false,
+            captured_at: "2026-01-05 00:00:00",
+            ingest_batch_id: None,
+        },
     )
     .unwrap();
     assert_eq!(
@@ -5122,15 +5131,18 @@ fn profile_reads_the_delivered_payload_before_any_mapping() {
 
     let raw = er_cli::profile::run_profile(
         &session,
-        er_cli::profile::Subject::Raw,
-        Some("crm"),
-        1,
-        &dedupe_core::profile::ProfileOptions {
-            exact_distinct: true,
-            sample: None,
+        &er_cli::profile::ProfileInputs {
+            subject: er_cli::profile::Subject::Raw,
+            source: Some("crm"),
+            tier: 1,
+            options: &dedupe_core::profile::ProfileOptions {
+                exact_distinct: true,
+                sample: None,
+            },
+            account: false,
+            captured_at: "2026-01-03 00:00:00",
+            ingest_batch_id: None,
         },
-        false,
-        "2026-01-03 00:00:00",
     )
     .unwrap();
 
@@ -5156,12 +5168,15 @@ fn profile_reads_the_delivered_payload_before_any_mapping() {
     // because subject is part of the key.
     er_cli::profile::run_profile(
         &session,
-        er_cli::profile::Subject::Standardized,
-        None,
-        1,
-        &dedupe_core::profile::ProfileOptions::default(),
-        false,
-        "2026-01-03 00:00:00",
+        &er_cli::profile::ProfileInputs {
+            subject: er_cli::profile::Subject::Standardized,
+            source: None,
+            tier: 1,
+            options: &dedupe_core::profile::ProfileOptions::default(),
+            account: false,
+            captured_at: "2026-01-03 00:00:00",
+            ingest_batch_id: None,
+        },
     )
     .unwrap();
     assert_eq!(lake_count(&session, "profile_runs"), 2);
@@ -5176,15 +5191,18 @@ fn profile_findings_name_the_columns_they_are_about() {
 
     let report = er_cli::profile::run_profile(
         &session,
-        er_cli::profile::Subject::Standardized,
-        None,
-        1,
-        &dedupe_core::profile::ProfileOptions {
-            exact_distinct: true,
-            sample: None,
+        &er_cli::profile::ProfileInputs {
+            subject: er_cli::profile::Subject::Standardized,
+            source: None,
+            tier: 1,
+            options: &dedupe_core::profile::ProfileOptions {
+                exact_distinct: true,
+                sample: None,
+            },
+            account: false,
+            captured_at: "2026-01-03 00:00:00",
+            ingest_batch_id: None,
         },
-        false,
-        "2026-01-03 00:00:00",
     )
     .unwrap();
 
@@ -5225,15 +5243,18 @@ fn tier_two_measures_candidate_blocking_keys() {
 
     let tier1 = er_cli::profile::run_profile(
         &session,
-        er_cli::profile::Subject::Standardized,
-        None,
-        1,
-        &dedupe_core::profile::ProfileOptions {
-            exact_distinct: true,
-            sample: None,
+        &er_cli::profile::ProfileInputs {
+            subject: er_cli::profile::Subject::Standardized,
+            source: None,
+            tier: 1,
+            options: &dedupe_core::profile::ProfileOptions {
+                exact_distinct: true,
+                sample: None,
+            },
+            account: false,
+            captured_at: "2026-01-03 00:00:00",
+            ingest_batch_id: None,
         },
-        false,
-        "2026-01-03 00:00:00",
     )
     .unwrap();
     assert!(
@@ -5244,15 +5265,18 @@ fn tier_two_measures_candidate_blocking_keys() {
 
     let tier2 = er_cli::profile::run_profile(
         &session,
-        er_cli::profile::Subject::Standardized,
-        None,
-        2,
-        &dedupe_core::profile::ProfileOptions {
-            exact_distinct: true,
-            sample: None,
+        &er_cli::profile::ProfileInputs {
+            subject: er_cli::profile::Subject::Standardized,
+            source: None,
+            tier: 2,
+            options: &dedupe_core::profile::ProfileOptions {
+                exact_distinct: true,
+                sample: None,
+            },
+            account: false,
+            captured_at: "2026-01-04 00:00:00",
+            ingest_batch_id: None,
         },
-        false,
-        "2026-01-04 00:00:00",
     )
     .unwrap();
 
@@ -5301,15 +5325,18 @@ fn tier_two_measures_candidate_blocking_keys() {
     // Re-running tier 2 over unchanged data rewrites the same key rows.
     let again = er_cli::profile::run_profile(
         &session,
-        er_cli::profile::Subject::Standardized,
-        None,
-        2,
-        &dedupe_core::profile::ProfileOptions {
-            exact_distinct: true,
-            sample: None,
+        &er_cli::profile::ProfileInputs {
+            subject: er_cli::profile::Subject::Standardized,
+            source: None,
+            tier: 2,
+            options: &dedupe_core::profile::ProfileOptions {
+                exact_distinct: true,
+                sample: None,
+            },
+            account: false,
+            captured_at: "2026-01-05 00:00:00",
+            ingest_batch_id: None,
         },
-        false,
-        "2026-01-05 00:00:00",
     )
     .unwrap();
     assert_eq!(again.profile_run_id, tier2.profile_run_id);
@@ -5318,4 +5345,107 @@ fn tier_two_measures_candidate_blocking_keys() {
         i64::try_from(tier2.candidate_keys.len()).unwrap(),
         "a re-measure must not duplicate the key rows"
     );
+}
+
+/// Every delivery profiles itself, at the cheap tier, without being asked.
+///
+/// A profile's value is comparative — one describes a corpus, a series shows it
+/// drifting — so the drift findings compare against the previous profile of the
+/// same subject. Triggered only by hand there is rarely a previous one, which
+/// makes those findings unreachable in practice rather than merely rare.
+///
+/// Two properties are asserted, and the second is the one that would otherwise
+/// rot: the profile must name the delivery it describes, because
+/// `profile_run.ingest_batch_id` spent its first two PRs claiming to be the
+/// per-delivery cache key while nothing populated it at all.
+#[test]
+fn ingesting_a_delivery_profiles_it_automatically() {
+    if !enabled() {
+        return;
+    }
+    let (session, config, tmp) = open_seeded_lake("auto_profile");
+
+    let run_id = "01AUTOPROFILE000000000001";
+    let deliveries: Vec<(String, String)> = ["crm", "billing"]
+        .iter()
+        .map(|s| {
+            let csv =
+                std::fs::read_to_string(repo_fixture(&format!("base_10/base/{s}.csv"))).unwrap();
+            ((*s).to_string(), csv)
+        })
+        .collect();
+    let model_json = std::fs::read_to_string(repo_fixture("model_test_v1.json")).unwrap();
+    let tf_csv = repo_fixture("model_test_v1.tf.csv");
+
+    er_cli::stage_ingest(
+        &session,
+        &config,
+        &er_cli::PipelineInputs {
+            mode: "full",
+            rebuild_reason: None,
+            segment: None,
+            lexicon: &lexicon_pairs(),
+            deliveries: &deliveries,
+            model: &er_cli::MatchModel {
+                settings_json: &model_json,
+                tf_csv_path: std::path::Path::new(&tf_csv),
+                model_version: "v0001",
+                tf_snapshot_id: "01JWMDTFSNAP00000000000001",
+            },
+            run_id,
+            ingested_at: "2026-01-01 00:00:00",
+            scored_at: "2026-01-01 00:00:00",
+            run_at: "2026-01-01 00:00:00",
+        },
+    )
+    .unwrap();
+
+    // One raw profile per delivered source, and nothing else: the standardized
+    // corpus does not exist yet at this point in the pipeline, so profiling it
+    // here would have described an empty or absent relation.
+    assert_eq!(
+        lake_count(&session, "profile_runs"),
+        2,
+        "one raw profile per delivery"
+    );
+    let rows = session
+        .query_strings(
+            "select subject, source_system, tier, ingest_batch_id \
+             from lake.main.profile_runs order by source_system",
+        )
+        .unwrap();
+    assert_eq!(
+        rows,
+        vec![
+            vec![
+                "raw".to_string(),
+                "billing".to_string(),
+                "1".to_string(),
+                format!("{run_id}:billing"),
+            ],
+            vec![
+                "raw".to_string(),
+                "crm".to_string(),
+                "1".to_string(),
+                format!("{run_id}:crm"),
+            ],
+        ],
+        "each profile names the delivery it describes, at tier 1"
+    );
+
+    // Tier 1 measures no blocking keys — that walk is behind an explicit
+    // request rather than on the path of every import.
+    assert_eq!(
+        lake_count(&session, "candidate_keys"),
+        0,
+        "tier 1 measures no candidate keys"
+    );
+    // ...but it does profile columns, so the auto-run is useful on its own and
+    // not just a row in a ledger.
+    assert!(
+        lake_count(&session, "column_profiles") > 0,
+        "the delivery's columns were profiled"
+    );
+
+    let _ = std::fs::remove_dir_all(&tmp);
 }

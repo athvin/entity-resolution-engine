@@ -115,12 +115,18 @@ impl ProfileRequest {
     ) -> Result<ProfileReport, String> {
         er_cli::profile::run_profile(
             session,
-            self.subject,
-            self.source.as_deref(),
-            self.tier,
-            &self.options,
-            account,
-            captured_at,
+            &er_cli::profile::ProfileInputs {
+                subject: self.subject,
+                source: self.source.as_deref(),
+                tier: self.tier,
+                options: &self.options,
+                account,
+                captured_at,
+                // A requested or scheduled profile describes the corpus as it
+                // stands, not one landing — the auto-profile on the ingest
+                // stage is the only caller that can name a delivery.
+                ingest_batch_id: None,
+            },
         )
         .map_err(|e| format!("{e:#}"))
     }

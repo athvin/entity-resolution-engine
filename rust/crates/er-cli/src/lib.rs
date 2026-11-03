@@ -4105,13 +4105,14 @@ pub fn stage_init(
     Ok(())
 }
 
-/// The `ingest` stage: land every delivery and record its batch.
+/// The `ingest` stage: land every delivery, record its batch, and profile it.
 ///
 /// Fan-out over N deliveries is this loop, not N tasks (§3.1): a delivery is
 /// not independently retryable — the whole stage is pre-imaged and re-run.
 ///
 /// # Errors
-/// Propagates the first delivery's ingest or batch write.
+/// Propagates the first delivery's ingest or batch write. NOT the profile —
+/// see below.
 pub fn stage_ingest(session: &Session, config: &Config, inputs: &PipelineInputs<'_>) -> Result<()> {
     for (source, csv) in inputs.deliveries {
         run_ingest(
@@ -4131,8 +4132,66 @@ pub fn stage_ingest(session: &Session, config: &Config, inputs: &PipelineInputs<
             false,
             inputs.ingested_at,
         )?;
+        auto_profile_delivery(session, config, inputs.run_id, source, inputs.ingested_at);
     }
     Ok(())
+}
+
+/// Profile what a delivery just landed, at the cheap tier, best-effort.
+///
+/// **Why automatic.** A profile's value is comparative: one describes a corpus,
+/// a series shows it drifting. Nothing else in the product notices that a
+/// delivery arrived 40% emptier than the last one.
+///
+/// To be exact about what exists: there is **no drift rule yet**. P001–P010
+/// each judge a single profile in isolation, and a rule that compares two needs
+/// a previous profile of the same subject to compare against — which, with
+/// profiling triggered only by hand, there usually was not. This is what builds
+/// the series; the rules that read it are a separate change. The ordering is
+/// deliberate rather than incidental, because a drift rule shipped first would
+/// have been correct code that almost never fired.
+///
+/// **Why tier 1 only.** Tier 2 measures blocking cost with a `GROUP BY` per
+/// candidate column; that belongs behind an explicit request, not on the path
+/// of every import. Tier 1 is one aggregate pass.
+///
+/// **Why best-effort.** Exactly `write_metric_snapshot`'s reasoning, and the
+/// delivery is in an even stronger position: the rows are already landed and
+/// the receipt is already written, so failing to DESCRIBE them must not fail
+/// the run that landed them. A tenant whose import succeeds and whose profile
+/// fails has their data; the reverse would be a regression caused entirely by
+/// an observability feature.
+fn auto_profile_delivery(
+    session: &Session,
+    config: &Config,
+    run_id: &str,
+    source: &str,
+    ingested_at: &str,
+) {
+    // The id `write_ingest_batch` just MERGEd, so the profile and the receipt
+    // name the same delivery.
+    let batch_id = format!("{run_id}:{source}");
+    let options = dedupe_core::profile::ProfileOptions {
+        // Exact distinct counts on every import: this is one aggregate pass
+        // over a single delivery, and the uniqueness verdict is the whole
+        // point of profiling a freshly landed file — `is_unique` declines to
+        // answer at all without them, so the approximate run would silence
+        // the "your record id repeats" finding rather than weaken it.
+        exact_distinct: true,
+        sample: None,
+    };
+    let inputs = crate::profile::ProfileInputs {
+        subject: crate::profile::Subject::Raw,
+        source: Some(source),
+        tier: 1,
+        options: &options,
+        account: !config.entity_type.is_person(),
+        captured_at: ingested_at,
+        ingest_batch_id: Some(&batch_id),
+    };
+    if let Err(e) = crate::profile::run_profile(session, &inputs) {
+        eprintln!("run {run_id}: profiling the {source} delivery failed: {e:#}");
+    }
 }
 
 /// The `standardize` stage: drop-and-rebuild of `int_std_records`.

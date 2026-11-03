@@ -198,6 +198,24 @@ async function walkToReview(page: Page, org: string, sourceName: string): Promis
   // Step 2: profile shows fill rates and samples.
   await expect(page.getByTestId("wizard-profile")).toContainText("2 sample rows, 11 columns");
   await expect(page.getByTestId("wizard-profile")).toContainText("ada@example.com");
+
+  // ...and says what this profile is NOT. The browser one reads 200 rows, so a
+  // fill rate here is a sample statistic a wider corpus can contradict; the
+  // step above can only promise "not uploaded yet" because of that. Asserted
+  // because the honest framing is the whole value of the line — a pointer that
+  // implied this table WAS the profile would make the sample authoritative.
+  const pointer = page.getByTestId("wizard-profile-pointer");
+  await expect(pointer).toContainText("not what the source holds");
+  await expect(pointer).toContainText("every row of the delivery is profiled automatically");
+  // It must not promise the deep tier, which no import runs.
+  await expect(pointer).toContainText("run the deeper tier");
+  // `org`, not ORG: this walk runs in the per-project wizard org, because
+  // activating a source publishes config and would race the shared fixtures.
+  await expect(pointer.getByRole("link", { name: "Profile" })).toHaveAttribute(
+    "href",
+    `/${org}/${DS}/profile`,
+  );
+
   await page.getByTestId("wizard-next").click();
 
   // Step 3: suggestions prefilled from the header names.

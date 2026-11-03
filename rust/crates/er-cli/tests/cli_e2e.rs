@@ -284,17 +284,26 @@ fn er_run_all_reproduces_base_10_relations() {
         empty,
         vec![
             "assertions",
+            // `candidate_keys` is the ONE profiler relation a run still leaves
+            // empty, and it is the tier split that keeps it that way: the
+            // ingest stage profiles each delivery at tier 1, and measuring what
+            // a column would cost as a blocking key is tier 2 — a `GROUP BY`
+            // per candidate column, which belongs behind an explicit request
+            // rather than on the path of every import. If this name ever leaves
+            // this list, the cheap tier has stopped being cheap.
+            //
+            // The other three profiler relations were here until the
+            // auto-profile landed, justified by a comment claiming "`run_all`
+            // resolves a corpus; it does not describe one" and that "the
+            // dispatcher DOES profile each delivery after a run, which is why
+            // its own e2e sees rows here and this one does not". That
+            // distinction never existed: the dispatcher's ingest task calls
+            // this same `stage_ingest`, so neither path profiled anything. The
+            // assertion was right about the state and wrong about the reason,
+            // which is the kind of comment that survives precisely because the
+            // test passes.
             "candidate_keys",
-            // The profiler's three relations. `run_all` resolves a corpus; it
-            // does not describe one, and `er profile` is a separate command —
-            // so a plain run leaves these empty, exactly as it leaves the
-            // steward overlays empty. The dispatcher DOES profile each delivery
-            // after a run, which is why its own e2e sees rows here and this one
-            // does not.
-            "column_profiles",
             "golden_overrides",
-            "profile_findings",
-            "profile_runs",
             "record_overlays",
             "record_qualities",
             // The per-stage ledger (batch-orchestration-design §4.3): its
