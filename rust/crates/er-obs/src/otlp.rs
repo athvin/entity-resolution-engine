@@ -194,6 +194,18 @@ fn environment_name() -> String {
     non_empty("ERSERVER_ENV").unwrap_or_else(|| "local".to_string())
 }
 
+/// The product this process belongs to, within one shared store.
+///
+/// The chart sets `OTEL_SERVICE_NAMESPACE` on both the deployments and the task
+/// template. That is **not** an OTLP SDK variable — the spec carries
+/// `service.namespace` inside `OTEL_RESOURCE_ATTRIBUTES` — so nothing read it
+/// until this function did, and it was a value shipped to no effect. Honouring
+/// the name the chart already uses is cheaper than changing the chart and
+/// leaves one spelling rather than two.
+fn service_namespace() -> String {
+    non_empty("OTEL_SERVICE_NAMESPACE").unwrap_or_else(|| "er".to_string())
+}
+
 /// How long [`crate::Guard::force_flush`] may block.
 ///
 /// Five seconds by default, which has to sit inside both the chart's 120 s
@@ -250,6 +262,7 @@ pub fn provider_for(
                 .with_service_name(role.service_name())
                 .with_attributes([
                     KeyValue::new("service.version", env!("CARGO_PKG_VERSION")),
+                    KeyValue::new("service.namespace", service_namespace()),
                     KeyValue::new("deployment.environment.name", environment_name()),
                     KeyValue::new("er.role", role.as_str()),
                 ])
