@@ -109,3 +109,146 @@ WHEN NOT MATCHED THEN INSERT
         Ok(__n)
     }
 }
+
+pub mod read {
+    //! @generated query functions for this entity + operation.
+    /// One row of `for_run`: Every measured candidate blocking key within one profile run, cheapest first — `ORDER BY expected_pairs` is the ranking itself, so a reader takes the top row rather than re-deriving which key is most selective. The second sort term keeps ties stable between requests. Unlike the column shapes, nothing here is a value: a candidate key is named by COLUMN names and described by counts, so this statement needs no gating at the handler.
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct ForRunRow {
+        pub key_columns: String,
+        pub row_count: i64,
+        pub covered_rows: i64,
+        pub distinct_values: i64,
+        pub expected_pairs: i64,
+        pub largest_block_pairs: i64,
+        pub largest_block_rows: i64,
+        pub entropy_bits: f64,
+        pub pair_loss_from_nulls: f64,
+    }
+
+    impl ForRunRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![
+                ("key_columns", ::arrow::datatypes::DataType::Utf8),
+                ("row_count", ::arrow::datatypes::DataType::Int64),
+                ("covered_rows", ::arrow::datatypes::DataType::Int64),
+                ("distinct_values", ::arrow::datatypes::DataType::Int64),
+                ("expected_pairs", ::arrow::datatypes::DataType::Int64),
+                ("largest_block_pairs", ::arrow::datatypes::DataType::Int64),
+                ("largest_block_rows", ::arrow::datatypes::DataType::Int64),
+                ("entropy_bits", ::arrow::datatypes::DataType::Float64),
+                (
+                    "pair_loss_from_nulls",
+                    ::arrow::datatypes::DataType::Float64,
+                ),
+            ]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "key_columns")?;
+                let c1: &::arrow::array::Int64Array = crate::batch::col(batch, 1, "row_count")?;
+                let c2: &::arrow::array::Int64Array = crate::batch::col(batch, 2, "covered_rows")?;
+                let c3: &::arrow::array::Int64Array =
+                    crate::batch::col(batch, 3, "distinct_values")?;
+                let c4: &::arrow::array::Int64Array =
+                    crate::batch::col(batch, 4, "expected_pairs")?;
+                let c5: &::arrow::array::Int64Array =
+                    crate::batch::col(batch, 5, "largest_block_pairs")?;
+                let c6: &::arrow::array::Int64Array =
+                    crate::batch::col(batch, 6, "largest_block_rows")?;
+                let c7: &::arrow::array::Float64Array =
+                    crate::batch::col(batch, 7, "entropy_bits")?;
+                let c8: &::arrow::array::Float64Array =
+                    crate::batch::col(batch, 8, "pair_loss_from_nulls")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        key_columns: crate::batch::req(
+                            crate::batch::opt_str(c0, i),
+                            "key_columns",
+                            i,
+                        )?,
+                        row_count: crate::batch::req(crate::batch::opt_i64(c1, i), "row_count", i)?,
+                        covered_rows: crate::batch::req(
+                            crate::batch::opt_i64(c2, i),
+                            "covered_rows",
+                            i,
+                        )?,
+                        distinct_values: crate::batch::req(
+                            crate::batch::opt_i64(c3, i),
+                            "distinct_values",
+                            i,
+                        )?,
+                        expected_pairs: crate::batch::req(
+                            crate::batch::opt_i64(c4, i),
+                            "expected_pairs",
+                            i,
+                        )?,
+                        largest_block_pairs: crate::batch::req(
+                            crate::batch::opt_i64(c5, i),
+                            "largest_block_pairs",
+                            i,
+                        )?,
+                        largest_block_rows: crate::batch::req(
+                            crate::batch::opt_i64(c6, i),
+                            "largest_block_rows",
+                            i,
+                        )?,
+                        entropy_bits: crate::batch::req(
+                            crate::batch::opt_f64(c7, i),
+                            "entropy_bits",
+                            i,
+                        )?,
+                        pair_loss_from_nulls: crate::batch::req(
+                            crate::batch::opt_f64(c8, i),
+                            "pair_loss_from_nulls",
+                            i,
+                        )?,
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// Every measured candidate blocking key within one profile run, cheapest first — `ORDER BY expected_pairs` is the ranking itself, so a reader takes the top row rather than re-deriving which key is most selective. The second sort term keeps ties stable between requests. Unlike the column shapes, nothing here is a value: a candidate key is named by COLUMN names and described by counts, so this statement needs no gating at the handler.
+    pub fn for_run(
+        conn: &::duckdb::Connection,
+        snapshot: i64,
+        profile_run_id: &str,
+    ) -> ::duckdb::Result<Vec<ForRunRow>> {
+        const SQL: &str = "SELECT key_columns, row_count, covered_rows, distinct_values,
+       expected_pairs, largest_block_pairs, largest_block_rows,
+       entropy_bits, pair_loss_from_nulls
+FROM lake.main.candidate_keys AT (VERSION => {snapshot})
+WHERE profile_run_id = $1
+ORDER BY expected_pairs, key_columns
+";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "candidate_key",
+            "read",
+            "for_run",
+            "candidate_keys",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let sql = SQL.replace("{snapshot}", &snapshot.to_string());
+        let mut stmt = ::er_span::check(&__span, conn.prepare(&sql))?;
+        let batches =
+            ::er_span::check(&__span, stmt.query_arrow(::duckdb::params![profile_run_id]))?
+                .collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
+        ForRunRow::from_batches(&batches)
+    }
+}

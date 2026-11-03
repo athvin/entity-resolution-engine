@@ -1,0 +1,33 @@
+kind: statement
+operation: read
+description: "Every column's shape within one profile run, ordered by name so the table a reader sees is stable between requests. Five of these fields echo values as stored rather than describing them — `top_values`, `lex_min`, `lex_max`, `num_min`, `num_max` — so on an email column they are real addresses. The statement projects them all and the handler decides who may see them, because entitlement is about who is asking and SQL does not know that; `er_server::read::VALUE_BEARING_COLUMN_FIELDS` is the list, and a test fails if a column is added here without being classified."
+params:
+  - { name: snapshot, type: bigint }
+  - { name: profile_run_id, type: varchar }
+returns:
+  - { name: column_name, type: varchar, nullable: false }
+  - { name: row_count, type: bigint, nullable: false }
+  - { name: total_row_count, type: bigint, nullable: false }
+  - { name: non_null_count, type: bigint, nullable: false }
+  - { name: blank_count, type: bigint, nullable: false }
+  - { name: distinct_approx, type: bigint, nullable: false }
+  - { name: distinct_exact, type: bigint }
+  - { name: distinct_normalized, type: bigint }
+  - { name: len_min, type: bigint }
+  - { name: len_max, type: bigint }
+  - { name: len_avg, type: double }
+  - { name: len_p50, type: bigint }
+  - { name: len_p95, type: bigint }
+  - { name: lex_min, type: varchar }
+  - { name: lex_max, type: varchar }
+  - { name: num_min, type: double }
+  - { name: num_max, type: double }
+  - { name: num_avg, type: double }
+  - { name: num_std, type: double }
+  - { name: cast_bigint, type: bigint, nullable: false }
+  - { name: cast_double, type: bigint, nullable: false }
+  - { name: cast_date, type: bigint, nullable: false }
+  - { name: cast_timestamp, type: bigint, nullable: false }
+  - { name: cast_boolean, type: bigint, nullable: false }
+  - { name: entropy_bits, type: double }
+  - { name: top_values, type: json }

@@ -30,7 +30,7 @@ statements is read or written only through the engine's own stage SQL, not
 through a typed query function.
 
 <!-- BEGIN GENERATED: entities-index -->
-**49 entities, 247 declared statements.**
+**49 entities, 251 declared statements.**
 
 | Entity | Relation | Store | Key | Natural key | History |
 |---|---|---|---|---|---|
@@ -94,8 +94,8 @@ Declared statements per entity and operation:
 | `api_key` | 1 | 1 | 1 | 0 |
 | `assertion` | 2 | 3 | 1 | 0 |
 | `audit_log` | 1 | 1 | 0 | 0 |
-| `candidate_key` | 1 | 0 | 0 | 0 |
-| `column_profile` | 1 | 0 | 0 | 0 |
+| `candidate_key` | 1 | 1 | 0 | 0 |
+| `column_profile` | 1 | 1 | 0 | 0 |
 | `config_version` | 1 | 3 | 2 | 0 |
 | `dataset` | 1 | 3 | 4 | 0 |
 | `ddl_log` | 0 | 1 | 0 | 0 |
@@ -116,8 +116,8 @@ Declared statements per entity and operation:
 | `metric_snapshot_source` | 1 | 1 | 0 | 0 |
 | `org` | 2 | 4 | 3 | 0 |
 | `pair_label` | 1 | 2 | 1 | 0 |
-| `profile_finding` | 1 | 0 | 0 | 0 |
-| `profile_run` | 1 | 1 | 0 | 0 |
+| `profile_finding` | 1 | 1 | 0 | 0 |
+| `profile_run` | 1 | 2 | 0 | 0 |
 | `raw_record` | 0 | 2 | 0 | 1 |
 | `record_overlay` | 1 | 2 | 1 | 1 |
 | `record_quality` | 1 | 2 | 0 | 1 |

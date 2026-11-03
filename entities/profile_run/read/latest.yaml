@@ -1,0 +1,25 @@
+kind: statement
+operation: read
+description: "The most recent profile of one corpus stage at one depth. Ordered by the run's logical clock and then by id, so a replayed fixture and a real sequence both resolve to one deterministic row rather than whichever the scan reached first."
+params:
+  - { name: snapshot, type: bigint }
+  - { name: subject, type: varchar }
+  - { name: source_system, type: varchar }
+  - { name: tier, type: bigint }
+returns:
+  - { name: id, type: varchar, nullable: false }
+  - { name: subject, type: varchar, nullable: false }
+  - { name: source_system, type: varchar, nullable: false }
+  - { name: snapshot, type: bigint, nullable: false }
+  - { name: tier, type: bigint, nullable: false }
+  - { name: ingest_batch_id, type: varchar }
+  - { name: corpus_digest, type: varchar, nullable: false }
+  - { name: row_count, type: bigint, nullable: false }
+  - { name: column_count, type: bigint, nullable: false }
+  - { name: config_hash, type: varchar }
+  - { name: model_version, type: varchar }
+  - { name: sampled, type: boolean, nullable: false }
+  - { name: sample_proportion, type: double }
+  - { name: sample_seed, type: bigint }
+  - { name: duration_ms, type: bigint, nullable: false }
+  - { name: captured_at, type: timestamp, nullable: false }

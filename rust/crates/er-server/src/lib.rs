@@ -5390,6 +5390,144 @@ async fn quality(
     }
 }
 
+/// Viewer+: a corpus stage's profile
+/// (`GET /v1/orgs/{org}/datasets/{ds}/profile`). Query: `subject`
+/// (`raw|standardized|golden`, default standardized), `source` (required for
+/// `raw`), `tier` (default 1).
+///
+/// Read-only and viewer-level for the same reason the pre-merge report is:
+/// describing a corpus writes nothing. The caveat is the five fields that echo
+/// values as stored rather than describing them — `top_values`, `lex_min`,
+/// `lex_max`, `num_min`, `num_max` — which are gated to steward+. A viewer gets
+/// every statistic with those nulled, and `top_values` keeps its counts and
+/// shares, which is what a skew finding actually needs.
+///
+/// Steward is the bar because a steward can already read the records
+/// themselves. It is not a bar a viewer can route around: `GET …/records` takes
+/// explicit keys (capped at 50) and will not enumerate, so a column's most
+/// frequent values are not otherwise reachable by someone who cannot already
+/// name the rows they want.
+///
+/// A corpus nobody has profiled answers `{"profiled": false}` rather than 404:
+/// the dataset exists and the question is fair, the answer is just "not yet".
+async fn dataset_profile(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, ds)): Path<(String, String)>,
+    Query(params): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let subject = params
+        .get("subject")
+        .map_or("standardized", String::as_str)
+        .to_string();
+    let request = match crate::profile_params::ProfileRequest::from_params(&json!({
+        "subject": subject,
+        "source": params.get("source"),
+        "tier": params.get("tier").and_then(|t| t.parse::<i64>().ok()).unwrap_or(1),
+    })) {
+        Ok(r) => r,
+        // The same parser the writer uses, so a subject this endpoint accepts
+        // is one a job could actually run.
+        Err(message) => return detail_err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+    let session = match dataset_lake(&state, &org, &ds).await {
+        Ok(s) => s,
+        Err(r) => return *r,
+    };
+    let snapshot = match read::page_start(&session, None) {
+        Ok((snap, _)) => snap,
+        Err(read::PageStartError::BadCursor) => {
+            return detail_err(StatusCode::UNPROCESSABLE_ENTITY, "invalid cursor");
+        }
+        Err(read::PageStartError::Lake(e)) => {
+            return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}"));
+        }
+    };
+    let source_system = request
+        .source
+        .clone()
+        .unwrap_or_else(|| er_cli::profile::NO_SOURCE.to_string());
+    let include_values = guard(&principal, &org, Role::Steward).is_ok();
+    match read::profile(
+        &session,
+        snapshot,
+        request.subject.as_str(),
+        &source_system,
+        request.tier,
+        include_values,
+    ) {
+        Ok(body) => Json(body).into_response(),
+        Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
+    }
+}
+
+/// Steward+: profile a corpus stage
+/// (`POST /v1/orgs/{org}/datasets/{ds}/profile`). Body: the same `subject`,
+/// `source`, `tier`, `exact_distinct`, `sample` and `sample_seed` a `profile`
+/// job takes. Returns 202 and the job id.
+///
+/// Steward rather than viewer because this one WRITES — a profile is persisted
+/// so it can be compared against the next one — and it takes the dataset's
+/// writer slot like any other job.
+///
+/// The params are validated HERE, through the same parser the dispatcher uses,
+/// so a bad request is a 422 naming the problem rather than a job that sits in
+/// the queue and then fails. That is the rule the segment resolution in
+/// `create_job` already follows.
+async fn dataset_profile_run(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, ds)): Path<(String, String)>,
+    Json(body): Json<Value>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Steward) {
+        return e.into_response();
+    }
+    if let Err(message) = crate::profile_params::ProfileRequest::from_params(&body) {
+        return detail_err(StatusCode::UNPROCESSABLE_ENTITY, message);
+    }
+    let Some(dsn) = &state.dsn else {
+        return detail_err(StatusCode::NOT_IMPLEMENTED, "profiling requires Postgres");
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
+    let d = match dataset_or_404(&client, &org_row, &ds).await {
+        Ok(row) => row,
+        Err(r) => return *r,
+    };
+    if let Err(e) = refuse_unless_active_dataset(&org_row, &d, "profiling") {
+        return *e;
+    }
+    match pg::enqueue(
+        &client,
+        &org_row.id,
+        Some(d.id.as_str()),
+        "profile",
+        0,
+        None,
+        Some(&body),
+        principal.provenance(),
+    )
+    .await
+    {
+        Ok(job) => (
+            StatusCode::ACCEPTED,
+            Json(json!({ "job": { "id": job.id, "kind": job.kind, "state": job.state } })),
+        )
+            .into_response(),
+        Err(e) => pg_err(e),
+    }
+}
+
 /// Viewer+: active pairwise match scores (`GET /v1/orgs/{org}/datasets/{ds}/match-scores`).
 /// Keyset page; query `cursor`, `limit`, `band_low`/`band_high` (probability
 /// band). The band names must match what the BFF forwards
@@ -9653,6 +9791,10 @@ fn build_routes(state: AppState) -> Router {
             get(insight_sources),
         )
         .route("/v1/orgs/{org}/datasets/{ds}/quality", get(quality))
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/profile",
+            get(dataset_profile).post(dataset_profile_run),
+        )
         .route(
             "/v1/orgs/{org}/datasets/{ds}/segments",
             get(segments_catalog),

@@ -1,0 +1,12 @@
+kind: statement
+operation: read
+description: "One profile run's findings, ordered by code then column. Code order rather than severity order because the codes are stable and a severity reclassification would otherwise reshuffle a list a reader has learned the shape of; the caller sorts by severity for display if it wants to."
+params:
+  - { name: snapshot, type: bigint }
+  - { name: profile_run_id, type: varchar }
+returns:
+  - { name: code, type: varchar, nullable: false }
+  - { name: severity, type: varchar, nullable: false }
+  - { name: column_name, type: varchar, nullable: false }
+  - { name: message, type: varchar, nullable: false }
+  - { name: detail, type: json }

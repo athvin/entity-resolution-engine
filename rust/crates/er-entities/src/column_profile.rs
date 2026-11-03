@@ -185,3 +185,225 @@ WHEN NOT MATCHED THEN INSERT
         Ok(__n)
     }
 }
+
+pub mod read {
+    //! @generated query functions for this entity + operation.
+    /// One row of `for_run`: Every column's shape within one profile run, ordered by name so the table a reader sees is stable between requests. Five of these fields echo values as stored rather than describing them — `top_values`, `lex_min`, `lex_max`, `num_min`, `num_max` — so on an email column they are real addresses. The statement projects them all and the handler decides who may see them, because entitlement is about who is asking and SQL does not know that; `er_server::read::VALUE_BEARING_COLUMN_FIELDS` is the list, and a test fails if a column is added here without being classified.
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct ForRunRow {
+        pub column_name: String,
+        pub row_count: i64,
+        pub total_row_count: i64,
+        pub non_null_count: i64,
+        pub blank_count: i64,
+        pub distinct_approx: i64,
+        pub distinct_exact: Option<i64>,
+        pub distinct_normalized: Option<i64>,
+        pub len_min: Option<i64>,
+        pub len_max: Option<i64>,
+        pub len_avg: Option<f64>,
+        pub len_p50: Option<i64>,
+        pub len_p95: Option<i64>,
+        pub lex_min: Option<String>,
+        pub lex_max: Option<String>,
+        pub num_min: Option<f64>,
+        pub num_max: Option<f64>,
+        pub num_avg: Option<f64>,
+        pub num_std: Option<f64>,
+        pub cast_bigint: i64,
+        pub cast_double: i64,
+        pub cast_date: i64,
+        pub cast_timestamp: i64,
+        pub cast_boolean: i64,
+        pub entropy_bits: Option<f64>,
+        pub top_values: Option<::serde_json::Value>,
+    }
+
+    impl ForRunRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![
+                ("column_name", ::arrow::datatypes::DataType::Utf8),
+                ("row_count", ::arrow::datatypes::DataType::Int64),
+                ("total_row_count", ::arrow::datatypes::DataType::Int64),
+                ("non_null_count", ::arrow::datatypes::DataType::Int64),
+                ("blank_count", ::arrow::datatypes::DataType::Int64),
+                ("distinct_approx", ::arrow::datatypes::DataType::Int64),
+                ("distinct_exact", ::arrow::datatypes::DataType::Int64),
+                ("distinct_normalized", ::arrow::datatypes::DataType::Int64),
+                ("len_min", ::arrow::datatypes::DataType::Int64),
+                ("len_max", ::arrow::datatypes::DataType::Int64),
+                ("len_avg", ::arrow::datatypes::DataType::Float64),
+                ("len_p50", ::arrow::datatypes::DataType::Int64),
+                ("len_p95", ::arrow::datatypes::DataType::Int64),
+                ("lex_min", ::arrow::datatypes::DataType::Utf8),
+                ("lex_max", ::arrow::datatypes::DataType::Utf8),
+                ("num_min", ::arrow::datatypes::DataType::Float64),
+                ("num_max", ::arrow::datatypes::DataType::Float64),
+                ("num_avg", ::arrow::datatypes::DataType::Float64),
+                ("num_std", ::arrow::datatypes::DataType::Float64),
+                ("cast_bigint", ::arrow::datatypes::DataType::Int64),
+                ("cast_double", ::arrow::datatypes::DataType::Int64),
+                ("cast_date", ::arrow::datatypes::DataType::Int64),
+                ("cast_timestamp", ::arrow::datatypes::DataType::Int64),
+                ("cast_boolean", ::arrow::datatypes::DataType::Int64),
+                ("entropy_bits", ::arrow::datatypes::DataType::Float64),
+                ("top_values", ::arrow::datatypes::DataType::Utf8),
+            ]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "column_name")?;
+                let c1: &::arrow::array::Int64Array = crate::batch::col(batch, 1, "row_count")?;
+                let c2: &::arrow::array::Int64Array =
+                    crate::batch::col(batch, 2, "total_row_count")?;
+                let c3: &::arrow::array::Int64Array =
+                    crate::batch::col(batch, 3, "non_null_count")?;
+                let c4: &::arrow::array::Int64Array = crate::batch::col(batch, 4, "blank_count")?;
+                let c5: &::arrow::array::Int64Array =
+                    crate::batch::col(batch, 5, "distinct_approx")?;
+                let c6: &::arrow::array::Int64Array =
+                    crate::batch::col(batch, 6, "distinct_exact")?;
+                let c7: &::arrow::array::Int64Array =
+                    crate::batch::col(batch, 7, "distinct_normalized")?;
+                let c8: &::arrow::array::Int64Array = crate::batch::col(batch, 8, "len_min")?;
+                let c9: &::arrow::array::Int64Array = crate::batch::col(batch, 9, "len_max")?;
+                let c10: &::arrow::array::Float64Array = crate::batch::col(batch, 10, "len_avg")?;
+                let c11: &::arrow::array::Int64Array = crate::batch::col(batch, 11, "len_p50")?;
+                let c12: &::arrow::array::Int64Array = crate::batch::col(batch, 12, "len_p95")?;
+                let c13: &::arrow::array::StringArray = crate::batch::col(batch, 13, "lex_min")?;
+                let c14: &::arrow::array::StringArray = crate::batch::col(batch, 14, "lex_max")?;
+                let c15: &::arrow::array::Float64Array = crate::batch::col(batch, 15, "num_min")?;
+                let c16: &::arrow::array::Float64Array = crate::batch::col(batch, 16, "num_max")?;
+                let c17: &::arrow::array::Float64Array = crate::batch::col(batch, 17, "num_avg")?;
+                let c18: &::arrow::array::Float64Array = crate::batch::col(batch, 18, "num_std")?;
+                let c19: &::arrow::array::Int64Array = crate::batch::col(batch, 19, "cast_bigint")?;
+                let c20: &::arrow::array::Int64Array = crate::batch::col(batch, 20, "cast_double")?;
+                let c21: &::arrow::array::Int64Array = crate::batch::col(batch, 21, "cast_date")?;
+                let c22: &::arrow::array::Int64Array =
+                    crate::batch::col(batch, 22, "cast_timestamp")?;
+                let c23: &::arrow::array::Int64Array =
+                    crate::batch::col(batch, 23, "cast_boolean")?;
+                let c24: &::arrow::array::Float64Array =
+                    crate::batch::col(batch, 24, "entropy_bits")?;
+                let c25: &::arrow::array::StringArray = crate::batch::col(batch, 25, "top_values")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        column_name: crate::batch::req(
+                            crate::batch::opt_str(c0, i),
+                            "column_name",
+                            i,
+                        )?,
+                        row_count: crate::batch::req(crate::batch::opt_i64(c1, i), "row_count", i)?,
+                        total_row_count: crate::batch::req(
+                            crate::batch::opt_i64(c2, i),
+                            "total_row_count",
+                            i,
+                        )?,
+                        non_null_count: crate::batch::req(
+                            crate::batch::opt_i64(c3, i),
+                            "non_null_count",
+                            i,
+                        )?,
+                        blank_count: crate::batch::req(
+                            crate::batch::opt_i64(c4, i),
+                            "blank_count",
+                            i,
+                        )?,
+                        distinct_approx: crate::batch::req(
+                            crate::batch::opt_i64(c5, i),
+                            "distinct_approx",
+                            i,
+                        )?,
+                        distinct_exact: crate::batch::opt_i64(c6, i),
+                        distinct_normalized: crate::batch::opt_i64(c7, i),
+                        len_min: crate::batch::opt_i64(c8, i),
+                        len_max: crate::batch::opt_i64(c9, i),
+                        len_avg: crate::batch::opt_f64(c10, i),
+                        len_p50: crate::batch::opt_i64(c11, i),
+                        len_p95: crate::batch::opt_i64(c12, i),
+                        lex_min: crate::batch::opt_str(c13, i),
+                        lex_max: crate::batch::opt_str(c14, i),
+                        num_min: crate::batch::opt_f64(c15, i),
+                        num_max: crate::batch::opt_f64(c16, i),
+                        num_avg: crate::batch::opt_f64(c17, i),
+                        num_std: crate::batch::opt_f64(c18, i),
+                        cast_bigint: crate::batch::req(
+                            crate::batch::opt_i64(c19, i),
+                            "cast_bigint",
+                            i,
+                        )?,
+                        cast_double: crate::batch::req(
+                            crate::batch::opt_i64(c20, i),
+                            "cast_double",
+                            i,
+                        )?,
+                        cast_date: crate::batch::req(
+                            crate::batch::opt_i64(c21, i),
+                            "cast_date",
+                            i,
+                        )?,
+                        cast_timestamp: crate::batch::req(
+                            crate::batch::opt_i64(c22, i),
+                            "cast_timestamp",
+                            i,
+                        )?,
+                        cast_boolean: crate::batch::req(
+                            crate::batch::opt_i64(c23, i),
+                            "cast_boolean",
+                            i,
+                        )?,
+                        entropy_bits: crate::batch::opt_f64(c24, i),
+                        top_values: crate::batch::opt_json(c25, i, "top_values")?,
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// Every column's shape within one profile run, ordered by name so the table a reader sees is stable between requests. Five of these fields echo values as stored rather than describing them — `top_values`, `lex_min`, `lex_max`, `num_min`, `num_max` — so on an email column they are real addresses. The statement projects them all and the handler decides who may see them, because entitlement is about who is asking and SQL does not know that; `er_server::read::VALUE_BEARING_COLUMN_FIELDS` is the list, and a test fails if a column is added here without being classified.
+    pub fn for_run(
+        conn: &::duckdb::Connection,
+        snapshot: i64,
+        profile_run_id: &str,
+    ) -> ::duckdb::Result<Vec<ForRunRow>> {
+        const SQL: &str =
+            "SELECT column_name, row_count, total_row_count, non_null_count, blank_count,
+       distinct_approx, distinct_exact, distinct_normalized,
+       len_min, len_max, len_avg, len_p50, len_p95, lex_min, lex_max,
+       num_min, num_max, num_avg, num_std,
+       cast_bigint, cast_double, cast_date, cast_timestamp, cast_boolean,
+       entropy_bits, top_values
+FROM lake.main.column_profiles AT (VERSION => {snapshot})
+WHERE profile_run_id = $1
+ORDER BY column_name
+";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "column_profile",
+            "read",
+            "for_run",
+            "column_profiles",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let sql = SQL.replace("{snapshot}", &snapshot.to_string());
+        let mut stmt = ::er_span::check(&__span, conn.prepare(&sql))?;
+        let batches =
+            ::er_span::check(&__span, stmt.query_arrow(::duckdb::params![profile_run_id]))?
+                .collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
+        ForRunRow::from_batches(&batches)
+    }
+}

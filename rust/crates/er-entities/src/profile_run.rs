@@ -256,4 +256,172 @@ WHERE subject = $1
         drop(__entered);
         CachedLiveRow::from_batches(&batches)
     }
+
+    /// One row of `latest`: The most recent profile of one corpus stage at one depth. Ordered by the run's logical clock and then by id, so a replayed fixture and a real sequence both resolve to one deterministic row rather than whichever the scan reached first.
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct LatestRow {
+        pub id: String,
+        pub subject: String,
+        pub source_system: String,
+        pub snapshot: i64,
+        pub tier: i64,
+        pub ingest_batch_id: Option<String>,
+        pub corpus_digest: String,
+        pub row_count: i64,
+        pub column_count: i64,
+        pub config_hash: Option<String>,
+        pub model_version: Option<String>,
+        pub sampled: bool,
+        pub sample_proportion: Option<f64>,
+        pub sample_seed: Option<i64>,
+        pub duration_ms: i64,
+        #[serde(serialize_with = "crate::batch::ser_duckdb_timestamp")]
+        pub captured_at: ::chrono::DateTime<::chrono::Utc>,
+    }
+
+    impl LatestRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![
+                ("id", ::arrow::datatypes::DataType::Utf8),
+                ("subject", ::arrow::datatypes::DataType::Utf8),
+                ("source_system", ::arrow::datatypes::DataType::Utf8),
+                ("snapshot", ::arrow::datatypes::DataType::Int64),
+                ("tier", ::arrow::datatypes::DataType::Int64),
+                ("ingest_batch_id", ::arrow::datatypes::DataType::Utf8),
+                ("corpus_digest", ::arrow::datatypes::DataType::Utf8),
+                ("row_count", ::arrow::datatypes::DataType::Int64),
+                ("column_count", ::arrow::datatypes::DataType::Int64),
+                ("config_hash", ::arrow::datatypes::DataType::Utf8),
+                ("model_version", ::arrow::datatypes::DataType::Utf8),
+                ("sampled", ::arrow::datatypes::DataType::Boolean),
+                ("sample_proportion", ::arrow::datatypes::DataType::Float64),
+                ("sample_seed", ::arrow::datatypes::DataType::Int64),
+                ("duration_ms", ::arrow::datatypes::DataType::Int64),
+                (
+                    "captured_at",
+                    ::arrow::datatypes::DataType::Timestamp(
+                        ::arrow::datatypes::TimeUnit::Microsecond,
+                        None,
+                    ),
+                ),
+            ]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "id")?;
+                let c1: &::arrow::array::StringArray = crate::batch::col(batch, 1, "subject")?;
+                let c2: &::arrow::array::StringArray =
+                    crate::batch::col(batch, 2, "source_system")?;
+                let c3: &::arrow::array::Int64Array = crate::batch::col(batch, 3, "snapshot")?;
+                let c4: &::arrow::array::Int64Array = crate::batch::col(batch, 4, "tier")?;
+                let c5: &::arrow::array::StringArray =
+                    crate::batch::col(batch, 5, "ingest_batch_id")?;
+                let c6: &::arrow::array::StringArray =
+                    crate::batch::col(batch, 6, "corpus_digest")?;
+                let c7: &::arrow::array::Int64Array = crate::batch::col(batch, 7, "row_count")?;
+                let c8: &::arrow::array::Int64Array = crate::batch::col(batch, 8, "column_count")?;
+                let c9: &::arrow::array::StringArray = crate::batch::col(batch, 9, "config_hash")?;
+                let c10: &::arrow::array::StringArray =
+                    crate::batch::col(batch, 10, "model_version")?;
+                let c11: &::arrow::array::BooleanArray = crate::batch::col(batch, 11, "sampled")?;
+                let c12: &::arrow::array::Float64Array =
+                    crate::batch::col(batch, 12, "sample_proportion")?;
+                let c13: &::arrow::array::Int64Array = crate::batch::col(batch, 13, "sample_seed")?;
+                let c14: &::arrow::array::Int64Array = crate::batch::col(batch, 14, "duration_ms")?;
+                let c15: &::arrow::array::TimestampMicrosecondArray =
+                    crate::batch::col(batch, 15, "captured_at")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        id: crate::batch::req(crate::batch::opt_str(c0, i), "id", i)?,
+                        subject: crate::batch::req(crate::batch::opt_str(c1, i), "subject", i)?,
+                        source_system: crate::batch::req(
+                            crate::batch::opt_str(c2, i),
+                            "source_system",
+                            i,
+                        )?,
+                        snapshot: crate::batch::req(crate::batch::opt_i64(c3, i), "snapshot", i)?,
+                        tier: crate::batch::req(crate::batch::opt_i64(c4, i), "tier", i)?,
+                        ingest_batch_id: crate::batch::opt_str(c5, i),
+                        corpus_digest: crate::batch::req(
+                            crate::batch::opt_str(c6, i),
+                            "corpus_digest",
+                            i,
+                        )?,
+                        row_count: crate::batch::req(crate::batch::opt_i64(c7, i), "row_count", i)?,
+                        column_count: crate::batch::req(
+                            crate::batch::opt_i64(c8, i),
+                            "column_count",
+                            i,
+                        )?,
+                        config_hash: crate::batch::opt_str(c9, i),
+                        model_version: crate::batch::opt_str(c10, i),
+                        sampled: crate::batch::req(crate::batch::opt_bool(c11, i), "sampled", i)?,
+                        sample_proportion: crate::batch::opt_f64(c12, i),
+                        sample_seed: crate::batch::opt_i64(c13, i),
+                        duration_ms: crate::batch::req(
+                            crate::batch::opt_i64(c14, i),
+                            "duration_ms",
+                            i,
+                        )?,
+                        captured_at: crate::batch::req(
+                            crate::batch::opt_ts(c15, i),
+                            "captured_at",
+                            i,
+                        )?,
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// The most recent profile of one corpus stage at one depth. Ordered by the run's logical clock and then by id, so a replayed fixture and a real sequence both resolve to one deterministic row rather than whichever the scan reached first.
+    pub fn latest(
+        conn: &::duckdb::Connection,
+        snapshot: i64,
+        subject: &str,
+        source_system: &str,
+        tier: i64,
+    ) -> ::duckdb::Result<Vec<LatestRow>> {
+        const SQL: &str =
+            "SELECT id, subject, source_system, snapshot, tier, ingest_batch_id, corpus_digest,
+       row_count, column_count, config_hash, model_version, sampled,
+       sample_proportion, sample_seed, duration_ms, captured_at
+FROM lake.main.profile_runs AT (VERSION => {snapshot})
+WHERE subject = $1
+  AND source_system = $2
+  AND tier = $3
+ORDER BY captured_at DESC, id DESC
+LIMIT 1
+";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "profile_run",
+            "read",
+            "latest",
+            "profile_runs",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let sql = SQL.replace("{snapshot}", &snapshot.to_string());
+        let mut stmt = ::er_span::check(&__span, conn.prepare(&sql))?;
+        let batches = ::er_span::check(
+            &__span,
+            stmt.query_arrow(::duckdb::params![subject, source_system, tier]),
+        )?
+        .collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
+        LatestRow::from_batches(&batches)
+    }
 }

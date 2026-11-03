@@ -91,3 +91,91 @@ WHEN NOT MATCHED THEN INSERT
         Ok(__n)
     }
 }
+
+pub mod read {
+    //! @generated query functions for this entity + operation.
+    /// One row of `for_run`: One profile run's findings, ordered by code then column. Code order rather than severity order because the codes are stable and a severity reclassification would otherwise reshuffle a list a reader has learned the shape of; the caller sorts by severity for display if it wants to.
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct ForRunRow {
+        pub code: String,
+        pub severity: String,
+        pub column_name: String,
+        pub message: String,
+        pub detail: Option<::serde_json::Value>,
+    }
+
+    impl ForRunRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![
+                ("code", ::arrow::datatypes::DataType::Utf8),
+                ("severity", ::arrow::datatypes::DataType::Utf8),
+                ("column_name", ::arrow::datatypes::DataType::Utf8),
+                ("message", ::arrow::datatypes::DataType::Utf8),
+                ("detail", ::arrow::datatypes::DataType::Utf8),
+            ]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "code")?;
+                let c1: &::arrow::array::StringArray = crate::batch::col(batch, 1, "severity")?;
+                let c2: &::arrow::array::StringArray = crate::batch::col(batch, 2, "column_name")?;
+                let c3: &::arrow::array::StringArray = crate::batch::col(batch, 3, "message")?;
+                let c4: &::arrow::array::StringArray = crate::batch::col(batch, 4, "detail")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        code: crate::batch::req(crate::batch::opt_str(c0, i), "code", i)?,
+                        severity: crate::batch::req(crate::batch::opt_str(c1, i), "severity", i)?,
+                        column_name: crate::batch::req(
+                            crate::batch::opt_str(c2, i),
+                            "column_name",
+                            i,
+                        )?,
+                        message: crate::batch::req(crate::batch::opt_str(c3, i), "message", i)?,
+                        detail: crate::batch::opt_json(c4, i, "detail")?,
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// One profile run's findings, ordered by code then column. Code order rather than severity order because the codes are stable and a severity reclassification would otherwise reshuffle a list a reader has learned the shape of; the caller sorts by severity for display if it wants to.
+    pub fn for_run(
+        conn: &::duckdb::Connection,
+        snapshot: i64,
+        profile_run_id: &str,
+    ) -> ::duckdb::Result<Vec<ForRunRow>> {
+        const SQL: &str = "SELECT code, severity, column_name, message, detail
+FROM lake.main.profile_findings AT (VERSION => {snapshot})
+WHERE profile_run_id = $1
+ORDER BY code, column_name
+";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "profile_finding",
+            "read",
+            "for_run",
+            "profile_findings",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let sql = SQL.replace("{snapshot}", &snapshot.to_string());
+        let mut stmt = ::er_span::check(&__span, conn.prepare(&sql))?;
+        let batches =
+            ::er_span::check(&__span, stmt.query_arrow(::duckdb::params![profile_run_id]))?
+                .collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
+        ForRunRow::from_batches(&batches)
+    }
+}
