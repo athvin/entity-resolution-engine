@@ -34,6 +34,19 @@ spec:
         {{- include "er-platform.labels" . | nindent 8 }}
     spec:
       serviceAccountName: er-api
+      # Endpoint removal is ASYNCHRONOUS with the SIGTERM: the kubelet signals
+      # the containers at the same moment the endpoint controller starts telling
+      # kube-proxy and the ALB to stop routing here. A process that drains
+      # perfectly and then exits still refuses the requests that were in flight
+      # across that gap. The `preStop` sleep on each container below is what
+      # closes it — the signal is withheld for its duration while the pod keeps
+      # serving — and this budget has to cover sleep + drain or the kubelet
+      # SIGKILLs mid-drain and undoes the whole thing.
+      #
+      # 60 = 5s of preStop + 55s of drain. The upper bound is a read that
+      # attaches the tenant's DuckDB environment, which is why api.resources
+      # carries a 3Gi ceiling; Next's own guidance for its half asks for 10-30s.
+      terminationGracePeriodSeconds: 60
       securityContext:
         {{- include "er-platform.podSecurityContext" . | nindent 8 }}
       initContainers:
@@ -118,6 +131,16 @@ spec:
           livenessProbe:
             httpGet: { path: /healthz, port: api }
             periodSeconds: 10
+          # The native sleep action (GA since 1.30), NOT `exec: ["sleep", "5"]`:
+          # an exec preStop depends on a shell and a coreutils `sleep` existing
+          # in the image, and the day someone slims this image that dependency
+          # fails silently — a preStop whose command cannot run is logged as a
+          # FailedPreStopHook event and the container is signalled immediately,
+          # which looks exactly like having no preStop at all.
+          lifecycle:
+            preStop:
+              sleep:
+                seconds: 5
           resources:
             {{- toYaml .Values.api.resources | nindent 12 }}
           volumeMounts:
@@ -187,6 +210,15 @@ spec:
           livenessProbe:
             httpGet: { path: /, port: http }
             periodSeconds: 10
+          # Same gap, same fix. The Next server needs no code change for this:
+          # the App Router already finishes in-flight requests and runs pending
+          # `after()` callbacks on SIGTERM, and its own self-hosting guidance
+          # asks the platform for a 10-30s drain window — which the pod-level
+          # grace period above provides.
+          lifecycle:
+            preStop:
+              sleep:
+                seconds: 5
           resources:
             {{- toYaml .Values.web.resources | nindent 12 }}
         {{- end }}
