@@ -4032,6 +4032,152 @@ async fn list_job_tasks(
     }
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ClearIn {
+    /// Extra tries to grant the cleared task, over and above its budget.
+    /// Zero re-runs it on its existing budget, which is the ordinary case.
+    #[serde(default)]
+    retries: Option<i64>,
+    /// Re-run at a different resource class — the operator's escalation,
+    /// distinct from the automatic OOM escalation (§5.5).
+    #[serde(default)]
+    resource_class: Option<String>,
+}
+
+/// Steward+: clear one task and everything downstream of it, so it re-runs
+/// WITHOUT re-running the whole job
+/// (`POST /v1/orgs/{org}/datasets/{ds}/jobs/{job_id}/tasks/{task_id}/clear`,
+/// §5.4).
+///
+/// The closure is computed from the COMPILED graph, not from the request: a
+/// caller naming one task gets that task plus its transitive downstream,
+/// because re-running a stage without re-running what consumed it would leave
+/// the lake describing two different runs. That is also why the task id is
+/// validated against the job's own DAG — a typo must 404 rather than clear
+/// nothing and report success.
+///
+/// Refused under a canceling job: a clear would hand new work to a job whose
+/// pods are being torn down.
+async fn clear_job_task(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, ds, job_id, task_id)): Path<(String, String, String, String)>,
+    // Optional, so a request with no body and no `content-type` resolves to
+    // `None` — this route's ordinary case, "re-run on the task's existing
+    // budget". The BFF omits the content-type when it has no body, so the two
+    // agree.
+    //
+    // The TYPED extractor matters beyond ergonomics: `tests/mcp_manifest.rs`
+    // derives the body's JSON Schema from it, so taking raw bytes here
+    // advertised a bare object and told an MCP caller nothing about the
+    // fields below. (That scan finds the first wrapped-body type after the
+    // `fn`, so a comment naming one would shadow the real signature — which
+    // is why this note spells none of them.)
+    body: Option<Json<ClearIn>>,
+) -> axum::response::Response {
+    if let Err(e) = guard(&principal, &org, Role::Steward) {
+        return e.into_response();
+    }
+    let Some(dsn) = &state.dsn else {
+        return detail_err(
+            StatusCode::NOT_IMPLEMENTED,
+            "the task ledger requires Postgres",
+        );
+    };
+    let input = body.map(|Json(b)| b);
+    let mut client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
+    if let Err(r) = dataset_or_404(&client, &org_row, &ds).await {
+        return *r;
+    }
+    let job = match pg::get_job(&client, &org_row.id, &job_id).await {
+        Ok(Some(j)) => j,
+        Ok(None) => return detail_err(StatusCode::NOT_FOUND, "no such job"),
+        Err(e) => return pg_err(e),
+    };
+    let Some(kind) = crate::dags::JobKind::parse(&job.kind) else {
+        return detail_err(
+            StatusCode::CONFLICT,
+            "this job's kind has no compiled graph, so it has no task to clear",
+        );
+    };
+    let dag = crate::dags::dag_for(kind);
+    let Some(index) = dag.nodes.iter().position(|n| n.task_id == task_id) else {
+        return detail_err(
+            StatusCode::NOT_FOUND,
+            format!("'{task_id}' is not a task of kind '{}'", job.kind),
+        );
+    };
+    // The closure: this task plus its transitive downstream — `er_dag` owns
+    // that walk, so the server cannot compute a different answer than the
+    // executor would.
+    //
+    // The probe answers `Present` for every reference, because THIS process
+    // cannot open a lake (§3.5 draws that line at the lake, and the control
+    // plane is on the wrong side of it). So the clear never drafts in extra
+    // upstream work here. That is not a hole: §6.3 step 5 has the POD probe
+    // each `LakeRef` through `Prober::snapshot_exists` before it runs, so a
+    // genuinely expired upstream surfaces as the cleared task's own
+    // `precondition` failure — visible, attributed, and retryable by a wider
+    // clear — rather than being silently guessed at from here.
+    let plan = er_dag::clear_closure(&dag, &[index], true, |_| {
+        er_dag::ReferenceExistence::Present
+    });
+    let closure: Vec<String> = plan
+        .must_run
+        .iter()
+        .map(|&i| dag.nodes[i].task_id.to_string())
+        .collect();
+    let retries = input.as_ref().and_then(|b| b.retries).unwrap_or(0);
+    let resource_class = input.as_ref().and_then(|b| b.resource_class.as_deref());
+    match taskpg::clear(
+        &mut client,
+        &org_row.id,
+        &job_id,
+        &closure,
+        retries,
+        resource_class,
+        job.image_digest.as_deref(),
+    )
+    .await
+    {
+        Ok(cleared) => (
+            StatusCode::ACCEPTED,
+            Json(json!({
+                // What was cleared, and what each arm of the clear did —
+                // three arms, because a live row rotates, a terminal row gets
+                // a successor, and a pending row resets in place (§5.4).
+                "cleared": closure,
+                "restarting": cleared.restarting.len(),
+                "rotated": cleared.rotated.len(),
+                "reset": cleared.reset.len(),
+                "reopened": cleared.job.is_some(),
+                // Empty from this process by construction (see the probe
+                // above); carried anyway so the shape does not change when
+                // the demand resolution gains a lake-side answer.
+                "demanded_upstream": plan
+                    .demanded_upstream
+                    .iter()
+                    .map(|&i| dag.nodes[i].task_id)
+                    .collect::<Vec<_>>(),
+            })),
+        )
+            .into_response(),
+        Err(taskpg::ClearError::Canceling) => detail_err(
+            StatusCode::CONFLICT,
+            "the job is canceling; a clear under a cancel is refused",
+        ),
+        Err(taskpg::ClearError::Pg(e)) => pg_err(e),
+    }
+}
+
 /// Who the attempt channel authenticated as (§6.4).
 enum AttemptIdentity {
     /// The per-attempt fallback token: hash match against the row. Pod
@@ -9237,6 +9383,10 @@ fn build_routes(state: AppState) -> Router {
         .route(
             "/v1/orgs/{org}/datasets/{ds}/jobs/{job_id}/tasks",
             get(list_job_tasks),
+        )
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/jobs/{job_id}/tasks/{task_id}/clear",
+            post(clear_job_task),
         )
         // The §6.4 attempt channel (fallback-token flavour): machine-to-machine,
         // authenticated by the per-attempt token rather than a bearer

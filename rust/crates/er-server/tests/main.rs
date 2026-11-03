@@ -39,6 +39,7 @@ mod no_second_executor;
 mod pg_approval;
 mod pg_attempt_reporter;
 mod pg_auth;
+mod pg_clear_endpoint;
 mod pg_config;
 mod pg_dataset_concurrency;
 mod pg_dataset_sweep;
