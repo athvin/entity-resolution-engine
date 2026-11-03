@@ -135,6 +135,19 @@ pub async fn ensure_schema(client: &mut Client) -> Result<(), SchemaError> {
     // the new-named locks exist before the old-named ones are dropped.
     if !deferred.is_empty() {
         let tx = client.transaction().await?;
+        // The SAME advisory lock every other phase takes. Without it this was
+        // the one phase of `ensure_schema` running unserialised, and it really
+        // does deadlock: `pg_schema_race.rs` reproduces it with six concurrent
+        // boots against an aged store, as two processes each holding a weaker
+        // lock on `public.jobs` and both upgrading to ShareRowExclusiveLock.
+        // Two boots are not enough to see it — they stay naturally offset,
+        // because phases 1-3 serialise them — which is exactly why it survived
+        // this long.
+        tx.execute(
+            "SELECT pg_advisory_xact_lock(hashtext('erserver.ensure_schema'), 0)",
+            &[],
+        )
+        .await?;
         tx.batch_execute("SET LOCAL er.ddl_log_skip = 'on'").await?;
         for stmt in &deferred {
             tx.batch_execute(stmt).await?;

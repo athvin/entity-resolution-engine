@@ -24,8 +24,20 @@ spec:
 ---
 # The one hole the edge needs (§4.1): the internal ALB's targets are pod IPs
 # (target-type ip) and the connection originates from the ALB dataplane in the
-# VPC — not from any pod — so it needs an ipBlock allowance. Scoped to er-web
-# (the only Ingress-exposed pod; the label is er-platform's) on its one port.
+# VPC — not from any pod — so it needs an ipBlock allowance.
+#
+# The selector is `web-api`, the label er-platform's MERGED pod actually
+# carries. It used to say `er-web`, from when the BFF was its own Deployment;
+# after the pods were merged nothing carried that label, so this policy selected
+# NOTHING and `default-deny-ingress` would have blackholed the ALB the first
+# time `ingress.enabled` was flipped on. It was never caught because both halves
+# are off by default and are meant to be turned on together — the failure was
+# waiting at the end of task 1.4, not in any diff.
+#
+# Selecting the merged pod does NOT expose the control plane, and that is the
+# port list's doing rather than the selector's: the rule admits one port, the
+# BFF's, and er-server's 8000 is not in it. §4.1's "er-api is on no load
+# balancer in any environment" therefore still holds for the whole pod.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -36,7 +48,7 @@ metadata:
 spec:
   podSelector:
     matchLabels:
-      app.kubernetes.io/name: er-web
+      app.kubernetes.io/name: web-api
   policyTypes: [Ingress]
   ingress:
     - from:
