@@ -12,11 +12,22 @@ export interface BlockingRuleEstimate {
   /** Pairs this rule adds that no earlier rule already generated. */
   marginal_pairs: number;
   cumulative_pairs: number;
+  /**
+   * Whether this rule's largest blocks could be enumerated. False for a rule
+   * carrying a filter condition, which has no block breakdown at all — which
+   * must render differently from "examined, no large blocks found".
+   */
+  has_block_breakdown: boolean;
 }
 
 export interface LargestBlockEstimate {
+  /** Which rule this block belongs to; every rule is broken down, not just the first. */
+  match_key: number;
   key_values: string[];
+  /** The pairs a run SCORES in this block, under the model's link type. */
   pairs: number;
+  /** Rows carrying this key value. `pairs` is quadratic in this. */
+  rows: number;
 }
 
 /**

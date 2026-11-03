@@ -1878,6 +1878,50 @@ fn the_blocking_estimate_matches_what_a_run_actually_scores() {
         "the redundant rule should be the dob/given-name one: {redundant:?}"
     );
 
+    // Block breakdowns: EVERY rule is examined now, not just the first, and a
+    // rule that cannot be broken down says so rather than looking examined.
+    //
+    // THE BUG THIS PINS: `pairs` used to be `count_l * count_r`, the raw
+    // product, which is right for `link_only` and an overstatement for a dedupe
+    // under `uid_l < uid_r`. base_10 is `dedupe_only`, so every block was
+    // reported roughly twice its real size — in the UI, labelled "pairs", next
+    // to the rule's genuine marginal count. A block can never hold more pairs
+    // than the rule it belongs to generates, and that is the invariant that
+    // catches it.
+    assert!(
+        estimate.per_rule.iter().any(|r| r.has_block_breakdown),
+        "base_10's equi-join rules have block breakdowns: {:?}",
+        estimate.per_rule
+    );
+    for block in &estimate.largest_blocks {
+        let rule = estimate
+            .per_rule
+            .iter()
+            .find(|r| r.match_key == block.match_key)
+            .expect("every block names a rule in the estimate");
+        assert!(
+            rule.has_block_breakdown,
+            "a block was reported for a rule marked as having no breakdown: {rule:?}"
+        );
+        assert!(
+            block.pairs <= rule.marginal_pairs.max(rule.cumulative_pairs),
+            "block {:?} claims {} pairs, more than its rule generates ({}) — this is \
+             the n^2-for-dedupe bug",
+            block.key_values,
+            block.pairs,
+            rule.cumulative_pairs
+        );
+        // And the figure is exactly C(rows, 2): the dedupe form, derived from
+        // the block's own row count rather than from the raw product.
+        assert_eq!(
+            block.pairs,
+            block.rows * (block.rows - 1) / 2,
+            "a dedupe block's pairs are C(rows, 2); got {} for {} rows",
+            block.pairs,
+            block.rows
+        );
+    }
+
     // THE CLAIM: the estimate is the number the run works through. Scoring with
     // a zero threshold keeps every candidate pair the blocking produced, so the
     // count of distinct scored pairs is exactly what was estimated.
@@ -1910,18 +1954,37 @@ fn the_blocking_estimate_matches_what_a_run_actually_scores() {
         estimate.candidate_pairs
     );
 
-    // The largest-block list names the keys that would dominate a run. base_10
-    // is small, so the point is the shape: at most what was asked for, each
-    // with a positive pair count, biggest first.
-    assert!(estimate.largest_blocks.len() <= 3);
-    let mut last = i64::MAX;
-    for block in &estimate.largest_blocks {
-        assert!(block.pairs > 0, "a reported block must contain pairs");
-        assert!(
-            block.pairs <= last,
-            "largest blocks must come biggest-first"
-        );
-        last = block.pairs;
+    // The largest-block list names the keys that would dominate a run.
+    //
+    // `n_largest` is PER RULE now, not per estimate: every rule with a
+    // breakdown contributes up to that many blocks, which is what makes the
+    // list comparable across rules rather than a view of whichever rule
+    // happened to be first.
+    assert!(
+        estimate.largest_blocks.len() <= 3 * rules.len(),
+        "at most n_largest blocks per rule, got {} over {} rules",
+        estimate.largest_blocks.len(),
+        rules.len()
+    );
+    // Biggest-first WITHIN a rule. Across rules the list is grouped by rule, so
+    // a global ordering would be the wrong claim — and asserting one would have
+    // passed trivially while this fan-out was still single-rule.
+    for entry in &estimate.per_rule {
+        let mut last = i64::MAX;
+        for block in estimate
+            .largest_blocks
+            .iter()
+            .filter(|b| b.match_key == entry.match_key)
+        {
+            assert!(block.pairs > 0, "a reported block must contain pairs");
+            assert!(block.rows > 1, "a block of one row generates no pairs");
+            assert!(
+                block.pairs <= last,
+                "blocks of rule {} must come biggest-first",
+                entry.match_key
+            );
+            last = block.pairs;
+        }
     }
 
     let _ = std::fs::remove_dir_all(&tmp);

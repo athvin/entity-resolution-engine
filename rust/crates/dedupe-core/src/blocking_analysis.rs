@@ -267,6 +267,26 @@ impl LargestBlock {
         let n = self.count_l;
         n * (n - 1) / 2
     }
+
+    /// The pairs a run of `link_type` actually scores inside this block.
+    ///
+    /// This is the figure to show a user, and it is NOT one number: the two
+    /// link types genuinely differ. `link_only` compares two disjoint sides, so
+    /// every ordered pair is scored and `count_l * count_r` is right. A dedupe
+    /// compares one table with itself under `uid_l < uid_r`, so the self-pairs
+    /// and one of each symmetric pair are discarded and the count is `C(n, 2)`
+    /// — on fake_1000's largest surname block, 253 rather than 4095.
+    ///
+    /// `link_and_dedupe` takes the dedupe form: it scores within sources as
+    /// well as across them, so the same `uid_l < uid_r` filter applies and the
+    /// block is one population rather than two.
+    #[must_use]
+    pub fn scored_pairs(&self, link_type: crate::settings::json::LinkType) -> i64 {
+        match link_type {
+            crate::settings::json::LinkType::LinkOnly => self.block_count,
+            _ => self.dedupe_block_pairs(),
+        }
+    }
 }
 
 /// The `n` blocking-key values producing the largest equi-join blocks
