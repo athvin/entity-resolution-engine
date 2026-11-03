@@ -447,3 +447,132 @@ fn the_blocking_rules_gate_on_pairs_not_rows() {
         "8M unblocked pairs is worth a sentence"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Drift (P011, P012) — the only rules that compare two profiles.
+// ---------------------------------------------------------------------------
+
+/// A previous column, given a fill rate expressed as present-of-1000.
+fn was(name: &str, present: i64) -> er_profile::PreviousColumn {
+    er_profile::PreviousColumn {
+        column_name: name.to_string(),
+        row_count: 1000,
+        non_null_count: present,
+        blank_count: 0,
+    }
+}
+
+fn previous(columns: Vec<er_profile::PreviousColumn>) -> er_profile::PreviousProfile {
+    er_profile::PreviousProfile {
+        captured_at: "2026-01-01 00:00:00".to_string(),
+        columns,
+    }
+}
+
+/// Run the registry over one column against a previous profile.
+fn drift_codes(
+    shape: ColumnShape,
+    prev: Option<&er_profile::PreviousProfile>,
+) -> Vec<&'static str> {
+    er_profile::findings_against(&[(shape, vec![])], &[], prev)
+        .into_iter()
+        .map(|f| f.code.0)
+        .collect()
+}
+
+#[test]
+fn p011_fires_when_a_fill_drop_costs_real_reach() {
+    // `healthy` is 940/1000 present. Against a previous 950/1000 that is a one
+    // point move, costing ~2% of reachable pairs — inside the noise a
+    // delivery's composition creates, and silent.
+    let quiet = previous(vec![was("email", 950)]);
+    assert!(!drift_codes(healthy("email"), Some(&quiet)).contains(&"P011"));
+
+    // Against a previous 1000/1000, 940 is a 12% pair loss: 1 - 0.94² = 0.116.
+    let noisy = previous(vec![was("email", 1000)]);
+    let reported = drift_codes(healthy("email"), Some(&noisy));
+    assert!(reported.contains(&"P011"), "got {reported:?}");
+}
+
+#[test]
+fn p011_is_silent_without_a_previous_profile() {
+    // The first profile of a corpus has nothing to compare against, and "has it
+    // changed" has no answer. The bug this guards is reading None as "no
+    // change" OR as "everything appeared" — both are answers to a question
+    // nobody could ask yet.
+    let reported = drift_codes(healthy("email"), None);
+    assert!(!reported.contains(&"P011"), "got {reported:?}");
+    assert!(!reported.contains(&"P012"), "got {reported:?}");
+}
+
+#[test]
+fn p011_ignores_a_column_that_was_already_mostly_empty() {
+    // 100/1000 -> 20/1000 is a 96% pair loss, and reporting it would be the
+    // same complaint P002 already makes about a column nobody can match on.
+    let mut sparse = healthy("fax");
+    sparse.non_null_count = 20;
+    let before = previous(vec![was("fax", 100)]);
+    let reported = drift_codes(sparse, Some(&before));
+    assert!(
+        !reported.contains(&"P011"),
+        "below 20% previous fill this is P002's business, got {reported:?}"
+    );
+}
+
+#[test]
+fn p011_does_not_complain_about_a_column_filling_up() {
+    // A column going from 500 to 940 present is good news; a warning here
+    // would teach people that drift findings are noise.
+    let before = previous(vec![was("email", 500)]);
+    let reported = drift_codes(healthy("email"), Some(&before));
+    assert!(!reported.contains(&"P011"), "got {reported:?}");
+}
+
+#[test]
+fn p012_reports_both_directions_with_the_right_severity() {
+    // `phone_e164` was there and is gone; `nickname` is new. One rule, because
+    // "did the column set change" is one question and a reader comparing two
+    // deliveries wants both halves of the answer.
+    let before = previous(vec![was("email", 940), was("phone_e164", 900)]);
+    let found = er_profile::findings_against(
+        &[(healthy("email"), vec![]), (healthy("nickname"), vec![])],
+        &[],
+        Some(&before),
+    );
+
+    let gone = found
+        .iter()
+        .find(|f| f.code == Code("P012") && f.column_name == "phone_e164")
+        .expect("the disappearance is reported");
+    assert_eq!(
+        gone.severity,
+        Severity::Warning,
+        "a column vanishing changes what can be matched"
+    );
+    assert!(gone.message.contains("absent from this one"));
+
+    let arrived = found
+        .iter()
+        .find(|f| f.code == Code("P012") && f.column_name == "nickname")
+        .expect("the arrival is reported");
+    assert_eq!(
+        arrived.severity,
+        Severity::Info,
+        "a new column is not a problem, just worth mapping"
+    );
+
+    // Unchanged columns produce nothing — the rule reports CHANGES, and a
+    // finding per steady column would bury the two that matter.
+    assert_eq!(
+        found.iter().filter(|f| f.code == Code("P012")).count(),
+        2,
+        "only the two changes, got {found:?}"
+    );
+}
+
+#[test]
+fn p012_is_quiet_when_the_column_set_is_unchanged() {
+    let before = previous(vec![was("email", 940)]);
+    let reported = drift_codes(healthy("email"), Some(&before));
+    assert!(!reported.contains(&"P012"), "got {reported:?}");
+}
