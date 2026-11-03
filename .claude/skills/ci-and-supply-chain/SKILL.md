@@ -209,11 +209,49 @@ That mints an AWS credential, not a GitHub one, and the role is
 blast radius, and it is read, so an agent cannot plant object code a later
 `main` build consumes.
 
-The zero-repository-secrets invariant survives them. `engine: copilot` draws on
-`copilot-requests: write` against the job token, so there is still no
-`secrets.*` reference in any workflow. Swapping to `engine: claude` would need
-an `ANTHROPIC_API_KEY` secret — a deliberate trade to make explicitly, not a
-detail to discover. gh-aw does not accept a Claude subscription OAuth token.
+**The zero-repository-secrets invariant does not survive them, and the claim
+that it did was false.** This section used to say `engine: copilot` draws on
+`copilot-requests: write` against the job token, so no secret was needed. On
+first real execution (2026-11-03, the run after #359 landed) all four agents
+failed at `activation`:
+
+```
+Error: None of the following secrets are set: COPILOT_GITHUB_TOKEN
+COPILOT_GITHUB_TOKEN is required by GitHub Copilot CLI.
+```
+
+The generated `activation` job runs `validate_multi_secret.sh
+COPILOT_GITHUB_TOKEN` and hard-fails without it. **There is no zero-secret path
+to running these at all** — `copilot` needs `COPILOT_GITHUB_TOKEN`, `claude`
+needs `ANTHROPIC_API_KEY` (an API key; gh-aw does not accept a Claude
+subscription OAuth token), and every other engine wants its own key. The
+invariant and the feature are mutually exclusive, which is the thing to know
+before reasoning about either.
+
+They now run `engine: claude` on `ANTHROPIC_API_KEY`, with the model chosen per
+workflow by whether the agent exercises judgement:
+
+| Workflow | Model | Why |
+|---|---|---|
+| `dependency-upgrade-pilot` | `claude-sonnet-5` | verdicts a version range |
+| `ci-triage` | `claude-sonnet-5` | classifies a red run |
+| `generated-artifact-healer` | `claude-haiku-4-5` | re-runs a known generator |
+| `skill-freshness-auditor` | `claude-haiku-4-5` | greps prose against code |
+
+Haiku is the cheapest current model and fine for mechanical work; it is the
+wrong default for the two judgement agents, because a confidently wrong verdict
+on a dependency bump is the failure #376 already cost three red PRs for. **Never
+set `effort` on a Haiku workflow** — Haiku 4.5 rejects the parameter.
+
+One consequence of leaving Copilot: `GH_AW_MAX_DAILY_AI_CREDITS` (5000) is
+denominated in Copilot credits and does not bind a BYO-key run, so the spend
+ceiling is whatever limit is configured Anthropic-side. These fire on every
+dependabot push and every red CI run, so that limit is load-bearing rather than
+belt-and-braces.
+
+They fail **closed**, which is the one thing that went right: `activation`
+failing leaves `agent`, `detection` and `safe_outputs` all `skipped`, so a
+missing or revoked key costs red runs, never an unintended write.
 
 Two interactions with the gates above worth knowing. `rust.yml`'s `detect`
 counts these paths as agent-only, so a prompt edit skips the backend gate —

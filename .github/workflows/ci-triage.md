@@ -27,7 +27,14 @@ permissions:
   issues: read
   pull-requests: read
 
-engine: copilot
+# Sonnet rather than Haiku because this agent's output is a JUDGEMENT —
+# "your diff" vs "the world moved" vs "runner infra" vs "flake" — and a
+# confidently wrong classification sends someone to debug the wrong thing.
+# The two mechanical agents (healer, auditor) run Haiku; see
+# `.claude/skills/ci-and-supply-chain/SKILL.md` for the split.
+engine:
+  id: claude
+  model: claude-sonnet-5
 network: defaults
 timeout-minutes: 15
 max-turns: 30

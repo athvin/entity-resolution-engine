@@ -13,7 +13,13 @@ on:
 permissions:
   contents: read
 
-engine: copilot
+# Haiku: string-level work — find a sentence in `.claude/skills/` that the
+# code contradicts. The evidence gate below is what makes a finding credible,
+# not model capability, and most weeks this emits `noop`.
+# Do NOT add `effort` here — Haiku 4.5 rejects it.
+engine:
+  id: claude
+  model: claude-haiku-4-5
 network: defaults
 timeout-minutes: 20
 max-turns: 40

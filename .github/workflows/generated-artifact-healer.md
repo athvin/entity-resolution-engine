@@ -23,7 +23,13 @@ permissions:
   pull-requests: read
   id-token: write # required by shared/rust-gate.md; an import cannot escalate
 
-engine: copilot
+# Haiku: this agent's job is mechanical — identify which generator owns the
+# stale artifact, run it, confirm the diff is only the expected regeneration.
+# There is no judgement call to get wrong, and `staged: true` previews the
+# push regardless. Do NOT add `effort` here — Haiku 4.5 rejects it.
+engine:
+  id: claude
+  model: claude-haiku-4-5
 timeout-minutes: 25
 max-turns: 25
 
