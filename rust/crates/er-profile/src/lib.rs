@@ -17,6 +17,7 @@
 //! freeing it, so a stored finding and a review that cited it keep meaning what
 //! they said.
 
+use dedupe_core::blocking_analysis::CandidateKeyEstimate;
 use dedupe_core::profile::{ColumnShape, ValueFrequency};
 
 pub mod rules;
@@ -143,6 +144,26 @@ pub trait ColumnRule: Sync {
     fn check(&self, ctx: &ColumnContext<'_>) -> Vec<Finding>;
 }
 
+/// What a corpus rule gets to look at: every column, and every candidate
+/// blocking key that was measured.
+///
+/// Separate from [`ColumnContext`] because some questions are not about a
+/// column at all. "Is any column a usable blocking key?" cannot be answered one
+/// column at a time — the answer depends on the best of them — and a rule that
+/// fired per column would say the same thing N times instead of once.
+pub struct CorpusContext<'a> {
+    pub columns: &'a [(ColumnShape, Vec<ValueFrequency>)],
+    /// Candidate keys, as measured. Empty when the tier that measures them did
+    /// not run, which a rule must treat as "unknown" rather than "none viable".
+    pub candidate_keys: &'a [CandidateKeyEstimate],
+}
+
+/// A rule that judges the corpus as a whole.
+pub trait CorpusRule: Sync {
+    fn info(&self) -> RuleInfo;
+    fn check(&self, ctx: &CorpusContext<'_>) -> Vec<Finding>;
+}
+
 /// Run every registered rule over every column, in code order within a column.
 ///
 /// Column order follows the input, so a caller that sorted its columns gets
@@ -151,12 +172,33 @@ pub trait ColumnRule: Sync {
 /// disagree with the table rendered beside it.
 #[must_use]
 pub fn findings(columns: &[(ColumnShape, Vec<ValueFrequency>)]) -> Vec<Finding> {
+    findings_with(columns, &[])
+}
+
+/// As [`findings`], plus the corpus-level rules, which need the candidate keys.
+///
+/// Kept as a second entry point rather than one with an `Option` so that the
+/// tier-1 caller cannot accidentally pass nothing and have a corpus rule read
+/// that as "no key is viable" — the empty slice means "not measured", and only
+/// this signature makes a caller say which it means.
+#[must_use]
+pub fn findings_with(
+    columns: &[(ColumnShape, Vec<ValueFrequency>)],
+    candidate_keys: &[CandidateKeyEstimate],
+) -> Vec<Finding> {
     let mut out = Vec::new();
     for (shape, top_values) in columns {
         let ctx = ColumnContext { shape, top_values };
         for rule in rules::column_rules() {
             out.extend(rule.check(&ctx));
         }
+    }
+    let corpus = CorpusContext {
+        columns,
+        candidate_keys,
+    };
+    for rule in rules::corpus_rules() {
+        out.extend(rule.check(&corpus));
     }
     out
 }
@@ -166,6 +208,7 @@ pub fn findings(columns: &[(ColumnShape, Vec<ValueFrequency>)]) -> Vec<Finding> 
 #[must_use]
 pub fn rule_infos() -> Vec<RuleInfo> {
     let mut infos: Vec<RuleInfo> = rules::column_rules().iter().map(|r| r.info()).collect();
+    infos.extend(rules::corpus_rules().iter().map(|r| r.info()));
     infos.sort_by_key(|i| i.code.number());
     infos
 }

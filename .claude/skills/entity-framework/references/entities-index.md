@@ -30,7 +30,7 @@ statements is read or written only through the engine's own stage SQL, not
 through a typed query function.
 
 <!-- BEGIN GENERATED: entities-index -->
-**47 entities, 244 declared statements.**
+**48 entities, 245 declared statements.**
 
 | Entity | Relation | Store | Key | Natural key | History |
 |---|---|---|---|---|---|
@@ -40,6 +40,7 @@ through a typed query function.
 | `api_key` | `api_keys` | postgres | `id` | — | yes |
 | `assertion` | `assertions` | duckdb | `id` | — | — |
 | `audit_log` | `audit_log` | postgres | `id` | — | — |
+| `candidate_key` | `candidate_keys` | duckdb | `id` | `profile_run_id, key_columns` | — |
 | `column_profile` | `column_profiles` | duckdb | `id` | `profile_run_id, column_name` | — |
 | `config_version` | `config_versions` | postgres | `id` | `org_id, version` | yes |
 | `dataset` | `datasets` | postgres | `id` | `org_id, name` | yes |
@@ -92,6 +93,7 @@ Declared statements per entity and operation:
 | `api_key` | 1 | 1 | 1 | 0 |
 | `assertion` | 2 | 3 | 1 | 0 |
 | `audit_log` | 1 | 1 | 0 | 0 |
+| `candidate_key` | 1 | 0 | 0 | 0 |
 | `column_profile` | 1 | 0 | 0 | 0 |
 | `config_version` | 1 | 2 | 2 | 0 |
 | `dataset` | 1 | 3 | 4 | 0 |

@@ -1,0 +1,6 @@
+kind: statement
+operation: create
+mode: partial
+description: "Record a profile run's candidate-key measurements from the session's __candidate_key_src staging. Keyed on (profile_run_id, key_columns), so re-measuring a key corrects its row rather than appending — and a key that stops being a candidate (its column went constant, say) keeps its last measurement, because what a key used to cost is what makes a change in it visible."
+params: []
+returns: none

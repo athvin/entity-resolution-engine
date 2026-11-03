@@ -125,10 +125,14 @@ impl ColumnRule for PlaceholderValuesPresent {
                       placeholder to NULL at standardization rather than to tune anything. The \
                       threshold is deliberately low because this is a correctness problem at \
                       any volume, and the placeholder list is deliberately short because a \
-                      longer one starts matching real surnames and place names.",
+                      longer one starts matching real surnames and place names. Graded `error` \
+                      rather than `warning` because the consequence is a WRONG RESULT and not a \
+                      cost: records sharing nothing but their missing data get merged, and an \
+                      over-merge is the expensive mistake in entity resolution — far harder to \
+                      notice, and far harder to undo, than a duplicate left behind.",
             conforming: P004_GOOD,
             violating: P004_BAD,
-            severity: Severity::Warning,
+            severity: Severity::Error,
         }
     }
 
@@ -339,7 +343,9 @@ impl ColumnRule for IdentifierIsNotUnique {
                       broken record identifier, and it is dangerous precisely because it looks \
                       fine: 997 distinct values in 1000 rows reads as a healthy identifier, and \
                       the three collisions silently decide which version of a record survives \
-                      ingest. Reported only when the EXACT distinct count was computed, never \
+                      ingest. Graded `error` for that reason: the \
+                      outcome is not a slower run or a missed duplicate but a row that is \
+                      simply gone, overwritten by whichever copy landed last. Reported only when the EXACT distinct count was computed, never \
                       from the approximate one — `approx_count_distinct` is a HyperLogLog and is \
                       wrong in both directions (measured at 978 on a column of 1000 genuinely \
                       distinct ids), so inferring uniqueness from it would both invent \
@@ -353,7 +359,7 @@ impl ColumnRule for IdentifierIsNotUnique {
                       collision at all is a finding and no threshold is needed.",
             conforming: P008_GOOD,
             violating: P008_BAD,
-            severity: Severity::Warning,
+            severity: Severity::Error,
         }
     }
 

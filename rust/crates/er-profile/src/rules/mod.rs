@@ -7,10 +7,11 @@
 //!
 //! Codes are append-only. A retired rule leaves its code behind rather than
 //! freeing it for reuse, so a stored finding keeps meaning what it said.
-//! The next free code is **P009**.
+//! The next free code is **P011**.
 
-use crate::ColumnRule;
+use crate::{ColumnRule, CorpusRule};
 
+pub mod blocking;
 pub mod completeness;
 pub mod distribution;
 pub mod typing;
@@ -27,8 +28,18 @@ static COLUMN_RULES: &[&dyn ColumnRule] = &[
     &distribution::IdentifierIsNotUnique,
 ];
 
+/// Rules that need the whole corpus at once, in code order.
+static CORPUS_RULES: &[&dyn CorpusRule] =
+    &[&blocking::NoViableBlockingKey, &blocking::BestBlockingKey];
+
 /// Every column-scoped rule.
 #[must_use]
 pub fn column_rules() -> &'static [&'static dyn ColumnRule] {
     COLUMN_RULES
+}
+
+/// Every corpus-scoped rule.
+#[must_use]
+pub fn corpus_rules() -> &'static [&'static dyn CorpusRule] {
+    CORPUS_RULES
 }

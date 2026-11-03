@@ -284,6 +284,7 @@ fn er_run_all_reproduces_base_10_relations() {
         empty,
         vec![
             "assertions",
+            "candidate_keys",
             // The profiler's three relations. `run_all` resolves a corpus; it
             // does not describe one, and `er profile` is a separate command —
             // so a plain run leaves these empty, exactly as it leaves the

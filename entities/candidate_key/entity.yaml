@@ -1,0 +1,63 @@
+kind: entity
+version: 1
+name: candidate_key
+relation: candidate_keys
+description: "What an equi-join on one column would cost as a blocking key, measured against the corpus rather than inferred from a model. Blocking decides the entire cost of a run, and it is chosen before anything is trained — so the question has to be answerable with no model at all, which is why these numbers come from a GROUP BY over the data and not from a settings document."
+key: [id]
+natural_key: [profile_run_id, key_columns]
+generate:
+  stores: [duckdb]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "Content-derived row id: sha256('candidate_keys:' || profile_run_id || ':' || key_columns)."
+  - name: profile_run_id
+    type: varchar
+    nullable: false
+    description: "The profile run that measured this key. Named for the relation it points at, per the foreign-key convention; no `references` is declared because DuckLake enforces no foreign keys (V11)."
+  - name: key_columns
+    type: varchar
+    nullable: false
+    description: "The key's columns, joined by the unit-separator character (chr(31)) — one name for a single-column key, several for a composite. A delimiter rather than a list because this column is in the natural key, and DuckLake has no list equality to MERGE on; chr(31) specifically because it cannot occur in a column name."
+  - name: row_count
+    type: bigint
+    nullable: false
+    description: "Rows in the profiled corpus, carried so `expected_pairs` can be read as a share without a second lookup. Named row_count rather than rows because `rows` is reserved in DuckDB and a column called that cannot be selected unquoted."
+  - name: covered_rows
+    type: bigint
+    nullable: false
+    description: "Rows where every key column is non-null — the only rows this key can block, because an equality is never true of a NULL."
+  - name: distinct_values
+    type: bigint
+    nullable: false
+    description: "Distinct key values among the covered rows. The block count: more blocks of fewer rows each is what makes a key cheap."
+  - name: expected_pairs
+    type: bigint
+    nullable: false
+    description: "Pairs an equi-join on this key generates, exactly: the sum of C(n, 2) over the value groups. For a rule used FIRST, with nothing preceding it to dedup against, this equals the marginal comparison count a trained model's own counter reports — which is what the engine's golden test asserts, so the cheap path cannot drift from the expensive one."
+  - name: largest_block_pairs
+    type: bigint
+    nullable: false
+    description: "Pairs contributed by the single largest block. The number that catches a key which looks affordable in total and is actually dominated by one value — the classic shape being a placeholder, where every record with a blank-but-present field lands in one enormous block."
+  - name: largest_block_rows
+    type: bigint
+    nullable: false
+    description: "Rows in that largest block."
+  - name: entropy_bits
+    type: double
+    nullable: false
+    description: "Shannon entropy of the key's value distribution, in bits. In bits so it is directly comparable with the compiler's match-weight scale, which is also in bits — one unit across both halves of the system."
+  - name: pair_loss_from_nulls
+    type: double
+    nullable: false
+    description: "The share of ALL corpus pairs this key can never reach because one endpoint or the other is NULL: `1 - (covered_rows / rows)^2`. The square is the part that surprises people — a key on a column that is 60% populated reaches only 36% of pairs — and it is why a cheap key is so often cheap for the wrong reason. Stored beside the cost so the trade is visible rather than implied."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical creation time."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical last-write time."
