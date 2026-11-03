@@ -90,6 +90,7 @@ job instead — `terraform plan` is the worked example.
 |---|---|---|---|
 | `detect` | detect infra changes | 5 | `always` |
 | `helpers` | terraform ci helpers (self-test) | 5 | `needs.detect.outputs.infra == 'true'` |
+| `charts` | helm charts (lint + render + selectors) | 10 | `needs.detect.outputs.charts == 'true'` |
 | `validate` | fmt + validate (credential-free) | 10 | `needs.detect.outputs.infra == 'true'` |
 | `plan` | plan (${{ matrix.key }}) | 20 | `needs.detect.outputs.infra == 'true' && (github.event_name == 'push' \|\| github.event.pul …` |
 | `plan-gate` | terraform plan | 5 | `${{ !cancelled() && needs.detect.outputs.infra == 'true' }}` |
