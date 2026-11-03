@@ -71,8 +71,8 @@ job instead — `terraform plan` is the worked example.
 | Job | Status-check context | Timeout | Condition |
 |---|---|---|---|
 | `detect` | detect changes | 5 | `always` |
-| `er-api` | er-api | — | `needs.detect.outputs.rust == 'true'` |
-| `er-web` | er-web | — | `needs.detect.outputs.frontend == 'true'` |
+| `er-api` | er-api | 90 | `needs.detect.outputs.rust == 'true'` |
+| `er-web` | er-web | 30 | `needs.detect.outputs.frontend == 'true'` |
 | `deploy-dev` | deploy dev (ci namespace) | 30 | `always() && !cancelled() && github.ref == 'refs/heads/main'` |
 
 ### `infra.yml`

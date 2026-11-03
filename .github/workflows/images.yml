@@ -102,6 +102,13 @@ jobs:
     needs: detect
     if: needs.detect.outputs.rust == 'true'
     runs-on: ubuntu-latest
+    # 90, against a measured 58m9s of real build (run 41524220825) — this
+    # Dockerfile's `COPY . .` means any rust/ change rebuilds all 408 crates,
+    # so the long case is the NORMAL case until that is restructured. The
+    # number exists because neither image job had a timeout at all: the
+    # default is 360 minutes, so a hung buildkit burned six runner-hours
+    # before failing, and `deploy-dev` waited on it the whole time.
+    timeout-minutes: 90
     permissions:
       contents: read
       id-token: write # OIDC token exchange for the ECR-push role
@@ -133,18 +140,20 @@ jobs:
           # largest producer in the shared 10 GB budget — the thing rust.yml's
           # cache-prune exists to cap. `image-manifest=true,oci-mediatypes=true`
           # because ECR rejects buildkit's default cache-manifest media type.
-          # The gha line stays as a transitional SECOND cache-from only (first
-          # registry run starts cold otherwise); cache-to no longer feeds the
-          # Actions cache at all, so the budget pressure ends here.
-          cache-from: |
-            type=registry,ref=${{ env.ECR }}/er-buildcache:er-api
-            type=gha,scope=er-api
+          # The transitional `type=gha` cache-from is GONE: run 41524220825
+          # logged `importing cache manifest from …/er-buildcache:er-api` and
+          # both tags are in the repo, so the registry round-trip is proven and
+          # buildkit now touches the Actions cache in neither direction.
+          cache-from: "type=registry,ref=${{ env.ECR }}/er-buildcache:er-api"
           cache-to: "type=registry,ref=${{ env.ECR }}/er-buildcache:er-api,mode=max,image-manifest=true,oci-mediatypes=true"
 
   er-web:
     needs: detect
     if: needs.detect.outputs.frontend == 'true'
     runs-on: ubuntu-latest
+    # 30, against 2m30s warm off the registry cache (run 41524220825). Same
+    # reason as er-api's: the default was 360.
+    timeout-minutes: 30
     permissions:
       contents: read
       id-token: write # OIDC token exchange for the ECR-push role
@@ -175,10 +184,8 @@ jobs:
           push: true
           tags: ${{ env.ECR }}/er-web:${{ steps.tag.outputs.sha }}
           # Same ECR-backed layer cache as er-api above — see that step's
-          # comment for the full reasoning and the transitional gha line.
-          cache-from: |
-            type=registry,ref=${{ env.ECR }}/er-buildcache:er-web
-            type=gha,scope=er-web
+          # comment for the full reasoning.
+          cache-from: "type=registry,ref=${{ env.ECR }}/er-buildcache:er-web"
           cache-to: "type=registry,ref=${{ env.ECR }}/er-buildcache:er-web,mode=max,image-manifest=true,oci-mediatypes=true"
 
   # §14.2's Helm half: "Dev platform releases apply from CI on `main`". Lives
