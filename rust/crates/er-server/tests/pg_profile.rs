@@ -209,15 +209,19 @@ async fn a_profile_job_runs_through_the_queue_and_lands_in_the_lake() {
         .unwrap()
         .expect("the refused job is in the queue");
     assert_eq!(persisted.state, "failed", "the queue records the refusal");
-    // The failure REASON is deliberately not asserted here. `dispatch_pg` marks
-    // the terminal state with `pg::mark` and discards the runner's error string
-    // — only the production loop routes it through `fail_or_retry`, which is
-    // what populates `error_class`/`error_detail`. So a test on this helper can
-    // observe that a bad request fails, never why. The message itself is pinned
-    // where it is produced, in `profile_params`' own tests.
+    // The failure REASON, which this helper now records: it classifies and
+    // routes through `fail_or_retry` exactly as the production loop does, so a
+    // job that failed here says why. The previous note in this place said "if
+    // it starts to, assert on it here" — it does, so here it is.
+    let detail = persisted.error_detail.unwrap_or_default();
     assert!(
-        persisted.error_detail.is_none(),
-        "dispatch_pg does not record a reason; if it starts to, assert on it here"
+        detail.contains("source"),
+        "the persisted failure should name the missing param, got {detail:?}"
+    );
+    assert_eq!(
+        persisted.error_class.as_deref(),
+        Some("precondition"),
+        "a request missing a required param is a precondition, not an internal error"
     );
     assert_eq!(
         lake_count(&session, "profile_runs"),

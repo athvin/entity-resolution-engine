@@ -3720,7 +3720,9 @@ pub fn dispatch_next(
 ///
 /// # Errors
 /// Propagates a queue (claim/mark) error. A `runner` failure is NOT an error —
-/// it is recorded as the job's `failed` terminal state.
+/// it is classified and recorded on the row, with its message in
+/// `error_detail`, which means a retryable class lands in `retrying` rather
+/// than `failed` just as it does in the production loop.
 pub async fn dispatch_pg<F>(
     client: &tokio_postgres::Client,
     runner: F,
@@ -3733,15 +3735,28 @@ where
         return Ok(None);
     };
     pg::mark(client, &job.id, "running").await?;
-    let final_state = if runner(&job).is_ok() {
-        "succeeded"
-    } else {
-        "failed"
-    };
-    pg::mark(client, &job.id, final_state).await?;
-    let completed = Job {
-        state: final_state.to_string(),
-        ..job
+    let completed = match runner(&job) {
+        Ok(()) => {
+            pg::mark(client, &job.id, "succeeded").await?;
+            Job {
+                state: "succeeded".to_string(),
+                ..job
+            }
+        }
+        // Route a failure through the same classify-and-record path the
+        // production loop uses, so the REASON is persisted.
+        //
+        // This used to `mark(…, "failed")` and DROP the runner's string, which
+        // meant a job failed through this helper carried no explanation at all:
+        // a test could observe that a bad request failed but never why, and a
+        // failed job with no reason is a bug class this repo has already
+        // shipped once. Classification also means a `TransientIo` failure
+        // lands in `retrying` here exactly as it does in production, rather
+        // than this helper disagreeing with the loop it stands in for.
+        Err(detail) => {
+            let class = pg::FailureClass::classify(&detail);
+            pg::fail_or_retry(client, &job.id, class, &detail).await?
+        }
     };
     // Record the job's outcome event, then — when given a client — drain it.
     // The real dispatcher splits these across its loop; doing both here keeps

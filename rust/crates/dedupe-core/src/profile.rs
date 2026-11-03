@@ -8,6 +8,15 @@ use crate::settings::Settings;
 use crate::sql::pipeline::CtePipeline;
 use crate::training::estimate_u::deterministic_sample_predicate;
 
+/// Quote an identifier, doubling any embedded quote.
+///
+/// One spelling for the whole module: the per-column SQL here interpolates a
+/// column name into both an identifier and a string literal, and three inline
+/// variants of the same escape is how one of them ends up missing.
+fn quoted_ident(name: &str) -> String {
+    format!("\"{}\"", name.replace('"', "\"\""))
+}
+
 /// The materialized per-column shape table.
 pub const COLUMN_SHAPE: &str = "__dedupe__column_shape";
 
@@ -183,7 +192,7 @@ pub fn column_shape(
 /// One column's `SELECT` arm. Every arm must project the same columns in the
 /// same order, because they are `UNION ALL`-ed.
 fn shape_arm(column: &str, table: &str, where_clause: &str, options: &ProfileOptions) -> String {
-    let q = format!("\"{}\"", column.replace('"', "\"\""));
+    let q = quoted_ident(column);
     let lit = column.replace('\'', "''");
     let v = format!("cast({q} as varchar)");
     // Length and lexical statistics are over the TRIMMED text, so a padded
@@ -281,7 +290,7 @@ pub fn top_values(
 
     let mut out = Vec::new();
     for column in columns {
-        let q = format!("\"{}\"", column.replace('"', "\"\""));
+        let q = quoted_ident(column);
         let v = format!("cast({q} as varchar)");
         let mut filter = format!("{q} is not null");
         if let Some(p) = &sample {
@@ -413,8 +422,18 @@ pub fn completeness(
     let arms: Vec<String> = columns
         .iter()
         .map(|c| {
+            // The column name reaches the SQL twice, as a literal and as an
+            // identifier, and each needs its own escape. The names here come
+            // from an operator's `--column` rather than from delivered data, so
+            // this is robustness rather than a security boundary — but the
+            // functions added to this module alongside these two do escape, and
+            // leaving one convention per function means a reader cannot tell
+            // which applies. A quote in a name produced invalid SQL and a
+            // confusing parse error rather than anything worse.
+            let q = quoted_ident(c);
+            let lit = c.replace('\'', "''");
             format!(
-                "select {group_select}, '{c}' as column_name,\n  count(*) - count(\"{c}\") as total_null_rows,\n  count(*) as total_rows_inc_nulls,\n  cast(count(\"{c}\")*1.0/count(*) as float) as completeness\nfrom {concat} {group_by}",
+                "select {group_select}, '{lit}' as column_name,\n  count(*) - count({q}) as total_null_rows,\n  count(*) as total_rows_inc_nulls,\n  cast(count({q})*1.0/count(*) as float) as completeness\nfrom {concat} {group_by}",
                 concat = concat.templated
             )
         })
@@ -434,8 +453,10 @@ pub fn column_value_frequencies(
     let arms: Vec<String> = columns
         .iter()
         .map(|c| {
+            let q = quoted_ident(c);
+            let lit = c.replace('\'', "''");
             format!(
-                "select count(*) as value_count, '{c}' as group_name, cast(\"{c}\" as varchar) as value,\n  (select count(\"{c}\") from {concat}) as total_non_null_rows,\n  (select count(*) from {concat}) as total_rows_inc_nulls,\n  (select count(distinct \"{c}\") from {concat}) as distinct_value_count\nfrom {concat} where \"{c}\" is not null group by \"{c}\"",
+                "select count(*) as value_count, '{lit}' as group_name, cast({q} as varchar) as value,\n  (select count({q}) from {concat}) as total_non_null_rows,\n  (select count(*) from {concat}) as total_rows_inc_nulls,\n  (select count(distinct {q}) from {concat}) as distinct_value_count\nfrom {concat} where {q} is not null group by {q}",
                 concat = concat.templated
             )
         })
