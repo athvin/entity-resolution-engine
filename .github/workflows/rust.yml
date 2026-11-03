@@ -305,7 +305,28 @@ jobs:
           # restore-keys still prefix-match the previous entry for a partial
           # restore. Bump `prefix-key` by hand only for a change neither file
           # records.
-          prefix-key: "v1-rust"
+          #
+          # v1 -> v2 (2026-11-03): the duckdb `=1.20000.0` -> `=1.20000.1` bump
+          # in #376 poisoned the v1 entry. `libduckdb-sys`'s build script
+          # unpacks the bundled C++ sources into its `OUT_DIR` and panics if
+          # that directory is not empty:
+          #
+          #   unpacking bundled DuckDB sources:
+          #   Os { code: 39, kind: DirectoryNotEmpty }
+          #
+          # The saved `target/` carries a populated
+          # `debug/build/libduckdb-sys-<hash>/out`. On restore cargo re-runs the
+          # build script but does not clear that directory, so every job that
+          # compiles duckdb fails. Main's run for the bump went green because
+          # its jobs restored the PRE-bump entry and `lint` only wrote the
+          # poisoned one at the end — so the breakage lands on every PR
+          # afterwards and never on the commit that caused it, which is why it
+          # looks like the PR's fault.
+          #
+          # Bumping the prefix is the lever the paragraph above describes:
+          # restore-keys are prefixed too, so v1 becomes unreachable rather than
+          # being resurrected by a partial restore. One cold cycle, then normal.
+          prefix-key: "v2-rust"
           key: ${{ hashFiles('rust/Cargo.toml') }}
           # THIS job is the single writer of `shared-key: rust`. The other four
           # compile jobs restore from it and set `save-if: false`, because the
@@ -448,7 +469,7 @@ jobs:
           # Keyed to include a hash of Cargo.toml, which rust-cache does not
           # hash by default — see the `lint` job for the stale-entry failure that
           # cost. Keep these identical across jobs or they stop sharing.
-          prefix-key: "v1-rust"
+          prefix-key: "v2-rust"
           key: ${{ hashFiles('rust/Cargo.toml') }}
           # Restore-only. `lint` is the single writer of this key — see the long
           # comment there for why five writers on a 10 GB capped cache is what
@@ -588,7 +609,7 @@ jobs:
           # Keyed to include a hash of Cargo.toml, which rust-cache does not
           # hash by default — see the `lint` job for the stale-entry failure that
           # cost. Keep these identical across jobs or they stop sharing.
-          prefix-key: "v1-rust"
+          prefix-key: "v2-rust"
           key: ${{ hashFiles('rust/Cargo.toml') }}
           # Restore-only. `lint` is the single writer of this key — see the long
           # comment there for why five writers on a 10 GB capped cache is what
@@ -795,7 +816,7 @@ jobs:
         with:
           workspaces: rust
           shared-key: rust
-          prefix-key: "v1-rust"
+          prefix-key: "v2-rust"
           key: ${{ hashFiles('rust/Cargo.toml') }}
           # Restore-only. `lint` is the single writer of this key.
           save-if: false
@@ -940,7 +961,7 @@ jobs:
           # Keyed to include a hash of Cargo.toml, which rust-cache does not
           # hash by default — see the `lint` job for the stale-entry failure that
           # cost. Keep these identical across jobs or they stop sharing.
-          prefix-key: "v1-rust"
+          prefix-key: "v2-rust"
           key: ${{ hashFiles('rust/Cargo.toml') }}
           # Restore-only. `lint` is the single writer of this key — see the long
           # comment there for why five writers on a 10 GB capped cache is what
@@ -1105,7 +1126,7 @@ jobs:
           # Keyed to include a hash of Cargo.toml, which rust-cache does not
           # hash by default — see the `lint` job for the stale-entry failure that
           # cost. Keep these identical across jobs or they stop sharing.
-          prefix-key: "v1-rust"
+          prefix-key: "v2-rust"
           key: ${{ hashFiles('rust/Cargo.toml') }}
           # Restore-only. `lint` is the single writer of this key — see the long
           # comment there for why five writers on a 10 GB capped cache is what
@@ -1173,7 +1194,7 @@ jobs:
           # Keyed to include a hash of Cargo.toml, which rust-cache does not
           # hash by default — see the `lint` job for the stale-entry failure that
           # cost. Keep these identical across jobs or they stop sharing.
-          prefix-key: "v1-rust"
+          prefix-key: "v2-rust"
           key: ${{ hashFiles('rust/Cargo.toml') }}
           # Restore-only. `lint` is the single writer of this key — see the long
           # comment there for why five writers on a 10 GB capped cache is what
@@ -1232,7 +1253,7 @@ jobs:
           # Keyed to include a hash of Cargo.toml, which rust-cache does not
           # hash by default — see the `lint` job for the stale-entry failure that
           # cost. Keep these identical across jobs or they stop sharing.
-          prefix-key: "v1-rust"
+          prefix-key: "v2-rust"
           key: ${{ hashFiles('rust/Cargo.toml') }}
           # This key KEEPS its writer, unlike the four restore-only jobs above,
           # and the reasoning is worth recording because the opposite looks
