@@ -56,27 +56,36 @@ So the commit that poisons the cache passes, and the next unrelated PR wears it.
 **Fixed by #422**, which bumped `prefix-key` to `v2-rust` so the poisoned entry
 becomes unreachable (restore-keys are prefixed too).
 
-**The open question, stated so it can be settled by observation rather than
-argument.** The mechanism above does not depend on the bump — it needs only a
-restored populated `out/` plus a fingerprint mismatch, and jobs here legitimately
-differ in fingerprint (`lint` is the only writer, but `test`, the lake shards and
-the e2e slices each select different packages and features). Two readings
-follow:
+**SETTLED, structural — re-keying is not a durable fix.** The mechanism does
+not depend on the bump: it needs a restored populated `out/` plus a cargo
+fingerprint mismatch, and this repo's jobs legitimately differ in fingerprint
+(`lint` is the only writer, while `test`, the lake shards and the e2e slices
+each select different packages and features). The first run to RESTORE the v2
+entry — PR #423's, with an unchanged `Cargo.toml` — failed identically:
 
-- **Transitional** — the mismatch only arises at a dependency bump, so v2 holds
-  until the next duckdb change, and bumping the prefix is simply what one does
-  then.
-- **Structural** — `lint`'s saved tree can never satisfy the other jobs'
-  fingerprints for this crate, so the next run that restores v2 breaks the same
-  way.
+```
+Cache hit for: v2-rust-rust-Linux-x64-8556beb2-11e7c23f
+Restored from cache key "v2-rust-..." full match: true.
+  unpacking bundled DuckDB sources: Os { code: 39, kind: DirectoryNotEmpty }
+```
 
-They differ on one observable: **the first main run that RESTORES the v2 entry**
-(i.e. the next merge whose `Cargo.toml` is unchanged). Green → transitional,
-and nothing more is needed. Red → structural, and the remedy is to stop caching
-`target/` for these jobs: sccache is content-addressed, never touches `target/`,
-and already carries the work at a 99% hit rate, so the removal costs nothing
-measurable. `coverage` would keep its own entry regardless — it opts out of
-sccache, where the trade really is 1.8 GiB against a timeout.
+Note `full match: true`. The rust-cache KEY matched exactly; what did not match
+is cargo's own fingerprint for the build script, which the key does not model.
+Two different notions of "the cache is valid", and only one of them is checked.
+So a prefix bump buys exactly one cold green run per bump — `8578f995` was that
+run — and the next restore breaks again, on PRs as well as main.
+
+**Remedy applied:** rust-cache removed from all seven sccache-backed compile
+jobs. sccache is content-addressed per compilation unit and never touches
+`target/`, so it cannot fail this way, and it was already carrying the work:
+two runs with `No cache found.` finished in 8m03 and 8m45 at a 99% hit rate
+while the entry held ~1.3 GB. The removal was measured, not assumed — the
+no-cache run came in at 8–13m per job, in line with the sharded baseline.
+`coverage` keeps its own entry: it opts out of sccache (llvm-cov owns
+`RUSTFLAGS`), so there the trade really is 1.8 GiB against a timeout.
+
+With sccache on S3, buildkit on ECR and this gone, nothing in the Rust gate
+writes the Actions cache at all — which retires the single-writer rule too.
 
 ## The measured baseline (2026-10-22)
 
@@ -479,7 +488,7 @@ rust-cache entry, so making the profile real buys cache headroom twice.
 | `.cargo/config.toml` for local mold/sccache | no | helps laptops, not CI; worth doing, not yet scoped |
 | cargo-chef + cache mounts in `rust/Dockerfile` | no | `COPY . .` + one `cargo build --release` means any source change rebuilds DuckDB in release mode; real, separate |
 | More cores per job | **blocked** | not reachable by editing `runs-on:` on a user-owned repo — see below |
-| Drop rust-cache from the Rust jobs | **open — now also a correctness question** | two runs completed in 8m03 and 8m45 with `No cache found.` and sccache at 99%; it holds ~1.3 GB and contributed nothing measurable. Since 2026-11-03 it is also the thing that broke `main` — see the incident below for the open question about whether re-keying is a durable fix |
+| Drop rust-cache from the Rust jobs | **done 2026-11-03 — forced by correctness** | it holds ~1.3 GB, contributed nothing measurable (8m03/8m45 with `No cache found.` at 99% sccache), and restoring a partial `target/` broke every compile job. Re-keying was tried first (#422) and buys one cold run per bump; see the incident |
 | headstart | no | see below |
 
 ## Rejected: headstart
