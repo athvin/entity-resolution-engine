@@ -1,0 +1,140 @@
+#!/usr/bin/env bash
+# A `gh` stub for simulating merge-bus.yml end to end.
+#
+# Reads scenario facts from $SIM/state (plain key=value) and performs REAL git
+# operations against the local bare repo at $SIM/origin.git for anything that
+# mutates refs, so the git-visible consequences of a merge are genuine even
+# though the GitHub API is faked.
+#
+# Every invocation is appended to $SIM/calls.log so assertions can check what
+# the bus actually asked for.
+set -uo pipefail
+
+SIM="${SIM:?SIM must be set}"
+printf '%s\n' "gh $*" >>"$SIM/calls.log"
+
+get() { sed -n "s/^$1=//p" "$SIM/state" | tail -1; }
+origin="$SIM/origin.git"
+# A plain (non-bare) working clone used only to perform squash merges.
+work="$SIM/landing"
+
+die() { echo "gh-stub: unhandled: $*" >&2; exit 64; }
+
+case "${1:-}" in
+pr)
+  shift
+  case "${1:-}" in
+  list)
+    shift
+    base=main; label=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --base) base="$2"; shift 2 ;;
+        --label) label="$2"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    if [ "$base" = "main" ] && [ -n "$label" ]; then
+      get candidates | tr ' ' '\n' | sed '/^$/d'
+    else
+      # children of a branch: "children_<ref>=<numbers>"
+      get "children_${base}" | tr ' ' '\n' | sed '/^$/d'
+    fi
+    ;;
+  view)
+    n="$2"; shift 2
+    jqexpr=""; fields=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --json) fields="$2"; shift 2 ;;
+        --jq) jqexpr="$2"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    case "$fields" in
+      *mergeStateStatus,isDraft,baseRefName,headRefName*)
+        printf '%s|%s|%s|%s\n' "$(get "state_$n")" "$(get "draft_$n")" \
+                               "$(get "base_$n")" "$(get "head_$n")" ;;
+      title) printf 'title of #%s\n' "$n" ;;
+      headRefName) get "head_$n" ;;
+      headRefOid) git --git-dir="$origin" rev-parse "refs/heads/$(get "head_$n")" ;;
+      mergeStateStatus)
+        # Scripted sequence for the bus PR: pop one value per call.
+        seq_file="$SIM/busstate.seq"
+        if [ -s "$seq_file" ]; then
+          val="$(head -1 "$seq_file")"
+          tail -n +2 "$seq_file" >"$seq_file.t"; mv "$seq_file.t" "$seq_file"
+        else
+          val="$(get bus_state_final)"
+        fi
+        printf '%s\n' "$val"
+        # Mid-validation hook: land an unrelated commit on origin/main once the
+        # bus believes the batch is green, which is exactly the window the
+        # land step's BASE_SHA re-assertion exists to close.
+        if [ "$val" = "CLEAN" ] && [ "$(get move_main)" = "1" ] && [ ! -f "$SIM/.moved" ]; then
+          touch "$SIM/.moved"
+          mv="$SIM/mover"; rm -rf "$mv"
+          git clone --quiet "$origin" "$mv"
+          git -C "$mv" switch --quiet --detach origin/main
+          echo "someone else's work" >"$mv/src/intruder.txt"
+          git -C "$mv" add -A
+          git -C "$mv" -c user.name=o -c user.email=o@x commit --quiet -m "unrelated commit landed mid-validation"
+          git -C "$mv" push --quiet origin HEAD:refs/heads/main
+        fi ;;
+      statusCheckRollup) get failed_contexts ;;
+      *) die "pr view fields=$fields jq=$jqexpr" ;;
+    esac
+    ;;
+  create)
+    br=""
+    while [ $# -gt 0 ]; do
+      case "$1" in --head) br="$2"; shift 2 ;; *) shift ;; esac
+    done
+    num="$(get bus_number)"
+    echo "head_$num=$br" >>"$SIM/state"
+    echo "https://github.com/o/r/pull/$num"
+    ;;
+  merge)
+    n="$2"
+    if [ "$(get merge_fails_on)" = "$n" ]; then
+      echo "gh-stub: simulated merge failure for #$n" >&2; exit 1
+    fi
+    if [ "$(get merge_noops_on)" = "$n" ]; then
+      # Reports success while landing nothing — which is not hypothetical:
+      # a stacked PR whose base branch is deleted is marked MERGED, with a real
+      # mergeCommit, while its code never reaches main. This is the case the
+      # land step's tree assertion exists to catch.
+      echo "merged #$n (squash)"; exit 0
+    fi
+    head="$(get "head_$n")"
+    git -C "$work" fetch --quiet origin main "refs/heads/$head"
+    git -C "$work" switch --quiet --detach FETCH_HEAD >/dev/null 2>&1 || true
+    git -C "$work" switch --quiet --detach origin/main
+    git -C "$work" merge --squash --quiet "refs/remotes/origin/$head" >/dev/null
+    git -C "$work" -c user.name=s -c user.email=s@x commit --quiet -m "squash #$n"
+    git -C "$work" push --quiet origin "HEAD:refs/heads/main"
+    git -C "$work" push --quiet origin ":refs/heads/$head"
+    echo "merged #$n (squash)"
+    ;;
+  edit|comment|close) : ;;
+  *) die "pr $*" ;;
+  esac
+  ;;
+api)
+  path="$2"
+  case "$path" in
+    *actions/runs/*/jobs*)
+      # Keyed per run id, so the pre-flight (which reads the recent completed
+      # runs) and the verdict classification (which reads the bus PR's own
+      # runs) can disagree — that is what a mid-validation capacity loss is.
+      rid="${path#*actions/runs/}"; rid="${rid%%/jobs*}"
+      v="$(get "steps_run_${rid}")"
+      [ -n "$v" ] || v="$(get steps_per_run)"
+      printf '%s\n' "${v:-0}" ;;
+    *actions/runs?status=completed*) get recent_run_ids | tr ' ' '\n' | sed '/^$/d' ;;
+    *actions/runs?head_sha=*) get bus_run_ids | tr ' ' '\n' | sed '/^$/d' ;;
+    *) die "api $path" ;;
+  esac
+  ;;
+*) die "$*" ;;
+esac

@@ -257,6 +257,25 @@ Four properties worth knowing before changing it:
   bus retargets stacked children onto `main` *before* merging their parent,
   which is the only time `gh pr edit --base` still works.
 
+**It has a simulator, and you should run it.** `bash scripts/ci/merge-bus-test.sh`
+executes the workflow's real step scripts with a runner's semantics for the
+parts that carry bugs — per-step `$GITHUB_OUTPUT`, `${{ }}` in `env:`, `if:`
+gating, a failed step halting the job — against a local bare repo with a
+stubbed `gh`. Git operations are genuine; only the GitHub API is faked. It
+exists because `workflow_dispatch` fires only for a workflow already on the
+default branch, so the live path cannot be exercised before the thing is
+merged, and because this is bash that merges to `main`.
+
+Each scenario was **mutation-tested**: the matching guard was deleted from the
+workflow and the suite confirmed to go red. That exercise is what found the one
+blind spot worth knowing about — removing the land step's tree assertion left
+every scenario green, because the tree always matched. The `lying` scenario now
+simulates `gh pr merge` reporting success while landing nothing, which is the
+real shape of the trap (a stacked PR marked `MERGED`, with a `mergeCommit`,
+whose code never reached `main`). It is hand-run, like a skill's `evals.md`:
+it needs python3 with PyYAML, and a required check may not be added here before
+it has been observed failing.
+
 `merge bus` **must never become a required status check**: it runs on
 `workflow_dispatch` only, so it can never report on a PR, and a required
 context that never reports blocks every PR forever. It is also the first
