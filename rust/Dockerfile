@@ -17,7 +17,26 @@
 # this context. The er-entity-gen `no_embedded_asset_escapes_the_cargo_workspace`
 # gate enforces that, after a generated module embedding the entity YAML by
 # relative path broke every image build while `make check` stayed green.
-FROM rust:1-bookworm AS build
+# THE DEPENDENCY LAYER IS SPLIT OUT, and the reason is a measurement: this
+# file used to be `COPY . .` followed by one `cargo build`, so ANY change under
+# rust/ — a one-line handler edit — invalidated that layer and recompiled all
+# 408 crates, bundled DuckDB's C++ included. Run 41524220825 measured it at
+# 58m9s on every rust-touching merge to main, with deploy-dev waiting behind it.
+#
+# cargo-chef splits it in two. `prepare` reduces the workspace to a recipe
+# (manifests + lockfile, no sources); `cook` builds the dependency graph from
+# that recipe against stubbed workspace crates. Sources then arrive in a LATER
+# layer, so a source-only change reuses the cooked dependencies and recompiles
+# only this workspace's 33 crates. The recipe changes when Cargo.toml or
+# Cargo.lock does, which is exactly when the dependency build genuinely must
+# re-run. The cook layer is what the ECR registry cache (images.yml
+# `cache-to: type=registry`) now carries between runs.
+#
+# `--bin er-server` on BOTH cook and build, deliberately: cargo resolves
+# features per selected target, so cooking the whole workspace would unify a
+# different feature set than the final build asks for, and every crate whose
+# features differed would compile a second time — handing back the saving.
+FROM rust:1-bookworm AS chef
 WORKDIR /src
 # mold is the LINKER FIX, not an optimisation: on aarch64-linux, GNU ld fails
 # this link with `undefined reference to duckdb_register_static_extensions` —
@@ -30,10 +49,29 @@ WORKDIR /src
 # kind-probe image on an arm64 host.
 RUN apt-get update && apt-get install -y --no-install-recommends mold \
     && rm -rf /var/lib/apt/lists/*
+# Pinned, like every other third-party tool here. This compiles cargo-chef
+# itself, which is why it sits in the shared base stage: the layer is reused by
+# both stages below and only rebuilt when this version changes.
+RUN cargo install cargo-chef --locked --version 0.1.78
+
+FROM chef AS planner
 COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM chef AS build
+# `.cargo/config.toml` BEFORE the cook, not with the sources. It carries the
+# CXXFLAGS that stamp libduckdb-sys's release version, and CXXFLAGS is part of
+# that crate's fingerprint: cooking without it would build DuckDB once here and
+# then AGAIN after the sources arrived with the config — the single most
+# expensive crate in the graph, compiled twice, for no gain.
+COPY .cargo .cargo
+COPY --from=planner /src/recipe.json recipe.json
 # DuckDB is compiled from sources vendored inside the `libduckdb-sys` crate (the
-# `bundled` feature untars them and builds with cc), so the only network the
-# build stage needs is crates.io — it does NOT fetch a prebuilt library.
+# `bundled` feature untars them and builds with cc), so the only network this
+# stage needs is crates.io — it does NOT fetch a prebuilt library. This is the
+# step that takes the time, and the step the layer cache now spares.
+RUN RUSTFLAGS="-C link-arg=-fuse-ld=mold" cargo chef cook --release --bin er-server --recipe-path recipe.json
+COPY . .
 RUN RUSTFLAGS="-C link-arg=-fuse-ld=mold" cargo build --release --bin er-server
 RUN strip target/release/er-server || true
 
