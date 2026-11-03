@@ -55,19 +55,58 @@ setup (how to run things, the dev substrate) stays in
 
 ---
 
-## The four tiers
+## The five tiers
 
 | Tier | Command | Runs in CI | What belongs here |
 |---|---|---|---|
 | **unit** — `tests/unit/` | `pnpm test` | yes, per-PR | Pure logic and anything with a decision matrix. Authorization, domain vocabularies, parsers, error envelopes. DB-backed cases run against PGlite. |
 | **component** — `tests/component/` | yes, per-PR | yes, per-PR | Branchy *render* logic: a component whose output derives from data (bar widths, chips, diffs). **Not** screens. |
 | **functional** — `tests/functional/` | `pnpm test:e2e` | yes, per-PR | Every screen and flow against the mock erserver, on three device projects, plus the visual baselines and the axe a11y sweep. This is the bulk of the coverage. |
+| **driver** — `tests/driver/` | `pnpm test:driver` | yes, per-PR | The postgres.js contract against a **real** PostgreSQL. Nothing else — see below. |
 | **full-stack** — `tests/e2e/` | `make frontend-e2e` | **no — release gate** | The real journey against a seeded dev stack (Docker, ~10 min). See [The full-stack tier](#the-full-stack-tier). |
 
 **Which tier does a change need?** If it is logic with branches, a unit test. If
 it is a component whose markup depends on data, a component test. If it is a
 screen, a flow, or anything a user would notice, the functional tier — that is
 where Playwright already drives real code against a real BFF.
+
+### The driver tier, and the hole it closes
+
+`db()` branches on the URL: `pglite://` takes PGlite (in-process WASM),
+anything else takes `drizzle-orm/postgres-js`. **Every tier above points at
+`pglite://memory`** — each DB-backed unit file sets it, and so does
+`playwright.config.ts` for both webServers. The only config naming a real
+server is `playwright.e2e.config.ts`, which is the release gate.
+
+So before this tier, nothing gating a merge ever constructed the real driver.
+That is not hypothetical: the **postgres 3.4.9 → 4.0.0 major (#378) passed all
+eight required contexts without postgres.js being loaded once**, and was
+cleared by hand instead. This class has no failing assertion to find — the code
+path simply does not run — which is why the fix is a tier and not a test added
+to an existing file.
+
+It is deliberately five cases, not a second unit tier: the types postgres v4's
+`infer: false` change can actually reach (boolean, `Buffer`/bytea, jsonb,
+`Date`/timestamptz), a transaction commit **and** rollback, and a COUNT. bytea
+is the consequential one — `org_credentials` holds each tenant's sealed
+erserver key, so a driver that mangles it costs tenant access, not a red test.
+
+Two rules when touching it:
+
+- **`environment: node`, always.** `vitest.driver.config.ts` pins it, and the
+  reason is load-bearing: postgres v4 detects binary with
+  `x instanceof Uint8Array`, so under vitest's default jsdom a Node `Buffer`
+  fails that check against jsdom's realm, the driver sends bytea as text, and
+  PostgreSQL rejects it `22P02 invalid input syntax for type bytea`. It reads
+  exactly like a driver incompatibility and is not one. Never move these cases
+  into `tests/unit/`, which is jsdom.
+- **It refuses to run against PGlite**, by an explicit assertion rather than by
+  luck. Pointed at `pglite://memory` it would still fail — PGlite returns a
+  non-`Buffer` for bytea — but incidentally, naming the wrong problem. The
+  `beforeAll` check makes the misconfiguration say so.
+
+Per the rule below, both halves were observed before the job was trusted: under
+jsdom it fails *exactly* the vault case; under node it passes 5/5.
 
 Do not reach for a component test to cover something the functional tier already
 drives. Duplicating a screen in jsdom is slower to run, weaker evidence, and two

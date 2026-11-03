@@ -28,6 +28,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:driver": "vitest run --config vitest.driver.config.ts",
     "test:e2e": "playwright test",
     "test:e2e:fresh": "bash dev/kill-servers.sh && playwright test",
     "test:e2e:full": "playwright test --config playwright.e2e.config.ts",
