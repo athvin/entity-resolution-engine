@@ -40,6 +40,7 @@ pub mod exec_task;
 pub mod executor;
 pub(crate) mod fixups;
 pub mod mail;
+pub mod migrate_plan;
 pub mod openapi;
 pub mod pg;
 pub mod profile_params;

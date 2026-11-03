@@ -60,6 +60,7 @@ mod pg_labels;
 mod pg_lake_catalog_schema;
 mod pg_lexicon;
 mod pg_mass_update;
+mod pg_migrate_plan;
 mod pg_migrate_tenants;
 mod pg_model_registry;
 mod pg_orgs;
