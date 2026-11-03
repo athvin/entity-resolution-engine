@@ -67,6 +67,16 @@ fn failures_are_classified_from_the_messages_this_codebase_produces() {
         ),
         ("connection reset by peer", FailureClass::TransientIo),
         ("operation timed out", FailureClass::TransientIo),
+        // A request that named something invalid is a precondition: retrying
+        // cannot help, because what is missing arrives when a CALLER changes
+        // the request. These used to fall through to `Internal`, which means
+        // "a bug until proven otherwise" and is alarmed on rather than
+        // reframed — so a caller's typo looked like an engine defect.
+        (
+            "a raw profile needs a \"source\" param: two sources' delivered payloads share no \
+             schema",
+            FailureClass::Precondition,
+        ),
         // Anything unrecognised stays internal.
         (
             "dispatcher task panicked: index out of bounds",

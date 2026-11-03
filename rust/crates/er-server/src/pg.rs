@@ -414,6 +414,16 @@ impl FailureClass {
             || m.contains("no trained model")
             || m.contains("no model yet")
             || m.contains("has no drop_root")
+            // A request that named something invalid — a missing required
+            // param, an unknown subject — is a precondition for the same
+            // reason the others are: retrying cannot help, because what is
+            // missing arrives when a caller changes the request. Without this
+            // branch such a failure fell through to `Internal`, which means
+            // "a bug until proven otherwise" and is alarmed on rather than
+            // reframed. Matched on `param:` because the validators that
+            // produce these messages all name the parameter and then explain,
+            // which is a shape worth keeping stable for exactly this reason.
+            || m.contains("param:")
         {
             FailureClass::Precondition
         } else if m.starts_with("config:") || m.contains("read config") {
