@@ -28,6 +28,7 @@
 use std::sync::OnceLock;
 
 use tracing_subscriber::EnvFilter;
+use tracing_subscriber::Layer as _;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
@@ -107,6 +108,58 @@ pub const DEFAULT_FILTER: &str = concat!(
     ",tokio_postgres=warn,aws_smithy_runtime=warn,aws_config=warn",
     ",aws_sdk_sesv2=warn,tower=warn,kube=info,kube_client=warn",
 );
+
+/// A per-layer filter that passes spans and drops **events**.
+///
+/// ## Why the exported signal carries no events
+///
+/// `tracing-opentelemetry` turns every `tracing` event inside a span into a
+/// span event, fields and all — so any `tracing::error!(error = %e)` anywhere
+/// in the workspace becomes exported content. That is an uncontrolled surface:
+/// a database error message routinely contains the offending record value.
+/// Measured on DuckDB, with a real fixture address:
+///
+/// ```text
+/// Constraint Error: Duplicate key "email: robert.chen@example.com"
+/// violates primary key constraint.
+/// ```
+///
+/// §10.4's rule is that telemetry carries identifiers and counts and never
+/// values, and this is a deduplication engine, so that string IS the payload.
+///
+/// Auditing the call sites would not hold. There are ~118 `eprintln!`s still to
+/// become `tracing` events, and the next person to add one cannot be expected
+/// to know that an `error` field reaches an exportable store. So the guarantee
+/// is structural, the same way `er_span::sql_span` has no parameter argument:
+/// events are not exported at all, and no field of one can leak.
+///
+/// Nothing is lost in-account. Every event still reaches stderr through the
+/// structured JSON layer and Fluent Bit still ships it to CloudWatch, which is
+/// where a message belongs. The span keeps the FACT of a failure —
+/// `er.outcome` and `otel.status_code` — which is what the collector's `errors`
+/// sampling policy and every dashboard actually read.
+///
+/// Reversible by deleting one `with_filter`, if a span-event allowlist ever
+/// becomes worth building.
+pub struct SpansOnly;
+
+impl<S> tracing_subscriber::layer::Filter<S> for SpansOnly {
+    fn enabled(
+        &self,
+        _meta: &tracing::Metadata<'_>,
+        _cx: &tracing_subscriber::layer::Context<'_, S>,
+    ) -> bool {
+        true
+    }
+
+    fn event_enabled(
+        &self,
+        _event: &tracing::Event<'_>,
+        _cx: &tracing_subscriber::layer::Context<'_, S>,
+    ) -> bool {
+        false
+    }
+}
 
 /// Held for the life of the process. Dropping it releases the process span and
 /// flushes whatever the exporter still holds.
@@ -214,10 +267,12 @@ pub fn init(role: Role) -> Guard {
     // layers — which is why its diagnostics are deferred to `report()` below
     // rather than emitted here, where nothing would be listening yet.
     let outcome = crate::otlp::build_provider(role);
-    let otel = outcome
-        .provider
-        .as_ref()
-        .map(|provider| tracing_opentelemetry::layer().with_tracer(crate::otlp::tracer(provider)));
+    let otel = outcome.provider.as_ref().map(|provider| {
+        tracing_opentelemetry::layer()
+            .with_tracer(crate::otlp::tracer(provider))
+            // Spans leave the process; events do not. See `SpansOnly`.
+            .with_filter(SpansOnly)
+    });
 
     tracing_subscriber::registry()
         .with(filter)
