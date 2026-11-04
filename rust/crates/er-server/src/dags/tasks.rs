@@ -923,7 +923,7 @@ impl Task<Session> for Train {
             .map_err(|e| engine_error(&format!("train artifact dir {}: {e}", dir.display())))?;
         let out_model = dir.join("model.json");
         let out_tf = dir.join("tf.csv");
-        er_cli::run_train(
+        let report = er_cli::run_train(
             ctx.session,
             &er_cli::TrainInputs {
                 template_settings_json: &template,
@@ -968,7 +968,23 @@ impl Task<Session> for Train {
                 config_hash: er_config::config_hash(&run.config),
                 labels_used: labels.len(),
             }),
-            er_dag::Counters(serde_json::json!({ "labels_used": labels.len() })),
+            // Convergence travels as a counter, not as an error: EM stopping at
+            // the iteration cap still produces usable parameters, and refusing
+            // the model would be worse than shipping it with the caveat
+            // attached. Until now the caveat was dropped on the floor —
+            // `run_train` discarded the whole outcome, so a session that never
+            // settled was indistinguishable from one that converged on step
+            // two, in the ledger and everywhere downstream of it.
+            er_dag::Counters(serde_json::json!({
+                "labels_used": labels.len(),
+                "em_sessions": report.sessions,
+                "em_converged": report.converged(),
+                "em_max_iterations": report.max_iterations,
+                // Named, not counted: which blocking rule failed to settle is
+                // the actionable half — it points at the rule whose pair
+                // population is too small or too skewed for EM to resolve.
+                "em_not_converged": report.not_converged,
+            })),
         ))
     }
 }

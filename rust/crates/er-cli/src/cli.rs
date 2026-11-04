@@ -379,7 +379,7 @@ pub fn run() -> Result<()> {
         } => {
             let template_settings_json = std::fs::read_to_string(&template)
                 .with_context(|| format!("reading {}", template.display()))?;
-            crate::run_train(
+            let report = crate::run_train(
                 &session,
                 &crate::TrainInputs {
                     template_settings_json: &template_settings_json,
@@ -397,9 +397,20 @@ pub fn run() -> Result<()> {
                 &out_model,
                 &out_tf,
             )?;
+            // Convergence on the same line as the artifacts: an operator
+            // training by hand is the one reader who can act on it
+            // immediately, by widening the EM rule whose pair population was
+            // too thin to settle.
             println!(
-                "trained {} -> {} + {}",
+                "trained {} ({}, {} EM session(s), {} iteration(s) max) -> {} + {}",
                 model_version,
+                if report.converged() {
+                    "converged".to_string()
+                } else {
+                    format!("DID NOT CONVERGE: {}", report.not_converged.join(", "))
+                },
+                report.sessions,
+                report.max_iterations,
                 out_model.display(),
                 out_tf.display()
             );

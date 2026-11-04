@@ -2487,7 +2487,7 @@ fn train_produces_a_scorable_model() {
     let template = std::fs::read_to_string(repo_fixture("model_test_v1.json")).unwrap();
     let out_model = tmp.join("trained.json");
     let out_tf = tmp.join("trained.tf.csv");
-    er_cli::run_train(
+    let report = er_cli::run_train(
         &session,
         &er_cli::TrainInputs {
             template_settings_json: &template,
@@ -2509,6 +2509,34 @@ fn train_produces_a_scorable_model() {
     .unwrap();
     assert!(out_model.exists(), "trained settings written");
     assert!(out_tf.exists(), "TF snapshot written");
+
+    // Training now says what it is willing to claim about itself. This was
+    // returned by `Linker::train` since EM landed and read by NOTHING —
+    // `run_train` discarded the whole outcome — so a session that hit the
+    // iteration cap without settling produced a model indistinguishable from
+    // one that converged on step two.
+    //
+    // Asserted as a SHAPE, not as a verdict: whether base_10's one EM rule
+    // converges is the engine's business and a golden's, and pinning `true`
+    // here would make this test fail for a legitimate change to the EM
+    // tolerance. What must hold is that the report describes the sessions that
+    // actually ran.
+    assert_eq!(report.sessions, 1, "one session per em_rules entry");
+    assert!(
+        report.max_iterations > 0,
+        "a session that ran has iterations"
+    );
+    assert_eq!(
+        report.converged(),
+        report.not_converged.is_empty(),
+        "the summary and the detail cannot disagree"
+    );
+    for rule in &report.not_converged {
+        assert!(
+            !rule.is_empty(),
+            "a non-converged session names its blocking rule, or the report is unactionable"
+        );
+    }
 
     // The trained artifacts round-trip: a full match with them scores pairs.
     let trained = std::fs::read_to_string(&out_model).unwrap();

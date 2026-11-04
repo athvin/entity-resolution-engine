@@ -100,9 +100,20 @@ impl TrainedModel {
     }
 
     /// Combine trained values (median of concrete estimates) and write them
-    /// into the compiled levels. A level whose only estimates are
-    /// `NotObserved` becomes the sentinel; levels with no estimates and no
-    /// fixed value are left as-is.
+    /// into the compiled levels.
+    ///
+    /// A level whose only estimates are `NotObserved` is left **as-is**, so it
+    /// falls back to its built-in default — the not-observed estimates are
+    /// filtered out and `median` of an empty slice is `None`. This comment used
+    /// to say such a level "becomes the sentinel", which the code below has
+    /// never done; the claim outlived the variant it described, and it is the
+    /// reason a later design doc concluded that an unobserved level scores at
+    /// u = 1e-6.
+    ///
+    /// Falling back to the default is the better behaviour and worth keeping on
+    /// purpose: the default is a considered prior for the level's POSITION in
+    /// the ladder, while 1e-6 asserts "these values practically never agree by
+    /// chance" on the strength of having seen no evidence either way.
     pub fn populate_from_trained_values(&mut self) {
         // Combine trained estimates: median of the NUMERIC estimates only
         // (sentinel "not observed" values are filtered out). If no numeric
@@ -206,5 +217,96 @@ mod tests {
         assert_eq!(median(&[1.0, 3.0]), Some(2.0));
         assert_eq!(median(&[3.0, 1.0, 2.0]), Some(2.0));
         assert_eq!(median(&[1.0, 2.0, 3.0, 4.0]), Some(2.5));
+    }
+
+    /// A level EM never observed keeps its DEFAULT, and is not driven to the
+    /// near-impossible 1e-6.
+    ///
+    /// Asserted because nothing asserted it, and the gap is what let a false
+    /// claim survive in two places at once: this function's own doc comment
+    /// said such a level "becomes the sentinel", and this feature's design doc
+    /// reasoned from that to "an unobserved level produces a large spurious
+    /// match weight, and nothing warns". Neither was true of trained output —
+    /// `combine` filters the not-observed estimates out, `median` of nothing is
+    /// `None`, and the slot is left alone.
+    ///
+    /// The distinction is worth a test rather than a comment because the two
+    /// behaviours are far apart in consequence. The default is a considered
+    /// prior for the level's position in the ladder; 1e-6 asserts that these
+    /// values practically never agree by chance, on the strength of having seen
+    /// no evidence either way, and `log2(m/u)` turns that into a large positive
+    /// weight for a level nobody measured.
+    #[test]
+    fn a_never_observed_level_falls_back_to_its_default() {
+        let mut history: BTreeMap<LevelKey, Vec<ParamEstimate>> = BTreeMap::new();
+        let key: LevelKey = (0, 2);
+        history.insert(
+            key,
+            vec![
+                ParamEstimate {
+                    value: ProbEstimate::NotObserved,
+                    source: EstimateSource::Em {
+                        blocking_rule: "l.email = r.email".to_string(),
+                    },
+                },
+                ParamEstimate {
+                    value: ProbEstimate::NotObserved,
+                    source: EstimateSource::Em {
+                        blocking_rule: "l.phone = r.phone".to_string(),
+                    },
+                },
+            ],
+        );
+
+        // The same arithmetic `populate_from_trained_values` applies: the
+        // not-observed estimates are filtered, leaving nothing to take a
+        // median of, so there is no slot to write and the level keeps what it
+        // had.
+        let numeric: Vec<f64> = history
+            .get(&key)
+            .expect("the history was just inserted")
+            .iter()
+            .filter_map(|e| match e.value {
+                ProbEstimate::Value(v) => Some(v),
+                ProbEstimate::NotObserved => None,
+            })
+            .collect();
+        assert_eq!(
+            numeric,
+            Vec::<f64>::new(),
+            "both estimates were not-observed"
+        );
+        assert_eq!(median(&numeric), None, "nothing to write means no write");
+
+        // And the slot that is left over resolves to the default rather than
+        // to a sentinel — which is the half that used to be wrong.
+        let slot = crate::comparison::ProbabilitySlot::Unset;
+        assert!(
+            (slot.resolve(0.09) - 0.09).abs() < f64::EPSILON,
+            "an unwritten slot must read as the level's default"
+        );
+        assert!(
+            (slot.resolve(0.09) - crate::comparison::LEVEL_NOT_OBSERVED_VALUE).abs() > f64::EPSILON,
+            "...and must NOT read as EM's in-session not-observed value"
+        );
+    }
+
+    /// One mixed estimate is enough: the numeric one wins and the
+    /// not-observed ones are ignored rather than dragging the median down.
+    #[test]
+    fn a_partly_observed_level_uses_only_the_numeric_estimates() {
+        let estimates = [
+            ProbEstimate::NotObserved,
+            ProbEstimate::Value(0.4),
+            ProbEstimate::NotObserved,
+        ];
+        let numeric: Vec<f64> = estimates
+            .iter()
+            .filter_map(|v| match v {
+                ProbEstimate::Value(x) => Some(*x),
+                ProbEstimate::NotObserved => None,
+            })
+            .collect();
+        assert_eq!(median(&numeric), Some(0.4));
     }
 }
