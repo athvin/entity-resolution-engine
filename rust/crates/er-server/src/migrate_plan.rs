@@ -229,6 +229,58 @@ pub fn control_catalog_hash() -> String {
     er_entity_diff::catalog_hash(&er_entities::catalog::catalog(), Store::Postgres)
 }
 
+/// What `er-server migrate` was asked to do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MigrateArgs {
+    /// Report and write nothing, whatever the verdict.
+    pub plan_only: bool,
+    /// Plan first and refuse — writing nothing — if the plan is breaking;
+    /// otherwise apply.
+    pub expect_additive: bool,
+    /// Machine-readable output.
+    pub json: bool,
+}
+
+impl MigrateArgs {
+    /// Whether this invocation needs a plan at all.
+    #[must_use]
+    pub fn plans(self) -> bool {
+        self.plan_only || self.expect_additive
+    }
+}
+
+/// Parse `er-server migrate`'s arguments, refusing anything unrecognised.
+///
+/// Extracted from the binary so the refusal is testable, and it is testable
+/// because the refusal is the whole point. The chart invokes this command from
+/// a Helm hook, where the arguments are a string in a YAML file: a misspelled
+/// `--expect-aditive` that were merely IGNORED would silently turn the gate
+/// back into a plain apply, and the deploy would look identical while having
+/// lost the thing it was added for.
+///
+/// That is not hypothetical. Probing the hook against a cluster running an
+/// image built before this flag existed, the old binary — which took no
+/// arguments at all — accepted `--does-not-exist` and exited 0 having done a
+/// normal migrate. Silent acceptance is the behaviour being removed.
+///
+/// # Errors
+/// The first unrecognised argument, named.
+pub fn parse_migrate_args(args: &[String]) -> Result<MigrateArgs, String> {
+    const KNOWN: [&str; 3] = ["--plan", "--json", "--expect-additive"];
+    if let Some(unknown) = args.iter().find(|a| !KNOWN.contains(&a.as_str())) {
+        return Err(format!(
+            "er-server migrate: unknown argument {unknown:?} (expected {})",
+            KNOWN.join(", ")
+        ));
+    }
+    let has = |name: &str| args.iter().any(|a| a == name);
+    Ok(MigrateArgs {
+        plan_only: has("--plan"),
+        expect_additive: has("--expect-additive"),
+        json: has("--json"),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -393,6 +445,67 @@ mod tests {
         assert_eq!(value["breaking"].as_array().unwrap().len(), 1);
         assert_eq!(value["ahead"].as_array().unwrap().len(), 1);
         assert_eq!(value["ahead"][0]["severity"], "ahead");
+    }
+
+    fn args(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| (*s).to_string()).collect()
+    }
+
+    #[test]
+    fn no_arguments_means_apply() {
+        let parsed = parse_migrate_args(&[]).unwrap();
+        assert!(!parsed.plans(), "a bare migrate must not plan");
+        assert!(!parsed.plan_only);
+        assert!(!parsed.expect_additive);
+    }
+
+    #[test]
+    fn each_mode_parses() {
+        assert!(parse_migrate_args(&args(&["--plan"])).unwrap().plan_only);
+        assert!(
+            parse_migrate_args(&args(&["--expect-additive"]))
+                .unwrap()
+                .expect_additive
+        );
+        assert!(
+            parse_migrate_args(&args(&["--plan", "--json"]))
+                .unwrap()
+                .json
+        );
+        // Both plan, which is what decides whether a plan is computed at all.
+        assert!(parse_migrate_args(&args(&["--plan"])).unwrap().plans());
+        assert!(
+            parse_migrate_args(&args(&["--expect-additive"]))
+                .unwrap()
+                .plans()
+        );
+    }
+
+    #[test]
+    fn an_unknown_argument_is_refused_and_named() {
+        // The case that matters, and it is not hypothetical. Probing the Helm
+        // hook against a cluster running an image built before this flag
+        // existed, the old binary — which took no arguments — accepted
+        // `--does-not-exist` and exited 0 having done a normal migrate. A
+        // misspelled `--expect-aditive` in a chart would have turned the gate
+        // silently back into a plain apply.
+        let err = parse_migrate_args(&args(&["--expect-aditive"])).unwrap_err();
+        assert!(
+            err.contains("--expect-aditive"),
+            "names the offender: {err}"
+        );
+        assert!(
+            err.contains("--expect-additive"),
+            "names the alternatives: {err}"
+        );
+    }
+
+    #[test]
+    fn an_unknown_argument_beside_a_valid_one_still_refuses() {
+        // Order must not matter: a scan that stopped at the first RECOGNISED
+        // flag would accept `--plan --oops`.
+        assert!(parse_migrate_args(&args(&["--plan", "--oops"])).is_err());
+        assert!(parse_migrate_args(&args(&["--oops", "--plan"])).is_err());
     }
 
     #[test]

@@ -1,0 +1,100 @@
+# The control-plane schema, as a pre-upgrade hook that may only ADD.
+#
+# This replaces the `er-migrate` init container on the web-api pod, and the
+# swap is the condition `docs/entity-framework-design.md` names in its own
+# rule 4: *"If replicas ever exceed one, the rule becomes expand-and-contract
+# and the init container is replaced by a hook that may only add."* The colour
+# dimension is that condition — two Deployments exist, and one of them is
+# serving while the other is deployed into.
+#
+# The init container worked because `Recreate` guaranteed the old pod was
+# already gone, so no old code could see a migrated schema. That guarantee is
+# exactly what blue/green gives up on purpose: the point is that the old colour
+# keeps serving. So the migration has to become one the old code survives, and
+# `--expect-additive` is what makes that a property rather than a hope.
+#
+# WHY A HOOK IS SAFE NOW WHEN IT WAS REJECTED BEFORE. `job-db-migrate.yaml`'s
+# header records the objection — a pre-upgrade hook runs while the old pod still
+# serves. That objection is sound and is not dismissed here; it is answered.
+# `er-server migrate --expect-additive` PLANS first and refuses, writing
+# nothing, if the plan contains anything the reconciler would not auto-apply.
+# What it can therefore execute is only `CREATE TABLE` for an absent relation
+# and `ADD COLUMN` for an absent nullable one — and the live colour tolerates
+# both, because every statement names its columns (E011), so an older binary
+# reads an ahead store correctly.
+#
+# That refusal is also why this is not redundant with the check `ensure_schema`
+# already carries. `ensure_schema` is six transactions: by the time its phase-3
+# reconciler refuses, the baseline replay and the BeforeReconcile fixups have
+# COMMITTED. Right for a boot, wrong for a gate — and this is a gate.
+#
+# WHICH IMAGE IT RUNS. `images.api`, not a colour's pin, and the distinction is
+# load-bearing: the colour blocks say what each DEPLOYMENT runs, while
+# `images.api` means "the release this upgrade is about". A cutover deploys the
+# new digest into the inactive colour and passes the same digest here, so the
+# schema is migrated by the catalog of the code that is about to serve. Deriving
+# it from a colour instead would be wrong in one of the two phases: during the
+# deploy phase `color.active` is still the OLD colour, and during the flip phase
+# the inactive one is.
+#
+# `ensure_schema` still rides the API's boot (idempotent, advisory-locked), so a
+# dev stack installed without this hook behaves exactly as it does today.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: er-schema-migrate
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: er-schema-migrate
+    app.kubernetes.io/component: migrations
+    {{- include "er-platform.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    # -5: after the ExternalSecrets at -10, which project the DSN this needs,
+    # and before the drizzle hook at 0. The two schemas are independent, but
+    # ordering them puts the one that can REFUSE first — a breaking control
+    # plane should stop the release before anything touches erweb.
+    helm.sh/hook-weight: "-5"
+    # Keep a FAILED Job for `kubectl logs`: its output is the refusal report,
+    # naming each difference the reconciler would not apply. A succeeded one is
+    # noise.
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  # ZERO retries, deliberately, unlike the drizzle hook's 3. The expected
+  # failure here is a refusal — a deliberate state someone created by writing a
+  # breaking entity change — and retrying a refusal three times triples the
+  # time to a clear error while changing nothing. The cost is that a transient
+  # Postgres blip fails the release instead of being absorbed; that is the
+  # better trade, because `--atomic` rolls the release back and re-running the
+  # deploy is one command, whereas a refusal buried under two retries is a
+  # confusing log.
+  backoffLimit: 0
+  # Generous, because this is where an index build on a live table lands (see
+  # entity-framework-design.md on why adding an index is not online yet).
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: er-schema-migrate
+        {{- include "er-platform.labels" . | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: er-api
+      securityContext:
+        {{- include "er-platform.podSecurityContext" . | nindent 8 }}
+      containers:
+        - name: schema-migrate
+          image: {{ include "er-platform.image" (dict "root" . "image" .Values.images.api) }}
+          command: ["er-server", "migrate", "--expect-additive"]
+          securityContext:
+            {{- include "er-platform.containerSecurityContext" . | nindent 12 }}
+            runAsUser: 1001
+            runAsGroup: 1001
+          env:
+            {{- include "er-platform.erserverEnv" . | nindent 12 }}
+          envFrom:
+            - secretRef:
+                name: er-erserver-env
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { cpu: 500m, memory: 512Mi }
