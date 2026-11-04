@@ -181,4 +181,53 @@ test.describe("profile", () => {
       "trust the number",
     );
   });
+
+  test("record quality names the rows to fix, and says what it is not scoped to", async ({
+    page,
+  }) => {
+    await login(page, USERS.viewer);
+    await page.goto(`/${ORG}/${DS}/profile`);
+
+    // The endpoint behind this was implemented upstream and consumed by
+    // NOTHING — no BFF route, no hook, no component, no mock arm — since it
+    // shipped. Its own feature plan listed wiring it as a free win and did not.
+    const quality = page.getByTestId("record-quality");
+    await expect(quality).toBeVisible();
+
+    // A bucket count beside its share: 46 unusable records is a crisis in a
+    // corpus of 400 and a rounding error in one of two million, and the count
+    // alone cannot tell you which.
+    const buckets = page.getByTestId("record-quality-buckets");
+    await expect(buckets).toContainText("46");
+    await expect(buckets).toContainText("6%");
+
+    // The worst records are the actionable half — a place to start, bounded by
+    // the server rather than paged.
+    const worst = page.getByTestId("record-quality-worst");
+    await expect(worst).toContainText("crm:C019");
+    await expect(worst).toContainText("21.0");
+
+    // ...and the card says it is NOT subject-scoped, because the switcher above
+    // does not move it and a reader would otherwise conclude the numbers are
+    // stale. Asserted by switching and re-checking.
+    await expect(quality).toContainText("do not change with the corpus selected");
+    await page.getByTestId("profile-subject-golden").click();
+    await expect(page.getByTestId("record-quality-buckets")).toContainText("46");
+  });
+
+  test("a dataset with no scoring configured says so, rather than showing zeros", async ({
+    page,
+  }) => {
+    // Steward, because `fresh-dev` is a TRIAGE_ORG and grants no viewer.
+    await login(page, USERS.steward);
+    await page.goto(`/fresh-dev/${DS}/profile`);
+
+    // `configured: false` is a different fact from "scored, all zero", and a
+    // zero here would read as the latter — the corpus would look uniformly
+    // unusable rather than unmeasured.
+    await expect(page.getByTestId("record-quality-unconfigured")).toContainText(
+      "No per-record scoring is configured",
+    );
+    await expect(page.getByTestId("record-quality-buckets")).toHaveCount(0);
+  });
 });

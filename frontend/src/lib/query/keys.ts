@@ -85,6 +85,10 @@ export const queryKeys = {
    */
   profileSources: (org: string, dataset: string) =>
     [...ds(org, dataset), "profile-sources"] as const,
+  /** Per-RECORD quality. The limit is part of the key because it changes the
+   * worst-records list the response carries, not just its presentation. */
+  recordQuality: (org: string, dataset: string, limit: number) =>
+    [...ds(org, dataset), "record-quality", limit] as const,
   configSegments: (org: string, dataset: string) =>
     [...ds(org, dataset), "config-segments"] as const,
   aiSettings: (org: string) => ["org", org, "ai-settings"] as const,

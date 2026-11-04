@@ -187,6 +187,21 @@ test.describe("accessibility", () => {
   for (const screen of SCREENS) {
     test(`${screen.name} has no serious axe violations`, async ({ page, isMobile }) => {
       test.skip(isMobile, "one axe pass per screen; the desktop DOM is a superset");
+      // Reduced motion, for two reasons that happen to agree.
+      //
+      // The correctness one: an accessibility audit should scan the state a
+      // reduced-motion user sees, and `globals.css` clamps every animation to
+      // 0.01ms under this preference so "the end state is simply there".
+      //
+      // The flake one, which is how it was found: `animations: "disabled"` in
+      // the Playwright config applies only to `toHaveScreenshot`, not to an
+      // axe scan. So axe could sample the dashboard's DQ tiles mid
+      // `animate-fade-in`, while the text was still semi-transparent, and
+      // report four colour-contrast violations against markup that is
+      // compliant once the fade completes. Measured at roughly one run in two
+      // on an unchanged test — in a REQUIRED check, so it was failing other
+      // people's PRs for a reason their diffs could not explain.
+      await page.emulateMedia({ reducedMotion: "reduce" });
       // The sweep logs in before every screen, so an unauthenticated route
       // cannot be added without making this step conditional.
       if (!screen.anonymous) await login(page, USERS.steward);

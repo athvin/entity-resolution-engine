@@ -2718,6 +2718,47 @@ const server = http.createServer((req, res) => {
           .slice(0, largest),
       });
     }
+    // Per-RECORD quality: the distribution, the dimensions, and the worst
+    // records. Distinct from `data-quality`, which is per-ATTRIBUTE and feeds
+    // the dashboard meter.
+    //
+    // `fresh-dev` answers `configured: false`, which is the server's own shape
+    // for a tenant whose config declares no scoring — and a different fact from
+    // "scored, all zero", which a 0 here would read as.
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/quality$/.exec(path)) &&
+      req.method === "GET"
+    ) {
+      if (match[1] === "fresh-dev") {
+        return send(res, 200, { configured: false, scored: 0 });
+      }
+      const limit = Math.min(100, Number(url.searchParams.get("limit") ?? 20));
+      return send(res, 200, {
+        configured: true,
+        scored: 800,
+        mean_score: 78.4,
+        min_score: 21.0,
+        max_score: 99.5,
+        buckets: { below_50: 46, between_50_80: 322, at_least_80: 432 },
+        dimensions: { completeness: 82.1, validity: 74.6, freshness: 78.9 },
+        worst: [
+          {
+            record_key: "crm:C019",
+            score: 21.0,
+            completeness: 18.0,
+            validity: 25.0,
+            freshness: 20.0,
+          },
+          {
+            record_key: "billing:B204",
+            score: 28.5,
+            completeness: 30.0,
+            validity: 22.0,
+            freshness: 33.5,
+          },
+        ].slice(0, limit),
+      });
+    }
     // The profile: column shapes, deterministic findings, and what each column
     // would cost as a blocking key.
     //

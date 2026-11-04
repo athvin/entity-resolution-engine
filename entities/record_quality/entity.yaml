@@ -7,7 +7,11 @@ key: [id]
 natural_key: [record_key]
 generate:
   stores: [duckdb]
-  languages: [rust]
+  # typescript + wire gained when the worst-records queue finally got a
+  # consumer: the UI mirrors these rows, and V16 refuses `typescript`
+  # without a wire because the binding emitter is gated on one.
+  languages: [rust, typescript]
+  wire: [json]
 columns:
   - name: id
     type: varchar
