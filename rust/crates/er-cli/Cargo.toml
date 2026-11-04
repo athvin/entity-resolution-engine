@@ -35,6 +35,9 @@ er-entity-diff = { version = "0.1.0", path = "../er-entity-diff" }
 er-obs = { version = "0.1.0", path = "../er-obs" }
 er-profile = { version = "0.1.0", path = "../er-profile" }
 tracing.workspace = true
+sha2.workspace = true
+hex.workspace = true
+chrono.workspace = true
 
 [dev-dependencies]
 er-hash = { path = "../er-hash" }

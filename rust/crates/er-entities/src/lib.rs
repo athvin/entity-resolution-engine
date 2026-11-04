@@ -48,6 +48,7 @@ pub mod schema;
 pub mod schema_migration;
 pub mod scored_record;
 pub mod staged_steward_action;
+pub mod statement_execution;
 pub mod tag;
 pub mod tagging;
 pub mod task_instance;

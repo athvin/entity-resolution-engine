@@ -594,6 +594,21 @@ erDiagram
         timestamp created_at
         timestamp updated_at
     }
+    statement_executions {
+        varchar id PK
+        varchar run_id
+        varchar stage
+        bigint seq
+        varchar statement
+        varchar kind
+        varchar store
+        varchar relation
+        bigint duration_ms
+        bigint row_count
+        varchar outcome
+        timestamp created_at
+        timestamp updated_at
+    }
     metric_snapshot_sources {
         varchar id PK
         varchar run_id
@@ -985,6 +1000,7 @@ erDiagram
     raw_records }o..|| entity_membership : "source_system, source_record_id"
     match_scores }o..|| metric_snapshots : "run_id"
     scored_records }o..|| metric_snapshots : "run_id"
+    statement_executions }o..|| metric_snapshots : "run_id"
     metric_snapshot_sources }o..|| metric_snapshots : "run_id"
     profile_findings }o..|| column_profiles : "profile_run_id, column_name"
     record_qualities }o..|| metric_snapshots : "run_id"
@@ -993,6 +1009,7 @@ erDiagram
     entity_events }o..|| metric_snapshots : "run_id"
     cut_edges }o..|| match_scores : "rec_a_key, rec_b_key, model_version, tf_snapshot_id"
     run_stages }o..|| metric_snapshots : "run_id"
+    run_stages }o..|| statement_executions : "run_id, stage, seq"
     ingest_batches }o..|| metric_snapshots : "run_id"
     ingest_batches }o..|| metric_snapshot_sources : "run_id, source_system"
     int_std_records }o..|| entity_membership : "source_system, source_record_id"
@@ -1016,6 +1033,7 @@ erDiagram
     match_scores }o..|| runs : "run_id → id"
     scored_records }o..|| runs : "run_id → id"
     metric_snapshots }o..|| runs : "run_id → id"
+    statement_executions }o..|| runs : "run_id → id"
     metric_snapshot_sources }o..|| runs : "run_id → id"
     record_qualities }o..|| runs : "run_id → id"
     entity_membership }o..|| runs : "run_id → id"
@@ -1034,6 +1052,7 @@ erDiagram
 | `match_scores` | ddl | One scored candidate pair (S4.3): the frozen model's match probability with its evidence waterfall, keyed by model and TF snapshot. |
 | `scored_records` | ddl | What the last successful match pass actually scored: one row per (record, model identity) at the moment it was scored, with the content hash it was scored under. This is what makes an incremental run safe — a record is new or changed, FOR A GIVEN MODEL, precisely when the standardized corpus disagrees with that model's rows here. Keyed per identity rather than per record because an ensemble scores one record with several models (E5b-2b): a record-keyed ledger let the second member's sync overwrite the first's, so a two-member pass left a ledger claiming only the last member had scored anything — and 'member B has not scored record X' then had nowhere to be true. |
 | `metric_snapshots` | ddl | One run's resolution metrics, kept so the dashboard can show a TREND rather than only a current value. The dashboard has always computed its numbers live from the lake, which means it can say what is true now and nothing about whether that is better or worse than last week — which is the question an operator actually has. |
+| `statement_executions` | ddl | One row per SQL execution in a pipeline run: which statement, how long, how many rows, and whether it succeeded. The spans answer this already but they are sampled and retained for weeks; this is the durable, unsampled copy, queryable with SQL forever — the thing you join against the CUR to say what a statement cost, and the thing a regression test can assert on. Deliberately carries NO statement text and no bind values: the identity is the `<entity>.<folder>.<stem>` triple for a declared statement, or the engine seam's name for one assembled at runtime. |
 | `metric_snapshot_sources` | ddl | One run's duplicate attribution, per source system. The corpus-wide duplicate rate says a tenant has a problem; it does not say WHERE the problem comes from, and the answer is nearly always one feed. Retained per run beside metric_snapshots for the same reason that table exists: a live number says what is true now and nothing about whether a source is getting better or worse. |
 | `profile_runs` | ddl | One execution of the dataset profiler over one corpus stage, and the cache key for its result. A profile exists to be looked at repeatedly and compared against the previous delivery, so recomputing it on every view would make the cheap tier expensive for no new information. |
 | `column_profiles` | ddl | One column's shape within one profile run: how full it is, how many distinct values it holds, how long its values are, what types they parse as, and its most frequent values. One row per column rather than per value, because the lake schema language cannot express a partition (there is no partition_by field) and a per-value table would grow with the corpus instead of with the schema. |
