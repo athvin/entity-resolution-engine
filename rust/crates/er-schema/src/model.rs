@@ -436,6 +436,29 @@ fn ddl_specs() -> Vec<TableSpec> {
             vec![key(&["id"]), key(&["run_id"])],
             BTreeMap::new(),
         ),
+        // Every SQL execution in a run (telemetry P13). The durable, unsampled
+        // copy of what the spans carry: the spans are sampled and expire, this
+        // is queryable with SQL forever and is what a cost roll-up joins.
+        tspec(
+            "statement_executions",
+            vec![
+                nn("id", VARCHAR),
+                nn("run_id", VARCHAR),
+                nn("stage", VARCHAR),
+                nn("seq", BIGINT),
+                nn("statement", VARCHAR),
+                nn("kind", VARCHAR),
+                nn("store", VARCHAR),
+                col("relation", VARCHAR),
+                nn("duration_ms", BIGINT),
+                col("row_count", BIGINT),
+                nn("outcome", VARCHAR),
+                nn("created_at", TIMESTAMP),
+                nn("updated_at", TIMESTAMP),
+            ],
+            vec![key(&["id"]), key(&["run_id", "stage", "seq"])],
+            BTreeMap::new(),
+        ),
         // Per-source duplicate attribution (O7b-2), beside the corpus-wide
         // snapshot it is assembled with.
         tspec(

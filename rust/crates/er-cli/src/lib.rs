@@ -3718,6 +3718,125 @@ pub fn run_all_observed(
 /// design §3.1); the dispatcher's attempt reporter is the consumer, and
 /// [`NoopObserver`] is everyone else. Observation must never change a run:
 /// implementations do their own error handling and return nothing.
+/// The run that buffered executions are attributed to, for the length of one
+/// run.
+///
+/// A run-scoped static rather than a parameter on `observed()`, which has 13
+/// call sites across several entry points — most of which have no run id to
+/// hand. A run that never sets this simply records nothing, which is the right
+/// behaviour for a path with nothing to attribute executions to.
+static EXECUTION_RUN: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// Buffers executions for the length of a run and stops on drop.
+///
+/// RAII because the alternative is an early `?` leaving the recorder enabled
+/// with no one draining it — which `er_obs::executions::disable` exists to make
+/// harmless, but only if it is actually called.
+struct ExecutionScope;
+
+impl ExecutionScope {
+    fn new(run_id: &str) -> Self {
+        *EXECUTION_RUN
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(run_id.to_string());
+        er_obs::executions::enable();
+        Self
+    }
+}
+
+impl Drop for ExecutionScope {
+    fn drop(&mut self) {
+        er_obs::executions::disable();
+        *EXECUTION_RUN
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+    }
+}
+
+/// Write one stage's buffered executions to the lake.
+///
+/// Best effort throughout, per `reporter.rs`'s contract that observation must
+/// never change a run: every failure is logged and swallowed. A run must not
+/// fail because its own telemetry could not be written.
+fn drain_executions(session: &Session, stage: &str) {
+    let Some(run_id) = EXECUTION_RUN
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone()
+    else {
+        return;
+    };
+    let (rows, dropped) = er_obs::executions::take();
+    if rows.is_empty() && dropped == 0 {
+        return;
+    }
+    if dropped > 0 {
+        // Never silent. A dropped row the table does not mention reads as
+        // "we captured everything".
+        tracing::warn!(
+            er.stage = %stage,
+            dropped,
+            "statement executions exceeded the buffer cap; rows were dropped"
+        );
+    }
+
+    // Held across the write: `append_rows` opens a `db.query` span of its own,
+    // and recording it would make the table grow by describing its own writes.
+    let _guard = er_obs::executions::guard();
+
+    // One timestamp for the whole batch: they were written together, and a
+    // per-row clock read would imply a precision the rows do not have.
+    let recorded_at = chrono::Utc::now()
+        .format("%Y-%m-%d %H:%M:%S%.6f")
+        .to_string();
+    let appended: Vec<er_entities::statement_execution::AppendRow> = rows
+        .into_iter()
+        .enumerate()
+        .map(|(index, execution)| {
+            let seq = i64::try_from(index).unwrap_or(i64::MAX);
+            er_entities::statement_execution::AppendRow {
+                id: execution_id(&run_id, stage, seq),
+                run_id: run_id.clone(),
+                stage: stage.to_string(),
+                seq,
+                statement: execution.statement,
+                kind: execution.kind.to_string(),
+                store: execution.store,
+                relation: execution.relation,
+                duration_ms: execution.duration_ms,
+                row_count: execution.row_count,
+                outcome: execution.outcome,
+                // Wall time, and the column says so. See the entity: the
+                // recorder has only a monotonic instant and the system clock,
+                // so a run-logical stamp would be fabricated.
+                created_at: recorded_at.clone(),
+                updated_at: recorded_at.clone(),
+            }
+        })
+        .collect();
+
+    let count = appended.len();
+    match er_entities::statement_execution::append_rows(session.connection(), &appended) {
+        Ok(_) => tracing::debug!(er.stage = %stage, count, "statement executions recorded"),
+        Err(e) => tracing::warn!(
+            er.stage = %stage,
+            count,
+            error = %e,
+            "recording statement executions failed; the run is unaffected"
+        ),
+    }
+}
+
+/// `sha256('statement_executions:' || run_id || ':' || stage || ':' || seq)`,
+/// matching the id the entity documents — deterministic, so a replayed fixture
+/// produces the same rows and a re-run overwrites rather than double-counting.
+fn execution_id(run_id: &str, stage: &str, seq: i64) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(format!("statement_executions:{run_id}:{stage}:{seq}"));
+    hex::encode(hasher.finalize())
+}
+
 pub trait StageObserver {
     fn stage_started(&self, stage: &str);
     /// `snapshot_end` is the lake head after the stage's last commit; `None`
@@ -3785,6 +3904,10 @@ fn observed<T>(
                 "stage succeeded"
             );
             observer.stage_succeeded(stage, snapshot_end);
+            // After the observer, so a failure to record cannot delay the
+            // ledger, and inside the stage span so the drain's own append is
+            // attributed to this stage rather than leaking into the next.
+            drain_executions(session, stage);
             Ok(v)
         }
         Err(e) => {
@@ -3802,6 +3925,9 @@ fn observed<T>(
                 "stage failed"
             );
             observer.stage_failed(stage, &detail);
+            // A failed stage's executions are the ones worth having: they say
+            // which statement was running when it died.
+            drain_executions(session, stage);
             Err(e)
         }
     }
@@ -3864,6 +3990,9 @@ pub fn run_all_ensemble_observed(
         er.segment = inputs.segment.map_or("", |(name, _)| name),
     );
     let _entered = run.enter();
+    // Buffer executions for the length of this run; `observed()` drains once
+    // per stage. Dropped on every exit path, including an early `?`.
+    let _executions = ExecutionScope::new(inputs.run_id);
     tracing::info!(
         er.run_id = %inputs.run_id,
         er.mode = %inputs.mode,

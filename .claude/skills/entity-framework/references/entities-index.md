@@ -30,7 +30,7 @@ statements is read or written only through the engine's own stage SQL, not
 through a typed query function.
 
 <!-- BEGIN GENERATED: entities-index -->
-**48 entities, 245 declared statements.**
+**49 entities, 245 declared statements.**
 
 | Entity | Relation | Store | Key | Natural key | History |
 |---|---|---|---|---|---|
@@ -76,6 +76,7 @@ through a typed query function.
 | `schema_migration` | `schema_migrations` | postgres | `id` | — | — |
 | `scored_record` | `scored_records` | duckdb | `id` | `record_key, model_version, tf_snapshot_id` | — |
 | `staged_steward_action` | `staged_steward_actions` | postgres | `id` | — | — |
+| `statement_execution` | `statement_executions` | duckdb | `id` | `run_id, stage, seq` | — |
 | `tag` | `tags` | postgres | `id` | — | yes |
 | `tagging` | `taggings` | postgres | `id` | — | yes |
 | `task_instance` | `task_instances` | postgres | `id` | `job_id, task_id, try_number` | — |

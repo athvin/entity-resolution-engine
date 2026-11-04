@@ -4,6 +4,7 @@
   "match_scores",
   "scored_records",
   "metric_snapshots",
+  "statement_executions",
   "metric_snapshot_sources",
   "profile_runs",
   "column_profiles",
@@ -2649,6 +2650,94 @@
     {
      "columns": [
       "record_key"
+     ],
+     "where": null
+    }
+   ],
+   "owner": "ddl"
+  },
+  "statement_executions": {
+   "columns": [
+    {
+     "name": "id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "run_id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "stage",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "seq",
+     "nullable": false,
+     "type": "BIGINT"
+    },
+    {
+     "name": "statement",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "kind",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "store",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "relation",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "duration_ms",
+     "nullable": false,
+     "type": "BIGINT"
+    },
+    {
+     "name": "row_count",
+     "nullable": true,
+     "type": "BIGINT"
+    },
+    {
+     "name": "outcome",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "created_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
+    },
+    {
+     "name": "updated_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
+    }
+   ],
+   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.statement_executions (\n  id VARCHAR NOT NULL,\n  run_id VARCHAR NOT NULL,\n  stage VARCHAR NOT NULL,\n  seq BIGINT NOT NULL,\n  statement VARCHAR NOT NULL,\n  kind VARCHAR NOT NULL,\n  store VARCHAR NOT NULL,\n  relation VARCHAR,\n  duration_ms BIGINT NOT NULL,\n  row_count BIGINT,\n  outcome VARCHAR NOT NULL,\n  created_at TIMESTAMP NOT NULL,\n  updated_at TIMESTAMP NOT NULL\n);",
+   "enums": {},
+   "keys": [
+    {
+     "columns": [
+      "id"
+     ],
+     "where": null
+    },
+    {
+     "columns": [
+      "run_id",
+      "stage",
+      "seq"
      ],
      "where": null
     }

@@ -278,6 +278,9 @@ pub fn init(role: Role) -> Guard {
         .with(filter)
         .with(json)
         .with(otel)
+        // Inert until a sink is installed, which only the pipeline does — so
+        // this is free in `er-entity`, `dedupe` and every test binary.
+        .with(crate::executions::ExecutionRecorder)
         .init();
 
     // Now there is somewhere for it to go.

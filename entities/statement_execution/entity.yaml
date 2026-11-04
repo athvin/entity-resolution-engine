@@ -1,0 +1,68 @@
+kind: entity
+version: 1
+name: statement_execution
+relation: statement_executions
+description: "One row per SQL execution in a pipeline run: which statement, how long, how many rows, and whether it succeeded. The spans answer this already but they are sampled and retained for weeks; this is the durable, unsampled copy, queryable with SQL forever — the thing you join against the CUR to say what a statement cost, and the thing a regression test can assert on. Deliberately carries NO statement text and no bind values: the identity is the `<entity>.<folder>.<stem>` triple for a declared statement, or the engine seam's name for one assembled at runtime."
+key: [id]
+natural_key: [run_id, stage, seq]
+generate:
+  stores: [duckdb]
+  languages: [rust]
+  # One batched `append_rows` per stage is the whole write path. A row per
+  # statement would mean a DuckLake snapshot per statement — DuckLake commits
+  # one per write — which would wreck snapshot history as thoroughly as it
+  # would wreck the hot loop.
+  append: true
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "Content-derived row id: sha256('statement_executions:' || run_id || ':' || stage || ':' || seq). Deterministic, so a replayed fixture produces the same rows and a re-run overwrites rather than double-counting."
+  - name: run_id
+    type: varchar
+    nullable: false
+    description: "The pipeline run this execution belongs to — the join back to `runs`, and through it to the job, the attempt and the pod that was billed."
+  - name: stage
+    type: varchar
+    nullable: false
+    description: "Which of the eleven stages was running. Bounded by RUN_STAGES, so grouping by it is safe and a stage's whole cost is one GROUP BY away."
+  - name: seq
+    type: bigint
+    nullable: false
+    description: "Ordinal within the stage, assigned as executions complete, and the ONLY ordering this table carries. There is deliberately no per-execution timestamp: the recorder sees wall time while the run works in run-logical time, and stamping one from the other would fabricate a clock. Absolute time comes from the run's own window in `runs`; `seq` orders within it, and does so even for two statements inside the same millisecond — which matters because the interesting ones are the fast ones repeated thousands of times."
+  - name: statement
+    type: varchar
+    nullable: false
+    description: "The statement's identity: `<entity>.<folder>.<stem>` for a declared statement, or the engine seam (`Session::execute_batch`) for SQL assembled at runtime. Never the text."
+  - name: kind
+    type: varchar
+    nullable: false
+    description: "`declared` or `generator`. The two have different guarantees — a declared statement's literals are provably bound, a generator's are not — so an analysis that treats them alike is wrong, and keeping the class on the row means it does not have to be inferred from the name."
+  - name: store
+    type: varchar
+    nullable: false
+    description: "`duckdb` for the lake, `postgresql` for the control plane. The one dimension that genuinely separates two different cost and latency profiles."
+  - name: relation
+    type: varchar
+    nullable: true
+    description: "The relation read or written, when the statement declares one. Null for a runtime-assembled batch, which may touch several."
+  - name: duration_ms
+    type: bigint
+    nullable: false
+    description: "Wall time for this execution. The column the whole table exists for: `sum(duration_ms) GROUP BY statement` is the question nobody could previously answer."
+  - name: row_count
+    type: bigint
+    nullable: true
+    description: "Rows affected or returned, where the call site knows. Null rather than zero when it does not, because a real zero and an unknown are different facts and conflating them silently understates throughput."
+  - name: outcome
+    type: varchar
+    nullable: false
+    description: "`ok` or `error`. Not an accepted-values column because V11 forbids those on a lake entity, so the vocabulary lives in er_span::Outcome and this records what it produced."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    description: "Wall time at which the recorder wrote this row — NOT the run's logical clock, unlike most lake entities. The recorder observes spans and has only a monotonic instant and the system clock; stamping a run-logical time from those would be inventing one. Ordering within a stage is `seq`; the run's own window is in `runs`. This column is bookkeeping, and nothing should join on it."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    description: "Equal to created_at: these rows are append-only and never updated. Declared because V4 requires it on every entity."

@@ -1972,6 +1972,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
+ "chrono",
  "clap",
  "dedupe-core",
  "er-compile",
@@ -1990,8 +1991,10 @@ dependencies = [
  "er-standardize",
  "er-std",
  "er-versions",
+ "hex",
  "serde",
  "serde_json",
+ "sha2 0.11.1",
  "tracing",
 ]
 
