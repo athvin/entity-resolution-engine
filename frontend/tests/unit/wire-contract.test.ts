@@ -54,6 +54,7 @@ import type { CandidateKey } from "@/lib/entities/bindings/CandidateKey";
 import type { ColumnProfile } from "@/lib/entities/bindings/ColumnProfile";
 import type { ProfileFinding } from "@/lib/entities/bindings/ProfileFinding";
 import type { ProfileRun } from "@/lib/entities/bindings/ProfileRun";
+import type { RecordQuality } from "@/lib/entities/bindings/RecordQuality";
 import type { MatchingModel } from "@/lib/entities/bindings/MatchingModel";
 import type { Org } from "@/lib/entities/bindings/Org";
 import type { Schedule } from "@/lib/entities/bindings/Schedule";
@@ -68,6 +69,7 @@ import type {
   ProfileFindingRow,
   ProfilePresent,
 } from "@/lib/query/profile";
+import type { WorstRecord } from "@/lib/query/quality";
 import type { ReceiptRow } from "@/components/sources/sources-content";
 import type { JobRow, LineageRow } from "@/lib/query/hooks";
 import type { ModelVersionDetail, ModelVersionRow } from "@/lib/query/models";
@@ -195,6 +197,15 @@ const PAIRS = {
    * - `columns`, `findings`, `candidate_keys` — the three joined child
    *   collections, which are rows of their own entities and checked above.
    */
+  /**
+   * One row of the worst-records queue. `record_quality` had
+   * `languages: [rust]` and no wire until the queue finally got a consumer, so
+   * this interface had nothing to be checked against — the same sequence
+   * `ingest_batch` went through in E9b, and for the same reason: the row had
+   * been on the JSON wire for as long as the endpoint had.
+   */
+  worstRecord: true satisfies NoUndeclaredFields<WorstRecord, RecordQuality>,
+
   profile: true satisfies NoUndeclaredFields<
     ProfilePresent,
     ProfileRun,
@@ -225,6 +236,7 @@ describe("wire contract: UI response shapes vs the generated entity bindings", (
       "schedule",
       "webhook",
       "webhookDelivery",
+      "worstRecord",
     ]);
   });
 

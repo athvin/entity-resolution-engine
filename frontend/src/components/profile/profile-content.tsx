@@ -17,6 +17,7 @@ import {
   useRunProfile,
   type ProfileSubject,
 } from "@/lib/query/profile";
+import { useRecordQuality } from "@/lib/query/quality";
 import { useDatasetSlug } from "@/lib/use-dataset-slug";
 import { cn } from "@/lib/utils";
 import { BlockingKeys } from "./blocking-keys";
@@ -24,6 +25,7 @@ import { ColumnTable } from "./column-table";
 import { count, stamp } from "./format";
 import { ProfileFindings } from "./profile-findings";
 import { ProfileNarrative } from "./profile-narrative";
+import { RecordQuality } from "./record-quality";
 import { ProfileInterstitial, type TierStep } from "./profile-interstitial";
 
 /**
@@ -106,6 +108,7 @@ export function ProfileContent({ org }: { org: string }) {
   const profile = useProfile(org, ds, subject, subject === "raw" ? source : null, tier);
   const run = useRunProfile(org, ds);
   const narrative = useProfileNarrative(org, ds);
+  const recordQuality = useRecordQuality(org, ds);
   const job = useJob(org, ds, jobId ?? "");
   const jobState = jobId ? job.data?.state : undefined;
 
@@ -373,6 +376,22 @@ export function ProfileContent({ org }: { org: string }) {
           )}
         </>
       )}
+
+      {/* OUTSIDE the profiled branch, deliberately. Record quality is scored by
+          the pipeline's own pass and has nothing to do with whether anybody has
+          profiled the corpus — nesting it under `profiled` hid a steward's work
+          queue because an unrelated measurement had not run, which is what the
+          functional test caught. */}
+      <Card data-testid="profile-quality-card">
+        <CardHeader className="p-4 pb-1 lg:p-6 lg:pb-2">
+          <CardTitle className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+            Record quality — which rows to fix first
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="p-4 pt-0 lg:p-6 lg:pt-0">
+          <RecordQuality quality={recordQuality.data} />
+        </CardContent>
+      </Card>
     </div>
   );
 }
