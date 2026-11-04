@@ -2405,7 +2405,13 @@ fn correct_applies_a_staged_assertion_without_rescoring() {
         .map(|r| r[0].clone())
         .collect();
     assert!(modes.iter().any(|m| m == "full"));
-    assert!(modes.iter().any(|m| m == "correct"), "correct run recorded");
+    // `correction_pass`, the value `RUN_MODES` declares — this assertion
+    // pinned `correct` for as long as the writer produced it, which is how an
+    // undeclared value in an enumerated column stayed invisible.
+    assert!(
+        modes.iter().any(|m| m == er_versions::MODE_CORRECTION_PASS),
+        "correction pass recorded under its declared mode, got {modes:?}"
+    );
 
     let _ = std::fs::remove_dir_all(&tmp);
 }
