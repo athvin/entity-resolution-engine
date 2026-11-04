@@ -10,7 +10,22 @@ use crate::sql::columns;
 /// this floor before `log2` during scoring.
 pub const M_U_CLAMP_MIN: f64 = 1e-300;
 
-/// The "level not observed" sentinel reads as this value.
+/// What EM's own "level not observed" working value reads as, while a session
+/// is running.
+///
+/// NOT what a never-observed level ends up with in a trained model, and the
+/// difference matters: `populate_from_trained_values` FILTERS the not-observed
+/// estimates out and leaves the slot alone, so the level falls back to its
+/// built-in default. `ProbabilitySlot` carried a third `NotObserved` variant
+/// for the other behaviour — resolve to 1e-6, a near-impossible u that yields a
+/// large positive match weight — and **nothing ever constructed it**: the only
+/// mention in the workspace was the `resolve` arm that read it, and deleting
+/// the variant left the whole workspace compiling with zero errors.
+///
+/// It is gone, because a dead variant that encodes a scoring behaviour nobody
+/// can reach is worse than no variant at all. This feature's own plan read it
+/// as live and concluded that an unobserved level "produces a large spurious
+/// match weight" with nothing warning; that was never true of trained output.
 pub const LEVEL_NOT_OBSERVED_VALUE: f64 = 1e-6;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -21,9 +36,6 @@ pub enum ProbabilitySlot {
     Unset,
     /// A concrete probability (from settings JSON or training).
     Value(f64),
-    /// Level never observed during training;
-    /// reads as 1e-6 regardless of defaults.
-    NotObserved,
 }
 
 impl ProbabilitySlot {
@@ -33,14 +45,18 @@ impl ProbabilitySlot {
         match self {
             ProbabilitySlot::Unset => default,
             ProbabilitySlot::Value(v) => *v,
-            ProbabilitySlot::NotObserved => LEVEL_NOT_OBSERVED_VALUE,
         }
     }
 
+    /// The concrete value, if one was supplied or trained.
+    ///
+    /// Exhaustive rather than wildcarded: with the dead `NotObserved` variant
+    /// gone there are two cases, and naming both means adding a third forces
+    /// this decision rather than silently inheriting `None`.
     pub fn raw(&self) -> Option<f64> {
         match self {
             ProbabilitySlot::Value(v) => Some(*v),
-            _ => None,
+            ProbabilitySlot::Unset => None,
         }
     }
 }

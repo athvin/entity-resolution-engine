@@ -4562,17 +4562,53 @@ fn export_tf_snapshot(
 ///
 /// # Errors
 /// Propagates the model-load / linker / training / export / save errors.
+/// What a training run is willing to say about its own confidence.
+///
+/// `EmSessionResult.converged` has been returned by `Linker::train` since EM
+/// landed and inspected by **nothing** — `run_train` discarded the whole
+/// `TrainOutcome`, and the only reader anywhere was `dedupe-cli`'s progress
+/// print. So a model trained from a session that hit the iteration cap without
+/// settling was activated, scored a corpus and looked exactly like one that
+/// converged on the second step.
+///
+/// Non-convergence is not a failure and must not read as one: EM stopping at
+/// the cap still produces usable parameters, and refusing the model would be
+/// worse than shipping it. It is a *confidence* statement, which is why it
+/// travels as a counter on the task rather than as an error.
+#[derive(Debug, Clone, Default)]
+pub struct TrainReport {
+    /// One per EM session — one session per `em_rules` entry.
+    pub sessions: usize,
+    /// The blocking rules whose session hit the cap without converging.
+    pub not_converged: Vec<String>,
+    /// Iterations the slowest session took, so "converged" can be read as
+    /// "converged quickly" or "only just".
+    pub max_iterations: usize,
+}
+
+impl TrainReport {
+    /// Every session settled.
+    #[must_use]
+    pub fn converged(&self) -> bool {
+        self.not_converged.is_empty()
+    }
+}
+
+/// Train a model and report what training was willing to claim about itself.
+///
+/// # Errors
+/// Propagates linker setup, the training pass, the TF export and the save.
 pub fn run_train(
     session: &Session,
     inputs: &TrainInputs,
     out_model: &Path,
     out_tf: &Path,
-) -> Result<()> {
+) -> Result<TrainReport> {
     let settings = er_match::load_model(inputs.template_settings_json)?;
     let input = session.register_lake_table("int_std_records", "int_std_records")?;
     let mut linker = dedupe_core::linker::Linker::new(session, settings, &input)
         .map_err(|e| anyhow::anyhow!("linker setup: {e}"))?;
-    linker
+    let outcome = linker
         .train(&dedupe_core::linker::TrainConfig {
             deterministic_rules: inputs.deterministic_rules.to_vec(),
             recall: inputs.recall,
@@ -4580,6 +4616,29 @@ pub fn run_train(
             em_rules: inputs.em_rules.to_vec(),
         })
         .map_err(|e| anyhow::anyhow!("train: {e}"))?;
+    let report = TrainReport {
+        sessions: outcome.em_sessions.len(),
+        not_converged: outcome
+            .em_sessions
+            .iter()
+            .filter(|s| !s.converged)
+            .map(|s| s.blocking_rule.clone())
+            .collect(),
+        max_iterations: outcome
+            .em_sessions
+            .iter()
+            .map(|s| s.iterations.len())
+            .max()
+            .unwrap_or(0),
+    };
+    if !report.converged() {
+        eprintln!(
+            "train: {} of {} EM session(s) hit the iteration cap without converging: {}",
+            report.not_converged.len(),
+            report.sessions,
+            report.not_converged.join(", ")
+        );
+    }
 
     // Export the TF snapshot BEFORE consuming the linker for the model.
     let tf_columns = linker.settings_ref().tf_columns();
@@ -4619,7 +4678,7 @@ pub fn run_train(
     model
         .save_to_json_file(out_model)
         .map_err(|e| anyhow::anyhow!("save trained model: {e}"))?;
-    Ok(())
+    Ok(report)
 }
 
 /// Stage known-match pairs as a `<uid>_l` / `<uid>_r` table the m-estimator can
