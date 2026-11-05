@@ -26,6 +26,25 @@ pub struct RenderAttempt {
     pub active_deadline_seconds: i64,
     /// The pod's argv tail: the last task of its fused segment.
     pub through_task: String,
+    /// The image digest this attempt runs, recorded as an annotation so an
+    /// in-flight pod says which release launched it.
+    ///
+    /// §6.2's Job spec lists it under `annotations` — the "authority" block —
+    /// and it HAS to be an annotation rather than a label: `sha256:` plus 64
+    /// hex is 71 characters and a label VALUE caps at 63, so the obvious
+    /// reading of "add the image-digest label" produces an object the API
+    /// server rejects.
+    ///
+    /// Not an adoption input. §6.2 is explicit that "an image-digest-only
+    /// difference is adopted because the contract is the fingerprint". This
+    /// exists to make a cutover legible — which colour's image each running
+    /// attempt came from — not to decide anything.
+    ///
+    /// Empty when the deployment pins a TAG rather than a digest: the chart
+    /// only sets `ER_IMAGE_DIGEST` `{{- with .Values.images.api.digest }}`, so
+    /// kind and a tag-based dev install have none. An empty annotation value is
+    /// legal and reads correctly as "not deployed by digest".
+    pub image_digest: String,
 }
 
 /// Why a render was refused.
@@ -67,7 +86,8 @@ pub fn render_job(template: &str, attempt: &RenderAttempt) -> Result<Job, Render
             "${ER_ACTIVE_DEADLINE_SECONDS}",
             &attempt.active_deadline_seconds.to_string(),
         )
-        .replace("${ER_THROUGH_TASK}", &attempt.through_task);
+        .replace("${ER_THROUGH_TASK}", &attempt.through_task)
+        .replace("${ER_IMAGE_DIGEST}", &attempt.image_digest);
     if let Some(at) = rendered.find("${ER_") {
         let tail: String = rendered[at..]
             .chars()
@@ -107,6 +127,7 @@ metadata:
     er.dupezero.com/task-id: "${ER_TASK_ID}"
     er.dupezero.com/structural-fingerprint: "${ER_STRUCTURAL_FINGERPRINT}"
     er.dupezero.com/policy-hash: "${ER_POLICY_HASH}"
+    er.dupezero.com/image-digest: "${ER_IMAGE_DIGEST}"
 spec:
   backoffLimit: 0
   activeDeadlineSeconds: ${ER_ACTIVE_DEADLINE_SECONDS}
@@ -158,6 +179,7 @@ mod tests {
             policy_hash: "ee".repeat(32),
             active_deadline_seconds: 21_600,
             through_task: "maintain".into(),
+            image_digest: "sha256:feed".into(),
         }
     }
 
@@ -179,6 +201,49 @@ mod tests {
         assert_eq!(pod.restart_policy.as_deref(), Some("Never"), "INVARIANT");
         let args = pod.containers[0].args.clone().unwrap();
         assert_eq!(args[1], "ab".repeat(32));
+    }
+
+    #[test]
+    fn the_image_digest_lands_as_an_annotation_not_a_label() {
+        // §6.2 lists it under annotations, and that is not a style choice:
+        // `sha256:` plus 64 hex is 71 characters and a label VALUE caps at 63,
+        // so the obvious reading — "add the image-digest label" — produces an
+        // object the API server rejects.
+        let mut a = attempt();
+        a.image_digest = format!("sha256:{}", "ab".repeat(32));
+        let job = render_job(REFERENCE_TEMPLATE, &a).expect("renders");
+        let ann = job.metadata.annotations.clone().expect("annotations");
+        assert_eq!(
+            ann.get("er.dupezero.com/image-digest"),
+            Some(&a.image_digest)
+        );
+        assert!(
+            a.image_digest.len() > 63,
+            "the length that forces the choice"
+        );
+        let labels = job.metadata.labels.clone().expect("labels");
+        assert!(
+            !labels.contains_key("er.dupezero.com/image-digest"),
+            "a 71-character label value would be rejected by the API server"
+        );
+    }
+
+    #[test]
+    fn an_absent_digest_still_substitutes() {
+        // The hazard this guards: a template placeholder that is not
+        // substituted is a LAUNCH-TIME REFUSAL (`RenderError::Unsubstituted`),
+        // so adding the annotation without handling a tag-based install would
+        // have failed every launch on kind and on `make dev-up TAG=…`, where
+        // the chart sets no ER_IMAGE_DIGEST at all.
+        let mut a = attempt();
+        a.image_digest = String::new();
+        let job = render_job(REFERENCE_TEMPLATE, &a).expect("renders with no digest");
+        let ann = job.metadata.annotations.clone().expect("annotations");
+        assert_eq!(
+            ann.get("er.dupezero.com/image-digest"),
+            Some(&String::new()),
+            "empty reads as 'not deployed by digest'; absent would read as a bug"
+        );
     }
 
     #[test]
