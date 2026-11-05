@@ -177,11 +177,11 @@ jobs:
             # in a fresh `list` read UNKNOWN, and the same PRs read
             # DIRTY/BLOCKED through `view`. So the authoritative read is per-PR,
             # and UNKNOWN is retried rather than believed in either direction.
-            state=""; draft=""; base=""; head=""
+            state=""; draft=""; base=""; head=""; oid=""
             for _ in 1 2 3 4 5; do
-              IFS='|' read -r state draft base head < <(gh pr view "$n" \
-                --json mergeStateStatus,isDraft,baseRefName,headRefName \
-                --jq '[.mergeStateStatus, (.isDraft|tostring), .baseRefName, .headRefName] | join("|")')
+              IFS='|' read -r state draft base head oid < <(gh pr view "$n" \
+                --json mergeStateStatus,isDraft,baseRefName,headRefName,headRefOid \
+                --jq '[.mergeStateStatus, (.isDraft|tostring), .baseRefName, .headRefName, .headRefOid] | join("|")')
               [ "$state" = "UNKNOWN" ] || break
               sleep 5
             done
@@ -222,6 +222,31 @@ jobs:
               # Such a PR must be merged by hand. Said plainly here so nobody
               # reads the skip as the bus being broken.
               reason="touches .github/workflows/ — GITHUB_TOKEN may not push workflow changes, so merge it by hand"
+            elif [ "$(gh api "repos/${GITHUB_REPOSITORY}/commits/${oid}/check-runs?per_page=100" --paginate \
+                        --jq '[.check_runs[] | select(.name | startswith("detect")) | select(.conclusion == "failure")] | length' \
+                      2>/dev/null || echo 0)" != "0" ]; then
+              # A GREEN THAT VERIFIED NOTHING. Every expensive job is gated on
+              # `needs.detect.outputs.*`, so when a `detect` job FAILS its
+              # dependents report `skipped` — and branch protection accepts
+              # `skipped` as satisfied. The result is a PR whose twelve required
+              # contexts are all "satisfied" with not one of them having run.
+              #
+              # Observed on #473 (2026-11-05): two Rust files changed, all three
+              # detect jobs failed in the Actions-minutes outage, all 12 required
+              # contexts `skipped`, `mergeStateStatus` CLEAN. A human or this bus
+              # could have merged it with nothing compiled or tested.
+              #
+              # `skipped` is only trustworthy when the job that decided to skip
+              # SUCCEEDED. This is the same "false skip is the worst failure mode
+              # available" that the `grep -c`-not-`-q` rule exists for, reached
+              # by a different route: there the detect job lies, here it dies.
+              #
+              # Not fixable by requiring the detect contexts in branch
+              # protection — they are matrix-free but there are three of them
+              # with two distinct names, and a required context that legitimately
+              # does not report would block every PR. Checking it here is cheap
+              # and precise.
+              reason="its detect jobs failed, so every gate reported skipped without running — re-run CI before batching"
             else
               case "$state" in
                 CLEAN) ;;
