@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 
-import { DS, snap } from "./helpers";
+import { snap } from "./helpers";
 
 /**
  * The M5 slice of the full-stack story: the operator freezes a real tenant and
@@ -10,6 +10,13 @@ import { DS, snap } from "./helpers";
  * the whole episode with a person attached. Requires `make frontend-dev` +
  * `make frontend-seed`.
  */
+
+/** The dataset the seed resolved its corpus into. Read rather than assumed:
+ * an org can hold several, and only the seed knows which one it filled. */
+function dataset(): string {
+  const file = path.join(__dirname, "..", "..", "dev", ".state", "expected.json");
+  return (JSON.parse(readFileSync(file, "utf8")) as { dataset: string }).dataset;
+}
 
 function org(): string {
   const file = path.join(__dirname, "..", "..", "dev", ".state", "expected.json");
@@ -49,9 +56,12 @@ test.describe.serial("run the business", () => {
         { timeout: 15_000 },
       )
       .toBe("suspended");
-    const refused = await page.request.post(`/api/orgs/${org()}/datasets/${DS}/jobs/submit`, {
-      data: { kind: "train", intent: "e2e-lifecycle-freeze-check" },
-    });
+    const refused = await page.request.post(
+      `/api/orgs/${org()}/datasets/${dataset()}/jobs/submit`,
+      {
+        data: { kind: "train", intent: "e2e-lifecycle-freeze-check" },
+      },
+    );
     expect(refused.status()).toBe(409);
 
     await page.getByTestId("resume-org").click();

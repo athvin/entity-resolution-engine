@@ -63,7 +63,7 @@ We already have the hard part — a proven, incremental entity-resolution engine
 
 **The two constraints that shape everything:**
 
-1. **One writer per tenant**, enforced by a session-scoped Postgres advisory lock; a second writer exits 3. Stages are synchronous and minutes-to-hours long (1M full ≈ 93s; 10M full ≈ 1h46m).
+1. **One writer per dataset**, enforced by a session-scoped Postgres advisory lock, under a per-org concurrency cap; a second writer exits 3. Stages are synchronous and minutes-to-hours long (1M full ≈ 93s; 10M full ≈ 1h46m).
 2. **CPU- and spill-bound at scale, not memory-bound.** Runtime scales with DuckDB thread count and the local NVMe spill volume; the memory working set stays a near-constant floor (measured ~9.4 GiB peak at 10M against a low DuckDB limit, because DuckDB spills rather than growing). Process-global `ER_*` env configures the lake connection.
 
 ## 3. Feature-parity matrix
@@ -72,7 +72,7 @@ Classification: **ENGINE** (exists, needs an API veneer) · **EXT** (engine exte
 
 | Cloudingo capability | Our delivering feature | Class | Honest gap |
 |---|---|---|---|
-| Filters (prebuilt + custom, per object) | Match-config service: templates compiling to `blocking`/`comparisons`/`thresholds` config blocks, with a publish workflow (§6) | ENGINE + NEW | Matching is stronger (probabilistic) but there's no edit API, and edits trip drift guards. One model per tenant per entity type, not independent per-object rule sets. |
+| Filters (prebuilt + custom, per object) | Match-config service: templates compiling to `blocking`/`comparisons`/`thresholds` config blocks, with a publish workflow (§6) | ENGINE + NEW | Matching is stronger (probabilistic) but there's no edit API, and edits trip drift guards. One model per DATASET per entity type — a tenant that needs independent rule sets gives each object its own dataset, which is also how it gets its own entity type. |
 | Merge grid (manual/mass/auto) | Duplicate-groups API (entity-centric read model) + assertions + apply service | ENGINE + NEW | Engine review queue is pair-centric gray-band only; groups ≥0.95 auto-merge silently in the lake. The grid needs a new group read model. |
 | Preserves attachments/notes/opportunities | Salesforce `merge()` natively reparents children | CONN | Free once writeback exists; we never touch child records. |
 | Survivorship rules | `survivorship` config block (ordered rule chain per attribute) + new master-election policy | ENGINE + NEW | Engine picks field *values*, not a master *record*; Salesforce merge needs a master ID (§10). |
@@ -167,7 +167,21 @@ Publish shows the tier and estimated runtime, then enqueues the required run wit
 
 ## 7. Multi-tenant isolation
 
-**Topology: shared Postgres cluster with one dedicated catalog *database* per tenant (`CREATE DATABASE er_t_{org}`, carrying `ER_LAKE_METADATA_SCHEMA=t_{org}` inside it), shared S3 bucket with a per-tenant prefix (`ER_LAKE_DATA_PATH=s3://er-lake/t_{org}/`).** The engine's own definition of a tenant is the (metadata schema, data path) pair; the SaaS wraps that unit in a database of its own per tenant — hard isolation was chosen over schema-per-tenant so that no tenant's tables ever share a database with another's, and each tenant gets database-granular backup/restore and a one-statement purge (`DROP DATABASE … WITH (FORCE)`). The org's `ER_CATALOG_DSN` is derived from `ERSERVER_TENANT_DSN_TEMPLATE` and rides in its env overlay like any other `ER_*` value; the metadata schema stays per-tenant even inside the dedicated database, so a stale or mis-derived DSN surfaces as an empty namespace rather than silently attaching another tenant's catalog. The engine's advisory writer lock is taken on the tenant's own database, which keeps the single-writer guarantee and makes cross-tenant lock-key collisions impossible. Dedicated bucket + STS-scoped credentials become an enterprise-tier option. Per-tenant Postgres *instances* still don't pay for themselves at $2.5k–10k/yr — this is many databases in one cluster, not many clusters.
+**Isolation is two levels, not one.** An org gets a dedicated catalog
+*database*; a **dataset** — one of possibly several independent resolution
+domains inside that org — gets its own DuckLake catalog within it, via the
+attach-time `METADATA_SCHEMA` option (`ER_LAKE_CATALOG_SCHEMA=ds_<name>`)
+plus a data path of its own. A session attaches exactly ONE dataset's lake as
+`lake.main.*`, which is why the engine and every generated statement needed
+no change when datasets arrived. Two datasets of one org therefore never
+share a table, and records never match across them.
+
+Note the near-miss in the names: the older `ER_LAKE_METADATA_SCHEMA` sets
+DuckLake's **user-table** schema, not its metadata schema. The per-dataset
+catalog lever is `ER_LAKE_CATALOG_SCHEMA`.
+
+
+**Topology: shared Postgres cluster with one dedicated catalog *database* per tenant (`CREATE DATABASE er_t_{org}`, carrying `ER_LAKE_METADATA_SCHEMA=t_{org}` inside it), shared S3 bucket with a per-tenant prefix (`ER_LAKE_DATA_PATH=s3://er-lake/t_{org}/`).** The engine's own definition of a tenant is the (metadata schema, data path) pair; the SaaS wraps that unit in a database of its own per tenant — hard isolation was chosen over schema-per-tenant so that no tenant's tables ever share a database with another's, and each tenant gets database-granular backup/restore and a one-statement purge (`DROP DATABASE … WITH (FORCE)`). The org's `ER_CATALOG_DSN` is derived from `ERSERVER_TENANT_DSN_TEMPLATE` and rides in its env overlay like any other `ER_*` value; the metadata schema stays per-tenant even inside the dedicated database, so a stale or mis-derived DSN surfaces as an empty namespace rather than silently attaching another tenant's catalog. The advisory writer lock is held per DATASET, so two datasets of one org can run at once, bounded by a per-org cap (`orgs.max_concurrent_jobs`, default 1 — today's single-writer profile). The lock is taken on the org's own database, which makes cross-tenant key collisions impossible. Dedicated bucket + STS-scoped credentials become an enterprise-tier option. Per-tenant Postgres *instances* still don't pay for themselves at $2.5k–10k/yr — this is many databases in one cluster, not many clusters.
 
 - **Control-plane DB** (separate database, same cluster): orgs, users, api_keys, config_versions, jobs, schedules, webhooks, idempotency keys, audit_log, staged_steward_actions.
 - **Secrets:** connector and per-tenant storage credentials live in a secrets manager, referenced by ID, injected into runner pods as env at dispatch. MVP uses one service credential with engine-enforced prefix isolation; a hardening phase adds STS-scoped per-tenant credentials as defense in depth.

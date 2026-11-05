@@ -91,9 +91,19 @@ Fixture users, orgs and the login helper live in `tests/functional/helpers.ts`:
 - Users spanning the role lattice, with one shared password constant.
 - `ORG` is the **read-only, pixel-compared** org — do not mutate it from a
   test, or you will break the visual baselines for every other spec.
-- `triageOrg(projectName)` and `wizardOrg(projectName)` return a **per-project**
-  mutable org, so the three device projects cannot interfere with each other.
-  Use them for anything that writes.
+- `triageOrg(projectName)`, `wizardOrg(projectName)`, `datasetsOrg(projectName)`
+  and their siblings return a **per-project** mutable org, so the three device
+  projects cannot interfere with each other. Use one for anything that writes.
+  The three projects share ONE mock server, so a journey that creates,
+  suspends or publishes against a shared org races the other two — this is a
+  rule, not a precaution: it is the defect that made the datasets manage
+  journey fail only in the full tier and pass in isolation.
+- `DS` is the dataset every journey works inside. Each fixture org carries one
+  named `default`, mirroring the backend's convergence sweep; the
+  `datasets-*` orgs carry a second so the switcher, the manage table and the
+  org-home dispatcher have a real choice to make. A fixture org added to the
+  mock must also be added to `src/lib/db/test-fixtures.ts`, or the BFF session
+  is not a member and every request 404s.
 - `login()` POSTs the **real** BFF login route via `page.request`, sharing the
   cookie jar — no auth stubbing, so the session path is covered by every test
   that logs in.
@@ -129,6 +139,12 @@ gate must be observed **failing** before it is trusted.
   reports no findings, which is indistinguishable from "clean".
 - **A mock that diverges from the real router.** A mock backend answering a
   shape the real service does not is a green test over a broken integration.
+- **A locally-green `@visual` test.** Baselines are Linux-only, so
+  `toHaveScreenshot` is a NO-OP on a Mac: the test passes having asserted
+  nothing, and a new baseline is never written. Verify visual work in the
+  pinned container — `dev/update-baselines.sh` to regenerate, or the same
+  image running `pnpm test:e2e --grep @visual` WITHOUT `--update-snapshots`
+  to compare the way CI does.
 - **A required check that never reports.** A workflow-level `paths:` filter
   leaves a required check pending forever and blocks every PR — which is why
   `frontend.yml` has no `paths:` filter and uses a `detect` job instead. See the

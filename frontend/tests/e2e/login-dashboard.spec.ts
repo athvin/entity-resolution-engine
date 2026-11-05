@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
 
-import { DS, snap } from "./helpers";
+import { snap } from "./helpers";
 
 /**
  * The M1 slice of the full-stack story: a seeded steward signs in and the
@@ -12,6 +12,9 @@ import { DS, snap } from "./helpers";
  */
 interface Expected {
   org: string;
+  /** Which of the org's datasets these numbers describe — the seed writes
+   * it, so the journey follows the seed instead of assuming `default`. */
+  dataset: string;
   metrics: { records: number; entities: number; duplicate_groups: number };
 }
 
@@ -21,21 +24,21 @@ function expected(): Expected {
 }
 
 test("a seeded steward signs in and sees real engine numbers", async ({ page }) => {
-  const { org } = expected();
+  const { org, dataset } = expected();
 
   await page.goto("/login");
   await snap(page, "login");
   await page.getByLabel("Email").fill("steward@acme.dev");
   await page.getByLabel("Password").fill("password-123!");
   await page.getByTestId("login-submit").click();
-  await expect(page).toHaveURL(new RegExp(`/${org}/${DS}/dashboard$`));
+  await expect(page).toHaveURL(new RegExp(`/${org}/${dataset}/dashboard$`));
 
   // The tiles must equal what the engine reports RIGHT NOW — the M3 journeys
   // legitimately mutate this tenant (unmerges, deliveries), so the truth is the
   // live metrics read, not the frozen seed snapshot. The seed's expected.json
   // stays as a sanity floor: the corpus never shrinks below its initial size.
   const live = (await (
-    await page.request.get(`/api/orgs/${org}/datasets/${DS}/metrics`)
+    await page.request.get(`/api/orgs/${org}/datasets/${dataset}/metrics`)
   ).json()) as {
     records: number;
     entities: number;
@@ -56,12 +59,12 @@ test("a seeded steward signs in and sees real engine numbers", async ({ page }) 
 });
 
 test("the operator account can view a tenant it does not belong to", async ({ page }) => {
-  const { org } = expected();
+  const { org, dataset } = expected();
   await page.goto("/login");
   await page.getByLabel("Email").fill("root@er.dev");
   await page.getByLabel("Password").fill("password-123!");
   await page.getByTestId("login-submit").click();
-  await expect(page).toHaveURL(new RegExp(`/${org}/${DS}/dashboard$`));
+  await expect(page).toHaveURL(new RegExp(`/${org}/${dataset}/dashboard$`));
   await expect(page.getByTestId("tile-records")).not.toBeEmpty();
   await snap(page, "operator-view");
 });

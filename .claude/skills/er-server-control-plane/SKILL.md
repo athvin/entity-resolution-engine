@@ -37,6 +37,23 @@ Routes are a single flat `Router::new()` chain — roughly sixty `.route()` call
 no `.nest()`. `/healthz` and a few globals, then everything tenant-scoped under
 `/v1/orgs/{org}/…`.
 
+**Almost everything is dataset-scoped: `/v1/orgs/{org}/datasets/{ds}/…`.** A
+dataset is an independent resolution domain inside an org — its own lake,
+config, models, entity ids and golden records — so the corpus, the queue, the
+registry and the review surfaces all live under one. What stays at the org
+are the things that genuinely belong to the tenant rather than to a corpus:
+lifecycle and `resources`, api-keys, members, audit, webhooks, and the tag
+VOCABULARY. Tag *application* is dataset-scoped, because its subjects are
+lake-local ids.
+
+A dataset-scoped handler takes `Path((org, ds))` and does three things in
+order before it touches anything: `guard(&principal, &org, role)` →
+`org_or_404` → `dataset_or_404` → `refuse_unless_active_dataset`. Bind the
+`DatasetDetail` it returns rather than discarding it — every dataset-scoped
+read and write wants `d.id`, and the parameters are all `&str`, so passing an
+org id where a dataset id belongs compiles cleanly and silently returns the
+wrong rows. That class of mistake is caught by the pg tier, not the compiler.
+
 The `:action` path normalizer is installed as an **outer tower service**
 (`Router::new().fallback_service(…)`), deliberately *not* as a
 `Router::layer`. A layer runs after routing has already happened, so it could
@@ -66,18 +83,24 @@ minimum)` enforces it, and the two failure codes differ on purpose:
 which is an enumeration oracle for a tenant whose existence should not leak.
 The operator token is cross-org and bypasses the scope check.
 
-Child tables carry `org_id`, so a scope-safe lookup is a single query rather
-than fetch-then-check.
+Child tables carry BOTH `dataset_id` and `org_id`: the dataset is the scope a
+read filters on, and the denormalized `org_id` keeps a scope-safe lookup a
+single query rather than fetch-then-check.
 
 ## The queue's correctness is Postgres's job
 
 Two constraints are enforced **by the database, not by code**:
 
-1. At most one **active** job per org — single-writer per tenant.
+1. At most one **active** job per DATASET — single-writer per corpus — plus
+   an org-level variant for the kinds that carry no dataset (`provision`, the
+   migrate sweep). A per-org COUNT cap (`orgs.max_concurrent_jobs`, default 1)
+   bounds how many of an org's datasets run at once; a COUNT is not
+   index-enforceable, so `pg::claim` holds an advisory lock for it while the
+   partial uniques remain the database's own backstop.
 2. At most one job per `(org, idempotency_key)`.
 
 So `claim` takes the highest-priority queued job whose org has no active job,
-`FOR UPDATE SKIP LOCKED`. When it loses that race the one-active-per-org
+`FOR UPDATE SKIP LOCKED`. When it loses that race the one-active-per-dataset
 constraint surfaces as a unique violation, and that is mapped to `None` — "no
 job for me right now" — **never to an error**. A lost race is normal operation
 for a concurrent dispatcher; treating it as a failure would make the logs
@@ -124,9 +147,9 @@ job with the master DSN. Do not "fix" this into a hard failure.
 ## The dispatcher
 
 `dispatcher::run_loop` polls; `dispatch_once` does claim → mark running →
-**reconcile the org's lake** (`schema::reconcile_lake_env`, recorded in
+**reconcile the dataset's lake** (`schema::reconcile_lake_env`, recorded in
 `public.tenant_schema_states` whatever the outcome; a breaking lake fails the
-job with `ERR_SCHEMA_BREAKING` before any stage runs) → open the org's lake →
+job with `ERR_SCHEMA_BREAKING` before any stage runs) → open the dataset's lake →
 run the matching `er-cli` operation **in-process** → mark the outcome → emit
 the `job.<state>` webhook. `provision` is the one kind that skips the
 pre-step and reconciles the lake it creates instead; `lake_migrate` is the

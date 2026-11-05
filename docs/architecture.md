@@ -1,8 +1,14 @@
 # Architecture
 
-*Engine layer — single-tenant per lake. The multi-tenant platform that runs many
-such lakes is in the [README](../README.md#architecture-at-a-glance) and
+*Engine layer — one lake, one corpus. The platform that runs many such lakes
+is in the [README](../README.md#architecture-at-a-glance) and
 [backend-design.md](backend-design.md).*
+
+A lake belongs to a **dataset**, not to a tenant: an org can hold several
+datasets — Contacts and Accounts, say — and each is an independent resolution
+domain with its own lake, configuration, models, entity ids and golden
+records. Records never match across datasets. Everything below describes one
+of them.
 
 The engine turns source records into a maintained set of people and golden
 records. Each source record has a stable `source_system:source_record_id` key;
@@ -79,7 +85,10 @@ across transitive connections, not just the directly scored pair.
 
 ## Execution boundaries
 
-A PostgreSQL advisory lock permits one writer per tenant. Native DuckDB connections
+A PostgreSQL advisory lock permits one writer per **dataset**, with a
+per-org cap on how many of an org's datasets may run at once
+(`orgs.max_concurrent_jobs`, default 1 — the single-writer profile this
+started as). Native DuckDB connections
 are reused within a command and closed between stages. `runs` records each run's
 configuration fingerprints, status and snapshot range. A failed job is resumed
 through the control plane (`resume` re-queues it); runs are deterministic over
