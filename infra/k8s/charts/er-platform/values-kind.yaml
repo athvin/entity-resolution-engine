@@ -40,9 +40,41 @@ executor:
   # kind node inside a laptop's docker VM is asked to hold if a phase ever does
   # overlap. The probe's phases run sequentially, so in practice it is one.
   inFlightCap: 3
-  # Sized for a laptop's docker VM, not for EKS; every class identical and
-  # unpinned because kind has one node and no Karpenter.
+  # Sized for a GITHUB RUNNER, not for a laptop and not for EKS; every class
+  # identical and unpinned because kind has one node and no Karpenter.
+  #
+  # These were `cpu: "1"` and that does not fit, which is why the probe step
+  # had never once passed in CI. The task pod sat `Pending` for the whole of
+  # phase 1's 420s budget and the job stayed `running`, so it surfaced as a
+  # timeout rather than as the scheduling refusal it was:
+  #
+  #   FailedScheduling  0/1 nodes are available: 1 Insufficient cpu.
+  #   no new claims to deallocate, preemption: not eligible due to
+  #   preemptionPolicy=Never
+  #
+  # The arithmetic, measured rather than estimated. Committed on the node
+  # before any task pod exists:
+  #
+  #   kube-system   0.95   (apiserver .25, controller-manager .20, etcd .10,
+  #                         scheduler .10, kindnet .10, coredns 2x.10)
+  #   er-postgres   0.10   (infra/k8s/kind/postgres.yaml)
+  #   er-dispatcher 0.25
+  #   web-api       0.25   (ONE container here — `web.enabled: false` above)
+  #   ------------------
+  #   total         1.55
+  #
+  # A standard GitHub-hosted runner on a private repository is 2 vCPU, so ~0.45
+  # is left and a 1-CPU request can never be scheduled. That the refusal
+  # happened at all is itself the measurement: with 4 allocatable there would
+  # have been 2.45 free and no failure. `requests == limits` for these pods and
+  # `preemptionPolicy: Never`, so there is no burst and nothing to evict.
+  #
+  # 250m leaves ~200m of headroom at 1.8/2.0 committed. The cost is wall clock,
+  # not correctness: a quarter-core DuckDB stage is slower, which phase 5's
+  # 1800s budget for seven sequential pods absorbs. Do not raise this without
+  # redoing the sum above — the next 100m is the difference between a probe
+  # that runs and one that reports a timeout for a pod that never started.
   classes:
-    S: { cpu: "1", memory: 1Gi, duckdbMemory: 500MB, spill: 2Gi, nodepool: "" }
-    M: { cpu: "1", memory: 1Gi, duckdbMemory: 500MB, spill: 2Gi, nodepool: "" }
-    L: { cpu: "1", memory: 1Gi, duckdbMemory: 500MB, spill: 2Gi, nodepool: "" }
+    S: { cpu: "250m", memory: 1Gi, duckdbMemory: 500MB, spill: 2Gi, nodepool: "" }
+    M: { cpu: "250m", memory: 1Gi, duckdbMemory: 500MB, spill: 2Gi, nodepool: "" }
+    L: { cpu: "250m", memory: 1Gi, duckdbMemory: 500MB, spill: 2Gi, nodepool: "" }
