@@ -45,8 +45,8 @@ fn values_yaml() -> String {
 fn allowlisted() -> Vec<String> {
     let yaml = values_yaml();
     let start = yaml
-        .find("keep_keys(attributes, [")
-        .expect("the values file declares keep_keys(attributes, [...]) — has it been renamed?");
+        .find("keep_keys(span.attributes, [")
+        .expect("the values file declares keep_keys(span.attributes, [...]) — has it been renamed?");
     let rest = &yaml[start..];
     let end = rest.find("])").expect("the keep_keys list is unterminated");
     let names: Vec<String> = rest[..end]
@@ -214,8 +214,8 @@ fn the_ottl_statement_carries_no_comment() {
     // is the only thing that showed it.
     let yaml = values_yaml();
     let start = yaml
-        .find("keep_keys(attributes, [")
-        .expect("the values file declares keep_keys(attributes, [...])");
+        .find("keep_keys(span.attributes, [")
+        .expect("the values file declares keep_keys(span.attributes, [...])");
     let rest = &yaml[start..];
     let end = rest.find("])").expect("the keep_keys list is unterminated");
     let statement = &rest[..end];
