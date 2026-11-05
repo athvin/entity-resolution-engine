@@ -27,13 +27,10 @@ since been rewritten in Rust; the design held, the paths did not.*
 > tracked card-by-card on the project board under the `epic` and `docs-backlog`
 > labels rather than prose here, because prose is what drifted.
 >
-> **Residual: every remaining `src/er/*.py` path in this document is historical, not
-> a location.** The header, §2, §3 and §15 were corrected; the inline citations in
-> §5, §8, §9 and §12 and the whole appendix table were deliberately left, because
-> translating them means guessing which Rust module inherited each responsibility
-> and a wrong path is worse than an obviously-dated one. Read them as *what the
-> design was built against*, and find the current owner in
-> `rust-conventions`' generated crate map. The sweep is tracked as its own card.
+> **Every path in this document now points at the code.** The appendix carries an
+> `Owner now` column, and the two seams that landed somewhere the design did not
+> anticipate — the orchestration facade and the writer lock — say so rather than
+> being quietly repointed.
 
 ---
 
@@ -78,7 +75,7 @@ We already have the hard part — a proven, incremental entity-resolution engine
 | Merge-grid primitives: gray-band review queue and always/never pair assertions — the merge/not-duplicate/undo mechanism | the `review`, `pair_label` and `assertion` entities; `.../reviews`, `/reviews/{id}/resolve`, `/reviews/bulk-resolve`, `.../assertions`, `/assertions/contradictions` |
 | Job-ready run ledger: `runs`, `run_stages` (typed counters, snapshot ranges), `ingest_batches` receipts, stage-level resume, config-drift guard, idempotent re-execution per stage, exit-code taxonomy (0/1/2/3/10) | the `run`, `run_stage`, `ingest_batch`, `task_instance` entities; `rust/crates/er-versions`, `er-errors` (`ExitCode::{Success,Config,Precondition,StageFailure,NothingToDo}`) |
 | Incremental correctness machinery: content-hash change detection, tombstones, frozen model + TF snapshots, affected-set reconcile, correction pass to repair drift | DesignDoc S4.3–S4.5, `rust/crates/er-match`, `er-hash`, `er-ids` |
-| Tenancy seam: a per-dataset Postgres advisory writer lock under a per-org concurrency cap; isolation unit is the (metadata schema, data path) pair | `rust/crates/er-server/src/provision.rs`, `er-config`, `configs/default.yaml` |
+| Tenancy seam: one active job per dataset, enforced by a declared partial unique index rather than a held lock, under a per-org concurrency cap; isolation unit is the (metadata schema, data path) pair | `entities/job/entity.yaml` (`jobs_one_active_per_dataset`), `rust/crates/er-server/src/provision.rs`, `er-config`, `configs/default.yaml` |
 
 **Missing (what this design adds)** — corrected, with what shipped struck through:
 ~~an HTTP API~~ (88 `/v1` routes in `er-server`), ~~a background job system~~ (a
@@ -91,7 +88,7 @@ canonical schema is person-centric (§13).
 
 **The two constraints that shape everything:**
 
-1. **One writer per dataset**, enforced by a session-scoped Postgres advisory lock, under a per-org concurrency cap; a second writer exits 3. Stages are synchronous and minutes-to-hours long (1M full ≈ 93s; 10M full ≈ 1h46m).
+1. **One writer per dataset**, enforced by the declared partial unique index `jobs_one_active_per_dataset` (not a session-scoped advisory lock, as originally designed), under a per-org concurrency cap; a second writer exits 3. Stages are synchronous and minutes-to-hours long (1M full ≈ 93s; 10M full ≈ 1h46m).
 2. **CPU- and spill-bound at scale, not memory-bound.** Runtime scales with DuckDB thread count and the local NVMe spill volume; the memory working set stays a near-constant floor (measured ~9.4 GiB peak at 10M against a low DuckDB limit, because DuckDB spills rather than growing). Process-global `ER_*` env configures the lake connection.
 
 ## 3. Feature-parity matrix
@@ -123,12 +120,12 @@ Classification: **ENGINE** (exists, needs an API veneer) · **EXT** (engine exte
 |---|---|---|---|---|
 | `er-api` (FastAPI/uvicorn) | `er-api` (slim, no dbt) | N stateless, autoscaled | 2–4 GiB | Control-plane CRUD, read path over DuckLake, steward writes, auth. **Never executes pipeline stages.** |
 | `er-dispatcher` | `er-api` | 1, leader-elected | <1 GiB | Queue polling, per-tenant serialization, cron, k8s Job launch/watch, zombie detection. Never touches DuckDB. |
-| `er-runner` | `er-pipeline` (existing, with dbt) | one k8s Job pod per pipeline run | ~6–14 GiB + local NVMe spill | Executes exactly one run via the `er/service.py` facade (§12), heartbeats progress, exits. |
+| `er-runner` | `er-pipeline` (existing, with dbt) | one k8s Job pod per pipeline run | ~6–14 GiB + local NVMe spill | Executes exactly one run via `er-server exec-task` over `er-dag`'s compiled DAG (§12), heartbeats progress, exits. |
 
 **Why a k8s Job per run, not long-lived workers:**
 
-- The engine's tenant seam is process-scoped: `src/er/lake/env.py` is the single reader of the `ER_*` env set. One pod per (tenant, run) makes env injection the isolation mechanism instead of a hazard.
-- The advisory lock is session-scoped (`src/er/lake/catalog.py` holds a dedicated Postgres connection for the run's lifetime). A pod that dies releases the lock automatically — the crash-safety property the engine already documents. Long-lived workers multiplexing tenants would have to reimplement that care.
+- The engine's tenant seam is process-scoped: `er-env` is the single reader of the `ER_*` env set. One pod per (tenant, run) makes env injection the isolation mechanism instead of a hazard.
+- **This changed shape.** The design expected a session-scoped advisory lock holding a dedicated Postgres connection for the run's lifetime. What shipped is a declared **partial unique index** (`jobs_one_active_per_dataset`, `entities/job/entity.yaml`), so Postgres enforces one active job per dataset and there is no connection to hold. The crash-safety argument still lands, by a different route: a dead pod's job is reaped to a terminal state, which lifts the constraint. The property the engine already documents. Long-lived workers multiplexing tenants would have to reimplement that care.
 - Bin-packing: pods sized per tenant tier are the only sane answer to a workload that scales on vCPU and local NVMe spill (hundreds of GiB) while memory stays a near-constant floor; idle tier-sized workers are dead money, and a pod failure's blast radius is one tenant's one resumable run.
 - The `er-pipeline` image is already described in `docker/Dockerfile` as "later the k8s job image" — this is the intended landing.
 
@@ -142,7 +139,7 @@ The API stays responsive trivially because it never runs stages: it imports `er`
 
 **Queue technology: Postgres `SELECT … FOR UPDATE SKIP LOCKED`. No broker.** Per-tenant serialization is mandatory anyway and is a transactional constraint — a partial unique index on `tenant_id WHERE state IN ('dispatching','running')` makes double-dispatch impossible by construction. The queue and the engine's advisory lock live in the same Postgres, so they can never disagree about who is writing. Volume is hundreds of jobs/day — three orders of magnitude below where Redis/Celery earns its operational cost — and Celery's at-least-once redelivery is actively wrong for an engine that deliberately never auto-retries.
 
-**Retry policy, keyed exactly to the engine's exit-code taxonomy** (`src/er/errors.py`):
+**Retry policy, keyed exactly to the engine's exit-code taxonomy** (`er-errors`):
 
 | Runner exit / event | error_class | Policy |
 |---|---|---|
@@ -222,7 +219,7 @@ catalog lever is `ER_LAKE_CATALOG_SCHEMA`.
 
 - A new `er/readapi/` module (§12) attaches per tenant using explicit settings (not process env), with a small per-pod LRU of warm attaches; DuckDB `memory_limit` kept low (~2 GiB, 2 threads) — API pods are not compute nodes.
 - **Snapshot-pinned keyset pagination:** page 1 captures the current snapshot; the cursor embeds `(snapshot_id, last_key)`; later pages query `AT (VERSION => snapshot_id)`. A run committing between pages cannot shear results. The snapshot ID also keys the response cache, so invalidation is exact and free.
-- Filter/sort columns are validated against the relation registry in `src/er/lake/model.py` — no string-built SQL from user input.
+- Filter/sort columns are validated against the relation registry in `rust/crates/er-schema/src/model.rs` — no string-built SQL from user input.
 - `?as_of=` history endpoints reuse the same time-travel mechanism; `entity_events` supplies the merge/split narrative.
 - **Explicit coupling:** `er lake maintain` snapshot expiry must retain snapshots longer than the maximum cursor/cache lifetime (cursors expire ≤1h; retention ≥24h).
 - **Pre-designed escape hatch, not built:** if fuzzy "find data" search outgrows queries over the normalized columns, materialise a display projection (the retired `golden_display` shape) and sync it to Postgres FTS per tenant. That is the only case that earns a serving copy.
@@ -282,6 +279,15 @@ The engine merges entities *in the lake*; Cloudingo merges records *in Salesforc
 
 ## 12. Engine changes workstream (deliberately small)
 
+> **All six landed, and several landed differently.** This section is the plan, kept
+> for its reasoning; the Python names in it are what the work was *called*, not where
+> it lives. Item 1 became `er-dag`'s compiled DAG rather than a service facade — the
+> typed-errors-instead-of-exit-codes intent survived as `er-errors`' `ExitCode`
+> mapping. Item 2's settings object became four explicit `ER_LAKE_*` variables read
+> by `er-env`. Item 4's read API is the `.../golden-records`, `.../records`,
+> `.../duplicates` and `.../match-scores` routes, with keyset pagination and snapshot
+> pinning as designed. Item 7's score-only mode shipped as `.../match-preview`.
+
 1. **`er/service.py` facade** extracted from `src/er/cli.py`'s orchestration sequence (`GlobalOptions.resolve` → writer lock → schema preflight → `RunContext` → stages → exit mapping, ~150–250 lines): `execute_chain(settings, config, chain, run_id, resume_id=None, hooks=None) → RunOutcome` with typed error classes instead of exit codes. The CLI becomes a thin caller; the runner calls this. The single biggest unblocking change.
 2. **`LakeSettings` parameterization** of `src/er/lake/env.py` — an explicit settings object accepted by `connect()` / `invocation_session()` / `tenant_lock()`, env as fallback. env.py is documented as the one reader of `ER_*`, so this is a one-seam change — and without it the API cannot safely serve two tenants from one process.
 3. **Progress + cancellation hooks:** `RunContext` accepts a stage-transition callback and a `should_cancel()` checked between stages; the runner wires heartbeats and SIGTERM to them.
@@ -311,8 +317,7 @@ The canonical schema is person-centric end to end (given/family name, email, pho
 
 ## 15. Roadmap
 
-> **Phases 1–3 are substantially delivered; phase 1's `er/service.py` is a Python
-> path that no longer exists.** What remains unbuilt in phase 3 is the one thing it
+> **Phases 1–3 are substantially delivered.** What remains unbuilt in phase 3 is the one thing it
 > shares with phase 4: the **Salesforce connector**. Phases 4 and 5 are open, and are
 > now tracked card-by-card on the project board rather than here — see the
 > `docs-backlog` and `epic` labels. The `Status` column below was added in that audit;
@@ -320,7 +325,7 @@ The canonical schema is person-centric end to end (given/family name, email, pho
 
 | Phase | Scope | Why | Status |
 |---|---|---|---|
-| **1 — Walking skeleton** | Control-plane DB (orgs, keys, config as uploaded YAML), `er/service.py`, `jobs` + dispatcher + k8s Job runner for run-all full/incremental, heartbeat status, one pilot tenant | Proves the riskiest seam end-to-end: job-per-pod running the unmodified sync engine under the advisory lock inside a tier-sized resource envelope | **done.** The control plane, job queue, dispatcher and K8s Job runner all ship. `er/service.py` is a dead Python path; the equivalent is `er-server`. |
+| **1 — Walking skeleton** | Control-plane DB (orgs, keys, config as uploaded YAML), the orchestration facade (shipped as `er-dag` + `er-server exec-task`, not a `service.py`), `jobs` + dispatcher + k8s Job runner for run-all full/incremental, heartbeat status, one pilot tenant | Proves the riskiest seam end-to-end: job-per-pod running the unmodified sync engine under the advisory lock inside a tier-sized resource envelope | **done.** The control plane, job queue, dispatcher and K8s Job runner all ship. `er/service.py` is a dead Python path; the equivalent is `er-server`. |
 | **2 — Read + steward** | `LakeSettings`, read-API module, golden/duplicates/reviews/assertions endpoints, snapshot-pinned pagination, roles | Makes the product demoable against Cloudingo's merge grid — the buying moment | **done.** Golden/duplicates/reviews/assertions endpoints ship with keyset pagination and four server-enforced roles. |
 | **3 — Automation + connector seam → MVP launch** | Schedules, retry/resume/idempotency, imports (preview report), events/webhooks, config versioning + publish tiers; **Salesforce connector in insights mode** (OAuth, Lead+Contact, bulk sync, polling); dashboards; merge-plan CSV export | The smallest sellable wedge: a zero-risk "audit your org" with visibly better match quality, priced under Cloudingo Standard, with the export as the action bridge | **done except the connector.** Schedules, retry/resume, imports with receipts, webhooks, config versioning + publish and dashboards all ship. **The Salesforce connector does not** — that is the MVP blocker, tracked as #511/#512. |
 | **4 — Parity: writeback** | Apply service (preview → approve → apply, journal, staleness guard), manual/mass/auto tiers, undo/restore, import commit + upsert, Accounts (organization entity type), field analysis, continuous micro-batch tier, per-tenant STS creds, SOC2 groundwork | Exit criterion: a Cloudingo Standard/Professional customer switches without losing a workflow (accepting minutes-not-seconds real-time) | **open.** Tracked as #514 (apply service), #530 (rollback/retry), #547 (organization entity type), #525 (continuous tier), #550 (per-tenant creds), #540 (SOC 2). |
@@ -347,14 +352,19 @@ The canonical schema is person-centric end to end (given/family name, email, pho
 
 ## Appendix: engine seams this design builds on
 
-| Seam | Path | Used by |
-|---|---|---|
-| CLI orchestration sequence to extract as `er/service.py` | `src/er/cli.py` | runner (§12) |
-| `ER_*` env reader to parameterize as `LakeSettings` | `src/er/lake/env.py` | API read path, runner (§12) |
-| Session/connection + snapshot machinery | `src/er/lake/ducklake.py` | read path (§8) |
-| Per-tenant advisory writer lock | `src/er/lake/catalog.py` | dispatcher, steward writes (§5, §16) |
-| Relation registry (authoritative schema map) | `src/er/lake/model.py` | read-API validation (§8) |
-| Review queue + always/never assertions | `src/er/review/queue.py`, `src/er/review/assertions.py` | merge grid, undo (§11) |
-| Per-source column mapping (`sources` block) | `configs/default.yaml`, `src/er/config/schema.py` | connector mapping compilation (§10) |
-| Run ledger, resume, drift guard, exit codes | `src/er/obs/runctx.py`, `src/er/resume.py`, `src/er/versions.py`, `src/er/errors.py` | job orchestration (§5) |
-| Cloudingo feature bar | `docs/research-cloudingo.md` | parity matrix (§3) |
+Every seam below was named as a Python path when this was written. The `Owner now`
+column is where the responsibility actually landed after the Rust rewrite — and two
+of them landed somewhere the design did not anticipate, which is noted rather than
+quietly repointed.
+
+| Seam | Named as | Owner now | Used by |
+|---|---|---|---|
+| CLI orchestration sequence | `src/er/cli.py`, to be extracted as `er/service.py` | **Not a service facade.** It became `er-dag`'s compiled DAG — a task is a pipeline stage, a DAG is a job kind, and wiring, arity, cycles and trigger-rule misuse all fail at `cargo build`. `er-cli` carries the subcommands. | runner (§12) |
+| `ER_*` env reader | `src/er/lake/env.py`, to be parameterized as `LakeSettings` | `er-env`; the lake layout is four explicit variables (`ER_LAKE_CATALOG`, `ER_LAKE_CATALOG_SCHEMA`, `ER_LAKE_DATA_PATH`, `ER_LAKE_METADATA_SCHEMA`) rather than a settings object | API read path, runner (§12) |
+| Session/connection + snapshot machinery | `src/er/lake/ducklake.py` | `dedupe-core/src/session/ducklake.rs` | read path (§8) |
+| Per-tenant advisory writer lock | `src/er/lake/catalog.py` | **Not a lock held in code, and no longer per-tenant.** It is a declared **partial unique index** — `jobs_one_active_per_dataset` on `dataset_id WHERE state IN ('dispatching','running','canceling')` in `entities/job/entity.yaml`, with `jobs_one_active_org_level` for org-level jobs. Postgres enforces it; the lake is the thing being written and each dataset is its own lake. | dispatcher, steward writes (§5, §16) |
+| Relation registry (authoritative schema map) | `src/er/lake/model.py` | `rust/crates/er-schema/src/model.rs` together with the `entities/` catalog — architecture.md names both as the authorities | read-API validation (§8) |
+| Review queue + always/never assertions | `src/er/review/queue.py`, `src/er/review/assertions.py` | the `review`, `pair_label` and `assertion` entities, served by `.../reviews`, `/reviews/{id}/resolve`, `/reviews/bulk-resolve`, `.../assertions` and `/assertions/contradictions` | merge grid, undo (§11) |
+| Per-source column mapping (`sources` block) | `configs/default.yaml`, `src/er/config/schema.py` | `configs/default.yaml` still, plus `er-config` | connector mapping compilation (§10) |
+| Run ledger, resume, drift guard, exit codes | `src/er/obs/runctx.py`, `src/er/resume.py`, `src/er/versions.py`, `src/er/errors.py` | the `run`, `run_stage` and `task_instance` entities, plus `er-versions` and `er-errors` (`ExitCode::{Success,Config,Precondition,StageFailure,NothingToDo}`) | job orchestration (§5) |
+| Cloudingo feature bar | `docs/research-cloudingo.md` | unchanged | parity matrix (§3) |
