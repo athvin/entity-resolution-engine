@@ -2652,12 +2652,14 @@ const server = http.createServer((req, res) => {
             match_key: 0,
             marginal_pairs: 1203,
             cumulative_pairs: 1203,
+            has_block_breakdown: true,
           },
           {
             blocking_rule: 'l."phone_e164" = r."phone_e164"',
             match_key: 1,
             marginal_pairs: 512,
             cumulative_pairs: 1715,
+            has_block_breakdown: true,
           },
           {
             // A rule that earns almost nothing: the point of the marginal
@@ -2666,12 +2668,19 @@ const server = http.createServer((req, res) => {
             match_key: 2,
             marginal_pairs: 127,
             cumulative_pairs: 1842,
+            has_block_breakdown: true,
           },
         ].slice(0, 3),
+        // `pairs` is C(rows, 2) — what a DEDUPE run scores in the block — not
+        // rows*rows. The server used to send the raw product and this mock
+        // mirrored it, so both agreed on a number neither should have produced.
+        // `largest` is per RULE now, so the slice is applied per match_key.
         largest_blocks: [
-          { key_values: ["", "94103"], pairs: 406 },
-          { key_values: ["smit", "10001"], pairs: 91 },
-        ].slice(0, largest),
+          { match_key: 0, key_values: ["", "94103"], rows: 29, pairs: 406 },
+          { match_key: 0, key_values: ["smit", "10001"], rows: 14, pairs: 91 },
+        ]
+          .filter((b) => b.match_key === 0)
+          .slice(0, largest),
       });
     }
     if (
