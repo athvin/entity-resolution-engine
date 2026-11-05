@@ -33,7 +33,7 @@ Other gates, each run on its own because they need external services:
 
 **The frontend gate blocks merges now.** `lint + types + unit`, `playwright
 functional tier` and `pnpm audit + licenses` are required status checks on `main`
-alongside the four Rust ones — before 2026-10-20 the frontend CI ran and was then
+alongside the five Rust ones — before 2026-10-20 the frontend CI ran and was then
 ignored at merge time. `.github/workflows/frontend.yml` therefore has no `paths:`
 filter: it uses the same `detect`-job pattern `rust.yml` does, because a workflow
 a path filter skips never reports, and a required check that never reports blocks
@@ -42,6 +42,16 @@ every backend-only PR forever.
 `docs/frontend-testing.md` is the frontend standard — which test tier a change
 belongs in, what each gate is for, and the rule that every gate must be observed
 *failing* before it is trusted.
+
+**Those greens can be stale, and the merge bus is what re-earns them.** `main`'s
+protection has `strict: false`, so a PR merges on a green it won against a base
+that may since have moved — four PRs each green against an older `main` can all
+merge and leave `main` red. `merge-bus.yml` batches the PRs that are ready,
+proves the *combination* green through an ordinary PR, and only then squash-merges
+the members. GitHub's own merge queue is this feature and cannot be enabled on a
+private user-owned repository, which is why it is a workflow here. The
+`ci-and-supply-chain` skill carries the rules; the one that bites is that
+`merge bus` must never become a required check.
 
 ## Layout
 

@@ -108,6 +108,12 @@ job instead — `terraform plan` is the worked example.
 |---|---|---|---|
 | `probe` | kind probe (executor e2e) | 90 | `always` |
 
+### `merge-bus.yml`
+
+| Job | Status-check context | Timeout | Condition |
+|---|---|---|---|
+| `bus` | merge bus | 75 | `always` |
+
 ### `rust.yml`
 
 | Job | Status-check context | Timeout | Condition |
