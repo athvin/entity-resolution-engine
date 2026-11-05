@@ -73,31 +73,21 @@ spec:
       terminationGracePeriodSeconds: 60
       securityContext:
         {{- include "er-platform.podSecurityContext" $ | nindent 8 }}
-      initContainers:
-        # The control-plane schema, BEFORE the new er-server serves: the baseline
-        # (every table) plus the reconciler (every column the catalog in this
-        # image adds), each applied statement ledgered in public.schema_migrations.
-        # Under Recreate the old pod is already gone, so no old code sees a
-        # migrated schema mid-flight; a breaking difference (ERR_SCHEMA_BREAKING)
-        # fails this container and the pod never starts, which is the halt a
-        # half-migrated schema deserves. ensure_schema also rides the API's boot
-        # (idempotent, advisory-locked), so a dev stack without this container
-        # behaves the same.
-        - name: er-migrate
-          image: {{ include "er-platform.colorImage" (dict "root" $ "spec" $spec "half" "api") }}
-          command: ["er-server", "migrate"]
-          securityContext:
-            {{- include "er-platform.containerSecurityContext" $ | nindent 12 }}
-            runAsUser: 1001
-            runAsGroup: 1001
-          env:
-            {{- include "er-platform.erserverEnv" $ | nindent 12 }}
-          envFrom:
-            - secretRef:
-                name: er-erserver-env
-          resources:
-            requests: { cpu: 100m, memory: 128Mi }
-            limits: { cpu: 500m, memory: 512Mi }
+      # NO init container. The control-plane schema is migrated by the
+      # `er-schema-migrate` pre-upgrade hook (job-schema-migrate.yaml), which
+      # runs `er-server migrate --expect-additive` and refuses — writing
+      # nothing — if the plan contains anything the live colour would not
+      # survive.
+      #
+      # It had to move. The init container was only safe because `Recreate`
+      # guaranteed the old pod was already gone, and that guarantee is exactly
+      # what blue/green gives up on purpose: the old colour keeps serving. An
+      # init container here would also migrate once PER COLOUR and at the wrong
+      # moment — the inactive colour's pod starting is not the release boundary.
+      #
+      # `ensure_schema` still rides the API's boot (idempotent,
+      # advisory-locked), so a store that somehow missed the hook converges on
+      # the first pod start rather than serving a stale schema.
       containers:
         # --- the Rust control plane + in-process dispatcher ---
         - name: er-server

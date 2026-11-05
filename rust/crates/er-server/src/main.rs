@@ -186,27 +186,15 @@ async fn async_main(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>>
 /// COMMITTED. Right for a boot — converge as far as is safe, then halt loudly —
 /// and wrong for a gate, which must leave the store untouched when it says no.
 async fn migrate(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    let flag = |name: &str| args.iter().any(|a| a == name);
-    let plan_only = flag("--plan");
-    let expect_additive = flag("--expect-additive");
-    if let Some(unknown) = args
-        .iter()
-        .find(|a| !matches!(a.as_str(), "--plan" | "--json" | "--expect-additive"))
-    {
-        // Refuse rather than ignore: a gate invoked with a misspelled flag that
-        // silently applied instead of planning would be the worst outcome
-        // available here.
-        return Err(format!(
-            "er-server migrate: unknown argument {unknown:?} \
-             (expected --plan, --json or --expect-additive)"
-        )
-        .into());
-    }
+    // Parsed in the library so the refusal of an unknown flag is testable; see
+    // `migrate_plan::parse_migrate_args` for why silent acceptance is the
+    // behaviour being removed.
+    let opts = er_server::migrate_plan::parse_migrate_args(args)?;
 
     let dsn = std::env::var("ER_PG_DSN").map_err(|_| "ER_PG_DSN is required for migrate")?;
     let mut client = er_server::pg::connect(&dsn).await?;
 
-    if plan_only || expect_additive {
+    if opts.plans() {
         let catalog = er_entities::catalog::catalog();
         let relations = er_entity_diff::postgres_relations(&catalog);
         let live = er_entity_diff::read_postgres_columns(&client, &relations).await?;
@@ -214,7 +202,7 @@ async fn migrate(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         let hash = er_server::migrate_plan::control_catalog_hash();
         let verdict = er_server::migrate_plan::verdict(&plan);
 
-        if flag("--json") {
+        if opts.json {
             println!("{}", er_server::migrate_plan::as_json(&plan, &hash));
         } else {
             print!("{}", er_server::migrate_plan::render(&plan, &hash));
@@ -222,7 +210,7 @@ async fn migrate(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 
         // `--plan` stops here whatever the verdict. `--expect-additive` stops
         // only to refuse, and falls through to apply otherwise.
-        if plan_only || verdict == er_server::migrate_plan::Verdict::Breaking {
+        if opts.plan_only || verdict == er_server::migrate_plan::Verdict::Breaking {
             std::process::exit(i32::from(verdict.exit_code()));
         }
     }
