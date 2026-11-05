@@ -230,15 +230,28 @@ jobs:
           kubectl apply -f infra/k8s/storage/ebs-gp3.yaml
           helm upgrade --install "$CI_NAMESPACE" infra/k8s/charts/er-dev-namespace \
             --namespace default --set "developer=$CI_NAMESPACE" --wait
-          # The executor allowlist (batch-orchestration-design §11): the two
-          # Phase 2 kinds run as per-attempt Kubernetes Jobs in this namespace.
-          # Enabled HERE, not in the chart default, so a developer namespace
-          # opts in deliberately.
+          # The executor allowlist (batch-orchestration-design §11): these kinds
+          # run as per-attempt Kubernetes Jobs in this namespace. Enabled HERE,
+          # not in the chart default, so a developer namespace opts in
+          # deliberately.
+          #
+          # `run_all_*` joins the two Phase 2 kinds because the pipeline has now
+          # been observed end to end on a real cluster: `check_kind.sh` phase 5
+          # runs `run_all_full` as seven pods — seven distinct Job objects, seven
+          # distinct pod uids, one launch each — and the lake comes out ledgered.
+          # Both share one DAG and one set of bodies; only `init`'s mode
+          # decision differs.
+          #
+          # The rest of Phase 3's kinds (`correct`, `train`, `apply_corrections`,
+          # `apply_approved`, `provision`) stay OFF for now. Their bodies are
+          # real and covered by the integration tier, but none has run on a
+          # cluster, and an allowlist whose entries all arrive together is not
+          # an allowlist. They go on as each is observed.
           helm upgrade --install er-platform infra/k8s/charts/er-platform \
             --namespace "$CI_NAMESPACE" --set "developer=$CI_NAMESPACE" \
             --set "images.api.digest=${{ steps.digests.outputs.er_api }}" \
             --set "images.web.digest=${{ steps.digests.outputs.er_web }}" \
             --set "efs.fileSystemId=${{ steps.env.outputs.fs }}" \
             --set "efs.accessPointId=${{ steps.env.outputs.ap }}" \
-            --set 'executor.dagKinds=lake_maintain\,lake_migrate' \
+            --set 'executor.dagKinds=lake_maintain\,lake_migrate\,run_all_full\,run_all_incremental' \
             --atomic --wait --timeout 10m
