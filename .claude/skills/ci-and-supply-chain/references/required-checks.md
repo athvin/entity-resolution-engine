@@ -105,7 +105,7 @@ job instead — `terraform plan` is the worked example.
 
 | Job | Status-check context | Timeout | Condition |
 |---|---|---|---|
-| `probe` | kind probe (executor e2e) | 90 | `always` |
+| `probe` | kind probe (executor e2e) | 120 | `always` |
 
 ### `rust.yml`
 

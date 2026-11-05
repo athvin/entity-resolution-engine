@@ -126,10 +126,17 @@ executor:
   # EMPTY BY DEFAULT — the executor is inert until a kind is listed here.
   # Deleted in Phase 4 when the legacy arm goes.
   dagKinds: ""
-  # Launch gate (§7.2): queued|running pod rows across orgs. Default 1 until
-  # the account's Standard vCPU quotas are raised — with 8 vCPU and 4 consumed
-  # by app+system nodes, a second runner node of any class cannot provision.
-  inFlightCap: 1
+  # Launch gate (§7.2): queued|running pod rows across orgs. Three since the
+  # Standard vCPU quotas were granted at 64 (both On-Demand L-1216C47A and Spot
+  # L-34B43A08, verified against the account rather than assumed — an earlier
+  # note recorded 8, which was the pre-grant value). The bound is node vCPU in
+  # the worst case: three L pods land on three 16-vCPU nodes, so 3×16 + 4 for
+  # app+system = 52 of 64. Four would need 68 and could not provision.
+  #
+  # The per-namespace ResourceQuota binds before this does, and deliberately —
+  # see er-dev-namespace/values.yaml. A pod the quota refuses comes back as a
+  # capacity FailedCreate, which costs a wait and not a launch.
+  inFlightCap: 3
   # §6.2: Postgres is the record; 300 s covers the watch's 5-min resync.
   ttlSecondsAfterFinished: 300
   # §4.5's capacity wait, seconds.

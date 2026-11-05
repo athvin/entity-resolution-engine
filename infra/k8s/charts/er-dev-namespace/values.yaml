@@ -29,15 +29,30 @@ postgres:
 # hooks while they run, the drift CronJob's 1 live + 1+3 history, the
 # idle-suspend CronJob's 1+1+1, a lingering bootstrap hook), and the executor
 # adds one `er-t-…` Job per in-flight task attempt that then lingers for its
-# 300 s TTL — `>= 8 + cap × (1 + ceil(ttl / mean_segment_seconds))`. With cap 1
-# that computes to 14; 20 buys margin and is recomputed whenever the cap
-# rises. (History: 8 after the 2.3 quota-stall incident, 10 for the
-# idle-suspend history, 20 since the executor.)
+# 300 s TTL — `>= 8 + cap × (1 + ceil(ttl / mean_segment_seconds))`. With cap 3,
+# TTL 300 s and segments of at least 60 s that computes to 8 + 3×6 = 26; 30
+# buys margin. (History: 8 after the 2.3 quota-stall incident, 10 for the
+# idle-suspend history, 20 at cap 1, 30 since the cap rose to 3.)
+#
+# The other three dimensions are NOT all sized for three concurrent L pods, and
+# the difference is deliberate — a ResourceQuota ceiling on cpu or jobs costs
+# nothing until it is used, while ephemeral storage is EBS that gets paid for:
+#
+#   limits.cpu                   3 × 12 (L) + 2 for the app  = 38  → 40
+#   requests.memory              3 × 14Gi (L) + app          = 46Gi → 80Gi is already clear
+#   requests.ephemeral-storage   3 × 400Gi (L spill)         = 1200Gi → LEFT at 900Gi
+#
+# So this namespace admits at most TWO concurrent L pods, on purpose. The third
+# is refused by the quota, which the classifier reads as a capacity
+# `FailedCreate`: it waits `executor.quotaWaitSeconds` and does not spend a
+# launch (§7.2's "the capacity wait is the backstop"). Mixed classes are
+# nowhere near it — three S pods are 6 cpu and 120Gi. Raising ephemeral to
+# 1200Gi is a real monthly cost and wants a decision, not a default.
 quota:
   requestsMemory: 80Gi
-  limitsCpu: "24"
+  limitsCpu: "40"
   requestsEphemeralStorage: 900Gi
-  jobs: 20
+  jobs: 30
 # LimitRange defaults — required so pods that omit a resource still pass the
 # quota (a ResourceQuota on a resource rejects any pod with no request for
 # it). Runner Jobs (2.3) always set their own explicit values.
