@@ -135,6 +135,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ env.DEPLOY_SHA }}
+          # Full history, because the staleness guard in "Resolve image
+          # digests" runs `git diff <the sha the reused image was built
+          # from>..<DEPLOY_SHA>`. The default depth of 1 clones a single
+          # commit, so that diff cannot resolve its left side and the guard
+          # would take its "cannot verify" branch on EVERY deploy — a check
+          # that always abstains, which is worse than no check because it
+          # looks like one.
+          fetch-depth: 0
       - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
         with:
           # The OIDC subject is pinned to `ref:refs/heads/main`
@@ -197,6 +205,46 @@ jobs:
               fi
               echo "$repo: no image tagged $DEPLOY_SHA — REUSED newest digest $d"
               echo "reused_${repo//-/_}=1" >> "$GITHUB_OUTPUT"
+
+              # REFUSE, rather than warn, when the tree that builds this image
+              # actually moved between what is running and what is being
+              # deployed.
+              #
+              # The warning above was not enough, and the evidence is specific:
+              # it fired on four deploys on 2026-11-05 — P12's metrics, P15's
+              # structured logging, P22's gate and P7's action header all
+              # merged, green, and absent from the running binary — and nobody
+              # read it, including the person who added it for exactly this
+              # failure. Something that must not be missed has to fail a check,
+              # not annotate one.
+              #
+              # The question is answerable because the reused digest carries
+              # the sha it WAS built from. `git diff <that sha>..<DEPLOY_SHA>`
+              # over the image's own source paths says whether this deploy
+              # would ship older code than it claims. No image tag and no
+              # source change is the legitimate case (#587's platform-only
+              # path, or a tree that genuinely did not move); no image tag WITH
+              # a source change is the bug.
+              built_from="$(aws ecr describe-images --repository-name "$repo" \
+                              --image-ids "imageDigest=$d" \
+                              --query 'imageDetails[0].imageTags[0]' --output text 2>/dev/null || true)"
+              case "$repo" in
+                er-api) watched="rust Dockerfile entities" ;;
+                er-web) watched="frontend" ;;
+                *)      watched="" ;;
+              esac
+              if [ -n "$built_from" ] && [ "$built_from" != "None" ] && [ -n "$watched" ]; then
+                # shellcheck disable=SC2086
+                if ! git cat-file -e "${built_from}^{commit}" 2>/dev/null; then
+                  echo "::warning title=$repo cannot verify the reused digest::its tag '$built_from' is not a commit in this checkout, so the staleness check could not run"
+                elif changed="$(git diff --name-only "$built_from".."$DEPLOY_SHA" -- $watched)" && [ -n "$changed" ]; then
+                  echo "::error title=$repo would ship older code than $DEPLOY_SHA::the newest digest in ECR was built from $built_from, and these paths changed between it and $DEPLOY_SHA. Refusing to deploy rather than reporting success on a stale image. Build it with: gh workflow run images.yml -f ref=$DEPLOY_SHA"
+                  echo "$changed" | head -20
+                  exit 1
+                else
+                  echo "$repo: reuse verified — no change under '$watched' between $built_from and $DEPLOY_SHA"
+                fi
+              fi
             else
               echo "$repo: $DEPLOY_SHA -> $d"
               echo "reused_${repo//-/_}=0" >> "$GITHUB_OUTPUT"
