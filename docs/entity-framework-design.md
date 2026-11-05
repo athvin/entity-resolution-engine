@@ -406,6 +406,12 @@ Atlas is not used, and neither is Alembic's model; Part 2 has the comparison. Th
 
 **What this does not do.** No blue-green or canary across schema versions; one replica, one version, and rules 5 to 7 stand in for it until the product needs more. No automatic data backfill for new `NOT NULL` lake columns; those are additive only with a default, or they are a rebuild.
 
+**Adding an index is not online, and the shape of `POSTGRES_BASELINE` is why.** Indexes are not reconciled at all — the differ compares `(name, type, nullable)` and never reads `pg_index`, so an index reaches a live store through the boot replay, which runs `CREATE [UNIQUE] INDEX IF NOT EXISTS` inside `ensure_schema`'s transaction. On Postgres that takes a `SHARE` lock: reads continue, writes to that table block for the duration of the build. At the control plane's current size that is seconds and nobody notices; it is recorded here because the remedy is not small.
+
+`CREATE INDEX CONCURRENTLY` cannot run inside a transaction block, and each `POSTGRES_BASELINE` entry is **one string per entity** — `public.jobs` is its `CREATE TABLE` plus five `CREATE INDEX` statements concatenated, applied with a single `batch_execute`. So going online needs: indexes emitted as a separate generated constant (which changes every entity's generated DDL, byte-compared by `er-entity verify`), a new non-transactional phase in `ensure_schema`, a fresh-versus-incremental split because `CONCURRENTLY` cannot build on a table created in a still-open transaction, `pg_index.indisvalid` recovery for a build that fails half-way, and the same treatment for the deferred replay in rule 4's sequence.
+
+Two consequences worth acting on before that work is justified. The volume lives in the lake, and **lake entities may not declare indexes at all** (lint rule `V11`), so this ceiling only ever applies to operational control-plane tables. And the narrow piece that stands alone is an `indisvalid` sweep: an operator who interrupts a manual `CREATE INDEX CONCURRENTLY` leaves an `INVALID` index behind, and nothing in the framework currently notices or rebuilds it.
+
 ### Type reference
 
 Everything the framework leans on already exists. The table is the full list of borrowed types and the one place each is used; nothing is wrapped or re-implemented.
