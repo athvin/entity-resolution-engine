@@ -8,24 +8,69 @@
 //! model.
 //!
 //! A list of kinds the scheduler will enqueue is a PROMISE that something
-//! handles them. This checks the promise, because nothing else did: the kinds
-//! are matched as string literals, so a missing arm is not a type error and the
-//! compiler has no opinion about it.
+//! handles them. This checks the promise, because nothing else did.
 //!
-//! Textual by necessity — the arms are `match job.kind.as_str()` literals and
-//! two of them are async pre-branches in `dispatch_once` rather than arms of
-//! that match. Beside `egress_guard.rs` and `mock_contract.rs`, which make the
-//! same kind of structural claim the same way.
+//! ## There are two destinations, and the promise is about both
+//!
+//! A kind routes to a **compiled DAG** when it is listed in
+//! `executor.dagKinds`, and to the legacy in-process arm in `dispatcher.rs`
+//! when it is not (batch-orchestration-design §11). So "somewhere to go" means
+//! a DAG for every kind, plus a legacy arm for every kind not yet on the
+//! allowlist — and the two are checked separately below because they retire at
+//! different times.
+//!
+//! The DAG half is the permanent one and is **registry-backed**: it asks
+//! `JobKind::parse` and `dags::dag_for`, so a missing kind is a `None` rather
+//! than a missing line of text. Phase 1 of the design said this file would
+//! scan `dag_for`; it did not, and the textual scan it kept is what made the
+//! file an obstacle to Phase 4 — deleting the legacy arms would have failed
+//! this file's own self-check, which hard-asserted that `lake_maintain` had a
+//! `match` arm in `dispatcher.rs`.
+//!
+//! The legacy half stays textual by necessity — the arms are
+//! `match job.kind.as_str()` literals and two of them are async pre-branches in
+//! `dispatch_once` rather than arms of that match — and it **retires itself**:
+//! it covers exactly `LEGACY_ARM_KINDS`, and when Phase 4 empties that list the
+//! test stands down instead of failing. That is the intended exit, not a hole.
+//!
+//! Beside `egress_guard.rs` and `mock_contract.rs`, which make the same kind of
+//! structural claim the same way.
+
+use er_server::dags::{self, JobKind};
 
 const DISPATCHER: &str = include_str!("../src/dispatcher.rs");
 
 /// Kinds enqueued by the product but never by a schedule, so they are not in
-/// `SCHEDULABLE_KINDS` and still need an arm.
+/// `SCHEDULABLE_KINDS` and still need a destination.
 const UNSCHEDULED_KINDS: [&str; 1] = ["apply_corrections"];
+
+/// Kinds that still reach the legacy in-process arm because they are absent
+/// from `executor.dagKinds` in the deploy (`.github/workflows/deploy.yml`).
+///
+/// **Phase 4 empties this list and deletes the test that reads it**, along with
+/// the arms themselves. Keep it in step with the deploy's `--set`: a kind on
+/// the allowlist no longer needs an arm, and one removed from the allowlist
+/// does.
+const LEGACY_ARM_KINDS: [&str; 5] = [
+    "correct",
+    "train",
+    "profile",
+    "apply_approved",
+    "apply_corrections",
+];
+
+/// Every kind the product can enqueue, from both lists.
+fn enqueueable() -> Vec<&'static str> {
+    er_server::SCHEDULABLE_KINDS
+        .iter()
+        .chain(UNSCHEDULED_KINDS.iter())
+        .copied()
+        .collect()
+}
 
 /// Whether `dispatcher.rs` routes `kind` — either as a `match` arm on
 /// `job.kind`, or as one of `dispatch_once`'s async pre-branches.
-fn is_routed(kind: &str) -> bool {
+fn has_legacy_arm(kind: &str) -> bool {
     // `"train" =>` / `"run_all_full" | "run_all_incremental" =>` style arms.
     let as_arm = DISPATCHER
         .lines()
@@ -37,37 +82,91 @@ fn is_routed(kind: &str) -> bool {
 }
 
 #[test]
-fn every_schedulable_job_kind_has_a_dispatcher_arm() {
+fn every_enqueueable_job_kind_compiles_to_a_dag() {
+    // The mechanism must be able to say no, or every assertion below is
+    // vacuously true. `parse` is the gate the whole test rests on.
+    assert!(
+        JobKind::parse("not_a_real_kind").is_none(),
+        "the registry lookup is broken: it resolved an invented kind"
+    );
+    assert!(
+        JobKind::parse("lake_maintain").is_some(),
+        "the registry lookup is broken: it cannot resolve a kind that exists"
+    );
+
+    let mut unroutable = Vec::new();
+    for kind in enqueueable() {
+        match JobKind::parse(kind) {
+            // Assembling it is the check: `dag_for` panics on a graph that
+            // does not validate (the same call `verify_all` makes at boot), and
+            // an empty graph would be a kind with nothing to execute.
+            Some(parsed) => {
+                let dag = dags::dag_for(parsed);
+                assert!(
+                    !dag.nodes.is_empty(),
+                    "{kind} assembles to an EMPTY dag, so an enqueued one would \
+                     settle without doing anything"
+                );
+            }
+            None => unroutable.push(kind),
+        }
+    }
+    assert!(
+        unroutable.is_empty(),
+        "these job kinds can be enqueued but `JobKind::parse` does not know \
+         them, so they compile to no DAG at all: {unroutable:?}"
+    );
+}
+
+#[test]
+fn kinds_off_the_allowlist_still_have_a_legacy_arm() {
+    // Phase 4's exit condition: with the legacy arm deleted the list is empty
+    // and there is nothing left to assert. Standing down is correct here —
+    // the DAG test above is what carries the promise afterwards.
+    if LEGACY_ARM_KINDS.is_empty() {
+        return;
+    }
     assert!(
         DISPATCHER.len() > 1000,
         "the dispatcher source did not load"
     );
-    // The scan must be able to see a kind that IS routed, or a typo in the
-    // matcher would make every assertion below vacuously true.
+    // The scan must see a kind that IS routed, and must not see one that is
+    // not. Both self-checks use members of the list under test, so they go
+    // away with it rather than outliving it.
     assert!(
-        is_routed("lake_maintain"),
-        "the routing scan is broken: it cannot find lake_maintain, which is \
-         handled by a plain match arm"
+        LEGACY_ARM_KINDS.iter().any(|k| has_legacy_arm(k)),
+        "the routing scan is broken: it found no legacy arm for ANY of \
+         {LEGACY_ARM_KINDS:?}"
     );
     assert!(
-        is_routed("apply_corrections"),
-        "the routing scan is broken: it cannot find apply_corrections, which is \
-         handled by an async pre-branch"
-    );
-    assert!(
-        !is_routed("not_a_real_kind"),
+        !has_legacy_arm("not_a_real_kind"),
         "the routing scan is broken: it claims an invented kind is routed"
     );
 
-    let unrouted: Vec<&str> = er_server::SCHEDULABLE_KINDS
+    let unrouted: Vec<&str> = LEGACY_ARM_KINDS
         .iter()
-        .chain(UNSCHEDULED_KINDS.iter())
         .copied()
-        .filter(|k| !is_routed(k))
+        .filter(|k| !has_legacy_arm(k))
         .collect();
     assert!(
         unrouted.is_empty(),
-        "these job kinds can be enqueued but the dispatcher does not handle \
-         them, so every one of them fails at run time: {unrouted:?}"
+        "these kinds are NOT on the executor allowlist, so they run on the \
+         legacy in-process arm — and it does not handle them, which means \
+         every one fails at run time: {unrouted:?}"
+    );
+}
+
+#[test]
+fn the_legacy_list_names_only_kinds_the_product_enqueues() {
+    // A stale entry here would keep an arm alive for a kind nothing can
+    // enqueue, and would make Phase 4 look larger than it is.
+    let strangers: Vec<&str> = LEGACY_ARM_KINDS
+        .iter()
+        .copied()
+        .filter(|k| !enqueueable().contains(k))
+        .collect();
+    assert!(
+        strangers.is_empty(),
+        "LEGACY_ARM_KINDS names kinds the product never enqueues: {strangers:?}"
     );
 }

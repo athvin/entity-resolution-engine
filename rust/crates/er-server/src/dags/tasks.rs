@@ -861,22 +861,152 @@ impl Task<Session> for Maintain {
     }
 }
 
+/// Classify an engine failure STRING into the er-errors taxonomy.
+///
+/// The engine hands back a formatted message rather than a typed error at this
+/// boundary, so something has to read the text. This is the one place that
+/// does it, and it produces an [`er_errors::ErrorClass`] directly.
+///
+/// It used to go through `pg::FailureClass::classify` — the legacy arm's
+/// classifier — which made new-arm code depend on a type the legacy arm owns
+/// and blocked that type's deletion. The design's §6.5 says the two taxonomies
+/// "collapse into the latter at the executor boundary", and this function IS
+/// that boundary, so the rules live here now. `pg::FailureClass` keeps only
+/// legacy-arm callers and goes with it in Phase 4.
+///
+/// The substring rules are carried over unchanged, deliberately: they match the
+/// message shapes `er-cli` actually produces, and the table in the tests below
+/// pins each one. Order matters — precondition before config before transient,
+/// because a message can satisfy more than one (`read config` also contains no
+/// transient marker, but `open lake: … timed out` would match two if the
+/// transient arm came first).
+fn engine_error_class(message: &str) -> er_errors::ErrorClass {
+    let m = message.to_ascii_lowercase();
+    if m.contains("org env missing")
+        || m.contains("no prior run")
+        || m.contains("no source deliveries")
+        || m.contains("no trained model")
+        || m.contains("no model yet")
+        || m.contains("has no drop_root")
+        // A request that named something invalid — a missing required param,
+        // an unknown subject — is a precondition for the same reason the
+        // others are: retrying cannot help, because what is missing arrives
+        // when a caller changes the request. Matched on `param:` because the
+        // validators that produce these messages all name the parameter and
+        // then explain, a shape worth keeping stable for exactly this reason.
+        || m.contains("param:")
+    {
+        er_errors::ErrorClass::Precondition
+    } else if m.starts_with("config:") || m.contains("read config") {
+        er_errors::ErrorClass::Config
+    } else if m.contains("open lake")
+        || m.contains("read model")
+        || m.contains("connection")
+        || m.contains("timed out")
+        || m.contains("timeout")
+        || m.contains("temporarily")
+        || m.contains("i/o error")
+    {
+        er_errors::ErrorClass::TransientIo
+    } else {
+        // What `pg::FailureClass::Internal` became: the unclassified default,
+        // which `er_errors::UNCLASSIFIED` already defines as `Data`. Not a
+        // silent widening — `stage_failure` has always carried `Data`, so this
+        // is the class that arm produced too.
+        er_errors::UNCLASSIFIED
+    }
+}
+
 /// Map an engine failure string onto the er-errors taxonomy the executor's
-/// retry policy reads, through the same classifier the legacy arm uses.
+/// retry policy reads.
 fn engine_error(message: &str) -> TaskError {
-    let class = crate::pg::FailureClass::classify(message);
-    let err = match class {
-        crate::pg::FailureClass::TransientIo => {
-            er_errors::ErError::stage_failure(message.to_string())
-                .with_class(er_errors::ErrorClass::TransientIo)
-        }
-        crate::pg::FailureClass::Precondition => {
+    // Every one of these exits `StageFailure`; only the class differs, so the
+    // constructor is chosen to match the class rather than the other way
+    // round. `precondition` and `config` set it themselves; the other two go
+    // through `stage_failure`, which carries `Data`.
+    let err = match engine_error_class(message) {
+        er_errors::ErrorClass::Precondition => {
             er_errors::ErError::precondition(message.to_string())
         }
-        crate::pg::FailureClass::Config => er_errors::ErError::config(message.to_string()),
-        crate::pg::FailureClass::Internal => er_errors::ErError::stage_failure(message.to_string()),
+        er_errors::ErrorClass::Config => er_errors::ErError::config(message.to_string()),
+        class => {
+            let e = er_errors::ErError::stage_failure(message.to_string());
+            if class == er_errors::UNCLASSIFIED {
+                e
+            } else {
+                e.with_class(class)
+            }
+        }
     };
     TaskError::Failed(err)
+}
+
+#[cfg(test)]
+mod engine_error_tests {
+    use super::engine_error_class;
+    use er_errors::ErrorClass;
+
+    /// The literal strings this codebase produces, and the class each must get.
+    ///
+    /// This table came from `pg_job_retry.rs`, which pinned the same cases
+    /// against `pg::FailureClass`. It moved here with the rules rather than
+    /// being deleted with them: the message shapes are what the assertion is
+    /// really about, and they outlive whichever type does the classifying.
+    #[test]
+    fn engine_messages_classify_the_way_the_retry_policy_needs() {
+        let cases: &[(&str, ErrorClass)] = &[
+            // Preconditions — retrying cannot help, so these must never be
+            // retryable or a doomed job burns its whole budget.
+            ("org env missing ER_LAKE_CATALOG", ErrorClass::Precondition),
+            (
+                "no source deliveries found under /app/drop",
+                ErrorClass::Precondition,
+            ),
+            ("no prior run to correct", ErrorClass::Precondition),
+            ("no model yet (ER_MODEL_PATH)", ErrorClass::Precondition),
+            (
+                "org has no drop_root for a run_all",
+                ErrorClass::Precondition,
+            ),
+            ("param: limit must be positive", ErrorClass::Precondition),
+            // Config.
+            (
+                "config: thresholds.auto_merge must be > review_low",
+                ErrorClass::Config,
+            ),
+            ("read config /srv/er/acme.yaml", ErrorClass::Config),
+            // Transient — the only family the task budget should spend a try on.
+            ("open lake: IO Error: disk full", ErrorClass::TransientIo),
+            (
+                "read model: Resource temporarily unavailable",
+                ErrorClass::TransientIo,
+            ),
+            ("connection reset by peer", ErrorClass::TransientIo),
+            ("operation timed out", ErrorClass::TransientIo),
+            // Anything unrecognised is the unclassified default, NOT transient:
+            // guessing "retryable" on an unknown failure is how a real bug
+            // becomes three identical pod launches.
+            ("thread 'main' panicked at src/lib.rs:1", ErrorClass::Data),
+            ("", ErrorClass::Data),
+        ];
+        for (message, want) in cases {
+            assert_eq!(
+                engine_error_class(message),
+                *want,
+                "message {message:?} classified wrongly"
+            );
+        }
+    }
+
+    /// The property the table above exists to protect: only `transient_io` is
+    /// retryable, so a precondition or a panic must not be.
+    #[test]
+    fn only_the_transient_family_is_retryable() {
+        assert!(ErrorClass::TransientIo.retryable());
+        assert!(!engine_error_class("org env missing X").retryable());
+        assert!(!engine_error_class("config: bad").retryable());
+        assert!(!engine_error_class("panicked").retryable());
+    }
 }
 
 /// Trains and writes `models/<run_id>/{model.json,tf.csv}` on the shared
