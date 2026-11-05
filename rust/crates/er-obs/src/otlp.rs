@@ -48,8 +48,9 @@ use std::time::Duration;
 use opentelemetry::KeyValue;
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry_http::{Bytes, HttpClient, HttpError, Request, Response};
-use opentelemetry_otlp::{SpanExporter, WithExportConfig, WithHttpConfig};
+use opentelemetry_otlp::{MetricExporter, SpanExporter, WithExportConfig, WithHttpConfig};
 use opentelemetry_sdk::Resource;
+use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
 use opentelemetry_sdk::trace::SdkTracerProvider;
 
 use crate::init::Role;
@@ -257,6 +258,58 @@ pub fn provider_for(
     // exactly the traces worth keeping, before anything knows they matter.
     Ok(SdkTracerProvider::builder()
         .with_batch_exporter(exporter)
+        .with_resource(
+            Resource::builder()
+                .with_service_name(role.service_name())
+                .with_attributes([
+                    KeyValue::new("service.version", env!("CARGO_PKG_VERSION")),
+                    KeyValue::new("service.namespace", service_namespace()),
+                    KeyValue::new("deployment.environment.name", environment_name()),
+                    KeyValue::new("er.role", role.as_str()),
+                ])
+                .build(),
+        )
+        .build())
+}
+
+/// Build a meter provider exporting to the same collector as the spans.
+///
+/// Separate from [`provider_for`] because the two signals have genuinely
+/// different delivery shapes. A span is exported in batches as traces complete;
+/// a metric is a periodic snapshot of accumulated state, so this needs a
+/// `PeriodicReader` and an interval rather than a batch processor.
+///
+/// Both share [`ReqwestClient`] and therefore the owned runtime described at
+/// the top of this module — the same reactor trap applies, for the same reason:
+/// the `er` CLI and `exec-task` run outside tokio.
+///
+/// # Errors
+///
+/// If the HTTP client or the exporter cannot be constructed.
+pub fn meter_provider_for(
+    role: Role,
+    endpoint: &str,
+    timeout: Duration,
+) -> Result<SdkMeterProvider, Box<dyn std::error::Error + Send + Sync>> {
+    let client = ReqwestClient::new(timeout)?;
+    let exporter = MetricExporter::builder()
+        .with_http()
+        .with_http_client(client)
+        .with_endpoint(endpoint)
+        .with_timeout(timeout)
+        .build()?;
+
+    // 60s rather than the SDK's default 30s. These are four series on a
+    // histogram; exporting them twice a minute buys no resolution anyone will
+    // use and doubles the request count against a collector that bills by the
+    // byte downstream. An ingest spike must come from a real change in
+    // behaviour, not from the reporting interval.
+    let reader = PeriodicReader::builder(exporter)
+        .with_interval(Duration::from_secs(60))
+        .build();
+
+    Ok(SdkMeterProvider::builder()
+        .with_reader(reader)
         .with_resource(
             Resource::builder()
                 .with_service_name(role.service_name())

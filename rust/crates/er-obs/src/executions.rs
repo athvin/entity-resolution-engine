@@ -261,9 +261,6 @@ where
     }
 
     fn on_close(&self, id: Id, ctx: Context<'_, S>) {
-        if !ENABLED.load(Ordering::Relaxed) {
-            return;
-        }
         if FLUSHING.get() {
             // The drain's own `append_rows` span. Recording it would append
             // again on the next drain, and each append would add one more.
@@ -279,6 +276,30 @@ where
         let Some(observed) = extensions.get::<Observed>() else {
             return;
         };
+
+        // The metric comes FIRST, before the `ENABLED` gate below, and the
+        // ordering is the whole point.
+        //
+        // `ENABLED` is the per-run buffering switch: it is armed by
+        // `ExecutionScope` on the job path, where a writable lake exists to
+        // append the fact table to. The read path — `read.rs`, every API query
+        // — runs with it off. Recording the histogram after that check would
+        // have made `er.db.query.duration` a metric about the job path only,
+        // silently, while looking like a metric about the database.
+        //
+        // The fact table and the histogram answer different questions and so
+        // have different scopes: one is "every statement this run executed",
+        // which needs somewhere durable to put it, and the other is "is the
+        // database slow", which is four series and needs nothing.
+        crate::metrics::record_query_duration(
+            observed.captured.store.as_deref(),
+            observed.captured.outcome.as_deref(),
+            observed.opened.elapsed(),
+        );
+
+        if !ENABLED.load(Ordering::Relaxed) {
+            return;
+        }
         // A declared statement carries `er.statement`; a runtime-assembled one
         // carries `er.generator`. Keeping the class explicit means an analysis
         // does not have to infer it from the name's shape.
