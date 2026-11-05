@@ -167,6 +167,12 @@ impl<S> tracing_subscriber::layer::Filter<S> for SpansOnly {
 pub struct Guard {
     _process: Option<tracing::span::EnteredSpan>,
     provider: Option<opentelemetry_sdk::trace::SdkTracerProvider>,
+    /// The meter provider, held for the same reason as the tracer's: a
+    /// `PeriodicReader` exports on an interval, so a process that exits inside
+    /// one loses whatever it accumulated unless something flushes on the way
+    /// out. For a runner pod — which exits as soon as its last stage finishes
+    /// — that is usually the entire run.
+    meters: Option<opentelemetry_sdk::metrics::SdkMeterProvider>,
 }
 
 impl Guard {
@@ -193,6 +199,11 @@ impl Guard {
                 tracing::debug!(error = %error, "flushing buffered spans failed");
             }
         }
+        if let Some(meters) = &self.meters
+            && let Err(error) = meters.force_flush()
+        {
+            tracing::debug!(error = %error, "flushing buffered metrics failed");
+        }
     }
 }
 
@@ -206,6 +217,11 @@ impl Drop for Guard {
             && let Err(error) = provider.shutdown()
         {
             tracing::debug!(error = %error, "shutting down the span exporter failed");
+        }
+        if let Some(meters) = &self.meters
+            && let Err(error) = meters.shutdown()
+        {
+            tracing::debug!(error = %error, "shutting down the metric exporter failed");
         }
     }
 }
@@ -236,6 +252,7 @@ pub fn init(role: Role) -> Guard {
         return Guard {
             _process: None,
             provider: None,
+            meters: None,
         };
     }
 
@@ -299,9 +316,36 @@ pub fn init(role: Role) -> Guard {
     )
     .entered();
 
+    // Metrics are built AFTER the subscriber, unlike traces, because nothing
+    // about them has to become a layer of it — so the failure path can simply
+    // log, and does not need `Outcome`'s report-it-later dance.
+    //
+    // Same endpoint as the spans: the collector's `otlp` receiver serves all
+    // signals on 4318, and the plan's one-store decision means there is nothing
+    // to point elsewhere.
+    let meters = match crate::traces_endpoint() {
+        Some(endpoint) => {
+            let signal = endpoint.replace("/v1/traces", "/v1/metrics");
+            match crate::otlp::meter_provider_for(role, &signal, crate::flush_timeout()) {
+                Ok(provider) => {
+                    opentelemetry::global::set_meter_provider(provider.clone());
+                    crate::metrics::install_from_global();
+                    tracing::debug!(endpoint = %signal, role = role.as_str(), "OTLP metric export installed");
+                    Some(provider)
+                }
+                Err(error) => {
+                    tracing::warn!(error = %error, "building the metric exporter failed; metrics are disabled");
+                    None
+                }
+            }
+        }
+        None => None,
+    };
+
     Guard {
         _process: Some(process),
         provider: outcome.provider,
+        meters,
     }
 }
 

@@ -19,8 +19,10 @@ pub mod executions;
 pub mod identity;
 pub mod init;
 pub mod logging;
+pub mod metrics;
 pub mod otlp;
 pub mod propagate;
+pub mod registry;
 
 pub use blocking::spawn_blocking_in_span;
 pub use executions::{Execution, ExecutionRecorder};

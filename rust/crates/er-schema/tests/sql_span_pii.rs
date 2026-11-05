@@ -236,10 +236,32 @@ fn forbidden_attribute_names_are_never_recorded() {
         attr_rs.display()
     );
 
+    // The two files that may NAME a forbidden attribute, because naming it is
+    // how each one forbids it. Anywhere else, the name's presence means the
+    // value is being recorded.
+    //
+    // This is the same shape of false positive that made `code_only` necessary:
+    // a gate strict enough to be useful will flag the declaration of the rule it
+    // enforces unless told not to.
+    const DECLARATION_SITES: &[(&str, &str)] = &[
+        (
+            "/er-span/src/attr.rs",
+            "the attribute registry itself — where `Pii::Never` is declared",
+        ),
+        (
+            "/er-obs/src/registry.rs",
+            "FORBIDDEN_DIMENSIONS, the list of dimension names no metric may \
+             carry; it exists to refuse them",
+        ),
+    ];
+
     let mut offenders = Vec::new();
     for file in all_sources() {
-        // The registry declares these names; it is the one place they belong.
-        if file.to_string_lossy().contains("/er-span/src/attr.rs") {
+        let path = file.to_string_lossy().to_string();
+        if DECLARATION_SITES
+            .iter()
+            .any(|(fragment, _)| path.contains(fragment))
+        {
             continue;
         }
         let text = fs::read_to_string(&file).expect("readable source");

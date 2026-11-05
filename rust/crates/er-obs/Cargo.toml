@@ -33,7 +33,7 @@ tokio.workspace = true
 # the HTTP client instead — see src/otlp.rs, which carries the measurement.
 opentelemetry = "0.31"
 opentelemetry_sdk = "0.31"
-opentelemetry-otlp = { version = "0.31", default-features = false, features = ["http-proto", "trace"] }
+opentelemetry-otlp = { version = "0.31", default-features = false, features = ["http-proto", "metrics", "trace"] }
 opentelemetry-http = { version = "0.31", default-features = false }
 tracing-opentelemetry = "0.32"
 # `opentelemetry_http::HttpClient` is declared with `#[async_trait]` and the
