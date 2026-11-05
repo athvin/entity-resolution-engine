@@ -183,6 +183,71 @@ else
     no "a phase 6 mutant was not refused — that assertion cannot fail"
 fi
 
+# ---- every /v1 path the probe calls must be a declared route --------------
+# The probe spent two days calling `POST /v1/orgs/{org}/jobs`, which stopped
+# existing when the datasets work made every job route dataset-scoped
+# (2026-11-04). Nothing noticed: kind.yml is nightly and not required, two of
+# its runs were outage no-starts, and the one that did report surfaced it as a
+# bare JSONDecodeError. A 404 against a route that is right there in the router
+# is the cheapest possible thing to check, and it needs no cluster.
+if python3 - "$PROBE" <<'PY'
+import re, sys
+
+probe = open(sys.argv[1]).read()
+router = open("rust/crates/er-server/src/lib.rs").read()
+
+routes = set(re.findall(r'"(/v1/[^"]*)"', router))
+if len(routes) < 20:
+    print(f"  FAIL  found only {len(routes)} /v1 routes in the router — the "
+          f"declaration shape changed, so this check examines nothing",
+          file=sys.stderr)
+    sys.exit(2)
+
+# Each shell interpolation maps to the placeholder the router declares. Keep
+# this table explicit: a silent fallback would turn an unmapped variable into
+# a false pass, which is the failure mode this whole file exists to prevent.
+SUBST = {
+    "${ORG}": "{org}", "${PORG}": "{org}", "${DS}": "{ds}",
+    "${JOB3}": "{job_id}", "${JOB6}": "{job_id}", "${id}": "{job_id}",
+    "$1": "{job_id}", "${ATTEMPT}": "{attempt_id}",
+}
+
+paths = set()
+for m in re.finditer(r'api (?:POST|GET|DELETE) "(/v1/[^"]*)"', probe):
+    paths.add(m.group(1))
+for m in re.finditer(r'\$\{BASE\}(/v1/[^"\s)]*)', probe):
+    paths.add(m.group(1))
+if not paths:
+    print("  FAIL  no /v1 call sites found in the probe — it cannot be calling "
+          "nothing, so the extraction is broken", file=sys.stderr)
+    sys.exit(2)
+
+bad, unmapped = [], []
+for p in sorted(paths):
+    n = p
+    for k, v in SUBST.items():
+        n = n.replace(k, v)
+    if "$" in n:
+        unmapped.append((p, n))
+    elif n not in routes:
+        bad.append((p, n))
+
+for p, n in unmapped:
+    print(f"  FAIL  {p} contains an interpolation this check cannot map ({n}) — "
+          f"add it to SUBST rather than leaving it unchecked", file=sys.stderr)
+for p, n in bad:
+    print(f"  FAIL  the probe calls {p}, which normalises to {n} — no such "
+          f"route in er-server. It will 404.", file=sys.stderr)
+if not bad and not unmapped:
+    print(f"  (checked {len(paths)} probe paths against {len(routes)} routes)")
+sys.exit(1 if (bad or unmapped) else 0)
+PY
+then
+    ok "every /v1 path the probe calls is a declared route"
+else
+    no "the probe calls a route er-server does not declare"
+fi
+
 # ---- the cutover guards are present at all -------------------------------
 # Textual, deliberately: these three live in bash rather than python, and the
 # cost of asserting them properly is a cluster. A grep cannot prove they work,
