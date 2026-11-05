@@ -115,6 +115,29 @@ risk runs the other way: a tree that *should* gate them has to be added by
 hand. A terraform PR skips the frontend gate for free and never reaches
 `images.yml`, which runs on `push` only.
 
+## Merge queue and content-addressed skips
+
+`rust`, `frontend` and `infra` all trigger on `merge_group`, so `main` is
+protected by the merge queue instead of "require branches to be up to date": a
+PR is green against the base it was opened on, and the queue re-tests the exact
+tree that will land. **Adding a required job to a workflow without
+`merge_group:` stalls every queued PR**, the same failure as a `paths:` filter.
+In the queue, each `detect` diffs `merge_group.base_sha...head_sha` with its
+usual filter; `rust.yml`'s `bench-compile`/`scale-tests` exclude the event, and
+`infra.yml`'s `plan` skips there (accepted by `plan-gate`).
+
+On a PR, `rust` and `frontend` `detect` also compute a **pass key**: a hash of
+the tested tree over every path the gate reads (Rust: the whole tree minus the
+filter's own exempt regex; frontend: the filter's own allowlist) plus the ISO
+week. A `ci-pass-*` cache hit means that content already went green on this PR,
+so the gate skips — the usual case being a rebase over a main that moved only
+through paths the gate ignores. `record-pass` writes the marker after every
+required job succeeds. Markers are PR-ref-scoped (a PR can only skip on its own
+result), are never consulted on `push` or `merge_group`, and expire weekly to
+bound floating inputs (stable rustc, advisory DBs). The `ci:full` label forces
+a full run. If the key and the filter ever disagree about what a gate reads,
+fix the filter's regex — the key reuses it verbatim.
+
 ## Why a job fails when your diff is innocent
 
 Four recurring causes, worth checking before debugging the change.

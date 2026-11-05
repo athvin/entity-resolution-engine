@@ -30,6 +30,14 @@ name: frontend
 
 on:
   pull_request:
+  # The merge queue. A queued PR is tested once more as the exact tree that will
+  # land (main + everything ahead of it in the queue), which is what lets
+  # branch protection drop "require branches to be up to date": nobody rebases
+  # just to re-satisfy a stale check. `detect` applies its usual path filter to
+  # the queue's own base...head (the exact tree that will land), but never
+  # consults the content-addressed pass markers, so whatever the PR's change
+  # reaches is re-proved against the real merge result before it lands.
+  merge_group:
   push:
     branches: [main]
   schedule:
@@ -66,7 +74,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      frontend: ${{ steps.filter.outputs.frontend }}
+      frontend: ${{ steps.decide.outputs.frontend }}
+      pass_key: ${{ steps.key.outputs.key }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -79,12 +88,19 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PUSH_BEFORE: ${{ github.event.before }}
           PUSH_AFTER: ${{ github.event.after }}
+          MQ_BASE: ${{ github.event.merge_group.base_sha }}
+          MQ_HEAD: ${{ github.event.merge_group.head_sha }}
         run: |
           # Which two commits bound "what changed" depends on the event.
           case "$EVENT" in
             pull_request)
               # `base...head` = what the PR introduces.
               RANGE="$BASE_SHA...$HEAD_SHA"
+              ;;
+            merge_group)
+              # The queue's candidate against the main it will land on — the
+              # same question a PR asks, about the exact tree that will merge.
+              RANGE="$MQ_BASE...$MQ_HEAD"
               ;;
             push)
               # The merge that just landed. A squash-merged PR already ran this
@@ -117,6 +133,65 @@ jobs:
             echo "frontend=true" >> "$GITHUB_OUTPUT"
           else
             echo "frontend=false" >> "$GITHUB_OUTPUT"
+          fi
+      # CONTENT-ADDRESSED SKIP. A PR whose tested tree is byte-identical, over
+      # every path this gate reads, to a tree that already went green on THIS PR
+      # skips the gate. That is the common rebase: main moved under the PR but
+      # only through paths this gate does not read (or not at all), so the
+      # re-run would prove the same thing twice. It also covers re-pushing the
+      # same content with reworded or squashed commits.
+      #
+      # The key is computed from the checked-out merge commit — the tree the
+      # jobs below actually test — not from the PR head, so a moved base whose
+      # change DOES reach a gated path changes the key and the gate runs.
+      #
+      # Why this is safe to trust:
+      #   - Markers are written only by `record-pass` on a `pull_request` run,
+      #     after every required job succeeded. Actions caches written from a
+      #     PR are scoped to that PR's ref, so a PR can only ever skip on a
+      #     result it produced itself — no PR can plant a marker for another.
+      #   - The ISO week is part of the key, bounding the floating inputs the
+      #     tree cannot see (stable rustc via rust-toolchain.toml, DuckDB
+      #     extension downloads, advisory databases) to at most a week.
+      #   - `merge_group` and `push` never consult markers, so the merge queue
+      #     re-proves everything before it lands. A PR-level skip can delay a
+      #     finding to the queue; it cannot get one onto main.
+      # Bypass with the `ci:full` label (or a workflow re-run after removing a
+      # marker) when you want the full gate regardless.
+      - id: key
+        if: github.event_name == 'pull_request' && steps.filter.outputs.frontend == 'true' && !contains(github.event.pull_request.labels.*.name, 'ci:full')
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          # Exactly the paths the filter above treats as this gate's inputs —
+          # the same regex, so a change the filter would ignore cannot change
+          # the key and vice versa.
+          include='^(frontend/|\.github/workflows/frontend\.yml$)'
+          exempt=''
+
+          tree="$(git ls-tree -r HEAD | awk -F'\t' -v re="$include" '$2 ~ re' | awk -F'\t' -v re="$exempt" 're == "" || $2 !~ re')"
+          printf 'keyed paths: %s\n' "$(printf '%s\n' "$tree" | wc -l)"
+          hash="$( { printf '%s\n' "$tree"; date -u +%G-W%V; } | sha256sum | cut -c1-40)"
+          echo "key=ci-pass-frontend-$hash" >> "$GITHUB_OUTPUT"
+      - id: lookup
+        if: steps.key.outputs.key != ''
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .ci-pass
+          key: ${{ steps.key.outputs.key }}
+          lookup-only: true
+      - id: decide
+        working-directory: ${{ github.workspace }}
+        env:
+          RAN: ${{ steps.filter.outputs.frontend }}
+          HIT: ${{ steps.lookup.outputs.cache-hit }}
+          KEY: ${{ steps.key.outputs.key }}
+        run: |
+          if [ "$RAN" = "true" ] && [ "$HIT" = "true" ]; then
+            echo "::notice::frontend gate skipped: this exact content already passed on this PR ($KEY)"
+            echo "frontend=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "frontend=$RAN" >> "$GITHUB_OUTPUT"
           fi
 
   check:
@@ -444,3 +519,27 @@ jobs:
           name: frontend-coverage
           path: frontend/coverage/
           retention-days: 14
+
+  # Writes the content-addressed pass marker `detect` looks up. Runs only on a
+  # PR, only when the gate actually ran (not when it was itself skipped by a
+  # marker or by the path filter), and only when every required job succeeded.
+  # Not a required check, and it cannot fail a merge: a failed save just means
+  # the next identical run does the work again.
+  record-pass:
+    name: record pass marker
+    needs: [detect, check, e2e-gate, audit, semgrep]
+    if: >-
+      ${{ !cancelled()
+      && github.event_name == 'pull_request'
+      && needs.detect.outputs.frontend == 'true'
+      && needs.detect.outputs.pass_key != ''
+      && needs.check.result == 'success' && needs.e2e-gate.result == 'success' && needs.audit.result == 'success' && needs.semgrep.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - working-directory: ${{ github.workspace }}
+        run: echo "${{ github.sha }}" > .ci-pass
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .ci-pass
+          key: ${{ needs.detect.outputs.pass_key }}
