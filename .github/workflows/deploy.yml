@@ -222,36 +222,219 @@ jobs:
             echo "Commit: \`$DEPLOY_SHA\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Roll the release
-        # `--atomic` is the difference between a failed deploy and a broken
-        # namespace: it rolls back on failure instead of leaving half a release.
+      # The executor allowlist (batch-orchestration-design §11): these kinds
+      # run as per-attempt Kubernetes Jobs in this namespace. Enabled HERE,
+      # not in the chart default, so a developer namespace opts in
+      # deliberately.
+      #
+      # `run_all_*` joins the two Phase 2 kinds because the pipeline has now
+      # been observed end to end on a real cluster: `check_kind.sh` phase 5
+      # runs `run_all_full` as seven pods — seven distinct Job objects, seven
+      # distinct pod uids, one launch each — and the lake comes out ledgered.
+      # Both share one DAG and one set of bodies; only `init`'s mode
+      # decision differs.
+      #
+      # The rest of Phase 3's kinds (`correct`, `train`, `apply_corrections`,
+      # `apply_approved`, `provision`) stay OFF for now. Their bodies are
+      # real and covered by the integration tier, but none has run on a
+      # cluster, and an allowlist whose entries all arrive together is not
+      # an allowlist. They go on as each is observed.
+
+      - name: The namespace chart
         run: |
           set -euo pipefail
           kubectl apply -f infra/k8s/storage/ebs-gp3.yaml
           helm upgrade --install "$CI_NAMESPACE" infra/k8s/charts/er-dev-namespace \
             --namespace default --set "developer=$CI_NAMESPACE" --wait
-          # The executor allowlist (batch-orchestration-design §11): these kinds
-          # run as per-attempt Kubernetes Jobs in this namespace. Enabled HERE,
-          # not in the chart default, so a developer namespace opts in
-          # deliberately.
-          #
-          # `run_all_*` joins the two Phase 2 kinds because the pipeline has now
-          # been observed end to end on a real cluster: `check_kind.sh` phase 5
-          # runs `run_all_full` as seven pods — seven distinct Job objects, seven
-          # distinct pod uids, one launch each — and the lake comes out ledgered.
-          # Both share one DAG and one set of bodies; only `init`'s mode
-          # decision differs.
-          #
-          # The rest of Phase 3's kinds (`correct`, `train`, `apply_corrections`,
-          # `apply_approved`, `provision`) stay OFF for now. Their bodies are
-          # real and covered by the integration tier, but none has run on a
-          # cluster, and an allowlist whose entries all arrive together is not
-          # an allowlist. They go on as each is observed.
+
+      - name: Read the live colour
+        # NEVER guessed. The Service selector is the single source of truth for
+        # which colour is serving — the same field the cutover moves — so this
+        # cannot drift from reality the way a stored value or a convention
+        # would. `make dev-resume` reads it the same way.
+        #
+        # Absent selector == first install: there is no live colour, so there is
+        # nothing to cut over FROM and the deploy takes the simple path below.
+        id: colour
+        run: |
+          set -euo pipefail
+          live="$(kubectl -n "$CI_NAMESPACE" get svc er-web \
+            -o jsonpath='{.spec.selector.er\.dupezero\.com/color}' 2>/dev/null || true)"
+          if [ -z "$live" ]; then
+            echo "no live colour (first install) — deploying blue directly"
+            echo "first=true" >> "$GITHUB_OUTPUT"
+            echo "live=blue" >> "$GITHUB_OUTPUT"
+            echo "target=blue" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          case "$live" in
+            blue) target=green ;;
+            green) target=blue ;;
+            *) echo "::error::svc/er-web selects unknown colour '$live'"; exit 1 ;;
+          esac
+          # The digests the LIVE colour is already serving, so the upgrade that
+          # deploys the target does not re-render the live Deployment and
+          # restart the pod taking traffic. `image: reg/repo@sha256:…` -> the
+          # digest only.
+          live_api="$(kubectl -n "$CI_NAMESPACE" get deploy "web-api-$live" \
+            -o jsonpath='{.spec.template.spec.containers[?(@.name=="er-server")].image}' | sed 's/.*@//')"
+          live_web="$(kubectl -n "$CI_NAMESPACE" get deploy "web-api-$live" \
+            -o jsonpath='{.spec.template.spec.containers[?(@.name=="er-web")].image}' | sed 's/.*@//')"
+          echo "live=$live target=$target"
+          echo "live api=$live_api web=$live_web"
+          {
+            echo "first=false"
+            echo "live=$live"
+            echo "target=$target"
+            echo "live_api=$live_api"
+            echo "live_web=$live_web"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Deploy the inactive colour
+        # Phase 1 of the cutover. Traffic does NOT move here: `color.active`
+        # stays on the live colour, and the new digests go into the other one.
+        #
+        # THE SCHEMA GATE IS THE HOOK, not a step here. `er-schema-migrate`
+        # (weight -5) runs `er-server migrate --expect-additive`, which plans
+        # first and refuses — writing nothing — if the release is breaking.
+        # Helm runs hooks before any release object is applied, so a breaking
+        # release fails with the live colour untouched. A separate preflight Job
+        # would be the same check twice.
+        #
+        # `images.api/web.digest` is what the HOOK migrates with: the colour
+        # blocks say what each Deployment runs, while `images.*` means "the
+        # release this upgrade is about".
+        env:
+          LIVE: ${{ steps.colour.outputs.live }}
+          TARGET: ${{ steps.colour.outputs.target }}
+          FIRST: ${{ steps.colour.outputs.first }}
+          LIVE_API: ${{ steps.colour.outputs.live_api }}
+          LIVE_WEB: ${{ steps.colour.outputs.live_web }}
+          DAG_KINDS: 'lake_maintain\,lake_migrate\,run_all_full\,run_all_incremental'
+          NEW_API: ${{ steps.digests.outputs.er_api }}
+          NEW_WEB: ${{ steps.digests.outputs.er_web }}
+          FS: ${{ steps.env.outputs.fs }}
+          AP: ${{ steps.env.outputs.ap }}
+        run: |
+          set -euo pipefail
+          args=(
+            --namespace "$CI_NAMESPACE" --set "developer=$CI_NAMESPACE"
+            --set "images.api.digest=$NEW_API"
+            --set "images.web.digest=$NEW_WEB"
+            --set "efs.fileSystemId=$FS"
+            --set "efs.accessPointId=$AP"
+            # The executor allowlist (batch-orchestration-design §11): the two
+            # Phase 2 kinds run as per-attempt Kubernetes Jobs in this
+            # namespace. Enabled HERE, not in the chart default, so a developer
+            # namespace opts in deliberately.
+            --set "executor.dagKinds=$DAG_KINDS"
+            --set "color.active=$LIVE"
+            --set "color.$TARGET.replicas=1"
+            --set "color.$TARGET.api.digest=$NEW_API"
+            --set "color.$TARGET.web.digest=$NEW_WEB"
+          )
+          if [ "$FIRST" != "true" ]; then
+            # Pin the live colour to what it is ALREADY serving. Without this
+            # the live Deployment re-renders to the new digest and restarts the
+            # pod taking traffic, which is the outage this exists to remove.
+            args+=(
+              --set "color.$LIVE.replicas=1"
+              --set "color.$LIVE.api.digest=$LIVE_API"
+              --set "color.$LIVE.web.digest=$LIVE_WEB"
+            )
+          fi
           helm upgrade --install er-platform infra/k8s/charts/er-platform \
+            "${args[@]}" --atomic --wait --timeout 10m
+          kubectl -n "$CI_NAMESPACE" rollout status "deploy/web-api-$TARGET" --timeout=5m
+
+      - name: Smoke-test the inactive colour
+        # Through the PREVIEW Services, which select the inactive colour. Hitting
+        # the live ones would test what is already in production and pass for the
+        # wrong reason — the failure that would make this whole mechanism
+        # decorative without looking broken.
+        #
+        # Readiness already proves er-server reached the control plane and the
+        # BFF reached er-server (#437 pointed both probes at checks that can
+        # fail). This adds the one thing a probe cannot: that the answer arrives
+        # through a Service, over the network path a real request takes.
+        if: steps.colour.outputs.first != 'true'
+        env:
+          TARGET: ${{ steps.colour.outputs.target }}
+        run: |
+          set -euo pipefail
+          kubectl -n "$CI_NAMESPACE" run "smoke-$GITHUB_RUN_ID" --rm -i --restart=Never \
+            --image=curlimages/curl:8.11.1 --quiet -- \
+            sh -ec '
+              code=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 10 http://er-api-preview:8000/readyz)
+              echo "er-api-preview /readyz -> $code"
+              [ "$code" = "200" ] || exit 1
+              code=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 10 http://er-web-preview:3000/api/healthz)
+              echo "er-web-preview /api/healthz -> $code"
+              [ "$code" = "200" ] || exit 1
+            '
+          echo "the $TARGET colour serves through its own Services"
+
+      - name: Cut over
+        # Phase 2: the whole cutover is this one field on two Service objects.
+        # The old colour keeps running, so a rollback is the same field moving
+        # back — see the summary this writes.
+        if: steps.colour.outputs.first != 'true'
+        env:
+          LIVE: ${{ steps.colour.outputs.live }}
+          TARGET: ${{ steps.colour.outputs.target }}
+          LIVE_API: ${{ steps.colour.outputs.live_api }}
+          LIVE_WEB: ${{ steps.colour.outputs.live_web }}
+          DAG_KINDS: 'lake_maintain\,lake_migrate\,run_all_full\,run_all_incremental'
+          NEW_API: ${{ steps.digests.outputs.er_api }}
+          NEW_WEB: ${{ steps.digests.outputs.er_web }}
+          FS: ${{ steps.env.outputs.fs }}
+          AP: ${{ steps.env.outputs.ap }}
+        run: |
+          set -euo pipefail
+          helm upgrade er-platform infra/k8s/charts/er-platform \
             --namespace "$CI_NAMESPACE" --set "developer=$CI_NAMESPACE" \
-            --set "images.api.digest=${{ steps.digests.outputs.er_api }}" \
-            --set "images.web.digest=${{ steps.digests.outputs.er_web }}" \
-            --set "efs.fileSystemId=${{ steps.env.outputs.fs }}" \
-            --set "efs.accessPointId=${{ steps.env.outputs.ap }}" \
-            --set 'executor.dagKinds=lake_maintain\,lake_migrate\,run_all_full\,run_all_incremental' \
+            --set "images.api.digest=$NEW_API" --set "images.web.digest=$NEW_WEB" \
+            --set "efs.fileSystemId=$FS" --set "efs.accessPointId=$AP" \
+            --set "executor.dagKinds=$DAG_KINDS" \
+            --set "color.active=$TARGET" \
+            --set "color.$TARGET.replicas=1" \
+            --set "color.$TARGET.api.digest=$NEW_API" \
+            --set "color.$TARGET.web.digest=$NEW_WEB" \
+            --set "color.$LIVE.replicas=1" \
+            --set "color.$LIVE.api.digest=$LIVE_API" \
+            --set "color.$LIVE.web.digest=$LIVE_WEB" \
             --atomic --wait --timeout 10m
+          now="$(kubectl -n "$CI_NAMESPACE" get svc er-web \
+            -o jsonpath='{.spec.selector.er\.dupezero\.com/color}')"
+          [ "$now" = "$TARGET" ] || { echo "::error::cutover did not take: svc selects '$now'"; exit 1; }
+          echo "traffic is on $TARGET"
+          {
+            echo "### Cut over to \`$TARGET\`"
+            echo
+            echo "The \`$LIVE\` colour is still running. To roll back:"
+            echo
+            echo '```'
+            echo "helm upgrade er-platform infra/k8s/charts/er-platform \\"
+            echo "  --namespace $CI_NAMESPACE --reuse-values --set color.active=$LIVE"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Retire the old colour
+        # Phase 3, and the one step that is deliberately NOT --atomic-coupled to
+        # the cutover: it runs only after the cutover has been verified, so a
+        # failure here leaves traffic correctly on the new colour with one
+        # surplus pod — the harmless direction.
+        #
+        # Scaled to zero rather than left warm because two serving pods is
+        # double the steady-state cost of a namespace, and the Deployment is
+        # kept (not deleted) so the next deploy scales it up with its image
+        # already cached. A rollback AFTER this point needs the replica count
+        # back as well as the selector, which is why the summary above prints
+        # the command while the pod is still there.
+        if: steps.colour.outputs.first != 'true'
+        env:
+          LIVE: ${{ steps.colour.outputs.live }}
+        run: |
+          set -euo pipefail
+          kubectl -n "$CI_NAMESPACE" scale "deploy/web-api-$LIVE" --replicas=0
+          echo "retired $LIVE"
