@@ -100,7 +100,7 @@ gh api graphql -f query='query{user(login:"athvin"){projectV2(number:2){
 
 **Only `name` and `enabled` are readable.** The `ProjectV2Workflow` type exposes
 nothing about what a workflow does or which Status value it targets — that
-configuration is visible only in the web UI. So the names below are read for
+configuration is visible only in the web UI. So the names above are read for
 their intent, and the intent is all the API will confirm.
 
 What follows from them:
@@ -114,7 +114,10 @@ What follows from them:
   "Item added to project" sets it. Do not follow a create with a Status edit.
 - **A merged pull request moves its own card.** The merge bus squash-merges its
   members, which fires "Pull request merged". Moving those cards by hand after a
-  batch merges is duplicated work, and it races the automation.
+  batch merges is duplicated work, and it races the automation. This one is also
+  worth confirming once by watching a single merge, because the failure is
+  silent in the opposite direction: if the automation does less than its name
+  says, cards quietly stop moving and nobody is told.
 - **`Status` → `Done` is not a bookkeeping edit.** "Auto-close issue" is enabled,
   and GitHub's built-in binds it to a Status value. Treat setting `Done` as
   something that may **close the underlying issue**. Which value triggers it
