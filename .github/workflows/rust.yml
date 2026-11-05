@@ -109,6 +109,27 @@ defaults:
 # compile job (the cargo-deny job must not inherit a wrapper it never installs).
 env:
   CARGO_INCREMENTAL: "0"
+  # mold is the linker for every rustc invocation — and the seven jobs that
+  # install it REMOVE this flag rather than failing when they cannot.
+  #
+  # It is an unpinned network dependency on `azure.archive.ubuntu.com` sitting
+  # on the critical path of six required jobs. Exiting non-zero there turned an
+  # unreachable mirror into a red required check with nothing in the diff to
+  # explain it — twice on 2026-11-05 alone (`73421208`, `41691e2a`), after the
+  # retry loop had already been hardened once for the same reason.
+  #
+  # The flag is computed away rather than cleared, so a future flag added
+  # beside it survives the fallback.
+  #
+  # The cost is worth knowing: sccache keys on the compilation inputs INCLUDING
+  # RUSTFLAGS, so a fallback run gets a COLD cache as well as a slower linker,
+  # and may still exhaust its timeout. A job that might finish beats one that
+  # cannot start, and the warning says which happened.
+  #
+  # The stronger fix is to stop using apt: mold ships a static tarball on its
+  # GitHub releases — the same host the checkout already depends on — so a
+  # pinned URL plus a checksum would remove the mirror from the path entirely.
+  # Not done here, to keep a change on a required path small enough to trust.
   RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
   # S3, not the Actions cache backend. The Actions one shares a 10 GB
   # per-repository budget, LRU-evicted past it, which is why this workflow used
@@ -406,7 +427,11 @@ jobs:
             echo "mold install attempt $i failed or timed out; retrying"
             sleep 5
           done
-          exit 1
+          # Fall back rather than fail — mold is a speed optimisation, not a
+          # correctness requirement. See the RUSTFLAGS comment in `env:` for
+          # why this is safe and what it costs.
+          echo "::warning title=mold unavailable, using the default linker::three attempts failed (an apt mirror, not this diff); this job will be much slower and may hit its timeout"
+          echo "RUSTFLAGS=${RUSTFLAGS//-C link-arg=-fuse-ld=mold/}" >> "$GITHUB_ENV"
       # Pushes on main assume the WRITE role; everything else (PRs) the READ
       # role. A PR that could write the cache would be a path for a branch to
       # plant object code a later main build consumes, and poisoning outlives
@@ -541,7 +566,11 @@ jobs:
             echo "mold install attempt $i failed or timed out; retrying"
             sleep 5
           done
-          exit 1
+          # Fall back rather than fail — mold is a speed optimisation, not a
+          # correctness requirement. See the RUSTFLAGS comment in `env:` for
+          # why this is safe and what it costs.
+          echo "::warning title=mold unavailable, using the default linker::three attempts failed (an apt mirror, not this diff); this job will be much slower and may hit its timeout"
+          echo "RUSTFLAGS=${RUSTFLAGS//-C link-arg=-fuse-ld=mold/}" >> "$GITHUB_ENV"
       # Pushes on main assume the WRITE role; everything else (PRs) the READ
       # role. A PR that could write the cache would be a path for a branch to
       # plant object code a later main build consumes, and poisoning outlives
@@ -695,7 +724,11 @@ jobs:
             echo "mold install attempt $i failed or timed out; retrying"
             sleep 5
           done
-          exit 1
+          # Fall back rather than fail — mold is a speed optimisation, not a
+          # correctness requirement. See the RUSTFLAGS comment in `env:` for
+          # why this is safe and what it costs.
+          echo "::warning title=mold unavailable, using the default linker::three attempts failed (an apt mirror, not this diff); this job will be much slower and may hit its timeout"
+          echo "RUSTFLAGS=${RUSTFLAGS//-C link-arg=-fuse-ld=mold/}" >> "$GITHUB_ENV"
       # Pushes on main assume the WRITE role; everything else (PRs) the READ
       # role. A PR that could write the cache would be a path for a branch to
       # plant object code a later main build consumes, and poisoning outlives
@@ -926,7 +959,11 @@ jobs:
             echo "mold install attempt $i failed or timed out; retrying"
             sleep 5
           done
-          exit 1
+          # Fall back rather than fail — mold is a speed optimisation, not a
+          # correctness requirement. See the RUSTFLAGS comment in `env:` for
+          # why this is safe and what it costs.
+          echo "::warning title=mold unavailable, using the default linker::three attempts failed (an apt mirror, not this diff); this job will be much slower and may hit its timeout"
+          echo "RUSTFLAGS=${RUSTFLAGS//-C link-arg=-fuse-ld=mold/}" >> "$GITHUB_ENV"
       # PRs assume the READ role — see the server leg's copy for the reasoning.
       - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
         with:
@@ -1080,7 +1117,11 @@ jobs:
             echo "mold install attempt $i failed or timed out; retrying"
             sleep 5
           done
-          exit 1
+          # Fall back rather than fail — mold is a speed optimisation, not a
+          # correctness requirement. See the RUSTFLAGS comment in `env:` for
+          # why this is safe and what it costs.
+          echo "::warning title=mold unavailable, using the default linker::three attempts failed (an apt mirror, not this diff); this job will be much slower and may hit its timeout"
+          echo "RUSTFLAGS=${RUSTFLAGS//-C link-arg=-fuse-ld=mold/}" >> "$GITHUB_ENV"
       # Pushes on main assume the WRITE role; everything else (PRs) the READ
       # role. A PR that could write the cache would be a path for a branch to
       # plant object code a later main build consumes, and poisoning outlives
@@ -1260,7 +1301,11 @@ jobs:
             echo "mold install attempt $i failed or timed out; retrying"
             sleep 5
           done
-          exit 1
+          # Fall back rather than fail — mold is a speed optimisation, not a
+          # correctness requirement. See the RUSTFLAGS comment in `env:` for
+          # why this is safe and what it costs.
+          echo "::warning title=mold unavailable, using the default linker::three attempts failed (an apt mirror, not this diff); this job will be much slower and may hit its timeout"
+          echo "RUSTFLAGS=${RUSTFLAGS//-C link-arg=-fuse-ld=mold/}" >> "$GITHUB_ENV"
       # Pushes on main assume the WRITE role; everything else (PRs) the READ
       # role. A PR that could write the cache would be a path for a branch to
       # plant object code a later main build consumes, and poisoning outlives
@@ -1342,7 +1387,11 @@ jobs:
             echo "mold install attempt $i failed or timed out; retrying"
             sleep 5
           done
-          exit 1
+          # Fall back rather than fail — mold is a speed optimisation, not a
+          # correctness requirement. See the RUSTFLAGS comment in `env:` for
+          # why this is safe and what it costs.
+          echo "::warning title=mold unavailable, using the default linker::three attempts failed (an apt mirror, not this diff); this job will be much slower and may hit its timeout"
+          echo "RUSTFLAGS=${RUSTFLAGS//-C link-arg=-fuse-ld=mold/}" >> "$GITHUB_ENV"
       # Pushes on main assume the WRITE role; everything else (PRs) the READ
       # role. A PR that could write the cache would be a path for a branch to
       # plant object code a later main build consumes, and poisoning outlives
