@@ -92,4 +92,21 @@ helm ${ctx[@]+"${ctx[@]}"} upgrade --install otel-operator open-telemetry/opente
   --version "$OPERATOR_VERSION" --namespace observability \
   -f "$values/otel-operator-values.yaml"
 
+# Wait for the collector to actually come up, which `helm upgrade --install`
+# does NOT do: it reports success once the objects are applied.
+#
+# This is not hypothetical. A `#` comment inside the `transform/pii_allowlist`
+# OTTL expression made the collector refuse its whole config, and the deploy
+# reported SUCCESS: the ConfigMap updated, the Deployment rolled, the new pod
+# crashlooped, and the OLD pod kept serving. So telemetry kept flowing, the run
+# was green, and the change had simply not taken effect. Only reading pod health
+# showed it.
+#
+# `deploy.yml` already states the intent — "a telemetry stack that silently
+# fails to install is worse than a red deploy" — and this is what delivers it.
+# Only the collector is waited on: it is the one release here that takes a
+# config it can reject at startup, and openobserve already has its own wait
+# above.
+kubectl ${ctx[@]+"${ctx[@]}"} -n observability rollout status deploy/otel-collector --timeout=3m
+
 echo "obs-up: ok (openobserve v1.1.2 Deployment, collector $COLLECTOR_VERSION)"
