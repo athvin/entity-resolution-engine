@@ -991,6 +991,14 @@ impl Task<Session> for Train {
                 // only place the distinction can survive the run.
                 "levels_fully_measured": report.fully_measured(),
                 "levels_defaulted": report.defaulted_levels,
+                // How loud this corpus actually is, against the one global
+                // number a compiled model has to assume. Ledgered because the
+                // two kinds of model are used interchangeably as a tenant's
+                // active version, so a threshold tuned against one scale can
+                // silently mean something else against the other.
+                "full_agreement_bits": report.full_agreement_bits,
+                "bits_per_field": report.bits_per_field,
+                "assumed_scale_diverges": report.scale_divergence().is_some(),
             })),
         ))
     }

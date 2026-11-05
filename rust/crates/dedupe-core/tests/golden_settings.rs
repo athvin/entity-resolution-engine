@@ -157,3 +157,64 @@ fn trained_models_after_each_step_compile() {
         assert_eq!(s.comparisons.len(), 5, "{name}");
     }
 }
+
+/// How loud the trained model is at full agreement, and each field's share.
+///
+/// `er-compile` cannot measure this — it builds a model from a config with no
+/// training behind it — so it assumes one global constant, 60 bits, calibrated
+/// on the committed person reference model. This corpus's own trained model
+/// supports about 31, which is the point of measuring rather than assuming:
+/// the right scale is a property of the data.
+#[test]
+fn full_agreement_bits_measures_the_trained_scale() {
+    let model = dedupe_core::model::TrainedModel::new(
+        Settings::from_json_str(&load_golden_text("model_final.json")).unwrap(),
+    );
+    let agreement = model.full_agreement_bits();
+
+    assert_eq!(
+        agreement.per_field.len(),
+        5,
+        "one entry per comparison: {:?}",
+        agreement.per_field
+    );
+    // The strongest level of each field is its exact match, which is what makes
+    // this the same quantity `DEFAULT_FULL_AGREEMENT_BITS` was calibrated from.
+    for field in &agreement.per_field {
+        assert!(
+            field.label_for_charts.starts_with("Exact match on"),
+            "{}: strongest level is {:?}",
+            field.comparison_name,
+            field.label_for_charts
+        );
+        assert!(
+            field.bits > 0.0,
+            "{} contributes {} bits, which would mean agreeing on it is evidence AGAINST a \
+             match",
+            field.comparison_name,
+            field.bits
+        );
+    }
+
+    // The total is the sum and nothing else — asserted because a mean or a max
+    // would also look plausible in the report, and only a sum is the evidence
+    // the scorer accumulates.
+    let summed: f64 = agreement.per_field.iter().map(|f| f.bits).sum();
+    assert!(
+        (agreement.total_bits - summed).abs() < 1e-12,
+        "total {} vs summed {summed}",
+        agreement.total_bits
+    );
+    // Pinned loosely: this moves if the goldens are retrained, and the value
+    // worth protecting is the order of magnitude, not the decimals.
+    assert!(
+        (agreement.total_bits - 31.0).abs() < 1.0,
+        "this corpus has measured ~31.0 bits; got {:.3} ({:?})",
+        agreement.total_bits,
+        agreement
+            .per_field
+            .iter()
+            .map(|f| format!("{} {:.2}", f.comparison_name, f.bits))
+            .collect::<Vec<_>>()
+    );
+}

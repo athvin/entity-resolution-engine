@@ -12,3 +12,4 @@
 
 mod comparator_sql_behaviour;
 mod reproduces_committed_model;
+mod score_scale_calibration;

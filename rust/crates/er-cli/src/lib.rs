@@ -4602,7 +4602,32 @@ pub struct TrainReport {
     /// and it is worth carrying because nothing else distinguishes them. The
     /// saved model looks identical either way.
     pub defaulted_levels: Vec<String>,
+    /// Bits of evidence this model accumulates when every field agrees as
+    /// strongly as it can.
+    ///
+    /// The number `er-compile` has to *assume* when it builds a model from a
+    /// config with no training behind it, where it is one global constant
+    /// (`CompileOptions::full_agreement_bits`) calibrated on the person
+    /// reference model. Training is the only thing that can measure it, so the
+    /// measurement travels with the report.
+    pub full_agreement_bits: f64,
+    /// Each field's share of `full_agreement_bits`, as `email 12.7 bits` lines
+    /// — the "implied bits per field" that says how the model ranks its
+    /// evidence, measured rather than declared by weights.
+    pub bits_per_field: Vec<String>,
 }
+
+/// How far the measured scale may sit from the compiled assumption before the
+/// report says so, as a ratio in either direction.
+///
+/// 2.0 is taken from the evidence that set the constant rather than invented:
+/// `DEFAULT_FULL_AGREEMENT_BITS`' own grid search over `base_10` found 55–60
+/// bits reproduced the committed clustering exactly, 20 bits under-merged (18
+/// clusters where there are 10) and 120 over-merged (9). Both failures are
+/// roughly a factor of two or three out, and inside a factor of two nothing went
+/// wrong — so that is where saying something starts to be useful rather than
+/// noisy.
+const SCALE_DIVERGENCE_FACTOR: f64 = 2.0;
 
 impl TrainReport {
     /// Every session settled.
@@ -4615,6 +4640,23 @@ impl TrainReport {
     #[must_use]
     pub fn fully_measured(&self) -> bool {
         self.defaulted_levels.is_empty()
+    }
+
+    /// The compiled assumption this corpus does not support, if it does not.
+    ///
+    /// `Some(assumed)` when the measured scale is more than
+    /// `SCALE_DIVERGENCE_FACTOR` away in either direction — too quiet and no
+    /// cluster forms, too loud and distinct records merge, which is the more
+    /// expensive of the two.
+    #[must_use]
+    pub fn scale_divergence(&self) -> Option<f64> {
+        let assumed = er_compile::CompileOptions::default().full_agreement_bits;
+        if assumed <= 0.0 || self.full_agreement_bits <= 0.0 {
+            return None;
+        }
+        let ratio = self.full_agreement_bits / assumed;
+        (ratio > SCALE_DIVERGENCE_FACTOR || ratio < 1.0 / SCALE_DIVERGENCE_FACTOR)
+            .then_some(assumed)
     }
 }
 
@@ -4656,8 +4698,11 @@ pub fn run_train(
             .unwrap_or(0),
         // Filled in below, once the model is final: the label pass can still
         // supply `m` for a level EM never observed, so reading it here would
-        // report a fallback that the next few lines go on to remove.
+        // report a fallback that the next few lines go on to remove. The scale
+        // moves with those same parameters, so it waits too.
         defaulted_levels: Vec::new(),
+        full_agreement_bits: 0.0,
+        bits_per_field: Vec::new(),
     };
     if !report.converged() {
         eprintln!(
@@ -4719,6 +4764,28 @@ pub fn run_train(
         );
     }
 
+    let agreement = model.full_agreement_bits();
+    report.full_agreement_bits = agreement.total_bits;
+    report.bits_per_field = agreement
+        .per_field
+        .iter()
+        .map(|f| format!("{} {:.1} bits", f.comparison_name, f.bits))
+        .collect();
+    if let Some(assumed) = report.scale_divergence() {
+        // Worth a warning because the compiled and trained models are used
+        // interchangeably as a tenant's active version: a config published
+        // before training carries the assumed scale, and a model trained
+        // afterwards carries this one. A large gap means the thresholds chosen
+        // against one do not mean the same thing against the other.
+        eprintln!(
+            "train: this corpus supports {:.1} bits of evidence at full agreement, but a \
+             compiled model assumes {assumed:.1} — thresholds calibrated against one scale do \
+             not carry over to the other ({})",
+            report.full_agreement_bits,
+            report.bits_per_field.join(", ")
+        );
+    }
+
     model
         .save_to_json_file(out_model)
         .map_err(|e| anyhow::anyhow!("save trained model: {e}"))?;
@@ -4763,4 +4830,57 @@ fn stage_match_labels(
         physical: "__train_labels".to_string(),
         columns: vec![left, right],
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn report_at(bits: f64) -> TrainReport {
+        TrainReport {
+            full_agreement_bits: bits,
+            ..TrainReport::default()
+        }
+    }
+
+    /// The divergence test is a ratio in BOTH directions, and quiet inside a
+    /// factor of two.
+    ///
+    /// Both halves matter and for different reasons. Too loud is the expensive
+    /// failure — `DEFAULT_FULL_AGREEMENT_BITS`' grid search found 120 bits
+    /// merging distinct people — but too quiet is the one a tenant is more
+    /// likely to hit without noticing, because it produces no clusters rather
+    /// than wrong ones, and an empty result reads as "no duplicates" rather
+    /// than as a miscalibration.
+    #[test]
+    fn scale_divergence_speaks_in_both_directions_and_not_in_between() {
+        let assumed = er_compile::CompileOptions::default().full_agreement_bits;
+
+        // Inside a factor of two: nothing to say. 31 bits is what the committed
+        // `fake_1000` model actually measures, so this is the real-data case —
+        // different from the assumption, not differently *calibrated*.
+        assert_eq!(report_at(31.0).scale_divergence(), None, "31 of 60");
+        assert_eq!(report_at(assumed).scale_divergence(), None, "exactly 60");
+        assert_eq!(report_at(assumed * 1.9).scale_divergence(), None, "1.9x");
+        assert_eq!(report_at(assumed / 1.9).scale_divergence(), None, "1/1.9x");
+
+        // Outside it, both ways. 21.8 is the committed ACCOUNT model, which is
+        // the case that prompted this: it compiles at 60 and measures 21.8.
+        assert_eq!(
+            report_at(21.8).scale_divergence(),
+            Some(assumed),
+            "the account reference model is 2.75x quieter than the assumption"
+        );
+        assert_eq!(
+            report_at(assumed * 2.5).scale_divergence(),
+            Some(assumed),
+            "and a model far louder than assumed is the dangerous direction"
+        );
+
+        // A model with no measurable scale says nothing rather than claiming a
+        // divergence from zero — `0.0` is the pre-measurement initial value, so
+        // reporting on it would fire on every run that failed before training.
+        assert_eq!(report_at(0.0).scale_divergence(), None, "unmeasured");
+        assert_eq!(report_at(-5.0).scale_divergence(), None, "nonsensical");
+    }
 }

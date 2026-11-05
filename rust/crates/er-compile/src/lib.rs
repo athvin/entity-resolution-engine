@@ -748,6 +748,26 @@ pub fn compile_with(config: &Config, options: &CompileOptions) -> Result<Compile
         ));
     }
 
+    // The scale, stated rather than left implicit. `full_agreement_bits` is one
+    // global number and nothing here varies it — not even by `entity_type`,
+    // though the two committed reference models disagree sharply about what it
+    // should be: the person model measures 59.9 bits and the account model 21.8,
+    // against an assumption of 60 for both (`tests/score_scale_calibration.rs`).
+    //
+    // The compiler cannot tell which is right for a given corpus, because only a
+    // trained model can. So it records the assumption it made, and `er train`
+    // reports what the corpus actually measures — which is the pairing that lets
+    // a tenant notice the gap at all.
+    notes.push(format!(
+        "score scale: a field at full agreement is worth {:.0} bits of evidence, divided among \
+         the {} comparison(s), and a disagreement costs {:.0}% of what an agreement earns. This \
+         is a global default calibrated on the person reference model, not a measurement of your \
+         data — `er train` reports the bits your own corpus supports",
+        options.full_agreement_bits,
+        config.comparisons.len(),
+        options.disagreement_ratio * 100.0
+    ));
+
     let mut comparisons = Vec::new();
     for (column, spec) in &config.comparisons {
         let weight = weights.get(column).copied().unwrap_or(0.0);
