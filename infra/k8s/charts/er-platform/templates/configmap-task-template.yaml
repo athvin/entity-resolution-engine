@@ -46,6 +46,12 @@ data:
         er.dupezero.com/task-id: "${ER_TASK_ID}"
         er.dupezero.com/structural-fingerprint: "${ER_STRUCTURAL_FINGERPRINT}"
         er.dupezero.com/policy-hash: "${ER_POLICY_HASH}"
+        # §6.2 lists this under annotations, and it has to be: `sha256:` plus
+        # 64 hex is 71 characters and a label VALUE caps at 63. Empty when the
+        # install pins a tag rather than a digest. Legibility only — an
+        # image-digest-only difference is ADOPTED, because the contract is the
+        # structural fingerprint.
+        er.dupezero.com/image-digest: "${ER_IMAGE_DIGEST}"
     spec:
       # INVARIANT: Postgres owns retry (D-JOBSPEC).
       backoffLimit: 0

@@ -575,6 +575,13 @@ impl Executor {
             policy_hash: dag.policy_hash.clone(),
             active_deadline_seconds: i64::try_from(timeout).unwrap_or(21_600),
             through_task: row.task_id.clone(),
+            // Already carried on the job/task rows "so a deploy mid-run is
+            // legible"; this puts it on the Job object too, which is where it
+            // is legible WITHOUT a database. Empty rather than absent when the
+            // install pins a tag: the template's placeholder must always
+            // substitute, because any surviving `${ER_` is a launch-time
+            // refusal.
+            image_digest: self.cfg.image_digest.clone().unwrap_or_default(),
         };
         let mut manifest = er_k8s::render_job(&self.cfg.template, &attempt)
             .map_err(|e| format!("render: {}", crate::errfmt::chain(&e)))?;
