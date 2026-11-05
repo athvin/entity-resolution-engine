@@ -2,6 +2,7 @@ import "server-only";
 
 import { env } from "@/lib/env";
 import { currentRequestContext } from "@/lib/telemetry/context";
+import { ACTION_HEADER } from "@/lib/telemetry/actions";
 import { TRACEPARENT_HEADER } from "@/lib/telemetry/traceparent";
 
 /**
@@ -107,6 +108,9 @@ export async function upstreamFetch(call: UpstreamCall): Promise<Response> {
   // invented, because that would assert a causal link that does not exist.
   const context = currentRequestContext();
   if (context) headers[TRACEPARENT_HEADER] = context.traceparent;
+  // Carried through so erserver's span can name the control, not just share
+  // the trace. Absent when no control caused the request, which is normal.
+  if (context?.action !== undefined) headers[ACTION_HEADER] = context.action;
 
   if (call.actingUser !== undefined) headers["x-acting-user"] = call.actingUser;
   if (call.json !== undefined) headers["content-type"] = "application/json";

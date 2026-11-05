@@ -1,7 +1,7 @@
 "use client";
 
 import { resolveActionName } from "./action-name";
-import type { UiAction } from "./actions";
+import { ACTION_HEADER, type UiAction } from "./actions";
 import { TRACEPARENT_HEADER, mintTraceparent } from "./traceparent";
 
 /**
@@ -144,9 +144,22 @@ export function currentInteraction(): Interaction {
   return backgroundRoot();
 }
 
-/** The header pair to merge into an outgoing BFF request. */
+/**
+ * The headers to merge into an outgoing BFF request.
+ *
+ * Both halves of the attribution: `traceparent` joins the request to the
+ * click's trace, and `x-er-action` names the control so the backend span can
+ * say what caused it without a reader walking up to the root.
+ *
+ * The background root is deliberately NOT sent as an action. It is not
+ * something anybody did, and sending it would make "no click" indistinguishable
+ * from a declared one in any grouping.
+ */
 export function interactionHeaders(): Record<string, string> {
-  return { [TRACEPARENT_HEADER]: currentInteraction().traceparent };
+  const live = currentInteraction();
+  const headers: Record<string, string> = { [TRACEPARENT_HEADER]: live.traceparent };
+  if (live.action !== BACKGROUND_ACTION) headers[ACTION_HEADER] = live.action;
+  return headers;
 }
 
 function enqueue(interaction: Interaction): void {

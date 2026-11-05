@@ -2,6 +2,8 @@ import "server-only";
 
 import { AsyncLocalStorage } from "node:async_hooks";
 
+import type { UiAction } from "./actions";
+
 /**
  * The per-request trace context, carried without touching 101 route handlers.
  *
@@ -33,6 +35,15 @@ export interface RequestContext {
   traceparent: string;
   /** False when the browser's context was absent or unusable and we minted one. */
   inherited: boolean;
+  /**
+   * The declared action that caused this request, when the browser named one.
+   *
+   * `undefined` is the common case and a correct one: a page load, a poll, a
+   * refetch on focus and anything reaching a handler without passing the proxy
+   * all genuinely have no control behind them. Validated against `UI_ACTIONS`
+   * before it gets here, so a value present is a value worth forwarding.
+   */
+  action?: UiAction;
 }
 
 const storage = new AsyncLocalStorage<RequestContext>();

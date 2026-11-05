@@ -186,3 +186,58 @@ describe("the beacon", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
+
+describe("the action header", () => {
+  let uninstall: () => void;
+
+  beforeEach(() => {
+    teardown();
+    document.body.innerHTML = "";
+    uninstall = installInteractionListener();
+  });
+
+  afterEach(() => {
+    uninstall();
+    teardown();
+    vi.restoreAllMocks();
+  });
+
+  it("names the control alongside the trace context", () => {
+    // Both halves of the attribution: the traceparent joins the request to the
+    // click's trace, the action names what caused it. Without the second, a
+    // backend span can only say "some click" and a reader has to walk to the
+    // root to find out which.
+    document.body.innerHTML = `<button data-er-action="run.start">Run</button>`;
+    document.querySelector("button")?.click();
+
+    const headers = interactionHeaders();
+    expect(headers["x-er-action"]).toBe("run.start");
+    expect(isAcceptableTraceparent(headers.traceparent ?? "")).toBe(true);
+  });
+
+  it("sends a keyboard-invoked action too", () => {
+    recordAction("review.decide.match");
+    expect(interactionHeaders()["x-er-action"]).toBe("review.decide.match");
+  });
+
+  it("sends NO action for the background root", () => {
+    // `background` is not something anybody did. Sending it would make "no
+    // click" indistinguishable from a declared action in any grouping.
+    const headers = interactionHeaders();
+    expect(headers["x-er-action"]).toBeUndefined();
+    expect(isAcceptableTraceparent(headers.traceparent ?? "")).toBe(true);
+  });
+
+  it("stops naming a control once its TTL has lapsed", () => {
+    vi.useFakeTimers();
+    document.body.innerHTML = `<button data-er-action="config.publish">Publish</button>`;
+    document.querySelector("button")?.click();
+    expect(interactionHeaders()["x-er-action"]).toBe("config.publish");
+
+    vi.advanceTimersByTime(INTERACTION_TTL_MS + 1);
+
+    // A poll firing a second later must not be attributed to the last click.
+    expect(interactionHeaders()["x-er-action"]).toBeUndefined();
+    vi.useRealTimers();
+  });
+});

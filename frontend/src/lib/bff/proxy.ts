@@ -318,8 +318,19 @@ export async function respond(run: () => Promise<NextResponse>): Promise<NextRes
   // is not redundant: a handler reachable without passing the proxy matcher
   // would otherwise have none, and minting here is cheaper than a trace that
   // silently stops.
-  const incoming = (await headers()).get(TRACEPARENT_HEADER);
-  const context = resolveTraceparent(incoming);
+  const requestHeaders = await headers();
+  const incoming = requestHeaders.get(TRACEPARENT_HEADER);
+  const resolved = resolveTraceparent(incoming);
+
+  // The action is validated against the vocabulary HERE rather than forwarded
+  // blind. The browser is not trusted, and an unrecognised value would either
+  // be a typo the er-actions gate should have caught or something hostile; in
+  // both cases dropping it is right, because an action name reaches a span
+  // store and a dashboard dimension.
+  const { ACTION_HEADER, isUiAction } = await import("@/lib/telemetry/actions");
+  const claimed = requestHeaders.get(ACTION_HEADER);
+  const context =
+    claimed !== null && isUiAction(claimed) ? { ...resolved, action: claimed } : resolved;
 
   return withRequestContext(context, async () => {
     try {
