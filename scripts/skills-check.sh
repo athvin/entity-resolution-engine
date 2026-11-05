@@ -1321,7 +1321,25 @@ run_drift_check() {
 			# Telling those apart from a `126 ++---` line alone once cost an hour.
 			git show "HEAD:$f" | generated_blocks >"$tmp_head"
 			generated_blocks <"$f" >"$tmp_work"
-			diff -u --label "HEAD/$f" --label "regenerated/$f" "$tmp_head" "$tmp_work" | head -40
+			#
+			# `|| true` is load-bearing. `diff` exits 1 when files differ —
+			# always, here — and under `set -euo pipefail` that aborted the
+			# script MID-LOOP, with three consequences that all hid behind an
+			# exit code which happened to still be 1:
+			#
+			#   - only the FIRST stale file was ever named, so fixing it and
+			#     re-running surfaced the next: whack-a-mole with no count;
+			#   - the `fail=1` below was never reached (the status came from
+			#     `set -e` instead, coincidentally the same value);
+			#   - in `all` mode, `run_lint` and `run_override_check` never ran
+			#     AT ALL. Drift is stale on precisely the PRs that edit a
+			#     skill, which are precisely the PRs where the authoring rules
+			#     and the override assertions matter. The gate went quiet
+			#     exactly when it should have spoken.
+			#
+			# Confirmed by committing two stale generated blocks and checking
+			# that both are named and both later phases still run.
+			diff -u --label "HEAD/$f" --label "regenerated/$f" "$tmp_head" "$tmp_work" | head -40 || true
 		done
 		fail=1
 	else
