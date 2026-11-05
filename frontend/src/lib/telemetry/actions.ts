@@ -89,6 +89,23 @@ export const UI_ACTIONS = [
   "dataset.create",
 ] as const;
 
+/**
+ * The header a declared action travels on, browser -> BFF -> erserver.
+ *
+ * Separate from `traceparent` because it answers a different question. The
+ * traceparent makes the backend work part of the click's TRACE; this makes the
+ * backend span able to say WHICH control caused it, without a reader having to
+ * walk up to the root span to find out. That is the difference between "this
+ * SQL belongs to some click" and "this SQL is what the Merge button does".
+ *
+ * Spoofable, exactly as `x-acting-user` and `traceparent` are: any credential
+ * holder can send any value. Tolerable for the same reason — an action name is
+ * a correlation handle and never an authorization input, and nothing downstream
+ * makes a decision on it. erserver shape-validates it before recording so a
+ * hostile value cannot blow up span cardinality or carry a payload.
+ */
+export const ACTION_HEADER = "x-er-action";
+
 /** A name drawn from [`UI_ACTIONS`]. */
 export type UiAction = (typeof UI_ACTIONS)[number];
 

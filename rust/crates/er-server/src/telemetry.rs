@@ -41,6 +41,44 @@ use tracing::Span;
 /// when it does not.
 pub const REQUEST_ID_HEADER: &str = "x-request-id";
 
+/// The header naming the UI control that caused this request.
+///
+/// Sent by the BFF, which read it from the browser and validated it against the
+/// closed `UI_ACTIONS` vocabulary in `frontend/src/lib/telemetry/actions.ts`.
+pub const ACTION_HEADER: &str = "x-er-action";
+
+/// Longest action name recorded. The vocabulary's longest member is well under
+/// this; the bound exists for values that did not come from the vocabulary.
+const ACTION_MAX: usize = 48;
+
+/// Whether an `x-er-action` value is fit to record.
+///
+/// **Shape, not membership.** The authoritative list is TypeScript, and
+/// duplicating it here would create a two-language vocabulary that drifts
+/// silently in whichever direction nobody is testing. The real guarantee is
+/// `frontend/scripts/check-er-actions.mjs`, which fails the build on an
+/// undeclared name; this is the untrusted-input bound underneath it.
+///
+/// Shape is enough for what it has to prevent. The rule — lowercase, digits,
+/// dots and underscores only, at least one dot, no leading or trailing dot —
+/// bounds span cardinality and refuses the payload shapes that matter here: an
+/// email carries `@`, a record key carries uppercase or hyphens, a query string
+/// carries `=` and `&`. All are rejected.
+///
+/// Split from the extractor so the rule is testable without a request, the same
+/// reason [`is_probe`] is split from [`make_span`].
+#[must_use]
+pub fn acceptable_action(raw: &str) -> bool {
+    !raw.is_empty()
+        && raw.len() <= ACTION_MAX
+        && raw.contains('.')
+        && !raw.starts_with('.')
+        && !raw.ends_with('.')
+        && raw
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '.' || c == '_')
+}
+
 /// Whether a route is a Kubernetes probe, and therefore not worth a span.
 ///
 /// The chart probes `/readyz` every 5 s for readiness and `/healthz` every 10 s
@@ -77,6 +115,18 @@ pub fn make_span(req: &Request<Body>) -> Span {
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
 
+    // The control the person pressed. Without it a trace says a job ran and
+    // every statement it executed, and not which button asked for it — and a
+    // reader would have to walk to the root span to find out. Empty for a
+    // request no control caused, which is most of them.
+    let action = req
+        .headers()
+        .get(ACTION_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .map(str::trim)
+        .filter(|v| acceptable_action(v))
+        .unwrap_or("");
+
     // `url.path` is recorded; `url.query` is NOT, and that is the §10.4 rule
     // rather than an oversight. `GET /v1/orgs/{org}/golden-records` takes `q`,
     // a contains-search over record values, so the query string is payload in
@@ -89,6 +139,12 @@ pub fn make_span(req: &Request<Body>) -> Span {
         http.route = %route,
         url.path = %req.uri().path(),
         er.request_id = %request_id,
+        // Span-only, never a metric dimension: the vocabulary grows with the
+        // UI, and a per-action metric series is the cardinality mistake §10
+        // already priced at ~$131/month for one histogram. A per-action
+        // aggregate, if ever wanted, is a `spanmetrics` connector in the
+        // collector's values file.
+        er.action = %action,
         // Recorded by the bearer guard, which is the first place the credential
         // has been resolved to an org and a role.
         er.org = tracing::field::Empty,
@@ -164,7 +220,7 @@ pub fn on_failure(
 
 #[cfg(test)]
 mod tests {
-    use super::{is_probe, make_span};
+    use super::{ACTION_MAX, acceptable_action, is_probe, make_span};
     use axum::body::Body;
 
     #[test]
@@ -198,5 +254,51 @@ mod tests {
             .body(Body::empty())
             .unwrap();
         drop(make_span(&req));
+    }
+
+    #[test]
+    fn a_declared_action_is_accepted() {
+        for action in [
+            "run.start",
+            "review.decide.match",
+            "review.bulk.no_match",
+            "label.skip",
+            "records.merge.confirm",
+            "dataset.create",
+        ] {
+            assert!(acceptable_action(action), "{action} should be accepted");
+        }
+    }
+
+    #[test]
+    fn the_payload_shapes_that_matter_here_are_refused() {
+        // This is the point of the function. The browser only sends declared
+        // names and a build gate enforces that, but the header is untrusted,
+        // and in a deduplication engine the things that could arrive instead
+        // are exactly the record values. Each of these is a real string from
+        // this app's own markup or routes.
+        for hostile in [
+            "member-remove-alice@acme.com", // the data-testid that caused the PII fix
+            "Remove alice@acme.com",        // the aria-label on the same button
+            "mark-CRM-20481",               // a record key
+            "q=jane+smith&org=acme",        // a query string, which is payload here
+            "../../etc/passwd",
+            "run.start\nx-injected: 1", // a header-splitting attempt
+            "RUN.START",                // uppercase is not in the vocabulary's shape
+        ] {
+            assert!(!acceptable_action(hostile), "{hostile:?} should be refused");
+        }
+    }
+
+    #[test]
+    fn shape_edges_are_refused() {
+        assert!(!acceptable_action(""), "empty");
+        assert!(!acceptable_action("nodot"), "a name with no dot is not one");
+        assert!(!acceptable_action(".leading"), "leading dot");
+        assert!(!acceptable_action("trailing."), "trailing dot");
+        assert!(
+            !acceptable_action(&format!("a.{}", "x".repeat(ACTION_MAX))),
+            "over the length bound"
+        );
     }
 }

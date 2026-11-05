@@ -122,6 +122,27 @@ config:
           boolean_attribute:
             key: er.impersonating
             value: true
+        # Goal #1, and the policy the plan listed that was missing until the
+        # `er.action` attribute existed to key on.
+        #
+        # A click that causes a mutation was already kept by `mutations`, and
+        # one that starts a run by `pipeline-runs`. What fell through was the
+        # click that causes a GET — opening a record, filtering the inbox,
+        # paging a table — which landed in `residual` and was therefore dropped
+        # 90% of the time. That is the half of the click stream most likely to
+        # be asked about ("what did this person look at before they merged
+        # these two?"), and the volume is tiny next to the read path it sits in.
+        #
+        # Matches any non-empty `er.action`. The value comes from the closed
+        # `UI_ACTIONS` vocabulary, validated at the BFF and shape-checked again
+        # by `er_server::telemetry::acceptable_action`, so a regex this broad
+        # cannot be driven to keep arbitrary traffic.
+        - name: ui-interactions
+          type: string_attribute
+          string_attribute:
+            key: er.action
+            values: [".+"]
+            enabled_regex_matching: true
         # Everything else — the GET read path, where the volume is.
         - name: residual
           type: probabilistic
