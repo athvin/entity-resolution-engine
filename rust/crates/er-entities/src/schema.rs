@@ -145,7 +145,7 @@ CREATE OR REPLACE TRIGGER er_history_datasets
     r#"CREATE TABLE IF NOT EXISTS public.config_versions (
   id text NOT NULL,
   org_id text NOT NULL REFERENCES orgs(id),
-  dataset_id text REFERENCES datasets(id),
+  dataset_id text NOT NULL REFERENCES datasets(id),
   version bigint NOT NULL,
   yaml text NOT NULL,
   config_hash text NOT NULL,
@@ -156,7 +156,7 @@ CREATE OR REPLACE TRIGGER er_history_datasets
   published_at timestamptz,
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (id),
-  UNIQUE (org_id, version)
+  UNIQUE (dataset_id, version)
 );
 CREATE INDEX IF NOT EXISTS config_versions_dataset ON public.config_versions (dataset_id, version);
 CREATE TABLE IF NOT EXISTS public.config_versions_history (
@@ -190,7 +190,7 @@ CREATE INDEX IF NOT EXISTS ddl_log_created_at ON public.ddl_log (created_at);"#,
     r#"CREATE TABLE IF NOT EXISTS public.entity_links (
   id text NOT NULL,
   org_id text NOT NULL REFERENCES orgs(id),
-  dataset_id text REFERENCES datasets(id),
+  dataset_id text NOT NULL REFERENCES datasets(id),
   parent_entity_id text NOT NULL,
   child_entity_id text NOT NULL,
   kind text NOT NULL CHECK (kind IN ('household', 'company', 'related')),
@@ -200,7 +200,7 @@ CREATE INDEX IF NOT EXISTS ddl_log_created_at ON public.ddl_log (created_at);"#,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (id),
-  UNIQUE (org_id, parent_entity_id, child_entity_id, kind)
+  UNIQUE (dataset_id, parent_entity_id, child_entity_id, kind)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS entity_links_org_pair_kind ON public.entity_links (org_id, parent_entity_id, child_entity_id, kind);
 CREATE INDEX IF NOT EXISTS entity_links_org_child ON public.entity_links (org_id, child_entity_id);
@@ -267,7 +267,7 @@ CREATE INDEX IF NOT EXISTS jobs_dataset ON public.jobs (dataset_id, state);"#,
     r#"CREATE TABLE IF NOT EXISTS public.matching_models (
   id text NOT NULL,
   org_id text NOT NULL REFERENCES orgs(id),
-  dataset_id text REFERENCES datasets(id),
+  dataset_id text NOT NULL REFERENCES datasets(id),
   name text NOT NULL,
   version bigint NOT NULL,
   entity_type text NOT NULL DEFAULT 'person' CHECK (entity_type IN ('person', 'account')),
@@ -282,7 +282,7 @@ CREATE INDEX IF NOT EXISTS jobs_dataset ON public.jobs (dataset_id, state);"#,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (id),
-  UNIQUE (org_id, name, version)
+  UNIQUE (dataset_id, name, version)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS matching_models_org_name_version ON public.matching_models (org_id, name, version);
 CREATE INDEX IF NOT EXISTS matching_models_org_state ON public.matching_models (org_id, state);
@@ -306,7 +306,7 @@ CREATE OR REPLACE TRIGGER er_history_matching_models
     r#"CREATE TABLE IF NOT EXISTS public.pair_labels (
   id text NOT NULL,
   org_id text NOT NULL REFERENCES orgs(id),
-  dataset_id text REFERENCES datasets(id),
+  dataset_id text NOT NULL REFERENCES datasets(id),
   rec_a_key text NOT NULL,
   rec_b_key text NOT NULL,
   verdict text NOT NULL CHECK (verdict IN ('match', 'no_match')),
@@ -318,7 +318,7 @@ CREATE OR REPLACE TRIGGER er_history_matching_models
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (id),
-  UNIQUE (org_id, rec_a_key, rec_b_key)
+  UNIQUE (dataset_id, rec_a_key, rec_b_key)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS pair_labels_org_pair ON public.pair_labels (org_id, rec_a_key, rec_b_key);
 CREATE INDEX IF NOT EXISTS pair_labels_org_recent ON public.pair_labels (org_id, created_at);
@@ -326,7 +326,7 @@ CREATE INDEX IF NOT EXISTS pair_labels_dataset ON public.pair_labels (dataset_id
     r#"CREATE TABLE IF NOT EXISTS public.s3_ingest_cursors (
   id text NOT NULL,
   org_id text NOT NULL REFERENCES orgs(id),
-  dataset_id text REFERENCES datasets(id),
+  dataset_id text NOT NULL REFERENCES datasets(id),
   source text NOT NULL,
   object_key text NOT NULL,
   etag text,
@@ -335,14 +335,14 @@ CREATE INDEX IF NOT EXISTS pair_labels_dataset ON public.pair_labels (dataset_id
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (id),
-  UNIQUE (org_id, source)
+  UNIQUE (dataset_id, source)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS s3_ingest_cursors_org_source ON public.s3_ingest_cursors (org_id, source);
 CREATE INDEX IF NOT EXISTS s3_ingest_cursors_dataset ON public.s3_ingest_cursors (dataset_id, source);"#,
     r#"CREATE TABLE IF NOT EXISTS public.schedules (
   id text NOT NULL,
   org_id text NOT NULL REFERENCES orgs(id),
-  dataset_id text REFERENCES datasets(id),
+  dataset_id text NOT NULL REFERENCES datasets(id),
   kind text NOT NULL,
   params jsonb NOT NULL DEFAULT '{}'::jsonb,
   cron text NOT NULL,
@@ -386,7 +386,7 @@ CREATE INDEX IF NOT EXISTS schema_migrations_created_at ON public.schema_migrati
     r#"CREATE TABLE IF NOT EXISTS public.staged_steward_actions (
   id text NOT NULL,
   org_id text NOT NULL REFERENCES orgs(id),
-  dataset_id text REFERENCES datasets(id),
+  dataset_id text NOT NULL REFERENCES datasets(id),
   action jsonb NOT NULL,
   state text NOT NULL DEFAULT 'pending' CHECK (state IN ('pending', 'applied', 'failed')),
   error text,
@@ -429,7 +429,7 @@ CREATE OR REPLACE TRIGGER er_history_tags
     r#"CREATE TABLE IF NOT EXISTS public.taggings (
   id text NOT NULL,
   org_id text NOT NULL REFERENCES orgs(id),
-  dataset_id text REFERENCES datasets(id),
+  dataset_id text NOT NULL REFERENCES datasets(id),
   tag_id text NOT NULL REFERENCES tags(id),
   subject_type text NOT NULL,
   subject_id text NOT NULL,

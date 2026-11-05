@@ -11,7 +11,7 @@ pub struct StagedStewardAction {
     /// The tenant the action applies to.
     pub org_id: String,
     /// The dataset whose lake this action drains into.
-    pub dataset_id: Option<String>,
+    pub dataset_id: String,
     /// The action payload.
     pub action: ::serde_json::Value,
     /// Whether the action is pending, applied or failed.
@@ -147,30 +147,6 @@ ORDER BY created_at, id
 
 pub mod update {
     //! @generated query functions for this entity + operation.
-    /// The dataset_id backfill (fixup 0002): stamp every pre-dataset row with its org's default dataset. Idempotent — only NULL rows are touched, so a re-run after new writes (which stamp themselves) is a no-op.
-    pub async fn backfill_dataset(
-        client: &impl ::tokio_postgres::GenericClient,
-    ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
-        const SQL: &str = "UPDATE public.staged_steward_actions c
-SET dataset_id = d.id, updated_at = now()
-FROM public.datasets d
-WHERE d.org_id = c.org_id AND d.name = 'default' AND c.dataset_id IS NULL
-";
-        let __span = ::er_span::sql_span(
-            ::er_span::Store::Control,
-            "staged_steward_action",
-            "update",
-            "backfill_dataset",
-            "staged_steward_actions",
-            SQL,
-        );
-        let __result = ::er_span::instrument(&__span, client.execute(SQL, &[])).await;
-        let __entered = __span.enter();
-        let __n = ::er_span::check(&__span, __result)?;
-        ::er_span::rows(&__span, __n);
-        Ok(__n)
-    }
-
     /// Mark a staged action applied after the dispatcher drains it to the lake.
     pub async fn mark_applied(
         client: &impl ::tokio_postgres::GenericClient,

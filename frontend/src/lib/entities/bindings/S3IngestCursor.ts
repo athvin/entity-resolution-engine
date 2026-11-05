@@ -8,7 +8,7 @@ export interface S3IngestCursor {
   /** The tenant whose prefix was polled; every read is scoped by it. */
   org_id: string;
   /** The dataset the polled source lands in. */
-  dataset_id: string | null;
+  dataset_id: string;
   /** The config source this object landed as — the first path segment under the tenant's prefix. */
   source: string;
   /** The full S3 key of the object last ingested, kept whole so a tenant asking 'which file produced this run' gets the answer rather than a reconstruction. */

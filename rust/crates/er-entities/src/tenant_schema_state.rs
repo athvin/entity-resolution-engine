@@ -173,30 +173,3 @@ ORDER BY org_id
             .collect())
     }
 }
-
-pub mod update {
-    //! @generated query functions for this entity + operation.
-    /// The dataset_id backfill (fixup 0002): stamp every pre-dataset row with its org's default dataset. Idempotent — only NULL rows are touched, so a re-run after new writes (which stamp themselves) is a no-op.
-    pub async fn backfill_dataset(
-        client: &impl ::tokio_postgres::GenericClient,
-    ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
-        const SQL: &str = "UPDATE public.tenant_schema_states c
-SET dataset_id = d.id, updated_at = now()
-FROM public.datasets d
-WHERE d.org_id = c.org_id AND d.name = 'default' AND c.dataset_id IS NULL
-";
-        let __span = ::er_span::sql_span(
-            ::er_span::Store::Control,
-            "tenant_schema_state",
-            "update",
-            "backfill_dataset",
-            "tenant_schema_states",
-            SQL,
-        );
-        let __result = ::er_span::instrument(&__span, client.execute(SQL, &[])).await;
-        let __entered = __span.enter();
-        let __n = ::er_span::check(&__span, __result)?;
-        ::er_span::rows(&__span, __n);
-        Ok(__n)
-    }
-}

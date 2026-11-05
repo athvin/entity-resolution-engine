@@ -1,7 +1,7 @@
 CREATE TABLE IF NOT EXISTS public.matching_models (
   id text NOT NULL,
   org_id text NOT NULL REFERENCES orgs(id),
-  dataset_id text REFERENCES datasets(id),
+  dataset_id text NOT NULL REFERENCES datasets(id),
   name text NOT NULL,
   version bigint NOT NULL,
   entity_type text NOT NULL DEFAULT 'person' CHECK (entity_type IN ('person', 'account')),
@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS public.matching_models (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (id),
-  UNIQUE (org_id, name, version)
+  UNIQUE (dataset_id, name, version)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS matching_models_org_name_version ON public.matching_models (org_id, name, version);
 CREATE INDEX IF NOT EXISTS matching_models_org_state ON public.matching_models (org_id, state);

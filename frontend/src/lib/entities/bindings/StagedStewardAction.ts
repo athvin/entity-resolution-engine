@@ -8,7 +8,7 @@ export interface StagedStewardAction {
   /** The tenant the action applies to. */
   org_id: string;
   /** The dataset whose lake this action drains into. */
-  dataset_id: string | null;
+  dataset_id: string;
   /** The action payload. */
   action: unknown;
   /** Whether the action is pending, applied or failed. */

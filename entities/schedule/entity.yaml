@@ -21,6 +21,7 @@ columns:
     description: "The tenant this schedule runs for."
   - name: dataset_id
     type: varchar
+    nullable: false
     references: { relation: datasets, column: id }
     description: "The dataset this schedule enqueues for."
   - name: kind

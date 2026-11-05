@@ -1,7 +1,7 @@
 CREATE TABLE IF NOT EXISTS public.taggings (
   id text NOT NULL,
   org_id text NOT NULL REFERENCES orgs(id),
-  dataset_id text REFERENCES datasets(id),
+  dataset_id text NOT NULL REFERENCES datasets(id),
   tag_id text NOT NULL REFERENCES tags(id),
   subject_type text NOT NULL,
   subject_id text NOT NULL,

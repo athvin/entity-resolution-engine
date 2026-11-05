@@ -580,7 +580,7 @@ name: config_version
 relation: config_versions
 description: "A versioned config document for a tenant: its YAML, hash and publish state."
 key: [id]
-natural_key: [org_id, version]
+natural_key: [dataset_id, version]
 generate:
   stores: [postgres]
   languages: [rust, typescript]
@@ -598,8 +598,9 @@ columns:
     description: "The tenant this config version belongs to."
   - name: dataset_id
     type: varchar
+    nullable: false
     references: { relation: datasets, column: id }
-    description: "The dataset this config version belongs to. Backfilled to the org's default dataset; joins the natural key at the clean break."
+    description: "The dataset this config version belongs to. Part of the natural key: rows belong to a dataset, not to the org at large."
   - name: version
     type: bigint
     nullable: false
@@ -846,7 +847,7 @@ name: entity_link
 relation: entity_links
 description: "A relationship between two resolved entities that is NOT a merge: a household, a corporate hierarchy, a 'these are related but distinct' note. The product has one answer to 'these two records belong together' — merge them — and that answer is wrong for a husband and wife at one address, or a subsidiary and its parent. Merging them loses the distinction and no later run can recover it; refusing to record anything loses the relationship. A link records it without collapsing either side."
 key: [id]
-natural_key: [org_id, parent_entity_id, child_entity_id, kind]
+natural_key: [dataset_id, parent_entity_id, child_entity_id, kind]
 generate:
   stores: [postgres]
   languages: [rust, typescript]
@@ -864,6 +865,7 @@ columns:
     description: "The tenant. Every read is scoped by it."
   - name: dataset_id
     type: varchar
+    nullable: false
     references: { relation: datasets, column: id }
     description: "The dataset whose entities this link relates — entity ids are lake-local."
   - name: parent_entity_id
@@ -1641,7 +1643,7 @@ name: matching_model
 relation: matching_models
 description: "An immutable version of a tenant's matching model: the settings document the engine scores against, its hash, provenance and activation state."
 key: [id]
-natural_key: [org_id, name, version]
+natural_key: [dataset_id, name, version]
 generate:
   stores: [postgres]
   languages: [rust, typescript]
@@ -1659,6 +1661,7 @@ columns:
     description: "The tenant this model version belongs to."
   - name: dataset_id
     type: varchar
+    nullable: false
     references: { relation: datasets, column: id }
     description: "The dataset whose corpus this model was trained for."
   - name: name
@@ -1942,7 +1945,7 @@ name: pair_label
 relation: pair_labels
 description: "A human (or model) verdict on one candidate pair — the training signal the engine has always been able to learn from and never had. One row per (org, pair): a re-label corrects the previous verdict rather than stacking another."
 key: [id]
-natural_key: [org_id, rec_a_key, rec_b_key]
+natural_key: [dataset_id, rec_a_key, rec_b_key]
 generate:
   stores: [postgres]
   languages: [rust, typescript]
@@ -1959,6 +1962,7 @@ columns:
     description: "The tenant whose corpus the pair belongs to; every read is scoped by it."
   - name: dataset_id
     type: varchar
+    nullable: false
     references: { relation: datasets, column: id }
     description: "The dataset whose record pair this verdict is about — record keys are lake-local."
   - name: rec_a_key
@@ -2625,7 +2629,7 @@ name: s3_ingest_cursor
 relation: s3_ingest_cursors
 description: "What the auto-ingest poller has already read, one row per (org, source). The poller runs on every dispatcher tick and the newest object under a prefix stays the newest until a new one arrives, so without this row the same CSV would be re-ingested every few seconds forever — an unbounded run loop over the tenant's own lake. An upsert rather than a log: the question it answers is 'what is already in', not 'what has ever been in', and the audit log already answers the second."
 key: [id]
-natural_key: [org_id, source]
+natural_key: [dataset_id, source]
 generate:
   stores: [postgres]
   languages: [rust, typescript]
@@ -2642,6 +2646,7 @@ columns:
     description: "The tenant whose prefix was polled; every read is scoped by it."
   - name: dataset_id
     type: varchar
+    nullable: false
     references: { relation: datasets, column: id }
     description: "The dataset the polled source lands in."
   - name: source
@@ -2710,6 +2715,7 @@ columns:
     description: "The tenant this schedule runs for."
   - name: dataset_id
     type: varchar
+    nullable: false
     references: { relation: datasets, column: id }
     description: "The dataset this schedule enqueues for."
   - name: kind
@@ -2891,6 +2897,7 @@ columns:
     description: "The tenant the action applies to."
   - name: dataset_id
     type: varchar
+    nullable: false
     references: { relation: datasets, column: id }
     description: "The dataset whose lake this action drains into."
   - name: action
@@ -3094,6 +3101,7 @@ columns:
     description: "The tenant. Denormalised from the tag so every read is scoped by one predicate rather than a join — the same reason every other tenant-scoped relation carries it."
   - name: dataset_id
     type: varchar
+    nullable: false
     references: { relation: datasets, column: id }
     description: "The dataset whose subject this tag is applied to — subject ids are lake-local."
   - name: tag_id

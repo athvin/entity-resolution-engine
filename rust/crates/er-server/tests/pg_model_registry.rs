@@ -785,10 +785,11 @@ async fn the_model_registry_seeds_versions_and_activates_exactly_one() {
     let err = client
         .execute(
             "INSERT INTO public.matching_models \
-               (id, org_id, name, version, entity_type, model_json, model_hash, \
-                model_version_label, state, provenance, created_by) \
-             SELECT 'dup-active-row', org_id, name, 999, entity_type, model_json, \
-                    model_hash, model_version_label, 'active', provenance, created_by \
+               (id, org_id, dataset_id, name, version, entity_type, model_json, \
+                model_hash, model_version_label, state, provenance, created_by) \
+             SELECT 'dup-active-row', org_id, dataset_id, name, 999, entity_type, \
+                    model_json, model_hash, model_version_label, 'active', \
+                    provenance, created_by \
              FROM public.matching_models \
              WHERE org_id = $1 AND name = 'strict' AND version = 2",
             &[&org_id],

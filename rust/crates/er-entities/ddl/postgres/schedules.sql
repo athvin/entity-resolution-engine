@@ -1,7 +1,7 @@
 CREATE TABLE IF NOT EXISTS public.schedules (
   id text NOT NULL,
   org_id text NOT NULL REFERENCES orgs(id),
-  dataset_id text REFERENCES datasets(id),
+  dataset_id text NOT NULL REFERENCES datasets(id),
   kind text NOT NULL,
   params jsonb NOT NULL DEFAULT '{}'::jsonb,
   cron text NOT NULL,

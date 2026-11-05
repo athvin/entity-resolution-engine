@@ -21,6 +21,7 @@ columns:
     description: "The tenant. Denormalised from the tag so every read is scoped by one predicate rather than a join — the same reason every other tenant-scoped relation carries it."
   - name: dataset_id
     type: varchar
+    nullable: false
     references: { relation: datasets, column: id }
     description: "The dataset whose subject this tag is applied to — subject ids are lake-local."
   - name: tag_id

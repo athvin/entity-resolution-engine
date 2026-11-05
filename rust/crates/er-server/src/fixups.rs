@@ -59,16 +59,11 @@ pub(crate) enum Kind {
     /// contract half, and it may not run until the store has recorded that
     /// release, which is what makes "you cannot contract in the same release
     /// that expanded" mechanical rather than a convention.
-    /// Unconstructed until the first contract fixup is written, and that order
-    /// is the point: a guard added alongside the first removal could not have
-    /// gated it.
     ///
-    /// `allow` rather than `expect`, which was tried first and does not work
-    /// here — an expectation must be FULFILLED in every compilation, and this
-    /// variant is dead in the lib target while the unit tests below construct
-    /// it, so `expect` errors with "unfulfilled" on the test target. Remove the
-    /// attribute when a registered fixup uses the variant.
-    #[allow(dead_code, reason = "ships before its first user; see above")]
+    /// The guard shipped one release before its first user, which is the only
+    /// order that makes a first user safe: a guard added alongside the first
+    /// removal could not have gated it. `0004_dataset_id_required` is that
+    /// first user.
     Contract { after: &'static str },
     /// Destructive, but shipped before this guard existed, so no `after` hash
     /// was ever recorded and there is nothing to check against. **Never use for
@@ -93,6 +88,23 @@ const FIXUPS: &[(&str, Phase, Kind)] = &[
                   tenant_schema_states UNIQUE. Shipped with the dataset \
                   switchover and already applied on every live store, so there \
                   is no release boundary left to gate on.",
+        },
+    ),
+    (
+        "0004_dataset_id_required",
+        Phase::BeforeReconcile,
+        // The expand half is the release that stopped addressing these rows by
+        // org: every statement re-scoped from `WHERE org_id = $1` to `WHERE
+        // dataset_id = $1`, carrying catalog `bbb067f8…`. Until a store has
+        // recorded that catalog, a pod may still be reading by org and relying
+        // on the org-keyed uniques this fixup drops — two datasets both holding
+        // a version 1 would hand such a reader the wrong row. That release
+        // changed no entity, so the hash it names is shared with its
+        // predecessors; it is the most specific marker the ledger carries, and
+        // it still refuses the case that matters — a jump from an older catalog
+        // straight to this one.
+        Kind::Contract {
+            after: "bbb067f8f6e59817fc972f51e6aa03379b9632bc268f189a7b0377fb06d00f87",
         },
     ),
 ];
@@ -147,18 +159,6 @@ pub(crate) async fn apply_fixups(client: &mut Client, phase: Phase) -> Result<()
         if *declared_phase != phase {
             continue;
         }
-        if let Kind::Contract { after } = kind
-            && !contract_allowed(after, &history, &current)
-        {
-            // A refusal, not a skip. Skipping would leave the store in the
-            // shape the fixup exists to leave behind, silently, and the next
-            // boot would skip again — so the removal would never happen and
-            // nothing would say so.
-            return Err(SchemaError::ContractNotReady {
-                fixup: (*name).to_string(),
-                after: (*after).to_string(),
-            });
-        }
         let tx = client.transaction().await?;
         tx.execute(
             "SELECT pg_advisory_xact_lock(hashtext('erserver.ensure_schema'), 0)",
@@ -171,6 +171,24 @@ pub(crate) async fn apply_fixups(client: &mut Client, phase: Phase) -> Result<()
         {
             tx.rollback().await?;
             continue;
+        }
+        // The contract guard is consulted only for a fixup that has NOT run.
+        // Order matters and this is the safe one: once the ledger says applied,
+        // the removal has already happened, so refusing here could not undo it
+        // — it would only take the store down permanently, on exactly the
+        // stores that already migrated successfully.
+        if let Kind::Contract { after } = kind
+            && !contract_allowed(after, &history, &current)
+        {
+            // A refusal, not a skip. Skipping would leave the store in the
+            // shape the fixup exists to leave behind, silently, and the next
+            // boot would skip again — so the removal would never happen and
+            // nothing would say so.
+            tx.rollback().await?;
+            return Err(SchemaError::ContractNotReady {
+                fixup: (*name).to_string(),
+                after: (*after).to_string(),
+            });
         }
         run_fixup(&tx, name).await?;
         er_entities::fixup::create::record(&tx, &er_ids::new_v7(), name, &applied_by()).await?;
@@ -186,33 +204,55 @@ async fn run_fixup(tx: &tokio_postgres::Transaction<'_>, name: &str) -> Result<(
     match name {
         "0002_backfill_dataset_ids" => backfill_dataset_ids(tx).await,
         "0003_per_dataset_locks" => per_dataset_locks(tx).await,
+        "0004_dataset_id_required" => dataset_id_required(tx).await,
         // Reaching this is a FIXUPS entry without a body — a bug in this
         // module, not in any database.
         other => unreachable!("fixup {other} is listed but has no body"),
     }
 }
 
-/// `0002_backfill_dataset_ids` — stamp every pre-dataset row with its org's
-/// `default` dataset. One declared statement per table; each touches only
-/// rows whose `dataset_id` is NULL, so the fixup is idempotent and rows
-/// written after the column landed (which stamp themselves) are never
-/// rewritten. Runs after [`ensure_default_datasets`] has ever converged?
-/// No — ordering inside one boot is: reconcile adds the columns, this
-/// backfill runs, then the convergence sweep runs. An org whose default
-/// dataset does not exist yet simply has no match here and is picked up the
-/// next boot; its children stay NULL until then, exactly as nullable means.
-async fn backfill_dataset_ids(tx: &tokio_postgres::Transaction<'_>) -> Result<(), SchemaError> {
-    er_entities::config_version::update::backfill_dataset(tx).await?;
-    er_entities::matching_model::update::backfill_dataset(tx).await?;
-    er_entities::job::update::backfill_dataset(tx).await?;
-    er_entities::task_instance::update::backfill_dataset(tx).await?;
-    er_entities::schedule::update::backfill_dataset(tx).await?;
-    er_entities::s3_ingest_cursor::update::backfill_dataset(tx).await?;
-    er_entities::pair_label::update::backfill_dataset(tx).await?;
-    er_entities::tenant_schema_state::update::backfill_dataset(tx).await?;
-    er_entities::entity_link::update::backfill_dataset(tx).await?;
-    er_entities::tagging::update::backfill_dataset(tx).await?;
-    er_entities::staged_steward_action::update::backfill_dataset(tx).await?;
+/// Every relation whose rows belong to a dataset, with whether the column is
+/// required there. `jobs` and `task_instances` stay nullable: an org-level
+/// kind (`provision`, the migrate sweep) has no dataset by design.
+const DATASET_SCOPED: &[(&str, bool)] = &[
+    ("config_versions", true),
+    ("matching_models", true),
+    ("schedules", true),
+    ("s3_ingest_cursors", true),
+    ("pair_labels", true),
+    // NULL is meaningful here: provisioning records an ORG-LEVEL lake
+    // position before any dataset exists, and the deploy sweep falls back to
+    // one for an org the convergence has not met yet.
+    ("tenant_schema_states", false),
+    ("entity_links", true),
+    ("taggings", true),
+    ("staged_steward_actions", true),
+    ("jobs", false),
+    ("task_instances", false),
+];
+
+/// Stamp every row that predates datasets with its org's `default` dataset.
+///
+/// Raw SQL rather than declared statements: `dataset_id` is part of the
+/// natural key now, and the entity lint rightly refuses an UPDATE that
+/// assigns one (E005 — natural identity is written once, at insert). A
+/// migration is the exception that proves that rule, and this module is
+/// where the repo already keeps migration SQL.
+///
+/// Touches only NULL rows, so it is idempotent and never rewrites a row that
+/// stamped itself.
+pub(crate) async fn backfill_dataset_ids(
+    tx: &tokio_postgres::Transaction<'_>,
+) -> Result<(), SchemaError> {
+    for (relation, _) in DATASET_SCOPED {
+        tx.batch_execute(&format!(
+            "UPDATE public.{relation} c
+             SET dataset_id = d.id, updated_at = now()
+             FROM public.datasets d
+             WHERE d.org_id = c.org_id AND d.name = 'default' AND c.dataset_id IS NULL"
+        ))
+        .await?;
+    }
     Ok(())
 }
 
@@ -293,11 +333,21 @@ pub(crate) async fn ensure_default_dataset_for(
 ) -> Result<(), SchemaError> {
     let entity_type = match org.active_config_version {
         Some(version) => {
-            er_entities::config_version::read::by_org_version(client, &org.id, version)
+            // Raw, and addressed by ORG — the two reasons are the same one.
+            // This runs before `0004_dataset_id_required` has filled
+            // `dataset_id`, on a store where the column may be NULL or not
+            // yet exist, so a generated reader would decode a now-required
+            // field and panic. It is also the only read in the system that
+            // legitimately has no dataset to address: it exists to decide
+            // what the first dataset should be.
+            client
+                .query_opt(
+                    "SELECT yaml FROM public.config_versions
+                     WHERE org_id = $1 AND version = $2",
+                    &[&org.id, &version],
+                )
                 .await?
-                .into_iter()
-                .next()
-                .and_then(|row| er_config::load_config_str(&row.yaml).ok())
+                .and_then(|row| er_config::load_config_str(row.get::<_, &str>("yaml")).ok())
                 .map_or("person", |c| match c.entity_type {
                     er_config::EntityType::Person => "person",
                     er_config::EntityType::Account => "account",
@@ -336,6 +386,106 @@ pub(crate) async fn ensure_default_dataset_by_name(
         .next()
     {
         ensure_default_dataset_for(client, &org).await?;
+    }
+    Ok(())
+}
+
+/// `0004_dataset_id_required` — make `dataset_id` what the catalog now says
+/// it is, on a store that predates it.
+///
+/// Runs BEFORE the reconciler because the reconciler refuses a live-nullable
+/// column against a NOT NULL declaration (`Severity::Breaking`, which stops
+/// the boot). It therefore cannot wait for the reconciler to add the column
+/// either, so it does that part itself — the one place this module stands in
+/// for the differ rather than cleaning up after it.
+///
+/// Order within the fixup matters: add, fill, then tighten. The default
+/// datasets the fill reads are converged by `ensure_schema` immediately
+/// before this phase, which is why that call moved ahead of the reconciler.
+///
+/// Finally it drops the org-keyed uniques the dataset-keyed ones supersede.
+/// Those are in-table constraints generated from the old natural keys, and
+/// the reconciler never drops; left in place, `UNIQUE (org_id, version)`
+/// would keep two datasets of one org from both having a version 1 — the
+/// precise thing the re-key exists to allow. They are matched by COLUMN SET
+/// rather than by name, because Postgres named them and names are the
+/// fragile part.
+async fn dataset_id_required(tx: &tokio_postgres::Transaction<'_>) -> Result<(), SchemaError> {
+    for (relation, required) in DATASET_SCOPED {
+        tx.batch_execute(&format!(
+            "ALTER TABLE public.{relation}
+             ADD COLUMN IF NOT EXISTS dataset_id text REFERENCES datasets(id)"
+        ))
+        .await?;
+        if *required {
+            tx.batch_execute(&format!(
+                "UPDATE public.{relation} c
+                 SET dataset_id = d.id
+                 FROM public.datasets d
+                 WHERE d.org_id = c.org_id AND d.name = 'default' AND c.dataset_id IS NULL"
+            ))
+            .await?;
+            tx.batch_execute(&format!(
+                "ALTER TABLE public.{relation} ALTER COLUMN dataset_id SET NOT NULL"
+            ))
+            .await?;
+        }
+    }
+    for (relation, columns) in SUPERSEDED_ORG_UNIQUES {
+        drop_unique_on(tx, relation, columns).await?;
+    }
+    Ok(())
+}
+
+/// The org-keyed uniques the dataset-keyed natural keys replace, by the
+/// column set Postgres recorded for them.
+const SUPERSEDED_ORG_UNIQUES: &[(&str, &[&str])] = &[
+    ("config_versions", &["org_id", "version"]),
+    ("matching_models", &["org_id", "name", "version"]),
+    ("pair_labels", &["org_id", "rec_a_key", "rec_b_key"]),
+    ("s3_ingest_cursors", &["org_id", "source"]),
+    (
+        "entity_links",
+        &["org_id", "parent_entity_id", "child_entity_id", "kind"],
+    ),
+];
+
+/// Drop the unique constraint on `relation` whose columns are exactly
+/// `columns`, whatever Postgres called it.
+///
+/// Column-set precise, unlike `0003`'s sweep of every unique on one table:
+/// here the NEW natural key is also a unique constraint on the same
+/// relation, and dropping it would undo the re-key in the same breath.
+async fn drop_unique_on(
+    tx: &tokio_postgres::Transaction<'_>,
+    relation: &str,
+    columns: &[&str],
+) -> Result<(), SchemaError> {
+    let rows = tx
+        .query(
+            "SELECT con.conname,
+                    array_agg(att.attname::text ORDER BY att.attname) AS cols
+             FROM pg_constraint con
+             JOIN pg_class rel ON rel.oid = con.conrelid
+             JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
+             JOIN unnest(con.conkey) AS k(attnum) ON true
+             JOIN pg_attribute att ON att.attrelid = rel.oid AND att.attnum = k.attnum
+             WHERE nsp.nspname = 'public' AND rel.relname = $1 AND con.contype = 'u'
+             GROUP BY con.conname",
+            &[&relation],
+        )
+        .await?;
+    let mut want: Vec<&str> = columns.to_vec();
+    want.sort_unstable();
+    for row in rows {
+        let name: String = row.get(0);
+        let cols: Vec<String> = row.get(1);
+        if cols == want {
+            tx.batch_execute(&format!(
+                "ALTER TABLE public.{relation} DROP CONSTRAINT IF EXISTS \"{name}\""
+            ))
+            .await?;
+        }
     }
     Ok(())
 }
@@ -423,9 +573,8 @@ mod tests {
     fn a_contract_kind_routes_to_the_guard() {
         // The dispatch `apply_fixups` performs, in isolation: only `Contract`
         // consults the history, and the other two run unconditionally. Written
-        // as a construction rather than a match over the registry because no
-        // registered fixup is a gated Contract yet — the guard ships before its
-        // first user, which is the only order that makes the first user safe.
+        // as a construction rather than a match over the registry so it keeps
+        // asserting the dispatch itself, whatever the registry happens to hold.
         let gated = |kind: Kind| match kind {
             Kind::Contract { after } => Some(after),
             Kind::Safe | Kind::ContractUngated { .. } => None,
@@ -447,7 +596,7 @@ mod tests {
     fn the_registry_classifies_every_fixup() {
         // The point of `Kind` is that appending to the registry forces a
         // decision. This asserts the decisions that exist are the ones
-        // reviewed: two entries, neither of them a gated Contract yet.
+        // reviewed: three entries, the last of them the first gated Contract.
         let kinds: Vec<&str> = super::FIXUPS
             .iter()
             .map(|(_, _, k)| match k {
@@ -456,7 +605,26 @@ mod tests {
                 Kind::ContractUngated { .. } => "ungated",
             })
             .collect();
-        assert_eq!(kinds, vec!["safe", "ungated"]);
+        assert_eq!(kinds, vec!["safe", "ungated", "contract"]);
+    }
+
+    #[test]
+    fn every_contract_names_a_catalog_hash() {
+        // `after` is compared against `schema_migrations.catalog_hash`, so a
+        // value that is not shaped like one of those can never match and the
+        // fixup would refuse every store that has any history — a typo here is
+        // a boot failure, not a weaker guard.
+        for (name, _, kind) in super::FIXUPS {
+            if let Kind::Contract { after } = kind {
+                assert_eq!(after.len(), 64, "fixup {name}: not a sha256 hex digest");
+                assert!(
+                    after
+                        .chars()
+                        .all(|c| c.is_ascii_hexdigit() && !c.is_uppercase()),
+                    "fixup {name}: not lowercase hex"
+                );
+            }
+        }
     }
 
     #[test]

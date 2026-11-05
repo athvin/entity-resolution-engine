@@ -20,6 +20,7 @@ columns:
     description: "The tenant the action applies to."
   - name: dataset_id
     type: varchar
+    nullable: false
     references: { relation: datasets, column: id }
     description: "The dataset whose lake this action drains into."
   - name: action

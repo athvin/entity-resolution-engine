@@ -4,7 +4,7 @@ name: entity_link
 relation: entity_links
 description: "A relationship between two resolved entities that is NOT a merge: a household, a corporate hierarchy, a 'these are related but distinct' note. The product has one answer to 'these two records belong together' — merge them — and that answer is wrong for a husband and wife at one address, or a subsidiary and its parent. Merging them loses the distinction and no later run can recover it; refusing to record anything loses the relationship. A link records it without collapsing either side."
 key: [id]
-natural_key: [org_id, parent_entity_id, child_entity_id, kind]
+natural_key: [dataset_id, parent_entity_id, child_entity_id, kind]
 generate:
   stores: [postgres]
   languages: [rust, typescript]
@@ -22,6 +22,7 @@ columns:
     description: "The tenant. Every read is scoped by it."
   - name: dataset_id
     type: varchar
+    nullable: false
     references: { relation: datasets, column: id }
     description: "The dataset whose entities this link relates — entity ids are lake-local."
   - name: parent_entity_id

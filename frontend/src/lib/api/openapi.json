@@ -274,6 +274,7 @@
         "required": [
           "id",
           "org_id",
+          "dataset_id",
           "version",
           "yaml",
           "config_hash",
@@ -297,11 +298,8 @@
             "description": "Principal that created the version."
           },
           "dataset_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "The dataset this config version belongs to. Backfilled to the org's default dataset; joins the natural key at the clean break."
+            "type": "string",
+            "description": "The dataset this config version belongs to. Part of the natural key: rows belong to a dataset, not to the org at large."
           },
           "id": {
             "type": "string",
@@ -885,6 +883,7 @@
         "required": [
           "id",
           "org_id",
+          "dataset_id",
           "kind",
           "params",
           "cron",
@@ -904,10 +903,7 @@
             "description": "The cron expression."
           },
           "dataset_id": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": "string",
             "description": "The dataset this schedule enqueues for."
           },
           "enabled": {
@@ -954,6 +950,7 @@
         "required": [
           "id",
           "org_id",
+          "dataset_id",
           "action",
           "state",
           "created_by",
@@ -982,10 +979,7 @@
             "description": "Principal that staged the action."
           },
           "dataset_id": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": "string",
             "description": "The dataset whose lake this action drains into."
           },
           "error": {

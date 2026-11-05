@@ -8,7 +8,7 @@ export interface Tagging {
   /** The tenant. Denormalised from the tag so every read is scoped by one predicate rather than a join — the same reason every other tenant-scoped relation carries it. */
   org_id: string;
   /** The dataset whose subject this tag is applied to — subject ids are lake-local. */
-  dataset_id: string | null;
+  dataset_id: string;
   /** The tag applied. */
   tag_id: string;
   /** What was tagged: `entity` (a resolved cluster, by its entity id) or `review` (an open review item). Two kinds rather than two tables, because a filter and a bulk action want one list of 'things tagged X' and a union of two relations would make every such read a join. */

@@ -4,7 +4,7 @@ INSERT INTO public.matching_models
 VALUES
   ($model_id, $org_id, $dataset_id, $name,
    coalesce((SELECT max(version) FROM public.matching_models
-             WHERE org_id = $org_id AND name = $name), 0) + 1,
+             WHERE dataset_id = $dataset_id AND name = $name), 0) + 1,
    $entity_type, $model_json, $model_hash,
    $model_version_label, $tf_snapshot_id, $provenance, $created_by)
 RETURNING

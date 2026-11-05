@@ -1,8 +1,0 @@
-kind: statement
-operation: read
-mode: full
-description: "One config version addressed by ORG, for the one caller that has no dataset yet: the convergence sweep reads a pre-dataset org's published config to learn the entity type the dataset it is about to create should carry. Every other reader addresses a dataset — see `by_version`."
-params:
-  - { name: org_id, type: varchar }
-  - { name: version, type: bigint }
-returns: entity

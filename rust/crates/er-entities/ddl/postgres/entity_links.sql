@@ -1,7 +1,7 @@
 CREATE TABLE IF NOT EXISTS public.entity_links (
   id text NOT NULL,
   org_id text NOT NULL REFERENCES orgs(id),
-  dataset_id text REFERENCES datasets(id),
+  dataset_id text NOT NULL REFERENCES datasets(id),
   parent_entity_id text NOT NULL,
   child_entity_id text NOT NULL,
   kind text NOT NULL CHECK (kind IN ('household', 'company', 'related')),
@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS public.entity_links (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (id),
-  UNIQUE (org_id, parent_entity_id, child_entity_id, kind)
+  UNIQUE (dataset_id, parent_entity_id, child_entity_id, kind)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS entity_links_org_pair_kind ON public.entity_links (org_id, parent_entity_id, child_entity_id, kind);
 CREATE INDEX IF NOT EXISTS entity_links_org_child ON public.entity_links (org_id, child_entity_id);

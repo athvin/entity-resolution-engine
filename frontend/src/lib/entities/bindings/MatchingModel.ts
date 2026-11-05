@@ -8,7 +8,7 @@ export interface MatchingModel {
   /** The tenant this model version belongs to. */
   org_id: string;
   /** The dataset whose corpus this model was trained for. */
-  dataset_id: string | null;
+  dataset_id: string;
   /** The model's name within the tenant; versions are monotonic within a name, so one tenant can keep several models (a classic rule model beside a trained one) and switch between them. */
   name: string;
   /** The monotonic version number within (org, name). Versions are immutable: a retrain or a weight override mints the next one rather than editing this. */

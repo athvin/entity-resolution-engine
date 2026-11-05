@@ -7,8 +7,8 @@ export interface ConfigVersion {
   id: string;
   /** The tenant this config version belongs to. */
   org_id: string;
-  /** The dataset this config version belongs to. Backfilled to the org's default dataset; joins the natural key at the clean break. */
-  dataset_id: string | null;
+  /** The dataset this config version belongs to. Part of the natural key: rows belong to a dataset, not to the org at large. */
+  dataset_id: string;
   /** The monotonic version number within the tenant. */
   version: number;
   /** The config document source. */

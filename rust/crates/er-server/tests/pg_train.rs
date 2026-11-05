@@ -143,7 +143,7 @@ async fn training_registers_a_draft_and_leaves_the_active_model_alone() {
     )
     .await
     .unwrap();
-    pg::activate_model_version(&client, &org_id, &seeded.id)
+    pg::activate_model_version(&client, &ds, &seeded.id)
         .await
         .unwrap();
 

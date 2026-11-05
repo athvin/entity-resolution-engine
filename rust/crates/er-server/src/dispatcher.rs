@@ -396,7 +396,7 @@ pub async fn schedule_tick(
         let (_job, inserted) = pg::enqueue_scheduled(
             client,
             &schedule.org_id,
-            schedule.dataset_id.as_deref(),
+            Some(&schedule.dataset_id),
             &schedule.kind,
             &key,
             Some(&schedule.params),
@@ -756,9 +756,6 @@ async fn dispatch_claimed(
                 Ok(rows) => rows
                     .into_iter()
                     // The dataset's own models only: each dataset trains and scores
-                    // against its own corpus. Pre-dataset rows were backfilled, so
-                    // for a single-dataset org this filters nothing out.
-                    .filter(|m| m.dataset_id.as_deref() == job.dataset_id.as_deref())
                     .map(|m| ActiveModel {
                         model_json: m.model_json,
                         model_version_label: m.model_version_label,

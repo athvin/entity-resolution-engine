@@ -11,7 +11,7 @@ pub struct EntityLink {
     /// The tenant. Every read is scoped by it.
     pub org_id: String,
     /// The dataset whose entities this link relates — entity ids are lake-local.
-    pub dataset_id: Option<String>,
+    pub dataset_id: String,
     /// The entity on the owning side — the household, the parent company. Deliberately NOT a foreign key, for the reason `taggings.subject_id` gives: an entity lives in the LAKE and this table is Postgres, so a database-level reference would point at a row this store does not own. The id is stable across runs because reconcile carries ids forward by membership overlap (INV-PERM) rather than re-deriving them, and an entity that loses that contest records `merged_into` — so a link survives its entity gaining members, and a merged-away side is followable rather than dangling.
     pub parent_entity_id: String,
     /// The entity on the member side — the person in the household, the subsidiary.
@@ -218,32 +218,5 @@ ORDER BY kind, parent_entity_id, child_entity_id
                 updated_at: row.get("updated_at"),
             })
             .collect())
-    }
-}
-
-pub mod update {
-    //! @generated query functions for this entity + operation.
-    /// The dataset_id backfill (fixup 0002): stamp every pre-dataset row with its org's default dataset. Idempotent — only NULL rows are touched, so a re-run after new writes (which stamp themselves) is a no-op.
-    pub async fn backfill_dataset(
-        client: &impl ::tokio_postgres::GenericClient,
-    ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
-        const SQL: &str = "UPDATE public.entity_links c
-SET dataset_id = d.id, updated_at = now()
-FROM public.datasets d
-WHERE d.org_id = c.org_id AND d.name = 'default' AND c.dataset_id IS NULL
-";
-        let __span = ::er_span::sql_span(
-            ::er_span::Store::Control,
-            "entity_link",
-            "update",
-            "backfill_dataset",
-            "entity_links",
-            SQL,
-        );
-        let __result = ::er_span::instrument(&__span, client.execute(SQL, &[])).await;
-        let __entered = __span.enter();
-        let __n = ::er_span::check(&__span, __result)?;
-        ::er_span::rows(&__span, __n);
-        Ok(__n)
     }
 }
