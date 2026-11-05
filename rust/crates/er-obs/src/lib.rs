@@ -19,8 +19,10 @@ pub mod executions;
 pub mod init;
 pub mod logging;
 pub mod otlp;
+pub mod propagate;
 
 pub use blocking::spawn_blocking_in_span;
 pub use executions::{Execution, ExecutionRecorder};
 pub use init::{Guard, Role, SpansOnly, init};
 pub use otlp::{ReqwestClient, flush_timeout, provider_for, traces_endpoint};
+pub use propagate::adopt_traceparent;

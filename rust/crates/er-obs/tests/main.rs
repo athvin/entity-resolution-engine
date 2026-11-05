@@ -10,5 +10,6 @@
 //!
 //! To run one file's tests: `cargo test -p er-obs --test main <name>`.
 
+mod adopts_parent_context;
 mod no_pii_in_exported_spans;
 mod otlp_export;
