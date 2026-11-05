@@ -258,12 +258,21 @@ jobs:
                 BLOCKED)
                   reason="a required check is missing, failing or still pending" ;;
                 UNSTABLE)
-                  # Deliberately conservative. UNSTABLE also covers a PR red only
-                  # on the non-required `semgrep (static analysis)` context, which
-                  # a human may merge. The bus takes only what GitHub calls fully
-                  # clean; widen this with an explicit input rather than by
-                  # loosening the predicate.
-                  reason="a non-required check is red (UNSTABLE)" ;;
+                  # Deliberately conservative, and note UNSTABLE means red OR
+                  # STILL PENDING on a non-required check — not red alone. Both
+                  # occur here: a PR red only on the non-required `semgrep
+                  # (static analysis)` context, which a human may merge, and a
+                  # PR merely waiting on one (observed on #484, queued on
+                  # `record pass marker`, which went CLEAN by itself minutes
+                  # later).
+                  #
+                  # The distinction matters for whoever reads the table, not for
+                  # the bus: reporting "red" when a check is only queued sends
+                  # someone hunting a failure that does not exist. Either way
+                  # the bus takes only what GitHub calls fully clean, so a
+                  # pending one simply rides the next round. Widen this with an
+                  # explicit input rather than by loosening the predicate.
+                  reason="a non-required check is red or still pending (UNSTABLE)" ;;
                 BEHIND)
                   reason="behind main and protection demands an update" ;;
                 UNKNOWN)

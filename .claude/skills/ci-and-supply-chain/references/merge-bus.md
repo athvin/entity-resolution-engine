@@ -41,6 +41,14 @@ Four properties worth knowing before changing it:
   workflows and reports no checks — any predicate phrased as "nothing is
   failing" reads that as green. Note `gh pr list` returns `UNKNOWN` and does not
   trigger the computation; only `gh pr view` does.
+
+  Two states are refused that a human could merge, both deliberately.
+  `UNSTABLE` means red **or still pending** on a non-required check, so a PR can
+  be skipped one round and ride the next with nothing wrong — seen on #484,
+  queued on `record pass marker`, `CLEAN` by itself minutes later. And a PR red
+  only on the non-required `semgrep (static analysis)` context is mergeable by
+  hand but refused here. If that conservatism ever costs more than it saves, add
+  an explicit input rather than loosening the predicate.
 - **It tells a bad batch apart from a starved account.** Cause 0 above presents
   as `failure` on every required context, which the bus would otherwise report
   as "the batch went red" — sending someone to debug a diff that was never
