@@ -30,11 +30,18 @@ data "aws_sns_topic" "alerts" {
 }
 
 locals {
-  # 5 GiB/day. At the INFREQUENT_ACCESS rate of $0.25/GB that is ~$1.25/day, or
-  # ~$38/month — well above anything this system produces at one developer's
-  # load, and far enough above it that a breach means a loop rather than a busy
-  # day. The container stream is the one that carries 118 `eprintln!` calls'
-  # worth of output plus every pipeline stage, so it gets the larger share.
+  # 5 GiB/day. `/er/dev/containers` is STANDARD class today — verified against
+  # the live account, not assumed — so the rate is $0.50/GB: ~$2.50/day, or
+  # ~$75/month sustained. That is well above anything this system produces at
+  # one developer's load, and far enough above it that a breach means a loop
+  # rather than a busy day. The container stream carries every `eprintln!` in
+  # er-server plus every pipeline stage, so it gets the larger share.
+  #
+  # P4 proposes moving this group to INFREQUENT_ACCESS, which would halve the
+  # rate. Worth doing, but NOT bundled here: the class is fixed at creation, so
+  # changing it in place is a destroy-and-recreate that takes the group's
+  # existing events with it. That belongs in its own PR whose plan output has
+  # been read, not in an unattended apply riding along with an alarm.
   containers_daily_bytes = 5 * 1024 * 1024 * 1024
 
   # 1 GiB/day. This stream carries the collector's own export of metrics and
@@ -73,7 +80,7 @@ resource "aws_cloudwatch_metric_alarm" "containers_log_ingest" {
   # `missing` would otherwise read as a breach once the period rolls over.
   treat_missing_data = "notBreaching"
 
-  alarm_description = "Container log ingest exceeded 5 GiB in a day. This log group is INFREQUENT_ACCESS, which supports no metric filters or subscription filters, so this alarm is the only guard on it. Expect a crash loop, a retry storm, or a log level left at debug."
+  alarm_description = "Container log ingest exceeded 5 GiB in a day (~$2.50/day at the STANDARD rate of $0.50/GB). Expect a crash loop, a retry storm, or a log level left at debug. If this group is ever moved to INFREQUENT_ACCESS, that class supports no metric filters, Live Tail or subscription filters, which would make this alarm the only guard on it."
 
   alarm_actions = [data.aws_sns_topic.alerts.arn]
   ok_actions    = [data.aws_sns_topic.alerts.arn]
