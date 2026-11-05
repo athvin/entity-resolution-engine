@@ -5,13 +5,29 @@
 # Fail on any security advisory or unmaintained/yanked crate.
 yanked = "deny"
 version = 2
-# The two RUSTSEC entries below are *unmaintained* notices (not vulnerabilities),
-# pulled transitively by the entity framework's analyser (ff-analysis's DataFusion
-# 52 + arrow 57 subtree). We do not control either and neither is a safe-upgrade:
-#   - RUSTSEC-2024-0436: `paste` (feature-complete proc-macro, via arrow/datafusion).
+# The three RUSTSEC entries below are *unmaintained* notices (not
+# vulnerabilities). We control none of them and none has a safe upgrade:
+#   - RUSTSEC-2024-0436: `paste` (feature-complete proc-macro, via arrow/datafusion),
+#     pulled by the entity framework's analyser (ff-analysis's DataFusion 52 +
+#     arrow 57 subtree).
 #   - RUSTSEC-2024-0449: `unsafe-libyaml`, via feather-flow's `serde_yaml`. Our own
 #     crates deliberately use `serde_norway` instead; this reaches us only through
 #     ff-analysis. Retire when feather-flow moves off serde_yaml.
+#   - RUSTSEC-2026-0441: `pin-utils`, archived 2026-10-01 after 0.1.1. It arrives
+#     through `aws-smithy-http`, so the whole AWS SDK surface depends on it:
+#     aws-config, aws-runtime, aws-sdk-s3, aws-sdk-sesv2 and aws-sdk-sts, all of
+#     which er-server needs for Pod Identity, the sccache bucket and SES mail.
+#     The advisory states "No safe upgrade is available!" — the fix is for smithy
+#     to move to `core::pin::pin!` or pin-project-lite, which is upstream's call
+#     and not ours. Swapping the SDK is not an option either: the aws crates are
+#     pinned `default-features = false` because the default TLS resolves to
+#     aws-lc-rs, which needs a cmake the build image does not carry.
+#
+#     What it actually is: a pin-projection macro crate whose repository was
+#     archived. Archived is a maintenance status, not a defect — there is no
+#     reported flaw in the code, and `pin_mut!` has simply been superseded by a
+#     std macro. Retire this entry when the AWS SDK drops the dependency; a
+#     `cargo tree -i pin-utils` returning nothing is the signal.
 #
 # There is deliberately no `zip` exception here any more. One existed for `zip`
 # 6.0.0 — a registry yank plus three extract-time path-handling advisories
@@ -24,6 +40,7 @@ version = 2
 ignore = [
     "RUSTSEC-2024-0436",
     "RUSTSEC-2024-0449",
+    "RUSTSEC-2026-0441",
 ]
 
 [licenses]
