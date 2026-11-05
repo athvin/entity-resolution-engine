@@ -289,6 +289,29 @@ config:
       # CloudWatch extracts the metric data on ingest.
       log_group_name: /er/dev/metrics
       log_stream_name: otel-collector
+      # Bill only the dimension set the code actually declares.
+      #
+      # By DEFAULT awsemf rolls dimensions up: for every metric it emits one
+      # series per subset of the dimensions, and injects `OTelLib` as a
+      # dimension of its own. Measured in ER/Dev on 2026-11-05, our ONE
+      # histogram with its two declared dimensions had become four dimension
+      # SETS —
+      #
+      #   db.system.name, OTelLib, outcome   -> 2 x 2 = 4 series
+      #   OTelLib, outcome                   ->         2
+      #   OTelLib                            ->         1
+      #   db.system.name, OTelLib            ->         2
+      #
+      # — i.e. NINE billable CloudWatch custom metrics where
+      # `er-obs/src/registry.rs` declares four. At ~$0.30/series/month that is
+      # a small absolute number and a 2.25x error in the one calculation the
+      # registry exists to keep honest, in the direction of understating cost.
+      #
+      # `NoDimensionRollup` makes the bill equal the declaration. It is also
+      # where the exporter is going anyway: it logs "the default value for
+      # DimensionRollupOption will be changing to NoDimensionRollup in a future
+      # release" on every start, which is the line that gave this away.
+      dimension_rollup_option: NoDimensionRollup
 
   service:
     pipelines:
