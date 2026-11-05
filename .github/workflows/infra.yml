@@ -100,6 +100,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       infra: ${{ steps.filter.outputs.infra }}
+      charts: ${{ steps.filter.outputs.charts }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -129,6 +130,7 @@ jobs:
                  || ! git cat-file -e "${PUSH_BEFORE}^{commit}" 2>/dev/null; then
                 echo "cannot compute the pushed range (before='$PUSH_BEFORE') — assuming infra changed"
                 echo "infra=true" >> "$GITHUB_OUTPUT"
+                echo "charts=true" >> "$GITHUB_OUTPUT"
                 exit 0
               fi
               range="$PUSH_BEFORE...$PUSH_AFTER"
@@ -136,6 +138,7 @@ jobs:
             *)
               echo "event '$EVENT' carries no diff — assuming infra changed"
               echo "infra=true" >> "$GITHUB_OUTPUT"
+              echo "charts=true" >> "$GITHUB_OUTPUT"
               exit 0
               ;;
           esac
@@ -156,6 +159,22 @@ jobs:
             echo "infra=true" >> "$GITHUB_OUTPUT"
           else
             echo "infra=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          # The HELM half, computed separately because it shares none of the
+          # terraform tiers' inputs: a chart change must not trigger a
+          # `terraform plan`, and a terraform change must not pay for a chart
+          # render. Same allowlist direction, same `grep -c`, same reason.
+          #
+          # `scripts/ci/charts-check.py` is in the pattern for the reason
+          # `scripts/ci/tf-*` is in the one above: a fix to the gate that did
+          # not run the gate would ship untested.
+          c="$(printf '%s\n' "$changed" \
+                | grep -cE '^(infra/k8s/charts/|scripts/ci/charts-check\.py$|\.github/workflows/infra\.yml$)' || true)"
+          if [ "${c:-0}" -gt 0 ]; then
+            echo "charts=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "charts=false" >> "$GITHUB_OUTPUT"
           fi
 
   # The three shell helpers this workflow calls, asserted against fixtures.
@@ -180,6 +199,97 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: fixture tests for the plan comment, metadata and destroy guard
         run: bash scripts/ci/tf-helpers-test.sh
+
+  # The HELM gate. There was none at all: `images.yml` triggers on
+  # `infra/k8s/**` and deploys chart changes straight into the `ci` namespace,
+  # so until now the first thing to evaluate a chart edit was the cluster.
+  # plan-to-aws.md listed "helm lint/template + kubeconform" as unfinished.
+  #
+  # Credential-free and offline, like `validate` above — it renders templates
+  # and compares schemas, it does not talk to a cluster. It lives in this
+  # workflow rather than its own because this is the infra gate and the detect
+  # pattern is already here; it is deliberately gated on its OWN detect output
+  # so a chart edit does not run `terraform plan` and a terraform edit does not
+  # pay for a chart render.
+  #
+  # NOT a required check yet, and that order is not optional: a job's `name:` IS
+  # its branch-protection context, so a context added for a job that has never
+  # reported green on `main` leaves every PR pending forever. Land it, watch it
+  # report, then require it.
+  charts:
+    name: helm charts (lint + render + selectors)
+    needs: detect
+    if: needs.detect.outputs.charts == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install helm and kubeconform
+        # Version-pinned tarballs rather than third-party actions, the same
+        # choice images.yml's helm install documents: every `uses:` here is
+        # SHA-pinned, and a pinned download needs no SHA to keep current. The
+        # version echo is the check that the install worked rather than
+        # silently leaving a missing binary for a later step to trip over.
+        env:
+          HELM_VERSION: v3.19.0
+          KUBECONFORM_VERSION: v0.7.0
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz" \
+            | sudo tar xz --strip-components=1 -C /usr/local/bin linux-amd64/helm
+          curl -fsSL "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" \
+            | sudo tar xz -C /usr/local/bin kubeconform
+          helm version --short
+          kubeconform -v
+      - name: Install PyYAML
+        # Explicit rather than relying on the runner image carrying it: the
+        # selector gate imports yaml, and a gate that cannot run must fail
+        # loudly at a named step instead of becoming an import error buried in
+        # a script's output.
+        run: python3 -m pip install --quiet 'pyyaml==6.0.2'
+      - name: helm lint
+        run: |
+          set -euo pipefail
+          helm lint infra/k8s/charts/er-platform \
+            --set efs.fileSystemId=fs-0 --set efs.accessPointId=fsap-0
+          helm lint infra/k8s/charts/er-dev-namespace --set developer=ci
+      - name: Render and schema-validate every profile
+        # Three renders, because they are three different manifest sets and a
+        # template guarded by `if` is unchecked in the profiles that disable it:
+        # the default dev profile, the kind profile (`web.enabled: false`, so no
+        # BFF container and no drizzle hook), and the namespace chart.
+        #
+        # `-ignore-missing-schemas` is needed for the ExternalSecret CRD, which
+        # has no published schema. It is a real gap — a typo in a CRD's `kind`
+        # would be skipped rather than caught — which is why the step prints the
+        # skipped count rather than hiding it, and why the selector gate below
+        # checks relationships that no schema could express anyway.
+        run: |
+          set -euo pipefail
+          render() {
+            echo "== $1 =="
+            shift
+            helm template "$@" > /tmp/render.yaml
+            kubeconform -strict -summary -ignore-missing-schemas \
+              -kubernetes-version 1.32.0 /tmp/render.yaml
+          }
+          render "er-platform (dev profile)" er-platform infra/k8s/charts/er-platform \
+            --namespace ci --set developer=ci \
+            --set efs.fileSystemId=fs-0 --set efs.accessPointId=fsap-0 \
+            --set ingress.enabled=true \
+            --set 'ingress.certificateArn=arn:aws:acm:us-east-2:0:certificate/0'
+          render "er-platform (kind profile)" er-platform infra/k8s/charts/er-platform \
+            --namespace er -f infra/k8s/charts/er-platform/values-kind.yaml
+          render "er-dev-namespace" ci infra/k8s/charts/er-dev-namespace \
+            --namespace default --set developer=ci \
+            --set webIngressFromVpc.enabled=true
+      - name: Selectors resolve, and the edge hole is web-only
+        # The check none of the above can make: does a selector match any pod
+        # that exists? See the script's header — a NetworkPolicy that matched
+        # nothing was valid YAML, valid against the schema and lint-clean for
+        # weeks. Cross-chart by necessity, since the policy and the pod it
+        # selects are in different charts.
+        run: python3 scripts/ci/charts-check.py
 
   validate:
     name: fmt + validate (credential-free)
