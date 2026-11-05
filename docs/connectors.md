@@ -66,7 +66,7 @@ Two halves of the seam are built and running in the control plane
 
 ### 3.1 Ingress — the drop-dir push seam
 
-`POST /v1/orgs/{org}/imports?source=<name>` (`server/src/erserver/api.py`) is the
+`POST /v1/orgs/{org}/datasets/{ds}/imports` (`upload_import` in `er-server`) is the
 generic ingress endpoint every connector targets:
 
 - The `source` is validated against the org's **published** config before any byte
@@ -83,7 +83,7 @@ entry, push files (or write them to the drop dir), enqueue." No engine change.
 
 ### 3.2 Egress — signed webhooks
 
-`server/src/erserver/webhooks.py` delivers control-plane events (today
+`er-server`'s webhook handlers deliver control-plane events (today
 `job.completed`) to subscribed URLs. Delivery is best-effort (a few retries, never
 blocks the queue) and each payload is signed with the subscription secret
 (HMAC-SHA256 in `X-ERServer-Signature`) so receivers can authenticate the sender.
@@ -194,6 +194,6 @@ connector.
   service (the normative source for this doc).
 - [backend-design.md §13](backend-design.md) — the object-model generalization that
   gates Account/custom objects.
-- `server/src/erserver/api.py` — the `POST /imports` drop-dir ingress seam.
-- `server/src/erserver/webhooks.py` — the signed-webhook egress seam.
+- `er-server` `upload_import` — the `POST .../imports` drop-dir ingress seam.
+- `er-server` `create_webhook` / `webhook_deliveries` — the signed-webhook egress seam.
 - [research-cloudingo.md](research-cloudingo.md) — why Salesforce is first.
