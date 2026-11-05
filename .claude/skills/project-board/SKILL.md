@@ -158,6 +158,13 @@ Three things about that output:
 
   `iteration` comes back as an object (`title`, `startDate`, `iterationId`),
   not a string.
+- **Parse it with `--jq`, not an external JSON parser.** Issue bodies reach the
+  item list verbatim, so a body containing a raw control character produces
+  output that `python3 -c 'json.load(...)'` rejects outright —
+  `Invalid control character at: line 1 column 113`. `gh`'s built-in `--jq`
+  tolerates it. The failure looks like a corrupt response rather than a
+  strictness difference, and it only appears once some issue on the board
+  happens to contain one, so it arrives long after the script was written.
 
 For anything `item-list` flattens — a field's `dataType`, an iteration's
 configuration, the automations — go to GraphQL. `projectV2(number:2)` accepts a
