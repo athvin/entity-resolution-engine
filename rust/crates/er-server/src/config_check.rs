@@ -208,7 +208,105 @@ pub fn profile_advisories(config: &Config, profiled: &[ProfiledColumn]) -> Vec<S
     }
 
     advisories.extend(unmeasurable_exact_levels(config, &by_name));
+    advisories.extend(unused_tf_payoff(config, &by_name));
     advisories
+}
+
+/// The minimum spread, in bits, worth recommending `tf: true` for.
+///
+/// Three bits is a factor of eight in the Bayes factor between agreeing on the
+/// commonest value and agreeing on a typical one — enough to move a pair across
+/// a threshold rather than merely nudge it, which is the point at which the
+/// advice can change an outcome.
+const ADVISE_TF_SPREAD_BITS: f64 = 3.0;
+
+/// Comparisons where term-frequency adjustment would change scores materially
+/// and is switched off.
+///
+/// **The arithmetic, taken from the scoring SQL rather than from the idea of
+/// TF.** `stages::score::mw_tf_adj_case_sql` emits, per level,
+///
+/// ```text
+/// weight * ( log2(u_exact) - log2(greatest(tf_l, tf_r, minimum_u_value)) )
+/// ```
+///
+/// so a value whose relative frequency is `p` has its evidence adjusted by
+/// `weight * log2(u_exact / p)`. A value exactly as common as the average
+/// collision rate is unchanged; a rarer one counts for more and a commoner one
+/// for less. Comparing the commonest value, at `p = n_max/M`, against a typical
+/// one, at `p = 1/d` for `d` distinct values over `M` populated rows:
+///
+/// ```text
+/// weight * [ log2(u_exact * d) - log2(u_exact * M / n_max) ]
+///   =  weight * log2(d * n_max / M)  =  weight * log2(n_max / n_avg)
+/// ```
+///
+/// `u_exact` cancels, which is what makes this answerable from a profile alone —
+/// it needs no estimate of the collision probability, only two counts the
+/// profile already has.
+///
+/// **It is a SKEW and not a span, and the difference matters.** A first draft
+/// compared the mode against a hypothetical one-off value, giving
+/// `weight * log2(n_max)`. That grows with the corpus: on a large table even a
+/// perfectly flat column has a large `n_max`, so the advisory fired on a column
+/// whose commonest value covered 2% of rows, and would have fired on nearly
+/// every column in any big corpus. Two existing tests caught it. Measuring the
+/// mode against the AVERAGE frequency instead is scale-free, and it asks the
+/// question that actually decides whether TF earns its keep: on a uniform
+/// column TF shifts every value by the same amount and discriminates nothing.
+///
+/// Reported as an upper bound, for two reasons that both point the same way:
+/// `minimum_u_value` clamps the rare end (and lives in the model, not the
+/// config, so it is not knowable here), and `tf.weight` is assumed to be the
+/// full 1.0 the compiler emits. Both can only narrow the real spread.
+fn unused_tf_payoff(config: &Config, by_name: &BTreeMap<&str, &ProfiledColumn>) -> Vec<String> {
+    let mut out = Vec::new();
+    for (key, spec) in &config.comparisons {
+        if spec.tf {
+            continue; // already on; nothing to recommend
+        }
+        // Without an exact level there is nothing for TF to scale against — and
+        // turning it on would be refused at publish, so recommending it here
+        // would be advice that contradicts the gate.
+        if !spec.levels.iter().any(|l| l.as_deref() == Some("exact")) {
+            continue;
+        }
+        let Some(stats) = by_name.get(key.as_str()) else {
+            continue;
+        };
+        let Some(top_share) = stats.top_share else {
+            continue;
+        };
+        // The distinct count is what makes this a skew rather than a corpus-size
+        // reading; without it there is no average frequency to compare against.
+        let Some(distinct) = stats.distinct_exact else {
+            continue;
+        };
+        let present = stats.non_null_count as f64;
+        if present <= 0.0 || distinct <= 0 {
+            continue;
+        }
+        // An integer row count, as in `unmeasurable_exact_levels` — the share is
+        // that count over the populated rows, so rounding recovers it.
+        let mode_count = (top_share * present).round();
+        let average_count = present / distinct as f64;
+        if mode_count < 2.0 || average_count <= 0.0 {
+            continue; // nothing repeats; TF has nothing to spread
+        }
+        let spread = (mode_count / average_count).log2();
+        if spread < ADVISE_TF_SPREAD_BITS {
+            continue;
+        }
+        out.push(format!(
+            "comparison `{key}` has an `exact` level with `tf: false`, and its values are \
+             lopsided: the commonest covers {mode_count:.0} of {present:.0} populated rows while \
+             the average of its {distinct} distinct values covers {average_count:.1} — turning on \
+             `tf` would spread the evidence for an exact agreement across up to {spread:.1} bits, \
+             counting a rare value that much more than a common one. At present every exact \
+             agreement on `{key}` is worth the same, however common the value"
+        ));
+    }
+    out
 }
 
 /// The `exact` levels whose u-probability this corpus cannot supply, at the
@@ -437,6 +535,36 @@ pub fn config_reference_problems(config: &Config) -> Vec<String> {
         if !valid.contains(key.as_str()) {
             problems.push(format!(
                 "comparison column `{key}` is not a standardized column"
+            ));
+        }
+    }
+
+    // Term-frequency adjustment needs an exact-match level to scale against,
+    // and nothing checked for one.
+    //
+    // The same shape as the constraint-column hole above, and it fails later and
+    // harder. `er-compile` attaches the TF adjustment to a comparison's FIRST
+    // declared level whenever `tf: true`, without requiring that level to be an
+    // exact match; at scoring time `scoring::u_probability_for_tf_base` looks for
+    // a sibling level that is an exact match on exactly the TF column and
+    // returns an error when there is none. So `tf: true` on a comparison whose
+    // levels are all fuzzy compiles cleanly, publishes cleanly, and then fails
+    // EVERY subsequent run inside the scoring stage.
+    //
+    // Only the `exact` token qualifies as the base. Every other comparator
+    // either is not an equality (`variant_match`, `jaro_winkler:`,
+    // `levenshtein:`) or compares a derived expression rather than the bare
+    // columns (`username_exact`, `domain_exact`, `first_n:`,
+    // `dob_same_year_month`), and `exact_match_columns` detects only an equality
+    // of two bare columns. The engine's own escape hatch,
+    // `disable_tf_exact_match_detection`, is not reachable from a tenant config.
+    for (key, spec) in &config.comparisons {
+        if spec.tf && !spec.levels.iter().any(|l| l.as_deref() == Some("exact")) {
+            problems.push(format!(
+                "comparison `{key}` sets `tf: true` but declares no `exact` level. Term-frequency \
+                 adjustment scales against the exact-match level's u probability, so there has to \
+                 be one — without it the scoring stage fails on every run. Add `exact` to the \
+                 levels, or drop `tf`"
             ));
         }
     }
@@ -1147,6 +1275,67 @@ mod tests {
         );
     }
 
+    /// The fixture's `given_name` comparison, which carries `tf: true` AND an
+    /// exact level — the shape the tests below mutate.
+    const GIVEN_NAME_TF: &str =
+        "given_name:  { levels: [exact, jaro_winkler:0.90, variant_match, null], tf: true }";
+
+    #[test]
+    fn tf_without_an_exact_level_is_refused_at_publish() {
+        assert_eq!(
+            GOOD.matches(GIVEN_NAME_TF).count(),
+            1,
+            "the fixture's given_name comparison moved; these tests edit it by text"
+        );
+        // Same `tf: true`, exact level removed.
+        let bad = load(&GOOD.replace(
+            GIVEN_NAME_TF,
+            "given_name:  { levels: [jaro_winkler:0.90, null], tf: true }",
+        ));
+        let problems = config_reference_problems(&bad);
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("`given_name`") && p.contains("no `exact` level")),
+            "the refusal must name the comparison and what is missing: {problems:?}"
+        );
+        // And the unmodified fixture is silent, so this is not refusing every
+        // config that mentions tf.
+        assert!(
+            !config_reference_problems(&load(GOOD))
+                .iter()
+                .any(|p| p.contains("`exact` level")),
+            "the fixture declares tf WITH an exact level and must pass"
+        );
+    }
+
+    /// Why the refusal above exists: without it the config reaches the engine
+    /// and the scoring stage fails.
+    ///
+    /// This is the positive control for the gate's motivation, and it is the
+    /// assertion that would notice the engine changing its mind — if
+    /// `u_probability_for_tf_base` ever grew a fallback, the refusal would
+    /// become over-strict and this test would say so.
+    #[test]
+    fn the_refusal_prevents_a_scoring_failure_on_every_run() {
+        let bad = load(&GOOD.replace(
+            GIVEN_NAME_TF,
+            "given_name:  { levels: [jaro_winkler:0.90, null], tf: true }",
+        ));
+        // It compiles — which is the whole problem: nothing upstream objects.
+        let compiled = er_compile::compile(&bad).expect("a fuzzy-only tf config still compiles");
+        let settings =
+            dedupe_core::Settings::from_json_str(&compiled.model_json).expect("settings parse");
+
+        let err = dedupe_core::stages::score::match_weight_parts_sql(&settings)
+            .expect_err("scoring must refuse a tf level with no exact sibling");
+        let text = crate::errfmt::chain(&err);
+        assert!(
+            text.contains("given_name") && text.contains("requires an exact-match level"),
+            "the engine's own complaint is what the publish refusal front-runs: {text}"
+        );
+    }
+
     #[test]
     fn a_dominant_value_is_counted_over_populated_rows_not_all_rows() {
         // The regression this pins. `dedupe_core::profile::top_values` divides
@@ -1298,6 +1487,109 @@ mod tests {
         let config = load(GOOD);
         let columns = vec![with_distinct("email", 100_000, 100_000)];
         assert_eq!(profile_advisories(&config, &columns), Vec::<String>::new());
+    }
+
+    // -----------------------------------------------------------------------
+    // Term-frequency adjustment: when switching it on would change scores.
+    // -----------------------------------------------------------------------
+
+    /// The fixture's `phone_e164` comparison: an `exact` level and no `tf`,
+    /// which is the shape the TF advisory is about.
+    const PHONE_NO_TF: &str = "phone_e164:  { levels: [exact, null] }";
+
+    #[test]
+    fn a_skewed_column_with_tf_off_is_recommended_for_it() {
+        assert_eq!(
+            GOOD.matches(PHONE_NO_TF).count(),
+            1,
+            "the fixture's phone comparison moved"
+        );
+        let config = load(GOOD);
+        // 50,000 distinct values over 100,000 rows averages 2 rows each, and the
+        // commonest covers 1,024 — a skew of 512, so log2(512) = 9 bits exactly.
+        let columns = vec![measurability("phone_e164", 100_000, 100_000, 50_000, 1_024)];
+        let advisories = profile_advisories(&config, &columns);
+        let tf = advisories
+            .iter()
+            .find(|a| a.contains("`tf: false`"))
+            .unwrap_or_else(|| panic!("a 9-bit spread is well over the threshold: {advisories:?}"));
+        assert!(
+            tf.contains("`phone_e164`") && tf.contains("9.0 bits"),
+            "it must name the comparison and the spread in bits: {tf}"
+        );
+        assert!(
+            tf.contains("1024 of 100000") && tf.contains("2.0"),
+            "and both counts the skew comes from, so the claim is checkable: {tf}"
+        );
+    }
+
+    #[test]
+    fn a_flat_column_is_not_recommended_for_tf() {
+        // Same corpus and the same 2-row average, but the commonest value covers
+        // only 4 rows: a skew of 2, so 1 bit. TF would be legal and almost
+        // pointless, and advice nobody should act on is worse than silence.
+        let config = load(GOOD);
+        let columns = vec![measurability("phone_e164", 100_000, 100_000, 50_000, 4)];
+        assert!(
+            !profile_advisories(&config, &columns)
+                .iter()
+                .any(|a| a.contains("`tf: false`")),
+            "a 1-bit skew is not worth a recommendation"
+        );
+    }
+
+    #[test]
+    fn tf_advice_does_not_fire_merely_because_the_corpus_is_large() {
+        // The regression the first draft had. `log2(mode_count)` grows with the
+        // corpus, so a column whose commonest value covers a mere 2% of a
+        // 100,000-row table scored 11 "bits" and was recommended — as would
+        // nearly every column in any large corpus. Here the mode covers 2,000
+        // rows but the average value covers 1,000, so the skew is 2 and the
+        // answer is silence. The absolute count is large; the lopsidedness is
+        // not.
+        let config = load(GOOD);
+        let columns = vec![measurability("phone_e164", 100_000, 100_000, 100, 2_000)];
+        let advisories = profile_advisories(&config, &columns);
+        assert!(
+            !advisories.iter().any(|a| a.contains("`tf: false`")),
+            "a flat distribution in a big corpus must stay quiet: {advisories:?}"
+        );
+    }
+
+    #[test]
+    fn tf_is_not_recommended_where_it_is_already_on_or_would_be_refused() {
+        // `given_name` carries `tf: true` in the fixture, so there is nothing to
+        // recommend however skewed it is.
+        let config = load(GOOD);
+        let skewed = vec![measurability("given_name", 100_000, 100_000, 50_000, 4_096)];
+        assert!(
+            !profile_advisories(&config, &skewed)
+                .iter()
+                .any(|a| a.contains("`tf: false`")),
+            "tf is already on for given_name"
+        );
+
+        // And a comparison with no `exact` level must not be recommended either
+        // — turning tf on there is refused at publish, so the advice would
+        // contradict the gate. The control is that the SAME column and profile
+        // DOES get the recommendation once an exact level is present.
+        let fuzzy = load(&GOOD.replace(
+            PHONE_NO_TF,
+            "phone_e164:  { levels: [jaro_winkler:0.90, null] }",
+        ));
+        let columns = vec![measurability("phone_e164", 100_000, 100_000, 50_000, 4_096)];
+        assert!(
+            profile_advisories(&load(GOOD), &columns)
+                .iter()
+                .any(|a| a.contains("`tf: false`")),
+            "the control must fire, or the silence below proves nothing"
+        );
+        assert!(
+            !profile_advisories(&fuzzy, &columns)
+                .iter()
+                .any(|a| a.contains("`tf: false`")),
+            "with no exact level there is nothing for tf to scale against"
+        );
     }
 
     #[test]
