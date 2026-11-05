@@ -222,6 +222,7 @@ export function MergeRecordsDialog({
               <Button
                 disabled={assertion.isPending}
                 onClick={confirmMerge}
+                data-er-action="records.merge.confirm"
                 data-testid="merge-confirm"
               >
                 <GitMerge /> Merge entities

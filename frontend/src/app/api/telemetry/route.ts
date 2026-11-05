@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { requireIdentity, respond } from "@/lib/bff/proxy";
+import { type UiAction, isUiAction } from "@/lib/telemetry/actions";
 import { isAcceptableTraceparent } from "@/lib/telemetry/traceparent";
 
 /**
@@ -35,15 +36,15 @@ import { isAcceptableTraceparent } from "@/lib/telemetry/traceparent";
 /** A beacon is a few hundred bytes per interaction; this is slack, not a budget. */
 const MAX_BYTES = 64 * 1024;
 
-/** Above this an action name is not a label, whatever it is. */
-const MAX_ACTION_LENGTH = 64;
-
 /** One batch cannot describe more clicks than the browser's own queue holds. */
 const MAX_INTERACTIONS = 200;
 
+/** How an action was invoked. A closed set, like the action itself. */
+const SOURCES = new Set(["click", "keyboard", "page-load"]);
+
 interface Accepted {
   traceparent: string;
-  action: string;
+  action: UiAction;
   source: string;
   at: number;
 }
@@ -65,12 +66,19 @@ function accept(body: unknown): Accepted[] {
     if (typeof entry !== "object" || entry === null) return [];
     const { traceparent, action, source, at } = entry as Record<string, unknown>;
     if (typeof traceparent !== "string" || !isAcceptableTraceparent(traceparent)) return [];
-    if (typeof action !== "string" || action.length === 0) return [];
+    // The action must be a DECLARED member, not merely a short string. This is
+    // the server-side half of the vocabulary and it is not redundant with
+    // `scripts/check-er-actions.mjs`: the gate constrains the markup in this
+    // repo, while this constrains what a browser can post. Truncating an
+    // arbitrary string to 64 characters — which is what this did before —
+    // would happily record `member-remove-alice@acme.com` if anything ever
+    // sent it.
+    if (typeof action !== "string" || !isUiAction(action)) return [];
     return [
       {
         traceparent,
-        action: action.slice(0, MAX_ACTION_LENGTH),
-        source: typeof source === "string" ? source.slice(0, 32) : "unknown",
+        action,
+        source: typeof source === "string" && SOURCES.has(source) ? source : "unknown",
         at: typeof at === "number" && Number.isFinite(at) ? at : Date.now(),
       },
     ];

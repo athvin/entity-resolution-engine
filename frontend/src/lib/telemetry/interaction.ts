@@ -1,6 +1,7 @@
 "use client";
 
 import { resolveActionName } from "./action-name";
+import type { UiAction } from "./actions";
 import { TRACEPARENT_HEADER, mintTraceparent } from "./traceparent";
 
 /**
@@ -31,6 +32,23 @@ import { TRACEPARENT_HEADER, mintTraceparent } from "./traceparent";
  * which the interesting controls, the ones inside rows and menus, routinely do.
  * One listener on `document` rather than per-component, so nothing has to
  * remember to opt in and there is no React lifecycle to leak.
+ *
+ * ## Why a click listener is not sufficient on its own
+ *
+ * The two highest-volume decision surfaces in this product are keyboard-first,
+ * and say so in the UI: the review inbox binds `m` / `n` / `x` and labelling
+ * binds `m` / `n` / `s`, each advertised next to the button with a `<kbd>` hint.
+ * A steward clearing a long queue uses the keys, not the buttons — that is the
+ * point of having them — so a click-only listener would record nothing at all
+ * for the steward who resolves the most pairs.
+ *
+ * No DOM event bridges that gap. A `keydown` on `document` says a key was
+ * pressed, not which product action the page chose to run in response; only the
+ * handler knows that. So the keyboard path reports itself through
+ * [`recordAction`], and the two paths share one vocabulary and one queue.
+ * `source` then distinguishes them, which is worth having on its own: the
+ * keyboard-to-click ratio on a surface is a direct measure of whether its power
+ * path is being used.
  */
 
 /** How long a click stays the parent of the requests it causes. */
@@ -42,13 +60,25 @@ const FLUSH_INTERVAL_MS = 5000;
 /** The queue is bounded: a stuck beacon must not grow memory without limit. */
 const MAX_QUEUED = 200;
 
+/** The name of the per-page-load root. Deliberately not a [`UiAction`]: it is
+ *  not something anybody did. */
+export const BACKGROUND_ACTION = "background";
+
+/**
+ * How an action was invoked.
+ *
+ * `keyboard` is not a lesser form of `click` — on the review and labelling
+ * queues it is the primary one.
+ */
+export type InteractionSource = "click" | "keyboard" | "page-load";
+
 export interface Interaction {
   /** `00-<trace>-<span>-01`, ready to send as a header. */
   traceparent: string;
-  /** The resolved action name, or `background` for the page-load root. */
-  action: string;
-  /** Where the name came from, so coverage is measurable. */
-  source: string;
+  /** A declared action, or `background` for the page-load root. */
+  action: UiAction | typeof BACKGROUND_ACTION;
+  /** How it was invoked — see [`InteractionSource`]. */
+  source: InteractionSource;
   /** Epoch ms, for the TTL and for the recorded duration. */
   at: number;
 }
@@ -64,15 +94,43 @@ let dropped = 0;
 let timer: ReturnType<typeof setInterval> | null = null;
 let installed = false;
 
-function mint(action: string, source: string): Interaction {
+function mint(action: UiAction | typeof BACKGROUND_ACTION, source: InteractionSource): Interaction {
   return { traceparent: mintTraceparent(), action, source, at: Date.now() };
 }
 
 function backgroundRoot(): Interaction {
   // Minted once per page load, so everything without a click shares one root
   // rather than producing a root per request.
-  background ??= mint("background", "page-load");
+  background ??= mint(BACKGROUND_ACTION, "page-load");
   return background;
+}
+
+/**
+ * Make `action` the live context and queue it.
+ *
+ * The one path both invocation styles take, so a keyboard decision and a click
+ * on the same control are indistinguishable downstream except by `source`.
+ */
+function report(action: UiAction, source: InteractionSource): Interaction {
+  current = mint(action, source);
+  // Queued immediately rather than on flush, so a control that fires NO
+  // request is still visible. That case is the whole reason the beacon exists:
+  // without it, an action with no network effect leaves no trace at all and
+  // looks like the user never acted.
+  enqueue(current);
+  return current;
+}
+
+/**
+ * Report an action the DOM cannot observe — a keyboard shortcut, or anything
+ * else a handler decides to run without a click on a named element.
+ *
+ * Call it from the handler that performs the action, not from the key
+ * dispatcher, so what is recorded is the action actually taken rather than the
+ * key pressed. A handler that returns early must not call it.
+ */
+export function recordAction(action: UiAction, source: InteractionSource = "keyboard"): void {
+  report(action, source);
 }
 
 /**
@@ -143,16 +201,11 @@ export function installInteractionListener(): () => void {
 
   const onClick = (event: Event) => {
     const resolved = resolveActionName(event.target);
-    // An unnamed target is not an action — most clicks land on text and scroll
-    // regions. Minting a context for those would make every trace a click
-    // trace and pay to store it.
+    // An undeclared target is not an action — most clicks land on text and
+    // scroll regions. Minting a context for those would make every trace a
+    // click trace and pay to store it.
     if (resolved === null) return;
-    current = mint(resolved.name, resolved.source);
-    // Queued immediately rather than on flush, so a button that fires NO
-    // request is still visible. That case is the whole reason the beacon
-    // exists: without it, an action with no network effect leaves no trace at
-    // all and looks like the user never clicked.
-    enqueue(current);
+    report(resolved.name, "click");
   };
 
   document.addEventListener("click", onClick, { capture: true });

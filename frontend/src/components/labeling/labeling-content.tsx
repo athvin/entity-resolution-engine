@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BffRequestError } from "@/lib/api/client";
+import type { UiAction } from "@/lib/telemetry/actions";
+import { type InteractionSource, recordAction } from "@/lib/telemetry/interaction";
 import { effectiveRole, useSession } from "@/lib/query/hooks";
 import {
   canRecordLabel,
@@ -19,6 +21,18 @@ import {
 } from "@/lib/query/labeling";
 
 import { useDatasetSlug } from "@/lib/use-dataset-slug";
+
+/**
+ * A labeller's verdict, as a declared telemetry action.
+ *
+ * Exhaustive over `Verdict`, so a third verdict is a compile error here rather
+ * than an unmeasured decision. `label.skip` is not in the map because skipping
+ * is not a verdict — it is reported separately from `skip`.
+ */
+const LABEL_ACTIONS: Record<Verdict, UiAction> = {
+  match: "label.match",
+  no_match: "label.no_match",
+};
 /**
  * Teaching the matcher, one pair at a time.
  *
@@ -65,15 +79,26 @@ export function LabelingContent({ org }: { org: string }) {
   const remaining = items.filter((item) => !skipped.has(pairKey(item.rec_a_key, item.rec_b_key)));
   const current = nextUnskipped(items, skipped);
 
-  const skip = useCallback(() => {
-    if (!current) return;
-    const key = pairKey(current.rec_a_key, current.rec_b_key);
-    setSkipped((seen) => new Set(seen).add(key));
-  }, [current]);
+  const skip = useCallback(
+    (source: InteractionSource = "click") => {
+      if (!current) return;
+      // Recorded even though it writes nothing: the rate of skipping is the
+      // signal. A queue that is mostly skipped is a queue of pairs no human
+      // can judge, which is a sampling problem rather than a labelling one.
+      recordAction("label.skip", source);
+      const key = pairKey(current.rec_a_key, current.rec_b_key);
+      setSkipped((seen) => new Set(seen).add(key));
+    },
+    [current],
+  );
 
   const give = useCallback(
-    (verdict: Verdict) => {
+    (verdict: Verdict, source: InteractionSource = "click") => {
       if (!current || !canLabel) return;
+      // After the early return, and reported here rather than from a
+      // `data-er-action` on the buttons: this is the funnel the `m` / `n` keys
+      // also take, and the attribute as well would count one verdict twice.
+      recordAction(LABEL_ACTIONS[verdict], source);
       setFailure(null);
       record.mutate(labelPayloadFor(current, verdict), {
         // No advance here: the pair leaves the queue server-side, so the
@@ -100,13 +125,13 @@ export function LabelingContent({ org }: { org: string }) {
       if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return;
       if (event.key === "m") {
         event.preventDefault();
-        give("match");
+        give("match", "keyboard");
       } else if (event.key === "n") {
         event.preventDefault();
-        give("no_match");
+        give("no_match", "keyboard");
       } else if (event.key === "s") {
         event.preventDefault();
-        skip();
+        skip("keyboard");
       }
     };
     window.addEventListener("keydown", onKey);
@@ -251,7 +276,13 @@ export function LabelingContent({ org }: { org: string }) {
                   >
                     Different <kbd className="ml-2 font-mono text-xs opacity-70">n</kbd>
                   </Button>
-                  <Button variant="ghost" onClick={skip} data-testid="labeling-skip">
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      skip();
+                    }}
+                    data-testid="labeling-skip"
+                  >
                     Unsure, skip <kbd className="ml-2 font-mono text-xs opacity-70">s</kbd>
                   </Button>
                   <span className="text-muted-foreground text-xs">

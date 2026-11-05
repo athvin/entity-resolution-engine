@@ -39,8 +39,9 @@
     "licenses:check": "node scripts/check-licenses.mjs",
     "authz:check": "node scripts/check-bff-authz.mjs",
     "upstream:check": "node scripts/check-bff-upstream.mjs",
+    "actions:check": "node scripts/check-er-actions.mjs",
     "migrations:check": "node scripts/check-migrations.mjs",
-    "check": "eslint . --max-warnings 0 && prettier --check . && tsc --noEmit && node scripts/check-bff-authz.mjs && node scripts/check-bff-upstream.mjs && node scripts/check-migrations.mjs && vitest run --coverage"
+    "check": "eslint . --max-warnings 0 && prettier --check . && tsc --noEmit && node scripts/check-bff-authz.mjs && node scripts/check-bff-upstream.mjs && node scripts/check-er-actions.mjs && node scripts/check-migrations.mjs && vitest run --coverage"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.3.0",

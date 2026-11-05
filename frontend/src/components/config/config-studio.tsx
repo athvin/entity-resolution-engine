@@ -292,6 +292,7 @@ export function ConfigStudio({ org }: { org: string }) {
             disabled={!dirty || createDraft.isPending || publish.isPending}
             onClick={() => void publishEdits()}
             className="h-auto min-h-11 w-full whitespace-normal sm:w-auto lg:min-h-9"
+            data-er-action="config.publish"
             data-testid="publish-button"
           >
             <Rocket />

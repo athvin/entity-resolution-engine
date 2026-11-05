@@ -6,6 +6,7 @@ import {
   flushInteractions,
   installInteractionListener,
   interactionHeaders,
+  recordAction,
   resetInteractionsForTests,
 } from "@/lib/telemetry/interaction";
 import { isAcceptableTraceparent } from "@/lib/telemetry/traceparent";
@@ -48,21 +49,21 @@ describe("the click context", () => {
 
     const live = currentInteraction();
     expect(live.action).toBe("run.start");
-    expect(live.source).toBe("data-er-action");
+    expect(live.source).toBe("click");
     expect(isAcceptableTraceparent(live.traceparent)).toBe(true);
   });
 
   it("sees a click whose handler calls stopPropagation", () => {
     // Capture phase earns its keep here: the controls worth measuring are the
     // ones inside rows and menus, and those routinely stop propagation.
-    document.body.innerHTML = `<button data-er-action="pair.merge">Merge</button>`;
+    document.body.innerHTML = `<button data-er-action="records.merge.confirm">Merge</button>`;
     const button = document.querySelector("button");
     button?.addEventListener("click", (e) => {
       e.stopPropagation();
     });
     button?.click();
 
-    expect(currentInteraction().action).toBe("pair.merge");
+    expect(currentInteraction().action).toBe("records.merge.confirm");
   });
 
   it("does NOT reuse a click once its TTL has lapsed", () => {
@@ -98,10 +99,31 @@ describe("the click context", () => {
   });
 
   it("offers the context as a traceparent header erserver would accept", () => {
-    document.body.innerHTML = `<button data-testid="wizard-next">Next</button>`;
+    document.body.innerHTML = `<button data-er-action="dataset.create">Create</button>`;
     document.querySelector("button")?.click();
     const headers = interactionHeaders();
     expect(isAcceptableTraceparent(headers.traceparent ?? "")).toBe(true);
+  });
+
+  it("mints nothing for a control named only by data-testid or aria-label", () => {
+    // The PII regression, at the listener level. Both attributes carry record
+    // values in this app, so neither may name an interaction.
+    const before = currentInteraction().traceparent;
+    document.body.innerHTML = `<button aria-label="Remove alice@acme.com" data-testid="member-remove-alice@acme.com">x</button>`;
+    document.querySelector("button")?.click();
+    expect(currentInteraction().traceparent).toBe(before);
+    expect(currentInteraction().action).toBe("background");
+  });
+
+  it("records a keyboard-invoked action the DOM cannot observe", () => {
+    // The review and labelling queues are keyboard-first and say so with <kbd>
+    // hints, so this is not an edge case — it is the primary path on the two
+    // highest-volume decision surfaces.
+    recordAction("review.decide.match");
+    const live = currentInteraction();
+    expect(live.action).toBe("review.decide.match");
+    expect(live.source).toBe("keyboard");
+    expect(isAcceptableTraceparent(live.traceparent)).toBe(true);
   });
 });
 
@@ -127,7 +149,7 @@ describe("the beacon", () => {
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("navigator", { sendBeacon: undefined });
 
-    document.body.innerHTML = `<button data-er-action="export.download">Export</button>`;
+    document.body.innerHTML = `<button data-er-action="config.publish">Export</button>`;
     document.querySelector("button")?.click();
     flushInteractions(false);
 
@@ -138,7 +160,7 @@ describe("the beacon", () => {
       interactions: { "er.action"?: string; action?: string }[];
     };
     expect(sent.interactions).toHaveLength(1);
-    expect(sent.interactions[0]?.action).toBe("export.download");
+    expect(sent.interactions[0]?.action).toBe("config.publish");
   });
 
   it("uses sendBeacon when the page may be leaving", () => {
