@@ -199,6 +199,37 @@ fn every_emitted_span_attribute_survives_the_collector() {
 }
 
 #[test]
+fn the_ottl_statement_carries_no_comment() {
+    // This test exists because its absence cost a crashlooping collector.
+    //
+    // The `keep_keys(...)` list is an OTTL expression inside a YAML `>-` block,
+    // and **OTTL has no comment syntax**. A `#` line added for readability folds
+    // into the expression, and the collector then refuses the ENTIRE config at
+    // startup with `lexer: invalid input text "#..."`.
+    //
+    // The failure mode is the nasty part: the ConfigMap updates, the Deployment
+    // rolls, the new pod crashloops, and the OLD pod keeps serving. So the
+    // config looks deployed, telemetry keeps flowing, and nothing works — the
+    // change simply never takes effect. Verified by reading pod health, which
+    // is the only thing that showed it.
+    let yaml = values_yaml();
+    let start = yaml
+        .find("keep_keys(attributes, [")
+        .expect("the values file declares keep_keys(attributes, [...])");
+    let rest = &yaml[start..];
+    let end = rest.find("])").expect("the keep_keys list is unterminated");
+    let statement = &rest[..end];
+
+    assert!(
+        !statement.contains('#'),
+        "the OTTL statement contains a `#`, which OTTL does not accept as a \
+         comment — the collector will refuse the whole config at startup and \
+         crashloop while the old pod keeps serving:\n\n{statement}\n\n\
+         Put commentary in a YAML comment above `transform/pii_allowlist` instead."
+    );
+}
+
+#[test]
 fn no_forbidden_attribute_is_allowlisted() {
     // The allowlist is the last thing between a `Pii::Never` name and an
     // exportable store, so it must not be the thing that admits one.
