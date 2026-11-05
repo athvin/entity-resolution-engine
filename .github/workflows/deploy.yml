@@ -53,6 +53,29 @@ on:
   workflow_run:
     workflows: [images]
     types: [completed]
+  # PLATFORM-ONLY CHANGES, which the `workflow_run` path above cannot see.
+  #
+  # `images` only runs when something that goes INTO an image changes, so a
+  # commit touching just `infra/k8s/**` builds nothing, `images` never runs,
+  # and this workflow never fires — while `obs_up.sh`, which applies those
+  # values, lives inside the deploy job. The result is a change that merges
+  # green and is simply never applied.
+  #
+  # Found by merging the collector's PII attribute allowlist (#507): committed,
+  # green, and absent from the cluster. It had been masked until then because
+  # every earlier observability change rode along with a Rust commit that did
+  # build an image.
+  #
+  # A `paths:` filter is safe HERE and nowhere near the gates: `deploy` is not
+  # a required status check (the required set is the rust, frontend and infra
+  # jobs), so a filtered run that never reports blocks nothing. On `rust.yml`
+  # or `frontend.yml` the same filter would block every PR forever, which is
+  # why those use the `detect`-job pattern instead.
+  push:
+    branches: [main]
+    paths:
+      - infra/k8s/**
+      - scripts/obs_up.sh
   # The manual path, for redeploying a sha whose images already exist.
   workflow_dispatch:
     inputs:
@@ -80,6 +103,7 @@ jobs:
     # deploy, which is what they should mean.
     if: >-
       github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'push' ||
       (github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
@@ -96,7 +120,15 @@ jobs:
       # built commit — using it would deploy whatever main happens to be now
       # rather than what was built, which is the subtle way this kind of split
       # goes wrong.
-      DEPLOY_SHA: ${{ github.event.inputs.sha || github.event.workflow_run.head_sha }}
+      #
+      # On the `push` path `github.sha` IS the pushed commit rather than a
+      # moving branch tip, so it is correct here for the same reason it is
+      # wrong above — the hazard is reading a branch tip, not the variable.
+      DEPLOY_SHA: ${{ github.event.inputs.sha || github.event.workflow_run.head_sha || github.sha }}
+      # True on the platform-only path, where NO image was built for this
+      # commit by design. It changes the stale-digest message below from a
+      # warning into a note — see the reasoning there.
+      PLATFORM_ONLY: ${{ github.event_name == 'push' }}
     steps:
       - name: Name the commit being deployed
         run: echo "deploying $DEPLOY_SHA"
@@ -144,7 +176,25 @@ jobs:
               #
               # The annotation puts it in the run summary where it is read,
               # rather than 140 lines into a step log where it was not.
-              echo "::warning title=$repo reused a stale digest::no image tagged $DEPLOY_SHA; rolled the newest digest in ECR instead ($d). Correct if that tree did not change in this commit — but if its build was skipped or failed, this deploy shipped older code than $DEPLOY_SHA."
+              # Two cases reach here and they deserve different volumes.
+              #
+              # On the `workflow_run` path a missing image is SUSPICIOUS: an
+              # images run did happen, so either that tree genuinely did not
+              # change or a build was skipped and this deploy is about to ship
+              # older code. That is the case the warning was added for, and it
+              # must stay loud.
+              #
+              # On the `push` path — a platform-only commit under
+              # `infra/k8s/**` — no image was built BY DESIGN, so reuse is the
+              # expected and correct outcome every single time. Warning there
+              # would fire on every such deploy and teach the reader to ignore
+              # the annotation, which would cost exactly the signal the loud
+              # case exists to provide.
+              if [ "$PLATFORM_ONLY" = "true" ]; then
+                echo "::notice title=$repo digest reused (platform-only deploy)::no image tagged $DEPLOY_SHA, which is expected: this commit touched only infra/k8s, so nothing was built. Rolling the newest digest in ECR ($d), which is what is already running."
+              else
+                echo "::warning title=$repo reused a stale digest::no image tagged $DEPLOY_SHA; rolled the newest digest in ECR instead ($d). Correct if that tree did not change in this commit — but if its build was skipped or failed, this deploy shipped older code than $DEPLOY_SHA."
+              fi
               echo "$repo: no image tagged $DEPLOY_SHA — REUSED newest digest $d"
               echo "reused_${repo//-/_}=1" >> "$GITHUB_OUTPUT"
             else
