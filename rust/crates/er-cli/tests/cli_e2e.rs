@@ -306,9 +306,21 @@ fn er_run_all_reproduces_base_10_relations() {
             "golden_overrides",
             "record_overlays",
             "record_qualities",
-            // The per-stage ledger (batch-orchestration-design §4.3): its
-            // writer is the Phase 2 pod verb, so the legacy run_all path
-            // leaves it empty.
+            // The per-stage ledger (batch-orchestration-design §4.3). It has
+            // NO writer anywhere — a search of the workspace finds zero
+            // callers of `er_entities::run_stage`'s generated `start` /
+            // `finish`, and `exec_task.rs` does not reference the entity.
+            //
+            // This comment used to say "its writer is the Phase 2 pod verb, so
+            // the legacy run_all path leaves it empty", which was right about
+            // the state and wrong about the reason — the exact trap the comment
+            // forty lines above warns about, committed again. Verified
+            // 2026-11-05 by grepping the whole tree.
+            //
+            // What it is actually waiting for is the eleven promoted counters:
+            // `er_obs::logging::stage_record_line` validates that key set
+            // exactly, and nothing currently produces it. See that module's
+            // docs.
             "run_stages"
         ],
         "only the relations base_10 never writes may be fileless: {after:?}"

@@ -2,6 +2,39 @@
 //! compact JSON object per stage, a fixed ordered key set (`exit_code` after
 //! `status`, the eleven promoted counters embedded), written to stderr by the
 //! caller. [`stage_record_line`] formats it; the key set is validated exactly.
+//!
+//! # This has no callers, and what it is waiting for
+//!
+//! [`stage_record_line`] is complete and tested and nothing calls it. That is
+//! worth stating, because an unwired primitive reads as either an oversight or
+//! as dead code, and it is neither.
+//!
+//! It is waiting on the **eleven promoted counters**, not on a call site. Its
+//! key set is validated exactly against `PROMOTED_COUNTERS`, so a caller must
+//! supply all of them or get `KeySetMismatch` — and the one obvious caller,
+//! `er_cli`'s `observed()`, does not have them. `observed()` brackets a stage
+//! and returns its result generically; the counters come from each stage's own
+//! output, so producing them means each of the eleven stages reporting its own,
+//! which is the substance of that work rather than a detail of it.
+//!
+//! Calling this with the counters defaulted to null or zero would be worse than
+//! not calling it. `run_stages` would fill, the `cli_e2e` tripwire asserting
+//! that table stays empty would flip, and every dashboard over it would read
+//! zeros as measurements. The same reason `docs/telemetry-reference.md` is
+//! generated rather than hand-written: a thing that looks like coverage is
+//! worse than a visible gap.
+//!
+//! So this stays unwired deliberately, and lands with the `run_stages` writer
+//! (batch-orchestration-design §4.3), which is also where
+//! [`crate::counters`] gets its first caller.
+//!
+//! One correction while here: `er-cli/tests/cli_e2e.rs` says `run_stages`'s
+//! "writer is the Phase 2 pod verb". It is not — `exec_task.rs` does not
+//! reference the entity, and a search of the workspace finds **zero** callers
+//! of `er_entities::run_stage`'s generated `start` / `finish` anywhere. The
+//! assertion is right about the state and wrong about the reason, which is the
+//! kind of comment that survives precisely because the test passes — a trap
+//! that same file warns about two lines earlier.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::LazyLock;

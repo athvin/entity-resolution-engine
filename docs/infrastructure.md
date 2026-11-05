@@ -697,7 +697,23 @@ The runner line dropped despite more vCPU: §6.5's switch from `r6id` to `c6id` 
 
 Three mechanisms turn the estimate into measurement, and the first has a sequencing trap.
 
-**Cost allocation tags.** Every resource carries `Project=er`, `Environment`, `ManagedBy`, and — on per-developer resources — `Developer`, via the provider's `default_tags`. These must be **activated as cost allocation tags in the Billing console, in Phase 0, before anything is created**: activation takes up to 24 hours and *does not backfill*. Activate them late and the first weeks of spend are permanently unattributable.
+**Cost allocation tags.** Every resource carries `Project=entity-resolution`, `Environment` and `ManagedBy`, via the provider's `default_tags` in `envs/{core,dev}/versions.tf`. These must be **activated as cost allocation tags in the Billing console, in Phase 0, before anything is created**: activation takes up to 24 hours and *does not backfill*. Activate them late and the first weeks of spend are permanently unattributable. Those three were activated 2026-10-11 and appear on all 42,502 tagged October rows as `user_project` / `user_environment` / `user_managed_by`, so for them the warning was heeded.
+
+> **`Developer` does not exist, and this paragraph used to say it did.** It
+> claimed every per-developer resource carries a `Developer` tag via
+> `default_tags`; no `default_tags` block sets one, and the CUR probe of
+> 2026-11-02 found it on **no resource at all**. So "per-developer cost comes
+> free from the tags" is false, and the per-developer question cannot be
+> answered for any spend to date — tags do not backfill, so adding one now
+> starts the clock rather than filling in the past.
+>
+> It also said `Project=er`; the actual value is `entity-resolution`, which
+> matters because a query filtering on `er` returns zero rows and looks like a
+> tagging failure rather than a typo.
+>
+> Both are recorded here rather than quietly corrected because the sequencing
+> trap this section is *about* is exactly what they cost: the claim that a tag
+> existed is why nobody checked that it did.
 
 **Cost and Usage Report → Athena.** Anything programmatic — a per-tenant monthly figure, a cost-per-million-records trend — needs the CUR delivered to S3 and queried with Athena. Partition it, or Athena scans the whole history on every query.
 
