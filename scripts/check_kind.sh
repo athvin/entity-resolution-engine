@@ -50,16 +50,26 @@ OP_TOKEN="$(kubectl --context "${CTX}" -n "${NS}" get secret er-erserver-env \
 ) &
 PF_PID=$!
 trap 'kill ${PF_PID} 2>/dev/null || true; pkill -f "port-forward svc/er-api ${PORT}:8000" 2>/dev/null || true' EXIT
-for _ in $(seq 1 30); do
-    curl -fsS "${BASE}/healthz" >/dev/null 2>&1 && break
+# `/readyz`, NOT `/healthz`. `healthz` is a static literal — `Json(json!({
+# "status": "ok" }))` — so it answers 200 while Postgres is unreachable and the
+# process cannot serve a single DB-backed request. `readyz` is the real signal
+# and is what the chart's readiness and startup probes read.
+#
+# This gate was `/healthz`, and that is the likely cause of the 2026-11-05
+# nightly failing in phase 1: the org POST landed, the very next job POST got
+# nothing for ten seconds, and the probe had already decided the API was up.
+# 90 ticks rather than 30 because `readyz` legitimately stays red through
+# `ensure_schema` on a cold boot, which is the whole point of waiting for it.
+for _ in $(seq 1 90); do
+    curl -fsS "${BASE}/readyz" >/dev/null 2>&1 && break
     sleep 1
 done
-curl -fsS "${BASE}/healthz" >/dev/null || fail "er-api unreachable through the port-forward"
+curl -fsS "${BASE}/readyz" >/dev/null \
+    || fail "er-api never became READY through the port-forward (/readyz); /healthz says $(curl -s -o /dev/null -w '%{http_code}' "${BASE}/healthz")"
 
 api() { # method path [json-body] — retried: `kubectl port-forward` drops the
     # odd connection mid-response, which surfaces as an empty body, not an
-    # HTTP error. Three attempts cover it; a real 4xx/5xx still fails fast
-    # because the body is empty on every attempt and the caller's parse dies.
+    # HTTP error. Five attempts cover it.
     local method="$1" path="$2" body="${3:-}" out=""
     for _ in 1 2 3 4 5; do
         if [ -n "${body}" ]; then
@@ -72,6 +82,44 @@ api() { # method path [json-body] — retried: `kubectl port-forward` drops the
         fi
         sleep 2
     done
+    # Every attempt failed. This comment used to say "a real 4xx/5xx still
+    # fails fast because the body is empty on every attempt and the caller's
+    # parse dies" — true, and a bad trade. `curl -fsS` prints no body on a
+    # 4xx/5xx, so what reached the log was the CALLER's traceback:
+    #
+    #   File "<string>", line 1, in <module>
+    #     import json,sys; print(json.load(sys.stdin)["id"])
+    #   json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+    #
+    # That is how the 2026-11-05 nightly failed, and it names neither the
+    # request nor the status — the two facts needed to tell "the API refused
+    # this" from "the port-forward died". So re-ask ONCE without -f, purely to
+    # report, and say so on stderr before failing.
+    local probe_body code
+    probe_body="$(mktemp)"
+    if [ -n "${body}" ]; then
+        code="$(curl -s -o "${probe_body}" -w '%{http_code}' -X "${method}" "${BASE}${path}" \
+            -H "Authorization: Bearer ${OP_TOKEN}" -H "Content-Type: application/json" \
+            -d "${body}" 2>/dev/null)" || true
+    else
+        code="$(curl -s -o "${probe_body}" -w '%{http_code}' -X "${method}" "${BASE}${path}" \
+            -H "Authorization: Bearer ${OP_TOKEN}" 2>/dev/null)" || true
+    fi
+    # `000` is curl's own "never got an HTTP response", and it prints that
+    # WHILE exiting non-zero — so this takes curl's code rather than
+    # substituting one. An earlier version wrote `|| echo "000"`, which
+    # appended a second 000 on exactly the failure it was meant to label:
+    # the message read `HTTP 000000` and the parenthetical below never fired,
+    # because the equality test no longer matched. Caught by running it
+    # against a closed port instead of reasoning about it.
+    [ -n "${code}" ] || code="000"
+    # The distinction is the whole point: a refusal (the API answered and said
+    # no) versus a dead port-forward (nothing answered at all).
+    printf 'check_kind: %s %s gave up after 5 tries — HTTP %s%s: %s\n' \
+        "${method}" "${path}" "${code}" \
+        "$([ "${code}" = "000" ] && printf ' (no HTTP response — port-forward or pod gone)')" \
+        "$(head -c 400 "${probe_body}" | tr '\n' ' ')" >&2
+    rm -f "${probe_body}"
     return 1
 }
 
