@@ -50,6 +50,7 @@ the same fix.
 | `infra-platform` | the Terraform env/module layout and shared S3 state with lockfile locking |
 | `landing-page` | the `(marketing)` route group that prerenders statically inside the same app that serves the BFF |
 | `pentest` | a Strix-style run that does recon over the attack surface, fans out a tester subagent per vulnerability category (user-invoked only) |
+| `project-board` | the `gh project` command surface for user-owned project #2 "Product Roadmap" and the `project` scope it requires |
 | `rust-conventions` | that `make check` (not the bare cargo trio) is the finish line |
 | `security` | the attack surface (internet-facing Next.js BFF in front of the privileged Rust er-server control plane) |
 | `sql-analysis` | the E0xx diagnostics and their remedies, the rewrite step that strips what the planner cannot parse |
