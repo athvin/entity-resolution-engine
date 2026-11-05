@@ -111,13 +111,26 @@ async fn async_main(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>>
         }
     }
 
-    // The merged `web-api` service runs the dispatcher IN-PROCESS: set
-    // ER_DISPATCH_IN_PROCESS=1 and the API process also drains the job queue (a
-    // background task). At one replica this satisfies the single-dispatcher
-    // model; a separate `er-dispatcher` Deployment is the alternative topology.
-    if let Some(dsn) = dsn.filter(|_| env_flag("ER_DISPATCH_IN_PROCESS")) {
-        tokio::spawn(async move {
-            let never = std::sync::atomic::AtomicBool::new(false);
+    // ER_DISPATCH_IN_PROCESS=1 makes this process also drain the job queue, in a
+    // background task.
+    //
+    // LOCAL DEV ONLY now, and the comment here used to say the opposite — that
+    // "the merged web-api service runs the dispatcher in-process" with a
+    // separate Deployment as "the alternative topology". The §6.7 split
+    // inverted that: the chart ships `er-dispatcher` as its own Deployment,
+    // because the identity that creates Jobs must not sit on the pod serving
+    // the API behind the BFF. `frontend/dev/env.sh` is the only thing that sets
+    // this, where one process is what a developer wants.
+    let in_process_dispatcher = if let Some(dsn) =
+        dsn.filter(|_| env_flag("ER_DISPATCH_IN_PROCESS"))
+    {
+        // The drain flag, SHARED with this process's HTTP server: both learn
+        // about the same SIGTERM because `tokio::signal` wakes every stream.
+        // It used to be a local `AtomicBool::new(false)` named `never` —
+        // accurate, since nothing ever set it, so this half of the process had
+        // no drain at all while the standalone `er-dispatcher` did.
+        let term = er_server::shutdown::sigterm_flag();
+        Some(tokio::spawn(async move {
             match er_server::pg::connect(&dsn).await {
                 Ok(client) => {
                     let http = er_server::webhook::client();
@@ -132,7 +145,7 @@ async fn async_main(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>>
                     if let Err(e) = er_server::dispatcher::run_loop(
                         &client,
                         &http,
-                        &never,
+                        &term,
                         reporter,
                         executor,
                         watch_frames,
@@ -146,8 +159,10 @@ async fn async_main(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>>
                     tracing::error!(error = %e, "the in-process dispatcher could not connect");
                 }
             }
-        });
-    }
+        }))
+    } else {
+        None
+    };
 
     let addr = std::env::var("ER_SERVER_ADDR").unwrap_or_else(|_| "0.0.0.0:8080".to_string());
     let listener = tokio::net::TcpListener::bind(&addr).await?;
@@ -165,6 +180,27 @@ async fn async_main(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>>
     axum::serve(listener, er_server::app(state))
         .with_graceful_shutdown(er_server::shutdown::on_sigterm())
         .await?;
+
+    // Wait for the in-process dispatcher before returning, when there is one.
+    //
+    // Setting the drain flag is only half a drain: the task is spawned, so
+    // `main` returning drops the runtime and kills whatever the dispatcher was
+    // mid-way through — the exact outcome the flag exists to prevent. The
+    // server's own drain finishes first (above), and the dispatcher's in-flight
+    // job is usually the longer of the two.
+    //
+    // Unbounded on purpose. This path is `ER_DISPATCH_IN_PROCESS`, which only
+    // the local dev stack sets (`frontend/dev/env.sh`) — there is no kubelet
+    // here to SIGKILL past a grace period, and a dev process that exits when
+    // both halves are done is the behaviour a developer wants. The deployed
+    // dispatcher is its own Deployment with its own
+    // `terminationGracePeriodSeconds`.
+    if let Some(handle) = in_process_dispatcher {
+        tracing::info!("waiting for the in-process dispatcher to drain");
+        if let Err(e) = handle.await {
+            tracing::error!(error = %e, "the in-process dispatcher task did not join cleanly");
+        }
+    }
     Ok(())
 }
 

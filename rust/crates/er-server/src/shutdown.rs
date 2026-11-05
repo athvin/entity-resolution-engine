@@ -44,3 +44,43 @@ pub async fn on_sigterm() {
         }
     }
 }
+
+/// A flag that flips to `true` on SIGTERM, for a loop that drains rather than
+/// a server that stops accepting.
+///
+/// [`on_sigterm`] is the right shape for `axum::serve`, which wants a future.
+/// The dispatcher's loop wants the opposite: a value it can poll at the top of
+/// each iteration, so it finishes the job in hand and exits at a boundary of
+/// its own choosing. Same signal, two shapes.
+///
+/// **Registering this alongside [`on_sigterm`] is safe.** `tokio::signal` hands
+/// every caller an independent stream, and a delivered signal wakes all of
+/// them — so the HTTP server and an in-process dispatcher both learn about the
+/// same SIGTERM, rather than one consuming it from under the other. That is
+/// what makes the merged process able to drain both halves.
+///
+/// A failed registration leaves the flag permanently `false`, which is the
+/// pre-existing behaviour (die on the default handler) rather than a loop that
+/// exits immediately — the same fail-safe direction as [`on_sigterm`], for the
+/// same reason: the error path of a drain must not itself end the process.
+#[must_use]
+pub fn sigterm_flag() -> std::sync::Arc<std::sync::atomic::AtomicBool> {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let flag = Arc::new(AtomicBool::new(false));
+    let setter = Arc::clone(&flag);
+    tokio::spawn(async move {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut term) => {
+                term.recv().await;
+                tracing::info!("SIGTERM received; draining the in-flight job");
+                setter.store(true, Ordering::SeqCst);
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "could not install the SIGTERM handler; the drain flag will never be set");
+            }
+        }
+    });
+    flag
+}
