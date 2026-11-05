@@ -573,8 +573,26 @@ jobs:
               'NF==2 && $2 ~ re {print $1}' | sort -u | paste -sd, - | sed 's/,/, /g')"
             if [ -n "$failed" ]; then verdict="red"; break; fi
 
-            held="$(printf '%s\n' "$rollup" | awk -F'\t' \
-              'NF==2 && $2 == "ACTION_REQUIRED" {print $1}' | sort -u | paste -sd, - | sed 's/,/, /g')"
+            # HELD-NESS COMES FROM THE ACTIONS API, NOT THE PR ROLLUP, and that
+            # is not a stylistic choice: a held run has ZERO jobs, so it creates
+            # ZERO check-runs, so `statusCheckRollup` is EMPTY. Reading
+            # ACTION_REQUIRED out of the rollup — as the first version did —
+            # can therefore never match.
+            #
+            # Measured on bus PR #601: three runs `conclusion:
+            # action_required`, rollup `entries=0`; approving them took it
+            # straight to `entries=29`. Left alone the bus would have polled its
+            # whole hour, timed out, then had the starvation classifier see zero
+            # executed steps and report an Actions spending limit — the wrong
+            # cause, loudly, which is the failure mode that classifier exists to
+            # prevent.
+            #
+            # The run names stand in for context names here; no check-run exists
+            # to name, which is the whole point.
+            held="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${BUS_SHA}&per_page=20" \
+                      --jq '[.workflow_runs[] | select(.conclusion == "action_required") | .name] | unique | join(", ")' \
+                    2>/dev/null || echo "")"
+            case "$held" in *$'\n'*) held="" ;; esac
             if [ -n "$held" ]; then
               # TRY TO RELEASE THEM ONCE, then fall back to asking a human.
               #

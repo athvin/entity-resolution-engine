@@ -88,9 +88,12 @@ pr)
           git -C "$mv" push --quiet origin HEAD:refs/heads/main
         fi ;;
       statusCheckRollup)
-        # The workflow now asks for "<name>\t<conclusion>" lines.
-        for c in $(get failed_contexts_names); do printf '%s\tFAILURE\n' "$c"; done
-        for c in $(get held_contexts); do printf '%s\tACTION_REQUIRED\n' "$c"; done ;;
+        # A HELD run has zero jobs, so it creates zero check-runs and the rollup
+        # is EMPTY. Emitting ACTION_REQUIRED rows here would be a shape GitHub
+        # never produces, and would have hidden the bug this models.
+        if [ -n "$(get held_contexts)" ]; then :; else
+          for c in $(get failed_contexts_names); do printf '%s\tFAILURE\n' "$c"; done
+        fi ;;
       *) die "pr view fields=$fields jq=$jqexpr" ;;
     esac
     ;;
@@ -180,7 +183,20 @@ api)
       if [ "$(get api_fails_bus)" = "1" ]; then
         echo "gh: Resource not accessible by integration (HTTP 403)" >&2; exit 1
       fi
-      get bus_run_ids | tr ' ' '\n' | sed '/^$/d' ;;
+      # Two shapes are asked of this endpoint: the held run NAMES (jq selects
+      # conclusion == action_required) and the run IDS for the step-count probe.
+      # Three shapes are asked of this endpoint and they must be told apart by
+      # what the jq SELECTS, not merely by whether it mentions
+      # action_required — the held-names query and the held-ids query both do.
+      case "$*" in
+        *action_required*.name*)
+          h="$(get held_contexts)"
+          [ -n "$h" ] && printf '%s\n' "$(echo $h | tr ' ' ',' | sed 's/,/, /g')" || printf '\n' ;;
+        *action_required*.id*)
+          # Held run ids. Reuse the bus run ids while anything is held.
+          [ -n "$(get held_contexts)" ] && { get bus_run_ids | tr ' ' '\n' | sed '/^$/d'; } || true ;;
+        *) get bus_run_ids | tr ' ' '\n' | sed '/^$/d' ;;
+      esac ;;
     */actions/runs/*/approve)
       if [ "$(get approve_works)" = "1" ]; then
         # Releasing them flips the scenario's rollup to empty next poll.
