@@ -11,13 +11,11 @@
 //! instead of carrying a third copy of statically-linked DuckDB. The `[[bin]]`
 //! target still exists and still builds.
 //!
-//! Worth keeping in view: this path has the SIGTERM drain and the in-process
-//! path does not — `er-server`'s in-process spawn passes a flag that is never
-//! set. That difference is why this entry point is preserved rather than
-//! deleted along with the Deployment that used to run it.
-
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+//! The drain is now [`crate::shutdown::sigterm_flag`], shared with the
+//! in-process arm rather than written out here. This comment used to record
+//! that the two differed — "this path has the SIGTERM drain and the in-process
+//! path does not" — because that arm passed a flag nothing ever set. They are
+//! the same mechanism now, so the difference it warned about is gone.
 
 use crate::{dispatcher, pg};
 
@@ -53,18 +51,9 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // SIGTERM -> drain: finish the in-flight job, then exit at the next loop top.
-    let term = Arc::new(AtomicBool::new(false));
-    {
-        let term = term.clone();
-        tokio::spawn(async move {
-            if let Ok(mut sig) =
-                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-            {
-                sig.recv().await;
-                term.store(true, Ordering::SeqCst);
-            }
-        });
-    }
+    // Shared with the API's in-process arm (`main.rs`) rather than duplicated —
+    // that copy was the one that had no drain, because its flag was never set.
+    let term = crate::shutdown::sigterm_flag();
 
     // The Kubernetes executor (§6): inert unless the chart lists kinds in
     // ER_EXECUTOR_DAG_KINDS and the pod carries an in-cluster identity.
