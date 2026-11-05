@@ -97,6 +97,42 @@ VALUES ($1, $2, $3, $4, $5, $6)
 
 pub mod read {
     //! @generated query functions for this entity + operation.
+    /// Every ledger row, oldest first — the catalog history a contract fixup checks before removing something an older release still reads.
+    pub async fn history(
+        client: &impl ::tokio_postgres::GenericClient,
+    ) -> ::std::result::Result<Vec<super::SchemaMigration>, ::tokio_postgres::Error> {
+        const SQL: &str =
+            "SELECT id, created_at, updated_at, catalog_hash, kind, relation, statement, applied_by
+FROM public.schema_migrations
+ORDER BY created_at, id
+";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "schema_migration",
+            "read",
+            "history",
+            "schema_migrations",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.query(SQL, &[])).await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
+        Ok(rows
+            .iter()
+            .map(|row| super::SchemaMigration {
+                id: row.get("id"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
+                catalog_hash: row.get("catalog_hash"),
+                kind: row.get("kind"),
+                relation: row.get("relation"),
+                statement: row.get("statement"),
+                applied_by: row.get("applied_by"),
+            })
+            .collect())
+    }
+
     /// The newest ledger row — the schema version the control database is at, as the reconciler and the deploy report read it.
     pub async fn latest(
         client: &impl ::tokio_postgres::GenericClient,

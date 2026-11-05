@@ -56,6 +56,19 @@ pub enum SchemaError {
     /// writes the migration by hand; the next boot verifies the result.
     #[error("the control-plane schema needs a hand-written migration")]
     Reconcile(#[from] er_entity_diff::ReconcileError),
+    /// A contract fixup — one that removes something an older release still
+    /// reads — was reached on a store that has no record of the release which
+    /// stopped reading it. Running it would break whatever is still serving
+    /// that older catalog, so the boot stops instead.
+    ///
+    /// The remedy is to deploy the expand release first and let it reach this
+    /// store, which is the two-release discipline the guard exists to enforce.
+    /// Display carries no source: the reporters walk the chain.
+    #[error(
+        "fixup {fixup} removes something the release before {after} still reads, \
+         and this store has no record of {after} — deploy that release first"
+    )]
+    ContractNotReady { fixup: String, after: String },
 }
 
 /// Ensure the control-plane schema under the advisory-lock bootstrap (db.py

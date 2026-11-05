@@ -44,12 +44,86 @@ pub(crate) enum Phase {
     AfterReconcile,
 }
 
+/// Whether a fixup removes something an older release still reads.
+///
+/// Every fixup must say. That is the whole mechanism: the registry below cannot
+/// be appended to without classifying the new entry, and `Contract` cannot be
+/// written without naming the catalog it became safe after. A reviewer sees the
+/// claim; `contract_allowed` enforces it.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Kind {
+    /// Additive, or data-only. Safe whatever else is running.
+    Safe,
+    /// Removes or tightens something. `after` is the catalog hash of the
+    /// release that STOPPED READING it — the expand half. This fixup is the
+    /// contract half, and it may not run until the store has recorded that
+    /// release, which is what makes "you cannot contract in the same release
+    /// that expanded" mechanical rather than a convention.
+    /// Unconstructed until the first contract fixup is written, and that order
+    /// is the point: a guard added alongside the first removal could not have
+    /// gated it.
+    ///
+    /// `allow` rather than `expect`, which was tried first and does not work
+    /// here — an expectation must be FULFILLED in every compilation, and this
+    /// variant is dead in the lib target while the unit tests below construct
+    /// it, so `expect` errors with "unfulfilled" on the test target. Remove the
+    /// attribute when a registered fixup uses the variant.
+    #[allow(dead_code, reason = "ships before its first user; see above")]
+    Contract { after: &'static str },
+    /// Destructive, but shipped before this guard existed, so no `after` hash
+    /// was ever recorded and there is nothing to check against. **Never use for
+    /// a new fixup** — the variant exists so the two that predate the guard are
+    /// labelled honestly rather than mis-declared `Safe`.
+    ContractUngated { why: &'static str },
+}
+
 /// The ordered fixup list. Append only; a retired fixup keeps its ledger row,
 /// so its name is never reused.
-const FIXUPS: &[(&str, Phase)] = &[
-    ("0002_backfill_dataset_ids", Phase::AfterReconcile),
-    ("0003_per_dataset_locks", Phase::AfterReconcile),
+const FIXUPS: &[(&str, Phase, Kind)] = &[
+    (
+        "0002_backfill_dataset_ids",
+        Phase::AfterReconcile,
+        Kind::Safe,
+    ),
+    (
+        "0003_per_dataset_locks",
+        Phase::AfterReconcile,
+        Kind::ContractUngated {
+            why: "drops the superseded org-level locks and the retired \
+                  tenant_schema_states UNIQUE. Shipped with the dataset \
+                  switchover and already applied on every live store, so there \
+                  is no release boundary left to gate on.",
+        },
+    ),
 ];
+
+/// May a contract fixup run, given the catalog versions this store has recorded?
+///
+/// Pure, and separated from the query for that reason: the decision is the part
+/// worth testing, and it needs no database to test.
+///
+/// The rule, and what it does and does not prove:
+///
+/// - **`after` is in the history** → allow. The store passed through the
+///   release that stopped reading the thing, so at some point only code that
+///   ignored it was serving.
+/// - **The history holds nothing but the current catalog** → allow. The store
+///   was born on this release; there is no older version of anything to
+///   protect, and refusing here would break every fresh install.
+/// - **Otherwise** → refuse. The store has history, but not the history this
+///   fixup needs — it jumped from something older straight to here, so a
+///   release that still read the thing may never have been retired.
+///
+/// What it proves is the store's HISTORY, not the absence of old pods. Keeping
+/// one version serving at a time is the deploy's job — which, with the colour
+/// dimension, is exactly what a cutover does.
+#[must_use]
+pub(crate) fn contract_allowed(after: &str, history: &[String], current: &str) -> bool {
+    if history.iter().any(|h| h == after) {
+        return true;
+    }
+    history.iter().all(|h| h == current)
+}
 
 /// Run every not-yet-applied fixup of `phase`, each in its own transaction
 /// under the schema-bootstrap advisory lock (two boots racing: the loser waits,
@@ -59,9 +133,31 @@ const FIXUPS: &[(&str, Phase)] = &[
 /// The first fixup that fails stops the boot, exactly as a breaking reconcile
 /// does — a half-applied data shape is worse than a loud restart.
 pub(crate) async fn apply_fixups(client: &mut Client, phase: Phase) -> Result<(), SchemaError> {
-    for (name, declared_phase) in FIXUPS {
+    // The ledger is read ONCE, outside the loop: it does not change under us
+    // (the advisory lock serialises boots) and a per-fixup query would be the
+    // same answer N times.
+    let history: Vec<String> = er_entities::schema_migration::read::history(client)
+        .await?
+        .into_iter()
+        .map(|row| row.catalog_hash)
+        .collect();
+    let current = crate::schema::control_catalog_hash();
+
+    for (name, declared_phase, kind) in FIXUPS {
         if *declared_phase != phase {
             continue;
+        }
+        if let Kind::Contract { after } = kind
+            && !contract_allowed(after, &history, &current)
+        {
+            // A refusal, not a skip. Skipping would leave the store in the
+            // shape the fixup exists to leave behind, silently, and the next
+            // boot would skip again — so the removal would never happen and
+            // nothing would say so.
+            return Err(SchemaError::ContractNotReady {
+                fixup: (*name).to_string(),
+                after: (*after).to_string(),
+            });
         }
         let tx = client.transaction().await?;
         tx.execute(
@@ -240,4 +336,138 @@ pub(crate) async fn ensure_default_dataset_by_name(
         ensure_default_dataset_for(client, &org).await?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Kind, contract_allowed};
+
+    const EXPAND: &str = "aaaa1111";
+    const OLDER: &str = "0000cccc";
+    const CURRENT: &str = "bbbb2222";
+
+    fn history(items: &[&str]) -> Vec<String> {
+        items.iter().map(|s| (*s).to_string()).collect()
+    }
+
+    #[test]
+    fn allowed_when_the_expand_release_is_in_the_history() {
+        // The store passed through the release that stopped reading the thing,
+        // so at some point only code that ignored it was serving.
+        assert!(contract_allowed(
+            EXPAND,
+            &history(&[OLDER, EXPAND, CURRENT]),
+            CURRENT
+        ));
+    }
+
+    #[test]
+    fn refused_when_the_store_skipped_the_expand_release() {
+        // Jumped from something older straight to here: a release that still
+        // read the thing may never have been retired. This is the case the
+        // guard exists for.
+        assert!(!contract_allowed(
+            EXPAND,
+            &history(&[OLDER, CURRENT]),
+            CURRENT
+        ));
+    }
+
+    #[test]
+    fn allowed_on_a_store_born_on_this_release() {
+        // Nothing older exists to protect, and refusing here would break every
+        // fresh install — which is the way a guard like this usually goes
+        // wrong.
+        assert!(contract_allowed(EXPAND, &history(&[CURRENT]), CURRENT));
+        assert!(contract_allowed(
+            EXPAND,
+            &history(&[CURRENT, CURRENT, CURRENT]),
+            CURRENT
+        ));
+    }
+
+    #[test]
+    fn allowed_on_an_empty_ledger() {
+        // The very first boot, before the reconciler has written anything.
+        assert!(contract_allowed(EXPAND, &[], CURRENT));
+    }
+
+    #[test]
+    fn refused_when_only_an_older_version_is_recorded() {
+        // History exists but predates the expand release entirely.
+        assert!(!contract_allowed(EXPAND, &history(&[OLDER]), CURRENT));
+    }
+
+    #[test]
+    fn no_registered_contract_may_name_the_current_catalog() {
+        // "You cannot contract in the same release that expanded" — if `after`
+        // were this build's own catalog hash, the guard would pass trivially on
+        // the very release that introduced the removal, which is the mistake it
+        // exists to prevent. Checked over the real registry, so adding such a
+        // fixup fails here rather than in a cluster.
+        let current = crate::schema::control_catalog_hash();
+        for (name, _, kind) in super::FIXUPS {
+            if let Kind::Contract { after } = kind {
+                assert_ne!(
+                    *after,
+                    current.as_str(),
+                    "fixup {name} contracts against its own release's catalog"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_contract_kind_routes_to_the_guard() {
+        // The dispatch `apply_fixups` performs, in isolation: only `Contract`
+        // consults the history, and the other two run unconditionally. Written
+        // as a construction rather than a match over the registry because no
+        // registered fixup is a gated Contract yet — the guard ships before its
+        // first user, which is the only order that makes the first user safe.
+        let gated = |kind: Kind| match kind {
+            Kind::Contract { after } => Some(after),
+            Kind::Safe | Kind::ContractUngated { .. } => None,
+        };
+        assert_eq!(gated(Kind::Contract { after: EXPAND }), Some(EXPAND));
+        assert_eq!(gated(Kind::Safe), None);
+        assert_eq!(gated(Kind::ContractUngated { why: "historical" }), None);
+
+        // And the branch it selects does refuse the case it exists for.
+        let after = gated(Kind::Contract { after: EXPAND }).unwrap();
+        assert!(!contract_allowed(
+            after,
+            &history(&[OLDER, CURRENT]),
+            CURRENT
+        ));
+    }
+
+    #[test]
+    fn the_registry_classifies_every_fixup() {
+        // The point of `Kind` is that appending to the registry forces a
+        // decision. This asserts the decisions that exist are the ones
+        // reviewed: two entries, neither of them a gated Contract yet.
+        let kinds: Vec<&str> = super::FIXUPS
+            .iter()
+            .map(|(_, _, k)| match k {
+                Kind::Safe => "safe",
+                Kind::Contract { .. } => "contract",
+                Kind::ContractUngated { .. } => "ungated",
+            })
+            .collect();
+        assert_eq!(kinds, vec!["safe", "ungated"]);
+    }
+
+    #[test]
+    fn an_ungated_contract_must_say_why() {
+        // The variant is a confession, not a shortcut. An empty reason would
+        // make it indistinguishable from `Safe`.
+        for (name, _, kind) in super::FIXUPS {
+            if let Kind::ContractUngated { why } = kind {
+                assert!(
+                    why.len() > 40,
+                    "fixup {name} is ungated without a real reason"
+                );
+            }
+        }
+    }
 }
