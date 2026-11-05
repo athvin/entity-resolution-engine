@@ -89,6 +89,33 @@ config:
     # that. Scaling to 2 splits traces across sampling decisions with no error
     # anywhere — fix it with a two-tier gateway and a `loadbalancing` exporter
     # keyed on trace id, not by bumping the replica count.
+    #
+    # CONSEQUENCE, measured 2026-11-05 and not yet mitigated: because there is
+    # exactly one replica and it is NOT protected from voluntary disruption,
+    # Karpenter evicts it on every consolidation. The `app` nodepool runs
+    # `consolidationPolicy: WhenEmptyOrUnderutilized` with
+    # `consolidateAfter: 1m`, and the pod was observed moving to a brand-new
+    # spot node three times inside 45 minutes ("Evicted pod: Underutilized").
+    #
+    # Each eviction discards whatever `decision_wait` was holding — up to 10s
+    # of traces whose sampling decision had not been made — plus any in-flight
+    # batch. Roughly a few percent of traces, lost invisibly: nothing errors,
+    # and the gap looks like a quiet period.
+    #
+    # The obvious fix is `karpenter.sh/do-not-disrupt: "true"` in
+    # `podAnnotations`, which is this repo's idiom for the runner pods. It is
+    # NOT applied here, because `nodepools/app.yaml` has no `expireAfter` —
+    # and `nodepools/runner-sm.yaml` records why that matters: "a
+    # do-not-disrupt pod otherwise pins a node indefinitely", which would
+    # leave an un-upgradeable node carrying AMI-level CVEs. Pinning the
+    # collector therefore needs `expireAfter` on the app pool first, and that
+    # pool also hosts web-api, reloader and openobserve, so it is a shared
+    # capacity decision with a cost side rather than an observability tweak.
+    #
+    # Three ways out, for whoever takes it: `do-not-disrupt` plus `expireAfter`
+    # on the app pool; a longer `consolidateAfter` there, which reduces churn
+    # for every app workload but pays for idle nodes longer; or accept the loss
+    # and stop reading short gaps as outages.
     # The PII boundary, enforced in flight rather than trusted.
     #
     # §10.4 is the one prohibition this system has: telemetry carries
