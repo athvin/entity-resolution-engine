@@ -16,5 +16,5 @@ SELECT
   created_at,
   updated_at
 FROM public.matching_models
-WHERE org_id = $org_id AND state = 'active'
+WHERE dataset_id = $dataset_id AND state = 'active'
 ORDER BY name

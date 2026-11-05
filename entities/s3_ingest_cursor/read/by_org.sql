@@ -9,5 +9,5 @@ SELECT
   created_at,
   updated_at
 FROM public.s3_ingest_cursors
-WHERE org_id = $org_id
+WHERE dataset_id = $dataset_id
 ORDER BY source

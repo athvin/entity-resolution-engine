@@ -198,11 +198,14 @@ pub async fn s3_poll_tick(
 
         // One read for every source's cursor, rather than a query per source.
         let cursors: std::collections::HashMap<String, (String, Option<String>)> =
-            er_entities::s3_ingest_cursor::read::by_org(client, &org_id)
-                .await?
-                .into_iter()
-                .map(|c| (c.source, (c.object_key, c.etag)))
-                .collect();
+            er_entities::s3_ingest_cursor::read::by_org(
+                client,
+                org_dataset.as_deref().unwrap_or(&org_id),
+            )
+            .await?
+            .into_iter()
+            .map(|c| (c.source, (c.object_key, c.etag)))
+            .collect();
 
         // The sources to sweep come from the ACTIVE config, not from listing
         // the bucket's directories: a tenant who drops a folder nobody
@@ -747,29 +750,31 @@ async fn dispatch_claimed(
         // published config's `models:` list says which of them score. The
         // selection happens in `run_job`, which is the half that holds the
         // config; this half just does the Postgres read it exists to do.
-        let models: Vec<ActiveModel> = match pg::active_models(client, &job.org_id).await {
-            Ok(rows) => rows
-                .into_iter()
-                // The dataset's own models only: each dataset trains and scores
-                // against its own corpus. Pre-dataset rows were backfilled, so
-                // for a single-dataset org this filters nothing out.
-                .filter(|m| m.dataset_id.as_deref() == job.dataset_id.as_deref())
-                .map(|m| ActiveModel {
-                    model_json: m.model_json,
-                    model_version_label: m.model_version_label,
-                    tf_snapshot_id: m.tf_snapshot_id,
-                    name: m.name,
-                    version: m.version,
-                })
-                // The field order above is the struct's; `ActiveModelSpec`
-                // declares them in wire order, which the compiler reconciles.
-                .collect(),
-            Err(e) => {
-                pg::mark(client, &job.id, "failed").await?;
-                eprintln!("job {} failed: reading the model registry: {e}", job.id);
-                return Ok(true);
-            }
-        };
+        let models: Vec<ActiveModel> =
+            match pg::active_models(client, job.dataset_id.as_deref().unwrap_or(&job.org_id)).await
+            {
+                Ok(rows) => rows
+                    .into_iter()
+                    // The dataset's own models only: each dataset trains and scores
+                    // against its own corpus. Pre-dataset rows were backfilled, so
+                    // for a single-dataset org this filters nothing out.
+                    .filter(|m| m.dataset_id.as_deref() == job.dataset_id.as_deref())
+                    .map(|m| ActiveModel {
+                        model_json: m.model_json,
+                        model_version_label: m.model_version_label,
+                        tf_snapshot_id: m.tf_snapshot_id,
+                        name: m.name,
+                        version: m.version,
+                    })
+                    // The field order above is the struct's; `ActiveModelSpec`
+                    // declares them in wire order, which the compiler reconciles.
+                    .collect(),
+                Err(e) => {
+                    pg::mark(client, &job.id, "failed").await?;
+                    eprintln!("job {} failed: reading the model registry: {e}", job.id);
+                    return Ok(true);
+                }
+            };
         let jb = job.clone();
         let drop_root = lake_drop_root.clone();
         // The counts come out beside the outcome rather than inside it: every
@@ -912,7 +917,8 @@ async fn apply_approved_merges(
     else {
         return Ok(0);
     };
-    let approved = pg::subjects_for_tag(client, org_id, &tag.id, Some("review"), MAX_APPROVED)
+    let scope = dataset_id.unwrap_or(org_id);
+    let approved = pg::subjects_for_tag(client, scope, &tag.id, Some("review"), MAX_APPROVED)
         .await
         .map_err(|e| format!("reading approved reviews: {e}"))?;
     if approved.is_empty() {
@@ -936,8 +942,7 @@ async fn apply_approved_merges(
             );
             continue;
         }
-        if let Err(e) =
-            pg::unapply_tag(client, org_id, &tag.id, "review", &tagging.subject_id).await
+        if let Err(e) = pg::unapply_tag(client, scope, &tag.id, "review", &tagging.subject_id).await
         {
             // Staged but still tagged: the next tick would stage it again. Said
             // out loud rather than swallowed, because a duplicate staged resolve
@@ -1462,7 +1467,7 @@ pub async fn train_and_register(
     if let Some(rr) = report.as_mut() {
         rr.pod_started("train").await;
     }
-    let trained = match train_half(client, org_id, env, run_id).await {
+    let trained = match train_half(client, org_id, dataset_id, env, run_id).await {
         Ok(t) => {
             if let Some(rr) = report.as_mut() {
                 rr.pod_succeeded("train", None).await;
@@ -1517,6 +1522,7 @@ struct TrainedArtifacts {
 async fn train_half(
     client: &tokio_postgres::Client,
     org_id: &str,
+    dataset_id: Option<&str>,
     env: &Value,
     run_id: &str,
 ) -> Result<TrainedArtifacts, String> {
@@ -1542,7 +1548,8 @@ async fn train_half(
     // from the active version so training refines what is live rather than
     // whatever happens to be on disk. Falling back to ER_MODEL_PATH keeps an
     // org created before the registry working.
-    let template = match pg::active_model_version(client, org_id).await {
+    let scope = dataset_id.unwrap_or(org_id);
+    let template = match pg::active_model_version(client, scope).await {
         Ok(Some(m)) => m.model_json,
         Ok(None) => {
             let path = env_str(env, "ER_MODEL_PATH").ok_or(
@@ -1580,7 +1587,7 @@ async fn train_half(
     // to live here. The exclusion is deliberately by origin rather than by
     // `labeled_by`: a future second LLM producer gets caught by this too.
     let match_labels: Vec<(String, String)> =
-        match er_entities::pair_label::read::all(client, org_id).await {
+        match er_entities::pair_label::read::all(client, scope).await {
             Ok(rows) => rows
                 .into_iter()
                 .filter(|l| l.verdict == "match" && l.origin != "llm")
@@ -1947,7 +1954,7 @@ pub async fn drain_and_correct(
     if let Some(rr) = report.as_mut() {
         rr.control_started("drain_actions").await;
     }
-    let pending = match pg::pending_actions(client, org_id)
+    let pending = match pg::pending_actions(client, dataset_id.unwrap_or(org_id))
         .await
         .map_err(|e| format!("read pending actions: {e}"))
     {

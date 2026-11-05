@@ -19,14 +19,6 @@ use tower::ServiceExt;
 
 use crate::common;
 
-/// The org's id for a test org name (child wrappers key on org_id).
-async fn oid(client: &tokio_postgres::Client, name: &str) -> String {
-    er_server::pg::org_id_by_name(client, name)
-        .await
-        .expect("org lookup")
-        .expect("org exists")
-}
-
 const TEST_YAML: &str = include_str!("../../er-cli/tests/fixtures/test.yaml");
 const NICKNAMES: &str = include_str!("../../er-cli/tests/fixtures/nickname_variants.csv");
 
@@ -209,7 +201,7 @@ async fn unmerge_splits_and_respects_contradictions() {
     assert_eq!(body["pairs"], 1);
     assert!(body["apply_job"].as_str().is_some());
 
-    let pending = pg::pending_actions(&client, &oid(&client, "split").await)
+    let pending = pg::pending_actions(&client, &common::default_dataset(&client, "split").await)
         .await
         .unwrap();
     assert_eq!(pending.len(), 1, "one never-rule staged");
@@ -259,7 +251,7 @@ async fn unmerge_splits_and_respects_contradictions() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::CREATED);
-    let pending = pg::pending_actions(&client, &oid(&client, "conflict").await)
+    let pending = pg::pending_actions(&client, &common::default_dataset(&client, "conflict").await)
         .await
         .unwrap();
     {
@@ -288,7 +280,7 @@ async fn unmerge_splits_and_respects_contradictions() {
     assert_eq!(resp.status(), StatusCode::CONFLICT);
     // The refused unmerge staged nothing new.
     assert_eq!(
-        pg::pending_count(&client, &oid(&client, "conflict").await)
+        pg::pending_count(&client, &common::default_dataset(&client, "conflict").await)
             .await
             .unwrap(),
         0
@@ -309,9 +301,10 @@ async fn unmerge_splits_and_respects_contradictions() {
     assert_eq!(resp.status(), StatusCode::CREATED);
     {
         let session = er_cli::open_lake(&cat_b, &data_b).unwrap();
-        for staged in &pg::pending_actions(&client, &oid(&client, "conflict").await)
-            .await
-            .unwrap()
+        for staged in
+            &pg::pending_actions(&client, &common::default_dataset(&client, "conflict").await)
+                .await
+                .unwrap()
         {
             er_cli::apply_staged_action(
                 &session,

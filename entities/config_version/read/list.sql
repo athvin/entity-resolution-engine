@@ -12,5 +12,5 @@ SELECT
   published_at,
   updated_at
 FROM public.config_versions
-WHERE org_id = $org_id
+WHERE dataset_id = $dataset_id
 ORDER BY version DESC

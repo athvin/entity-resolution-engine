@@ -178,7 +178,7 @@ pub mod read {
     /// The tenant's active model version — what a run scores against. Ordered by version so that even if two rows were ever active (which activation makes impossible), the newer one is served rather than an arbitrary one.
     pub async fn active(
         client: &impl ::tokio_postgres::GenericClient,
-        org_id: &str,
+        dataset_id: &str,
     ) -> ::std::result::Result<Vec<super::MatchingModel>, ::tokio_postgres::Error> {
         const SQL: &str = "SELECT
   id,
@@ -198,7 +198,7 @@ pub mod read {
   created_at,
   updated_at
 FROM public.matching_models
-WHERE org_id = $1 AND state = 'active'
+WHERE dataset_id = $1 AND state = 'active'
 ORDER BY version DESC
 LIMIT 1
 ";
@@ -210,7 +210,7 @@ LIMIT 1
             "matching_models",
             SQL,
         );
-        let __result = ::er_span::instrument(&__span, client.query(SQL, &[&org_id])).await;
+        let __result = ::er_span::instrument(&__span, client.query(SQL, &[&dataset_id])).await;
         let __entered = __span.enter();
         let rows = ::er_span::check(&__span, __result)?;
         ::er_span::rows(&__span, rows.len() as u64);
@@ -240,7 +240,7 @@ LIMIT 1
     /// EVERY active model version for the tenant, one per name — the ensemble a run scores with (E5b). Sibling of `active`, which serves the single-model path with `LIMIT 1`; that one answers "the" active model and becomes ambiguous the moment two names are active, which is why an ensemble reads through here instead. `ORDER BY name` is for read determinism only — a cascade's step order comes from the ordered `models:` list in the published config, never from this ordering, so renaming a model cannot silently reorder a cascade. `matching_models_one_active_per_name` guarantees at most one row per name.
     pub async fn active_all(
         client: &impl ::tokio_postgres::GenericClient,
-        org_id: &str,
+        dataset_id: &str,
     ) -> ::std::result::Result<Vec<super::MatchingModel>, ::tokio_postgres::Error> {
         const SQL: &str = "SELECT
   id,
@@ -260,7 +260,7 @@ LIMIT 1
   created_at,
   updated_at
 FROM public.matching_models
-WHERE org_id = $1 AND state = 'active'
+WHERE dataset_id = $1 AND state = 'active'
 ORDER BY name
 ";
         let __span = ::er_span::sql_span(
@@ -271,7 +271,7 @@ ORDER BY name
             "matching_models",
             SQL,
         );
-        let __result = ::er_span::instrument(&__span, client.query(SQL, &[&org_id])).await;
+        let __result = ::er_span::instrument(&__span, client.query(SQL, &[&dataset_id])).await;
         let __entered = __span.enter();
         let rows = ::er_span::check(&__span, __result)?;
         ::er_span::rows(&__span, rows.len() as u64);
@@ -301,7 +301,7 @@ ORDER BY name
     /// One model version by its natural key.
     pub async fn by_version(
         client: &impl ::tokio_postgres::GenericClient,
-        org_id: &str,
+        dataset_id: &str,
         name: &str,
         version: i64,
     ) -> ::std::result::Result<Vec<super::MatchingModel>, ::tokio_postgres::Error> {
@@ -323,7 +323,7 @@ ORDER BY name
   created_at,
   updated_at
 FROM public.matching_models
-WHERE org_id = $1 AND name = $2 AND version = $3
+WHERE dataset_id = $1 AND name = $2 AND version = $3
 ";
         let __span = ::er_span::sql_span(
             ::er_span::Store::Control,
@@ -334,7 +334,8 @@ WHERE org_id = $1 AND name = $2 AND version = $3
             SQL,
         );
         let __result =
-            ::er_span::instrument(&__span, client.query(SQL, &[&org_id, &name, &version])).await;
+            ::er_span::instrument(&__span, client.query(SQL, &[&dataset_id, &name, &version]))
+                .await;
         let __entered = __span.enter();
         let rows = ::er_span::check(&__span, __result)?;
         ::er_span::rows(&__span, rows.len() as u64);
@@ -364,7 +365,7 @@ WHERE org_id = $1 AND name = $2 AND version = $3
     /// Every model version a tenant has, grouped by name with the newest version of each first.
     pub async fn list(
         client: &impl ::tokio_postgres::GenericClient,
-        org_id: &str,
+        dataset_id: &str,
     ) -> ::std::result::Result<Vec<super::MatchingModel>, ::tokio_postgres::Error> {
         const SQL: &str = "SELECT
   id,
@@ -384,7 +385,7 @@ WHERE org_id = $1 AND name = $2 AND version = $3
   created_at,
   updated_at
 FROM public.matching_models
-WHERE org_id = $1
+WHERE dataset_id = $1
 ORDER BY name, version DESC
 ";
         let __span = ::er_span::sql_span(
@@ -395,7 +396,7 @@ ORDER BY name, version DESC
             "matching_models",
             SQL,
         );
-        let __result = ::er_span::instrument(&__span, client.query(SQL, &[&org_id])).await;
+        let __result = ::er_span::instrument(&__span, client.query(SQL, &[&dataset_id])).await;
         let __entered = __span.enter();
         let rows = ::er_span::check(&__span, __result)?;
         ::er_span::rows(&__span, rows.len() as u64);

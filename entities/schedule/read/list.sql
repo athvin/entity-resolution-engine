@@ -10,5 +10,5 @@ SELECT
   created_at,
   updated_at
 FROM public.schedules
-WHERE org_id = $org_id
+WHERE dataset_id = $dataset_id
 ORDER BY created_at

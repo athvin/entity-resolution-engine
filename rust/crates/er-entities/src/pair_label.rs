@@ -157,13 +157,13 @@ pub mod read {
     /// Every label a tenant has, for the training pass to materialise into the lake and for the labelling queue to exclude from what it offers. Coverage is counted from these rows in Rust rather than aggregated in SQL, because a control-plane read declares `returns: entity` — and reading them whole is what training needs anyway. Deliberately unbounded: labels are human-authored, so the set is thousands at most, and a LIMIT here would silently train on a prefix. Ordered by pair so a trained model's bytes do not depend on Postgres's scan order.
     pub async fn all(
         client: &impl ::tokio_postgres::GenericClient,
-        org_id: &str,
+        dataset_id: &str,
     ) -> ::std::result::Result<Vec<super::PairLabel>, ::tokio_postgres::Error> {
         const SQL: &str =
             "SELECT id, org_id, dataset_id, rec_a_key, rec_b_key, verdict, origin, labeled_by,
        model_version, score_at_label, note, created_at, updated_at
 FROM public.pair_labels
-WHERE org_id = $1
+WHERE dataset_id = $1
 ORDER BY rec_a_key, rec_b_key
 ";
         let __span = ::er_span::sql_span(
@@ -174,7 +174,7 @@ ORDER BY rec_a_key, rec_b_key
             "pair_labels",
             SQL,
         );
-        let __result = ::er_span::instrument(&__span, client.query(SQL, &[&org_id])).await;
+        let __result = ::er_span::instrument(&__span, client.query(SQL, &[&dataset_id])).await;
         let __entered = __span.enter();
         let rows = ::er_span::check(&__span, __result)?;
         ::er_span::rows(&__span, rows.len() as u64);
@@ -201,7 +201,7 @@ ORDER BY rec_a_key, rec_b_key
     /// The tenant's labels, newest first, optionally narrowed to one verdict or one origin. The explicit ::varchar casts are needed because Postgres cannot infer a parameter's type from `$x IS NULL` alone and resolves left to right.
     pub async fn page(
         client: &impl ::tokio_postgres::GenericClient,
-        org_id: &str,
+        dataset_id: &str,
         verdict: Option<&str>,
         origin: Option<&str>,
         limit: i64,
@@ -210,7 +210,7 @@ ORDER BY rec_a_key, rec_b_key
             "SELECT id, org_id, dataset_id, rec_a_key, rec_b_key, verdict, origin, labeled_by,
        model_version, score_at_label, note, created_at, updated_at
 FROM public.pair_labels
-WHERE org_id = $1
+WHERE dataset_id = $1
   AND ($2::varchar IS NULL OR verdict = $2::varchar)
   AND ($3::varchar IS NULL OR origin = $3::varchar)
 ORDER BY created_at DESC, id DESC
@@ -226,7 +226,7 @@ LIMIT $4
         );
         let __result = ::er_span::instrument(
             &__span,
-            client.query(SQL, &[&org_id, &verdict, &origin, &limit]),
+            client.query(SQL, &[&dataset_id, &verdict, &origin, &limit]),
         )
         .await;
         let __entered = __span.enter();

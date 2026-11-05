@@ -1,7 +1,7 @@
 kind: statement
 operation: read
 mode: full
-description: "An org's config versions, newest first."
+description: "A dataset's config versions, newest first."
 params:
-  - { name: org_id, type: varchar }
+  - { name: dataset_id, type: varchar }
 returns: entity

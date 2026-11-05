@@ -467,14 +467,20 @@ async fn the_model_registry_seeds_versions_and_activates_exactly_one() {
         .await
         .unwrap()
         .get(0);
+    // Hand-written rather than through `create_model_version`, to plant a
+    // row of the WRONG entity type. It carries its dataset like every other
+    // registry row: the activate route resolves the model by dataset, so an
+    // unstamped row is simply invisible and the test would see 404 instead
+    // of the refusal it exists to pin.
+    let ds = common::default_dataset(&client, "acme").await;
     client
         .execute(
             "INSERT INTO matching_models
-               (id, org_id, name, version, entity_type, model_json, model_hash,
-                model_version_label, provenance, created_by)
-             VALUES ($1, $2, 'accounts', 1, 'account', $3, 'deadbeef', 'acct-v1',
+               (id, org_id, dataset_id, name, version, entity_type, model_json,
+                model_hash, model_version_label, provenance, created_by)
+             VALUES ($1, $2, $3, 'accounts', 1, 'account', $4, 'deadbeef', 'acct-v1',
                      '{}'::jsonb, 'test')",
-            &[&er_ids::new_v7(), &org_id, &starter_json],
+            &[&er_ids::new_v7(), &org_id, &ds, &starter_json],
         )
         .await
         .unwrap();
@@ -694,7 +700,7 @@ async fn the_model_registry_seeds_versions_and_activates_exactly_one() {
     // assertion that fails against the org-wide archive this replaced.
     // Summarised as (name, version): `MatchingModel`'s Debug carries the whole
     // settings document, which buries the one fact the assertion is about.
-    let models = pg::active_models(&client, &org_id).await.unwrap();
+    let models = pg::active_models(&client, &ds).await.unwrap();
     let active = summarise(&models);
     assert_eq!(
         active.iter().map(|(n, _)| *n).collect::<Vec<_>>(),
@@ -735,7 +741,7 @@ async fn the_model_registry_seeds_versions_and_activates_exactly_one() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    let models = pg::active_models(&client, &org_id).await.unwrap();
+    let models = pg::active_models(&client, &ds).await.unwrap();
     let active = summarise(&models);
     assert_eq!(
         active,

@@ -141,11 +141,11 @@ pub mod delete {
     /// Remove one link, scoped by org so a link id learned elsewhere cannot delete another tenant's row. A hard delete rather than a tombstone: the history companion already records what was removed and by whom, so a status column would be a second, weaker record of the same fact.
     pub async fn by_id(
         client: &impl ::tokio_postgres::GenericClient,
-        org_id: &str,
+        dataset_id: &str,
         link_id: &str,
     ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
         const SQL: &str = "DELETE FROM public.entity_links
-WHERE org_id = $1 AND id = $2
+WHERE dataset_id = $1 AND id = $2
 ";
         let __span = ::er_span::sql_span(
             ::er_span::Store::Control,
@@ -156,7 +156,7 @@ WHERE org_id = $1 AND id = $2
             SQL,
         );
         let __result =
-            ::er_span::instrument(&__span, client.execute(SQL, &[&org_id, &link_id])).await;
+            ::er_span::instrument(&__span, client.execute(SQL, &[&dataset_id, &link_id])).await;
         let __entered = __span.enter();
         let __n = ::er_span::check(&__span, __result)?;
         ::er_span::rows(&__span, __n);
@@ -169,7 +169,7 @@ pub mod read {
     /// Every link touching one entity, from either side. BOTH sides in one read because the entity view asks one question — 'what is this entity related to' — and answering it with two queries would make the caller decide which side it is on, which is exactly what it does not know yet. The direction is recoverable from the rows: the caller compares the entity id against parent_entity_id.
     pub async fn for_entity(
         client: &impl ::tokio_postgres::GenericClient,
-        org_id: &str,
+        dataset_id: &str,
         entity_id: &str,
     ) -> ::std::result::Result<Vec<super::EntityLink>, ::tokio_postgres::Error> {
         const SQL: &str = "SELECT
@@ -185,7 +185,7 @@ pub mod read {
   created_at,
   updated_at
 FROM public.entity_links
-WHERE org_id = $1
+WHERE dataset_id = $1
   AND (parent_entity_id = $2 OR child_entity_id = $2)
 ORDER BY kind, parent_entity_id, child_entity_id
 ";
@@ -198,7 +198,7 @@ ORDER BY kind, parent_entity_id, child_entity_id
             SQL,
         );
         let __result =
-            ::er_span::instrument(&__span, client.query(SQL, &[&org_id, &entity_id])).await;
+            ::er_span::instrument(&__span, client.query(SQL, &[&dataset_id, &entity_id])).await;
         let __entered = __span.enter();
         let rows = ::er_span::check(&__span, __result)?;
         ::er_span::rows(&__span, rows.len() as u64);

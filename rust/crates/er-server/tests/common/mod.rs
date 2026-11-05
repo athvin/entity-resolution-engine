@@ -164,3 +164,22 @@ pub fn with_dbname(dsn: &str, dbname: &str) -> String {
     out.push(format!("dbname={dbname}"));
     out.join(" ")
 }
+
+/// The id of `org`'s `default` dataset.
+///
+/// The control plane's rows are addressed by dataset, so a fixture that
+/// writes through the HTTP surface (which resolves the dataset for itself)
+/// and then reads back through `pg::*` needs the same id the route used.
+/// Panics rather than returning an Option: every org has this dataset from
+/// its first moment, and a test that cannot find it is broken, not skipped.
+#[allow(dead_code)]
+pub async fn default_dataset(client: &tokio_postgres::Client, org: &str) -> String {
+    let org_id = er_server::pg::org_id_by_name(client, org)
+        .await
+        .expect("org lookup")
+        .unwrap_or_else(|| panic!("org {org} exists"));
+    er_server::pg::default_dataset_id(client, &org_id)
+        .await
+        .expect("dataset lookup")
+        .unwrap_or_else(|| panic!("org {org} has its default dataset"))
+}

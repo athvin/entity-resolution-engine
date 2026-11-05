@@ -42,6 +42,7 @@ mod pg_auth;
 mod pg_clear_endpoint;
 mod pg_config;
 mod pg_dataset_concurrency;
+mod pg_dataset_isolation;
 mod pg_dataset_sweep;
 mod pg_datasets;
 mod pg_ddl_log;

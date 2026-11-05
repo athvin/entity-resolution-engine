@@ -3,5 +3,5 @@ operation: read
 mode: full
 description: "Everything this tenant has already auto-ingested, so one poll can decide what is new without a query per source. Unbounded on purpose: the row count is the number of configured sources, which is small and bounded by the config rather than by the corpus."
 params:
-  - { name: org_id, type: varchar }
+  - { name: dataset_id, type: varchar }
 returns: entity

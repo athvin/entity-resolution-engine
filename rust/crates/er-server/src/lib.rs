@@ -936,9 +936,7 @@ async fn provision_org(
             "the default dataset was just converged yet cannot be read back",
         );
     };
-    if let Err(e) =
-        pg::publish_config_version(&client, &org_row.id, name, ds_id, version, Some("C")).await
-    {
+    if let Err(e) = pg::publish_config_version(&client, name, ds_id, version, Some("C")).await {
         return pg_err(e);
     }
 
@@ -1173,10 +1171,15 @@ async fn seed_starter_model(
     let Ok(Some(org_row)) = pg::get_org(client, org).await else {
         return json!({ "seeded": false, "reason": "org row not readable" });
     };
+    // The starter model belongs to the org's one dataset, converged moments
+    // earlier by the create-org handler.
+    let Ok(Some(ds_id)) = pg::default_dataset_id(client, &org_row.id).await else {
+        return json!({ "seeded": false, "reason": "the org has no default dataset yet" });
+    };
     // `POST /v1/orgs` is an idempotent upsert, so a replay must not mint a
     // second version: versions auto-increment, which would otherwise make
     // re-registering an org silently accumulate identical models.
-    match pg::list_model_versions(client, &org_row.id).await {
+    match pg::list_model_versions(client, &ds_id).await {
         Ok(existing) if !existing.is_empty() => {
             return json!({
                 "seeded": false,
@@ -2251,10 +2254,11 @@ async fn models_index(
         Err(r) => return *r,
     };
     // Scope-correct before anything is served: an unknown dataset 404s.
-    if let Err(r) = dataset_or_404(&client, &org_row, &ds).await {
-        return *r;
-    }
-    match pg::list_model_versions(&client, &org_row.id).await {
+    let d = match dataset_or_404(&client, &org_row, &ds).await {
+        Ok(row) => row,
+        Err(r) => return *r,
+    };
+    match pg::list_model_versions(&client, &d.id).await {
         Ok(rows) => {
             // `active` is a LIST, one entry per name. It used to be
             // `rows.iter().find(state == "active")` — a single row — which was
@@ -2422,10 +2426,11 @@ async fn get_model_version(
         Err(r) => return *r,
     };
     // Scope-correct before anything is served: an unknown dataset 404s.
-    if let Err(r) = dataset_or_404(&client, &org_row, &ds).await {
-        return *r;
-    }
-    match pg::model_version(&client, &org_row.id, &name, version).await {
+    let d = match dataset_or_404(&client, &org_row, &ds).await {
+        Ok(row) => row,
+        Err(r) => return *r,
+    };
+    match pg::model_version(&client, &d.id, &name, version).await {
         Ok(Some(m)) => {
             let mut body = model_summary(&m);
             body["model_json"] = json!(m.model_json);
@@ -2604,10 +2609,11 @@ async fn model_version_evaluation(
         Err(r) => return *r,
     };
     // Scope-correct before anything is served: an unknown dataset 404s.
-    if let Err(r) = dataset_or_404(&client, &org_row, &ds).await {
-        return *r;
-    }
-    let model = match pg::model_version(&client, &org_row.id, &name, version).await {
+    let d = match dataset_or_404(&client, &org_row, &ds).await {
+        Ok(row) => row,
+        Err(r) => return *r,
+    };
+    let model = match pg::model_version(&client, &d.id, &name, version).await {
         Ok(Some(m)) => m,
         Ok(None) => {
             return detail_err(
@@ -2630,7 +2636,7 @@ async fn model_version_evaluation(
             Err(r) => return *r,
         },
     };
-    let labels = match er_entities::pair_label::read::all(&client, &org_row.id).await {
+    let labels = match er_entities::pair_label::read::all(&client, &d.id).await {
         Ok(l) => l,
         Err(e) => return pg_err(e),
     };
@@ -2667,10 +2673,11 @@ async fn activate_model_version(
         Err(r) => return *r,
     };
     // Scope-correct before anything is served: an unknown dataset 404s.
-    if let Err(r) = dataset_or_404(&client, &org_row, &ds).await {
-        return *r;
-    }
-    let target = match pg::model_version(&client, &org_row.id, &name, version).await {
+    let d = match dataset_or_404(&client, &org_row, &ds).await {
+        Ok(row) => row,
+        Err(r) => return *r,
+    };
+    let target = match pg::model_version(&client, &d.id, &name, version).await {
         Ok(Some(m)) => m,
         Ok(None) => {
             return detail_err(
@@ -2755,10 +2762,11 @@ async fn list_config_versions(
         Err(r) => return *r,
     };
     // Scope-correct before anything is served: an unknown dataset 404s.
-    if let Err(r) = dataset_or_404(&client, &org_row, &ds).await {
-        return *r;
-    }
-    match pg::list_config_versions(&client, &org_row.id).await {
+    let d = match dataset_or_404(&client, &org_row, &ds).await {
+        Ok(row) => row,
+        Err(r) => return *r,
+    };
+    match pg::list_config_versions(&client, &d.id).await {
         Ok(rows) => {
             let out: Vec<Value> = rows
                 .iter()
@@ -2810,10 +2818,11 @@ async fn get_config_version(
         Err(r) => return *r,
     };
     // Scope-correct before anything is served: an unknown dataset 404s.
-    if let Err(r) = dataset_or_404(&client, &org_row, &ds).await {
-        return *r;
-    }
-    match pg::get_config_version(&client, &org_row.id, version).await {
+    let d = match dataset_or_404(&client, &org_row, &ds).await {
+        Ok(row) => row,
+        Err(r) => return *r,
+    };
+    match pg::get_config_version(&client, &d.id, version).await {
         Ok(Some(d)) => Json(config_detail_json(&d)).into_response(),
         Ok(None) => config_version_missing(&org, &version.to_string()).into_response(),
         Err(e) => pg_err(e),
@@ -2875,10 +2884,11 @@ async fn active_config(
         Err(r) => return *r,
     };
     // Scope-correct before anything is served: an unknown dataset 404s.
-    if let Err(r) = dataset_or_404(&client, &org_row, &ds).await {
-        return *r;
-    }
-    match pg::get_config_version(&client, &org_row.id, active).await {
+    let d = match dataset_or_404(&client, &org_row, &ds).await {
+        Ok(row) => row,
+        Err(r) => return *r,
+    };
+    match pg::get_config_version(&client, &d.id, active).await {
         Ok(Some(d)) => Json(config_detail_json(&d)).into_response(),
         Ok(None) => (
             StatusCode::NOT_FOUND,
@@ -3234,7 +3244,7 @@ async fn publish_config_version(
     };
 
     // The version being published + its re-validated config.
-    let detail = match pg::get_config_version(&client, &org_row.id, version).await {
+    let detail = match pg::get_config_version(&client, &d.id, version).await {
         Ok(Some(d)) => d,
         Ok(None) => return config_version_missing(&org, &version.to_string()).into_response(),
         Err(e) => return pg_err(e),
@@ -3266,7 +3276,7 @@ async fn publish_config_version(
     // mistake discovered in the dispatcher is a failed job with the tenant's
     // next rebuild already queued behind it.
     if !new_config.models.is_empty() {
-        match pg::active_models(&client, &org_row.id).await {
+        match pg::active_models(&client, &d.id).await {
             Ok(active) => {
                 let have: std::collections::BTreeSet<&str> =
                     active.iter().map(|m| m.name.as_str()).collect();
@@ -3315,7 +3325,7 @@ async fn publish_config_version(
     let (tier, changed): (Option<&str>, Vec<String>) = match active_v {
         None => (Some("C"), Vec::new()),
         Some(av) => {
-            let old_yaml = match pg::get_config_version(&client, &org_row.id, av).await {
+            let old_yaml = match pg::get_config_version(&client, &d.id, av).await {
                 Ok(Some(d)) => d.yaml,
                 Ok(None) => String::new(),
                 Err(e) => return pg_err(e),
@@ -3364,9 +3374,7 @@ async fn publish_config_version(
     }
     // History images record the acting principal (er.actor).
     let _ = pg::set_actor(&client, &principal.actor).await;
-    if let Err(e) =
-        pg::publish_config_version(&client, &org_row.id, &org, &d.id, version, tier).await
-    {
+    if let Err(e) = pg::publish_config_version(&client, &org, &d.id, version, tier).await {
         return pg_err(e);
     }
     // The published document's `correction_pass.cadence` becomes a real
@@ -5475,7 +5483,7 @@ async fn labeling_next(
         Ok(c) => c,
         Err(r) => return *r,
     };
-    let labels = match er_entities::pair_label::read::all(&client, &org_row.id).await {
+    let labels = match er_entities::pair_label::read::all(&client, &d.id).await {
         Ok(l) => l,
         Err(e) => return pg_err(e),
     };
@@ -5670,13 +5678,14 @@ async fn labels_list(
         Err(r) => return *r,
     };
     // Scope-correct before anything is served: an unknown dataset 404s.
-    if let Err(r) = dataset_or_404(&client, &org_row, &ds).await {
-        return *r;
-    }
+    let d = match dataset_or_404(&client, &org_row, &ds).await {
+        Ok(row) => row,
+        Err(r) => return *r,
+    };
     let limit = read::parse_limit(params.get("limit").map(String::as_str));
     match er_entities::pair_label::read::page(
         &client,
-        &org_row.id,
+        &d.id,
         params.get("verdict").map(String::as_str),
         params.get("origin").map(String::as_str),
         limit,
@@ -6303,7 +6312,7 @@ pub(crate) async fn dataset_active_config(
             "no published config; publish a config version first",
         )));
     };
-    let detail = match pg::get_config_version(client, &d.org_id, active).await {
+    let detail = match pg::get_config_version(client, &d.id, active).await {
         Ok(Some(v)) => v,
         Ok(None) => {
             return Err(Box::new(detail_err(
@@ -6321,6 +6330,15 @@ pub(crate) async fn dataset_active_config(
     })
 }
 
+/// The active config of an org's DEFAULT dataset.
+///
+/// A compatibility shim for the callers that are still org-driven — the S3
+/// poller sweeps orgs, and `source_priority` is asked for by org — now that
+/// config versions are addressed by dataset. It resolves the default dataset
+/// rather than taking one, which is the same answer those callers got before
+/// datasets existed. The clean-break phase removes it along with the org's
+/// own `active_config_version` mirror; everything dataset-scoped already
+/// calls [`dataset_active_config`].
 pub(crate) async fn org_active_config(
     client: &tokio_postgres::Client,
     org_row: &pg::OrgDetail,
@@ -6331,7 +6349,13 @@ pub(crate) async fn org_active_config(
             "no published config; publish a config version first",
         )));
     };
-    let yaml = match pg::get_config_version(client, &org_row.id, active).await {
+    let Ok(Some(ds_id)) = pg::default_dataset_id(client, &org_row.id).await else {
+        return Err(Box::new(detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "the org has no default dataset to read a config from",
+        )));
+    };
+    let yaml = match pg::get_config_version(client, &ds_id, active).await {
         Ok(Some(d)) => d.yaml,
         Ok(None) => {
             return Err(Box::new(detail_err(
@@ -6945,10 +6969,11 @@ async fn s3_ingest_state(
         Err(r) => return *r,
     };
     // Scope-correct before anything is served: an unknown dataset 404s.
-    if let Err(r) = dataset_or_404(&client, &org_row, &ds).await {
-        return *r;
-    }
-    let sources = match er_entities::s3_ingest_cursor::read::by_org(&client, &org_row.id).await {
+    let d = match dataset_or_404(&client, &org_row, &ds).await {
+        Ok(row) => row,
+        Err(r) => return *r,
+    };
+    let sources = match er_entities::s3_ingest_cursor::read::by_org(&client, &d.id).await {
         Ok(rows) => rows,
         Err(e) => return pg_err(e),
     };
@@ -7259,10 +7284,11 @@ async fn schedules_index(
         Err(r) => return *r,
     };
     // Scope-correct before anything is served: an unknown dataset 404s.
-    if let Err(r) = dataset_or_404(&client, &org_row, &ds).await {
-        return *r;
-    }
-    match pg::list_schedules(&client, &org_row.id).await {
+    let d = match dataset_or_404(&client, &org_row, &ds).await {
+        Ok(row) => row,
+        Err(r) => return *r,
+    };
+    match pg::list_schedules(&client, &d.id).await {
         Ok(rows) => {
             let out: Vec<Value> = rows
                 .iter()
@@ -7307,12 +7333,13 @@ async fn update_schedule(
         Err(r) => return *r,
     };
     // Scope-correct before anything is served: an unknown dataset 404s.
-    if let Err(r) = dataset_or_404(&client, &org_row, &ds).await {
-        return *r;
-    }
+    let d = match dataset_or_404(&client, &org_row, &ds).await {
+        Ok(row) => row,
+        Err(r) => return *r,
+    };
     // History images record the acting principal (er.actor).
     let _ = pg::set_actor(&client, &principal.actor).await;
-    match pg::set_schedule_enabled(&client, &org_row.id, &schedule_id, body.enabled).await {
+    match pg::set_schedule_enabled(&client, &d.id, &schedule_id, body.enabled).await {
         Ok(true) => Json(json!({ "id": schedule_id, "enabled": body.enabled })).into_response(),
         Ok(false) => detail_err(
             StatusCode::CONFLICT,
@@ -7343,12 +7370,13 @@ async fn delete_schedule(
         Err(r) => return *r,
     };
     // Scope-correct before anything is served: an unknown dataset 404s.
-    if let Err(r) = dataset_or_404(&client, &org_row, &ds).await {
-        return *r;
-    }
+    let d = match dataset_or_404(&client, &org_row, &ds).await {
+        Ok(row) => row,
+        Err(r) => return *r,
+    };
     // History images record the acting principal (er.actor).
     let _ = pg::set_actor(&client, &principal.actor).await;
-    match pg::delete_schedule(&client, &org_row.id, &schedule_id).await {
+    match pg::delete_schedule(&client, &d.id, &schedule_id).await {
         Ok(deleted) => Json(json!({ "deleted": deleted })).into_response(),
         Err(e) => pg_err(e),
     }
@@ -7917,10 +7945,11 @@ async fn entity_links(
         Err(r) => return *r,
     };
     // Scope-correct before anything is served: an unknown dataset 404s.
-    if let Err(r) = dataset_or_404(&client, &org_row, &ds).await {
-        return *r;
-    }
-    match er_entities::entity_link::read::for_entity(&client, &org_row.id, &entity_id).await {
+    let d = match dataset_or_404(&client, &org_row, &ds).await {
+        Ok(row) => row,
+        Err(r) => return *r,
+    };
+    match er_entities::entity_link::read::for_entity(&client, &d.id, &entity_id).await {
         Ok(rows) => Json(json!({ "items": rows })).into_response(),
         Err(e) => pg_err(e),
     }
@@ -7951,11 +7980,12 @@ async fn delete_entity_link(
         Err(r) => return *r,
     };
     // Scope-correct before anything is served: an unknown dataset 404s.
-    if let Err(r) = dataset_or_404(&client, &org_row, &ds).await {
-        return *r;
-    }
+    let d = match dataset_or_404(&client, &org_row, &ds).await {
+        Ok(row) => row,
+        Err(r) => return *r,
+    };
     let _ = pg::set_actor(&client, &principal.actor).await;
-    match er_entities::entity_link::delete::by_id(&client, &org_row.id, &link_id).await {
+    match er_entities::entity_link::delete::by_id(&client, &d.id, &link_id).await {
         Ok(0) => detail_err(StatusCode::NOT_FOUND, "no such link"),
         Ok(_) => {
             let _ = pg::audit(
@@ -8060,7 +8090,7 @@ async fn tag_application(
     } else {
         pg::unapply_tag(
             &client,
-            &org_row.id,
+            &d.id,
             &tag_id,
             &body.subject_type,
             &body.subject_id,
@@ -8120,13 +8150,14 @@ async fn tag_subjects(
         Err(r) => return *r,
     };
     // Scope-correct before anything is served: an unknown dataset 404s.
-    if let Err(r) = dataset_or_404(&client, &org_row, &ds).await {
-        return *r;
-    }
+    let d = match dataset_or_404(&client, &org_row, &ds).await {
+        Ok(row) => row,
+        Err(r) => return *r,
+    };
     let limit = read::parse_limit(params.get("limit").map(String::as_str));
     match pg::subjects_for_tag(
         &client,
-        &org_row.id,
+        &d.id,
         &tag_id,
         params.get("subject_type").map(String::as_str),
         limit,
@@ -8907,10 +8938,11 @@ async fn staged_count(
         Err(r) => return *r,
     };
     // Scope-correct before anything is served: an unknown dataset 404s.
-    if let Err(r) = dataset_or_404(&client, &org_row, &ds).await {
-        return *r;
-    }
-    match pg::pending_count(&client, &org_row.id).await {
+    let d = match dataset_or_404(&client, &org_row, &ds).await {
+        Ok(row) => row,
+        Err(r) => return *r,
+    };
+    match pg::pending_count(&client, &d.id).await {
         Ok(n) => Json(json!({ "pending_count": n })).into_response(),
         Err(e) => pg_err(e),
     }
