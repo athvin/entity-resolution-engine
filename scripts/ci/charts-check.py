@@ -267,13 +267,82 @@ def main() -> int:
                 f"nothing"
             )
 
+    # ---- 5. a pre-install hook may not need a release-managed ServiceAccount
+    #
+    # Helm applies NO release resource until every pre-install hook has
+    # completed, so a hook pod naming a ServiceAccount that the chart declares
+    # without a hook annotation can never be admitted:
+    #
+    #   pods "er-schema-migrate-" is forbidden: error looking up service
+    #   account ci/er-api: serviceaccount not found
+    #
+    # The Job then creates no pod, Helm's hook wait times out, and `--atomic`
+    # uninstalls the release. This is invisible on an upgrade — a previous
+    # release has already created the ServiceAccount, so only a FIRST install
+    # breaks: a new developer namespace, a fresh kind cluster, or a re-install
+    # after a rollback uninstalled things. It cost the 2026-11-05 nightly kind
+    # run, and no gate would have caught it.
+    hook_sas: dict[str, int] = {}
+    plain_sas: set[str] = set()
+    for doc in platform:
+        if doc.get("kind") != "ServiceAccount":
+            continue
+        ann = (doc["metadata"].get("annotations") or {})
+        name = doc["metadata"]["name"]
+        if "helm.sh/hook" in ann:
+            hook_sas[name] = int(ann.get("helm.sh/hook-weight", 0))
+        else:
+            plain_sas.add(name)
+
+    pre_hook_pods = 0
+    for doc in platform:
+        ann = (doc.get("metadata", {}).get("annotations") or {})
+        hooks = ann.get("helm.sh/hook", "")
+        if not any(h in hooks for h in ("pre-install", "pre-upgrade")):
+            continue
+        try:
+            spec = doc["spec"]["template"]["spec"]
+        except (KeyError, TypeError):
+            continue  # not a pod-bearing hook (a Secret, a ConfigMap)
+        pre_hook_pods += 1
+        sa = spec.get("serviceAccountName")
+        if sa is None:
+            continue
+        name = doc["metadata"]["name"]
+        weight = int(ann.get("helm.sh/hook-weight", 0))
+        if sa in plain_sas:
+            problems.append(
+                f"the pre-install hook {name!r} names serviceAccountName {sa!r}, "
+                f"which this chart declares WITHOUT a helm.sh/hook annotation — so "
+                f"it does not exist when the hook runs and the pod is refused. The "
+                f"release then fails its first install in any fresh namespace. Either "
+                f"drop serviceAccountName (the default SA is right for a hook that "
+                f"only reaches Postgres) or give {sa!r} its own hook at a lower weight"
+            )
+        elif sa in hook_sas and hook_sas[sa] >= weight:
+            problems.append(
+                f"the pre-install hook {name!r} (weight {weight}) names hook "
+                f"ServiceAccount {sa!r} at weight {hook_sas[sa]}. The account must "
+                f"sort STRICTLY EARLIER or it may not exist yet"
+            )
+    if pre_hook_pods == 0:
+        problems.append(
+            "no pre-install/pre-upgrade hook pod was found in the er-platform "
+            "render — the schema and drizzle migrate hooks should both be here, so "
+            "this check examined nothing"
+        )
+    else:
+        print(f"  {pre_hook_pods} pre-install hook pod(s); "
+              f"hook SAs {sorted(hook_sas)}, release SAs {sorted(plain_sas)}")
+
     if problems:
         print("\ncharts-check FAILED:\n", file=sys.stderr)
         for problem in problems:
             print(f"  - {problem}", file=sys.stderr)
         return 1
 
-    print("\ncharts-check passed: every selector resolves, and the edge hole is web-only.")
+    print("\ncharts-check passed: every selector resolves, the edge hole is web-only, "
+          "and no pre-install hook needs a release-managed ServiceAccount.")
     return 0
 
 

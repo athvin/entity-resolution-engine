@@ -79,7 +79,34 @@ spec:
         {{- include "er-platform.labels" . | nindent 8 }}
     spec:
       restartPolicy: Never
-      serviceAccountName: er-api
+      # NO serviceAccountName, and that is load-bearing rather than an
+      # omission. A `pre-install` hook runs BEFORE any release resource is
+      # applied, and `serviceaccounts.yaml` carries no hook annotation — so
+      # `er-api` does not exist yet, the kubelet refuses the pod with
+      #
+      #   pods "er-schema-migrate-" is forbidden:
+      #   error looking up service account <ns>/er-api: serviceaccount not found
+      #
+      # the Job never creates a pod, Helm's hook wait times out after five
+      # minutes, and `--atomic` uninstalls the whole release. This cost the
+      # 2026-11-05 nightly kind run, and it is invisible on an UPGRADE: the
+      # `ci` namespace survived only because a pre-PR10 release had already
+      # created the ServiceAccount, so the pre-upgrade hook found one lying
+      # around. The broken path is every FIRST install — a new developer
+      # namespace, a fresh kind cluster, or any re-install after an `--atomic`
+      # rollback uninstalled the release.
+      #
+      # `job-db-migrate.yaml`, the other pre-install hook, already had this
+      # right by naming no ServiceAccount; `job-tenant-migrate.yaml` names
+      # `er-api` safely because it is a POST-install hook, by which time the
+      # release's own resources exist. This file took the line from the latter.
+      #
+      # The default ServiceAccount is the right identity here: the Job reaches
+      # Postgres over a DSN from `er-erserver-env` and talks to the Kubernetes
+      # API not at all. `er-api` offered nothing it needed — no RBAC binding,
+      # no Pod Identity association — only a name. The token is explicitly not
+      # mounted, matching the stance serviceaccounts.yaml states for er-api.
+      automountServiceAccountToken: false
       securityContext:
         {{- include "er-platform.podSecurityContext" . | nindent 8 }}
       containers:
