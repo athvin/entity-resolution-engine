@@ -89,6 +89,65 @@ config:
     # that. Scaling to 2 splits traces across sampling decisions with no error
     # anywhere — fix it with a two-tier gateway and a `loadbalancing` exporter
     # keyed on trace id, not by bumping the replica count.
+    # The PII boundary, enforced in flight rather than trusted.
+    #
+    # §10.4 is the one prohibition this system has: telemetry carries
+    # identifiers and counts, never attribute values. Three things already
+    # uphold it in code — `sql_span` has no parameter argument so there is
+    # nowhere to put a bind value, `er_span::attr` declares three names
+    # `Pii::Never`, and `er-schema/tests/sql_span_pii.rs` fails the build if
+    # product code names one. This is the layer underneath all of that: an
+    # ALLOWLIST, so an attribute nobody anticipated does not ship merely
+    # because nobody thought to forbid it.
+    #
+    # Fail-closed by construction: `keep_keys` drops everything not named, so
+    # the failure mode of forgetting an attribute is losing a field, not
+    # leaking one. A denylist would have the opposite failure mode, which is
+    # the wrong way round for a deduplication engine whose payload is names
+    # and addresses.
+    #
+    # **If an attribute you expect is missing in OpenObserve, look here
+    # first.** That is the cost of this control and it is deliberate.
+    #
+    # The list was built by MEASUREMENT, not from the code alone: a scan of
+    # every span macro in the workspace found 37 names, and a real exported
+    # Parquet file from the dev collector showed eight more that
+    # `tracing-opentelemetry` adds on its own (`busy_ns`, `idle_ns`,
+    # `thread.*`, `code.*`, `target`). Keeping only the 37 would have silently
+    # dropped the CPU-versus-wall-time split, which is among the most useful
+    # things on a stage span. A dependency bump that renames any of those SDK
+    # attributes will drop it again, so re-measure after one.
+    #
+    # Resource attributes (`service.*`, `deployment.environment.name`,
+    # `er.role`) are NOT affected: this touches span attributes only.
+    transform/pii_allowlist:
+      error_mode: ignore
+      trace_statements:
+        - context: span
+          statements:
+            - >-
+              keep_keys(attributes, [
+                "er.statement", "er.generator", "er.rows", "er.outcome",
+                "er.org", "er.dataset", "er.run_id", "er.stage",
+                "er.action", "er.actor", "er.role", "er.request_id",
+                "er.attempt", "er.duration_ms", "er.job_id", "er.job_kind",
+                "er.members", "er.mode", "er.model_version",
+                "er.rebuild_reason", "er.segment", "er.snapshot_end",
+                "er.tf_snapshot_id", "er.trace_context",
+                "db.system.name", "db.collection.name",
+                "db.query.text", "db.query.summary",
+                "http.request.method", "http.response.status_code",
+                "http.route", "url.path", "error.type",
+                "busy_ns", "idle_ns", "thread.id", "thread.name",
+                "code.file.path", "code.line.number", "code.module.name",
+                "target",
+                # Set as FIELDS on the process span, distinct from the resource
+                # attributes of the same names. The gate caught these: without
+                # them the process span loses its own identity while the
+                # resource keeps it, which is the confusing half of a drop.
+                "service.name", "service.version"
+              ])
+
     tail_sampling:
       decision_wait: 10s
       num_traces: 50000
@@ -195,7 +254,7 @@ config:
         exporters: [awsemf, otlp_http/openobserve]
       traces:
         receivers: [otlp]
-        processors: [memory_limiter, tail_sampling, batch]
+        processors: [memory_limiter, transform/pii_allowlist, tail_sampling, batch]
         exporters: [awsxray, otlp_http/openobserve]
       # Still no OTLP logs pipeline. Logs ride stdout -> Fluent Bit, which is
       # the reliable path for an ephemeral Job: the runtime captures both
