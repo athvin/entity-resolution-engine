@@ -5227,6 +5227,132 @@ fn profile_reads_the_delivered_payload_before_any_mapping() {
     assert_eq!(lake_count(&session, "profile_runs"), 2);
 }
 
+/// Profiling the GOLDEN subject — the post-resolution corpus.
+///
+/// This path was wired and never run. `Subject::Golden` had zero test coverage
+/// anywhere: `lake_e2e` exercised `Standardized` and `Raw`, and `pg_profile`
+/// posted `{"subject": "standardized"}` and `{"subject": "raw"}`, so the arm
+/// that opens `golden_records` (or `acct_golden_records`) was dead code as far
+/// as any gate could tell. That is the same shape as `train` sitting in
+/// `SCHEDULABLE_KINDS` with no dispatcher arm — the reason
+/// `dispatch_coverage.rs` exists.
+///
+/// It matters more than the usual untested branch, because profiling the golden
+/// records is the whole reason the profiler takes a `subject` at all: the same
+/// machinery answers "what did I import" and "what did resolution produce", and
+/// the second question is the one asked after the expensive work is done.
+///
+/// `run_all_base` rather than `standardized_lake`, because golden records only
+/// exist after a full resolve.
+#[test]
+fn profile_reads_the_resolved_corpus_not_only_the_standardized_one() {
+    if !enabled() {
+        return;
+    }
+    let (session, _config, _tmp) = run_all_base("profile_golden");
+
+    // The premise: there is a resolved corpus to profile, and it is SMALLER
+    // than the standardized one (base_10's ten people arrive as more rows
+    // across three sources and resolve back down). Asserted so that a golden
+    // profile silently reading the wrong relation cannot pass.
+    let golden_rows = lake_count(&session, "golden_records");
+    let std_rows = lake_count(&session, "int_std_records");
+    assert!(golden_rows > 0, "the fixture must resolve to some entities");
+    assert!(
+        golden_rows < std_rows,
+        "resolution should collapse rows: {golden_rows} golden vs {std_rows} standardized"
+    );
+
+    // `run_all` already auto-profiles — one raw profile per delivered source
+    // plus the standardized corpus — so the interesting number is the DELTA,
+    // not the total. Asserted rather than assumed: the first draft of this test
+    // expected an empty table and found four, which is itself the evidence that
+    // the auto-profile-on-delivery path runs inside a real pipeline.
+    let before = lake_count(&session, "profile_runs");
+    assert!(
+        before > 0,
+        "run_all should have auto-profiled the deliveries and the standardized corpus"
+    );
+
+    let report = er_cli::profile::run_profile(
+        &session,
+        &er_cli::profile::ProfileInputs {
+            subject: er_cli::profile::Subject::Golden,
+            source: None,
+            tier: 1,
+            options: &dedupe_core::profile::ProfileOptions {
+                exact_distinct: true,
+                sample: None,
+            },
+            account: false,
+            captured_at: "2026-01-04 00:00:00",
+            ingest_batch_id: None,
+        },
+    )
+    .unwrap();
+
+    assert_eq!(report.subject, "golden");
+    assert_eq!(
+        report.source_system,
+        er_cli::profile::NO_SOURCE,
+        "the resolved corpus is not source-scoped — it is what every source became"
+    );
+    assert_eq!(
+        report.row_count, golden_rows,
+        "the profile must describe the golden relation, not another stage"
+    );
+    assert!(
+        report.columns.iter().any(|c| c.column_name == "email"),
+        "golden records carry the surviving attributes: {:?}",
+        report
+            .columns
+            .iter()
+            .map(|c| &c.column_name)
+            .collect::<Vec<_>>()
+    );
+
+    // It persists under its OWN natural key rather than overwriting a profile
+    // of another stage: `subject` is part of that key, so the golden profile is
+    // one new row even though the standardized corpus was already profiled.
+    assert_eq!(
+        lake_count(&session, "profile_runs"),
+        before + 1,
+        "the golden profile must be a new run, not a rewrite of another subject's"
+    );
+
+    // And the cache claim holds for this subject too — re-profiling the same
+    // snapshot at the same tier rewrites the same row instead of appending.
+    // Worth asserting per subject rather than once: the natural key is
+    // (subject, source_system, snapshot, tier), so a key that silently dropped
+    // `subject` would pass the standardized test and double every golden
+    // profile.
+    let again = er_cli::profile::run_profile(
+        &session,
+        &er_cli::profile::ProfileInputs {
+            subject: er_cli::profile::Subject::Golden,
+            source: None,
+            tier: 1,
+            options: &dedupe_core::profile::ProfileOptions {
+                exact_distinct: true,
+                sample: None,
+            },
+            account: false,
+            captured_at: "2026-01-05 00:00:00",
+            ingest_batch_id: None,
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        lake_count(&session, "profile_runs"),
+        before + 1,
+        "re-profiling the golden corpus is a MERGE, not an append"
+    );
+    assert_eq!(
+        again.profile_run_id, report.profile_run_id,
+        "and it is the same run row, so a stored profile keeps its handle"
+    );
+}
+
 #[test]
 fn profile_findings_name_the_columns_they_are_about() {
     if !enabled() {
