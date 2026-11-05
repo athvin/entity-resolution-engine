@@ -57,6 +57,8 @@ merge_noops_on=
 failed_contexts=
 bus_state_final=CLEAN
 move_main=0
+api_fails_recent=
+api_fails_bus=
 candidates=101 102
 state_101=CLEAN
 draft_101=false
@@ -81,6 +83,11 @@ case "$SCEN" in
   moved)     printf 'CLEAN\n'          >"$SIM/busstate.seq"; add "move_main=1" ;;
   partial)   printf 'CLEAN\n'          >"$SIM/busstate.seq"; add "merge_fails_on=102" ;;
   lying)     printf 'CLEAN\n'          >"$SIM/busstate.seq"; add "merge_noops_on=102" ;;
+  preflight-blind)
+             printf 'BLOCKED\nCLEAN\n'  >"$SIM/busstate.seq"; add "api_fails_recent=1" ;;
+  verdict-blind)
+             printf 'BLOCKED\n'        >"$SIM/busstate.seq"
+             add "failed_contexts=test" "bus_state_final=BLOCKED" "api_fails_bus=1" ;;
   reject)    printf 'CLEAN\n'          >"$SIM/busstate.seq"
              add "candidates=101 102 104 105 106" \
                  "state_104=DIRTY" "draft_104=false" "base_104=main" "head_104=feat-c" \

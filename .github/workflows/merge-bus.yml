@@ -86,6 +86,17 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  # `actions: read` is NOT optional, and leaving it out is how the first live
+  # run failed. Declaring a `permissions:` block sets every scope you do not
+  # name to `none`, so both the starvation pre-flight and the verdict
+  # classification — each of which reads `/actions/runs` to count executed
+  # steps — got `Resource not accessible by integration (HTTP 403)` and the
+  # build step died before it created anything.
+  #
+  # Nothing offline could have caught this: the simulator stubs `gh`, so token
+  # scopes are never exercised. It is the reason this repo insists a gate be
+  # observed working before it is trusted.
+  actions: read
 
 concurrency:
   # ONE bus at a time, and never cancelled. `cancel-in-progress: true` here would
@@ -260,19 +271,42 @@ jobs:
           # Several runs rather than one, because a single starved run may just
           # be a run that lost a race for capacity — only an unbroken streak is
           # evidence of the account-level block.
+          # A FAILED API CALL IS NOT DATA. The first version interpolated the
+          # call straight into `for rid in $(gh api ...)`, so when the call
+          # 403'd its error text became the loop's word list and the next
+          # request went to `/actions/runs/gh:/jobs` — a 404 on a garbage id.
+          # Read the status explicitly instead, and treat an unreadable API as
+          # unknown rather than as an answer.
+          recent=""
+          if ! recent="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?status=completed&per_page=5" \
+                           --jq '.workflow_runs[].id' 2>/dev/null)"; then
+            # Advisory, not a gate: this check only saves a wasted batch during
+            # an outage, and the verdict classification below is the real
+            # safety net. Failing closed here would let a permissions hiccup
+            # block every merge.
+            echo "::warning::could not read recent run history (needs \`actions: read\`); skipping the capacity pre-flight"
+            recent=""
+          fi
+
           starved=0; checked=0
-          for rid in $(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?status=completed&per_page=5" \
-                         --jq '.workflow_runs[].id'); do
+          for rid in $recent; do
+            case "$rid" in ''|*[!0-9]*) continue ;; esac
             steps="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${rid}/jobs?per_page=100" \
-                       --jq '[.jobs[].steps | length] | add // 0')"
+                       --jq '[.jobs[].steps | length] | add // 0' 2>/dev/null || echo skip)"
+            case "$steps" in ''|*[!0-9]*) continue ;; esac
             checked=$((checked + 1))
             [ "$steps" -eq 0 ] && starved=$((starved + 1))
           done
+
           if [ "$checked" -gt 0 ] && [ "$starved" -eq "$checked" ]; then
             echo "::error::None of the last ${checked} completed runs executed a single step. GitHub is not allocating runners for this account — an Actions minutes or spending limit, not a problem with any PR. A bus PR could only fail for that reason, so nothing was created."
             exit 1
           fi
-          echo "pre-flight: runners are being allocated (${starved}/${checked} recent runs starved)"
+          if [ "$checked" -eq 0 ]; then
+            echo "pre-flight: no readable run history; proceeding (the verdict step still classifies starvation)"
+          else
+            echo "pre-flight: runners are being allocated (${starved}/${checked} recent runs starved)"
+          fi
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -398,15 +432,29 @@ jobs:
           # Authoritative here because it reads the bus PR's OWN runs.
           if [ "$verdict" != "green" ]; then
             head_sha="$(gh pr view "$BUS" --json headRefOid --jq .headRefOid)"
-            executed=0
-            for rid in $(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${head_sha}&per_page=20" \
-                           --jq '.workflow_runs[].id'); do
-              steps="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${rid}/jobs?per_page=100" \
-                         --jq '[.jobs[].steps | length] | add // 0')"
-              executed=$((executed + steps))
-            done
-            echo "steps executed across the bus PR's runs: ${executed}"
-            [ "$executed" -eq 0 ] && verdict="starved"
+            # `read_ok` matters more than `executed`. If the Actions API cannot
+            # be read, `executed` stays 0 — which would relabel a genuinely RED
+            # batch as `starved`, suppressing the bus-failed label and the
+            # member comments and telling everyone to go look at their billing.
+            # Claiming starvation requires evidence, not the absence of it.
+            read_ok=0; executed=0; runs=""
+            if runs="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${head_sha}&per_page=20" \
+                         --jq '.workflow_runs[].id' 2>/dev/null)"; then
+              for rid in $runs; do
+                case "$rid" in ''|*[!0-9]*) continue ;; esac
+                steps="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${rid}/jobs?per_page=100" \
+                           --jq '[.jobs[].steps | length] | add // 0' 2>/dev/null || echo skip)"
+                case "$steps" in ''|*[!0-9]*) continue ;; esac
+                read_ok=1
+                executed=$((executed + steps))
+              done
+            fi
+            if [ "$read_ok" -eq 1 ]; then
+              echo "steps executed across the bus PR's runs: ${executed}"
+              [ "$executed" -eq 0 ] && verdict="starved"
+            else
+              echo "::warning::could not read the bus PR's run history; reporting as ${verdict} rather than guessing at starvation"
+            fi
           fi
 
           echo "verdict: $verdict"
