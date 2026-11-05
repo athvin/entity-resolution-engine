@@ -38,6 +38,13 @@ spec:
 # port list's doing rather than the selector's: the rule admits one port, the
 # BFF's, and er-server's 8000 is not in it. §4.1's "er-api is on no load
 # balancer in any environment" therefore still holds for the whole pod.
+#
+# COLOUR-AGNOSTIC ON PURPOSE. `web-api` is two Deployments now, one per colour,
+# and both carry this label — so the hole admits whichever colour is live
+# without this policy knowing which that is. If it were pinned to a colour, a
+# cutover would blackhole the newly-active pod until someone also updated a
+# NetworkPolicy in the OTHER chart, and the symptom would be a green deploy
+# serving 100% errors with every probe passing.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

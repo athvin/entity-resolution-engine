@@ -75,6 +75,45 @@ erserver:
     from: "" # ER_MAIL_FROM; required by `ses`, which disables itself without it
     configurationSet: "" # ER_MAIL_CONFIGURATION_SET; terraform output ses_configuration_set_name
 
+# Blue/green for the web-api pod. TWO Deployments, one per colour, and the
+# `er-api`/`er-web` Services select `color.active` — so a cutover is one field
+# on two Service objects and a rollback is that field moving back, with the old
+# pod still running because its colour was never scaled down.
+#
+# WHY `active` IS A VALUE AND THE INACTIVE COLOUR IS NOT. There is one source of
+# truth and the other half is derived (`er-platform.inactiveColor`). Two
+# independent values could be set to the same colour, which renders a preview
+# Service pointing at the LIVE pod — and then the cutover's smoke test passes by
+# testing what is already in production. That failure looks like success, which
+# is the worst kind, so the shape makes it unrepresentable.
+#
+# DEFAULTS ARE A SINGLE LIVE COLOUR. `blue` at one replica, `green` at zero and
+# pinning no images, so an install that knows nothing about colours — kind, a
+# developer namespace, `make dev-up` — gets exactly the topology it had before,
+# one serving pod, plus a second Deployment scaled to zero. The rendered
+# difference against the previous chart is the Deployment's name and one label.
+#
+# ADOPTING THIS COSTS ONE RESTART. The Deployment is renamed `web-api` ->
+# `web-api-blue`, so the first upgrade after this lands deletes the old object
+# and creates the new one. Every upgrade after that can be a cutover.
+#
+# PER-COLOUR DIGESTS are the point of the nested `api`/`web` blocks: a deploy
+# pins the NEW image into the inactive colour while the live colour keeps the
+# digest it is already serving. One shared `images.api` would re-render both
+# Deployments on every upgrade and restart the colour taking traffic, which is
+# the outage this exists to remove. Empty falls back to `images.*`, which is
+# what keeps the single-colour default working.
+color:
+  active: blue
+  blue:
+    replicas: 1
+    api: { tag: "", digest: "" }
+    web: { tag: "", digest: "" }
+  green:
+    replicas: 0
+    api: { tag: "", digest: "" }
+    web: { tag: "", digest: "" }
+
 api:
   replicas: 1
   resources:

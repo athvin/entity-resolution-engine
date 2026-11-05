@@ -1,7 +1,25 @@
-# Both ClusterIP, both selecting the merged web-api pod. er-api is on no load
-# balancer in any environment (§4.1); er-web is reached through the Ingress.
-# The Service names are unchanged so the Ingress and any er-api DNS references
-# keep resolving — they just both point at the one web-api pod now.
+{{- $active := include "er-platform.activeColor" . }}
+{{- $inactive := include "er-platform.inactiveColor" . }}
+# Four Services over two colours.
+#
+# `er-api` and `er-web` are the LIVE pair: they add
+# `er.dupezero.com/color: {{ $active }}` to the selector, so moving traffic
+# between colours is a one-field change to these two objects and nothing else.
+# That is the whole cutover — no new controller, no second Ingress, no weighted
+# target group. Rollback is the same field moving back, with the old pod still
+# running because the colour was never scaled down.
+#
+# `er-api-preview` and `er-web-preview` are the INACTIVE pair, and they are what
+# makes the cutover gateable: the new colour can be deployed, probed and
+# smoke-tested through them while taking no production traffic. They are
+# ClusterIP like the others, so a `kubectl port-forward` reaches them with no
+# edge at all — which is why this works today, before the ALB of task 1.4
+# exists.
+#
+# Both halves of a colour are one pod (er-server on 8000, the BFF on 3000), so
+# `er-api` and `er-web` necessarily select the same pod and differ only in port.
+# `er-api` is on no load balancer in any environment (§4.1); `er-web` is the
+# only one the Ingress names.
 apiVersion: v1
 kind: Service
 metadata:
@@ -14,7 +32,29 @@ metadata:
 spec:
   type: ClusterIP
   selector:
-    {{- include "er-platform.selectorLabels" (dict "root" . "name" "web-api") | nindent 4 }}
+    {{- include "er-platform.selectorLabels" (dict "root" . "name" "web-api" "color" $active) | nindent 4 }}
+  ports:
+    - name: http
+      port: 8000
+      targetPort: api
+---
+# The inactive colour's control plane, for the cutover's preflight. Deliberately
+# present even when that colour is at `replicas: 0`: a Service with no endpoints
+# is a connection refused, which is a clearer signal to a smoke test than a
+# Service that does not exist.
+apiVersion: v1
+kind: Service
+metadata:
+  name: er-api-preview
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: er-api-preview
+    app.kubernetes.io/component: web-api
+    {{- include "er-platform.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "er-platform.selectorLabels" (dict "root" . "name" "web-api" "color" $inactive) | nindent 4 }}
   ports:
     - name: http
       port: 8000
@@ -33,7 +73,30 @@ metadata:
 spec:
   type: ClusterIP
   selector:
-    {{- include "er-platform.selectorLabels" (dict "root" . "name" "web-api") | nindent 4 }}
+    {{- include "er-platform.selectorLabels" (dict "root" . "name" "web-api" "color" $active) | nindent 4 }}
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
+---
+# What a human or a deploy job hits to decide whether the new colour is fit to
+# serve. The one rule: this must point at the colour that is NOT live, or the
+# smoke test passes by testing production. `er-platform.inactiveColor` derives
+# it from `color.active` for that reason, and
+# `scripts/ci/charts-check.py` asserts the result.
+apiVersion: v1
+kind: Service
+metadata:
+  name: er-web-preview
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: er-web-preview
+    app.kubernetes.io/component: web-api
+    {{- include "er-platform.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "er-platform.selectorLabels" (dict "root" . "name" "web-api" "color" $inactive) | nindent 4 }}
   ports:
     - name: http
       port: 3000

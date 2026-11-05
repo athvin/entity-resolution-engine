@@ -22,6 +22,42 @@ helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
 {{- define "er-platform.selectorLabels" -}}
 app.kubernetes.io/name: {{ .name }}
 app.kubernetes.io/instance: {{ .root.Release.Name }}
+{{- with .color }}
+er.dupezero.com/color: {{ . }}
+{{- end }}
+{{- end }}
+
+{{/* The colour the Services currently select. One value, read from one place,
+     so the Services and the preview Services cannot disagree about which half
+     is live.
+
+     `fail` rather than a lint, because the failure is silent otherwise and the
+     chart is the only place that cannot be bypassed: a typo'd
+     `--set color.active=gren` renders Services selecting a colour no Deployment
+     carries, so they get no endpoints and the namespace serves nothing — while
+     `helm upgrade` reports success, because every object applied cleanly. CI
+     cannot catch it either; the value arrives on the deploy command line, not
+     in the tree. Refusing to render is the only place this is checkable at the
+     moment it is wrong. */}}
+{{- define "er-platform.activeColor" -}}
+{{- $active := .Values.color.active -}}
+{{- if not (has $active (list "blue" "green")) -}}
+{{- fail (printf "color.active must be \"blue\" or \"green\", got %q — the Services would select a colour no Deployment carries, leaving them with no endpoints while the upgrade reported success" $active) -}}
+{{- end -}}
+{{- $active -}}
+{{- end }}
+
+{{/* The OTHER colour: what a preview Service points at, and what the next
+     deploy writes into.
+
+     Derived rather than configured, deliberately. Two independent values would
+     let a deploy set `active: blue` and `inactive: blue`, which renders a
+     preview Service aimed at the live pod — and then the cutover's smoke test
+     passes by testing the thing already in production, which is the one failure
+     that would make the whole mechanism decorative without looking broken.
+     `scripts/ci/charts-check.py` asserts the result anyway. */}}
+{{- define "er-platform.inactiveColor" -}}
+{{- if eq .Values.color.active "blue" -}}green{{- else -}}blue{{- end -}}
 {{- end }}
 
 {{/* Image ref for a component: (dict "root" . "image" .Values.images.api).
@@ -127,4 +163,26 @@ seccompProfile:
 allowPrivilegeEscalation: false
 capabilities:
   drop: ["ALL"]
+{{- end }}
+
+{{/* The image for one half of one colour: (dict "root" $ "spec" $spec "half" "api").
+
+     Each colour pins its own digests so a cutover can deploy the new image into
+     the inactive colour while the live one keeps the digest it is already
+     serving. That is the whole reason this is per-colour and not one
+     `images.api`: a single shared value would re-render BOTH Deployments on
+     every upgrade, which restarts the colour currently taking traffic — the
+     outage the mechanism exists to remove.
+
+     Falls back to `images.api`/`images.web` when a colour pins nothing, so an
+     install that does not care about colours (kind, a developer namespace)
+     needs no colour values at all and behaves exactly as before. */}}
+{{- define "er-platform.colorImage" -}}
+{{- $base := index .root.Values.images .half -}}
+{{- $pin := index .spec .half -}}
+{{- $image := dict
+      "repository" $base.repository
+      "tag" (default $base.tag $pin.tag)
+      "digest" (default $base.digest $pin.digest) -}}
+{{- include "er-platform.image" (dict "root" .root "image" $image) -}}
 {{- end }}

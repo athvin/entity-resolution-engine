@@ -8,30 +8,54 @@
 #     API over localhost. The only container exposed via the Ingress.
 # Postgres stays its own StatefulSet. Recreate: the init container migrates the
 # control-plane schema, and no old code may see a migrated schema mid-flight.
+#
+# ---------------------------------------------------------------------------
+# TWO of these, one per colour, and `services.yaml` decides which one serves.
+#
+# `Recreate` and `replicas` stay per-colour rather than becoming a rolling
+# update: WITHIN a colour the semantics are exactly what they were, so
+# redeploying the live colour behaves as it always has. The zero-downtime
+# property comes from the OTHER colour already being up and healthy before the
+# Service selector moves, not from how either one rolls.
+#
+# A colour at `replicas: 0` still renders its Deployment. That is deliberate —
+# it is what makes `--set color.green.replicas=1` a scale-up rather than a
+# create, so the cutover never waits on a first image pull, and it is why the
+# preview Services below always have something to point at.
+#
+# The init container is still here and still migrates in-place. Moving it to a
+# pre-upgrade hook that may only add is the NEXT change (and the reason
+# `er-server migrate --expect-additive` exists); until then a colour deploy
+# carries the same in-place migration it always did, and the colour dimension
+# alone buys the traffic half of blue/green.
+# ---------------------------------------------------------------------------
+{{- range $color := list "blue" "green" }}
+{{- $spec := index $.Values.color $color }}
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: web-api
-  namespace: {{ .Release.Namespace }}
+  name: web-api-{{ $color }}
+  namespace: {{ $.Release.Namespace }}
   labels:
     app.kubernetes.io/name: web-api
     app.kubernetes.io/component: web-api
-    {{- include "er-platform.labels" . | nindent 4 }}
+    {{- include "er-platform.labels" $ | nindent 4 }}
   annotations:
     reloader.stakater.com/auto: "true" # §9.1 — roll on secret rotation
 spec:
-  replicas: 1
+  replicas: {{ $spec.replicas }}
   strategy:
     type: Recreate
   selector:
     matchLabels:
-      {{- include "er-platform.selectorLabels" (dict "root" . "name" "web-api") | nindent 6 }}
+      {{- include "er-platform.selectorLabels" (dict "root" $ "name" "web-api" "color" $color) | nindent 6 }}
   template:
     metadata:
       labels:
         app.kubernetes.io/component: web-api
-        {{- include "er-platform.selectorLabels" (dict "root" . "name" "web-api") | nindent 8 }}
-        {{- include "er-platform.labels" . | nindent 8 }}
+        {{- include "er-platform.selectorLabels" (dict "root" $ "name" "web-api" "color" $color) | nindent 8 }}
+        {{- include "er-platform.labels" $ | nindent 8 }}
     spec:
       serviceAccountName: er-api
       # Endpoint removal is ASYNCHRONOUS with the SIGTERM: the kubelet signals
@@ -48,7 +72,7 @@ spec:
       # carries a 3Gi ceiling; Next's own guidance for its half asks for 10-30s.
       terminationGracePeriodSeconds: 60
       securityContext:
-        {{- include "er-platform.podSecurityContext" . | nindent 8 }}
+        {{- include "er-platform.podSecurityContext" $ | nindent 8 }}
       initContainers:
         # The control-plane schema, BEFORE the new er-server serves: the baseline
         # (every table) plus the reconciler (every column the catalog in this
@@ -60,14 +84,14 @@ spec:
         # (idempotent, advisory-locked), so a dev stack without this container
         # behaves the same.
         - name: er-migrate
-          image: {{ include "er-platform.image" (dict "root" . "image" .Values.images.api) }}
+          image: {{ include "er-platform.colorImage" (dict "root" $ "spec" $spec "half" "api") }}
           command: ["er-server", "migrate"]
           securityContext:
-            {{- include "er-platform.containerSecurityContext" . | nindent 12 }}
+            {{- include "er-platform.containerSecurityContext" $ | nindent 12 }}
             runAsUser: 1001
             runAsGroup: 1001
           env:
-            {{- include "er-platform.erserverEnv" . | nindent 12 }}
+            {{- include "er-platform.erserverEnv" $ | nindent 12 }}
           envFrom:
             - secretRef:
                 name: er-erserver-env
@@ -77,21 +101,21 @@ spec:
       containers:
         # --- the Rust control plane + in-process dispatcher ---
         - name: er-server
-          image: {{ include "er-platform.image" (dict "root" . "image" .Values.images.api) }}
+          image: {{ include "er-platform.colorImage" (dict "root" $ "spec" $spec "half" "api") }}
           securityContext:
-            {{- include "er-platform.containerSecurityContext" . | nindent 12 }}
+            {{- include "er-platform.containerSecurityContext" $ | nindent 12 }}
             runAsUser: 1001
             runAsGroup: 1001
           ports:
             - name: api
               containerPort: 8000
           env:
-            {{- include "er-platform.erserverEnv" . | nindent 12 }}
+            {{- include "er-platform.erserverEnv" $ | nindent 12 }}
             # The cancel route needs to know which kinds the EXECUTOR runs
             # (cancel-through-canceling vs the legacy arm); this populates
             # AppState.executor_kinds only — the API process never builds an
             # executor, that is the dispatcher Deployment's job.
-            {{- with .Values.executor.dagKinds }}
+            {{- with $.Values.executor.dagKinds }}
             - name: ER_EXECUTOR_DAG_KINDS
               value: {{ . | quote }}
             {{- end }}
@@ -142,10 +166,10 @@ spec:
               sleep:
                 seconds: 5
           resources:
-            {{- toYaml .Values.api.resources | nindent 12 }}
+            {{- toYaml $.Values.api.resources | nindent 12 }}
           volumeMounts:
             - name: er-efs
-              mountPath: {{ .Values.efs.mountPath }}
+              mountPath: {{ $.Values.efs.mountPath }}
             - name: duckdb-tmp
               mountPath: /app/.tmp
             # The §6.4 key-set credential, EXPLICIT because automount stays
@@ -159,12 +183,12 @@ spec:
             - name: api-server-token
               mountPath: /var/run/secrets/kubernetes.io/serviceaccount
               readOnly: true
-        {{- if .Values.web.enabled }}
+        {{- if $.Values.web.enabled }}
         # --- the Next.js BFF (browser-facing) ---
         - name: er-web
-          image: {{ include "er-platform.image" (dict "root" . "image" .Values.images.web) }}
+          image: {{ include "er-platform.colorImage" (dict "root" $ "spec" $spec "half" "web") }}
           securityContext:
-            {{- include "er-platform.containerSecurityContext" . | nindent 12 }}
+            {{- include "er-platform.containerSecurityContext" $ | nindent 12 }}
             runAsUser: 1000
             runAsGroup: 1000
           ports:
@@ -174,9 +198,9 @@ spec:
             # Same pod — reach the API over localhost, no Service hop.
             - name: ERSERVER_BASE_URL
               value: http://localhost:8000
-            {{- if .Values.ingress.enabled }}
+            {{- if $.Values.ingress.enabled }}
             - name: ERWEB_PUBLIC_BASE_URL
-              value: https://{{ include "er-platform.host" . }}
+              value: https://{{ include "er-platform.host" $ }}
             {{- end }}
             - name: ERSERVER_OPERATOR_TOKEN
               valueFrom:
@@ -220,7 +244,7 @@ spec:
               sleep:
                 seconds: 5
           resources:
-            {{- toYaml .Values.web.resources | nindent 12 }}
+            {{- toYaml $.Values.web.resources | nindent 12 }}
         {{- end }}
       volumes:
         - name: er-efs
@@ -247,3 +271,4 @@ spec:
                     - path: namespace
                       fieldRef:
                         fieldPath: metadata.namespace
+{{- end }}
