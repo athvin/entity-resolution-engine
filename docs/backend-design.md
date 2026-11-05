@@ -1,28 +1,39 @@
 # Backend design: a multi-tenant SaaS on the ER engine
 
-*A high-level design for a FastAPI backend with background job execution that turns the existing entity-resolution engine into the backend of a direct [Cloudingo](research-cloudingo.md) competitor. This is a design document — no code, no API payload schemas. Written 2026-09-25.*
+*A high-level design for a control-plane backend with background job execution that
+turns the existing entity-resolution engine into the backend of a direct
+[Cloudingo](research-cloudingo.md) competitor. This is a design document — no code, no
+API payload schemas. Written 2026-09-25 against a FastAPI implementation that has
+since been rewritten in Rust; the design held, the paths did not.*
 
-> **Implementation status (2026-09-25).** Phases 1–3 of §15 are built and
-> tested — see [server/README.md](../server/README.md). Engine side:
-> `src/er/service.py` (typed orchestration facade: run-all, correct, train)
-> and the per-tenant env overlay in `src/er/lake/env.py`
-> (`lake_environment`). Server side (`server/`, package `erserver`): jobs
-> queue with per-org serialization by unique index, exit-code-keyed retries,
-> cancel/resume, startup reaper, and live per-stage heartbeats streamed off
-> the engine's S5.2 stderr records; API-key auth with roles + operator token
-> + audit log; config versions with tier classification and publish (which
-> finally executes `correction_pass.cadence` as a schedule); cron schedules;
-> the snapshot-pinned read path (golden records, duplicate groups, entity
-> detail with lineage and events, runs, metrics); steward writes with
-> lock-conflict staging and dispatcher draining; imports (the drop-dir
-> connector seam); signed webhooks; merge-plan export. Verified by three
-> suites, including a full E2E that drives a real lake (Postgres catalog +
-> MinIO) entirely through the API and dispatcher. Deliberately not built
-> (needs external systems or is §15 phase 4–5): the Salesforce connector and
-> writeback ([connectors.md](connectors.md)), OIDC, STS per-tenant
-> credentials, FTS search, Marketo, non-person entity types. (The k8s Job
-> launcher has since shipped — `server/src/erserver/k8s.py`, live-probed per
-> plan-to-aws.md §2.3.)
+> **Implementation status — corrected.** The original note here described the Python
+> server as the implementation and pointed at `server/README.md`,
+> `src/er/service.py`, `src/er/lake/env.py` and `server/src/erserver/k8s.py`. **All
+> four are gone**, along with the rest of the Python/dbt engine: `git ls-files server`
+> returns nothing. What it described is now the Rust workspace under `rust/`.
+>
+> **Phases 1–3 of §15 remain delivered**, in `er-server`: a Postgres SKIP-LOCKED job
+> queue whose two correctness constraints are enforced by the database rather than
+> code, a claim-run-mark dispatcher (`dispatcher.rs`), cancel/resume, bearer and
+> API-key auth with four server-enforced roles plus an audit ledger, config versions
+> with publish tiers, cron schedules, the snapshot-pinned read path, steward writes
+> with lock-conflict staging, imports over the drop-dir seam, signed webhooks and
+> merge-plan export — across 88 `/v1` routes. The Kubernetes Job launcher is
+> `rust/crates/er-k8s`, and tenant provisioning is `provision.rs`.
+>
+> **Still not built** (external systems, or §15 phase 4–5): the Salesforce connector
+> and writeback ([connectors.md](connectors.md)), OIDC/SSO, per-tenant STS
+> credentials, FTS search, Marketo, and non-person entity types. Those are now
+> tracked card-by-card on the project board under the `epic` and `docs-backlog`
+> labels rather than prose here, because prose is what drifted.
+>
+> **Residual: every remaining `src/er/*.py` path in this document is historical, not
+> a location.** The header, §2, §3 and §15 were corrected; the inline citations in
+> §5, §8, §9 and §12 and the whole appendix table were deliberately left, because
+> translating them means guessing which Rust module inherited each responsibility
+> and a wrong path is worse than an obviously-dated one. Read them as *what the
+> design was built against*, and find the current owner in
+> `rust-conventions`' generated crate map. The sweep is tracked as its own card.
 
 ---
 
@@ -49,17 +60,34 @@ We already have the hard part — a proven, incremental entity-resolution engine
 
 ## 2. What the engine gives us vs what's missing
 
+> **This section was written against the Python implementation and has been
+> corrected. Most of what it called missing now exists.** Every `Where` path below
+> used to be a `src/er/*.py` file; there are **zero tracked files under `src/` or
+> `server/`** — the Python/dbt engine was rewritten into the `rust/` workspace and
+> removed. The paths are now Rust crates. The `Missing` list was four-sixths wrong:
+> the HTTP API, the job system, the scheduler and the read layer all shipped.
+>
+> §15's roadmap carries the same drift and is corrected there. Treat any remaining
+> status claim in this document as a hypothesis until checked against the code.
+
 **Assets (exist today, need only orchestration or an API veneer):**
 
 | Asset | Where |
 |---|---|
-| Pipeline stages as clean library functions (connection + `Config` + `StageRun` in, typed result out): ingest, standardize, train, match full/incremental, reconcile, assemble, correction chain | `src/er/ingest/landing.py`, `src/er/std/stage.py`, `src/er/matching/{full,incremental,train}.py`, `src/er/entities/reconcile_stage.py`, `src/er/golden/assemble.py` |
-| Merge-grid primitives: gray-band review queue (`open_reviews`/`resolve_review`) and always/never pair assertions (`add_assertion`/`retract_assertion`) — the merge/not-duplicate/undo mechanism | `src/er/review/queue.py`, `src/er/review/assertions.py` |
-| Job-ready run ledger: `runs`, `run_stages` (typed counters, snapshot ranges), `ingest_batches` receipts, stage-level resume, config-drift guard, idempotent re-execution per stage, exit-code taxonomy (0/1/2/3/10) | `src/er/obs/runctx.py`, `src/er/resume.py`, `src/er/versions.py`, `src/er/errors.py` |
-| Incremental correctness machinery: content-hash change detection, tombstones, frozen model + TF snapshots, affected-set reconcile, correction pass to repair drift | DesignDoc S4.3–S4.5, `src/er/matching/correction.py` |
-| Tenancy seam: `tenant` is a first-class config block keying a per-tenant Postgres advisory writer lock; isolation unit is the (metadata schema, data path) pair | `src/er/lake/catalog.py`, `configs/default.yaml` |
+| Pipeline stages as library functions (connection + config + run context in, typed result out): ingest, standardize, train, match full/incremental, reconcile, assemble, correction chain | `rust/crates/er-ingest`, `er-standardize`, `er-match`, `dedupe-core`, `er-reconcile`, `er-golden`; `er correct` in `er-cli/src/cli.rs` |
+| Merge-grid primitives: gray-band review queue and always/never pair assertions — the merge/not-duplicate/undo mechanism | the `review`, `pair_label` and `assertion` entities; `.../reviews`, `/reviews/{id}/resolve`, `/reviews/bulk-resolve`, `.../assertions`, `/assertions/contradictions` |
+| Job-ready run ledger: `runs`, `run_stages` (typed counters, snapshot ranges), `ingest_batches` receipts, stage-level resume, config-drift guard, idempotent re-execution per stage, exit-code taxonomy (0/1/2/3/10) | the `run`, `run_stage`, `ingest_batch`, `task_instance` entities; `rust/crates/er-versions`, `er-errors` (`ExitCode::{Success,Config,Precondition,StageFailure,NothingToDo}`) |
+| Incremental correctness machinery: content-hash change detection, tombstones, frozen model + TF snapshots, affected-set reconcile, correction pass to repair drift | DesignDoc S4.3–S4.5, `rust/crates/er-match`, `er-hash`, `er-ids` |
+| Tenancy seam: a per-dataset Postgres advisory writer lock under a per-org concurrency cap; isolation unit is the (metadata schema, data path) pair | `rust/crates/er-server/src/provision.rs`, `er-config`, `configs/default.yaml` |
 
-**Missing (what this design adds):** an HTTP API, a background job system, a scheduler (config declares `correction_pass.cadence` but nothing executes it), a Python read layer (golden records are raw SQL over dbt marts), connectors, and any writeback path. Also one honest engine gap: the canonical schema is person-centric (§13).
+**Missing (what this design adds)** — corrected, with what shipped struck through:
+~~an HTTP API~~ (88 `/v1` routes in `er-server`), ~~a background job system~~ (a
+Postgres SKIP-LOCKED queue with a claim-run-mark dispatcher), ~~a scheduler~~ (the
+`schedule` entity and a tick that fires), ~~a read layer~~ (`.../golden-records`,
+`.../records`, `.../duplicates`, `.../match-scores` and the rest). **Still missing:
+connectors beyond the generic ingress seam — specifically the Salesforce
+connector — and any writeback path.** Plus the one honest engine gap, unchanged: the
+canonical schema is person-centric (§13).
 
 **The two constraints that shape everything:**
 
@@ -72,7 +100,7 @@ Classification: **ENGINE** (exists, needs an API veneer) · **EXT** (engine exte
 
 | Cloudingo capability | Our delivering feature | Class | Honest gap |
 |---|---|---|---|
-| Filters (prebuilt + custom, per object) | Match-config service: templates compiling to `blocking`/`comparisons`/`thresholds` config blocks, with a publish workflow (§6) | ENGINE + NEW | Matching is stronger (probabilistic) but there's no edit API, and edits trip drift guards. One model per DATASET per entity type — a tenant that needs independent rule sets gives each object its own dataset, which is also how it gets its own entity type. |
+| Filters (prebuilt + custom, per object) | Match-config service: templates compiling to `blocking`/`comparisons`/`thresholds` config blocks, with a publish workflow (§6) | ENGINE + NEW | Matching is stronger (probabilistic). ~~There's no edit API~~ — the edit API shipped: `.../config`, `.../config/versions`, `.../config/versions/{version}` and `.../config/versions/{version}/publish`, with a publish gate that reads the profile and advises rather than refuses. Edits still interact with drift guards. One model per DATASET per entity type — a tenant that needs independent rule sets gives each object its own dataset, which is also how it gets its own entity type. |
 | Merge grid (manual/mass/auto) | Duplicate-groups API (entity-centric read model) + assertions + apply service | ENGINE + NEW | Engine review queue is pair-centric gray-band only; groups ≥0.95 auto-merge silently in the lake. The grid needs a new group read model. |
 | Preserves attachments/notes/opportunities | Salesforce `merge()` natively reparents children | CONN | Free once writeback exists; we never touch child records. |
 | Survivorship rules | `survivorship` config block (ordered rule chain per attribute) + new master-election policy | ENGINE + NEW | Engine picks field *values*, not a master *record*; Salesforce merge needs a master ID (§10). |
@@ -283,14 +311,20 @@ The canonical schema is person-centric end to end (given/family name, email, pho
 
 ## 15. Roadmap
 
-| Phase | Scope | Why |
-|---|---|---|
-| **1 — Walking skeleton** | Control-plane DB (orgs, keys, config as uploaded YAML), `er/service.py`, `jobs` + dispatcher + k8s Job runner for run-all full/incremental, heartbeat status, one pilot tenant | Proves the riskiest seam end-to-end: job-per-pod running the unmodified sync engine under the advisory lock inside a tier-sized resource envelope |
-| **2 — Read + steward** | `LakeSettings`, read-API module, golden/duplicates/reviews/assertions endpoints, snapshot-pinned pagination, roles | Makes the product demoable against Cloudingo's merge grid — the buying moment |
-| **3 — Automation + connector seam → MVP launch** | Schedules, retry/resume/idempotency, imports (preview report), events/webhooks, config versioning + publish tiers; **Salesforce connector in insights mode** (OAuth, Lead+Contact, bulk sync, polling); dashboards; merge-plan CSV export | The smallest sellable wedge: a zero-risk "audit your org" with visibly better match quality, priced under Cloudingo Standard, with the export as the action bridge |
-| **4 — Parity: writeback** | Apply service (preview → approve → apply, journal, staleness guard), manual/mass/auto tiers, undo/restore, import commit + upsert, Accounts (organization entity type), field analysis, continuous micro-batch tier, per-tenant STS creds, SOC2 groundwork | Exit criterion: a Cloudingo Standard/Professional customer switches without losing a workflow (accepting minutes-not-seconds real-time) |
-| **5 — Differentiation** | Cross-object Lead↔Contact resolution surfaced (with convert writeback), Marketo + generic file/S3 sources, custom objects, synchronous `/check` for entry-time dedupe, time-travel/audit reporting, per-tenant model tuning, self-hosted option | Attacks where Cloudingo structurally can't follow |
+> **Phases 1–3 are substantially delivered; phase 1's `er/service.py` is a Python
+> path that no longer exists.** What remains unbuilt in phase 3 is the one thing it
+> shares with phase 4: the **Salesforce connector**. Phases 4 and 5 are open, and are
+> now tracked card-by-card on the project board rather than here — see the
+> `docs-backlog` and `epic` labels. The `Status` column below was added in that audit;
+> the `Scope` text is left as written so the original plan stays legible.
 
+| Phase | Scope | Why | Status |
+|---|---|---|---|
+| **1 — Walking skeleton** | Control-plane DB (orgs, keys, config as uploaded YAML), `er/service.py`, `jobs` + dispatcher + k8s Job runner for run-all full/incremental, heartbeat status, one pilot tenant | Proves the riskiest seam end-to-end: job-per-pod running the unmodified sync engine under the advisory lock inside a tier-sized resource envelope | **done.** The control plane, job queue, dispatcher and K8s Job runner all ship. `er/service.py` is a dead Python path; the equivalent is `er-server`. |
+| **2 — Read + steward** | `LakeSettings`, read-API module, golden/duplicates/reviews/assertions endpoints, snapshot-pinned pagination, roles | Makes the product demoable against Cloudingo's merge grid — the buying moment | **done.** Golden/duplicates/reviews/assertions endpoints ship with keyset pagination and four server-enforced roles. |
+| **3 — Automation + connector seam → MVP launch** | Schedules, retry/resume/idempotency, imports (preview report), events/webhooks, config versioning + publish tiers; **Salesforce connector in insights mode** (OAuth, Lead+Contact, bulk sync, polling); dashboards; merge-plan CSV export | The smallest sellable wedge: a zero-risk "audit your org" with visibly better match quality, priced under Cloudingo Standard, with the export as the action bridge | **done except the connector.** Schedules, retry/resume, imports with receipts, webhooks, config versioning + publish and dashboards all ship. **The Salesforce connector does not** — that is the MVP blocker, tracked as #511/#512. |
+| **4 — Parity: writeback** | Apply service (preview → approve → apply, journal, staleness guard), manual/mass/auto tiers, undo/restore, import commit + upsert, Accounts (organization entity type), field analysis, continuous micro-batch tier, per-tenant STS creds, SOC2 groundwork | Exit criterion: a Cloudingo Standard/Professional customer switches without losing a workflow (accepting minutes-not-seconds real-time) | **open.** Tracked as #514 (apply service), #530 (rollback/retry), #547 (organization entity type), #525 (continuous tier), #550 (per-tenant creds), #540 (SOC 2). |
+| **5 — Differentiation** | Cross-object Lead↔Contact resolution surfaced (with convert writeback), Marketo + generic file/S3 sources, custom objects, synchronous `/check` for entry-time dedupe, time-travel/audit reporting, per-tenant model tuning, self-hosted option | Attacks where Cloudingo structurally can't follow | **open.** Tracked as #520 (convert writeback), #548 (Marketo), #529 (`/check`), #547 (custom objects). |
 ## 16. Hardest problems and risks
 
 **Technical (each answered in the design):**
