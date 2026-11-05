@@ -228,20 +228,33 @@ not the write having failed.** Re-read before concluding anything, and never
 retry a create because the first one "did not appear" — that is how duplicates
 get made. `item-add` is idempotent and `item-create` is not.
 
-## Conventions here — provisional
+## Conventions here
 
-The board is GitHub's stock "Product Roadmap" template and has carried no real
-work yet, so what follows is a starting point rather than settled practice.
-Edit this section as it gets used; it is the one part of this skill that is not
-a verified property of the board.
+The board is GitHub's stock "Product Roadmap" template. It carries the
+**DataGroomr parity epics** — one issue per epic, labelled `epic` plus exactly
+one of `mvp` / `post-appexchange`, titled `E<n> — <name>`. The conventions
+below were settled while loading them; they are practice rather than a property
+of the board, so edit this section as it changes.
 
 - **`Status`** is `Todo` / `In progress` / `Done`, and the automations own most
-  of its movement. Treat a hand edit as the exception.
+  of its movement. Treat a hand edit as the exception. `In progress` here means
+  **part-built** — an epic whose foundation already exists in the engine — not
+  that someone is working on it this week. That reading is a local convention
+  and will mislead anyone who assumes the usual one.
 - **`Priority`** is `P0` / `P1` / `P2`. There is no P3 — the absence of a
-  priority is the backlog.
-- **`Size`** (`XS`–`XL`) and **`Estimate`** (a number) both exist, which is the
-  template's doing. Pick one and leave the other empty; two maintained
-  estimates disagree within a week.
+  priority is the backlog, and that is load-bearing: the lowest-ranked epics
+  carry no priority at all rather than a notional P2.
+- **`Estimate`** carries **engineering-weeks remaining**, and **`Size` is left
+  empty**. Both fields exist because the template ships both; two maintained
+  estimates disagree within a week, so pick one. Estimate won because it sums —
+  a board view totals a release's weeks, which `XS`–`XL` cannot.
+- **The release flag is a repo label, not a board field.** Labels travel with
+  the issue and work in `gh issue list --label mvp`; a board field would be
+  invisible outside the board. The cost is that board views can filter on it
+  but not group by it.
+- **Stack rank lives in the issue body** (`stack rank N of 30`), not in a
+  field. Issues were created in rank order so the default board order matches,
+  but nothing enforces that — the body is the record.
 - **`Iteration`** is a 14-day cycle starting Monday. The *current* iteration is
   the first entry of the field's `iterations` array — completed ones move to a
   separate `completedIterations` array, so index 0 is not a guess.
