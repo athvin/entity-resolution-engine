@@ -65,10 +65,25 @@ test.describe("steward triage", () => {
 
     for (let index = 0; index < 20; index += 1) {
       const card = page.getByTestId("swipe-card");
-      await expect(card).toBeVisible();
-      const before = await card.textContent();
-      const box = await card.boundingBox();
-      if (!box) throw new Error("swipe card has no box");
+      // The label and the box have to come from the SAME card, under one
+      // retry. `toBeVisible()` resolving does not mean the node survives the
+      // next call: each decision re-renders the queue, so the element React
+      // had when the assertion passed can be detached by the time
+      // `boundingBox()` runs -- and a detached element reports no box, which
+      // read as "swipe card has no box" and failed the test outright. WebKit
+      // lost that race in half of local runs. `toBeVisible()` inside the loop
+      // is the wait, so a mid-swap resolution costs a retry rather than the
+      // run.
+      const grabCard = async () => {
+        for (let attempt = 0; attempt < 20; attempt += 1) {
+          await expect(card).toBeVisible();
+          const before = await card.textContent();
+          const box = await card.boundingBox();
+          if (box) return { before, box };
+        }
+        throw new Error("swipe card never reported a box");
+      };
+      const { before, box } = await grabCard();
       const startX = box.x + box.width / 2;
       const startY = box.y + Math.min(60, box.height / 4);
       const direction = index % 2 === 0 ? 1 : -1; // alternate match / no-match
