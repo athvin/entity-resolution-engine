@@ -102,8 +102,25 @@ aws_iam_role:inline_policy
 # `eks.14 -> eks.17`, and we set it nowhere. Left alone it would fail the daily
 # drift schedule after every AWS patch, forever, which is the fastest way to
 # teach everyone to ignore a red drift job.
+#
+# `aws_efs_file_system:size_in_bytes` — the filesystem's METERED SIZE. The
+# provider computes it from how much data is currently stored, so it moves
+# whenever anything writes to EFS: a task pod landing a drop, the dispatcher
+# reading a config, a lake file. Calling that "changed outside Terraform" is
+# true in the most useless possible sense. Observed failing the dev drift run
+# on 2026-11-05 (run 41977751212) as the only finding:
+#
+#   tf-drift-classify: REAL DRIFT — these changed outside Terraform:
+#     module.efs.aws_efs_file_system.this [size_in_bytes]
+#
+# Both criteria above were checked: it is Attribute-Reference-only in the
+# provider (there is no argument that sets a filesystem's size), and
+# `grep -rn size_in_bytes infra/terraform/` returns nothing. Left alone it
+# fails the schedule every day that anyone uses the product, which is the exact
+# alarm fatigue this classifier exists to prevent.
 IGNORE_READONLY="
 aws_eks_cluster:platform_version
+aws_efs_file_system:size_in_bytes
 "
 
 die() {

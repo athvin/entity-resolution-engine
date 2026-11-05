@@ -377,9 +377,40 @@ case "$verdict" in
 *) no "still reports what it ignored" "output: $verdict" ;;
 esac
 
+# EFS reports its metered size as a computed attribute, so it moves whenever
+# anything writes to the filesystem. Modelled on run 41977751212, where it was
+# the ONLY finding and failed the dev stack on its own.
+cat >"$tmp/dc-efs-size.json" <<'EOF'
+{"resource_drift":[
+ {"address":"module.efs.aws_efs_file_system.this","type":"aws_efs_file_system",
+  "change":{"before":{"size_in_bytes":[{"value":6144}]},"after":{"size_in_bytes":[{"value":316416}]}}}
+]}
+EOF
+
+# Same boundary as platform_version's: a SETTABLE attribute on the SAME type
+# must stay loud, or "ignore size_in_bytes on aws_efs_file_system" could be
+# widened to the type and EFS drift detection would be retired silently.
+# `encrypted` is the one worth choosing — turning it off is the change you most
+# want a red drift run for.
+cat >"$tmp/dc-efs-boundary.json" <<'EOF'
+{"resource_drift":[
+ {"address":"module.efs.aws_efs_file_system.this","type":"aws_efs_file_system",
+  "change":{"before":{"size_in_bytes":[{"value":6144}],"encrypted":true},
+            "after":{"size_in_bytes":[{"value":316416}],"encrypted":false}}}
+]}
+EOF
+
 # The read-only rule, and its boundary.
 expect_exit "a read-only attribute is NOT drift"       0 bash "$CLASSIFY" "$tmp/dc-readonly.json"
 expect_exit "a settable attribute beside it IS drift"  1 bash "$CLASSIFY" "$tmp/dc-readonly-boundary.json"
+expect_exit "EFS metered size is NOT drift"            0 bash "$CLASSIFY" "$tmp/dc-efs-size.json"
+expect_exit "EFS encryption turned off IS drift"       1 bash "$CLASSIFY" "$tmp/dc-efs-boundary.json"
+
+efsb="$(bash "$CLASSIFY" "$tmp/dc-efs-boundary.json" 2>&1 || true)"
+case "$efsb" in
+*"[encrypted]"*) ok "names only encrypted, not the size" ;;
+*) no "names only encrypted, not the size" "output: $efsb" ;;
+esac
 
 boundary="$(bash "$CLASSIFY" "$tmp/dc-readonly-boundary.json" 2>&1 || true)"
 case "$boundary" in
