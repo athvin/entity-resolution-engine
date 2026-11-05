@@ -22,11 +22,26 @@
 # alarm in this stack would need its own cross-region topic to say something
 # already being said.
 
-# Read rather than hardcoded, matching the `aws_iam_openid_connect_provider`
-# pattern beside it: this fails loudly if envs/core has not been applied, which
-# is the correct ordering signal.
-data "aws_sns_topic" "alerts" {
-  name = "er-alerts"
+# The topic lives in envs/core. Its ARN is CONSTRUCTED rather than read, and
+# that is a correction rather than a shortcut.
+#
+# The first version used `data "aws_sns_topic"`, matching the
+# `aws_iam_openid_connect_provider` pattern beside it on the stated reasoning
+# that it "fails loudly if envs/core has not been applied". That pattern works
+# there because core was applied long ago. It cannot work for a resource born in
+# the SAME change: `plan (core)` and `plan (dev)` run in parallel against the
+# account as it is now, so dev's plan asked for a topic that does not exist yet
+# and failed with `reading SNS Topic (er-alerts): empty result`. A data source
+# can only read the past.
+#
+# Ordering is still guaranteed, just at apply rather than plan: the apply matrix
+# is `max-parallel: 1` with `core` ahead of `dev`, so the topic exists before
+# these alarms are created. An SNS ARN is fully determined by account, region
+# and name, so constructing it is exact rather than a guess.
+locals {
+  # `data.aws_caller_identity.current` is declared in bedrock.tf — one per
+  # module, so it is reused here rather than re-declared.
+  alerts_topic_arn = "arn:aws:sns:us-east-2:${data.aws_caller_identity.current.account_id}:er-alerts"
 }
 
 locals {
@@ -82,8 +97,8 @@ resource "aws_cloudwatch_metric_alarm" "containers_log_ingest" {
 
   alarm_description = "Container log ingest exceeded 5 GiB in a day (~$2.50/day at the STANDARD rate of $0.50/GB). Expect a crash loop, a retry storm, or a log level left at debug. If this group is ever moved to INFREQUENT_ACCESS, that class supports no metric filters, Live Tail or subscription filters, which would make this alarm the only guard on it."
 
-  alarm_actions = [data.aws_sns_topic.alerts.arn]
-  ok_actions    = [data.aws_sns_topic.alerts.arn]
+  alarm_actions = [local.alerts_topic_arn]
+  ok_actions    = [local.alerts_topic_arn]
 }
 
 resource "aws_cloudwatch_metric_alarm" "metrics_log_ingest" {
@@ -104,8 +119,8 @@ resource "aws_cloudwatch_metric_alarm" "metrics_log_ingest" {
 
   alarm_description = "Metrics/traces log ingest exceeded 1 GiB in a day. This stream is structured and bounded, so a breach most likely means tail sampling stopped dropping anything — check that `tail_sampling` still precedes `batch` in the collector pipeline."
 
-  alarm_actions = [data.aws_sns_topic.alerts.arn]
-  ok_actions    = [data.aws_sns_topic.alerts.arn]
+  alarm_actions = [local.alerts_topic_arn]
+  ok_actions    = [local.alerts_topic_arn]
 }
 
 # Athena is the one service here that bills per byte READ rather than per byte
@@ -129,6 +144,6 @@ resource "aws_cloudwatch_metric_alarm" "athena_data_scanned" {
 
   alarm_description = "Athena scanned more than 500 GiB in a day in the er-cost workgroup. A single query cannot do this — the workgroup caps one at 10 GiB — so this is the same query repeating, i.e. a partition predicate that stopped pruning."
 
-  alarm_actions = [data.aws_sns_topic.alerts.arn]
-  ok_actions    = [data.aws_sns_topic.alerts.arn]
+  alarm_actions = [local.alerts_topic_arn]
+  ok_actions    = [local.alerts_topic_arn]
 }
