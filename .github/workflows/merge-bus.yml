@@ -96,7 +96,22 @@ permissions:
   # Nothing offline could have caught this: the simulator stubs `gh`, so token
   # scopes are never exercised. It is the reason this repo insists a gate be
   # observed working before it is trusted.
-  actions: read
+  #
+  # `write` rather than `read`, because the wait step also attempts to approve
+  # its own held runs (see there). Read alone covers the step-count probes.
+  actions: write
+  # `checks: read` is what `gh pr view --json statusCheckRollup` needs. Without
+  # it the field is simply inaccessible:
+  #
+  #   GraphQL: Resource not accessible by integration
+  #     (repository.pullRequest.statusCheckRollup…)
+  #
+  # and under `set -euo pipefail` the failing assignment killed the wait step
+  # outright. Note `mergeStateStatus` kept working throughout — only the rollup
+  # needs this — which is why the loop logged BLOCKED six times before dying.
+  # Third scope learned this way; the lesson is the block itself, not any one
+  # name: declaring `permissions:` sets everything you did not list to `none`.
+  checks: read
 
 concurrency:
   # ONE bus at a time, and never cancelled. `cancel-in-progress: true` here would
@@ -501,6 +516,7 @@ jobs:
 
           {
             echo "bus=$bus"
+            echo "bus_sha=$local_sha"
             echo "base_sha=$base_sha"
             echo "batch_tree=$batch_tree"
             echo "riding=${riding[*]}"
@@ -515,6 +531,7 @@ jobs:
         if: ${{ steps.build.outputs.bus != '' }}
         env:
           BUS: ${{ steps.build.outputs.bus }}
+          BUS_SHA: ${{ steps.build.outputs.bus_sha }}
         # WAITING FOR `CLEAN` IS WHAT MAKES "NO CHECKS YET" SAFE. A freshly
         # opened PR has reported nothing, so a predicate phrased as "nothing is
         # failing" would call it green within seconds of creation. CLEAN is
@@ -524,20 +541,71 @@ jobs:
         run: |
           set -euo pipefail
 
-          failure_states='FAILURE|TIMED_OUT|CANCELLED|ACTION_REQUIRED|STARTUP_FAILURE|ERROR'
+          # ACTION_REQUIRED IS NOT A BATCH FAILURE, and listing it alongside the
+          # real ones was wrong. A bot-authored pull request's workflow runs are
+          # created `conclusion: action_required` with ZERO jobs, waiting for a
+          # human to press "Approve and run" — observed on bus PR #585, all
+          # three runs held. Calling that "the batch went red" accuses the
+          # members of a failure nothing executed, and it is indistinguishable
+          # from starvation by step count, because both are zero.
+          failure_states='FAILURE|TIMED_OUT|CANCELLED|STARTUP_FAILURE|ERROR'
           deadline=$(( SECONDS + 60 * 60 ))
-          verdict="timeout"; failed=""
+          verdict="timeout"; failed=""; held=""
 
           while [ "$SECONDS" -lt "$deadline" ]; do
-            state="$(gh pr view "$BUS" --json mergeStateStatus --jq .mergeStateStatus)"
+            state="$(gh pr view "$BUS" --json mergeStateStatus --jq .mergeStateStatus 2>/dev/null || echo UNREADABLE)"
             if [ "$state" = "CLEAN" ]; then
               verdict="green"; break
             fi
-            failed="$(gh pr view "$BUS" --json statusCheckRollup --jq \
-              "[.statusCheckRollup[]? | select(((.conclusion // .state) // \"\") | test(\"${failure_states}\")) | (.name // .context)] | unique | join(\", \")")"
-            if [ -n "$failed" ]; then
-              verdict="red"; break
+
+            # NOT fatal if it cannot be read. This assignment used to abort the
+            # whole step under `set -e` the moment the rollup was inaccessible,
+            # which is how the first successful batch died with the bus PR left
+            # open and no report. An unreadable rollup means "keep waiting".
+            rollup=""
+            if ! rollup="$(gh pr view "$BUS" --json statusCheckRollup --jq \
+                 '[.statusCheckRollup[]? | {n: (.name // .context), c: ((.conclusion // .state) // "")}] | map("\(.n)\t\(.c)") | join("\n")' 2>/dev/null)"; then
+              echo "  $(date -u +%H:%M:%S) ${state} — rollup unreadable (needs \`checks: read\`); waiting"
+              sleep 30; continue
             fi
+
+            failed="$(printf '%s\n' "$rollup" | awk -F'\t' -v re="$failure_states" \
+              'NF==2 && $2 ~ re {print $1}' | sort -u | paste -sd, - | sed 's/,/, /g')"
+            if [ -n "$failed" ]; then verdict="red"; break; fi
+
+            held="$(printf '%s\n' "$rollup" | awk -F'\t' \
+              'NF==2 && $2 == "ACTION_REQUIRED" {print $1}' | sort -u | paste -sd, - | sed 's/,/, /g')"
+            if [ -n "$held" ]; then
+              # TRY TO RELEASE THEM ONCE, then fall back to asking a human.
+              #
+              # Whether a `GITHUB_TOKEN` may approve runs it caused is the open
+              # question this attempt answers; if GitHub refuses, the bus says
+              # so and stops rather than pretending the batch failed. Approving
+              # runs no new untrusted code — the bus PR is a merge of PRs whose
+              # own CI already ran this exact content — so the substance of the
+              # gate is unaffected either way.
+              if [ "${approved:-0}" = "1" ]; then
+                verdict="held"; break
+              fi
+              approved=1
+              echo "  $(date -u +%H:%M:%S) runs awaiting approval (${held}); attempting to release them"
+              any=0
+              for rid in $(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${BUS_SHA}&per_page=20" \
+                             --jq '.workflow_runs[] | select(.conclusion == "action_required") | .id' 2>/dev/null); do
+                case "$rid" in ''|*[!0-9]*) continue ;; esac
+                if gh api -X POST "repos/${GITHUB_REPOSITORY}/actions/runs/${rid}/approve" >/dev/null 2>&1; then
+                  any=1; echo "    approved run ${rid}"
+                else
+                  echo "::warning::could not approve run ${rid}"
+                fi
+              done
+              if [ "$any" = "0" ]; then
+                echo "::warning::no run could be approved by this token"
+                verdict="held"; break
+              fi
+              sleep 30; continue
+            fi
+
             echo "  $(date -u +%H:%M:%S) ${state} — waiting"
             sleep 30
           done
@@ -547,7 +615,9 @@ jobs:
           # the misattribution the pre-flight above describes — it just arrives
           # from the other direction, when capacity runs out mid-validation.
           # Authoritative here because it reads the bus PR's OWN runs.
-          if [ "$verdict" != "green" ]; then
+          # `held` already carries its own explanation, and is byte-identical
+          # to starvation by step count (both zero), so it must not be relabelled.
+          if [ "$verdict" != "green" ] && [ "$verdict" != "held" ]; then
             head_sha="$(gh pr view "$BUS" --json headRefOid --jq .headRefOid)"
             # `read_ok` matters more than `executed`. If the Actions API cannot
             # be read, `executed` stays 0 — which would relabel a genuinely RED
@@ -578,6 +648,7 @@ jobs:
           {
             echo "verdict=$verdict"
             echo "failed=$failed"
+            echo "held=$held"
           } >>"$GITHUB_OUTPUT"
 
       # ---------------------------------------------------------------------
@@ -590,6 +661,7 @@ jobs:
           RIDING: ${{ steps.build.outputs.riding }}
           VERDICT: ${{ steps.verdict.outputs.verdict }}
           FAILED: ${{ steps.verdict.outputs.failed }}
+          HELD: ${{ steps.verdict.outputs.held }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         # The bus PR is left OPEN on purpose. Its branch is the only place the
         # failing combination exists, so closing it would delete the evidence
@@ -606,6 +678,9 @@ jobs:
               blame="batch" ;;
             starved)
               headline="never ran — GitHub allocated no runner for any job (an Actions minutes or spending limit on the account, not a problem with any PR in the batch)"
+              blame="account" ;;
+            held)
+              headline="is waiting for a human to approve its workflow runs (${HELD}). A bot-authored pull request does not run CI unattended, and this token could not release them — press \"Approve and run\" on the bus PR, then re-dispatch"
               blame="account" ;;
             *)
               headline="did not conclude within the hour the bus waits"

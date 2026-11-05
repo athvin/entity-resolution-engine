@@ -87,7 +87,10 @@ pr)
           git -C "$mv" -c user.name=o -c user.email=o@x commit --quiet -m "unrelated commit landed mid-validation"
           git -C "$mv" push --quiet origin HEAD:refs/heads/main
         fi ;;
-      statusCheckRollup) get failed_contexts ;;
+      statusCheckRollup)
+        # The workflow now asks for "<name>\t<conclusion>" lines.
+        for c in $(get failed_contexts_names); do printf '%s\tFAILURE\n' "$c"; done
+        for c in $(get held_contexts); do printf '%s\tACTION_REQUIRED\n' "$c"; done ;;
       *) die "pr view fields=$fields jq=$jqexpr" ;;
     esac
     ;;
@@ -127,7 +130,18 @@ pr)
   esac
   ;;
 api)
-  path="$2"
+  # The path is the first argument that is not a flag or a flag's value —
+  # `gh api -X POST <path>` puts it at $4, not $2. Reading $2 positionally made
+  # every POST fall through to `die`, which is why the approve scenario failed.
+  shift
+  path=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -X|--method|-f|-F|--field|--raw-field|--jq|-q|--template|-H|--header|--input) shift 2 || shift ;;
+      --paginate|--silent|-i|--include) shift ;;
+      *) path="$1"; break ;;
+    esac
+  done
   case "$path" in
     */commits/*/check-runs*)
       # "detect_failed_<oid>=1" means this PR's detect jobs died, so every
@@ -167,6 +181,13 @@ api)
         echo "gh: Resource not accessible by integration (HTTP 403)" >&2; exit 1
       fi
       get bus_run_ids | tr ' ' '\n' | sed '/^$/d' ;;
+    */actions/runs/*/approve)
+      if [ "$(get approve_works)" = "1" ]; then
+        # Releasing them flips the scenario's rollup to empty next poll.
+        echo "held_contexts=" >>"$SIM/state"; echo "{}"
+      else
+        echo "gh: Resource not accessible by integration (HTTP 403)" >&2; exit 1
+      fi ;;
     *) die "api $path" ;;
   esac
   ;;
