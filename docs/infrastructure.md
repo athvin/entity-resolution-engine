@@ -456,7 +456,13 @@ The cost is a dependency, not a credential: `aws-config` + `aws-sdk-sesv2` enter
 
 Container stdout reaches CloudWatch (a Fluent Bit DaemonSet, task 1.8), every Rust entry point installs a `tracing` subscriber that writes one structured JSON object per event to stderr, and **spans now leave the process**: `er-obs` exports them over OTLP to the collector, which fans out to CloudWatch and to a self-hosted OpenObserve (§10.5). Verified end to end against a real `run-all` — one trace carrying `job -> run -> stage -> statement` with per-statement durations, and a PII probe over the exported payload finding none of nine real fixture values.
 
-**Metrics are still unwired.** The collector's `metrics` pipeline has zero producers and there is deliberately no `/metrics` endpoint (D-OTEL rejects a scrape topology; the push path is OTLP). [backend-design.md](backend-design.md) §14's API RED metrics, queue depth, dispatch latency and per-class concurrency are the remaining half.
+**Metrics now have a producer, and deliberately only one.** `er-obs` installs an `SdkMeterProvider` over OTLP to the same collector (`/v1/metrics`, a 60s `PeriodicReader`), and emits one aggregate histogram: `er.db.query.duration`, dimensioned `db.system.name` x `outcome` — **four series**. There is still no `/metrics` endpoint (D-OTEL rejects a scrape topology; the push path is OTLP).
+
+The single histogram is the decision, not a staging post. `statement_name` as a dimension would be 247 statements x 2 outcomes = **494 billable series, roughly $148/month for one histogram** in one developer's dev namespace, growing with every new `.sql` file — D-OTEL's stated failure mode for `tenant`, reached by another route. So statement identity is span-only, where it is free and groupable, and `er-obs/tests/cardinality.rs` refuses any metric carrying an unbounded or tenant-scoped dimension. If a per-statement aggregate is ever wanted it is a `spanmetrics` connector in the collector's values file — YAML, revertible, no Rust change.
+
+Every metric is declared as a value in `er-obs/src/registry.rs`, which renders a byte-compared [telemetry-reference.md](telemetry-reference.md). A hand-written metrics table is how a metric ends up documented and never emitted, which reads as coverage rather than as a gap: its dashboard panel renders an honest-looking empty chart.
+
+[backend-design.md](backend-design.md) §14's API RED metrics, queue depth, dispatch latency and per-class concurrency are the remaining half — each now an entry in that registry plus a call site, not new machinery.
 
 **OpenTelemetry to one collector** is the foundation, exporter swappable — the four system-specific reasons, and the one-collector-but-not-one-backend split, are in D-OTEL.
 
@@ -482,14 +488,21 @@ by `statement_executions`, not by the ledger.
 
 ### 10.2 Traces — and the one schema change that makes them work
 
-The runner is a separate pod launched asynchronously from a database row (§6), so trace context has to survive that hop; it does not travel by itself. **Add `jobs.trace_context` (text, nullable)** holding the W3C `traceparent` captured at enqueue, which the runner reads to start its root span as a child of that context. This is the highest-value single decision in this section: with it, one trace spans the click, the API call, the queue wait, the dispatch, every pipeline stage, and the dbt invocations. Without it you get two unrelated traces and a `run_id` to join them by hand.
+The runner is a separate pod launched asynchronously from a database row (§6), so trace context has to survive that hop; it does not travel by itself. **`jobs.trace_context` (text, nullable)** holds the W3C `traceparent` captured at enqueue, and the dispatcher now starts the job span as a true child of it via `er_obs::adopt_traceparent` — not as a field naming it, which joins two traces by log search rather than making them one. `audit_log.trace_id` and `erweb.audit.trace_id` carry the same trace durably, which is the half that outlives a span: traces expire on a retention we choose, while the audit ledger is a 400-day compliance artifact. This is the highest-value single decision in this section: with it, one trace spans the click, the API call, the dispatch, every pipeline stage and every SQL statement (the dbt invocations this used to name went with the Python engine). Without it you get two unrelated traces and a `run_id` to join them by hand.
 
-Instrumentation, in rough order of value per unit of effort:
+Instrumentation, and what each turned into. The first and third entries here
+used to name `opentelemetry-instrumentation-fastapi`, `-psycopg` and
+`@vercel/otel`; none of those can instrument this system — the Python engine,
+server and dbt were removed, and the BFF route handlers are not where the
+context had to live. They are recorded as superseded rather than deleted,
+because a reader who finds the old plan elsewhere should be able to tell it was
+reconsidered rather than forgotten.
 
-- `opentelemetry-instrumentation-fastapi` and `-psycopg` on the API and dispatcher — near-zero effort, immediately gives RED metrics and DB span timing.
-- **A span per pipeline stage** in the runner. DONE: `observed()` in er-cli brackets all eleven stages and the ambient `tracing` context means a statement span nests under its stage with no signature change — which is what made 245 statements attributable from one emitter change.
-- `@vercel/otel` in the BFF, propagating into the typed erserver client.
-- The queue wait as its own span — the gap between enqueue and claim is where per-tenant serialization shows up, invisible today.
+- **The HTTP layer**, DONE — `tower-http` inside `build_routes`, where routing has already happened, so `http.route` is the templated path rather than the URI. `Span::none()` for `/healthz` and `/readyz`: at one replica the chart's probes are ~780k spans a month carrying nothing. (Superseded `-fastapi`/`-psycopg`.)
+- **A span per pipeline stage**, DONE — `observed()` in er-cli brackets all eleven stages, and ambient `tracing` context means a statement span nests under its stage with no signature change. That is what made 245 statements attributable from one emitter change.
+- **A span per SQL statement**, DONE — five emitters in `er-sql-check`, so attribution is by construction rather than by call-site discipline. 96.9% of a measured run's wall time.
+- **The browser half**, DONE — one delegated capture-phase click listener mints a W3C context per interaction, and the BFF carries it through `AsyncLocalStorage` established in `respond()`, not from a route handler. `x-er-action` carries the control's name alongside it, so a backend span can say *which* button caused it rather than only that some click did. (Superseded `@vercel/otel`.)
+- **The queue wait as its own span** — still not built. The gap between enqueue and claim is where per-tenant, soon per-dataset, serialization shows up, and it is invisible today. It needs the OTel tracer directly (`with_start_time`/`with_end_time`), because the gap happened before the process that would record it existed and `tracing` has no API for a backdated span.
 
 Sampling: **always sample pipeline runs** (hundreds per day, each high-value); head-sample the API read path, where the volume is. **One gotcha specific to Jobs:** the OTel SDK's batching exporter drops unflushed spans when a process exits, and a runner pod exits immediately after its final span — so the tail of every run, including the failure path, would silently vanish. The runner needs an explicit `force_flush()` with a timeout in its exit path, on every exit code.
 
@@ -507,9 +520,15 @@ The engine already writes structured JSON to stderr; add `trace_id` and `span_id
 
 ### 10.6 Phasing, and the coupling to §6
 
-- **Phase 1:** collector deployed; logs shipped with trace fields; FastAPI/psycopg auto-instrumentation. Cheap, immediate, no schema change.
-- **Phase 2, alongside the Job launcher:** `jobs.trace_context`, spans per stage, `force_flush()` on runner exit. **Designed together with §6.3's progress decision** — both cross the dispatcher-to-pod boundary the subprocess pipe used to cover.
-- **Phase 4:** dashboards for the §14 metric list, alerting. (`ER_PROFILE_*` is gone with the Python engine; the surviving knob is `ER_TRACE_SQL_TEXT`, and spans carry no events by design — see er-obs's `SpansOnly`.)
+This phasing is kept as written and annotated with what actually happened,
+because two of the three phases were delivered by a different route than
+planned and the difference is the useful part.
+
+- **Phase 1 — DONE, by another route.** Collector deployed and logs shipped with trace fields, as planned. "FastAPI/psycopg auto-instrumentation" could never happen: Python auto-instrumentation cannot touch a Rust binary, and the `Instrumentation` CR with its `python:` block shipped against a deployment that no longer exists. What replaced it is `tower-http` in the HTTP layer and five emitters in `er-sql-check` — *more* work than an auto-instrumentor, and the reason 247 statements are attributable by construction rather than by call-site discipline.
+- **Phase 2 — DONE as designed.** `jobs.trace_context`, a span per stage, `force_flush()` on runner exit. The `force_flush` cost one line rather than eleven because `exec_task::run` is the single wrapper all eleven early returns funnel through.
+- **Phase 4 — alerting STARTED, dashboards not.** Three CloudWatch alarms exist (container and metrics log ingest, Athena bytes scanned), chosen because CloudWatch already publishes those metrics so they work on apply — an alarm wired to a metric nobody emits sits in `INSUFFICIENT_DATA` forever while looking configured. **The notification path is live but MUTE until the SNS email subscription is confirmed**, and an unconfirmed subscription is indistinguishable from a working one in the console. The §14 metric list is still one histogram of its ~320 series.
+
+(`ER_PROFILE_*` is gone with the Python engine; the surviving knob is `ER_TRACE_SQL_TEXT`, and spans carry no events by design — see er-obs's `SpansOnly`.)
 
 ## 11. Container registries
 
