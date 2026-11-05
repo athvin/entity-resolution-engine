@@ -133,9 +133,23 @@ jobs:
               d="$(aws ecr describe-images --repository-name "$repo" \
                      --query 'reverse(sort_by(imageDetails,&imagePushedAt))[0].imageDigest' \
                      --output text 2>/dev/null || true)"
-              echo "$repo: no image tagged $DEPLOY_SHA — reusing newest digest $d"
+              # A WARNING, not just a log line. Reusing a digest is correct
+              # when that tree genuinely did not change — but it also happens
+              # when the build that should have produced one was skipped or
+              # never ran, and then a GREEN deploy ships code from an arbitrary
+              # number of commits back. Observed: the images run carrying the
+              # telemetry exporter died in an outage, the next merge was
+              # frontend-only so er-api was correctly skipped, and the deploy
+              # reported success while rolling an image nine commits stale.
+              #
+              # The annotation puts it in the run summary where it is read,
+              # rather than 140 lines into a step log where it was not.
+              echo "::warning title=$repo reused a stale digest::no image tagged $DEPLOY_SHA; rolled the newest digest in ECR instead ($d). Correct if that tree did not change in this commit — but if its build was skipped or failed, this deploy shipped older code than $DEPLOY_SHA."
+              echo "$repo: no image tagged $DEPLOY_SHA — REUSED newest digest $d"
+              echo "reused_${repo//-/_}=1" >> "$GITHUB_OUTPUT"
             else
               echo "$repo: $DEPLOY_SHA -> $d"
+              echo "reused_${repo//-/_}=0" >> "$GITHUB_OUTPUT"
             fi
             if [ -z "$d" ] || [ "$d" = "None" ]; then
               echo "::error::no digest in ECR for $repo; refusing to deploy by tag"
@@ -182,6 +196,32 @@ jobs:
         # fails to install is worse than a red deploy, because the absence of
         # spans reads as "nothing happened" rather than as a broken deploy.
         run: bash scripts/obs_up.sh
+      - name: Say what was deployed
+        # The summary is the artifact someone reads a week later when asking
+        # "was that change actually out?". A digest alone does not answer it;
+        # whether it came from THIS commit does.
+        env:
+          API_REUSED: ${{ steps.digests.outputs.reused_er_api }}
+          WEB_REUSED: ${{ steps.digests.outputs.reused_er_web }}
+        run: |
+          {
+            echo "### deploy — dev (\`ci\` namespace)"
+            echo ""
+            echo "| image | digest | from this commit? |"
+            echo "|---|---|---|"
+            for pair in "er-api:$API_REUSED:${{ steps.digests.outputs.er_api }}" \
+                        "er-web:$WEB_REUSED:${{ steps.digests.outputs.er_web }}"; do
+              name="${pair%%:*}"; rest="${pair#*:}"; reused="${rest%%:*}"; digest="${rest#*:}"
+              if [ "$reused" = "1" ]; then
+                echo "| \`$name\` | \`${digest:0:19}…\` | **no — reused the newest digest in ECR** |"
+              else
+                echo "| \`$name\` | \`${digest:0:19}…\` | yes |"
+              fi
+            done
+            echo ""
+            echo "Commit: \`$DEPLOY_SHA\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Roll the release
         # `--atomic` is the difference between a failed deploy and a broken
         # namespace: it rolls back on failure instead of leaving half a release.
