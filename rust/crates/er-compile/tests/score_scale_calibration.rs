@@ -32,6 +32,11 @@ use er_config::load_config_str;
 
 const TEST_YAML: &str = include_str!("../../er-config/tests/fixtures/test.yaml");
 
+/// The one committed account config. It lives under `er-standardize` rather than
+/// beside the person fixture, which is a large part of why the compile tests had
+/// no account coverage until one went looking for it.
+const ACCOUNT_YAML: &str = include_str!("../../er-standardize/tests/fixtures/acct_test.yaml");
+
 /// Load one of the committed reference models from `fixtures/static/`.
 fn committed_model(name: &str) -> TrainedModel {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -144,6 +149,44 @@ fn the_compiled_scale_does_not_vary_with_entity_type() {
         (as_person - assumed).abs() < 1e-6,
         "a compiled model's full agreement IS `full_agreement_bits`: {as_person:.6} vs \
          {assumed:.1}"
+    );
+}
+
+#[test]
+fn a_real_account_config_compiles_and_inherits_the_person_scale() {
+    // The compile tests had NO account coverage at all. That matters twice: the
+    // account path could break without anyone noticing, and the gap this file
+    // records — the account reference model measuring a third of the assumed
+    // scale — deserves to be demonstrated against a genuine account config
+    // rather than a person config with `entity_type` flipped, which is all
+    // `the_compiled_scale_does_not_vary_with_entity_type` can show.
+    let config = load_config_str(ACCOUNT_YAML).expect("the account fixture parses");
+    assert_eq!(
+        config.entity_type,
+        er_config::EntityType::Account,
+        "this test is pointless unless the fixture really is an account config"
+    );
+
+    let bits = compiled_bits(ACCOUNT_YAML);
+    let assumed = CompileOptions::default().full_agreement_bits;
+    assert!(
+        (bits - assumed).abs() < 1e-6,
+        "a real account config compiles to the person-calibrated scale: {bits:.6} vs \
+         {assumed:.1}"
+    );
+
+    // Which is 2.7x the account reference model's own measurement. Spelled out
+    // here, on the account path, because this is the number a decision would
+    // turn on.
+    let measured = committed_model("acct_model_v1.json")
+        .full_agreement_bits()
+        .total_bits;
+    let ratio = bits / measured;
+    assert!(
+        ratio > 2.0,
+        "the compiled account scale should still be far above what the account model \
+         measures: compiled {bits:.1}, measured {measured:.3}, ratio {ratio:.2}. If this \
+         fails the gap has closed — re-read the module comment before loosening it."
     );
 }
 

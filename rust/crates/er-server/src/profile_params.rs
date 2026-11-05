@@ -169,6 +169,23 @@ mod tests {
         assert!(err.contains("golden"), "{err}");
     }
 
+    /// A `golden` job is accepted and needs no source.
+    ///
+    /// The error message above already named `golden` among the accepted values,
+    /// which reads as coverage without being any: a subject can be advertised in
+    /// a rejection and still not parse. Nothing asserted that a golden job runs
+    /// — the whole subject had no test anywhere, at this layer or the engine's.
+    #[test]
+    fn a_golden_profile_is_accepted_without_a_source() {
+        let r = ProfileRequest::from_params(&json!({"subject": "golden"})).unwrap();
+        assert_eq!(r.subject, Subject::Golden);
+        assert!(
+            r.source.is_none(),
+            "the resolved corpus is one relation, not one per source"
+        );
+        assert_eq!(r.tier, DEFAULT_TIER);
+    }
+
     #[test]
     fn sampling_is_parsed_with_its_bounds() {
         let r = ProfileRequest::from_params(&json!({"sample": 0.25, "sample_seed": 7})).unwrap();

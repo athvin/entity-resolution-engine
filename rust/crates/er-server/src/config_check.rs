@@ -1280,6 +1280,94 @@ mod tests {
     const GIVEN_NAME_TF: &str =
         "given_name:  { levels: [exact, jaro_winkler:0.90, variant_match, null], tf: true }";
 
+    // -----------------------------------------------------------------------
+    // Entity type: which schema a config is validated against.
+    // -----------------------------------------------------------------------
+
+    /// The one committed account config. It lives under `er-standardize` rather
+    /// than beside the person fixture, which is why the compile tests had no
+    /// account coverage at all until one went looking for it.
+    const ACCOUNT: &str = include_str!("../../er-standardize/tests/fixtures/acct_test.yaml");
+
+    fn std_columns(account: bool) -> BTreeSet<String> {
+        er_schema::model::int_std_record_columns(account)
+            .into_iter()
+            .map(|c| c.name)
+            .collect()
+    }
+
+    /// `config_reference_problems` picks its column set from `entity_type`, and
+    /// nothing tested that it does.
+    ///
+    /// An inverted or ignored switch is silent in the worst way: an account
+    /// config would validate against the person schema, publish, and then fail
+    /// the tenant's first run on a column that was never there. The check is one
+    /// line (`let account = config.entity_type == EntityType::Account`) and it
+    /// decides every column decision below it.
+    ///
+    /// The foreign columns are DERIVED from the two schemas rather than spelled
+    /// out, so this keeps testing the property as the schemas grow — and the
+    /// premise that the two sets actually differ is asserted first, because a
+    /// test comparing two identical sets would pass while proving nothing.
+    #[test]
+    fn column_validation_follows_the_entity_type() {
+        let person = std_columns(false);
+        let account = std_columns(true);
+        let person_only: Vec<&String> = person.difference(&account).collect();
+        let account_only: Vec<&String> = account.difference(&person).collect();
+        assert!(
+            !person_only.is_empty() && !account_only.is_empty(),
+            "the two schemas must genuinely differ or this proves nothing: \
+             person-only {person_only:?}, account-only {account_only:?}"
+        );
+
+        // Both committed fixtures validate against their own schema.
+        assert_eq!(
+            config_reference_problems(&load(GOOD)),
+            Vec::<String>::new(),
+            "the person fixture must pass as a person config"
+        );
+        assert_eq!(
+            config_reference_problems(&load(ACCOUNT)),
+            Vec::<String>::new(),
+            "the account fixture must pass as an account config"
+        );
+
+        // A person config naming an account-only column is refused.
+        const PERSON_CMP: &str = "addr_postal: { levels: [exact, null] }";
+        assert_eq!(GOOD.matches(PERSON_CMP).count(), 1, "person fixture moved");
+        let foreign = account_only[0];
+        let bad_person = load(&GOOD.replace(
+            PERSON_CMP,
+            &format!("{foreign}: {{ levels: [exact, null] }}"),
+        ));
+        assert!(
+            config_reference_problems(&bad_person)
+                .iter()
+                .any(|p| p.contains(foreign.as_str())),
+            "`{foreign}` is not a person column and must be refused in a person config"
+        );
+
+        // And the mirror: an account config naming a person-only column.
+        const ACCOUNT_CMP: &str = "company_name: { levels: [exact, null] }";
+        assert_eq!(
+            ACCOUNT.matches(ACCOUNT_CMP).count(),
+            1,
+            "account fixture moved"
+        );
+        let foreign = person_only[0];
+        let bad_account = load(&ACCOUNT.replace(
+            ACCOUNT_CMP,
+            &format!("{foreign}: {{ levels: [exact, null] }}"),
+        ));
+        assert!(
+            config_reference_problems(&bad_account)
+                .iter()
+                .any(|p| p.contains(foreign.as_str())),
+            "`{foreign}` is not an account column and must be refused in an account config"
+        );
+    }
+
     #[test]
     fn tf_without_an_exact_level_is_refused_at_publish() {
         assert_eq!(
