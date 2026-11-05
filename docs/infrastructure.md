@@ -454,25 +454,31 @@ The cost is a dependency, not a credential: `aws-config` + `aws-sdk-sesv2` enter
 
 ## 10. Observability
 
-Container stdout reaches CloudWatch (a Fluent Bit DaemonSet, task 1.8), and since the telemetry programme began every Rust entry point installs a `tracing` subscriber that writes one structured JSON object per event to stderr — so logs leave the box with a level, fields and a service identity. **No metrics endpoint and no spans yet:** the span pipeline waits on a destination (see §10.5), and the collector's `traces` and `metrics` pipelines still have zero producers. [backend-design.md](backend-design.md) §14 specifies what should exist (pod logs tagged `tenant/job/run/stage`, API RED metrics, queue depth, dispatch latency, per-class concurrency); the log half has a subscriber under it now, and the metric and span halves are still unwired. **OpenTelemetry to one collector** is the foundation, exporter swappable (the four system-specific reasons, and the one-collector-but-not-one-backend split, are in D-OTEL).
+Container stdout reaches CloudWatch (a Fluent Bit DaemonSet, task 1.8), every Rust entry point installs a `tracing` subscriber that writes one structured JSON object per event to stderr, and **spans now leave the process**: `er-obs` exports them over OTLP to the collector, which fans out to CloudWatch and to a self-hosted OpenObserve (§10.5). Verified end to end against a real `run-all` — one trace carrying `job -> run -> stage -> statement` with per-statement durations, and a PII probe over the exported payload finding none of nine real fixture values.
 
-Two things in this section have gone stale against the all-Rust cutover and are
-corrected where they appear below: §10.1's table and §10.2's instrumentation
-list name Python modules (`src/er/obs/runctx.py`, `sql_profile.py`) and Python
-libraries (`opentelemetry-instrumentation-fastapi`, `-psycopg`) that no longer
-exist, and §10.6's Phase 1 claims auto-instrumentation that could never have
-attached to a Rust binary. The `Instrumentation` CR the chart still carries is
-inert for the same reason.
+**Metrics are still unwired.** The collector's `metrics` pipeline has zero producers and there is deliberately no `/metrics` endpoint (D-OTEL rejects a scrape topology; the push path is OTLP). [backend-design.md](backend-design.md) §14's API RED metrics, queue depth, dispatch latency and per-class concurrency are the remaining half.
+
+**OpenTelemetry to one collector** is the foundation, exporter swappable — the four system-specific reasons, and the one-collector-but-not-one-backend split, are in D-OTEL.
 
 ### 10.1 What already exists, and the boundary not to cross
 
 | Exists | Where | Role |
 |---|---|---|
-| `runs`, `run_stages` with typed counters and snapshot ranges | [src/er/obs/runctx.py](../src/er/obs/runctx.py) | **Durable business telemetry, already in Postgres** |
-| One JSON record per stage on stderr | engine S5.2 records | Live progress, consumed into `jobs.progress` |
-| Opt-in profiling: `ER_PROFILE_SQL`, `ER_PROFILE_PYTHON`, `ER_PROFILE_STORAGE` → `ER_PROFILE_DIR` | [src/er/obs/sql_profile.py](../src/er/obs/sql_profile.py), [docs/profiling.md](profiling.md) | Deep per-query and per-stage attribution, off by default |
+| `runs` with typed counters and snapshot ranges | [entities/run](../entities/run), written by the dispatcher's reporter | **Durable business telemetry, in Postgres** |
+| One JSON record per stage on stderr | `observed()` in [er-cli/src/lib.rs](../rust/crates/er-cli/src/lib.rs), formatted by [er-obs/src/init.rs](../rust/crates/er-obs/src/init.rs) | Live progress, consumed into `jobs.progress` |
+| A span per stage and per SQL statement | [er-span](../rust/crates/er-span), called from the 245 generated statement functions and the six `Session` seams | Per-statement attribution; 96.9% of a measured run's wall time |
+| One row per SQL execution | `statement_executions`, buffered by [er-obs/src/executions.rs](../rust/crates/er-obs/src/executions.rs) and drained per stage | The durable, unsampled copy the spans are not |
+| Statement text on a span, opt in | `ER_TRACE_SQL_TEXT=1` | Off by default: declared statements bind their values, but the default should not be "ship the SQL" |
 
-**`runs`/`run_stages` stays the system of record for business counters.** OTel metrics are for *operational* questions. The rule: anything a user might see in the UI comes from Postgres; anything an operator pages on comes from OTel.
+**`run_stages` is declared and still has NO writer.** Its generated
+`create::start` and `update::finish` have zero callers, so the per-stage ledger
+is empty in every environment — and `er-cli/tests/cli_e2e.rs` asserts that it
+stays empty, with a comment claiming the Phase 2 pod verb writes it. That
+comment is aspirational; the test is the tripwire that will fail when it becomes
+true. Stage duration and outcome are currently carried by the `stage` span and
+by `statement_executions`, not by the ledger.
+
+**`runs` stays the system of record for business counters.** OTel metrics are for *operational* questions. The rule: anything a user might see in the UI comes from Postgres; anything an operator pages on comes from OTel.
 
 ### 10.2 Traces — and the one schema change that makes them work
 
@@ -481,7 +487,7 @@ The runner is a separate pod launched asynchronously from a database row (§6), 
 Instrumentation, in rough order of value per unit of effort:
 
 - `opentelemetry-instrumentation-fastapi` and `-psycopg` on the API and dispatcher — near-zero effort, immediately gives RED metrics and DB span timing.
-- **A span per pipeline stage** in the runner. [src/er/obs/runctx.py](../src/er/obs/runctx.py) already brackets exactly these boundaries and holds the counters that become span attributes, so this is an adapter rather than new instrumentation.
+- **A span per pipeline stage** in the runner. DONE: `observed()` in er-cli brackets all eleven stages and the ambient `tracing` context means a statement span nests under its stage with no signature change — which is what made 245 statements attributable from one emitter change.
 - `@vercel/otel` in the BFF, propagating into the typed erserver client.
 - The queue wait as its own span — the gap between enqueue and claim is where per-tenant serialization shows up, invisible today.
 
@@ -503,7 +509,7 @@ The engine already writes structured JSON to stderr; add `trace_id` and `span_id
 
 - **Phase 1:** collector deployed; logs shipped with trace fields; FastAPI/psycopg auto-instrumentation. Cheap, immediate, no schema change.
 - **Phase 2, alongside the Job launcher:** `jobs.trace_context`, spans per stage, `force_flush()` on runner exit. **Designed together with §6.3's progress decision** — both cross the dispatcher-to-pod boundary the subprocess pipe used to cover.
-- **Phase 4:** `ER_PROFILE_*` output as span events, dashboards for the §14 metric list, alerting.
+- **Phase 4:** dashboards for the §14 metric list, alerting. (`ER_PROFILE_*` is gone with the Python engine; the surviving knob is `ER_TRACE_SQL_TEXT`, and spans carry no events by design — see er-obs's `SpansOnly`.)
 
 ## 11. Container registries
 
@@ -621,8 +627,8 @@ Bootstrap is two stacks, not one, because the state bucket must live in an accou
 | **Runner writes its own progress** | [server/src/erserver/runner.py](../server/src/erserver/runner.py), [queue.py](../server/src/erserver/queue.py) | A Job pod has no stderr pipe to the dispatcher (§6.3) |
 | **Per-run resource sizing** from record count | [server/src/erserver/queue.py](../server/src/erserver/queue.py), [policy.py](../server/src/erserver/policy.py), derived from [benchmarks/scales.yaml](../benchmarks/scales.yaml) | CPU-tiered classes on the job row, not `orgs.env` (§6.5) |
 | **`jobs.trace_context`** column | [server/src/erserver/db.py](../server/src/erserver/db.py) | W3C traceparent across the enqueue→pod hop; one trace end to end (§10.2) |
-| **OTel instrumentation + `force_flush()` on exit** | [server/src/erserver/api.py](../server/src/erserver/api.py), [runner.py](../server/src/erserver/runner.py), [src/er/obs/runctx.py](../src/er/obs/runctx.py), `frontend/` | Spans per stage; an exiting Job otherwise drops its last batch (§10.2) |
-| **Per-run cost on the run row** | [server/src/erserver/queue.py](../server/src/erserver/queue.py), [src/er/obs/runctx.py](../src/er/obs/runctx.py) | vCPU-hours × node rate, recorded next to the existing counters (§16.2) |
+| **OTel instrumentation + `force_flush()` on exit** | DONE for the backend: [er-obs](../rust/crates/er-obs), with the flush at `main.rs`'s `exec-task` arm because `process::exit` runs no destructors. The browser half (clicks, beacon) is outstanding. | Spans per stage; an exiting Job otherwise drops its last batch (§10.2) |
+| **Per-run cost on the run row** | BLOCKED, not unbuilt: Split Cost Allocation Data is off, so all ten `split_line_item_*` CUR columns are present and entirely NULL (re-probed 2026-11-05, 0 of 9,341 rows). Console-only to enable, and it does not backfill. | vCPU-hours × node rate, recorded next to the existing counters (§16.2) |
 | Non-root `USER` in all three images | [docker/Dockerfile](../docker/Dockerfile) (none today), both new Dockerfiles | Pod Security `restricted` requires it (§5.6) |
 | Disable FastAPI docs routes outside dev | [server/src/erserver/api.py](../server/src/erserver/api.py) | `/docs`, `/redoc`, `/openapi.json` are the only unauthenticated routes besides `/healthz` (§4.1) |
 | *(optional)* `api_keys.last_used_at` | [server/src/erserver/db.py](../server/src/erserver/db.py), [auth.py](../server/src/erserver/auth.py) | Turns the SOC 2 credential review into a query (§8.6) |
@@ -658,7 +664,7 @@ The live tracker with acceptance criteria is [plan-to-aws.md](plan-to-aws.md); t
 
 **Phase 3 — Prod, when there is prod traffic.** Network, EKS prod, Aurora prod multi-AZ, the prod lake with CMK and scoped CloudTrail, the prefix-scoped export role (§8.4), `make refresh-dev` Path A, and the internet-facing prod ALB behind WAF with rate rules on the three unauthenticated write paths (§4.1).
 
-**Phase 4 — Hardening and the audit run-up.** The IRSA credential chain (§9.2) — the SES API port that was to retire the SMTP key is **done**, and the key was never created (§9.3) — per-tenant scoped ServiceAccounts (§6.4), `ER_PROFILE_*` as span events, dashboards for the [backend-design.md](backend-design.md) §14 metric list, alerting, automated snapshot sharing, GuardDuty in prod, and the point-in-time SOC 2 artifacts (policies, risk assessment, subprocessor inventory including the Anthropic flow, vendor assessments, break-glass procedure, a restore test with its record — §8.6).
+**Phase 4 — Hardening and the audit run-up.** The IRSA credential chain (§9.2) — the SES API port that was to retire the SMTP key is **done**, and the key was never created (§9.3) — per-tenant scoped ServiceAccounts (§6.4), dashboards for the [backend-design.md](backend-design.md) §14 metric list, alerting, automated snapshot sharing, GuardDuty in prod, and the point-in-time SOC 2 artifacts (policies, risk assessment, subprocessor inventory including the Anthropic flow, vendor assessments, break-glass procedure, a restore test with its record — §8.6).
 
 *A follow-up worth noting:* an EKS cluster unlocks the GitHub Actions Runner Controller, which resolves a recorded blocker — [benchmarks/scales.yaml](../benchmarks/scales.yaml) asks for `ubuntu-latest-8-cores` and `ubuntu-latest-16-cores` at the `100k` and `1m` scales, neither available today. A `runner-l` node serves them natively. The
 dispatched coding agent's Phase 3 ([agent-fleet.md](agent-fleet.md) §5) is the
