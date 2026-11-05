@@ -211,6 +211,13 @@ wins structurally, because root skills load at startup while nested and plugin
 skills load later. The override is partial each time — only the conflicting
 claim is superseded.
 
+This is enforced, not just documented: `scripts/skills-check.sh overrides` (part
+of `make check`) fails if a house skill stops naming the skill it supersedes, if
+it is no longer a root skill, if a root skill collides with the overridden name,
+or if this table and the script's registry drift apart. Load order is only half
+the mechanism — the naming is the half that can rot, and when the gate was added
+two of the three skills below were not naming their counterpart at all.
+
 | Skill | Wrong here because | Overridden by |
 |---|---|---|
 | `rust-best-practice` (symposium-synced under `rust/.claude/skills/`, gitignored) | its `cargo fmt` + `cargo clippy` + `cargo test` finish line **skips `entities-check`** | `rust-conventions` |

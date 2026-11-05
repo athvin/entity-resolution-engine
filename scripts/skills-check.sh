@@ -19,7 +19,16 @@
 # entities" while the tree held 30. Hand-written counts in this repo rot within
 # days, so no skill states a count in prose; counts live here.
 #
-# Usage: skills-check.sh [lint|regen|check|all]
+#   overrides
+#          Asserts the three deliberate skill overrides still hold: the house
+#          skill exists at the root, names the skill it supersedes in its own
+#          body, and does not collide with a root skill of the same name — plus
+#          that the registry and CLAUDE.md's table describe the same set. Pure
+#          shell, same as `lint`, and for the same reason: it must run on a
+#          skills-only PR. See the section comment above `skill_overrides`.
+#
+# Usage: skills-check.sh [lint|regen|overrides|check|all]
+#   lint  = authoring rules + overrides
 #   check = regen + fail on drift (what CI runs)
 #   all   = lint + check (what `make skills-check` runs)
 
@@ -269,6 +278,150 @@ run_lint() {
 		exit 2
 	fi
 	note "examined $found skills"
+}
+
+# ---------------------------------------------------------------------------
+# skill overrides
+# ---------------------------------------------------------------------------
+#
+# Three general-purpose skills are deliberately overridden by house skills
+# (CLAUDE.md, "general-purpose skills are overridden"). The override is NOT
+# enforced by any loader setting — it rests on two things:
+#
+#   1. load order: root skills load at startup, nested and plugin skills later;
+#   2. the house skill SAYING SO in its own body, so a session that has both
+#      loaded is told which claim to discard.
+#
+# (1) is structural and cannot regress from an edit here. (2) is prose, and
+# prose is exactly what rots: delete the sentence while refactoring a skill and
+# the override silently degrades to a coincidence of load order, with nothing
+# red anywhere. This is the gap mono#272 found the hard way — its catalog eval
+# caught `frontend-design` shadowing the house skill, and that eval cost $8.55
+# and 524s a run, which is why it ended up pinned and ignored rather than fixed.
+#
+# So: assert the cheap, deterministic half here instead. This gate does NOT
+# prove a model picks the right skill at runtime — only an eval can do that, and
+# the decision on record (issue #586) is not to buy one. It proves the override
+# is still *stated* where it has to be stated for load order to mean anything.
+#
+# `overridden|house|where the overridden skill comes from`.
+skill_overrides=(
+	"rust-best-practice|rust-conventions|symposium-synced under rust/.claude/skills/"
+	"frontend-design|frontend-design-system|plugin"
+	"dataviz|frontend-data-ui|plugin"
+)
+
+# Body = everything after the closing frontmatter delimiter. Frontmatter is
+# excluded deliberately: `description` is marketing copy for the skill router,
+# while the override has to be stated where a session that already loaded the
+# skill will read it.
+skill_body() {
+	awk 'NR==1 && $0=="---" { infm=1; next }
+	     infm && $0=="---" { infm=0; started=1; next }
+	     started' "$1"
+}
+
+# The mention must be BACKTICK-DELIMITED — `dataviz`, not dataviz. That is the
+# house convention for a skill name, and insisting on it defeats two false
+# passes that a bare substring search walks straight into. Both were observed on
+# the real files while building this gate, not imagined:
+#
+#   1. A longer name containing the shorter one. `frontend-design-system`
+#      contains `frontend-design`, so a bare search matches the house skill's
+#      own name on its every self-reference.
+#   2. A FILENAME containing it. `frontend-design-system`'s body cites
+#      `docs/frontend-design.md` — a document, not the skill — and that alone
+#      made the assertion pass while the override went unstated. This is the
+#      more dangerous of the two, because stripping the skill's own name (the
+#      obvious fix for 1) does nothing about it.
+#
+# Requiring the delimiters rules out both: `docs/frontend-design.md` has no
+# backtick between `design` and `.md`, and `frontend-design-system` has none
+# between `design` and `-system`.
+names_skill_in_backticks() {
+	local file=$1 skill=$2
+	skill_body "$file" | grep -qF "\`$skill\`"
+}
+
+# The rows of CLAUDE.md's override table, so the registry above and the document
+# cannot drift apart in either direction.
+override_table_rows() {
+	awk '
+		/^\| Skill \| Wrong here because \| Overridden by \|/ { intable = 1; next }
+		intable && /^\|[ -]*-/ { next }
+		intable && /^\|/ { print; next }
+		intable { exit }
+	' CLAUDE.md
+}
+
+run_override_check() {
+	echo "skills-check: overrides"
+	local entry overridden house origin rows row_count n
+
+	for entry in "${skill_overrides[@]}"; do
+		IFS='|' read -r overridden house origin <<<"$entry"
+
+		# O1 — the house skill must exist, and at the ROOT. A house skill that
+		# moved into a nested directory would lose the load-order race it is
+		# relying on, which is not something its own prose would reveal.
+		if [[ ! -f $skills_dir/$house/SKILL.md ]]; then
+			err "override: house skill '$house' not found at $skills_dir/$house/SKILL.md (it must be a ROOT skill to load before '$overridden')"
+			continue
+		fi
+
+		# O2 — the house skill must name the skill it supersedes, literally and
+		# in backticks. "any generic data-visualization skill" leaves the model
+		# to infer that `dataviz` is the thing meant; naming it removes the
+		# inference step at the moment it matters.
+		if ! names_skill_in_backticks "$skills_dir/$house/SKILL.md" "$overridden"; then
+			err "override: '$house' never names \`$overridden\` in its body — the supersession is documented only in CLAUDE.md, so a session with both loaded is not told which claim to discard. State it in the body, with the skill name in backticks."
+			note "  ($overridden comes from: $origin)"
+		fi
+
+		# O3 — a root skill of the same name is a genuine collision, not an
+		# override: two skills would compete at the same load stage and the
+		# winner is then undefined rather than decided.
+		if [[ -e $skills_dir/$overridden ]]; then
+			err "override: '$overridden' also exists as a ROOT skill at $skills_dir/$overridden — that is a name collision, not an override, and load order no longer decides it"
+		fi
+	done
+
+	# O4 — the registry and CLAUDE.md's table must describe the same set.
+	rows=$(override_table_rows)
+	if [[ -z $rows ]]; then
+		err "override: CLAUDE.md's override table is missing or its header changed — the registry in this script has nothing to agree with"
+		return
+	fi
+	row_count=$(printf '%s\n' "$rows" | grep -c '^|')
+	if ((row_count != ${#skill_overrides[@]})); then
+		err "override: CLAUDE.md lists $row_count overridden skills, the registry in this script has ${#skill_overrides[@]} — add the new pair to BOTH"
+	fi
+	# Both names must appear on the SAME row. Searching the whole table for each
+	# name independently would be satisfied by two half-correct rows — a table
+	# that pairs `dataviz` with the wrong house skill still mentions both names
+	# somewhere, and that is exactly the drift this is meant to catch.
+	for entry in "${skill_overrides[@]}"; do
+		IFS='|' read -r overridden house origin <<<"$entry"
+		if ! printf '%s\n' "$rows" | grep -F "\`$overridden\`" | grep -qF "\`$house\`"; then
+			err "override: CLAUDE.md's table has no single row pairing \`$overridden\` with \`$house\`"
+		fi
+	done
+
+	# The heading carries the count in words, and a hand-written count in this
+	# repo goes stale within weeks — the reason every other count here lives in
+	# a GENERATED block. This one cannot (it is a prose heading), so assert it.
+	n=${#skill_overrides[@]}
+	local word
+	case $n in
+	1) word=One ;; 2) word=Two ;; 3) word=Three ;; 4) word=Four ;;
+	5) word=Five ;; 6) word=Six ;; 7) word=Seven ;; 8) word=Eight ;;
+	*) word=$n ;;
+	esac
+	if ! grep -qF "### $word general-purpose skills are overridden" CLAUDE.md; then
+		err "override: CLAUDE.md's heading does not read '### $word general-purpose skills are overridden' — the registry holds $n pairs, so the word in the heading is stale"
+	fi
+
+	note "checked $n documented skill overrides"
 }
 
 # ---------------------------------------------------------------------------
@@ -1168,7 +1321,25 @@ run_drift_check() {
 			# Telling those apart from a `126 ++---` line alone once cost an hour.
 			git show "HEAD:$f" | generated_blocks >"$tmp_head"
 			generated_blocks <"$f" >"$tmp_work"
-			diff -u --label "HEAD/$f" --label "regenerated/$f" "$tmp_head" "$tmp_work" | head -40
+			#
+			# `|| true` is load-bearing. `diff` exits 1 when files differ —
+			# always, here — and under `set -euo pipefail` that aborted the
+			# script MID-LOOP, with three consequences that all hid behind an
+			# exit code which happened to still be 1:
+			#
+			#   - only the FIRST stale file was ever named, so fixing it and
+			#     re-running surfaced the next: whack-a-mole with no count;
+			#   - the `fail=1` below was never reached (the status came from
+			#     `set -e` instead, coincidentally the same value);
+			#   - in `all` mode, `run_lint` and `run_override_check` never ran
+			#     AT ALL. Drift is stale on precisely the PRs that edit a
+			#     skill, which are precisely the PRs where the authoring rules
+			#     and the override assertions matter. The gate went quiet
+			#     exactly when it should have spoken.
+			#
+			# Confirmed by committing two stale generated blocks and checking
+			# that both are named and both later phases still run.
+			diff -u --label "HEAD/$f" --label "regenerated/$f" "$tmp_head" "$tmp_work" | head -40 || true
 		done
 		fail=1
 	else
@@ -1180,8 +1351,12 @@ run_drift_check() {
 # ---------------------------------------------------------------------------
 
 case "${1:-all}" in
-lint) run_lint ;;
+lint)
+	run_lint
+	run_override_check
+	;;
 regen) run_regen ;;
+overrides) run_override_check ;;
 check)
 	run_regen
 	run_drift_check
@@ -1190,9 +1365,10 @@ all)
 	run_regen
 	run_drift_check
 	run_lint
+	run_override_check
 	;;
 *)
-	echo "usage: $0 [lint|regen|check|all]" >&2
+	echo "usage: $0 [lint|regen|overrides|check|all]" >&2
 	exit 2
 	;;
 esac
