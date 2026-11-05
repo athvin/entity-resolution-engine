@@ -213,6 +213,60 @@ def main() -> int:
                 f"that true"
             )
 
+    # (4) the live pair and the preview pair must select DIFFERENT colours
+    #
+    # The one failure that would make the whole cutover decorative without
+    # looking broken: a preview Service pointing at the colour already serving.
+    # The deploy's smoke test runs against the previews, so if they aim at the
+    # live pod it passes by testing production, every time, and the new colour
+    # is promoted having been checked by nothing.
+    #
+    # The chart makes it unrepresentable today — `er-platform.inactiveColor` is
+    # DERIVED from `color.active` rather than configured, and an invalid colour
+    # is a `fail` at render. This is the belt: a hand-edit of services.yaml that
+    # pasted the wrong helper call would restore the hazard, and nothing else
+    # would notice.
+    COLOR = "er.dupezero.com/color"
+    live_pair = {"er-api", "er-web"}
+    preview_pair = {"er-api-preview", "er-web-preview"}
+    colour_of = {
+        svc["metadata"]["name"]: (svc["spec"].get("selector") or {}).get(COLOR)
+        for svc in services
+    }
+    present_live = live_pair & colour_of.keys()
+    present_preview = preview_pair & colour_of.keys()
+
+    if not present_live or not present_preview:
+        problems.append(
+            f"expected the live pair {sorted(live_pair)} and the preview pair "
+            f"{sorted(preview_pair)} to render, got {sorted(colour_of)} — the "
+            f"colour check examined nothing"
+        )
+    else:
+        live_colours = {colour_of[n] for n in present_live}
+        preview_colours = {colour_of[n] for n in present_preview}
+        print(f"  live {sorted(present_live)} -> {sorted(live_colours)}; "
+              f"preview {sorted(present_preview)} -> {sorted(preview_colours)}")
+        if None in live_colours | preview_colours:
+            problems.append(
+                f"a Service selector carries no {COLOR}: live={sorted(live_colours)} "
+                f"preview={sorted(preview_colours)}. Without it the Service selects "
+                f"BOTH colours at once, so a cutover would never move traffic"
+            )
+        elif len(live_colours) != 1 or len(preview_colours) != 1:
+            problems.append(
+                f"the pairs disagree internally: live={sorted(live_colours)} "
+                f"preview={sorted(preview_colours)}. er-api and er-web are the same "
+                f"pod, so they must always select the same colour"
+            )
+        elif live_colours == preview_colours:
+            problems.append(
+                f"the preview Services select {sorted(preview_colours)}, which is the "
+                f"LIVE colour: the deploy's smoke test would pass by testing what is "
+                f"already in production, and promote the new colour having checked "
+                f"nothing"
+            )
+
     if problems:
         print("\ncharts-check FAILED:\n", file=sys.stderr)
         for problem in problems:
