@@ -118,12 +118,14 @@ What follows from them:
   worth confirming once by watching a single merge, because the failure is
   silent in the opposite direction: if the automation does less than its name
   says, cards quietly stop moving and nobody is told.
-- **`Status` → `Done` is not a bookkeeping edit.** "Auto-close issue" is enabled,
-  and GitHub's built-in binds it to a Status value. Treat setting `Done` as
-  something that may **close the underlying issue**. Which value triggers it
-  cannot be read from the API, so confirm it once against a disposable issue
-  before relying on either answer — and until then, do not set `Done` merely to
-  tidy a board up.
+- **`Status` → `Done` closes the underlying issue. Verified, not inferred.** An
+  issue observed `OPEN`, then `Status` set to `Done` through `item-edit`, read
+  back as `CLOSED / COMPLETED` within seconds. So `Done` is never a bookkeeping
+  edit: it resolves the issue for everyone watching it. Setting it on work that
+  is not finished is a wrong state change, not an untidy board.
+
+  Use it deliberately — recording already-shipped work is the case where
+  closing is the point. Do not use it to tidy, and do not bulk-apply it.
 
 The general rule: **check whether an automation already did the work before
 writing.** The board has more than one writer.
@@ -230,11 +232,24 @@ get made. `item-add` is idempotent and `item-create` is not.
 
 ## Conventions here
 
-The board is GitHub's stock "Product Roadmap" template. It carries the
-**DataGroomr parity epics** — one issue per epic, labelled `epic` plus exactly
-one of `mvp` / `post-appexchange`, titled `E<n> — <name>`. The conventions
-below were settled while loading them; they are practice rather than a property
-of the board, so edit this section as it changes.
+The board is GitHub's stock "Product Roadmap" template, and every card is an
+issue carrying exactly one **class** label:
+
+| Class | What it is | Also carries |
+|---|---|---|
+| `epic` | a DataGroomr parity epic, titled `E<n> — <name>` | `mvp` or `post-appexchange` |
+| `docs-backlog` | open work found in `docs/` and verified against the code | `mvp` or `post-appexchange` |
+| `shipped` | a built capability documented in `docs/`, recorded so the board shows the product and not only its gaps | nothing — closed, so the release question is moot |
+
+**`docs/` understates what is built, consistently.** The checkboxes, the
+`frontend-design.md` §6.1 status column and its §7 gap list have all been
+observed stale in the same direction: features marked `Roadmap` or `Gap` that
+already have routes. A `docs/` item is a hypothesis until grepped against
+`rust/crates/er-server/src` or the entity catalog. One stale row reached a
+board card before this was caught.
+
+The conventions below are practice rather than a property of the board, so
+edit this section as it changes.
 
 - **`Status`** is `Todo` / `In progress` / `Done`, and the automations own most
   of its movement. Treat a hand edit as the exception. `In progress` here means
