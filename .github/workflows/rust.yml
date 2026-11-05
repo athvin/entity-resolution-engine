@@ -329,6 +329,21 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: bash scripts/skills-check.sh all
 
+      - name: Skills-check regression tests
+        # The gate's own race conditions, asserted deterministically. The reason
+        # this step exists is that `names_skill_in_backticks` piped `awk` into
+        # `grep -q` under `pipefail`, so a found match could report as missing
+        # whenever the reader won the race — it failed exactly once, on #606,
+        # against a tree where the name was present, and passed on rerun.
+        #
+        # A race cannot be trusted to the gate's own green, so it gets a suite
+        # that forces the losing side every time, plus a mutation check that
+        # fails if the suite stops discriminating.
+        #
+        # Same bare-checkout budget as the step above: pure bash, no toolchain.
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/ci/skills-check-test.sh
+
   # S9 — every `uses:` pinned to a commit SHA with its `# vTAG` comment.
   #
   # This job exists because the policy was enforced by NOTHING. `scripts/ci/

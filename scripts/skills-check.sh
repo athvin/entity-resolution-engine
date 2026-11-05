@@ -339,8 +339,27 @@ skill_body() {
 # backtick between `design` and `.md`, and `frontend-design-system` has none
 # between `design` and `-system`.
 names_skill_in_backticks() {
-	local file=$1 skill=$2
-	skill_body "$file" | grep -qF "\`$skill\`"
+	local file=$1 skill=$2 body needle
+	# Captured and THEN matched, never piped into `grep -q`.
+	#
+	# `set -euo pipefail` is on, and `grep -q` exits the instant it matches.
+	# That closes the pipe while `awk` is still writing the rest of the body,
+	# SIGPIPEs it, and makes the *pipeline* exit 141 — so a match that was
+	# found reports as missing. It is a race, which is the worst version: it
+	# passes locally and fails on one loaded CI runner, then passes on rerun.
+	#
+	# Not hypothetical. `agent skills (lint + drift)` failed on #606 claiming
+	# `frontend-design-system` never names `frontend-design`, against a tree
+	# where it does, at body line 26. Every house skill names its counterpart
+	# early — body lines 26, 31 and 34 — leaving 6.6–9.7 kB still to write, so
+	# all three are exposed and the largest body is the likeliest to fire.
+	#
+	# `tf-helpers-test.sh` already carries this warning for the same reason,
+	# and ci-and-supply-chain's skill states the rule: `grep -c`, not `grep -q`,
+	# on anything fed by a pipe. Bash pattern matching needs no pipe at all.
+	body=$(skill_body "$file")
+	needle="\`$skill\`"
+	[[ $body == *"$needle"* ]]
 }
 
 # The rows of CLAUDE.md's override table, so the registry above and the document
@@ -400,9 +419,14 @@ run_override_check() {
 	# name independently would be satisfied by two half-correct rows — a table
 	# that pairs `dataviz` with the wrong house skill still mentions both names
 	# somewhere, and that is exactly the drift this is meant to catch.
+	# Same no-`grep -q`-behind-a-pipe rule as `names_skill_in_backticks`. The
+	# writer here is small enough that it has not been seen to fire, but the
+	# shape is identical and a row list only grows.
+	local matched
 	for entry in "${skill_overrides[@]}"; do
 		IFS='|' read -r overridden house origin <<<"$entry"
-		if ! printf '%s\n' "$rows" | grep -F "\`$overridden\`" | grep -qF "\`$house\`"; then
+		matched=$(printf '%s\n' "$rows" | grep -F "\`$overridden\`" || true)
+		if [[ $matched != *"\`$house\`"* ]]; then
 			err "override: CLAUDE.md's table has no single row pairing \`$overridden\` with \`$house\`"
 		fi
 	done
