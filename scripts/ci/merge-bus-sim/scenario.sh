@@ -97,6 +97,9 @@ case "$SCEN" in
              add "candidates=101 109 102" \
                  "state_109=CLEAN" "draft_109=false" "base_109=main" "head_109=feat-c" \
                  "files_109=src/c.txt" "detect_failed_oid109=1" ;;
+  detect-read-flaky)
+             printf 'BLOCKED\nCLEAN\n'  >"$SIM/busstate.seq"
+             add "check_flaky_oid101=1" "check_flaky_oid102=1" ;;
   verdict-blind)
              printf 'BLOCKED\n'        >"$SIM/busstate.seq"
              add "failed_contexts=test" "bus_state_final=BLOCKED" "api_fails_bus=1" ;;

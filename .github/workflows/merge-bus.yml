@@ -166,6 +166,66 @@ jobs:
             exit 0
           fi
 
+          # How many of this commit's `detect` jobs FAILED — "0" when none did,
+          # and "0" as well when the answer cannot be read.
+          #
+          # A FAILED API CALL IS NOT DATA, and the first version of this check
+          # got that wrong in a way worth spelling out, because it reads as
+          # correct. It was:
+          #
+          #   [ "$(gh api ... --paginate --jq '...|length' 2>/dev/null || echo 0)" != "0" ]
+          #
+          # `--paginate` emits one jq result per page, and `|| echo 0` appends
+          # another on failure — so a call that emits page one and THEN errors
+          # (a secondary rate limit is the obvious candidate, given how many
+          # calls this loop makes) yields the two-line string "0\n0". That is
+          # `!= "0"`, so a perfectly healthy PR gets skipped as unverified.
+          #
+          # Measured 2026-11-05 on #510: all three detect jobs had completed
+          # `success` twenty minutes earlier, the PR was CLEAN, and the bus
+          # skipped it anyway. This is the same defect the pre-flight above was
+          # already fixed for, reintroduced here one commit later.
+          #
+          # So: read the status explicitly, require a single bare number, and
+          # FAIL OPEN on anything else — consistent with the pre-flight.
+          # `mergeStateStatus == CLEAN` is still required, so this check is a
+          # safety net rather than the gate, and a rate limit must not be able
+          # to block every merge. The warning is loud instead.
+          #
+          # NOT `--paginate`, and not whitespace-collapsing either: `"0\n0"`
+          # with the newline stripped becomes `"00"`, which is still numeric and
+          # still `!= "0"` — the same bug wearing a different hat. One page of
+          # 100 is fetched and `total_count` is compared against it, so a commit
+          # with more check-runs than that says so rather than quietly answering
+          # from a prefix.
+          detect_failures() {
+            local oid="$1" raw fails total
+            [ -n "$oid" ] || { echo "::warning::no head oid for the detect check" >&2; echo 0; return; }
+            if ! raw="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${oid}/check-runs?per_page=100" \
+                          --jq '"\([.check_runs[] | select(.name | startswith("detect")) | select(.conclusion == "failure")] | length) \(.total_count) \(.check_runs | length)"' \
+                        2>/dev/null)"; then
+              echo "::warning::could not read check-runs for ${oid}; not treating that as a detect failure" >&2
+              echo 0; return
+            fi
+            # Exactly three space-separated integers on one line, or we do not
+            # understand the answer and must not act on it.
+            case "$raw" in
+              *$'\n'*|'')
+                echo "::warning::unexpected check-runs response for ${oid} (${raw}); ignoring" >&2
+                echo 0; return ;;
+            esac
+            set -- $raw
+            [ "$#" -eq 3 ] || { echo "::warning::unparseable check-runs response for ${oid}: '${raw}'" >&2; echo 0; return; }
+            fails="$1"; total="$2"; fetched="$3"
+            for v in "$fails" "$total" "$fetched"; do
+              case "$v" in ''|*[!0-9]*) echo "::warning::non-numeric check-runs field for ${oid}: '${raw}'" >&2; echo 0; return ;; esac
+            done
+            if [ "$total" -gt "$fetched" ]; then
+              echo "::warning::${oid} has ${total} check-runs but only ${fetched} were read; the detect answer may be partial" >&2
+            fi
+            echo "$fails"
+          }
+
           chosen=()
           printf '\n%-6s  %-9s  %s\n' "PR" "VERDICT" "REASON"
           printf -- '------  ---------  ------------------------------------------\n'
@@ -222,9 +282,7 @@ jobs:
               # Such a PR must be merged by hand. Said plainly here so nobody
               # reads the skip as the bus being broken.
               reason="touches .github/workflows/ — GITHUB_TOKEN may not push workflow changes, so merge it by hand"
-            elif [ "$(gh api "repos/${GITHUB_REPOSITORY}/commits/${oid}/check-runs?per_page=100" --paginate \
-                        --jq '[.check_runs[] | select(.name | startswith("detect")) | select(.conclusion == "failure")] | length' \
-                      2>/dev/null || echo 0)" != "0" ]; then
+            elif [ "$(detect_failures "$oid")" != "0" ]; then
               # A GREEN THAT VERIFIED NOTHING. Every expensive job is gated on
               # `needs.detect.outputs.*`, so when a `detect` job FAILS its
               # dependents report `skipped` — and branch protection accepts
