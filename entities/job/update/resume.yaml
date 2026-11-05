@@ -1,7 +1,7 @@
 kind: statement
 operation: update
 mode: partial
-description: "Requeue a failed/canceled job with not_before = now(); a run_id is carried forward as resume_run_id so the next dispatch resumes that run."
+description: "Requeue a failed/canceled job with not_before = now(). The whole job re-runs; partial resumption is the task ledger's job, through clear."
 params:
   - { name: org_id, type: varchar }
   - { name: job_id, type: varchar }

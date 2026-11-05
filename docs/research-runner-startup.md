@@ -55,6 +55,18 @@ the question is the Python-era launcher (plan-to-aws 2.3) and the target design,
 not what the current Rust chart does. The recommendation below is written for
 the target design, and it also tells you what to keep from the in-process path.
 
+> **Superseded 2026-11-04.** Every sentence in the paragraph above is now false,
+> and it is left standing because the measurements that follow were taken under
+> it. What changed: the dispatcher is its own Deployment and the `web-api` pod
+> no longer sets `ER_DISPATCH_IN_PROCESS` at all; `dispatcher.launcher` and
+> `images.runner` are gone from `values.yaml` rather than merely unread; and the
+> Kubernetes executor is built, so a listed kind runs as **one Job per task
+> attempt** — not per run — with `er-server exec-task` as the body. The
+> in-process arm survives only for kinds absent from `executor.dagKinds` and is
+> deleted in [batch-orchestration-design](batch-orchestration-design.md) Phase
+> 4. The startup taxes measured below are unaffected: they are properties of
+> `Session`, not of who launches it.
+
 **Two startup taxes that are in the code, not the cluster:**
 
 1. `Session::attach_ducklake` runs `INSTALL ducklake; LOAD ducklake;` on every
