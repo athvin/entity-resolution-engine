@@ -137,6 +137,12 @@ Recorded so nobody retries these without new evidence:
 
 ## Measuring
 
+> **None of these entry points exist any more.** `make benchmark`,
+> `benchmark-workloads`, `benchmark-10m` and `profile-workloads` were all removed
+> with the Python pipeline, along with `benchmarks/full_pipeline.py`. They are kept
+> because they record which workload produced each measurement below. For the live
+> engine's benchmark surface see the `ducklake-performance` skill.
+
 Entry points:
 
 ```sh

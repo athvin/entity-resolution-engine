@@ -4,6 +4,13 @@
 
 Entries are ADR-style: **Decision**, **Context**, **Rejected alternative**, **Date**. Section references (§N) point into [infrastructure.md](infrastructure.md).
 
+> **Code references here are historical by design, and no longer links.** A decision
+> log records what was decided *then*, so 12 links to `server/src/erserver/*.py`,
+> `src/er/*.py`, `docker/compose.yaml`, `dbt/` and `benchmarks/` files were pointing
+> at a Python implementation that has since been rewritten in Rust and removed. They
+> are now inline code spans — the reasoning is unchanged and the links no longer
+> 404. Where a decision still has a live owner, the ADR names it in prose.
+
 ---
 
 ## Revision history
@@ -43,7 +50,7 @@ Consequences that rippled through the design: the §8.2 guard statements moved f
 
 **Decision.** `us-east-2`, single region, no DR replication in this phase.
 
-**Context.** Chosen when the Identity Center organization instance was created there — its primary region is permanent. Every service this design uses is available in us-east-2 at the same price points; the repo's `ER_S3_REGION` sites ([docker/compose.yaml](../docker/compose.yaml), [frontend/dev/env.sh](../frontend/dev/env.sh), [dbt/profiles/profiles.yml](../dbt/profiles/profiles.yml)) match.
+**Context.** Chosen when the Identity Center organization instance was created there — its primary region is permanent. Every service this design uses is available in us-east-2 at the same price points; the repo's `ER_S3_REGION` sites (`docker/compose.yaml`, [frontend/dev/env.sh](../frontend/dev/env.sh), `dbt/profiles/profiles.yml`) match.
 
 **Rejected alternative.** Multi-region and a real DR posture — deferred (§18.6 carries it as a stated accepted risk rather than an omission).
 
@@ -55,13 +62,13 @@ Consequences that rippled through the design: the §8.2 guard statements moved f
 
 **Decision.** A native Kubernetes Job per run, behind the `launch` seam that already exists — not Argo Workflows.
 
-**Context.** There is real prior art for multi-tenant ephemeral data pipelines on Argo Workflows, and the instinct is sound. It is the wrong fit here for a specific reason: **the DAG is inside the process, not across pods.** `run_all_full` executes ingest → standardize → train → match → reconcile → assemble as library calls in a single process via [src/er/service.py](../src/er/service.py), with dbt invoked as a subprocess inside that same pod. There is no artifact to pass between pods, no step to fan out, and no dependency graph for Kubernetes to resolve. Argo's core value — orchestrating multi-step DAGs across pods with artifact passing — would have nothing to orchestrate.
+**Context.** There is real prior art for multi-tenant ephemeral data pipelines on Argo Workflows, and the instinct is sound. It is the wrong fit here for a specific reason: **the DAG is inside the process, not across pods.** `run_all_full` executes ingest → standardize → train → match → reconcile → assemble as library calls in a single process via `src/er/service.py`, with dbt invoked as a subprocess inside that same pod. There is no artifact to pass between pods, no step to fan out, and no dependency graph for Kubernetes to resolve. Argo's core value — orchestrating multi-step DAGs across pods with artifact passing — would have nothing to orchestrate.
 
 What it would add is a **second, competing copy of control logic that already exists and is tested**:
 
-- **Retry semantics.** [server/src/erserver/policy.py](../server/src/erserver/policy.py) keys retries to the engine's exit-code taxonomy: `0` succeeded, `10` no-op, `2` fails permanently (config error — must never retry), `3` + `lock_conflict` requeues after 30s *without consuming an attempt*, `1` + `transient_io` or a `None` exit requeues *with `--resume`* under exponential backoff. Argo's `retryStrategy` does not know any of that, and expressing it there would put the policy in two places.
+- **Retry semantics.** `server/src/erserver/policy.py` keys retries to the engine's exit-code taxonomy: `0` succeeded, `10` no-op, `2` fails permanently (config error — must never retry), `3` + `lock_conflict` requeues after 30s *without consuming an attempt*, `1` + `transient_io` or a `None` exit requeues *with `--resume`* under exponential backoff. Argo's `retryStrategy` does not know any of that, and expressing it there would put the policy in two places.
 - **Two sources of truth for run state.** The `jobs` table is what the API's `/runs` endpoints and the frontend's job detail view read, with live per-stage progress in `jobs.progress`. An Argo workflow object would shadow it, and the two would disagree the first time one of them was restarted.
-- **Two schedulers.** Cron already lives in the dispatcher's leader loop via `croniter` ([schedules.py](../server/src/erserver/schedules.py)). Argo CronWorkflows would be a second thing able to start a tenant's run, and it *cannot* honour the `jobs_one_active_per_org` partial unique index, because that guarantee is enforced by the dispatcher's `FOR UPDATE SKIP LOCKED` claim query. Two dispatchers means the single-writer-per-tenant property is gone.
+- **Two schedulers.** Cron already lives in the dispatcher's leader loop via `croniter` (`schedules.py`). Argo CronWorkflows would be a second thing able to start a tenant's run, and it *cannot* honour the `jobs_one_active_per_org` partial unique index, because that guarantee is enforced by the dispatcher's `FOR UPDATE SKIP LOCKED` claim query. Two dispatchers means the single-writer-per-tenant property is gone.
 
 [backend-design.md](backend-design.md) §5 already rejected Celery and Redis on structurally identical grounds — "at-least-once redelivery is actively wrong for an engine that deliberately never auto-retries." Argo is a different tool with the same mismatch: an orchestrator with its own opinions about retries and state, layered over an engine whose state machine is already complete and deliberate. There is also a roadmap cost: [backend-design.md](backend-design.md) §15 phase 5 contemplates a self-hosted option, and the existing non-k8s fallback (the dispatcher forking a subprocess) serves that today. Argo would become a hard dependency for self-hosters.
 
@@ -212,7 +219,7 @@ The resolving check (D1, 2026-10-10): Auto Mode honours `karpenter.sh/do-not-dis
 
 ## D-SIZING — vCPU-tiered resource classes, not memory-tiered
 
-**Decision.** Resource classes tiered on vCPU with a near-constant memory floor, sized per run from the record count, carried on the **job row** (`jobs.resource_class`) rather than merged into `orgs.env`. Authority: [server/src/erserver/sizing.py](../server/src/erserver/sizing.py). [backend-design.md](backend-design.md) §7 has been corrected to match (§18.9 resolved — the spec and the implementation now agree).
+**Decision.** Resource classes tiered on vCPU with a near-constant memory floor, sized per run from the record count, carried on the **job row** (`jobs.resource_class`) rather than merged into `orgs.env`. Authority: `server/src/erserver/sizing.py`. [backend-design.md](backend-design.md) §7 has been corrected to match (§18.9 resolved — the spec and the implementation now agree).
 
 **Context.** The measurements say the thing to scale is CPU, not memory, and that inverts the resource classes the design started from:
 
@@ -226,7 +233,7 @@ The reason memory stays flat is that DuckDB **spills**, and spill is why §5.3 e
 
 **Why the job row, not `orgs.env`.** Dynamic sizing makes the §2 API-pod inheritance problem worse: if a tenant's env is set to 16 threads for its nightly 10M run, the API pods serving that tenant's read path inherit 16 threads across up to `_POOL_CAPACITY = 8` warm attaches. Per-run sizing therefore rides the job row until the [backend-design.md](backend-design.md) §8 split between tenant and API-pod settings is implemented (§18.10).
 
-**Rejected alternative.** Memory-tiered resource classes (S 8 / M 24 / L 64 GiB), following the original [backend-design.md](backend-design.md) §7. The record-count-to-class mapping in [benchmarks/scales.yaml](../benchmarks/scales.yaml) transfers; its memory figures do not, because its envelopes are deliberately generous so a benchmark never OOMs mid-run (the `1m` scale declares 12 CPU / 56 GiB) whereas production sizing should track measured *peaks*.
+**Rejected alternative.** Memory-tiered resource classes (S 8 / M 24 / L 64 GiB), following the original [backend-design.md](backend-design.md) §7. The record-count-to-class mapping in `benchmarks/scales.yaml` transfers; its memory figures do not, because its envelopes are deliberately generous so a benchmark never OOMs mid-run (the `1m` scale declares 12 CPU / 56 GiB) whereas production sizing should track measured *peaks*.
 
 **Two honest limits.** The thread-scaling measurement stops at 6 threads, so the knee above 6 is unknown — and unlikely to be linear, because the same run showed **reconcile getting 14% *slower*** at 6 threads, being a Python graph step that does not parallelize with DuckDB threads (§18.2). And the `le=32` bound on `duckdb_threads` caps the useful instance at 32 vCPU, which is what makes `c6id.8xlarge` the top of the ladder.
 
@@ -272,7 +279,7 @@ The explicit request is also what lets the scheduler avoid stacking two spill-he
 1. **Dispatcher streams pod logs** via `read_namespaced_pod_log(follow=True)`. Preserves the existing parsing code, but holds one long-lived HTTP stream per concurrent run, loses progress if the dispatcher restarts mid-run, and is vulnerable to log rotation on a multi-hour job.
 2. **The runner writes its own progress** to the control-plane database. The runner already holds a DSN and already emits exactly these records; this makes the write direct instead of relayed.
 
-Option 2 wins: it survives dispatcher restarts, removes N long-lived streams, and makes the dispatcher a pure scheduler rather than also a log relay. It is a small change to [server/src/erserver/runner.py](../server/src/erserver/runner.py) and it is on the same seam that §10 needs for trace context — so the two were designed together (§18.5 recorded the decision point).
+Option 2 wins: it survives dispatcher restarts, removes N long-lived streams, and makes the dispatcher a pure scheduler rather than also a log relay. It is a small change to `server/src/erserver/runner.py` and it is on the same seam that §10 needs for trace context — so the two were designed together (§18.5 recorded the decision point).
 
 **Rejected alternative.** Dispatcher streams pod logs (option 1).
 
@@ -284,7 +291,7 @@ Option 2 wins: it survives dispatcher restarts, removes N long-lived streams, an
 
 **Decision.** The Job carries `backoffLimit: 0` / `restartPolicy: Never`, and mounts the EFS access point at `ERSERVER_CONFIG_ROOT` / `ERSERVER_DROP_ROOT`.
 
-**Context.** `backoffLimit: 0` is the single most important field. The default of 6 would have Kubernetes retry a failed run on its own schedule, with no knowledge of the exit-code taxonomy — re-running a config error six times, and worse, re-running a partially-completed pipeline *without* `--resume`. **The EFS mount was omitted by the second revision**, and its absence fails late: the runner's first act is opening the config file by path ([server/src/erserver/runner.py:31](../server/src/erserver/runner.py)), and an incremental import lists its CSV drops from `drop_root` at ingest time ([src/er/ingest/sources.py:146](../src/er/ingest/sources.py)). Half an escape hatch exists and is worth recording: config *content* could travel inline — `configsvc.validate_yaml` already round-trips inline YAML through a temp file — but drops cannot leave the filesystem, because `storage.drop_dir` must be an absolute local path ([src/er/config/schema.py:285](../src/er/config/schema.py)) and discovery is a literal directory listing. Inline config is a later optimization, not a way out of the mount. The dispatcher needs the same mount for its own reasons (§2): `drain_staged` re-loads an org's config on every idle pass.
+**Context.** `backoffLimit: 0` is the single most important field. The default of 6 would have Kubernetes retry a failed run on its own schedule, with no knowledge of the exit-code taxonomy — re-running a config error six times, and worse, re-running a partially-completed pipeline *without* `--resume`. **The EFS mount was omitted by the second revision**, and its absence fails late: the runner's first act is opening the config file by path (`server/src/erserver/runner.py:31`), and an incremental import lists its CSV drops from `drop_root` at ingest time (`src/er/ingest/sources.py:146`). Half an escape hatch exists and is worth recording: config *content* could travel inline — `configsvc.validate_yaml` already round-trips inline YAML through a temp file — but drops cannot leave the filesystem, because `storage.drop_dir` must be an absolute local path (`src/er/config/schema.py:285`) and discovery is a literal directory listing. Inline config is a later optimization, not a way out of the mount. The dispatcher needs the same mount for its own reasons (§2): `drain_staged` re-loads an org's config on every idle pass.
 
 **Rejected alternative.** The Kubernetes default `backoffLimit: 6`; and the second revision's Job spec with no EFS mount.
 
@@ -318,7 +325,7 @@ Option 2 wins: it survives dispatcher restarts, removes N long-lived streams, an
 
 **Decision.** A second IAM user exists for SES SMTP (`ses:SendRawEmail` only, SMTP password derived from its access key, in Secrets Manager, rotated under the reloader rules) until the mailer is ported to the SES API in Phase 4.
 
-**Context.** Email was treated as a future feature by the earlier revisions; it is not. [server/src/erserver/mailer.py](../server/src/erserver/mailer.py) is a complete sender behind a durable `email_outbox` table that the dispatcher's leader tick drains with retry and backoff, and live flows depend on it (invites, password reset, `job_failed` and `report_completed` notifications). It is dormant today only because nothing sets `ERSERVER_SMTP_URL` — which in a cloud environment means every invite parks silently in the outbox. SES's SMTP interface **does not accept credentials derived from temporary credentials**; AWS documents this flatly, so IRSA can never back the SMTP path, no matter how the §9.2 cluster-identity work progresses. This is the amendment to §8.1's "one long-lived key" claim: two static keys, both with named Phase-4 exits.
+**Context.** Email was treated as a future feature by the earlier revisions; it is not. `server/src/erserver/mailer.py` is a complete sender behind a durable `email_outbox` table that the dispatcher's leader tick drains with retry and backoff, and live flows depend on it (invites, password reset, `job_failed` and `report_completed` notifications). It is dormant today only because nothing sets `ERSERVER_SMTP_URL` — which in a cloud environment means every invite parks silently in the outbox. SES's SMTP interface **does not accept credentials derived from temporary credentials**; AWS documents this flatly, so IRSA can never back the SMTP path, no matter how the §9.2 cluster-identity work progresses. This is the amendment to §8.1's "one long-lived key" claim: two static keys, both with named Phase-4 exits.
 
 **Rejected alternative.** An SMTP interface endpoint (not worth it at this scale — it has had availability-zone gaps in some regions, and port 25 is throttled from EC2 regardless; pods reach the SMTP endpoint through the NAT on 587). And IRSA for the SMTP path — structurally impossible.
 

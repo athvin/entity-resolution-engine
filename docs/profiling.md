@@ -85,6 +85,12 @@ layout, clustering or scoring algorithm.
 
 Run from the repository root with Docker available:
 
+> **These commands no longer run.** `scripts/ci/profile.sh` and the Compose
+> project it created were removed with the Python pipeline, per the note at the
+> top of this document. They are kept because the invocations record exactly
+> which workload produced the measurements below — which is the point of a
+> historical record — but nothing here is a current instruction.
+
 ```sh
 bash scripts/ci/profile.sh
 ```
