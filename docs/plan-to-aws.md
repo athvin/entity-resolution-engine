@@ -132,21 +132,47 @@ activation takes up to 24h and never backfills (§16.1).
 
 ---
 
-## Track A — application changes (parallel, start any time after 0.7)
+## Track A — application changes — CLOSED
 
-All from §14.1. No cluster required; CI is the harness. These merge into Phase 1 at 1.8.
+**This track is finished, and three of its five items were never going to be done
+as written.** Track A was specified against the FastAPI/dbt application; that
+application has since been rewritten in Rust and removed, which retired the items
+rather than completing them. It is kept here, struck through, because a reader who
+finds five unchecked boxes concludes there is 5 items of work outstanding, and
+there is none.
 
-- [ ] **A.1 Two new images** — `docker/Dockerfile.api` (slim: no dbt, no MinIO), `frontend/Dockerfile` (Next standalone, Node 22)
-  - CI builds and pushes both deployed images (`er-api`, `er-web`) from `.github/workflows/images.yml`; `make check` passes.
-  - Both new images run as non-root (`docker run --rm <img> whoami` ≠ root) (§5.6).
-- [ ] **A.2 `ERSERVER_TENANT_DB_PREFIX`** (§7.2) — default `er_`, behaviour bit-for-bit unchanged without the var; a unit test proves both the default and an override.
-- [ ] **A.3 Lake prefix normalization** (§7.3) — one layout across CI compose, dev stack, and settings default; the integration tier passes.
-- [ ] **A.4 FastAPI docs off outside dev** (§4.1) — `/docs`, `/redoc`, `/openapi.json` return 404 under prod settings; still served in dev.
-- [ ] **A.5 Non-root `USER` in `docker/Dockerfile`** — the compose `pipeline` service (whose command is pytest) still passes the full integration tier.
+All from §14.1. These merged into Phase 1 at 1.8.
 
-**Track A exit:** a full integration-tier run (`make check` + `make check-e2e` plus the 2h08m single-session
-pass) is green on the branch that carries all five — that tier, not the fast tiers, is what
-catches cross-module leaks here.
+- [x] **A.1 Two new images** — **done, at different paths than planned.** The slim API
+      image is `rust/Dockerfile` (not `docker/Dockerfile.api`) and the web image is
+      `frontend/Dockerfile`. Both acceptance criteria hold: `images.yml` builds and
+      pushes both `er-api` and `er-web`, and both run as non-root (`USER 1001` and
+      `USER node` respectively). The image carries no dbt or MinIO layer because
+      neither exists any more.
+- [x] ~~**A.2 `ERSERVER_TENANT_DB_PREFIX`** (§7.2)~~ — **retired, not done.** The
+      `ERSERVER_*` namespace belonged to the Python server. The Rust control plane
+      hardcodes the tenant database name as `er_t_{safe}` in `provision.rs`. If a
+      configurable prefix is still wanted it needs re-specifying against the Rust
+      server and a new item; nothing is pending under this one.
+- [x] ~~**A.3 Lake prefix normalization** (§7.3)~~ — **retired.** It asked for one
+      layout across "CI compose, dev stack, and settings default"; there is no
+      `compose.yaml` and no settings module. Lake layout is now four explicit
+      variables — `ER_LAKE_CATALOG`, `ER_LAKE_CATALOG_SCHEMA`, `ER_LAKE_DATA_PATH`,
+      `ER_LAKE_METADATA_SCHEMA` — which is the normalization this asked for, reached
+      by a different route.
+- [x] ~~**A.4 FastAPI docs off outside dev** (§4.1)~~ — **moot.** There is no FastAPI
+      app. `/docs`, `/redoc` and `/openapi.json` are not served by anything. The
+      OpenAPI document is now a build artifact emitted by `er-openapi` and pinned by
+      a snapshot test, not a live endpoint to switch off.
+- [x] ~~**A.5 Non-root `USER` in `docker/Dockerfile`**~~ — **moot.**
+      `docker/Dockerfile` does not exist, and neither does the compose `pipeline`
+      service whose pytest command was the acceptance test. Non-root is covered by
+      A.1 for both images that do exist.
+
+**Track A exit:** satisfied. The integration-tier run it named (`make check-e2e`
+plus a 2h08m single-session pass) described the Python test suite; the equivalent
+gate today is `make check` plus `make check-e2e`, and the frontend tiers in
+[frontend-testing.md](frontend-testing.md).
 
 ---
 
