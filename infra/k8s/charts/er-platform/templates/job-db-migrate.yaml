@@ -33,6 +33,14 @@ spec:
         {{- include "er-platform.labels" . | nindent 8 }}
     spec:
       restartPolicy: Never
+      # Naming no ServiceAccount is correct for a pre-install hook — see the
+      # long note in job-schema-migrate.yaml, which got this wrong and broke
+      # every fresh install. The one thing missing was the token: the DEFAULT
+      # account automounts unless told not to, unlike the three in
+      # serviceaccounts.yaml which all set it explicitly. This pod runs drizzle
+      # against Postgres and never calls the Kubernetes API, so it should hold
+      # no API credential either.
+      automountServiceAccountToken: false
       securityContext:
         {{- include "er-platform.podSecurityContext" . | nindent 8 }}
         runAsUser: 1000
