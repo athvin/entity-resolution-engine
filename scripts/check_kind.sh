@@ -31,6 +31,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PORT="${ER_KIND_PROBE_PORT:-18000}"
 BASE="http://127.0.0.1:${PORT}"
 ORG="kindacme"
+# Every job route is DATASET-scoped since the datasets work landed
+# (2026-11-04). `create_org` makes this dataset synchronously — "the org's
+# one dataset exists from its first moment" — so there is nothing to wait for.
+DS="default"
 
 log() { echo "check_kind: $*" >&2; }
 fail() { echo "check_kind: FAIL — $*" >&2; exit 1; }
@@ -55,9 +59,16 @@ trap 'kill ${PF_PID} 2>/dev/null || true; pkill -f "port-forward svc/er-api ${PO
 # process cannot serve a single DB-backed request. `readyz` is the real signal
 # and is what the chart's readiness and startup probes read.
 #
-# This gate was `/healthz`, and that is the likely cause of the 2026-11-05
-# nightly failing in phase 1: the org POST landed, the very next job POST got
-# nothing for ten seconds, and the probe had already decided the API was up.
+# CORRECTION, same day: when this changed from `/healthz` the comment here
+# claimed the old gate was "the likely cause of the 2026-11-05 nightly failing
+# in phase 1". It was not. The api() diagnostics added alongside it then
+# printed the real answer on the next run — `POST .../jobs gave up after 5
+# tries — HTTP 404` — a route that no longer existed, fixed below. Waiting on
+# the literal was a real bug and is still worth fixing, but it was not that
+# bug, and leaving the wrong cause written down here is how it becomes a
+# premise. The lesson is the one that keeps recurring: a plausible cause found
+# while fixing something else is a hypothesis, not a diagnosis.
+#
 # 90 ticks rather than 30 because `readyz` legitimately stays red through
 # `ensure_schema` on a cold boot, which is the whole point of waiting for it.
 for _ in $(seq 1 90); do
@@ -143,11 +154,11 @@ EOF
 log "org ${ORG} registered"
 
 enqueue() {
-    api POST "/v1/orgs/${ORG}/jobs" '{"kind":"lake_maintain"}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])'
+    api POST "/v1/orgs/${ORG}/datasets/${DS}/jobs" '{"kind":"lake_maintain"}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])'
 }
 
 job_state() {
-    api GET "/v1/orgs/${ORG}/jobs/$1" | python3 -c 'import json,sys; print(json.load(sys.stdin)["state"])'
+    api GET "/v1/orgs/${ORG}/datasets/${DS}/jobs/$1" | python3 -c 'import json,sys; print(json.load(sys.stdin)["state"])'
 }
 
 wait_state() { # job_id want timeout_s
@@ -166,7 +177,7 @@ wait_state() { # job_id want timeout_s
     fail "job ${id} never reached ${want} (last: $(job_state "${id}"))"
 }
 
-tasks_json() { api GET "/v1/orgs/${ORG}/jobs/$1/tasks"; }
+tasks_json() { api GET "/v1/orgs/${ORG}/datasets/${DS}/jobs/$1/tasks"; }
 
 # ---- phase 1: green -------------------------------------------------------
 log "phase 1: the green path"
@@ -196,7 +207,7 @@ catch_running() { # job_id
     local id="$1" deadline=$(( $(date +%s) + 90 ))
     while [ "$(date +%s)" -lt "${deadline}" ]; do
         local snap
-        snap="$(api GET "/v1/orgs/${ORG}/jobs/${id}/tasks" || true)"
+        snap="$(api GET "/v1/orgs/${ORG}/datasets/${DS}/jobs/${id}/tasks" || true)"
         case "$(printf '%s' "${snap}" | python3 -c 'import json,sys
 try:
     ts = json.load(sys.stdin)["tasks"]
@@ -257,7 +268,7 @@ for attempt in 1 2 3; do
     log "job ${candidate} settled before it could be canceled (attempt ${attempt}); trying a fresh one"
 done
 [ -n "${JOB3}" ] || fail "three jobs settled before a cancel could land"
-api POST "/v1/orgs/${ORG}/jobs/${JOB3}/cancel" >/dev/null
+api POST "/v1/orgs/${ORG}/datasets/${DS}/jobs/${JOB3}/cancel" >/dev/null
 # The cancel may lose the race with the final finish: a job that settled
 # succeeded moments before the POST is a pass for the RACE, not the probe —
 # accept either terminal state but assert no managed Job survives.
@@ -343,7 +354,7 @@ api POST /v1/orgs "$(cat <<EOF
 EOF
 )" >/dev/null
 
-PJOB="$(api POST "/v1/orgs/${PORG}/jobs" '{"kind":"run_all_full"}' \
+PJOB="$(api POST "/v1/orgs/${PORG}/datasets/${DS}/jobs" '{"kind":"run_all_full"}' \
     | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
 
 # A plain reassignment, not a `ORG=… wait_state` prefix: bash's scoping for an
@@ -423,7 +434,7 @@ EOF
 # the whole diagnosis here, so keep it.
 runs_code="$(curl -s -o /tmp/er-kind-runs5.json -w '%{http_code}' \
     -H "Authorization: Bearer ${OP_TOKEN}" \
-    "${BASE}/v1/orgs/${PORG}/datasets/default/runs")"
+    "${BASE}/v1/orgs/${PORG}/datasets/${DS}/runs")"
 if [ "${runs_code}" != "200" ]; then
     log "the runs read answered ${runs_code}: $(head -c 300 /tmp/er-kind-runs5.json)"
     fail "the control plane could not read back the lake the pods just wrote (HTTP ${runs_code})"
