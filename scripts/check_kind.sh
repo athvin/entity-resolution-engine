@@ -14,6 +14,11 @@
 #   3. cancel   — a running job is canceled; it settles canceled and no managed
 #                 Job object survives.
 #   4. refuse   — a garbage JWT-shaped bearer on the attempt channel is 401.
+#   5. pipeline — `run_all_full` runs as SEVEN pods, one per stage, each with
+#                 its own Job object and one launch, and the lake ends up
+#                 ledgered. This is the only phase where a stage must read what
+#                 a previous stage's PROCESS wrote, which is the class of bug
+#                 splitting a DAG across pods introduces (§11 Phase 3).
 #
 # Needs `scripts/kind_env.sh up` first. Exits non-zero on the first failure.
 set -euo pipefail
@@ -234,5 +239,158 @@ code="$(curl -s -o /dev/null -w '%{http_code}' \
     -H "Authorization: Bearer ${FORGED}" "${BASE}/v1/internal/attempts/${ATTEMPT}")"
 [ "${code}" = "401" ] || fail "a forged JWT answered ${code}, wanted 401"
 log "phase 4 ok: 401"
+
+# ---- phase 5: a seven-stage pipeline, each stage its own pod ---------------
+#
+# The four phases above all drive single-task kinds, so none of them can show
+# the thing most likely to break once a DAG is split across pods: a stage
+# reading what the PREVIOUS STAGE'S PROCESS produced. In the monolith every
+# stage shared one address space and one DuckDB handle; here `standardize` runs
+# in a container that did not exist when `ingest` finished, and the only things
+# that cross are the lake and the task's published output.
+#
+# That is not a hypothetical class of bug. `seed_lexicon` writes a
+# SESSION-LOCAL table, which was invisible for as long as one process ran every
+# stage and failed immediately once `init` and `standardize` were separate pods.
+#
+# A separate org, deliberately: the phases above depend on `lake_maintain`
+# settling in seconds against an EMPTY lake, and seeding base_10 into the org
+# they share would quietly change the window phases 2 and 3 are trying to
+# catch. `pg_run_all_pipeline.rs` already holds the golden-partition
+# comparison against a child-process double; what this adds is real pods, real
+# scheduling and real per-pod token verification for all seven.
+PORG="kindpipe"
+log "phase 5: run_all_full as seven pods (org ${PORG})"
+
+PDROP="${DATA_DIR}/drop/${PORG}"
+mkdir -p "${PDROP}" "${DATA_DIR}/data/${PORG}"
+cp "${ROOT}/rust/crates/er-cli/tests/fixtures/test.yaml" "${DATA_DIR}/configs/${PORG}.yaml"
+cp "${ROOT}/rust/crates/er-cli/tests/fixtures/nickname_variants.csv" "${DATA_DIR}/configs/${PORG}.lexicon.csv"
+cp "${ROOT}/fixtures/static/model_test_v1.json" "${DATA_DIR}/configs/${PORG}.model.json"
+# A COPY of the frozen-TF fixture, never the fixture itself: `train` APPENDS
+# its snapshot to that file, so pointing a tenant at the committed one would
+# have the probe mutate the repo. It did, once, in the integration tier.
+cp "${ROOT}/fixtures/static/model_test_v1.tf.csv" "${DATA_DIR}/configs/${PORG}.tf.csv"
+for src in crm billing webforms; do
+    cp "${ROOT}/fixtures/static/base_10/base/${src}.csv" "${PDROP}/${src}.csv"
+done
+chmod -R a+rwx "${DATA_DIR}/drop" "${DATA_DIR}/data" "${DATA_DIR}/configs"
+
+api POST /v1/orgs "$(cat <<EOF
+{
+  "name": "${PORG}",
+  "config_path": "/srv/er/configs/${PORG}.yaml",
+  "drop_root": "/srv/er/drop/${PORG}",
+  "env": {
+    "ER_CONFIG_PATH": "/srv/er/configs/${PORG}.yaml",
+    "ER_LAKE_CATALOG": "/srv/er/data/${PORG}/catalog.ducklake",
+    "ER_LAKE_DATA_PATH": "/srv/er/data/${PORG}/",
+    "ER_LEXICON_PATH": "/srv/er/configs/${PORG}.lexicon.csv",
+    "ER_MODEL_PATH": "/srv/er/configs/${PORG}.model.json",
+    "ER_TF_PATH": "/srv/er/configs/${PORG}.tf.csv",
+    "ER_MODEL_VERSION": "v0001",
+    "ER_TF_SNAPSHOT_ID": "01JWMDTFSNAP00000000000001"
+  }
+}
+EOF
+)" >/dev/null
+
+PJOB="$(api POST "/v1/orgs/${PORG}/jobs" '{"kind":"run_all_full"}' \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
+
+# A plain reassignment, not a `ORG=… wait_state` prefix: bash's scoping for an
+# assignment prefixed onto a FUNCTION differs between POSIX and default mode,
+# and the helpers interpolate ${ORG}. This is the last phase, so repointing it
+# outright is both correct and the clearer thing to read.
+ORG="${PORG}"
+
+# Wait for ANY terminal state, then dump the ledger, THEN require success.
+# `wait_state … succeeded` would abort the moment the job settled `failed`,
+# before anything printed the per-task rows — and in a seven-stage pipeline the
+# only thing worth knowing is WHICH stage failed and with what `error_detail`.
+# Generous on time: seven sequential pods, each paying a cold image start and a
+# cold DuckDB open, on one kind node inside a laptop's docker VM.
+pdeadline=$(( $(date +%s) + 1800 ))
+pfinal=""
+while [ "$(date +%s)" -lt "${pdeadline}" ]; do
+    pfinal="$(job_state "${PJOB}")"
+    case "${pfinal}" in succeeded|failed|canceled) break ;; esac
+    sleep 5
+done
+tasks_json "${PJOB}" > /tmp/er-kind-tasks5.json
+if [ "${pfinal}" != "succeeded" ]; then
+    log "pipeline settled '${pfinal}' — the ledger, newest stage last:"
+    python3 - /tmp/er-kind-tasks5.json <<'EOF' >&2 || true
+import json, sys
+for t in sorted(json.load(open(sys.argv[1]))["tasks"], key=lambda r: r["seq"]):
+    if not t["live"]:
+        continue
+    print(f"  {t['task_id']:12} {t['state']:16} try={t['try_number']} "
+          f"launches={t['launches']} class={t.get('resource_class')} "
+          f"err={t.get('error_class')} {t.get('error_detail') or ''}")
+EOF
+    fail "the pipeline did not succeed (settled '${pfinal:-never settled}')"
+fi
+python3 - /tmp/er-kind-tasks5.json <<'EOF'
+import json, sys
+
+tasks = json.load(open(sys.argv[1]))["tasks"]
+live = [t for t in tasks if t["live"]]
+want = ["init", "ingest", "standardize", "match", "reconcile", "assemble", "finish"]
+assert sorted(t["task_id"] for t in live) == sorted(want), sorted(t["task_id"] for t in live)
+
+jobs = set()
+for t in live:
+    assert t["state"] == "succeeded", (t["task_id"], t["state"], t.get("error_detail"))
+    assert t["launches"] == 1, f"{t['task_id']}: launches={t['launches']}"
+    name = t["k8s_job_name"] or ""
+    assert name.startswith("er-t-"), (t["task_id"], name)
+    # A real pod, identified from the claims the control plane VERIFIED — the
+    # child-process double in the integration tier cannot produce this.
+    assert t["pod_uid"], f"{t['task_id']}: no verified pod uid"
+    assert t["output"] is not None, f"{t['task_id']}: no durable output"
+    jobs.add(name)
+assert len(jobs) == 7, f"each stage needs its own Job object, got {len(jobs)}: {sorted(jobs)}"
+
+# The handoff actually crossed the pod boundary. `init` published the run plan,
+# and `standardize` pinned two references — the plan plus the corpus `ingest`
+# landed, which only rehydrates if ingest's own pod published it.
+init = next(t for t in live if t["task_id"] == "init")
+assert init["output"]["plan"] == "run_plan", init["output"]
+assert init["output"]["doc"]["mode"] == "full", init["output"]["doc"]
+std = next(t for t in live if t["task_id"] == "standardize")
+pins = std["input"]["pins"]
+assert len(pins) == 2, f"standardize pinned {len(pins)} refs, wanted the plan + the landed corpus"
+print(f"phase 5 ok: seven stages, seven Jobs, one launch each — {sorted(jobs)[0]} …")
+EOF
+
+# And the lake really holds the result: the run is ledgered under the model the
+# work order carried. A pipeline whose pods all exited zero without writing
+# anything would pass every assertion above and fail this one.
+#
+# Fetched WITHOUT `api`: this route is dataset-scoped and opens the lake in the
+# API process, so a 503 is a distinguishable outcome and not a transport
+# failure. `api` uses `curl -fsS`, which would exhaust its five retries on a
+# 503 and then die under `set -e` having printed nothing at all — the body is
+# the whole diagnosis here, so keep it.
+runs_code="$(curl -s -o /tmp/er-kind-runs5.json -w '%{http_code}' \
+    -H "Authorization: Bearer ${OP_TOKEN}" \
+    "${BASE}/v1/orgs/${PORG}/datasets/default/runs")"
+if [ "${runs_code}" != "200" ]; then
+    log "the runs read answered ${runs_code}: $(head -c 300 /tmp/er-kind-runs5.json)"
+    fail "the control plane could not read back the lake the pods just wrote (HTTP ${runs_code})"
+fi
+python3 - /tmp/er-kind-runs5.json "${PJOB}" <<'EOF'
+import json, sys
+
+runs = json.load(open(sys.argv[1]))
+runs = runs["runs"] if isinstance(runs, dict) else runs
+mine = [r for r in runs if r.get("id") == sys.argv[2] or r.get("run_id") == sys.argv[2]]
+assert len(mine) == 1, f"exactly one run row for the job, got {len(mine)} of {len(runs)}"
+run = mine[0]
+assert run.get("mode") == "full", run
+assert run.get("model_version") == "v0001", run
+print("phase 5 ok: the run is ledgered full @ v0001 — the pods wrote the lake")
+EOF
 
 log "ALL PHASES PASS"

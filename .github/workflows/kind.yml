@@ -1,7 +1,8 @@
-# The kind probe (batch-orchestration-design §11 Phase 2): the Kubernetes
-# executor end to end on a real (local) cluster — real pods, real projected
-# ServiceAccount tokens verified against the real API server's JWKS, adoption
-# across a dispatcher restart, cancel-through-canceling.
+# The kind probe (batch-orchestration-design §11): the Kubernetes executor end
+# to end on a real (local) cluster — real pods, real projected ServiceAccount
+# tokens verified against the real API server's JWKS, adoption across a
+# dispatcher restart, cancel-through-canceling, and a seven-pod `run_all_full`
+# where each stage reads what the previous stage's PROCESS wrote.
 #
 # Nightly + manual, and DELIBERATELY NOT a required check: the
 # frontend-testing standard says a gate must be observed failing before it is
@@ -26,7 +27,11 @@ jobs:
   probe:
     name: kind probe (executor e2e)
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    # 120, not 90: the cold image build is ~40 min on its own and the pipeline
+    # phase adds seven sequential pods, each paying a cold DuckDB open, against
+    # a 30-minute wait of its own. At 90 a slow build and a slow pipeline
+    # together would cancel the job just before its most interesting assertion.
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Reclaim runner disk

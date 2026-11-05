@@ -4424,7 +4424,15 @@ pub fn stage_correct_init(
         config,
         run_id,
         run_at,
-        "correct",
+        // The DECLARED mode, not the kind's name. `runs.mode` carries an
+        // enumeration — `er_schema::model::RUN_MODES`, declared on the
+        // registry's `enum_map` and repeated in the entity's own description —
+        // and `correct` was never a member of it. A row saying `correct` is an
+        // undeclared value in a constrained column: nothing enforced it, so it
+        // sat there, and the one function that maps a run's mode to a rebuild
+        // reason (`er_versions::rebuild_reason_for`) could never match it. The
+        // job KIND is still `correct`; only the ledger's mode moves.
+        er_versions::MODE_CORRECTION_PASS,
         &model_version,
         &tf_snapshot_id,
         None,

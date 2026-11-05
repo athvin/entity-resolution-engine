@@ -1,11 +1,13 @@
-# The kind profile (batch-orchestration-design §11 Phase 2's probe): the
-# er-platform chart with every AWS edge swapped for a local equivalent, and the
-# executor ON for the two Phase 2 kinds. Installed by scripts/kind_env.sh as
+# The kind profile (batch-orchestration-design §11's probe): the er-platform
+# chart with every AWS edge swapped for a local equivalent, and the executor ON
+# for every kind the probe drives. Installed by scripts/kind_env.sh as
 # `-f values-kind.yaml`; the image coordinates ride --set from the script.
 #
 # What this profile proves that no unit tier can: a real pod's projected token
-# against a real API server's JWKS, adoption across a dispatcher restart, and
-# cancel-through-canceling against a live DuckDB.
+# against a real API server's JWKS, adoption across a dispatcher restart,
+# cancel-through-canceling against a live DuckDB, and — since the pipeline
+# phase — a seven-stage run where each stage's pod hands the next one its work
+# through the lake rather than through a shared process.
 developer: er-kind
 environment: kind
 
@@ -26,10 +28,18 @@ erserver:
     backend: log
 
 executor:
-  # The whole point: lake_maintain and lake_migrate run as per-attempt
-  # Kubernetes Jobs, on the one kind node, with no nodepool pinning.
-  dagKinds: "lake_maintain,lake_migrate"
-  inFlightCap: 2
+  # The whole point: these kinds run as per-attempt Kubernetes Jobs, on the one
+  # kind node, with no nodepool pinning. `run_all_full` is here because the
+  # single-task kinds cannot show the thing most likely to break across a pod
+  # boundary — a stage reading what the previous stage's PROCESS wrote. Phase 5
+  # drives it; see scripts/check_kind.sh.
+  dagKinds: "lake_maintain,lake_migrate,run_all_full"
+  # Three — the same as the chart default, stated explicitly because the reason
+  # differs. `run_all` is a strict chain, so the cap never gates the pipeline
+  # regardless of its value; what it bounds here is how many DuckDB pods one
+  # kind node inside a laptop's docker VM is asked to hold if a phase ever does
+  # overlap. The probe's phases run sequentially, so in practice it is one.
+  inFlightCap: 3
   # Sized for a laptop's docker VM, not for EKS; every class identical and
   # unpinned because kind has one node and no Karpenter.
   classes:
