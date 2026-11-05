@@ -1,0 +1,207 @@
+#!/usr/bin/env bash
+# Fixture tests for the kind probe's assertion blocks, so a change that
+# NEUTERS one is caught on the PR that makes it rather than never.
+#
+# WHY THIS EXISTS. `scripts/check_kind.sh` needs a real cluster, a real image
+# build and roughly two hours, and it runs nightly — so its python assertion
+# blocks are the least-exercised correctness-critical code in the repository.
+# That would be tolerable if the failure mode were loud. It is not: an
+# assertion that can no longer fail makes the nightly probe GREENER, not
+# redder, so the nightly cannot detect its own neutering. Only a mutation test
+# can, and only a mutation test that runs per-PR catches it before it lands.
+#
+# This is not hypothetical. Phase 6 was written asserting
+# `termination_reason != "control_plane_unreachable"` on a task caught in
+# `running`. Reading exec_task.rs afterwards showed that reason is written at
+# exactly one site — the step-1 work-order loop — which a running task has
+# already passed; the reachable mid-run failure is `fenced`, from the heartbeat
+# thread. The guard's precondition could not hold, so it would have passed no
+# matter what the cutover did, through a full two-hour green run. The
+# assertion is now `termination_reason is None` and every branch of it is
+# mutated below.
+#
+# The blocks are EXTRACTED from check_kind.sh rather than transcribed. A copy
+# would be a second source of truth that drifts, and the drift would show up as
+# this test passing against code the probe no longer runs.
+#
+# No cluster, no network, no docker. Runs in about a second.
+#
+# Usage: scripts/ci/kind-assertions-test.sh
+# Exit codes: 0 all assertions held; 1 at least one did not; 2 nothing examined.
+set -uo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$REPO_ROOT" || exit 1
+
+PROBE="scripts/check_kind.sh"
+[ -f "$PROBE" ] || {
+    printf 'kind-assertions-test: missing %s\n' "$PROBE" >&2
+    exit 2
+}
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+fails=0
+ok() { printf '  PASS  %s\n' "$1"; }
+no() {
+    printf '  FAIL  %s\n' "$1" >&2
+    fails=$((fails + 1))
+}
+
+# ---- every embedded block must at least compile ---------------------------
+# Cheap coverage for the phases whose assertions this test does not mutate:
+# a syntax error in any of them would otherwise surface two hours into a
+# nightly run, after the image build and five phases of real work.
+blocks="$(python3 - "$PROBE" <<'PY'
+import re, sys
+src = open(sys.argv[1]).read()
+print(len(re.findall(r"python3 - /tmp/er-kind-tasks\d+\.json <<'EOF'\n.*?\nEOF\n", src, re.S)))
+PY
+)"
+if [ "${blocks:-0}" -lt 2 ]; then
+    no "found only ${blocks:-0} embedded assertion blocks — the heredoc shape changed, so this test examines nothing"
+    printf 'kind-assertions-test: nothing to examine\n' >&2
+    exit 2
+fi
+if python3 - "$PROBE" <<'PY'
+import re, sys, py_compile, tempfile, os
+src = open(sys.argv[1]).read()
+bad = []
+for i, m in enumerate(re.finditer(r"python3 - (/tmp/er-kind-tasks\d+\.json) <<'EOF'\n(.*?)\nEOF\n", src, re.S)):
+    f = tempfile.NamedTemporaryFile("w", suffix=".py", delete=False)
+    f.write(m.group(2)); f.close()
+    try:
+        py_compile.compile(f.name, doraise=True)
+    except Exception as e:
+        bad.append(f"{m.group(1)}: {e}")
+    finally:
+        os.unlink(f.name)
+sys.exit(1 if bad else 0)
+PY
+then
+    ok "all ${blocks} embedded assertion blocks compile"
+else
+    no "an embedded assertion block does not compile"
+fi
+
+# ---- phase 6: mutate every branch ----------------------------------------
+# Each case feeds a crafted task ledger to the REAL extracted block and
+# asserts the exit code. A mutant that still exits 0 is an assertion that
+# cannot discriminate, which is the whole thing being tested for.
+if python3 - "$PROBE" "$tmp" <<'PY'
+import json, os, re, subprocess, sys
+
+probe, tmp = sys.argv[1], sys.argv[2]
+src = open(probe).read()
+m = re.search(r"python3 - /tmp/er-kind-tasks6\.json <<'EOF'\n(.*?)\nEOF\n", src, re.S)
+if not m:
+    print("  FAIL  phase 6 assertion block not found in check_kind.sh", file=sys.stderr)
+    sys.exit(2)
+blk = os.path.join(tmp, "phase6.py")
+open(blk, "w").write(m.group(1))
+
+
+def row(**kw):
+    r = {
+        "task_id": "maintain",
+        "live": True,
+        "state": "succeeded",
+        "termination_reason": None,
+        "launches": 1,
+        "error_detail": None,
+    }
+    r.update(kw)
+    return r
+
+
+# (label, ledger, should the block exit 0, required substring of its output)
+#
+# That fourth element is not decoration. The `assert "termination_reason" in t`
+# guard in the probe is BEHAVIOURALLY redundant — the subscript beside it
+# raises KeyError on a missing field either way — so deleting it leaves every
+# exit code unchanged and no mutant can catch it. What it actually buys is the
+# diagnosis: a named AssertionError about the ledger shape instead of a bare
+# KeyError traceback surfacing two hours into a nightly run. Asserting the
+# message is the only way to keep it.
+cases = [
+    ("a clean cutover passes", [row()], True, None),
+    # The reachable mid-run failure: three missed heartbeats fence the attempt,
+    # step 6 refuses to post a verdict, the finished work is discarded.
+    ("REFUSES fenced", [row(termination_reason="fenced")], False, None),
+    # Only reachable by a sibling that launches after the flip and cannot
+    # fetch its work order through the moved Service.
+    ("REFUSES control_plane_unreachable", [row(termination_reason="control_plane_unreachable")], False, None),
+    ("REFUSES sigterm", [row(termination_reason="sigterm")], False, None),
+    ("REFUSES stale_start", [row(termination_reason="stale_start")], False, None),
+    # Two processes writing one lake — the invariant phase 2 also protects.
+    ("REFUSES a relaunched attempt", [row(launches=2)], False, None),
+    ("REFUSES a task that did not succeed", [row(state="failed")], False, None),
+    # Rename detection, and it must DIAGNOSE rather than merely die: see the
+    # note above on why the exit code alone cannot keep this guard.
+    (
+        "REFUSES a ledger missing termination_reason, by name",
+        [{k: v for k, v in row().items() if k != "termination_reason"}],
+        False,
+        "termination_reason field",
+    ),
+    # The cutover window caught nothing, so the phase proved nothing.
+    ("REFUSES an empty live set", [row(live=False)], False, None),
+    # One bad row among good ones must not be averaged away.
+    ("REFUSES one fenced row among many", [row(), row(task_id="b", termination_reason="fenced")], False, None),
+]
+
+fails = 0
+for label, tasks, want_pass, want_text in cases:
+    f = os.path.join(tmp, "t6.json")
+    with open(f, "w") as fh:
+        json.dump({"tasks": tasks}, fh)
+    p = subprocess.run([sys.executable, blk, f], capture_output=True, text=True)
+    passed = p.returncode == 0
+    out = (p.stdout or "") + (p.stderr or "")
+    tail = [l for l in out.strip().splitlines() if l.strip()]
+    why = tail[-1][:100] if tail else "(no output)"
+    if passed != want_pass:
+        fails += 1
+        got = "exited 0" if passed else "refused"
+        print(f"  FAIL  phase 6 {label}: {got}, wanted {'exit 0' if want_pass else 'a refusal'} — {why}", file=sys.stderr)
+    elif want_text and want_text not in out:
+        fails += 1
+        print(
+            f"  FAIL  phase 6 {label}: refused, but without naming {want_text!r} "
+            f"— a bare traceback is the wrong diagnosis for a nightly run; got: {why}",
+            file=sys.stderr,
+        )
+    else:
+        print(f"  PASS  phase 6 {label}")
+
+sys.exit(1 if fails else 0)
+PY
+then
+    ok "phase 6 assertions discriminate on every mutated branch"
+else
+    no "a phase 6 mutant was not refused — that assertion cannot fail"
+fi
+
+# ---- the cutover guards are present at all -------------------------------
+# Textual, deliberately: these three live in bash rather than python, and the
+# cost of asserting them properly is a cluster. A grep cannot prove they work,
+# but it can prove nobody deleted them, which is the realistic regression.
+for needle in \
+    'carries no er.dupezero.com/color selector' \
+    'cutover did not take' \
+    'restore failed'; do
+    if grep -qF "$needle" "$PROBE"; then
+        ok "the guard '${needle}' is still present"
+    else
+        no "the guard '${needle}' is gone from ${PROBE}"
+    fi
+done
+
+printf '\n'
+if [ "$fails" -eq 0 ]; then
+    printf 'kind-assertions-test: ok\n'
+    exit 0
+fi
+printf 'kind-assertions-test: %d assertion(s) did not hold\n' "$fails" >&2
+exit 1

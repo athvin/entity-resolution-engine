@@ -107,7 +107,8 @@ job instead — `terraform plan` is the worked example.
 
 | Job | Status-check context | Timeout | Condition |
 |---|---|---|---|
-| `probe` | kind probe (executor e2e) | 120 | `always` |
+| `assertions` | kind probe assertions (fixtures) | 5 | `always` |
+| `probe` | kind probe (executor e2e) | 120 | `github.event_name != 'pull_request'` |
 
 ### `merge-bus.yml`
 
