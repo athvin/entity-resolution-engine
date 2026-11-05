@@ -64,6 +64,16 @@ pub(crate) fn install_from_global() {
     install(&global::meter_provider().meter("er-obs"));
 }
 
+/// Whether the instruments exist, i.e. a meter provider was installed.
+///
+/// Read by [`crate::executions`] to decide whether a statement span is worth
+/// observing at all when per-run buffering is off. Keeping it a cheap
+/// `OnceLock::get` means the no-telemetry case — `er-entity`, `dedupe`, every
+/// test binary — still pays nothing.
+pub(crate) fn installed() -> bool {
+    INSTRUMENTS.get().is_some()
+}
+
 /// Record one statement's duration.
 ///
 /// Called from [`crate::executions`]'s `on_close`. Total by construction: an
@@ -102,9 +112,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn recording_without_a_provider_is_a_no_op() {
-        // The state every test binary and the `er` CLI run in. Must not panic:
-        // a metric that cannot be recorded must never fail a statement.
+    fn recording_is_safe_whether_or_not_a_provider_exists() {
+        // Renamed from `recording_without_a_provider_is_a_no_op`, which
+        // overstated what it can guarantee: `INSTRUMENTS` is a process-global
+        // `OnceLock`, and `executions.rs`'s behavioural test installs a real
+        // meter in the same binary, so by the time this runs the provider may
+        // or may not exist depending on test order.
+        //
+        // "Does not panic" is true either way, and is the property that
+        // matters — a metric that cannot be recorded must never fail a
+        // statement. Asserting a no-op would have been an order-dependent
+        // claim dressed as an invariant.
         record_query_duration(Some("duckdb"), Some("ok"), Duration::from_millis(5));
         record_query_duration(
             Some("postgresql"),

@@ -231,7 +231,24 @@ where
     S: Subscriber + for<'a> LookupSpan<'a>,
 {
     fn on_new_span(&self, attrs: &Attributes<'_>, id: &Id, ctx: Context<'_, S>) {
-        if !ENABLED.load(Ordering::Relaxed) {
+        // Observe when EITHER consumer needs it.
+        //
+        // This used to be `if !ENABLED { return }`, which made the metric in
+        // `on_close` unreachable everywhere buffering is off — the read path and
+        // the dispatcher — because `Observed` carries the store, the outcome and
+        // the timing, and without it `on_close` returns before recording.
+        //
+        // P12 moved the metric call ahead of the `ENABLED` gate in `on_close`
+        // and claimed that ordering made the histogram span both paths. The
+        // ordering was right and the effect was not: the data it reads is
+        // created HERE, under the same gate. Found by checking that metrics had
+        // actually arrived — the dispatcher was emitting 435 statement spans a
+        // file and `/er/dev/metrics` had nothing newer than a month-old Python
+        // record.
+        //
+        // `metrics::installed()` keeps the original property that mattered: the
+        // no-telemetry case pays nothing, because neither consumer is present.
+        if !ENABLED.load(Ordering::Relaxed) && !crate::metrics::installed() {
             return;
         }
         let meta = attrs.metadata();
@@ -360,7 +377,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{BUFFER_CAP, Execution};
+    use super::{BUFFER_CAP, ENABLED, Execution, ExecutionRecorder, disable};
+    use std::sync::atomic::Ordering;
 
     #[test]
     fn the_cap_is_documented_and_generous() {
@@ -414,6 +432,83 @@ mod tests {
             !rendered.to_lowercase().contains("select")
                 && !rendered.to_lowercase().contains("insert"),
             "no SQL may appear on an execution row"
+        );
+    }
+
+    /// A statement span is observed even when per-run buffering is OFF.
+    ///
+    /// This is the test whose absence let `er.db.query.duration` ship broken.
+    /// `on_new_span` gated on `ENABLED`, so `Observed` — which carries the
+    /// store, the outcome and the timing — was never attached on the read path
+    /// or in the dispatcher, and `on_close` returned before recording the
+    /// metric. Every existing test here enabled buffering first, so none of
+    /// them could see it.
+    ///
+    /// Records a real data point through the real `Layer`, with buffering OFF
+    /// — the configuration the bug lived in.
+    ///
+    /// An earlier version of this test asserted the SHAPE of the gate
+    /// condition instead, which is the same mistake that let the bug ship:
+    /// every other test here enables buffering first, so none of them could
+    /// observe that `Observed` was never attached without it. A test that
+    /// checks a condition rather than an outcome cannot catch an outcome.
+    ///
+    /// So this installs an in-memory meter, opens and closes a statement span
+    /// with `ENABLED` false, and asserts a data point came out with the two
+    /// declared dimensions.
+    ///
+    /// `INSTRUMENTS` is a process-global `OnceLock`, so this leaves them
+    /// installed for the rest of the binary. That is why `metrics.rs`'s
+    /// companion test asserts "does not panic" rather than "is a no-op" — the
+    /// honest guarantee either way.
+    #[test]
+    fn a_statement_span_records_a_metric_with_buffering_off() {
+        use opentelemetry::metrics::MeterProvider as _;
+        use opentelemetry_sdk::metrics::InMemoryMetricExporter;
+        use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
+        use tracing_subscriber::layer::SubscriberExt as _;
+
+        let exporter = InMemoryMetricExporter::default();
+        let provider = SdkMeterProvider::builder()
+            .with_reader(PeriodicReader::builder(exporter.clone()).build())
+            .build();
+        crate::metrics::install(&provider.meter("test"));
+
+        // The configuration that was broken: no per-run buffering.
+        disable();
+        assert!(!ENABLED.load(Ordering::Relaxed), "buffering must be off");
+
+        let subscriber = tracing_subscriber::registry().with(ExecutionRecorder);
+        tracing::subscriber::with_default(subscriber, || {
+            // `generator_span`, not `sql_span`: the PII gate in
+            // `er-schema/tests/sql_span_pii.rs` reserves `sql_span` for
+            // GENERATED code and flagged this test for calling it — correctly,
+            // since this file is product source. `generator_span` is what
+            // product code uses, and it declares the same two dimensions the
+            // histogram reads (`db.system.name`, `er.outcome`), so the path
+            // under test is identical.
+            let span = er_span::generator_span(
+                er_span::Store::Control,
+                "test::statement",
+                "a statement span, for the metric path",
+            );
+            let _entered = span.enter();
+            // `check` records the outcome the histogram reads; the Result it
+            // returns is the caller's, not ours.
+            let _ = er_span::check::<(), &str>(&span, Ok(()));
+        });
+
+        provider.force_flush().expect("flush");
+        let metrics = exporter.get_finished_metrics().expect("finished metrics");
+        let found = metrics.iter().any(|rm| {
+            rm.scope_metrics()
+                .any(|sm| sm.metrics().any(|m| m.name() == "er.db.query.duration"))
+        });
+        assert!(
+            found,
+            "no `er.db.query.duration` data point was exported with buffering off — \
+             the histogram is unreachable off the job path, which is the bug this \
+             test exists for"
         );
     }
 }
