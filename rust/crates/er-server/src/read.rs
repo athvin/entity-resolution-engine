@@ -1600,6 +1600,11 @@ pub fn profiled_standardized_columns(
             row_count: c.row_count,
             non_null_count: c.non_null_count,
             blank_count: c.blank_count,
+            // EXACT only. The duplicate floor is a record count, and deriving
+            // one from `distinct_approx` would turn a HyperLogLog's error —
+            // wrong in both directions — into a number a tenant reads as "you
+            // have N duplicates".
+            distinct_exact: c.distinct_exact,
             // The profile stores the top values as JSON; only the leading
             // share is wanted here, and reaching past it would pull a real
             // value into the publish path for no reason.

@@ -69,6 +69,11 @@ test.describe("config studio", () => {
     const advisories = page.getByTestId("publish-advisories");
     await expect(advisories).toContainText("measured, not blocking");
     await expect(advisories).toContainText("cannot reach");
+    // Every entry, not just the first: the duplicate floor is the second
+    // advisory, and a consumer that rendered only `advisories[0]` would pass a
+    // single-element fixture and silently drop the rest.
+    await expect(advisories).toContainText("at least 86 records share an");
+    await expect(advisories).toContainText("a floor measured with no model");
     // The wording must not read as a refusal: the version IS published, and a
     // reader who thinks otherwise will publish again.
     await expect(page.getByTestId("publish-result")).toContainText("published");

@@ -3679,6 +3679,10 @@ const server = http.createServer((req, res) => {
           // consumer read `undefined` on exactly the path nothing tested.
           advisories: [
             "blocking key `email` reads `email`, which is 71% populated — an equality is never true of a NULL, so this rule cannot reach 50% of all pairs",
+            // Two, not one: the field is a LIST and the studio renders every
+            // entry, so a single-element fixture would never catch a consumer
+            // that read `advisories[0]` and called it done.
+            "at least 86 records share an `email` with another record (7412 rows carry 7326 distinct values) — a floor measured with no model, so the real count is usually higher",
           ],
         });
       }
@@ -3714,6 +3718,10 @@ const server = http.createServer((req, res) => {
           // consumer read `undefined` on exactly the path nothing tested.
           advisories: [
             "blocking key `email` reads `email`, which is 71% populated — an equality is never true of a NULL, so this rule cannot reach 50% of all pairs",
+            // Two, not one: the field is a LIST and the studio renders every
+            // entry, so a single-element fixture would never catch a consumer
+            // that read `advisories[0]` and called it done.
+            "at least 86 records share an `email` with another record (7412 rows carry 7326 distinct values) — a floor measured with no model, so the real count is usually higher",
           ],
         });
       }
@@ -3729,6 +3737,7 @@ const server = http.createServer((req, res) => {
         // consumer read `undefined` on exactly the path nothing tested.
         advisories: [
           "blocking key `email` reads `email`, which is 71% populated — an equality is never true of a NULL, so this rule cannot reach 50% of all pairs",
+          "at least 86 records share an `email` with another record (7412 rows carry 7326 distinct values) — a floor measured with no model, so the real count is usually higher",
         ],
       });
     }
