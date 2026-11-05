@@ -142,7 +142,15 @@ jobs:
         timeout-minutes: 13
         run: |
           for i in 1 2 3; do
-            if timeout 120 sudo apt-get update && timeout 120 sudo apt-get install -y mold; then
+            # See rust.yml for the full reasoning: a partial `apt-get update`
+            # that reaches only packages.microsoft.com exits 0, leaves mold out
+            # of the index, and every retry then Hit:1 the same cache. Clearing
+            # the lists makes the retry able to recover; Error-Mode=any makes an
+            # unreachable mirror a failure rather than a warning, so the `&&`
+            # actually guards the install.
+            sudo rm -rf /var/lib/apt/lists/*
+            if timeout 120 sudo apt-get update -o APT::Update::Error-Mode=any \
+               && timeout 120 sudo apt-get install -y mold; then
               exit 0
             fi
             echo "mold install attempt $i failed or timed out; retrying"

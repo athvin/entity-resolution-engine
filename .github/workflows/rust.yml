@@ -263,7 +263,25 @@ jobs:
         timeout-minutes: 13
         run: |
           for i in 1 2 3; do
-            if timeout 120 sudo apt-get update && timeout 120 sudo apt-get install -y mold; then
+            # Clear the package lists first, so a retry actually re-fetches.
+            # Observed 2026-11-05: `apt-get update` reached ONLY
+            # packages.microsoft.com and never contacted
+            # azure.archive.ubuntu.com, exited 0 with a partial index, and
+            # `apt-get install -y mold` then reported "Unable to locate package
+            # mold". All three attempts repeated it, because each one Hit:1 the
+            # cache it had just been given rather than refetching — so the retry
+            # loop could not recover from the one state it exists for. mold IS
+            # on the image's archive (2.40.4+dfsg-2.1ubuntu1): a different leg
+            # of the same run, on the same ubuntu-26.04 image, installed it.
+            sudo rm -rf /var/lib/apt/lists/*
+            # ...and make a repository that could not be fetched a FAILURE
+            # rather than a warning. Without this a partial update exits 0 and
+            # the `&&` stops guarding anything: install runs against an index
+            # missing the package it is about to look for, and the error
+            # surfaces as a confusing "no such package" instead of "the mirror
+            # was unreachable".
+            if timeout 120 sudo apt-get update -o APT::Update::Error-Mode=any \
+               && timeout 120 sudo apt-get install -y mold; then
               exit 0
             fi
             echo "mold install attempt $i failed or timed out; retrying"
@@ -380,7 +398,25 @@ jobs:
         timeout-minutes: 13
         run: |
           for i in 1 2 3; do
-            if timeout 120 sudo apt-get update && timeout 120 sudo apt-get install -y mold; then
+            # Clear the package lists first, so a retry actually re-fetches.
+            # Observed 2026-11-05: `apt-get update` reached ONLY
+            # packages.microsoft.com and never contacted
+            # azure.archive.ubuntu.com, exited 0 with a partial index, and
+            # `apt-get install -y mold` then reported "Unable to locate package
+            # mold". All three attempts repeated it, because each one Hit:1 the
+            # cache it had just been given rather than refetching — so the retry
+            # loop could not recover from the one state it exists for. mold IS
+            # on the image's archive (2.40.4+dfsg-2.1ubuntu1): a different leg
+            # of the same run, on the same ubuntu-26.04 image, installed it.
+            sudo rm -rf /var/lib/apt/lists/*
+            # ...and make a repository that could not be fetched a FAILURE
+            # rather than a warning. Without this a partial update exits 0 and
+            # the `&&` stops guarding anything: install runs against an index
+            # missing the package it is about to look for, and the error
+            # surfaces as a confusing "no such package" instead of "the mirror
+            # was unreachable".
+            if timeout 120 sudo apt-get update -o APT::Update::Error-Mode=any \
+               && timeout 120 sudo apt-get install -y mold; then
               exit 0
             fi
             echo "mold install attempt $i failed or timed out; retrying"
@@ -516,7 +552,25 @@ jobs:
         timeout-minutes: 13
         run: |
           for i in 1 2 3; do
-            if timeout 120 sudo apt-get update && timeout 120 sudo apt-get install -y mold; then
+            # Clear the package lists first, so a retry actually re-fetches.
+            # Observed 2026-11-05: `apt-get update` reached ONLY
+            # packages.microsoft.com and never contacted
+            # azure.archive.ubuntu.com, exited 0 with a partial index, and
+            # `apt-get install -y mold` then reported "Unable to locate package
+            # mold". All three attempts repeated it, because each one Hit:1 the
+            # cache it had just been given rather than refetching — so the retry
+            # loop could not recover from the one state it exists for. mold IS
+            # on the image's archive (2.40.4+dfsg-2.1ubuntu1): a different leg
+            # of the same run, on the same ubuntu-26.04 image, installed it.
+            sudo rm -rf /var/lib/apt/lists/*
+            # ...and make a repository that could not be fetched a FAILURE
+            # rather than a warning. Without this a partial update exits 0 and
+            # the `&&` stops guarding anything: install runs against an index
+            # missing the package it is about to look for, and the error
+            # surfaces as a confusing "no such package" instead of "the mirror
+            # was unreachable".
+            if timeout 120 sudo apt-get update -o APT::Update::Error-Mode=any \
+               && timeout 120 sudo apt-get install -y mold; then
               exit 0
             fi
             echo "mold install attempt $i failed or timed out; retrying"
@@ -729,7 +783,25 @@ jobs:
         timeout-minutes: 13
         run: |
           for i in 1 2 3; do
-            if timeout 120 sudo apt-get update && timeout 120 sudo apt-get install -y mold; then
+            # Clear the package lists first, so a retry actually re-fetches.
+            # Observed 2026-11-05: `apt-get update` reached ONLY
+            # packages.microsoft.com and never contacted
+            # azure.archive.ubuntu.com, exited 0 with a partial index, and
+            # `apt-get install -y mold` then reported "Unable to locate package
+            # mold". All three attempts repeated it, because each one Hit:1 the
+            # cache it had just been given rather than refetching — so the retry
+            # loop could not recover from the one state it exists for. mold IS
+            # on the image's archive (2.40.4+dfsg-2.1ubuntu1): a different leg
+            # of the same run, on the same ubuntu-26.04 image, installed it.
+            sudo rm -rf /var/lib/apt/lists/*
+            # ...and make a repository that could not be fetched a FAILURE
+            # rather than a warning. Without this a partial update exits 0 and
+            # the `&&` stops guarding anything: install runs against an index
+            # missing the package it is about to look for, and the error
+            # surfaces as a confusing "no such package" instead of "the mirror
+            # was unreachable".
+            if timeout 120 sudo apt-get update -o APT::Update::Error-Mode=any \
+               && timeout 120 sudo apt-get install -y mold; then
               exit 0
             fi
             echo "mold install attempt $i failed or timed out; retrying"
@@ -865,7 +937,25 @@ jobs:
         timeout-minutes: 13
         run: |
           for i in 1 2 3; do
-            if timeout 120 sudo apt-get update && timeout 120 sudo apt-get install -y mold; then
+            # Clear the package lists first, so a retry actually re-fetches.
+            # Observed 2026-11-05: `apt-get update` reached ONLY
+            # packages.microsoft.com and never contacted
+            # azure.archive.ubuntu.com, exited 0 with a partial index, and
+            # `apt-get install -y mold` then reported "Unable to locate package
+            # mold". All three attempts repeated it, because each one Hit:1 the
+            # cache it had just been given rather than refetching — so the retry
+            # loop could not recover from the one state it exists for. mold IS
+            # on the image's archive (2.40.4+dfsg-2.1ubuntu1): a different leg
+            # of the same run, on the same ubuntu-26.04 image, installed it.
+            sudo rm -rf /var/lib/apt/lists/*
+            # ...and make a repository that could not be fetched a FAILURE
+            # rather than a warning. Without this a partial update exits 0 and
+            # the `&&` stops guarding anything: install runs against an index
+            # missing the package it is about to look for, and the error
+            # surfaces as a confusing "no such package" instead of "the mirror
+            # was unreachable".
+            if timeout 120 sudo apt-get update -o APT::Update::Error-Mode=any \
+               && timeout 120 sudo apt-get install -y mold; then
               exit 0
             fi
             echo "mold install attempt $i failed or timed out; retrying"
@@ -1026,7 +1116,25 @@ jobs:
         timeout-minutes: 13
         run: |
           for i in 1 2 3; do
-            if timeout 120 sudo apt-get update && timeout 120 sudo apt-get install -y mold; then
+            # Clear the package lists first, so a retry actually re-fetches.
+            # Observed 2026-11-05: `apt-get update` reached ONLY
+            # packages.microsoft.com and never contacted
+            # azure.archive.ubuntu.com, exited 0 with a partial index, and
+            # `apt-get install -y mold` then reported "Unable to locate package
+            # mold". All three attempts repeated it, because each one Hit:1 the
+            # cache it had just been given rather than refetching — so the retry
+            # loop could not recover from the one state it exists for. mold IS
+            # on the image's archive (2.40.4+dfsg-2.1ubuntu1): a different leg
+            # of the same run, on the same ubuntu-26.04 image, installed it.
+            sudo rm -rf /var/lib/apt/lists/*
+            # ...and make a repository that could not be fetched a FAILURE
+            # rather than a warning. Without this a partial update exits 0 and
+            # the `&&` stops guarding anything: install runs against an index
+            # missing the package it is about to look for, and the error
+            # surfaces as a confusing "no such package" instead of "the mirror
+            # was unreachable".
+            if timeout 120 sudo apt-get update -o APT::Update::Error-Mode=any \
+               && timeout 120 sudo apt-get install -y mold; then
               exit 0
             fi
             echo "mold install attempt $i failed or timed out; retrying"
@@ -1089,7 +1197,25 @@ jobs:
         timeout-minutes: 13
         run: |
           for i in 1 2 3; do
-            if timeout 120 sudo apt-get update && timeout 120 sudo apt-get install -y mold; then
+            # Clear the package lists first, so a retry actually re-fetches.
+            # Observed 2026-11-05: `apt-get update` reached ONLY
+            # packages.microsoft.com and never contacted
+            # azure.archive.ubuntu.com, exited 0 with a partial index, and
+            # `apt-get install -y mold` then reported "Unable to locate package
+            # mold". All three attempts repeated it, because each one Hit:1 the
+            # cache it had just been given rather than refetching — so the retry
+            # loop could not recover from the one state it exists for. mold IS
+            # on the image's archive (2.40.4+dfsg-2.1ubuntu1): a different leg
+            # of the same run, on the same ubuntu-26.04 image, installed it.
+            sudo rm -rf /var/lib/apt/lists/*
+            # ...and make a repository that could not be fetched a FAILURE
+            # rather than a warning. Without this a partial update exits 0 and
+            # the `&&` stops guarding anything: install runs against an index
+            # missing the package it is about to look for, and the error
+            # surfaces as a confusing "no such package" instead of "the mirror
+            # was unreachable".
+            if timeout 120 sudo apt-get update -o APT::Update::Error-Mode=any \
+               && timeout 120 sudo apt-get install -y mold; then
               exit 0
             fi
             echo "mold install attempt $i failed or timed out; retrying"
