@@ -85,7 +85,7 @@ async fn async_main(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>>
         return er_server::dispatcher_bin::run().await;
     }
     match args.get(1).map(String::as_str) {
-        Some("migrate") => return migrate().await,
+        Some("migrate") => return migrate(&args[2..]).await,
         Some("migrate-tenants") => return migrate_tenants(&args[2..]).await,
         Some("install-extensions") => return install_extensions(&args[2..]),
         _ => {}
@@ -167,10 +167,66 @@ async fn async_main(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>>
     Ok(())
 }
 
-/// `er-server migrate`: the control-plane schema, then the event triggers.
-async fn migrate() -> Result<(), Box<dyn std::error::Error>> {
+/// `er-server migrate [--plan [--json]] [--expect-additive]`: the control-plane
+/// schema, then the event triggers.
+///
+/// Three modes, because a deploy gate and a boot want different things:
+///
+/// - bare — apply, as it has always done.
+/// - `--plan` — report what WOULD be applied and write nothing. Exits 3 on a
+///   breaking plan, 0 otherwise, so a preflight can branch (see
+///   [`er_server::migrate_plan::Verdict::exit_code`]).
+/// - `--expect-additive` — plan first, refuse without writing if the plan is
+///   breaking, otherwise apply.
+///
+/// That last mode is not redundant with the refusal `ensure_schema` already
+/// carries, and the difference is the whole reason this exists:
+/// `ensure_schema` is six transactions, so by the time its phase-3 reconciler
+/// refuses, the baseline replay and the `BeforeReconcile` fixups have
+/// COMMITTED. Right for a boot — converge as far as is safe, then halt loudly —
+/// and wrong for a gate, which must leave the store untouched when it says no.
+async fn migrate(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    let flag = |name: &str| args.iter().any(|a| a == name);
+    let plan_only = flag("--plan");
+    let expect_additive = flag("--expect-additive");
+    if let Some(unknown) = args
+        .iter()
+        .find(|a| !matches!(a.as_str(), "--plan" | "--json" | "--expect-additive"))
+    {
+        // Refuse rather than ignore: a gate invoked with a misspelled flag that
+        // silently applied instead of planning would be the worst outcome
+        // available here.
+        return Err(format!(
+            "er-server migrate: unknown argument {unknown:?} \
+             (expected --plan, --json or --expect-additive)"
+        )
+        .into());
+    }
+
     let dsn = std::env::var("ER_PG_DSN").map_err(|_| "ER_PG_DSN is required for migrate")?;
     let mut client = er_server::pg::connect(&dsn).await?;
+
+    if plan_only || expect_additive {
+        let catalog = er_entities::catalog::catalog();
+        let relations = er_entity_diff::postgres_relations(&catalog);
+        let live = er_entity_diff::read_postgres_columns(&client, &relations).await?;
+        let plan = er_entity_diff::plan_migration(&catalog, er_entity_spec::Store::Postgres, &live);
+        let hash = er_server::migrate_plan::control_catalog_hash();
+        let verdict = er_server::migrate_plan::verdict(&plan);
+
+        if flag("--json") {
+            println!("{}", er_server::migrate_plan::as_json(&plan, &hash));
+        } else {
+            print!("{}", er_server::migrate_plan::render(&plan, &hash));
+        }
+
+        // `--plan` stops here whatever the verdict. `--expect-additive` stops
+        // only to refuse, and falls through to apply otherwise.
+        if plan_only || verdict == er_server::migrate_plan::Verdict::Breaking {
+            std::process::exit(i32::from(verdict.exit_code()));
+        }
+    }
+
     if let Err(e) = er_server::pg::ensure_schema(&mut client).await {
         eprintln!("er-server migrate: {}", er_server::errfmt::chain(&e));
         return Err("the control-plane schema could not be migrated".into());
