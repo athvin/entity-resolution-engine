@@ -101,13 +101,12 @@ async fn async_main(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>>
     if let Some(dsn) = &dsn {
         let mut client = er_server::pg::connect(dsn).await?;
         if let Err(e) = er_server::pg::ensure_schema(&mut client).await {
-            eprintln!("er-server: {}", er_server::errfmt::chain(&e));
+            tracing::error!(error = %er_server::errfmt::chain(&e), "er-server failed to start");
             return Err("the control-plane schema could not be ensured".into());
         }
         if !er_server::pg::ensure_event_triggers(&mut client).await? {
-            eprintln!(
-                "er-server: DDL-ledger event triggers not installed (requires \
-                 superuser/rds_superuser); run `er-server migrate` with the master DSN"
+            tracing::warn!(
+                "the DDL-ledger event triggers are not installed (requires superuser/rds_superuser); run `er-server migrate` with the master DSN"
             );
         }
     }
@@ -125,7 +124,7 @@ async fn async_main(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>>
                     let reporter = match er_server::reporter::AttemptReporter::connect(&dsn).await {
                         Ok(r) => Some(r),
                         Err(e) => {
-                            eprintln!("in-process attempt reporter disabled (connect failed): {e}");
+                            tracing::warn!(error = %e, "the in-process attempt reporter is disabled: connecting failed");
                             None
                         }
                     };
@@ -140,10 +139,12 @@ async fn async_main(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>>
                     )
                     .await
                     {
-                        eprintln!("in-process dispatcher stopped (control-plane): {e}");
+                        tracing::error!(error = %e, "the in-process dispatcher stopped: control-plane error");
                     }
                 }
-                Err(e) => eprintln!("in-process dispatcher could not connect: {e}"),
+                Err(e) => {
+                    tracing::error!(error = %e, "the in-process dispatcher could not connect");
+                }
             }
         });
     }
@@ -185,6 +186,13 @@ async fn async_main(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>>
 /// refuses, the baseline replay and the `BeforeReconcile` fixups have
 /// COMMITTED. Right for a boot — converge as far as is safe, then halt loudly —
 /// and wrong for a gate, which must leave the store untouched when it says no.
+// The `eprintln!`s in `migrate`, `migrate_tenants` and `install_extensions`
+// are DELIBERATE and allowlisted in `structured_logging.rs`. These are operator
+// CLI verbs: a human runs `er-server migrate` and reads the result on their
+// terminal. Structured JSON is the right shape for a daemon whose output is
+// shipped and queried, and the wrong shape for a sentence someone is about to
+// read — the same reasoning that exempts `er-entity check` and `er … --json`.
+// Everything in `async_main`, which is the daemon path, is `tracing`.
 async fn migrate(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     // Parsed in the library so the refusal of an unknown flag is testable; see
     // `migrate_plan::parse_migrate_args` for why silent acceptance is the

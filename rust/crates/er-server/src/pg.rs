@@ -138,15 +138,13 @@ pub async fn ensure_schema(client: &mut Client) -> Result<(), SchemaError> {
     )
     .await?;
     if !reconciled.applied.is_empty() {
-        eprintln!(
-            "er-server: control-plane schema migrated ({})",
-            reconciled.detail()
-        );
+        tracing::info!(detail = %reconciled.detail(), "the control-plane schema was migrated");
     }
     for ahead in &reconciled.ahead {
-        eprintln!(
-            "er-server: control-plane schema is ahead of this build: {}: {}",
-            ahead.relation, ahead.message
+        tracing::warn!(
+            relation = %ahead.relation,
+            detail = %ahead.message,
+            "the control-plane schema is ahead of this build"
         );
     }
     // Baseline statements deferred above (indexes on columns the reconciler
@@ -172,9 +170,9 @@ pub async fn ensure_schema(client: &mut Client) -> Result<(), SchemaError> {
             tx.batch_execute(stmt).await?;
         }
         tx.commit().await?;
-        eprintln!(
-            "er-server: {} baseline statement(s) replayed after reconcile (new-column indexes)",
-            deferred.len()
+        tracing::info!(
+            count = deferred.len(),
+            "baseline statements replayed after reconcile (new-column indexes)"
         );
     }
     // Data work that needs the reconciler's ADD COLUMNs (backfills) runs after

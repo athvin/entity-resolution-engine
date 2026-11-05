@@ -224,9 +224,8 @@ fn backend_from(get: &dyn Fn(&str) -> Option<String>) -> Backend {
                 .map(|value| value.trim().to_string())
                 .filter(|value| !value.is_empty());
             let Some(from) = from else {
-                eprintln!(
-                    "er-server: ER_MAIL_BACKEND=ses but ER_MAIL_FROM is unset or empty — \
-                     email is disabled"
+                tracing::warn!(
+                    "ER_MAIL_BACKEND=ses but ER_MAIL_FROM is unset or empty; email is disabled"
                 );
                 return Backend::Off;
             };
@@ -239,9 +238,9 @@ fn backend_from(get: &dyn Fn(&str) -> Option<String>) -> Backend {
         }
         other => {
             if !other.is_empty() && other != "off" {
-                eprintln!(
-                    "er-server: unrecognised ER_MAIL_BACKEND {other:?} \
-                     (expected ses, log or off) — email is disabled"
+                tracing::warn!(
+                    backend = ?other,
+                    "unrecognised ER_MAIL_BACKEND (expected ses, log or off); email is disabled"
                 );
             }
             Backend::Off
@@ -339,6 +338,14 @@ impl Mailer {
             // treated as unconfigured rather than panicking.
             (Backend::Off, _) | (Backend::Ses { .. }, None) => Err(MailError::NotConfigured),
             (Backend::Log, _) => {
+                // DELIBERATE, and allowlisted in `structured_logging.rs`. The
+                // `log` backend's whole purpose is that a developer reads the
+                // rendered email in their terminal; the multi-line
+                // subject-and-body layout IS the feature, and folding it into
+                // JSON fields would defeat it. It also carries a recipient
+                // address and a body, so it must stay on the stderr path —
+                // which `SpansOnly` keeps out of the exported spans and Fluent
+                // Bit ships in-account.
                 eprintln!(
                     "er-server: [mail:log] to={} template={} org={}\n  subject: {}\n{}",
                     message.to,

@@ -100,7 +100,7 @@ fn env_var(name: &str) -> Option<String> {
 fn write_termination(record: &TerminalRecord) {
     let path = env_var("ER_TERMINATION_LOG").unwrap_or_else(|| "/dev/termination-log".to_string());
     if let Err(e) = std::fs::write(&path, record.to_capped_json()) {
-        eprintln!("exec-task: termination record not written to {path}: {e}");
+        tracing::error!(path = %path, error = %e, "the termination record was not written");
     }
 }
 
@@ -146,7 +146,7 @@ pub fn run(args: &[String]) -> i32 {
     match run_inner(args) {
         Ok(code) => code,
         Err(message) => {
-            eprintln!("exec-task: {message}");
+            tracing::error!(error = %message, "the task verb failed");
             EXIT_PRECONDITION
         }
     }
@@ -195,11 +195,11 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
                     snapshot_end: None,
                     counters: None,
                 });
-                eprintln!("exec-task: work order refused ({status}): {detail}");
+                tracing::error!(http.response.status_code = status, detail = %detail, "the work order was refused");
                 return Ok(EXIT_PRECONDITION);
             }
             Err(e) => {
-                eprintln!("exec-task: work order fetch {tick}: {e}");
+                tracing::warn!(tick = tick, error = %e, "fetching the work order failed; retrying");
                 std::thread::sleep(Duration::from_secs(10));
             }
         }
@@ -311,7 +311,7 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
                 snapshot_end: None,
                 counters: None,
             });
-            eprintln!("exec-task: stale start ({status}): {detail}");
+            tracing::warn!(http.response.status_code = status, detail = %detail, "the start was stale");
             return Ok(EXIT_PRECONDITION);
         }
         Err(e) => return Err(format!("start: {e}")),
@@ -451,7 +451,7 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
             });
             let posted = channel.post(&format!("/v1/internal/attempts/{attempt}/finish"), &finish);
             if let Err(e) = &posted {
-                eprintln!("exec-task: finish not posted ({e}); the record carries the verdict");
+                tracing::warn!(error = %e, "the finish was not posted; the termination record carries the verdict");
             }
             write_termination(&TerminalRecord {
                 v: 1,
@@ -522,7 +522,7 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
                 snapshot_end,
                 counters: counters.snapshot(),
             });
-            eprintln!("exec-task: task failed [{}]: {detail}", class.as_str());
+            tracing::error!(er.error_class = %class.as_str(), detail = %detail, "the task failed");
             Ok(exit)
         }
     }

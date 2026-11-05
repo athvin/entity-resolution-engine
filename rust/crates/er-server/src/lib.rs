@@ -1279,10 +1279,10 @@ async fn send_email(
             // The recipient is deliberately absent from the log line: this runs
             // for password resets, so the address is the one thing worth not
             // writing down on every transport hiccup.
-            eprintln!(
-                "er-server: email transport failed (template={}): {}",
-                body.template,
-                errfmt::chain(&e)
+            tracing::error!(
+                er.template = %body.template,
+                error = %errfmt::chain(&e),
+                "the email transport failed"
             );
             (
                 StatusCode::BAD_GATEWAY,
@@ -3479,7 +3479,7 @@ async fn publish_config_version(
     )
     .await
     {
-        eprintln!("config.published for {org} v{version} not queued: {e}");
+        tracing::warn!(er.org = %org, er.version = version, error = %e, "the config.published webhook was not queued");
     }
     // Computed after everything that can fail has already succeeded, so the
     // ordering itself guarantees an advisory cannot cost a tenant a publish.
@@ -3530,7 +3530,7 @@ async fn publish_advisories(
     match read::profiled_standardized_columns(&session, snapshot) {
         Ok(columns) => config_check::profile_advisories(config, &columns),
         Err(e) => {
-            eprintln!("publish advisories for {org}/{ds}: profile read failed: {e}");
+            tracing::warn!(er.org = %org, er.dataset = %ds, error = %e, "reading the profile for publish advisories failed");
             Vec::new()
         }
     }
@@ -4324,7 +4324,7 @@ async fn attempt_authorized(
         let claims = match verifier.verify(token).await {
             Ok(c) => c,
             Err(e) => {
-                eprintln!("satoken: attempt {attempt_id}: {}", errfmt::chain(&e));
+                tracing::warn!(er.attempt_id = %attempt_id, error = %errfmt::chain(&e), "verifying the service-account token failed");
                 return Err(Box::new(
                     unauthorized("the ServiceAccount token does not verify").into_response(),
                 ));
@@ -4439,7 +4439,7 @@ async fn attempt_work_order(
                 .map(|l| (l.rec_a_key, l.rec_b_key))
                 .collect(),
             Err(e) => {
-                eprintln!("work order: reading labels failed, the train falls back to EM: {e}");
+                tracing::warn!(error = %e, "reading labels failed; the train falls back to EM");
                 Vec::new()
             }
         }
@@ -6738,7 +6738,7 @@ pub(crate) async fn finish_delivery(
     )
     .await
     {
-        eprintln!("import.received for {org}/{source} not queued: {e}");
+        tracing::warn!(er.org = %org, er.source = %source, error = %e, "the import.received webhook was not queued");
     }
     (
         StatusCode::ACCEPTED,

@@ -193,7 +193,7 @@ pub(crate) async fn apply_fixups(client: &mut Client, phase: Phase) -> Result<()
         run_fixup(&tx, name).await?;
         er_entities::fixup::create::record(&tx, &er_ids::new_v7(), name, &applied_by()).await?;
         tx.commit().await?;
-        eprintln!("er-server: fixup {name} applied");
+        tracing::info!(er.fixup = %name, "the fixup was applied");
     }
     Ok(())
 }

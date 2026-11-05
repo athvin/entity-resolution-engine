@@ -65,7 +65,7 @@ pub async fn run_loop(
     if let Some(ex) = executor.as_mut() {
         ex.adopt().await;
     }
-    eprintln!("dispatcher up");
+    tracing::info!("the dispatcher is up");
     let mut idle = IDLE_MIN;
     let mut next_schedule_tick = tokio::time::Instant::now();
     let mut next_s3_poll = tokio::time::Instant::now();
@@ -79,10 +79,10 @@ pub async fn run_loop(
             next_schedule_tick = tokio::time::Instant::now() + SCHEDULE_TICK_EVERY;
             match schedule_tick(client, chrono::Utc::now()).await {
                 Ok(0) => {}
-                Ok(n) => eprintln!("scheduler enqueued {n} job(s)"),
+                Ok(n) => tracing::info!(count = n, "the scheduler enqueued jobs"),
                 // A tick failure must not take the job loop down with it: the
                 // queue keeps draining and the next tick retries.
-                Err(e) => eprintln!("scheduler tick failed: {e}"),
+                Err(e) => tracing::warn!(error = %e, "a scheduler tick failed"),
             }
         }
         // Auto-ingest (E9c) rides the loop for the reason the scheduler tick
@@ -95,11 +95,11 @@ pub async fn run_loop(
             next_s3_poll = tokio::time::Instant::now() + S3_POLL_EVERY;
             match s3_poll_tick(client, &mut s3).await {
                 Ok(0) => {}
-                Ok(n) => eprintln!("s3 auto-ingest: {n} object(s) landed"),
+                Ok(n) => tracing::info!(count = n, "s3 auto-ingest landed objects"),
                 // Same rule as the scheduler tick and the webhook drain: a
                 // failure here must not take the job loop down, or one
                 // tenant's misconfigured bucket stops every tenant's jobs.
-                Err(e) => eprintln!("s3 auto-ingest tick failed: {e}"),
+                Err(e) => tracing::warn!(error = %e, "an s3 auto-ingest tick failed"),
             }
         }
 
@@ -113,7 +113,7 @@ pub async fn run_loop(
             // failure here must not take the job loop down either, for the
             // same reason the scheduler tick does not.
             Err(e) => {
-                eprintln!("webhook drain failed: {e}");
+                tracing::warn!(error = %e, "the webhook drain failed");
                 0
             }
         };
@@ -141,7 +141,7 @@ pub async fn run_loop(
             idle = (idle * 2).min(IDLE_MAX); // is seen at the next loop top)
         }
     }
-    eprintln!("dispatcher draining -> exit");
+    tracing::info!("the dispatcher is draining and will exit");
     Ok(())
 }
 
@@ -213,9 +213,9 @@ pub async fn s3_poll_tick(
         // would attribute their records to a source that does not exist.
         let detail = pg::OrgDetail::from(org);
         let Ok(config) = crate::org_active_config(client, &detail).await else {
-            eprintln!(
-                "s3 auto-ingest: skipping '{org_name}' — no readable active config to say which \
-                 sources its prefix holds"
+            tracing::warn!(
+                er.org = %org_name,
+                "s3 auto-ingest skipped the org: no readable active config to say which sources its prefix holds"
             );
             continue;
         };
@@ -224,15 +224,17 @@ pub async fn s3_poll_tick(
             let mut skipped = Vec::new();
             let newest = watcher.newest(&bucket, &prefix, source, &mut skipped).await;
             for why in &skipped {
-                eprintln!("s3 auto-ingest: {org_name}/{source} passed over an object: {why:?}");
+                tracing::info!(er.org = %org_name, er.source = %source, reason = ?why, "s3 auto-ingest passed over an object");
             }
             let found = match newest {
                 Ok(Some(found)) => found,
                 Ok(None) => continue,
                 Err(e) => {
-                    eprintln!(
-                        "s3 auto-ingest: {org_name}/{source}: {}",
-                        crate::errfmt::chain(&e)
+                    tracing::warn!(
+                        er.org = %org_name,
+                        er.source = %source,
+                        error = %crate::errfmt::chain(&e),
+                        "s3 auto-ingest failed for this source"
                     );
                     continue;
                 }
@@ -256,10 +258,12 @@ pub async fn s3_poll_tick(
                 match crate::delivery_preconditions(client, &org_name, "default", source).await {
                     Ok(t) => t,
                     Err(refusal) => {
-                        eprintln!(
-                            "s3 auto-ingest: {org_name}/{source} not landed ({}): {}",
-                            drop.key,
-                            refusal.reason()
+                        tracing::warn!(
+                            er.org = %org_name,
+                            er.source = %source,
+                            er.object_key = %drop.key,
+                            reason = %refusal.reason(),
+                            "s3 auto-ingest did not land an object"
                         );
                         continue;
                     }
@@ -269,9 +273,10 @@ pub async fn s3_poll_tick(
             let Some(part) =
                 crate::s3_ingest::staging_path(Path::new(&drop_root), source, &delivery_id)
             else {
-                eprintln!(
-                    "s3 auto-ingest: {org_name} refused source '{source}' — it would not stay \
-                     inside the drop root"
+                tracing::warn!(
+                    er.org = %org_name,
+                    er.source = %source,
+                    "s3 auto-ingest refused the source: it would not stay inside the drop root"
                 );
                 continue;
             };
@@ -280,9 +285,11 @@ pub async fn s3_poll_tick(
                 Err(e) => {
                     // A `.part` left behind would accumulate every tick.
                     let _ = tokio::fs::remove_file(&part).await;
-                    eprintln!(
-                        "s3 auto-ingest: {org_name}/{source}: {}",
-                        crate::errfmt::chain(&e)
+                    tracing::warn!(
+                        er.org = %org_name,
+                        er.source = %source,
+                        error = %crate::errfmt::chain(&e),
+                        "s3 auto-ingest failed for this source"
                     );
                     continue;
                 }
@@ -312,10 +319,11 @@ pub async fn s3_poll_tick(
                 // is already in flight. Leaving the cursor alone is the whole
                 // retry mechanism — the next tick finds the same object still
                 // new and lands it once the queue is free.
-                eprintln!(
-                    "s3 auto-ingest: {org_name}/{source} could not be published ({}); the \
-                     cursor stays put so the next tick retries",
-                    response.status()
+                tracing::warn!(
+                    er.org = %org_name,
+                    er.source = %source,
+                    http.response.status_code = %response.status(),
+                    "s3 auto-ingest could not publish; the cursor stays put so the next tick retries"
                 );
                 continue;
             }
@@ -337,9 +345,11 @@ pub async fn s3_poll_tick(
                 // is not a failure of the import — it is a failure to remember
                 // it, and the next tick will land the same object again. Loud,
                 // because a cursor that never advances is an ingest loop.
-                eprintln!(
-                    "s3 auto-ingest: {org_name}/{source} landed but its cursor did not advance, \
-                     so it will be re-ingested: {e}"
+                tracing::warn!(
+                    er.org = %org_name,
+                    er.source = %source,
+                    error = %e,
+                    "s3 auto-ingest landed but its cursor did not advance, so it will be re-ingested"
                 );
                 continue;
             }
@@ -383,9 +393,10 @@ pub async fn schedule_tick(
         // the API rejects these on the way in, so one here is a data-level
         // surprise worth seeing.
         let Ok(expr) = crate::cron::Cron::parse(&schedule.cron) else {
-            eprintln!(
-                "schedule {} has an unrunnable cron {:?}; skipping",
-                schedule.id, schedule.cron
+            tracing::warn!(
+                er.schedule_id = %schedule.id,
+                cron = ?schedule.cron,
+                "the schedule has an unrunnable cron; skipping it"
             );
             continue;
         };
@@ -567,7 +578,7 @@ async fn dispatch_claimed(
         if let Some(rr) = report.as_mut() {
             rr.settle(false).await;
         }
-        eprintln!("job {} failed: org id '{}' not found", job.id, job.org_id);
+        tracing::error!(er.job_id = %job.id, er.org_id = %job.org_id, "the job failed: its org id was not found");
         return Ok(true);
     };
 
@@ -583,10 +594,10 @@ async fn dispatch_claimed(
         if let Some(rr) = report.as_mut() {
             rr.settle(false).await;
         }
-        eprintln!(
-            "job {} failed: dataset id '{}' not found",
-            job.id,
-            job.dataset_id.as_deref().unwrap_or("")
+        tracing::error!(
+            er.job_id = %job.id,
+            er.dataset_id = %job.dataset_id.as_deref().unwrap_or(""),
+            "the job failed: its dataset id was not found"
         );
         return Ok(true);
     };
@@ -638,7 +649,7 @@ async fn dispatch_claimed(
         if let Ok(r) = &outcome
             && !r.applied.is_empty()
         {
-            eprintln!("job {}: lake schema migrated ({})", job.id, r.detail());
+            tracing::info!(er.job_id = %job.id, detail = %r.detail(), "the lake schema was migrated");
         }
         if let Some(rr) = report.as_mut() {
             match &outcome {
@@ -716,9 +727,10 @@ async fn dispatch_claimed(
             .await
             .map(|staged| {
                 if staged > 0 {
-                    eprintln!(
-                        "approval: staged {staged} approved merge(s) for {}",
-                        org.name
+                    tracing::info!(
+                        er.org = %org.name,
+                        count = staged,
+                        "staged approved merges"
                     );
                 }
             }),
@@ -755,28 +767,31 @@ async fn dispatch_claimed(
         // published config's `models:` list says which of them score. The
         // selection happens in `run_job`, which is the half that holds the
         // config; this half just does the Postgres read it exists to do.
-        let models: Vec<ActiveModel> =
-            match pg::active_models(client, job.dataset_id.as_deref().unwrap_or(&job.org_id)).await
-            {
-                Ok(rows) => rows
-                    .into_iter()
-                    // The dataset's own models only: each dataset trains and scores
-                    .map(|m| ActiveModel {
-                        model_json: m.model_json,
-                        model_version_label: m.model_version_label,
-                        tf_snapshot_id: m.tf_snapshot_id,
-                        name: m.name,
-                        version: m.version,
-                    })
-                    // The field order above is the struct's; `ActiveModelSpec`
-                    // declares them in wire order, which the compiler reconciles.
-                    .collect(),
-                Err(e) => {
-                    pg::mark(client, &job.id, "failed").await?;
-                    eprintln!("job {} failed: reading the model registry: {e}", job.id);
-                    return Ok(true);
-                }
-            };
+        let models: Vec<ActiveModel> = match pg::active_models(
+            client,
+            job.dataset_id.as_deref().unwrap_or(&job.org_id),
+        )
+        .await
+        {
+            Ok(rows) => rows
+                .into_iter()
+                // The dataset's own models only: each dataset trains and scores
+                .map(|m| ActiveModel {
+                    model_json: m.model_json,
+                    model_version_label: m.model_version_label,
+                    tf_snapshot_id: m.tf_snapshot_id,
+                    name: m.name,
+                    version: m.version,
+                })
+                // The field order above is the struct's; `ActiveModelSpec`
+                // declares them in wire order, which the compiler reconciles.
+                .collect(),
+            Err(e) => {
+                pg::mark(client, &job.id, "failed").await?;
+                tracing::error!(er.job_id = %job.id, error = %e, "the job failed: reading the model registry");
+                return Ok(true);
+            }
+        };
         let jb = job.clone();
         let drop_root = lake_drop_root.clone();
         // The counts come out beside the outcome rather than inside it: every
@@ -815,17 +830,15 @@ async fn dispatch_claimed(
             // UI already tells the operator which of those it is.
             let class = pg::FailureClass::classify(message);
             let after = pg::fail_or_retry(client, &job.id, class, message).await?;
-            eprintln!(
-                "job {} ({}) failed [{}] -> {}{}: {message}",
-                job.id,
-                job.kind,
-                class.as_str(),
-                after.state,
-                if after.state == "queued" {
-                    format!(" (attempt {} of {})", after.attempt, after.max_attempts)
-                } else {
-                    String::new()
-                }
+            tracing::error!(
+                er.job_id = %job.id,
+                er.job_kind = %job.kind,
+                er.error_class = %class.as_str(),
+                er.state = %after.state,
+                er.attempt = after.attempt,
+                er.max_attempts = after.max_attempts,
+                detail = %message,
+                "the job failed"
             );
             after
         }
@@ -857,9 +870,14 @@ async fn dispatch_claimed(
     // outcome is not part of producing it.
     for message in run_report_messages(&org.name, &org.env, &completed, &entity_counts) {
         if let Err(e) = mailer.send(&message).await {
-            eprintln!(
-                "run report for job {} to {} failed: {e}",
-                completed.id, message.to
+            tracing::warn!(
+                er.job_id = %completed.id,
+                error = %e,
+                // `message.to` is deliberately NOT a field: it is a recipient
+                // address, and §10.4 keeps plaintext email off anything
+                // exportable. The job id finds the recipient in the control
+                // plane on the rare occasion it is actually needed.
+                "sending the run report failed"
             );
         }
     }
@@ -938,9 +956,11 @@ async fn apply_approved_merges(
         if let Err(e) = pg::stage_action(client, org_id, dataset_id, &action, &actor).await {
             // One unstageable review must not strand the rest: the tag stays on
             // it, so the next tick retries exactly that one.
-            eprintln!(
-                "approval: staging review {} for {org_name} failed: {e}",
-                tagging.subject_id
+            tracing::warn!(
+                er.org = %org_name,
+                er.review_id = %tagging.subject_id,
+                error = %e,
+                "staging the approved review failed"
             );
             continue;
         }
@@ -949,9 +969,10 @@ async fn apply_approved_merges(
             // Staged but still tagged: the next tick would stage it again. Said
             // out loud rather than swallowed, because a duplicate staged resolve
             // of the same review is a no-op on apply but noise in the ledger.
-            eprintln!(
-                "approval: review {} staged but its tag could not be removed: {e}",
-                tagging.subject_id
+            tracing::warn!(
+                er.review_id = %tagging.subject_id,
+                error = %e,
+                "the review was staged but its tag could not be removed"
             );
         }
         staged += 1;
@@ -1118,9 +1139,10 @@ async fn emit_entity_aggregates(
         // degrades the payload rather than skipping the delivery.
         Ok(None) => job.org_id.clone(),
         Err(e) => {
-            eprintln!(
-                "run {}: entity-event aggregate not recorded: resolving the org: {e}",
-                job.id
+            tracing::warn!(
+                er.job_id = %job.id,
+                error = %e,
+                "the entity-event aggregate was not recorded: resolving the org failed"
             );
             return;
         }
@@ -1137,10 +1159,11 @@ async fn emit_entity_aggregates(
     };
     for (kind, n) in counts {
         let Some(event) = entity_event_name(kind) else {
-            eprintln!(
-                "run {}: {n} {kind:?} entity events have no catalog entry, so nothing \
-                 could have subscribed to them — not delivered",
-                job.id
+            tracing::warn!(
+                er.job_id = %job.id,
+                count = n,
+                er.event_kind = ?kind,
+                "entity events have no catalog entry, so nothing could have subscribed to them; not delivered"
             );
             continue;
         };
@@ -1167,7 +1190,7 @@ async fn emit_entity_aggregates(
         )
         .await
         {
-            eprintln!("run {}: {event} not recorded: {e}", job.id);
+            tracing::warn!(er.job_id = %job.id, er.event = %event, error = %e, "the event was not recorded");
         }
     }
 }
@@ -1300,7 +1323,7 @@ fn run_job(
                     .iter()
                     .map(|m| format!("{}={}", m.name, m.model.model_version))
                     .collect();
-                eprintln!("run {run_id}: ensemble {}", listed.join(" + "));
+                tracing::info!(er.run_id = %run_id, er.ensemble = %listed.join(" + "), "the run ensemble");
             }
 
             // The mode the job asked for, then the drift guard's verdict on it.
@@ -1321,7 +1344,7 @@ fn run_job(
                 er_versions::check_mode_preconditions(prior.as_ref(), &current, asked, true)
                     .map_err(|e| format!("mode guard: {e}"))?;
             if decision.escalated() {
-                eprintln!("run {run_id}: {}", decision.message);
+                tracing::info!(er.run_id = %run_id, detail = %decision.message, "the model decision for this run");
             }
             let rebuild_reason = if decision.escalated() {
                 Some(er_versions::REBUILD_OPERATOR)
@@ -1382,7 +1405,7 @@ fn run_job(
                     if let Err(detail) =
                         request.run(&session, !config.entity_type.is_person(), &now)
                     {
-                        eprintln!("run {run_id}: profiling delivered {source} failed: {detail}");
+                        tracing::warn!(er.run_id = %run_id, er.source = %source, detail = %detail, "profiling the delivered source failed");
                     }
                 }
             }
@@ -1401,18 +1424,20 @@ fn run_job(
     // a COUNT could not be read would destroy work to describe it. An empty
     // vector means "nothing to announce", which is also the honest answer for a
     // kind of job that reconciles nothing.
-    let counts =
-        match er_entities::entity_event::read::counts_by_kind_live(session.connection(), run_id) {
-            Ok(rows) => rows
-                .into_iter()
-                .map(|r| (r.event_type, r.n.unwrap_or(0)))
-                .filter(|(_, n)| *n > 0)
-                .collect(),
-            Err(e) => {
-                eprintln!("run {run_id}: entity-event counts unavailable: {e}");
-                Vec::new()
-            }
-        };
+    let counts = match er_entities::entity_event::read::counts_by_kind_live(
+        session.connection(),
+        run_id,
+    ) {
+        Ok(rows) => rows
+            .into_iter()
+            .map(|r| (r.event_type, r.n.unwrap_or(0)))
+            .filter(|(_, n)| *n > 0)
+            .collect(),
+        Err(e) => {
+            tracing::warn!(er.run_id = %run_id, error = %e, "the entity-event counts are unavailable");
+            Vec::new()
+        }
+    };
     Ok(counts)
 }
 
@@ -1588,21 +1613,24 @@ async fn train_half(
     // `read::all` has no origin filter and returns every row, so the guard has
     // to live here. The exclusion is deliberately by origin rather than by
     // `labeled_by`: a future second LLM producer gets caught by this too.
-    let match_labels: Vec<(String, String)> =
-        match er_entities::pair_label::read::all(client, scope).await {
-            Ok(rows) => rows
-                .into_iter()
-                .filter(|l| l.verdict == "match" && l.origin != "llm")
-                .map(|l| (l.rec_a_key, l.rec_b_key))
-                .collect(),
-            // A label read that fails must not fail the train: EM is a complete
-            // training method on its own, and it is what every run did before
-            // labels existed. Reported in provenance as zero labels used.
-            Err(e) => {
-                eprintln!("reading labels for training failed, falling back to EM-only: {e}");
-                Vec::new()
-            }
-        };
+    let match_labels: Vec<(String, String)> = match er_entities::pair_label::read::all(
+        client, scope,
+    )
+    .await
+    {
+        Ok(rows) => rows
+            .into_iter()
+            .filter(|l| l.verdict == "match" && l.origin != "llm")
+            .map(|l| (l.rec_a_key, l.rec_b_key))
+            .collect(),
+        // A label read that fails must not fail the train: EM is a complete
+        // training method on its own, and it is what every run did before
+        // labels existed. Reported in provenance as zero labels used.
+        Err(e) => {
+            tracing::warn!(error = %e, "reading labels for training failed; falling back to EM-only");
+            Vec::new()
+        }
+    };
     let labels_used = match_labels.len();
 
     let (model_json, tf_rows) = {
@@ -1701,9 +1729,10 @@ async fn register_half(
     )
     .await
     .map_err(|e| format!("registering the trained model: {e}"))?;
-    eprintln!(
-        "train {run_id}: registered draft version {} (not activated)",
-        trained.label
+    tracing::info!(
+        er.run_id = %run_id,
+        er.model_version = %trained.label,
+        "registered a draft model version (not activated)"
     );
     Ok(())
 }
@@ -1866,9 +1895,11 @@ async fn provision_tenant(
     }
     lake_step?;
 
-    eprintln!(
-        "job {job_id}: provisioned {} ({:?})",
-        org.name, profile.mode
+    tracing::info!(
+        er.job_id = %job_id,
+        er.org = %org.name,
+        er.mode = ?profile.mode,
+        "provisioned the org"
     );
     // §3.5's `activate` control task: the state transition the UI's progress
     // panel is waiting for.
@@ -1890,9 +1921,11 @@ async fn provision_tenant(
         && let Err(e) =
             pg::set_dataset_state(client, &org.id, "default", "active", "provisioning").await
     {
-        eprintln!(
-            "job {job_id}: provisioned {} but its default dataset stayed provisioning: {e}",
-            org.name
+        tracing::warn!(
+            er.job_id = %job_id,
+            er.org = %org.name,
+            error = %e,
+            "provisioned the org but its default dataset stayed provisioning"
         );
     }
     match &activate {
@@ -2047,9 +2080,12 @@ pub async fn drain_and_correct(
         )
         .await
         {
-            eprintln!(
-                "run {run_id}: reviewer label for {}|{} not recorded: {e}",
-                label.rec_a_key, label.rec_b_key
+            tracing::warn!(
+                er.run_id = %run_id,
+                er.record_a = %label.rec_a_key,
+                er.record_b = %label.rec_b_key,
+                error = %e,
+                "the reviewer label was not recorded"
             );
         }
     }
@@ -2090,7 +2126,7 @@ pub async fn drain_and_correct(
             )
             .await
             {
-                eprintln!("review.resolved for {review_id} not queued: {e}");
+                tracing::warn!(er.review_id = %review_id, error = %e, "the review.resolved webhook was not queued");
             }
         }
     }
@@ -2150,7 +2186,7 @@ async fn write_back_resolutions(
         Ok(targets) if targets.is_empty() => return,
         Ok(_) => {}
         Err(e) => {
-            eprintln!("run {run_id}: write-back subscriber lookup failed: {e}");
+            tracing::warn!(er.run_id = %run_id, error = %e, "the write-back subscriber lookup failed");
             return;
         }
     }
@@ -2162,14 +2198,14 @@ async fn write_back_resolutions(
         let session = match crate::schema::open_lake_env(env) {
             Ok(s) => s,
             Err(e) => {
-                eprintln!("run {run_id}: write-back skipped: {e}");
+                tracing::warn!(er.run_id = %run_id, error = %e, "the write-back was skipped");
                 return;
             }
         };
         let snapshot = match crate::read::latest_snapshot(&session) {
             Ok(s) => s,
             Err(e) => {
-                eprintln!("run {run_id}: write-back skipped: {e}");
+                tracing::warn!(er.run_id = %run_id, error = %e, "the write-back was skipped");
                 return;
             }
         };
@@ -2185,7 +2221,9 @@ async fn write_back_resolutions(
                     // drain), not an error, and the other half of the pair may
                     // still resolve.
                     Ok(None) => {}
-                    Err(e) => eprintln!("run {run_id}: write-back lookup for {key}: {e}"),
+                    Err(e) => {
+                        tracing::warn!(er.run_id = %run_id, er.record_key = %key, error = %e, "the write-back lookup failed");
+                    }
                 }
             }
         }
@@ -2194,14 +2232,16 @@ async fn write_back_resolutions(
             match crate::read::entity_detail(&session, entity_type, snapshot, entity_id) {
                 Ok(Some(detail)) => payloads.push((entity_id.clone(), detail)),
                 Ok(None) => {}
-                Err(e) => eprintln!("run {run_id}: write-back detail for {entity_id}: {e}"),
+                Err(e) => {
+                    tracing::warn!(er.run_id = %run_id, er.entity_id = %entity_id, error = %e, "the write-back detail lookup failed");
+                }
             }
         }
         let org_name = match pg::get_org_by_id(client, org_id).await {
             Ok(Some(org)) => org.name,
             Ok(None) => org_id.to_string(),
             Err(e) => {
-                eprintln!("run {run_id}: write-back skipped: resolving the org: {e}");
+                tracing::warn!(er.run_id = %run_id, error = %e, "the write-back was skipped: resolving the org failed");
                 return;
             }
         };
@@ -2226,7 +2266,7 @@ async fn write_back_resolutions(
         )
         .await
         {
-            eprintln!("run {run_id}: entity.write_back for {entity_id} not queued: {e}");
+            tracing::warn!(er.run_id = %run_id, er.entity_id = %entity_id, error = %e, "the entity.write_back webhook was not queued");
         }
     }
 }

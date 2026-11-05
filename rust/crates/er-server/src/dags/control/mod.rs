@@ -368,9 +368,11 @@ impl ControlTask<PgClient> for SettleActions {
             )
             .await
             {
-                eprintln!(
-                    "settle_actions: reviewer label for {}|{} not recorded: {e}",
-                    label.rec_a_key, label.rec_b_key
+                tracing::warn!(
+                    er.record_a = %label.rec_a_key,
+                    er.record_b = %label.rec_b_key,
+                    error = %e,
+                    "the reviewer label was not recorded"
                 );
             }
         }
@@ -489,9 +491,11 @@ impl ControlTask<PgClient> for StageApproved {
             )
             .await
             {
-                eprintln!(
-                    "stage_approved: staging review {} for {} failed: {e}",
-                    tagging.subject_id, org.name
+                tracing::warn!(
+                    er.review_id = %tagging.subject_id,
+                    er.org = %org.name,
+                    error = %e,
+                    "staging the approved review failed"
                 );
                 continue;
             }
@@ -507,9 +511,10 @@ impl ControlTask<PgClient> for StageApproved {
                 // Staged but still tagged: the next tick would stage it again.
                 // Said out loud rather than swallowed — a duplicate staged
                 // resolve is a no-op on apply but noise in the ledger.
-                eprintln!(
-                    "stage_approved: review {} staged but its tag could not be removed: {e}",
-                    tagging.subject_id
+                tracing::warn!(
+                    er.review_id = %tagging.subject_id,
+                    error = %e,
+                    "the review was staged but its tag could not be removed"
                 );
             }
             staged += 1;
