@@ -193,6 +193,7 @@ The table below is **generated** from each skill's frontmatter by
 | editing Terraform or a Helm chart, writing a NodePool | `infra-platform` |
 | editing or adding a marketing page or its copy | `landing-page` |
 | invoking /pentest, /pentest <category>, /pentest live (user-invoked only) | `pentest` |
+| asked what is on the board or to add, triage or move a card | `project-board` |
 | authoring or reviewing any Rust in this repo | `rust-conventions` |
 | reviewing an endpoint or handler for SSRF/injection/tenant-isolation/auth/business-logic abuse | `security` |
 | an E0xx diagnostic fails, when a statement will not plan | `sql-analysis` |
