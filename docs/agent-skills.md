@@ -383,6 +383,33 @@ error-handling companions agree with our Display rule, `frontend-design`'s
 quality floor and writing guidance apply unchanged, and `dataviz`'s form
 heuristic is sound. Only the specific conflicting claim is superseded.
 
+**This is enforced, not just documented.** `scripts/skills-check.sh overrides`
+(inside `make skills-check`, so inside `make check`) holds four invariants per
+pair: the house skill exists at the **root**, where it wins the load-order race;
+its **body** names the superseded skill in backticks; no root skill collides with
+that name, which would make load order stop deciding anything; and the registry
+in the script agrees with the table above row for row, heading count word
+included.
+
+The body assertion is the one that matters, because the other three are
+structural and cannot rot from a prose edit. Load order is only half the
+mechanism — a session that has both skills loaded has to be *told* which claim to
+discard, and that telling is a sentence someone can delete while refactoring,
+with nothing going red. When this gate was first run it found exactly that:
+neither `frontend-data-ui` nor `frontend-design-system` named its counterpart.
+`frontend-data-ui` said "any generic data-visualization skill" and never wrote
+`dataviz`; `frontend-design-system` matched a naive search only through the
+unrelated filename `docs/frontend-design.md`. Hence the backticks — they are what
+separates a skill name from a document path and from a longer name that contains
+it.
+
+What this gate does **not** do is prove that a model picks the right skill at
+runtime. Only a catalog eval can, and the decision on record (#586) is not to buy
+one: the eval in `athvin/mono` that originally caught the `frontend-design`
+shadowing cost $8.55 and 524s per run, which is why it ended up pinned at an old
+action version and ignored rather than fixed. A cheap check that cannot rot beats
+an expensive one that gets disabled.
+
 If an override ever misfires, the escalation is `skillOverrides` in
 `.claude/settings.json`, keyed by skill name with one of the four enum strings
 Tier 2 lists. Nothing uses it today — the file carries no `skillOverrides` block

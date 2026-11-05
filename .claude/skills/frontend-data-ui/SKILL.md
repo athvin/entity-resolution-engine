@@ -35,6 +35,16 @@ recommendation was never adopted.** Proposing a chart library is therefore a
 decision to escalate to a human, not an implementation detail to settle inside a
 task — and a generic data-visualization skill will reach for one by default.
 
+Concretely, this skill **supersedes the `dataviz` skill** on two points: the
+assumption that a charting library is available, and its colour-bearing
+categorical palette. Both are wrong here — charts are hand-rolled DOM/CSS by
+decision, and colour is not an encoding channel in a grayscale product. The rest
+of `dataviz` — the form heuristic, axis and legend conventions, accessible
+contrast floors — still applies. The supersession works because this is a root
+skill and loads first, but load order only decides anything if the conflict is
+named, so it is named here rather than only in `CLAUDE.md`.
+`scripts/skills-check.sh overrides` fails if this paragraph loses the name.
+
 ### How to build one instead
 
 `waterfall-chart.tsx` is the pattern to copy, and it is short enough to read

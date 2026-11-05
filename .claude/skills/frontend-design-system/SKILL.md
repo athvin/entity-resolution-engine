@@ -27,6 +27,14 @@ skills say about the quality floor — responsive to mobile, visible keyboard
 focus, reduced motion respected — does apply, and so does their writing
 guidance.
 
+Concretely, this skill **supersedes the `frontend-design` skill** on palette and
+aesthetic risk. If a session has both loaded, `frontend-design`'s instruction to
+pick 4–6 named hex values is the claim to discard; everything it says about the
+quality floor stands. The supersession works because this is a root skill and
+loads first, but load order only decides anything if the conflict is named — so
+it is named here, not only in `CLAUDE.md`. `scripts/skills-check.sh overrides`
+fails if this paragraph loses the name.
+
 The practical consequence: the interesting decisions on this product are type
 scale, weight, surface planes, spacing rhythm and where the single inversion
 goes. Spend effort there.
