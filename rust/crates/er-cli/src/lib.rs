@@ -4592,6 +4592,16 @@ pub struct TrainReport {
     /// Iterations the slowest session took, so "converged" can be read as
     /// "converged quickly" or "only just".
     pub max_iterations: usize,
+    /// Levels whose m or u is the built-in default because training measured
+    /// nothing for them, as `comparison / level (m and u)` lines.
+    ///
+    /// Not a failure either, and for the same reason as `not_converged`: the
+    /// default is a considered prior for the level's position in the ladder, and
+    /// a model carrying one is still usable. It is a *provenance* statement —
+    /// which parameters describe this corpus and which describe an assumption —
+    /// and it is worth carrying because nothing else distinguishes them. The
+    /// saved model looks identical either way.
+    pub defaulted_levels: Vec<String>,
 }
 
 impl TrainReport {
@@ -4599,6 +4609,12 @@ impl TrainReport {
     #[must_use]
     pub fn converged(&self) -> bool {
         self.not_converged.is_empty()
+    }
+
+    /// Every level's m and u came from this corpus.
+    #[must_use]
+    pub fn fully_measured(&self) -> bool {
+        self.defaulted_levels.is_empty()
     }
 }
 
@@ -4624,7 +4640,7 @@ pub fn run_train(
             em_rules: inputs.em_rules.to_vec(),
         })
         .map_err(|e| anyhow::anyhow!("train: {e}"))?;
-    let report = TrainReport {
+    let mut report = TrainReport {
         sessions: outcome.em_sessions.len(),
         not_converged: outcome
             .em_sessions
@@ -4638,6 +4654,10 @@ pub fn run_train(
             .map(|s| s.iterations.len())
             .max()
             .unwrap_or(0),
+        // Filled in below, once the model is final: the label pass can still
+        // supply `m` for a level EM never observed, so reading it here would
+        // report a fallback that the next few lines go on to remove.
+        defaulted_levels: Vec::new(),
     };
     if !report.converged() {
         eprintln!(
@@ -4681,6 +4701,22 @@ pub fn run_train(
             session, &mut model, &concat, &tf_tables, &labels,
         )
         .map_err(|e| anyhow::anyhow!("m from labels: {e}"))?;
+    }
+
+    // Now that the model is final — EM, u-sampling and any label pass all
+    // applied — record which parameters are still the built-in defaults.
+    report.defaulted_levels = model
+        .defaulted_levels()
+        .iter()
+        .map(dedupe_core::model::DefaultedLevel::describe)
+        .collect();
+    if !report.fully_measured() {
+        eprintln!(
+            "train: {} level(s) kept a built-in default because training measured nothing \
+             for them: {}",
+            report.defaulted_levels.len(),
+            report.defaulted_levels.join(", ")
+        );
     }
 
     model
