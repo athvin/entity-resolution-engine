@@ -852,7 +852,9 @@ async fn provision_org(
         return detail_err(
             StatusCode::INTERNAL_SERVER_ERROR,
             format!(
-                "the starter config {} references unknown columns: {}",
+                // Same correction as the publish path below: these problems are
+                // no longer only about column names.
+                "the starter config {} is not valid: {}",
                 profile.config_template.display(),
                 problems.join("; ")
             ),
@@ -3262,8 +3264,15 @@ async fn publish_config_version(
     if !reference_problems.is_empty() {
         return detail_err(
             StatusCode::UNPROCESSABLE_ENTITY,
+            // Not "references unknown columns": `config_reference_problems`
+            // grew past column references — it also rejects a malformed
+            // ensemble, a survivorship group mistake, and a `tf: true` with no
+            // exact level to scale against. Naming only columns made the
+            // refusal misdescribe its own reason, which is worse than a vague
+            // message because the reader goes looking for a typo that is not
+            // there. The problems themselves each say what is wrong.
             format!(
-                "config references columns the standardized schema does not have: {}",
+                "the config cannot be published as written: {}",
                 reference_problems.join("; ")
             ),
         )
