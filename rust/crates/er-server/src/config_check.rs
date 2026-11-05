@@ -31,6 +31,11 @@ pub struct ProfiledColumn {
     pub blank_count: i64,
     /// The most frequent value's share, when values were counted.
     pub top_share: Option<f64>,
+    /// EXACT distinct values, when the profile computed them. `None` means the
+    /// run used only the HyperLogLog sketch, and the duplicate floor declines
+    /// to answer rather than derive a record count from an approximation that
+    /// is wrong in both directions.
+    pub distinct_exact: Option<i64>,
 }
 
 impl ProfiledColumn {
@@ -54,6 +59,22 @@ const ADVISE_PAIR_LOSS_ABOVE: f64 = 0.5;
 
 /// The dominant-value share above which a blocking key's cost is worth naming.
 const ADVISE_MODE_SHARE_ABOVE: f64 = 0.2;
+
+/// How nearly unique a compared attribute must be before rows sharing a value
+/// are evidence of duplication rather than ordinary overlap.
+///
+/// Two filters, and BOTH are load-bearing — a measurement against the `base_10`
+/// fixture is what proved it:
+///
+/// - **The config must compare on the column.** Cardinality alone cannot tell
+///   an identifier from a timestamp. `updated_at_source` in that corpus holds
+///   22 distinct values across 23 rows, which is as near-unique as a column
+///   gets, and two records sharing an update time is a coincidence rather than
+///   a duplicate. A first draft of this lived in the findings registry, which
+///   is deliberately config-blind, and reported exactly that nonsense.
+/// - **And the values must be mostly distinct.** `addr_postal` IS compared and
+///   holds 11 values across 23 rows; neighbours are not duplicates.
+const ADVISE_DUPLICATE_RATIO: f64 = 0.8;
 
 /// What the latest profile says about the config being published — advice, never
 /// a refusal.
@@ -128,6 +149,47 @@ pub fn profile_advisories(config: &Config, profiled: &[ProfiledColumn]) -> Vec<S
                 ));
             }
         }
+    }
+
+    // The duplicate floor: how much duplication is already visible, with no
+    // model and no scored corpus. This is the question a tenant asks first, and
+    // until now the product could not answer it until after the work the answer
+    // was meant to justify.
+    //
+    // A FLOOR, and the wording says so: it counts rows sharing a value on a
+    // compared, near-unique attribute. Duplicates that DISAGREE on that
+    // attribute are invisible here, so the true count is usually higher.
+    let mut floors: Vec<(&str, i64, i64, i64)> = Vec::new();
+    for key in config.comparisons.keys() {
+        let Some(stats) = by_name.get(key.as_str()) else {
+            continue;
+        };
+        let Some(distinct) = stats.distinct_exact else {
+            continue; // the sketch cannot support a record count
+        };
+        let present = stats.non_null_count - stats.blank_count;
+        if present <= 0 || distinct <= 0 {
+            continue;
+        }
+        if (distinct as f64) / (present as f64) < ADVISE_DUPLICATE_RATIO {
+            continue;
+        }
+        let floor = present - distinct;
+        if floor > 0 {
+            floors.push((key.as_str(), floor, present, distinct));
+        }
+    }
+    // The tightest bound, not the sum: a record repeating on two attributes
+    // would be counted twice by a sum, which turns a lower bound into an
+    // over-estimate and destroys the one property the number has.
+    if let Some(&(column, floor, present, distinct)) =
+        floors.iter().max_by_key(|(_, floor, _, _)| *floor)
+    {
+        advisories.push(format!(
+            "at least {floor} records share an `{column}` with another record ({present} rows \
+             carry {distinct} distinct values) — a floor measured with no model, so the real \
+             count is usually higher"
+        ));
     }
 
     advisories
@@ -689,6 +751,20 @@ mod tests {
             non_null_count: present,
             blank_count: 0,
             top_share,
+            distinct_exact: None,
+        }
+    }
+
+    /// A column with an exact distinct count, which is what the duplicate floor
+    /// is computed from.
+    fn with_distinct(name: &str, present: i64, distinct: i64) -> ProfiledColumn {
+        ProfiledColumn {
+            column_name: name.to_string(),
+            row_count: present,
+            non_null_count: present,
+            blank_count: 0,
+            top_share: None,
+            distinct_exact: Some(distinct),
         }
     }
 
@@ -794,5 +870,112 @@ mod tests {
             .clone();
         let columns = vec![profiled(&first, 0, 0, None)];
         assert_eq!(profile_advisories(&config, &columns), Vec::<String>::new());
+    }
+
+    // -----------------------------------------------------------------------
+    // The duplicate floor — and the two filters a real corpus proved necessary.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn the_duplicate_floor_counts_rows_sharing_a_compared_near_unique_value() {
+        // 7,412 rows carrying 7,326 distinct emails: 86 repeat. `email` is in
+        // the fixture's `comparisons:`, so it is an attribute this tenant says
+        // identifies an entity.
+        let config = load(GOOD);
+        let advisories = profile_advisories(&config, &[with_distinct("email", 7_412, 7_326)]);
+        let floor = advisories
+            .iter()
+            .find(|a| a.contains("share an `email`"))
+            .expect("the floor should be reported");
+        assert!(floor.contains("at least 86 records"), "got {floor}");
+        // It must read as a BOUND. A reader who takes it as the answer will
+        // under-estimate, because duplicates that disagree on email are
+        // invisible to it.
+        assert!(
+            floor.contains("a floor measured with no model") && floor.contains("usually higher"),
+            "the bound must be stated as a bound: {floor}"
+        );
+    }
+
+    #[test]
+    fn a_near_unique_column_the_config_does_not_compare_is_ignored() {
+        // THE case that moved this out of the findings registry.
+        // `base_10`'s `updated_at_source` holds 22 distinct values across 23
+        // rows — as near-unique as a column gets — and two records sharing an
+        // update timestamp is a coincidence, not a duplicate. Cardinality alone
+        // cannot tell an identifier from a clock, and the registry is
+        // deliberately config-blind, so it reported exactly this nonsense.
+        let config = load(GOOD);
+        let advisories = profile_advisories(&config, &[with_distinct("updated_at_source", 23, 22)]);
+        assert_eq!(
+            advisories,
+            Vec::<String>::new(),
+            "a column outside `comparisons:` is not an identifier, got {advisories:?}"
+        );
+    }
+
+    #[test]
+    fn a_compared_but_low_cardinality_column_is_ignored() {
+        // `addr_postal` IS compared, and in that same corpus holds 11 values
+        // across 23 rows. Neighbours are not duplicates, so the cardinality
+        // filter has to survive alongside the config one.
+        let config = load(GOOD);
+        let advisories = profile_advisories(&config, &[with_distinct("addr_postal", 23, 11)]);
+        assert!(
+            !advisories.iter().any(|a| a.contains("share an")),
+            "sharing a postcode is not duplication, got {advisories:?}"
+        );
+    }
+
+    #[test]
+    fn the_floor_declines_to_answer_from_a_sketch() {
+        // `distinct_exact: None` means the run used only the HyperLogLog.
+        // Deriving a RECORD COUNT from a sketch that is wrong in both
+        // directions would hand a tenant a number they read as exact.
+        let config = load(GOOD);
+        let advisories = profile_advisories(&config, &[profiled("email", 7_412, 7_412, None)]);
+        assert!(
+            !advisories.iter().any(|a| a.contains("share an")),
+            "no exact distinct count means no floor, got {advisories:?}"
+        );
+    }
+
+    #[test]
+    fn the_floor_reports_the_tightest_bound_not_the_sum() {
+        // 40 repeats on email, 150 on phone. The answer is 150, not 190: a
+        // record repeating on both would be double-counted by a sum, turning a
+        // lower bound into an over-estimate.
+        let config = load(GOOD);
+        let advisories = profile_advisories(
+            &config,
+            &[
+                with_distinct("email", 1_000, 960),
+                with_distinct("phone_e164", 1_000, 850),
+            ],
+        );
+        let floor = advisories
+            .iter()
+            .find(|a| a.contains("share an"))
+            .expect("one floor advisory");
+        assert!(floor.contains("at least 150"), "got {floor}");
+        assert!(
+            floor.contains("phone_e164"),
+            "and it must name the column: {floor}"
+        );
+        assert_eq!(
+            advisories.iter().filter(|a| a.contains("share an")).count(),
+            1,
+            "one bound, not one per column"
+        );
+    }
+
+    #[test]
+    fn a_fully_unique_compared_column_says_nothing() {
+        let config = load(GOOD);
+        let advisories = profile_advisories(&config, &[with_distinct("email", 5_000, 5_000)]);
+        assert!(
+            !advisories.iter().any(|a| a.contains("share an")),
+            "nothing repeats, so there is nothing to report: {advisories:?}"
+        );
     }
 }
