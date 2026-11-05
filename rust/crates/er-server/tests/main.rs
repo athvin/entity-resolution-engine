@@ -90,4 +90,5 @@ mod pg_unmerge;
 mod pg_webhook_catalog;
 mod pg_webhook_deliver;
 mod pg_webhooks;
+mod profile_value_gate;
 mod response_envelopes;

@@ -1563,3 +1563,315 @@ pub fn insight_sources(
         }
     }
 }
+
+/// One corpus stage's profile: the run, every column's shape, and the findings.
+///
+/// `include_values` gates every field that echoes a value **as stored** — see
+/// [`VALUE_BEARING_COLUMN_FIELDS`]. A viewer gets the statistics with those
+/// stripped; a steward gets them intact. The decision is made here rather than
+/// in the statement because it is about WHO is asking, which SQL does not know.
+///
+/// This gate first shipped covering `top_values` alone, described in this very
+/// comment as "the one field in a profile that carries personal data". It was
+/// not: `lex_min`/`lex_max` are the lexically smallest and largest values in the
+/// column, and `num_min`/`num_max` the numeric extremes — all four verbatim
+/// data, so on an email column `lex_min` is a real address and on a salary
+/// column `num_max` is one person's pay. A gate covering one of five fields is
+/// worse than no gate, because it reads as complete. The classification is now
+/// a pair of exhaustive lists that
+/// `tests/profile_value_gate.rs` checks against the entity definition, so a
+/// column added to `column_profile` cannot reach the wire unclassified.
+///
+/// A corpus that has never been profiled reads as `{"profiled": false}` rather
+/// than erroring, on the same principle as `quality`'s `configured: false`:
+/// asking is a fair question whether or not the answer exists yet.
+///
+/// # Errors
+/// Propagates the lake read.
+pub fn profile(
+    session: &Session,
+    snapshot: i64,
+    subject: &str,
+    source_system: &str,
+    tier: i64,
+    include_values: bool,
+) -> Result<Value, String> {
+    let runs = match er_entities::profile_run::read::latest(
+        session.connection(),
+        snapshot,
+        subject,
+        source_system,
+        tier,
+    ) {
+        Ok(rows) => rows,
+        // The relation is absent until something profiles, and "not yet" is the
+        // honest answer to the question rather than a failure.
+        Err(e) if is_missing_relation(&e.to_string()) => {
+            return Ok(json!({ "profiled": false, "subject": subject, "tier": tier }));
+        }
+        Err(e) => return Err(e.to_string()),
+    };
+    let Some(run) = runs.first() else {
+        return Ok(json!({ "profiled": false, "subject": subject, "tier": tier }));
+    };
+
+    let columns =
+        er_entities::column_profile::read::for_run(session.connection(), snapshot, &run.id)
+            .map_err(|e| e.to_string())?;
+    let findings =
+        er_entities::profile_finding::read::for_run(session.connection(), snapshot, &run.id)
+            .map_err(|e| e.to_string())?;
+    // Only a tier-2 run measures candidate keys, so an absent set is the normal
+    // tier-1 answer rather than a gap — it travels as an empty array, which is
+    // what "measured nothing" looks like to a consumer that renders a table.
+    let candidate_keys =
+        er_entities::candidate_key::read::for_run(session.connection(), snapshot, &run.id)
+            .map_err(|e| e.to_string())?;
+
+    Ok(json!({
+        "profiled": true,
+        "profile_run_id": run.id,
+        "subject": run.subject,
+        "source_system": run.source_system,
+        "tier": run.tier,
+        "data_snapshot": run.snapshot,
+        "corpus_digest": run.corpus_digest,
+        "row_count": run.row_count,
+        "column_count": run.column_count,
+        "ingest_batch_id": run.ingest_batch_id,
+        "config_hash": run.config_hash,
+        "model_version": run.model_version,
+        // `sampled` travels with the proportion so a consumer rendering a
+        // number knows whether to label it approximate; a figure from a 5%
+        // sample shown as exact is worse than no figure.
+        "sampled": run.sampled,
+        "sample_proportion": run.sample_proportion,
+        "sample_seed": run.sample_seed,
+        "duration_ms": run.duration_ms,
+        "captured_at": run.captured_at,
+        // Serialize the generated row rather than restating its 26 fields: a
+        // hand-written object here would be one more place to forget a column
+        // the entity gained, and `json!` cannot nest this wide anyway (it hits
+        // its own recursion limit). The gated fields are patched afterwards.
+        "columns": columns.iter().map(|c| {
+            let mut v = serde_json::to_value(c).unwrap_or(Value::Null);
+            if let Some(obj) = v.as_object_mut() {
+                redact_column_values(obj, include_values);
+            }
+            v
+        }).collect::<Vec<_>>(),
+        "findings": findings.iter().map(|f| json!({
+            "code": f.code,
+            "severity": f.severity,
+            // The empty string is the stored sentinel for a corpus-level
+            // finding; it becomes null on the wire so a consumer does not have
+            // to know that, and cannot accidentally match a column named "".
+            "column_name": if f.column_name.is_empty() { Value::Null }
+                           else { Value::String(f.column_name.clone()) },
+            "message": f.message,
+            "detail": f.detail,
+        })).collect::<Vec<_>>(),
+        // Cheapest key first, as the statement ordered them. `key_columns` is
+        // stored chr(31)-joined because the lake has no list type and the IN-list
+        // idiom needs one varchar; it is split back into an array here so a
+        // consumer never has to know that encoding, and so a composite key
+        // renders as two names rather than one string with a control character
+        // in the middle.
+        "candidate_keys": candidate_keys.iter().map(|k| json!({
+            "key_columns": k.key_columns.split('\u{1f}').collect::<Vec<_>>(),
+            "row_count": k.row_count,
+            "covered_rows": k.covered_rows,
+            "distinct_values": k.distinct_values,
+            "expected_pairs": k.expected_pairs,
+            "largest_block_pairs": k.largest_block_pairs,
+            "largest_block_rows": k.largest_block_rows,
+            "entropy_bits": k.entropy_bits,
+            "pair_loss_from_nulls": k.pair_loss_from_nulls,
+        })).collect::<Vec<_>>(),
+    }))
+}
+
+/// Fields of a `column_profile` row that echo a value **as stored**, and so
+/// carry whatever the corpus carries — a real address, a real name, one
+/// person's salary.
+///
+/// The test of membership is "could a reader recover a datum from this field",
+/// not the column's type: `num_max` is a number and belongs here, `num_avg` is
+/// a number and does not, because an average of many rows is nobody's value.
+/// Drawing the line at verbatim-or-not keeps it one sentence long; drawing it
+/// at "which types feel sensitive" is how `lex_min` was missed the first time.
+pub const VALUE_BEARING_COLUMN_FIELDS: [&str; 5] =
+    ["top_values", "lex_min", "lex_max", "num_min", "num_max"];
+
+/// Fields of a `column_profile` row that are counts, lengths, or statistics
+/// derived from many rows — safe for any role that may see the column exists.
+///
+/// Listed exhaustively rather than inferred as "everything else" so that a
+/// column added to the entity lands in NEITHER list and fails the gate test,
+/// which is the point: the failure asks a question that has to be answered.
+pub const DERIVED_COLUMN_FIELDS: [&str; 25] = [
+    "id",
+    "profile_run_id",
+    "column_name",
+    "row_count",
+    "total_row_count",
+    "non_null_count",
+    "blank_count",
+    "distinct_approx",
+    "distinct_exact",
+    "distinct_normalized",
+    "len_min",
+    "len_max",
+    "len_avg",
+    "len_p50",
+    "len_p95",
+    "num_avg",
+    "num_std",
+    "cast_bigint",
+    "cast_double",
+    "cast_date",
+    "cast_timestamp",
+    "cast_boolean",
+    "entropy_bits",
+    "created_at",
+    "updated_at",
+];
+
+/// Strip the value-bearing fields of one serialized `column_profile` row unless
+/// the caller is entitled to them.
+///
+/// Values are nulled in place rather than removed, so the response shape does
+/// not depend on who asked — a consumer renders "—" for a null it expected, and
+/// throws on a key that vanished. `top_values` keeps its array and loses only
+/// each entry's `value`, because the SHAPE of the distribution is what a viewer
+/// needs to read a skew finding: that the top value covers 31% of rows is the
+/// point, and which value it is adds nothing to that.
+fn redact_column_values(obj: &mut serde_json::Map<String, Value>, include_values: bool) {
+    if include_values {
+        return;
+    }
+    for field in VALUE_BEARING_COLUMN_FIELDS {
+        if field == "top_values" {
+            let redacted = redact_top_values(obj.get(field));
+            obj.insert(field.to_string(), redacted);
+        } else if obj.contains_key(field) {
+            obj.insert(field.to_string(), Value::Null);
+        }
+    }
+}
+
+/// `top_values` with the values removed and the counts kept.
+fn redact_top_values(raw: Option<&Value>) -> Value {
+    let Some(Value::Array(items)) = raw else {
+        return Value::Null;
+    };
+    Value::Array(
+        items
+            .iter()
+            .map(|v| {
+                json!({
+                    "value": Value::Null,
+                    "count": v.get("count").cloned().unwrap_or(Value::Null),
+                    "share": v.get("share").cloned().unwrap_or(Value::Null),
+                    "rank": v.get("rank").cloned().unwrap_or(Value::Null),
+                })
+            })
+            .collect::<Vec<_>>(),
+    )
+}
+
+#[cfg(test)]
+mod value_gate_tests {
+    use super::{DERIVED_COLUMN_FIELDS, VALUE_BEARING_COLUMN_FIELDS, redact_column_values};
+    use serde_json::{Value, json};
+
+    /// A column profile with every value-bearing field populated with something
+    /// recognisable, so a leak shows up as the literal string in an assertion
+    /// rather than as a shape mismatch.
+    fn row() -> serde_json::Map<String, Value> {
+        let mut obj = serde_json::Map::new();
+        obj.insert("column_name".into(), json!("email"));
+        obj.insert("lex_min".into(), json!("aaron@example.com"));
+        obj.insert("lex_max".into(), json!("zoe@example.com"));
+        obj.insert("num_min".into(), json!(18.0));
+        obj.insert("num_max".into(), json!(97.0));
+        obj.insert("num_avg".into(), json!(41.5));
+        obj.insert("num_std".into(), json!(12.25));
+        obj.insert("non_null_count".into(), json!(940));
+        obj.insert("entropy_bits".into(), json!(9.5));
+        obj.insert(
+            "top_values".into(),
+            json!([{"value": "sam@example.com", "count": 31, "share": 0.031, "rank": 1}]),
+        );
+        obj
+    }
+
+    #[test]
+    fn a_steward_gets_the_row_untouched() {
+        let before = row();
+        let mut after = row();
+        redact_column_values(&mut after, true);
+        assert_eq!(Value::Object(after), Value::Object(before));
+    }
+
+    #[test]
+    fn a_viewer_gets_no_value_bearing_field() {
+        let mut obj = row();
+        redact_column_values(&mut obj, false);
+
+        for field in VALUE_BEARING_COLUMN_FIELDS {
+            if field == "top_values" {
+                continue;
+            }
+            assert_eq!(
+                obj.get(field),
+                Some(&Value::Null),
+                "{field} reached a viewer"
+            );
+        }
+
+        // Nulled in place, never removed: a key that vanishes by role makes the
+        // response shape depend on who asked, and a consumer that reads it
+        // throws instead of rendering "—".
+        for field in VALUE_BEARING_COLUMN_FIELDS {
+            assert!(obj.contains_key(field), "{field} was removed, not nulled");
+        }
+
+        // Nothing identifying survives anywhere in the serialized form — this
+        // is the assertion that would have caught the original gate, because it
+        // does not depend on knowing WHICH field holds the address.
+        let text = Value::Object(obj.clone()).to_string();
+        for leak in ["aaron@example.com", "zoe@example.com", "sam@example.com"] {
+            assert!(!text.contains(leak), "{leak} survived redaction: {text}");
+        }
+    }
+
+    #[test]
+    fn a_viewer_keeps_every_statistic_including_the_distribution_shape() {
+        let mut obj = row();
+        redact_column_values(&mut obj, false);
+
+        for field in DERIVED_COLUMN_FIELDS {
+            if let Some(expected) = row().get(field) {
+                assert_eq!(obj.get(field), Some(expected), "{field} should survive");
+            }
+        }
+
+        // The skew is the point of the panel: counts, shares and ranks survive
+        // so "the top value covers 3.1% of rows" is still readable without
+        // knowing which value it is.
+        let top = obj
+            .get("top_values")
+            .and_then(Value::as_array)
+            .expect("array");
+        assert_eq!(
+            top.len(),
+            1,
+            "the entry survives rather than the array going"
+        );
+        assert_eq!(top[0].get("count"), Some(&json!(31)));
+        assert_eq!(top[0].get("share"), Some(&json!(0.031)));
+        assert_eq!(top[0].get("rank"), Some(&json!(1)));
+        assert_eq!(top[0].get("value"), Some(&Value::Null));
+    }
+}

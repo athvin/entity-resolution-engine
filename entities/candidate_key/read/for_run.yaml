@@ -1,0 +1,16 @@
+kind: statement
+operation: read
+description: "Every measured candidate blocking key within one profile run, cheapest first — `ORDER BY expected_pairs` is the ranking itself, so a reader takes the top row rather than re-deriving which key is most selective. The second sort term keeps ties stable between requests. Unlike the column shapes, nothing here is a value: a candidate key is named by COLUMN names and described by counts, so this statement needs no gating at the handler."
+params:
+  - { name: snapshot, type: bigint }
+  - { name: profile_run_id, type: varchar }
+returns:
+  - { name: key_columns, type: varchar, nullable: false }
+  - { name: row_count, type: bigint, nullable: false }
+  - { name: covered_rows, type: bigint, nullable: false }
+  - { name: distinct_values, type: bigint, nullable: false }
+  - { name: expected_pairs, type: bigint, nullable: false }
+  - { name: largest_block_pairs, type: bigint, nullable: false }
+  - { name: largest_block_rows, type: bigint, nullable: false }
+  - { name: entropy_bits, type: double, nullable: false }
+  - { name: pair_loss_from_nulls, type: double, nullable: false }
