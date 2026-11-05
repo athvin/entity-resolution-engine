@@ -426,6 +426,18 @@ pub fn run() -> Result<()> {
                     report.defaulted_levels.join(", ")
                 );
             }
+            // The scale, always — not only when it diverges. An operator
+            // comparing two corpora wants the number in both runs' output, and
+            // a line that appears only on bad news cannot be used to notice a
+            // drift over time.
+            println!(
+                "  full agreement is worth {:.1} bits here ({})",
+                report.full_agreement_bits,
+                report.bits_per_field.join(", ")
+            );
+            if let Some(assumed) = report.scale_divergence() {
+                println!("  NOTE: a compiled (untrained) model assumes {assumed:.1} bits");
+            }
         }
         Command::Correct { run_id, run_at } => {
             crate::run_correct(&session, &config, &run_id, &run_at)?;

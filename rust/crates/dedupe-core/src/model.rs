@@ -249,11 +249,85 @@ impl TrainedModel {
         out
     }
 
+    /// The evidence this model accumulates when every field agrees as strongly
+    /// as it can, in bits of log2 Bayes factor — and each field's share of it.
+    ///
+    /// **What it is for.** `er-compile` synthesises an untrained model from a
+    /// tenant config using a single global constant for this quantity
+    /// (`CompileOptions::full_agreement_bits`, default 60), and that constant was
+    /// calibrated by taking exactly this measurement over the committed person
+    /// reference model. Measuring it on a *trained* model is how a tenant learns
+    /// whether the assumption holds for their corpus. The constant's own doc
+    /// comment records why it matters in both directions: too quiet and no
+    /// cluster ever forms, too loud and distinct records start merging — "louder
+    /// is not safer", and the false merge is the more expensive mistake.
+    ///
+    /// Per field it takes the strongest non-null level, because full agreement
+    /// means every field at its best. Resolved through the same
+    /// [`crate::scoring::level_m_u`] path the scorer uses, so this is the
+    /// evidence the engine really accumulates rather than a reading of the saved
+    /// document — which also means a level whose m or u is a built-in default
+    /// contributes its default here. [`TrainedModel::defaulted_levels`] is how
+    /// you tell which of this total is measurement and which is assumption.
+    #[must_use]
+    pub fn full_agreement_bits(&self) -> FullAgreement {
+        let mut per_field = Vec::new();
+        for c in &self.settings.comparisons {
+            let mut best: Option<(f64, &str)> = None;
+            for level in &c.levels {
+                if level.is_null_level {
+                    continue;
+                }
+                // A level whose m/u cannot be resolved contributes nothing
+                // rather than aborting the measurement: this is a diagnostic,
+                // and a partial answer beats refusing to answer.
+                let Ok((m, u)) = crate::scoring::level_m_u(c, level) else {
+                    continue;
+                };
+                let bits = crate::scoring::match_weight(m, u);
+                if best.is_none_or(|(b, _)| bits > b) {
+                    best = Some((bits, level.label_for_charts.as_str()));
+                }
+            }
+            if let Some((bits, label)) = best {
+                per_field.push(FieldBits {
+                    comparison_name: c.output_column_name.clone(),
+                    label_for_charts: label.to_string(),
+                    bits,
+                });
+            }
+        }
+        FullAgreement {
+            total_bits: per_field.iter().map(|f| f.bits).sum(),
+            per_field,
+        }
+    }
+
     pub fn save_to_json_file(&self, path: &std::path::Path) -> Result<()> {
         let json = serde_json::to_string_pretty(&self.to_settings_json())?;
         std::fs::write(path, json)?;
         Ok(())
     }
+}
+
+/// How loud a model is at full agreement. See
+/// [`TrainedModel::full_agreement_bits`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct FullAgreement {
+    /// Bits of log2 Bayes factor summed over every field's strongest level.
+    pub total_bits: f64,
+    /// Each field's contribution, in the model's comparison order.
+    pub per_field: Vec<FieldBits>,
+}
+
+/// One field's contribution to full agreement.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FieldBits {
+    pub comparison_name: String,
+    /// The level that contributed — the field's strongest, which is normally its
+    /// exact-match level.
+    pub label_for_charts: String,
+    pub bits: f64,
 }
 
 /// One comparison level whose m or u came from the built-in default rather than
