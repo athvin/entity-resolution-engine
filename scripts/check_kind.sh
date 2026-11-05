@@ -19,6 +19,16 @@
 #                 ledgered. This is the only phase where a stage must read what
 #                 a previous stage's PROCESS wrote, which is the class of bug
 #                 splitting a DAG across pods introduces (§11 Phase 3).
+#   6. cutover   — `color.active` flips while a task is RUNNING, so the pod's
+#                 control-plane callbacks land on a different er-server process
+#                 than the one that launched it. The attempt must not notice:
+#                 one launch, settles succeeded, and NO termination_reason at
+#                 all — the reachable mid-run failure is `fenced` (three missed
+#                 heartbeats), not `control_plane_unreachable`, which only the
+#                 step-1 work-order loop can write. Phase 2 covers the
+#                 dispatcher restarting; this covers the SERVING tier moving
+#                 under an in-flight attempt, which is what a blue/green deploy
+#                 does (D-BLUEGREEN).
 #
 # Needs `scripts/kind_env.sh up` first. Exits non-zero on the first failure.
 set -euo pipefail
@@ -31,6 +41,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PORT="${ER_KIND_PROBE_PORT:-18000}"
 BASE="http://127.0.0.1:${PORT}"
 ORG="kindacme"
+# Phase 5 repoints ${ORG} at its own pipeline org; phase 6 needs this one back.
+MAINORG="${ORG}"
 
 log() { echo "check_kind: $*" >&2; }
 fail() { echo "check_kind: FAIL — $*" >&2; exit 1; }
@@ -300,8 +312,9 @@ PJOB="$(api POST "/v1/orgs/${PORG}/jobs" '{"kind":"run_all_full"}' \
 
 # A plain reassignment, not a `ORG=… wait_state` prefix: bash's scoping for an
 # assignment prefixed onto a FUNCTION differs between POSIX and default mode,
-# and the helpers interpolate ${ORG}. This is the last phase, so repointing it
-# outright is both correct and the clearer thing to read.
+# and the helpers interpolate ${ORG}. Phase 6 repoints it back to ${MAINORG}
+# rather than inheriting this one, because its org needs the lake_maintain
+# config rather than the pipeline fixture.
 ORG="${PORG}"
 
 # Wait for ANY terminal state, then dump the ledger, THEN require success.
@@ -392,5 +405,151 @@ assert run.get("mode") == "full", run
 assert run.get("model_version") == "v0001", run
 print("phase 5 ok: the run is ledgered full @ v0001 — the pods wrote the lake")
 EOF
+
+# ---- phase 6: a colour cutover under an in-flight attempt -----------------
+# The deploy's second phase moves `svc/er-api` from one colour to the other
+# while work is running. A task pod's ONLY route to the control plane is that
+# Service (`ER_SERVER_URL` in the task template is
+# `http://er-api.<ns>.svc.cluster.local:8000`), so after the flip its
+# heartbeats, its claim renewals and its finish call all land on a DIFFERENT
+# er-server process than the one that launched it. If the cutover were visible
+# to a running attempt it would fail paying work — a data-path failure caused
+# by a serving-path deploy.
+#
+# What that failure would actually look like, because it decides the assertion:
+# `exec-task` has TWO unreachability windows with different reasons, and only
+# the second is reachable once a task is `running`.
+#
+#   step 1, work order   6 ticks x 10s = 60s, then control_plane_unreachable,
+#                        exit 3, CHARGED TO THE LAUNCH BUDGET. A task already
+#                        running is past this; a sibling that launches after
+#                        the flip is not.
+#   heartbeat thread     posts every 30s, fences after 3 consecutive transport
+#                        misses (~90s). Step 6 then refuses to post a verdict
+#                        and writes `fenced` — the work completed and the
+#                        result is thrown away, which is the expensive one.
+#
+# So the assertion is "no termination_reason at all" rather than a single named
+# reason; see the python block for why naming only the first would be
+# decoration.
+#
+# Distinct from phase 2 in what it exercises: the dispatcher is NOT coloured and
+# does not restart here, so adoption is not involved. What is being proved is
+# that the attempt's callback path is stateless across the two pods.
+log "phase 6: traffic cuts over while a task is in flight"
+ORG="${MAINORG}"
+
+svc_colour() {
+    kubectl --context "${CTX}" -n "${NS}" get svc er-api \
+        -o jsonpath='{.spec.selector.er\.dupezero\.com/color}'
+}
+
+helm_colour() { # extra --set args, applied with --reuse-values
+    helm --kube-context "${CTX}" -n "${NS}" upgrade er-platform \
+        "${ROOT}/infra/k8s/charts/er-platform" \
+        --reuse-values "$@" --wait --timeout 5m >/dev/null
+}
+
+LIVE_COLOUR="$(svc_colour)"
+# Not an assertion about which colour — an assertion that the chart HAS the
+# colour dimension at all. A pre-PR9 chart leaves this empty, and every
+# assertion below would then pass having cut nothing over.
+[ -n "${LIVE_COLOUR}" ] || fail "svc/er-api carries no er.dupezero.com/color selector — the chart predates the colour dimension, so this phase would prove nothing"
+case "${LIVE_COLOUR}" in
+    blue)  IDLE_COLOUR=green ;;
+    green) IDLE_COLOUR=blue ;;
+    *)     fail "svc/er-api selects colour '${LIVE_COLOUR}', which is neither blue nor green" ;;
+esac
+log "live=${LIVE_COLOUR} idle=${IDLE_COLOUR}"
+
+# Bring the idle colour up BEFORE enqueuing, so the only thing that happens
+# inside the attempt's window is the selector flip. Its image comes from
+# `images.*` through `er-platform.colorImage`'s `default` fallback, so it runs
+# the same build as the live colour — which is the real deploy's steady state
+# too, since a cutover differs from this only in the digest.
+helm_colour --set "color.${IDLE_COLOUR}.replicas=1"
+kubectl --context "${CTX}" -n "${NS}" rollout status "deploy/web-api-${IDLE_COLOUR}" --timeout=300s
+log "idle colour ${IDLE_COLOUR} is up and ready, not yet serving"
+
+JOB6=""
+for attempt in 1 2 3; do
+    candidate="$(enqueue)"
+    if catch_running "${candidate}"; then
+        JOB6="${candidate}"
+        break
+    fi
+    log "job ${candidate} settled before the cutover window (attempt ${attempt}); trying a fresh one"
+done
+[ -n "${JOB6}" ] || fail "three jobs settled before a running task could be caught"
+
+helm_colour --set "color.active=${IDLE_COLOUR}"
+NOW_COLOUR="$(svc_colour)"
+[ "${NOW_COLOUR}" = "${IDLE_COLOUR}" ] \
+    || fail "cutover did not take: svc/er-api selects '${NOW_COLOUR}', wanted '${IDLE_COLOUR}'"
+log "traffic moved ${LIVE_COLOUR} -> ${IDLE_COLOUR} with a task in flight"
+
+# The probe's own port-forward is NOT affected and that is not a gap: `kubectl
+# port-forward svc/...` resolves to one pod when the stream opens and does not
+# re-resolve, so these reads keep landing on the old colour — which still runs,
+# because retiring it is the deploy's third phase. Both colours read the same
+# Postgres, so the ledger below is the same ledger either pod would serve. The
+# flip is proved by the selector assertion above, not by where curl lands.
+wait_state "${JOB6}" succeeded 420
+tasks_json "${JOB6}" > /tmp/er-kind-tasks6.json
+python3 - /tmp/er-kind-tasks6.json <<'EOF'
+import json, sys
+
+tasks = json.load(open(sys.argv[1]))["tasks"]
+live = [t for t in tasks if t["live"]]
+assert live, "no live task rows — the cutover window caught nothing"
+for t in live:
+    assert t["state"] == "succeeded", (t["task_id"], t["state"], t.get("error_detail"))
+    # Subscript, not .get(): the assertion below is about a field's VALUE, so a
+    # renamed or dropped field must raise KeyError here rather than let
+    # `.get(...) != "fenced"` pass on a None that only means "no such key".
+    # A gate that cannot fail is worse than no gate.
+    assert "termination_reason" in t, (
+        f"{t['task_id']}: no termination_reason field on the task row — the "
+        "ledger shape changed and this phase would prove nothing"
+    )
+    # ANY reason, not just the one failure mode. `control_plane_unreachable`
+    # is the WRONG guard for this window and asserting only it would be
+    # decoration: exec_task.rs writes that reason solely in the step-1
+    # work-order loop, which a task already in `running` has passed. The
+    # reachable mid-run mode is `fenced` — the heartbeat thread posts every
+    # 30s and fences after 3 consecutive transport misses (so ~90s), after
+    # which step 6 refuses to post the verdict even though the work finished.
+    # A succeeded task carries no reason at all, so `is None` covers fenced,
+    # sigterm, stale_start, structural_mismatch and control_plane_unreachable
+    # (the last still reachable here by a sibling task that LAUNCHES after the
+    # flip and fetches its work order through the moved Service).
+    assert t["termination_reason"] is None, (
+        f"{t['task_id']}: the cutover was visible to the attempt "
+        f"(termination_reason={t['termination_reason']!r}, "
+        f"error_detail={t.get('error_detail')!r}) — 'fenced' means the "
+        "heartbeat missed three posts across the flip; "
+        "'control_plane_unreachable' means a sibling could not fetch its "
+        "work order after it"
+    )
+    # A relaunch would mean two processes writing one lake — the same invariant
+    # phase 2 protects, re-checked because a cutover is a second way to lose it.
+    assert t["launches"] == 1, (
+        f"{t['task_id']}: launches={t['launches']} — a cutover must NOT relaunch "
+        "a live attempt"
+    )
+print("phase 6 ok: the attempt survived the cutover — one launch, no "
+      "control_plane_unreachable")
+EOF
+
+# Leave the release as phase 1 found it, so the probe is re-runnable and a
+# later `kind_env.sh up` does not inherit a surprising active colour. Order
+# matters: flip back FIRST, then retire — the reverse would blackhole the
+# Service for as long as the scale-down took.
+helm_colour --set "color.active=${LIVE_COLOUR}"
+helm_colour --set "color.${IDLE_COLOUR}.replicas=0"
+RESTORED="$(svc_colour)"
+[ "${RESTORED}" = "${LIVE_COLOUR}" ] \
+    || fail "restore failed: svc/er-api selects '${RESTORED}', wanted '${LIVE_COLOUR}'"
+log "phase 6 cleanup: restored to ${LIVE_COLOUR}, ${IDLE_COLOUR} retired"
 
 log "ALL PHASES PASS"
