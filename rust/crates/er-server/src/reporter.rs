@@ -84,9 +84,10 @@ pub const INPROC: &str = "inproc";
 /// mismatch between the engine's stage names and the compiled graph).
 fn row_id(run: &PlannedRun, task: &str) -> Option<String> {
     let Some((id, _)) = run.rows.get(task) else {
-        eprintln!(
-            "attempt reporter: job {} has no task row named '{task}'",
-            run.job_id
+        tracing::warn!(
+            er.job_id = %run.job_id,
+            er.task = %task,
+            "the job has no task row with this name"
         );
         return None;
     };
@@ -121,7 +122,11 @@ impl AttemptReporter {
         match self.plan_inner(job).await {
             Ok(planned) => planned,
             Err(e) => {
-                eprintln!("attempt reporter: planning job {} failed: {e}", job.id);
+                tracing::error!(
+                    er.job_id = %job.id,
+                    error = %crate::errfmt::chain(&e),
+                    "planning the job's task rows failed"
+                );
                 None
             }
         }
@@ -135,10 +140,9 @@ impl AttemptReporter {
         if let Some(fp) = job.structural_fingerprint.as_deref()
             && fp != dag.structural_fingerprint
         {
-            eprintln!(
-                "attempt reporter: job {} was planned against another build's graph; running \
-                 unreported rather than mixing ledgers",
-                job.id
+            tracing::warn!(
+                er.job_id = %job.id,
+                "the job was planned against another build's graph; running unreported rather than mixing ledgers"
             );
             return Ok(None);
         }
@@ -187,9 +191,11 @@ impl AttemptReporter {
             return;
         };
         if let Err(e) = self.pod_started_inner(run, &id).await {
-            eprintln!(
-                "attempt reporter: starting {task} on job {} failed: {e}",
-                run.job_id
+            tracing::error!(
+                er.job_id = %run.job_id,
+                er.task = %task,
+                error = %crate::errfmt::chain(&e),
+                "starting the task row failed"
             );
         }
     }
@@ -211,10 +217,10 @@ impl AttemptReporter {
         if let Some(row) = &claimed
             && row.id != id
         {
-            eprintln!(
-                "attempt reporter: claimed '{}' while reporting '{id}' — two scheduled rows \
-                 should be impossible on the in-process path",
-                row.id
+            tracing::error!(
+                er.claimed_row = %row.id,
+                er.reported_row = %id,
+                "claimed one row while reporting another; two scheduled rows should be impossible on the in-process path"
             );
         }
         er_entities::task_instance::update::start(
@@ -248,9 +254,11 @@ impl AttemptReporter {
         )
         .await
         {
-            eprintln!(
-                "attempt reporter: finishing {task} on job {} failed: {e}",
-                run.job_id
+            tracing::error!(
+                er.job_id = %run.job_id,
+                er.task = %task,
+                error = %crate::errfmt::chain(&e),
+                "finishing the task row failed"
             );
         }
     }
@@ -286,9 +294,11 @@ impl AttemptReporter {
             backoff: taskpg::POD_BACKOFF,
         };
         if let Err(e) = taskpg::fail_or_retry_task(&mut self.client, &id, &failure).await {
-            eprintln!(
-                "attempt reporter: failing {task} on job {} failed: {e}",
-                run.job_id
+            tracing::error!(
+                er.job_id = %run.job_id,
+                er.task = %task,
+                error = %crate::errfmt::chain(&e),
+                "marking the task row failed"
             );
         }
     }
@@ -308,9 +318,11 @@ impl AttemptReporter {
         if let Err(e) =
             er_entities::task_instance::update::claim_control(&self.client, &self.epoch).await
         {
-            eprintln!(
-                "attempt reporter: control claim for {task} on job {} failed: {e}",
-                run.job_id
+            tracing::error!(
+                er.job_id = %run.job_id,
+                er.task = %task,
+                error = %crate::errfmt::chain(&e),
+                "claiming the control task row failed"
             );
         }
     }
@@ -335,9 +347,11 @@ impl AttemptReporter {
         )
         .await
         {
-            eprintln!(
-                "attempt reporter: finishing control {task} on job {} failed: {e}",
-                run.job_id
+            tracing::error!(
+                er.job_id = %run.job_id,
+                er.task = %task,
+                error = %crate::errfmt::chain(&e),
+                "finishing the control task row failed"
             );
         }
     }
@@ -367,9 +381,11 @@ impl AttemptReporter {
             backoff: taskpg::CONTROL_BACKOFF,
         };
         if let Err(e) = taskpg::fail_or_retry_task(&mut self.client, &id, &failure).await {
-            eprintln!(
-                "attempt reporter: failing control {task} on job {} failed: {e}",
-                run.job_id
+            tracing::error!(
+                er.job_id = %run.job_id,
+                er.task = %task,
+                error = %crate::errfmt::chain(&e),
+                "marking the control task row failed"
             );
         }
     }
@@ -392,9 +408,10 @@ impl AttemptReporter {
     /// legacy arm's to settle.
     pub async fn settle(&mut self, run: &PlannedRun, job_succeeded: bool) {
         if let Err(e) = self.settle_inner(run, job_succeeded).await {
-            eprintln!(
-                "attempt reporter: settling job {}'s rows failed: {e}",
-                run.job_id
+            tracing::error!(
+                er.job_id = %run.job_id,
+                error = %crate::errfmt::chain(&e),
+                "settling the job's remaining rows failed"
             );
         }
     }
@@ -431,10 +448,10 @@ impl AttemptReporter {
                     TaskState::Canceled
                 }
                 PassAction::Schedule => {
-                    eprintln!(
-                        "attempt reporter: job {} succeeded with '{task_id}' still schedulable — \
-                         a stage the engine never reported",
-                        run.job_id
+                    tracing::warn!(
+                        er.job_id = %run.job_id,
+                        er.task = %task_id,
+                        "the job succeeded with a task still schedulable; the engine never reported that stage"
                     );
                     TaskState::Canceled
                 }

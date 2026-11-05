@@ -59,7 +59,7 @@ impl ExecutorConfig {
             .filter(|k| {
                 let known = JobKind::parse(k).is_some();
                 if !known {
-                    eprintln!("executor: ignoring unknown kind '{k}' in ER_EXECUTOR_DAG_KINDS");
+                    tracing::warn!(kind = %k, "ignoring an unknown kind in ER_EXECUTOR_DAG_KINDS");
                 }
                 known
             })
@@ -76,7 +76,7 @@ impl ExecutorConfig {
             Ok(path) => match std::fs::read_to_string(&path) {
                 Ok(t) => t,
                 Err(e) => {
-                    eprintln!("executor: cannot read the task template at {path}: {e}");
+                    tracing::error!(path = %path, error = %e, "cannot read the task template");
                     return None;
                 }
             },
@@ -113,7 +113,7 @@ pub async fn from_env(
             {
                 Ok(ns) => ns.trim().to_string(),
                 Err(e) => {
-                    eprintln!("executor: disabled — no namespace (set ER_NAMESPACE): {e}");
+                    tracing::warn!(error = %e, "the executor is disabled: no namespace (set ER_NAMESPACE)");
                     return (None, None);
                 }
             }
@@ -122,7 +122,7 @@ pub async fn from_env(
     let api: Arc<dyn PodApi> = match er_k8s::KubeApi::in_cluster(&namespace) {
         Ok(api) => Arc::new(api),
         Err(e) => {
-            eprintln!("executor: disabled — no in-cluster Kubernetes identity: {e}");
+            tracing::warn!(error = %e, "the executor is disabled: no in-cluster Kubernetes identity");
             return (None, None);
         }
     };
@@ -136,7 +136,7 @@ pub async fn from_env(
     match Executor::connect(dsn, api, cfg).await {
         Ok(ex) => (Some(ex), Some(rx)),
         Err(e) => {
-            eprintln!("executor: disabled — control-plane connect failed: {e}");
+            tracing::warn!(error = %e, "the executor is disabled: connecting to the control plane failed");
             (None, None)
         }
     }
@@ -183,10 +183,10 @@ impl Executor {
     /// `Resync` frame then reconciles against the listing.
     pub async fn adopt(&mut self) {
         if let Err(e) = er_entities::job::update::adopt(&self.client, &self.epoch).await {
-            eprintln!("executor: adopting jobs failed: {e}");
+            tracing::warn!(error = %e, "adopting jobs failed");
         }
         if let Err(e) = er_entities::task_instance::update::adopt(&self.client, &self.epoch).await {
-            eprintln!("executor: adopting rows failed: {e}");
+            tracing::warn!(error = %e, "adopting rows failed");
         }
     }
 
@@ -230,8 +230,8 @@ impl Executor {
         .await
         {
             Ok(Some(_)) => {}
-            Ok(None) => eprintln!("executor: job {} left dispatching mid-plan", job.id),
-            Err(e) => eprintln!("executor: planning job {} failed: {e}", job.id),
+            Ok(None) => tracing::warn!(er.job_id = %job.id, "the job left dispatching mid-plan"),
+            Err(e) => tracing::error!(er.job_id = %job.id, error = %e, "planning the job failed"),
         }
     }
 
@@ -250,7 +250,7 @@ impl Executor {
         ] {
             match result {
                 Ok(did) => worked |= did,
-                Err(e) => eprintln!("executor: {name} failed: {e}"),
+                Err(e) => tracing::warn!(er.sweep = %name, error = %e, "a sweep failed"),
             }
         }
         worked
@@ -270,7 +270,9 @@ impl Executor {
         for job in jobs {
             match self.readiness_for(&job).await {
                 Ok(did) => worked |= did,
-                Err(e) => eprintln!("executor: readiness for job {} failed: {e}", job.id),
+                Err(e) => {
+                    tracing::warn!(er.job_id = %job.id, error = %e, "the readiness check failed");
+                }
             }
         }
         Ok(worked)
@@ -386,9 +388,11 @@ impl Executor {
         tx.commit().await?;
         if let Some(settled) = settled {
             worked = true;
-            eprintln!(
-                "executor: job {} ({}) settled {}",
-                settled.id, settled.kind, settled.state
+            tracing::info!(
+                er.job_id = %settled.id,
+                er.job_kind = %settled.kind,
+                er.state = %settled.state,
+                "the job settled"
             );
             let _ = webhook::emit_job_event(&self.client, &settled).await;
         }
@@ -541,7 +545,7 @@ impl Executor {
                 continue;
             }
             if let Err(e) = self.create_for(&row, &token).await {
-                eprintln!("executor: creating a Job for {} failed: {e}", row.id);
+                tracing::error!(er.task_instance_id = %row.id, error = %e, "creating the Kubernetes Job failed");
             }
         }
     }
@@ -692,7 +696,7 @@ impl Executor {
         let listing = match self.api.list(&Selector(MANAGED_SELECTOR.into())).await {
             Ok(l) => l,
             Err(e) => {
-                eprintln!("executor: zombie sweep could not list pods: {e}");
+                tracing::warn!(error = %e, "the zombie sweep could not list pods");
                 return Ok(false);
             }
         };
@@ -732,7 +736,7 @@ impl Executor {
         let listing = match self.api.list(&Selector(MANAGED_SELECTOR.into())).await {
             Ok(l) => l,
             Err(e) => {
-                eprintln!("executor: stuck-pending sweep could not list: {e}");
+                tracing::warn!(error = %e, "the stuck-pending sweep could not list");
                 return Ok(false);
             }
         };
@@ -797,7 +801,7 @@ impl Executor {
         match frame {
             WatchFrame::Resync => {
                 if let Err(e) = self.reconcile().await {
-                    eprintln!("executor: resync reconcile failed: {e}");
+                    tracing::warn!(error = %e, "the resync reconcile failed");
                 }
             }
             WatchFrame::Pod(pod) => self.apply_pod(&pod, false).await,
@@ -1064,7 +1068,7 @@ impl Executor {
         let listing = match self.api.list(&Selector(MANAGED_SELECTOR.into())).await {
             Ok(l) => l,
             Err(e) => {
-                eprintln!("executor: reconcile could not list: {e}");
+                tracing::warn!(error = %e, "the reconcile could not list");
                 return Ok(());
             }
         };
@@ -1220,7 +1224,9 @@ impl Executor {
                 }
             }
             Ok(_) => {}
-            Err(e) => eprintln!("executor: requeue of {} failed: {e}", row.id),
+            Err(e) => {
+                tracing::warn!(er.task_instance_id = %row.id, error = %e, "requeueing the row failed");
+            }
         }
         self.pending_since.remove(job_name);
     }
@@ -1245,7 +1251,7 @@ impl Executor {
         )
         .await;
         self.pending_since.remove(job_name);
-        eprintln!("executor: capacity wait ({reason}) for {}", row.id);
+        tracing::info!(er.task_instance_id = %row.id, reason = %reason, "waiting on capacity");
     }
 
     async fn revoke_and_delete(&self, job_name: &str) {
@@ -1267,7 +1273,7 @@ impl Executor {
 
     async fn api_delete(&self, job_name: &str) {
         if let Err(e) = self.api.delete_job(job_name).await {
-            eprintln!("executor: deleting Job {job_name} failed: {e}");
+            tracing::warn!(er.k8s_job = %job_name, error = %e, "deleting the Kubernetes Job failed");
         }
     }
 

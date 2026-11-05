@@ -146,14 +146,14 @@ impl Verifier {
         let ca = match std::fs::read(&ca_path) {
             Ok(b) => b,
             Err(e) => {
-                eprintln!("satoken: no cluster CA at {}: {e}", ca_path.display());
+                tracing::warn!(path = %ca_path.display(), error = %e, "no cluster CA at this path");
                 return None;
             }
         };
         let cert = match reqwest::Certificate::from_pem(&ca) {
             Ok(c) => c,
             Err(e) => {
-                eprintln!("satoken: the cluster CA does not parse: {e}");
+                tracing::warn!(error = %e, "the cluster CA does not parse");
                 return None;
             }
         };
@@ -165,7 +165,7 @@ impl Verifier {
         {
             Ok(c) => c,
             Err(e) => {
-                eprintln!("satoken: building the JWKS client failed: {e}");
+                tracing::warn!(error = %e, "building the JWKS client failed");
                 return None;
             }
         };

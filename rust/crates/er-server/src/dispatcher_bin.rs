@@ -35,7 +35,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // Advisory-locked, so it's safe alongside the API's own ensure_schema.
     pg::ensure_schema(&mut client).await?;
     if !pg::ensure_event_triggers(&mut client).await? {
-        eprintln!("er-dispatcher: DDL-ledger event triggers not installed (needs superuser)");
+        tracing::warn!("the DDL-ledger event triggers are not installed (needs superuser)");
     }
     // The dispatcher's writes identify themselves to the history/DDL ledgers.
     pg::set_actor(&client, "er-dispatcher").await?;
@@ -47,7 +47,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let reporter = match crate::reporter::AttemptReporter::connect(&dsn).await {
         Ok(r) => Some(r),
         Err(e) => {
-            eprintln!("er-dispatcher: attempt reporter disabled (connect failed): {e}");
+            tracing::warn!(error = %e, "the attempt reporter is disabled: connecting failed");
             None
         }
     };

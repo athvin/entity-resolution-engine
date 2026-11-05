@@ -481,7 +481,7 @@ impl Task<Session> for Finish {
         let closed = match ended {
             Ok(()) => true,
             Err(e) => {
-                eprintln!("finish: the run row could not be closed: {e:#}");
+                tracing::warn!(error = %format!("{e:#}"), "the run row could not be closed");
                 false
             }
         };
