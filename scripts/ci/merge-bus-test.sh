@@ -149,6 +149,14 @@ has   "$S/log" "batch: 101 102" "the other two still ride"
 hasnt "$S/calls.log" "pr merge 108" "the workflow-touching PR was never merged"
 has   "$S/log" "landed #102" "the batch still landed"
 
+echo "=== detect-died: a green that verified nothing is refused ==="
+S=$(run detect-died); echo "  rc=$(cat "$S/rc")"
+chk "exit 0" "$(cat "$S/rc")" "0"
+has   "$S/log" "its detect jobs failed" "skipped with the real reason"
+has   "$S/log" "re-run CI before batching" "told the reader what to do"
+has   "$S/log" "batch: 101 102" "the genuinely-verified two still ride"
+hasnt "$S/calls.log" "pr merge 109" "the unverified PR was never merged"
+
 echo
 echo "===================================="
 echo "passed: $pass   failed: $fail"

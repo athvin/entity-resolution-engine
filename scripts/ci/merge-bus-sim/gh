@@ -52,9 +52,9 @@ pr)
       esac
     done
     case "$fields" in
-      *mergeStateStatus,isDraft,baseRefName,headRefName*)
-        printf '%s|%s|%s|%s\n' "$(get "state_$n")" "$(get "draft_$n")" \
-                               "$(get "base_$n")" "$(get "head_$n")" ;;
+      *mergeStateStatus,isDraft,baseRefName,headRefName,headRefOid*)
+        printf '%s|%s|%s|%s|%s\n' "$(get "state_$n")" "$(get "draft_$n")" \
+                               "$(get "base_$n")" "$(get "head_$n")" "oid$n" ;;
       title) printf 'title of #%s\n' "$n" ;;
       headRefName) get "head_$n" ;;
       files)
@@ -129,6 +129,11 @@ pr)
 api)
   path="$2"
   case "$path" in
+    */commits/*/check-runs*)
+      # "detect_failed_<oid>=1" means this PR's detect jobs died, so every
+      # gated required context reported `skipped` without running.
+      oid="${path#*/commits/}"; oid="${oid%%/check-runs*}"
+      if [ "$(get "detect_failed_${oid}")" = "1" ]; then echo 1; else echo 0; fi ;;
     *actions/runs/*/jobs*)
       # Keyed per run id, so the pre-flight (which reads the recent completed
       # runs) and the verdict classification (which reads the bus PR's own
