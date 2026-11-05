@@ -57,6 +57,12 @@ pr)
                                "$(get "base_$n")" "$(get "head_$n")" ;;
       title) printf 'title of #%s\n' "$n" ;;
       headRefName) get "head_$n" ;;
+      files)
+        # "files_<n>=a/b c/d"; counted by the workflow's jq, so emit the paths
+        # it would have selected. Empty means the PR touches no workflow files.
+        for f in $(get "files_$n"); do
+          case "$f" in .github/workflows/*) echo "$f" ;; esac
+        done | wc -l | tr -d ' ' ;;
       headRefOid) git --git-dir="$origin" rev-parse "refs/heads/$(get "head_$n")" ;;
       mergeStateStatus)
         # Scripted sequence for the bus PR: pop one value per call.

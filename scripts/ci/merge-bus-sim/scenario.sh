@@ -59,6 +59,8 @@ bus_state_final=CLEAN
 move_main=0
 api_fails_recent=
 api_fails_bus=
+files_101=src/a.txt
+files_102=src/b.txt
 candidates=101 102
 state_101=CLEAN
 draft_101=false
@@ -85,6 +87,11 @@ case "$SCEN" in
   lying)     printf 'CLEAN\n'          >"$SIM/busstate.seq"; add "merge_noops_on=102" ;;
   preflight-blind)
              printf 'BLOCKED\nCLEAN\n'  >"$SIM/busstate.seq"; add "api_fails_recent=1" ;;
+  workflow-touching)
+             printf 'BLOCKED\nCLEAN\n'  >"$SIM/busstate.seq"
+             add "candidates=101 108 102" \
+                 "state_108=CLEAN" "draft_108=false" "base_108=main" "head_108=feat-c" \
+                 "files_108=.github/workflows/rust.yml src/c.txt" ;;
   verdict-blind)
              printf 'BLOCKED\n'        >"$SIM/busstate.seq"
              add "failed_contexts=test" "bus_state_final=BLOCKED" "api_fails_bus=1" ;;
