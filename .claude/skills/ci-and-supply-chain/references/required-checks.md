@@ -163,6 +163,7 @@ last green run, so a failure is usually not caused by the diff.
 ignore = [
     "RUSTSEC-2024-0436",
     "RUSTSEC-2024-0449",
+    "RUSTSEC-2026-0441",
 ]
 ```
 

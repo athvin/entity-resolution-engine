@@ -5,13 +5,21 @@
 # Fail on any security advisory or unmaintained/yanked crate.
 yanked = "deny"
 version = 2
-# The two RUSTSEC entries below are *unmaintained* notices (not vulnerabilities),
-# pulled transitively by the entity framework's analyser (ff-analysis's DataFusion
-# 52 + arrow 57 subtree). We do not control either and neither is a safe-upgrade:
+# Every RUSTSEC entry below is an *unmaintained* notice rather than a
+# vulnerability, and each reaches us transitively through a dependency we do not
+# control, with no safe upgrade available on our side:
 #   - RUSTSEC-2024-0436: `paste` (feature-complete proc-macro, via arrow/datafusion).
 #   - RUSTSEC-2024-0449: `unsafe-libyaml`, via feather-flow's `serde_yaml`. Our own
 #     crates deliberately use `serde_norway` instead; this reaches us only through
 #     ff-analysis. Retire when feather-flow moves off serde_yaml.
+#   - RUSTSEC-2026-0441: `pin-utils`, published 2026-11-05 and immediately red on
+#     every PR and on `main`. `cargo tree -i pin-utils` puts it under exactly one
+#     parent, `aws-smithy-http`, and from there under the whole AWS SDK stack
+#     (aws-config, aws-sdk-s3, aws-sdk-sesv2, aws-sdk-sts, aws-sigv4,
+#     aws-smithy-runtime). Nothing here depends on it directly and no version of
+#     the SDK drops it yet, so the unblocker is upstream. The crate is three
+#     macros superseded by `core::pin::pin!`; it is unmaintained because it is
+#     finished. Retire when the AWS SDK stops pulling it.
 #
 # There is deliberately no `zip` exception here any more. One existed for `zip`
 # 6.0.0 — a registry yank plus three extract-time path-handling advisories
@@ -24,6 +32,7 @@ version = 2
 ignore = [
     "RUSTSEC-2024-0436",
     "RUSTSEC-2024-0449",
+    "RUSTSEC-2026-0441",
 ]
 
 [licenses]
