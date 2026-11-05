@@ -984,6 +984,13 @@ impl Task<Session> for Train {
                 // the actionable half — it points at the rule whose pair
                 // population is too small or too skewed for EM to resolve.
                 "em_not_converged": report.not_converged,
+                // Provenance, for the same reason: which levels the model is
+                // scoring from a built-in default rather than from this corpus.
+                // Not an error — the default is a considered prior — but the
+                // saved model looks identical either way, so the ledger is the
+                // only place the distinction can survive the run.
+                "levels_fully_measured": report.fully_measured(),
+                "levels_defaulted": report.defaulted_levels,
             })),
         ))
     }

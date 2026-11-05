@@ -414,6 +414,18 @@ pub fn run() -> Result<()> {
                 out_model.display(),
                 out_tf.display()
             );
+            // A second line rather than more of the first: this is provenance,
+            // not a verdict, and an operator reading "converged" should not have
+            // to parse which parameters that convergence actually measured.
+            // `run_train` already warns on stderr; this keeps the hand-training
+            // summary self-contained on stdout.
+            if !report.fully_measured() {
+                println!(
+                    "  {} level(s) scoring from a built-in default (training measured nothing for them): {}",
+                    report.defaulted_levels.len(),
+                    report.defaulted_levels.join(", ")
+                );
+            }
         }
         Command::Correct { run_id, run_at } => {
             crate::run_correct(&session, &config, &run_id, &run_at)?;

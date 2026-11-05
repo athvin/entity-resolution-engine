@@ -199,10 +199,97 @@ impl TrainedModel {
         out
     }
 
+    /// The non-null levels whose `m` or `u` is still [`ProbabilitySlot::Unset`]
+    /// after training, so the scorer reads the level's built-in default instead
+    /// of a value measured on this corpus.
+    ///
+    /// **Why this is worth reporting at all.** Falling back to the default is
+    /// the right behaviour — see [`TrainedModel::populate_from_trained_values`],
+    /// which explains why it beats a sentinel — but it is *silent*. Training
+    /// succeeds, the model saves, every golden passes, and nothing distinguishes
+    /// a parameter measured on a million pairs from one that is a prior about
+    /// where the level sits in the ladder. For most levels the prior is fine.
+    /// For an exact-match level on a near-unique column it can be orders of
+    /// magnitude out, because the true u of an equality is that corpus's own
+    /// collision probability.
+    ///
+    /// This is the post-hoc half of a pair: `er-server`'s publish advisories
+    /// *predict* which `exact` levels the u-sample will not measure, from the
+    /// profile alone and before any training. This reports which ones actually
+    /// came back unmeasured, which is what makes that prediction checkable
+    /// rather than merely plausible.
+    ///
+    /// Read off the final slots rather than the estimate history on purpose: the
+    /// question is what the scorer will use, and a level pinned by `fix_m` /
+    /// `fix_u` or supplied in the settings JSON is a declared value, not a
+    /// fallback. `Unset` is the one state that means "the default is in force".
+    #[must_use]
+    pub fn defaulted_levels(&self) -> Vec<DefaultedLevel> {
+        let mut out = Vec::new();
+        for c in &self.settings.comparisons {
+            for level in &c.levels {
+                // The null level has no m or u by construction — `detailed_records`
+                // reports `None` for both — so it is not a fallback.
+                if level.is_null_level {
+                    continue;
+                }
+                let m_defaulted = level.m.raw().is_none();
+                let u_defaulted = level.u.raw().is_none();
+                if m_defaulted || u_defaulted {
+                    out.push(DefaultedLevel {
+                        comparison_name: c.output_column_name.clone(),
+                        comparison_vector_value: level.gamma,
+                        label_for_charts: level.label_for_charts.clone(),
+                        m_defaulted,
+                        u_defaulted,
+                    });
+                }
+            }
+        }
+        out
+    }
+
     pub fn save_to_json_file(&self, path: &std::path::Path) -> Result<()> {
         let json = serde_json::to_string_pretty(&self.to_settings_json())?;
         std::fs::write(path, json)?;
         Ok(())
+    }
+}
+
+/// One comparison level whose m or u came from the built-in default rather than
+/// from training. See [`TrainedModel::defaulted_levels`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DefaultedLevel {
+    pub comparison_name: String,
+    pub comparison_vector_value: i32,
+    pub label_for_charts: String,
+    /// `m` is the default: training found no matching pairs at this level.
+    pub m_defaulted: bool,
+    /// `u` is the default: the u-sample never saw this level. On an exact level
+    /// this usually means the column is too near-unique for random pairs to
+    /// agree at the configured `u_max_pairs`.
+    pub u_defaulted: bool,
+}
+
+impl DefaultedLevel {
+    /// `email / Exact match on email (u)` — the comparison, the level, and which
+    /// parameters fell back, in one line fit for a CLI or a task message.
+    #[must_use]
+    pub fn describe(&self) -> String {
+        let which = match (self.m_defaulted, self.u_defaulted) {
+            (true, true) => "m and u",
+            (true, false) => "m",
+            (false, true) => "u",
+            // Not constructed: `defaulted_levels` only emits a level when at
+            // least one is defaulted. Spelled out rather than `unreachable!`,
+            // because a panic in a reporting path would be worse than a dull
+            // string.
+            (false, false) => "nothing",
+        };
+        format!(
+            "{} / {} ({which})",
+            self.comparison_name, self.label_for_charts
+        )
     }
 }
 

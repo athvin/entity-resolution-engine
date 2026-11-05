@@ -112,6 +112,74 @@ fn u_default_path_matches_golden() {
     assert_u_matches(&m, "model_after_u.json", 1e-12);
 }
 
+/// `defaulted_levels` reports exactly the parameters the scorer will take from a
+/// built-in default rather than from this corpus — checked at the two stages the
+/// committed goldens already capture.
+///
+/// Worth pinning because the fallback is otherwise invisible: training succeeds,
+/// the model saves, every golden here passes, and nothing in the saved document
+/// distinguishes a u measured over a million pairs from a prior about where the
+/// level sits in the ladder. For an exact level on a near-unique column the two
+/// can be orders of magnitude apart.
+///
+/// The goldens make the two halves separable, which is the real property: after
+/// u-sampling every non-null level has a measured u and *none* has a measured m,
+/// so a report that conflated them would fail here.
+#[test]
+fn defaulted_levels_tracks_what_training_has_measured() {
+    // Untrained: neither parameter exists anywhere, so every non-null level is
+    // reported for both. `detailed_records` supplies the denominator rather than
+    // a hand-written 20, but the count is asserted so that an accessor silently
+    // returning nothing cannot pass.
+    let initial = model();
+    let non_null = initial
+        .detailed_records()
+        .iter()
+        // The prior travels as a record too, with no m and no u; this excludes
+        // it without naming it.
+        .filter(|r| !r.is_null_level && r.m_probability.is_some())
+        .count();
+    assert!(non_null > 0, "the fixture must have non-null levels");
+
+    let defaulted = initial.defaulted_levels();
+    assert_eq!(
+        defaulted.len(),
+        non_null,
+        "an untrained model defaults every non-null level"
+    );
+    assert!(
+        defaulted.iter().all(|d| d.m_defaulted && d.u_defaulted),
+        "...and both of its parameters, not one"
+    );
+    let described: Vec<String> = defaulted
+        .iter()
+        .map(dedupe_core::model::DefaultedLevel::describe)
+        .collect();
+    assert!(
+        described
+            .iter()
+            .any(|d| d == "email / Exact match on email (m and u)"),
+        "the description must name the comparison, the level and which parameters \
+         fell back: {described:?}"
+    );
+
+    // After u-sampling: u is measured everywhere, m is still a default because
+    // nothing has estimated it yet.
+    let after_u = TrainedModel::new(
+        Settings::from_json_str(&load_golden_text("model_after_u.json")).unwrap(),
+    );
+    let defaulted = after_u.defaulted_levels();
+    assert_eq!(
+        defaulted.len(),
+        non_null,
+        "m is still unmeasured on every level"
+    );
+    assert!(
+        defaulted.iter().all(|d| d.m_defaulted && !d.u_defaulted),
+        "u came from the corpus and m did not — the two must not be conflated"
+    );
+}
+
 #[test]
 fn sampled_record_set_matches_golden() {
     // max_pairs below C(1000,2) so the deterministic hash filter fires.

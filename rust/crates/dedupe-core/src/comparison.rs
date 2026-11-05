@@ -39,8 +39,13 @@ pub enum ProbabilitySlot {
 }
 
 impl ProbabilitySlot {
-    /// Resolve the slot given the level's default:
-    /// `Value` wins; `NotObserved` -> 1e-6; `Unset` -> the supplied default.
+    /// Resolve the slot given the level's default: `Value` wins, `Unset` reads
+    /// the supplied default.
+    ///
+    /// This used to add "`NotObserved` -> 1e-6", naming a variant that no longer
+    /// exists — and that line is the origin of the belief that an untrained
+    /// level scores at 1e-6. `TrainedModel::defaulted_levels` reports which
+    /// levels are resolving through the `Unset` arm, because doing so is silent.
     pub fn resolve(&self, default: f64) -> f64 {
         match self {
             ProbabilitySlot::Unset => default,
