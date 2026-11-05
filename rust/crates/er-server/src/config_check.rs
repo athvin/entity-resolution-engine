@@ -136,17 +136,32 @@ pub fn profile_advisories(config: &Config, profiled: &[ProfiledColumn]) -> Vec<S
                 // Pairs from one value are quadratic in its count, which is the
                 // part that surprises people: one value on 20% of a 100k corpus
                 // is 200 million comparisons from that block alone.
-                let rows = share * stats.row_count as f64;
-                let pairs = rows * (rows - 1.0) / 2.0;
-                advisories.push(format!(
-                    "blocking key `{}` reads `{}`, whose most common value covers {:.0}% of rows \
-                     ({:.0} of them) — that one block alone is about {:.0} comparisons",
-                    rule.key_type,
-                    col.column,
-                    share * 100.0,
-                    rows,
-                    pairs
-                ));
+                //
+                // The share's denominator is the column's NON-NULL rows, not all
+                // of them — `dedupe_core::profile::top_values` divides by
+                // `count(<col>)`. This multiplied it by `row_count` at first,
+                // which overstates the block by 1/fill and the COMPARISONS by
+                // 1/fill², because the count is squared: on a half-populated
+                // column it exaggerated by 4x the one number the tenant is being
+                // asked to act on. Thresholding on the share itself is right as
+                // it stands — an equi-join only ever compares non-null values,
+                // so a share of the populated rows IS the block's share.
+                let rows = (share * stats.non_null_count as f64).round();
+                // Below two rows there is no pair to report, and `rows - 1`
+                // would go negative and print "-0 comparisons".
+                if rows >= 2.0 {
+                    let pairs = rows * (rows - 1.0) / 2.0;
+                    advisories.push(format!(
+                        "blocking key `{}` reads `{}`, whose most common value covers {:.0}% of \
+                         its populated rows ({:.0} of them) — that one block alone is about \
+                         {:.0} comparisons",
+                        rule.key_type,
+                        col.column,
+                        share * 100.0,
+                        rows,
+                        pairs
+                    ));
+                }
             }
         }
     }
@@ -192,7 +207,160 @@ pub fn profile_advisories(config: &Config, profiled: &[ProfiledColumn]) -> Vec<S
         ));
     }
 
+    advisories.extend(unmeasurable_exact_levels(config, &by_name));
     advisories
+}
+
+/// The `exact` levels whose u-probability this corpus cannot supply, at the
+/// `u_max_pairs` the config declares.
+///
+/// **What the hazard is, and what it is not.** A level the u-sample never
+/// observes is *not* scored at a sentinel. `estimate_u` records
+/// `ProbEstimate::NotObserved`, and `populate_from_trained_values` filters
+/// those out and leaves the slot untouched, so the level falls back to its
+/// built-in default — which is the better behaviour and deliberate. (A design
+/// note once concluded such a level scores at `u = 1e-6`; that was a stale doc
+/// comment outliving the variant it described, and the claim is false. It is
+/// worth naming here because it is the reason this advisory nearly got written
+/// against the wrong hazard.)
+///
+/// The real cost is quieter: the tenant is told nothing when a level's
+/// u-probability came from a prior rather than from their data. For most levels
+/// the default is a considered position on the ladder, and that is fine. For an
+/// `exact` level it can be off by orders of magnitude, because the true u of an
+/// equality is the corpus's own collision probability — on a near-unique column,
+/// about `1/distinct`.
+///
+/// **Only `exact` is predictable this way.** Every other token compares a
+/// derived or fuzzy key (`jaro_winkler:`, `levenshtein:`, `first_n:`,
+/// `username_exact`, `domain_exact`, `variant_match`, …) whose agreement rate
+/// column-level statistics cannot bound, so this says nothing about them rather
+/// than guessing.
+///
+/// **The arithmetic, and why it only ever errs quiet.** `estimate_u` joins its
+/// sample to itself under `uid_l < uid_r`, so it counts UNORDERED pairs, and the
+/// chunking partitions them rather than resampling. Over a column's `d` distinct
+/// non-null values with counts `n_v` summing to `M`, out of `N` rows, the number
+/// of agreeing pairs is `A/2` where `A = Σ n_v(n_v−1)`, and the chance a random
+/// pair is one of them is `A / (N(N−1))`. Two bounds on `A` hold with nothing but
+/// the profile, both via the mode count `n_max = top_share · M`:
+///
+/// - `A ≤ M(n_max − 1)` — no value repeats more often than the mode does
+/// - `A ≥ M(M/d − 1)` — a uniform column minimises agreement
+///
+/// **`n_v(n_v−1)`, not `n_v²`.** A value appearing *once* contributes no agreeing
+/// pair at all, and that is precisely the case this advisory exists for; the
+/// square over-counts it by exactly the amount that matters. The first draft used
+/// the square and predicted ten agreements on a perfectly unique column, which
+/// cannot produce a single one.
+///
+/// Checked against real data rather than asserted: this closed form reproduces
+/// all five `exact` u-probabilities in
+/// `rust/fixtures/golden/fake_1000/model_after_u_simple.json` to **zero**
+/// relative error — that golden runs unchunked with early stopping off, so it
+/// examines every pair of the corpus — and both bounds hold on all five columns.
+///
+/// Only the UPPER bound decides anything here, so this fires only when no
+/// distribution consistent with the profile could supply enough observations.
+/// Early stopping and chunking can only reduce the pairs examined, which makes
+/// under-measurement likelier, never less likely — so the estimate stays an
+/// upper bound in practice too. A level that merely *might* go unmeasured stays
+/// silent.
+fn unmeasurable_exact_levels(
+    config: &Config,
+    by_name: &BTreeMap<&str, &ProfiledColumn>,
+) -> Vec<String> {
+    // The sampler's own early-stop target is the right threshold to borrow,
+    // because that constant already encodes "enough observations for this
+    // estimate to mean anything". Read from `UOptions` rather than restated, so
+    // the two cannot drift.
+    //
+    // NOT `config.training.u_min_count_per_level`: `dedupe_core`'s `Linker`
+    // builds `UOptions { max_pairs, ..Default::default() }`, so that config
+    // field is never read and the effective minimum is always this default.
+    let Some(min_count) =
+        dedupe_core::training::estimate_u::UOptions::default().min_count_per_level
+    else {
+        return Vec::new();
+    };
+    let min_count = min_count as f64;
+    let max_pairs = config.training.u_max_pairs as f64;
+    let mut out = Vec::new();
+
+    for (key, spec) in &config.comparisons {
+        if !spec.levels.iter().any(|l| l.as_deref() == Some("exact")) {
+            continue;
+        }
+        let Some(stats) = by_name.get(key.as_str()) else {
+            continue;
+        };
+        let Some(distinct) = stats.distinct_exact else {
+            continue;
+        };
+        // Without the mode's share there is no UPPER bound on the collision
+        // probability — only the uniform LOWER bound — and firing on a lower
+        // bound would claim a level cannot be measured when a concentrated
+        // distribution would measure it easily.
+        let Some(top_share) = stats.top_share else {
+            continue;
+        };
+        let rows = stats.row_count as f64;
+        let present = stats.non_null_count as f64;
+        if rows < 2.0 || present <= 0.0 || distinct <= 0 || top_share <= 0.0 {
+            continue;
+        }
+
+        let corpus_pairs = rows * (rows - 1.0) / 2.0;
+        let examined = max_pairs.min(corpus_pairs);
+        // A ≤ M(n_max − 1), clamped at zero: a mode of one means no value
+        // repeats, so there is no agreeing pair to find at any sample size.
+        // Rounded because it IS an integer: `top_values` stores the mode's row
+        // count divided by the populated rows, so multiplying back recovers the
+        // count, and rounding clears the float noise that would otherwise decide
+        // whether a mode of exactly 1 reads as 1.0000000000000002.
+        let mode_count = (top_share * present).round();
+        let agreeing_at_most = if mode_count <= 1.0 {
+            0.0
+        } else {
+            present * (mode_count - 1.0)
+        };
+        let collision_at_most = agreeing_at_most / (rows * (rows - 1.0));
+        let expected_at_most = examined * collision_at_most;
+        if expected_at_most >= min_count {
+            continue;
+        }
+
+        let remedy = if collision_at_most <= 0.0 {
+            // The sharpest form of the finding: not "the sample is too small"
+            // but "there is nothing to sample". Naming a setting here would be
+            // advice that cannot work.
+            "no two records share a value on it at all, so no `u_max_pairs` can reach it — \
+             its u stays at the default until the data repeats"
+                .to_string()
+        } else {
+            // The pairs needed if the distribution is as concentrated as the
+            // profile allows — a LOWER bound on the requirement, worded as one.
+            let needed = min_count / collision_at_most;
+            if needed > corpus_pairs {
+                format!(
+                    "the corpus holds only about {corpus_pairs:.0} pairs in total, so no \
+                     `u_max_pairs` can reach it — its u stays at the default until the \
+                     corpus grows"
+                )
+            } else {
+                format!("reaching it would take a `u_max_pairs` of at least about {needed:.0}")
+            }
+        };
+        out.push(format!(
+            "comparison `{key}` declares an `exact` level, and at `u_max_pairs = {max_pairs:.0}` \
+             the u-sample examines about {examined:.0} pairs — with {distinct} distinct values \
+             over {present:.0} populated rows, an exact agreement is expected at most \
+             {expected_at_most:.0} times, short of the {min_count:.0} observations the sampler \
+             asks for. Its u-probability will fall back to a built-in default rather than being \
+             measured on your data; {remedy}"
+        ));
+    }
+    out
 }
 
 /// The problems found in a config's column references (empty = the config is
@@ -976,6 +1144,182 @@ mod tests {
         assert!(
             !advisories.iter().any(|a| a.contains("share an")),
             "nothing repeats, so there is nothing to report: {advisories:?}"
+        );
+    }
+
+    #[test]
+    fn a_dominant_value_is_counted_over_populated_rows_not_all_rows() {
+        // The regression this pins. `dedupe_core::profile::top_values` divides
+        // by `count(<col>)`, so the share is of the column's POPULATED rows;
+        // this multiplied it by `row_count`, overstating the block by 1/fill and
+        // the comparisons by 1/fill² because the count is squared. Every earlier
+        // test here used a fully populated column, where fill is 1 and the
+        // mistake cannot show — which is exactly why it survived.
+        let config = load(GOOD);
+        // Half populated, mode on 40% of those: 20,000 rows, not 40,000.
+        let columns = vec![profiled("email", 100_000, 50_000, Some(0.40))];
+        let advisories = profile_advisories(&config, &columns);
+        let skew = advisories
+            .iter()
+            .find(|a| a.contains("most common value"))
+            .expect("a 40% mode is well over the threshold");
+        assert!(
+            skew.contains("20000"),
+            "0.40 x 50,000 populated rows is 20,000 rows; got {skew}"
+        );
+        assert!(
+            skew.contains("199990000"),
+            "and 20,000 rows is 199,990,000 pairs — the quadratic is where the \
+             old denominator showed up as a 4x exaggeration: got {skew}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Which `exact` levels the u-sample can actually measure.
+    // -----------------------------------------------------------------------
+
+    /// A column carrying what the measurability bound needs: the exact distinct
+    /// count, and how many rows the most frequent value occupies.
+    ///
+    /// `mode_count` is spelled as a count rather than the share the profile
+    /// stores, because the count is the quantity the arithmetic turns on — the
+    /// difference between a value appearing once (no agreeing pair) and twice
+    /// (one) is the whole subject.
+    fn measurability(
+        name: &str,
+        rows: i64,
+        present: i64,
+        distinct: i64,
+        mode_count: i64,
+    ) -> ProfiledColumn {
+        ProfiledColumn {
+            column_name: name.to_string(),
+            row_count: rows,
+            non_null_count: present,
+            blank_count: 0,
+            top_share: Some(mode_count as f64 / present as f64),
+            distinct_exact: Some(distinct),
+        }
+    }
+
+    #[test]
+    fn an_exact_level_on_a_unique_column_can_never_be_observed() {
+        // 100,000 distinct values over 100,000 rows: no two records share an
+        // email, so the `exact` level has nothing to count at ANY sample size.
+        // This is the case the first draft of the arithmetic got wrong — using
+        // `n_v²` it predicted ten agreements on a column that cannot produce
+        // one — and it is the sharpest form of the finding.
+        let config = load(GOOD);
+        let columns = vec![measurability("email", 100_000, 100_000, 100_000, 1)];
+        let advisories = profile_advisories(&config, &columns);
+        assert_eq!(advisories.len(), 1, "only the u advisory: {advisories:?}");
+        let a = &advisories[0];
+        assert!(
+            a.contains("`email`") && a.contains("`exact`"),
+            "it must name the comparison and the level: {a}"
+        );
+        assert!(
+            a.contains("at most 0 times") && a.contains("100 observations"),
+            "both numbers, so the gap is checkable rather than asserted: {a}"
+        );
+        assert!(
+            a.contains("no two records share a value on it at all"),
+            "and it must say a bigger setting cannot help: {a}"
+        );
+    }
+
+    #[test]
+    fn a_rarely_repeating_exact_level_names_the_setting_that_would_reach_it() {
+        // 100,001 rows, the most frequent email on 3 of them: at most
+        // 100,001 x 2 agreeing pairs among 100,001 x 100,000, so a million
+        // sampled pairs expect at most 20 agreements against a target of 100.
+        // Five million pairs would reach it.
+        let config = load(GOOD);
+        let columns = vec![measurability("email", 100_001, 100_001, 50_000, 3)];
+        let advisories = profile_advisories(&config, &columns);
+        assert_eq!(advisories.len(), 1, "only the u advisory: {advisories:?}");
+        let a = &advisories[0];
+        assert!(
+            a.contains("at most 20 times"),
+            "the expected observations: {a}"
+        );
+        assert!(
+            a.contains("at least about 5000000"),
+            "and the setting that would reach them: {a}"
+        );
+    }
+
+    #[test]
+    fn an_exact_level_the_sample_will_measure_is_silent() {
+        // 1,000 values over 100,000 rows with a mode of 200: a million sampled
+        // pairs expect ~1,990 agreements, comfortably past the target.
+        let config = load(GOOD);
+        let columns = vec![measurability("email", 100_000, 100_000, 1_000, 200)];
+        assert_eq!(profile_advisories(&config, &columns), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_comparison_with_no_exact_level_is_not_advised_about() {
+        // Only `exact` has an agreement rate that column statistics can bound.
+        // A fuzzy comparator's u depends on the comparator, so this has to stay
+        // quiet rather than guess.
+        const EXACT_PHONE: &str = "phone_e164:  { levels: [exact, null] }";
+        assert_eq!(
+            GOOD.matches(EXACT_PHONE).count(),
+            1,
+            "the fixture's phone comparison moved; this test edits it by text"
+        );
+        let fuzzy = GOOD.replace(
+            EXACT_PHONE,
+            "phone_e164:  { levels: [jaro_winkler:0.90, null] }",
+        );
+        let columns = vec![measurability("phone_e164", 100_000, 100_000, 100_000, 1)];
+
+        // Positive control first: under the fixture's own `exact` level this
+        // very column DOES fire. Without it, a typo in the column name would
+        // make the silence below meaningless.
+        assert_eq!(
+            profile_advisories(&load(GOOD), &columns).len(),
+            1,
+            "the control must fire, or this test proves nothing"
+        );
+        assert_eq!(
+            profile_advisories(&load(&fuzzy), &columns),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn without_a_mode_share_the_advisory_declines_to_claim() {
+        // Without the mode there is no UPPER bound on agreement, only the
+        // uniform lower one. Firing on a lower bound would claim a level cannot
+        // be measured when a concentrated distribution would measure it easily,
+        // so a profile that counted no values gets no advice.
+        let config = load(GOOD);
+        let columns = vec![with_distinct("email", 100_000, 100_000)];
+        assert_eq!(profile_advisories(&config, &columns), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_corpus_too_small_to_measure_says_so_rather_than_naming_a_setting() {
+        // 150 rows with a mode of 2: 11,175 pairs exist in the whole corpus and
+        // expect at most 75 agreements, but reaching 100 would take 14,900 — more
+        // pairs than the corpus has. Naming a setting would be advice that cannot
+        // be followed, however large it is.
+        let config = load(GOOD);
+        let columns = vec![measurability("email", 150, 150, 149, 2)];
+        let advisories = profile_advisories(&config, &columns);
+        let u = advisories
+            .iter()
+            .find(|a| a.contains("`exact`"))
+            .expect("the u advisory must fire");
+        assert!(
+            u.contains("at most 75 times") && u.contains("no `u_max_pairs` can reach it"),
+            "it must say the corpus is the limit, not the setting: {u}"
+        );
+        assert!(
+            u.contains("11175"),
+            "and name the pair count that bounds it: {u}"
         );
     }
 }
