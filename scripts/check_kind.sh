@@ -304,10 +304,33 @@ PJOB="$(api POST "/v1/orgs/${PORG}/jobs" '{"kind":"run_all_full"}' \
 # outright is both correct and the clearer thing to read.
 ORG="${PORG}"
 
-# Generous: seven sequential pods, each paying a cold image start and a cold
-# DuckDB open, on one kind node inside a laptop's docker VM.
-wait_state "${PJOB}" succeeded 1800
+# Wait for ANY terminal state, then dump the ledger, THEN require success.
+# `wait_state … succeeded` would abort the moment the job settled `failed`,
+# before anything printed the per-task rows — and in a seven-stage pipeline the
+# only thing worth knowing is WHICH stage failed and with what `error_detail`.
+# Generous on time: seven sequential pods, each paying a cold image start and a
+# cold DuckDB open, on one kind node inside a laptop's docker VM.
+pdeadline=$(( $(date +%s) + 1800 ))
+pfinal=""
+while [ "$(date +%s)" -lt "${pdeadline}" ]; do
+    pfinal="$(job_state "${PJOB}")"
+    case "${pfinal}" in succeeded|failed|canceled) break ;; esac
+    sleep 5
+done
 tasks_json "${PJOB}" > /tmp/er-kind-tasks5.json
+if [ "${pfinal}" != "succeeded" ]; then
+    log "pipeline settled '${pfinal}' — the ledger, newest stage last:"
+    python3 - /tmp/er-kind-tasks5.json <<'EOF' >&2 || true
+import json, sys
+for t in sorted(json.load(open(sys.argv[1]))["tasks"], key=lambda r: r["seq"]):
+    if not t["live"]:
+        continue
+    print(f"  {t['task_id']:12} {t['state']:16} try={t['try_number']} "
+          f"launches={t['launches']} class={t.get('resource_class')} "
+          f"err={t.get('error_class')} {t.get('error_detail') or ''}")
+EOF
+    fail "the pipeline did not succeed (settled '${pfinal:-never settled}')"
+fi
 python3 - /tmp/er-kind-tasks5.json <<'EOF'
 import json, sys
 
