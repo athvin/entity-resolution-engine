@@ -157,6 +157,14 @@ has   "$S/log" "re-run CI before batching" "told the reader what to do"
 has   "$S/log" "batch: 101 102" "the genuinely-verified two still ride"
 hasnt "$S/calls.log" "pr merge 109" "the unverified PR was never merged"
 
+echo "=== detect-read-flaky: an API that emits then errors must not skip a healthy PR ==="
+S=$(run detect-read-flaky); echo "  rc=$(cat "$S/rc")"
+chk "exit 0" "$(cat "$S/rc")" "0"
+hasnt "$S/log" "its detect jobs failed" "did NOT falsely claim a detect failure"
+has   "$S/log" "could not read check-runs" "warned that it could not read"
+has   "$S/log" "batch: 101 102" "both healthy PRs still rode"
+has   "$S/log" "landed #102" "the batch landed"
+
 echo
 echo "===================================="
 echo "passed: $pass   failed: $fail"

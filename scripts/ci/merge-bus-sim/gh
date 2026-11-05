@@ -133,7 +133,13 @@ api)
       # "detect_failed_<oid>=1" means this PR's detect jobs died, so every
       # gated required context reported `skipped` without running.
       oid="${path#*/commits/}"; oid="${oid%%/check-runs*}"
-      if [ "$(get "detect_failed_${oid}")" = "1" ]; then echo 1; else echo 0; fi ;;
+      # The workflow's jq asks for "<detect failures> <total_count> <fetched>".
+      if [ "$(get "detect_failed_${oid}")" = "1" ]; then f=2; else f=0; fi
+      echo "$f 39 39"
+      # "check_flaky_<oid>=1" reproduces the real defect: output, THEN a
+      # non-zero exit. The naive form concatenated `|| echo 0` onto this and
+      # skipped a healthy PR.
+      if [ "$(get "check_flaky_${oid}")" = "1" ]; then exit 1; fi ;;
     *actions/runs/*/jobs*)
       # Keyed per run id, so the pre-flight (which reads the recent completed
       # runs) and the verdict classification (which reads the bus PR's own
