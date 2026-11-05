@@ -84,6 +84,28 @@ aws_iam_role:managed_policy_arns
 aws_iam_role:inline_policy
 "
 
+# Ignored on ONE type, by the READ-ONLY RULE: the provider computes the
+# attribute and Terraform cannot set it, so a difference can never be
+# configuration drift — there is no configuration for it to drift FROM.
+#
+# A third rule rather than a third entry in the list above, because the
+# sibling-resource rule does not cover this and stretching it would make that
+# rule mean "whatever we are tired of seeing". The test for #370's lesson
+# applies here too: a rule, not a longer list of sightings.
+#
+# What qualifies: the attribute appears only in the provider's *Attribute
+# Reference*, never its Argument Reference, and `grep` finds it nowhere in
+# infra/terraform/. Both were checked for the entry below.
+#
+# `aws_eks_cluster:platform_version` — AWS patches the control plane on its own
+# schedule and moves this with it. Observed in the 2026-11-05 drift run going
+# `eks.14 -> eks.17`, and we set it nowhere. Left alone it would fail the daily
+# drift schedule after every AWS patch, forever, which is the fastest way to
+# teach everyone to ignore a red drift job.
+IGNORE_READONLY="
+aws_eks_cluster:platform_version
+"
+
 die() {
     printf 'tf-drift-classify: %s\n' "$1" >&2
     exit "${2:-2}"
@@ -134,6 +156,9 @@ while IFS=$'\t' read -r addr rtype diff; do
             [ "$attr" = "$ig" ] && skip=1
         done
         for pair in $IGNORE_ON_TYPE; do
+            [ "$rtype:$attr" = "$pair" ] && skip=1
+        done
+        for pair in $IGNORE_READONLY; do
             [ "$rtype:$attr" = "$pair" ] && skip=1
         done
         [ "$skip" -eq 1 ] || remaining="$remaining,$attr"

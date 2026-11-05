@@ -333,6 +333,29 @@ expect_exit "the measured artifacts are NOT drift"    0 bash "$CLASSIFY" "$tmp/d
 expect_exit "a real attribute change IS drift"        1 bash "$CLASSIFY" "$tmp/dc-real.json"
 expect_exit "real drift beside an artifact"           1 bash "$CLASSIFY" "$tmp/dc-mixed.json"
 expect_exit "policy on a type that owns it IS drift"  1 bash "$CLASSIFY" "$tmp/dc-policy-owned.json"
+
+# The read-only rule. AWS patches the EKS control plane and moves
+# `platform_version` with it; Terraform cannot set it, so there is no
+# configuration for it to drift from.
+cat >"$tmp/dc-readonly.json" <<'EOF'
+{"resource_drift":[
+ {"address":"module.eks.aws_eks_cluster.this","type":"aws_eks_cluster",
+  "change":{"before":{"platform_version":"eks.14"},"after":{"platform_version":"eks.17"}}}
+]}
+EOF
+
+# The boundary that keeps the rule honest: a SETTABLE attribute on the SAME
+# type must stay loud. Without this, "ignore platform_version on
+# aws_eks_cluster" could be widened to the type and nobody would notice that
+# EKS drift detection had been retired.
+cat >"$tmp/dc-readonly-boundary.json" <<'EOF'
+{"resource_drift":[
+ {"address":"module.eks.aws_eks_cluster.this","type":"aws_eks_cluster",
+  "change":{"before":{"platform_version":"eks.14","version":"1.33"},
+            "after":{"platform_version":"eks.17","version":"1.30"}}}
+]}
+EOF
+
 # The sibling-resource rule. Ignoring these hides nothing: the resource
 # Terraform actually manages reports the same drift itself.
 expect_exit "deprecated sibling mirrors are NOT drift" 0 bash "$CLASSIFY" "$tmp/dc-siblings.json"
@@ -352,6 +375,16 @@ esac
 case "$verdict" in
 *"aws_kms_key.state"*) ok "still reports what it ignored" ;;
 *) no "still reports what it ignored" "output: $verdict" ;;
+esac
+
+# The read-only rule, and its boundary.
+expect_exit "a read-only attribute is NOT drift"       0 bash "$CLASSIFY" "$tmp/dc-readonly.json"
+expect_exit "a settable attribute beside it IS drift"  1 bash "$CLASSIFY" "$tmp/dc-readonly-boundary.json"
+
+boundary="$(bash "$CLASSIFY" "$tmp/dc-readonly-boundary.json" 2>&1 || true)"
+case "$boundary" in
+*"[version]"*) ok "names only the settable attribute as drift" ;;
+*) no "names only the settable attribute as drift" "output: $boundary" ;;
 esac
 
 # --- verdict ----------------------------------------------------------------
