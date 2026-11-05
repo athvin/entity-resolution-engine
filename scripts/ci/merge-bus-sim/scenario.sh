@@ -55,6 +55,9 @@ bus_run_ids=7
 merge_fails_on=
 merge_noops_on=
 failed_contexts=
+failed_contexts_names=
+held_contexts=
+approve_works=
 bus_state_final=CLEAN
 move_main=0
 api_fails_recent=
@@ -78,9 +81,9 @@ case "$SCEN" in
   green)     printf 'BLOCKED\nCLEAN\n' >"$SIM/busstate.seq" ;;
   stacked)   printf 'CLEAN\n'          >"$SIM/busstate.seq"; add "children_feat-a=201" "head_201=feat-a-child" ;;
   red)       printf 'BLOCKED\n'        >"$SIM/busstate.seq"
-             add "failed_contexts=test, entities" "bus_state_final=BLOCKED" ;;
+             add "failed_contexts_names=test entities" "bus_state_final=BLOCKED" ;;
   starved)   printf 'BLOCKED\n'        >"$SIM/busstate.seq"
-             add "failed_contexts=test" "bus_state_final=BLOCKED" "steps_run_7=0" ;;
+             add "failed_contexts_names=test" "bus_state_final=BLOCKED" "steps_run_7=0" ;;
   preflight) add "steps_per_run=0" ;;
   moved)     printf 'CLEAN\n'          >"$SIM/busstate.seq"; add "move_main=1" ;;
   partial)   printf 'CLEAN\n'          >"$SIM/busstate.seq"; add "merge_fails_on=102" ;;
@@ -100,9 +103,15 @@ case "$SCEN" in
   detect-read-flaky)
              printf 'BLOCKED\nCLEAN\n'  >"$SIM/busstate.seq"
              add "check_flaky_oid101=1" "check_flaky_oid102=1" ;;
+  held-released)
+             printf 'BLOCKED\nBLOCKED\nCLEAN\n' >"$SIM/busstate.seq"
+             add "held_contexts=test entities" "approve_works=1" "steps_run_7=0" ;;
+  held-stuck)
+             printf 'BLOCKED\nBLOCKED\n'        >"$SIM/busstate.seq"
+             add "held_contexts=test entities" "approve_works=0" "bus_state_final=BLOCKED" "steps_run_7=0" ;;
   verdict-blind)
              printf 'BLOCKED\n'        >"$SIM/busstate.seq"
-             add "failed_contexts=test" "bus_state_final=BLOCKED" "api_fails_bus=1" ;;
+             add "failed_contexts_names=test" "bus_state_final=BLOCKED" "api_fails_bus=1" ;;
   reject)    printf 'CLEAN\n'          >"$SIM/busstate.seq"
              add "candidates=101 102 104 105 106" \
                  "state_104=DIRTY" "draft_104=false" "base_104=main" "head_104=feat-c" \
