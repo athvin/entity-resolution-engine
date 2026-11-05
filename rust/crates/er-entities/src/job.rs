@@ -1373,7 +1373,7 @@ RETURNING
             .collect())
     }
 
-    /// Requeue a failed/canceled job with not_before = now(); a run_id is carried forward as resume_run_id so the next dispatch resumes that run.
+    /// Requeue a failed/canceled job with not_before = now(). The whole job re-runs; partial resumption is the task ledger's job, through clear.
     pub async fn resume(
         client: &impl ::tokio_postgres::GenericClient,
         org_id: &str,
@@ -1381,9 +1381,7 @@ RETURNING
     ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
         const SQL: &str =
             "UPDATE public.jobs SET state = 'queued', not_before = now(), updated_at = now(),
-    finished_at = NULL,
-    params = CASE WHEN run_id IS NULL THEN params
-                  ELSE params || jsonb_build_object('resume_run_id', run_id) END
+    finished_at = NULL
 WHERE org_id = $1 AND id = $2 AND state IN ('failed', 'canceled')
 ";
         let __span = ::er_span::sql_span(

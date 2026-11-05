@@ -493,8 +493,8 @@ pub async fn mark(client: &Client, job_id: &str, state: &str) -> Result<(), PgEr
 }
 
 /// Requeue a failed/canceled job (`queue.py` `resume_job`): back to `queued`
-/// with `not_before = now()`, `finished_at` cleared, and — if it has a `run_id`
-/// — a `resume_run_id` param so the next dispatch resumes that run. Returns
+/// with `not_before = now()` and `finished_at` cleared. The whole job re-runs;
+/// resuming PART of one is the task ledger's job, through clear. Returns
 /// `true` iff a resumable row changed; `false` (→ 409) for any other state.
 ///
 /// # Errors
