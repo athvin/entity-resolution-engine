@@ -64,6 +64,7 @@ Distinct `resource "aws_*"` blocks across `infra/terraform/`, by count:
    4  aws_s3_bucket_lifecycle_configuration
    4  aws_ssoadmin_account_assignment
    4  aws_ssoadmin_permission_set
+   3  aws_cloudwatch_metric_alarm
    3  aws_s3_bucket_versioning
    3  aws_security_group
    3  aws_ssoadmin_managed_policy_attachment
@@ -112,6 +113,9 @@ Distinct `resource "aws_*"` blocks across `infra/terraform/`, by count:
    1  aws_sesv2_configuration_set
    1  aws_sesv2_email_identity
    1  aws_sesv2_email_identity_mail_from_attributes
+   1  aws_sns_topic
+   1  aws_sns_topic_policy
+   1  aws_sns_topic_subscription
    1  aws_vpc
    1  aws_vpc_endpoint
 ```
