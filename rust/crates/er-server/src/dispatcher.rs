@@ -521,13 +521,18 @@ async fn dispatch_claimed(
         er.org = %job.org_id,
         er.job_kind = %job.kind,
         er.attempt = job.attempt,
-        // The §10.2 hop, half-closed: the enqueue side writes this (the
-        // traceparent of the request that asked for the job) and it is recorded
-        // here so a log search joins the two. Making this span a true CHILD of
-        // that context needs the OTel context propagator, which arrives with
-        // the exporter — at which point this field becomes `set_parent`.
+        // The §10.2 hop, now CLOSED. The field stays because a log search over
+        // CloudWatch has no span tree to walk and this is how it joins the two
+        // sides there; `adopt_traceparent` below is what makes them one trace
+        // for anything reading spans.
         er.trace_context = job.trace_context.as_deref().unwrap_or(""),
     );
+    // The enqueueing request's context, adopted as this span's parent — so a
+    // click, the HTTP request it caused, this job, its run, its stages and
+    // every statement they execute are one trace rather than two joined by a
+    // string. Best effort: a job the scheduler enqueued has no request behind
+    // it and stays a root, which is correct.
+    er_obs::adopt_traceparent(&job_span, job.trace_context.as_deref().unwrap_or(""));
     let _entered = job_span.enter();
     tracing::info!(
         er.job_id = %job.id,
