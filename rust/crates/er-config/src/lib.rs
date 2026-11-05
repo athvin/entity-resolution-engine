@@ -463,13 +463,34 @@ pub struct Training {
     pub deterministic_rules: Vec<String>,
     pub recall: f64,
     pub u_max_pairs: i64,
-    /// REQUIRED with no default (V10): a defaulted seed makes the training
-    /// determinism test's byte-equality claim unreproducible.
+    /// REQUIRED with no default (V10).
+    ///
+    /// **Currently inert, and the reason it is required is not the reason this
+    /// comment used to give.** It said "a defaulted seed makes the training
+    /// determinism test's byte-equality claim unreproducible", which asserts a
+    /// causal role the field does not have: `dedupe_core::linker` builds
+    /// `UOptions { max_pairs: cfg.u_max_pairs, ..Default::default() }`, whose
+    /// `seed` is `None`, so this value never reaches the sampler. Determinism
+    /// does hold — `estimate_u` samples on `hash(<uid>) % 1e9`, which is
+    /// reproducible with or without a salt — it simply does not come from here.
+    /// Changing this number in a tenant config produces a byte-identical model.
+    ///
+    /// Wiring it is a deliberate behaviour change (every tenant's u-sample, and
+    /// therefore every committed golden, would move), so it is left as-is rather
+    /// than quietly connected.
     pub u_seed: i64,
+    /// Inert: see [`Training::u_seed`]. The sampler's method is not selectable —
+    /// `estimate_u` always uses the deterministic hash bucket.
     #[serde(default = "default_sampling_method")]
     pub u_sampling_method: String,
+    /// Inert: see [`Training::u_seed`]. `UOptions::default()` supplies
+    /// `Some(100)` and this is never read, so the effective minimum is always
+    /// 100 observations per level. `er_server::config_check` reads the default
+    /// rather than this field for exactly that reason.
     #[serde(default)]
     pub u_min_count_per_level: Option<i64>,
+    /// Inert: see [`Training::u_seed`]. The sampler always uses
+    /// `UOptions::default()`'s 10 chunks.
     #[serde(default = "default_num_chunks")]
     pub u_num_chunks: i64,
     pub em_blocking_rules: Vec<String>,
