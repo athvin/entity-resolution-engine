@@ -87,10 +87,30 @@ concurrency:
   # measurement, and it looks like a build failure rather than a cancellation
   # until you read the run's conclusion.
   #
-  # On a `push` the inputs are empty, so this collapses to the old behaviour:
-  # a newer push to main still cancels an in-flight build of an older one.
   group: images-${{ github.ref }}-${{ github.event.inputs.ref || '' }}
-  cancel-in-progress: true
+  # NEVER cancel a push build, for the same reason `deploy.yml` never cancels a
+  # deploy: an image is the ARTIFACT a commit needs, not a check on it.
+  # Cancelling one does not save work, it removes the thing the deploy is
+  # supposed to roll — and the deploy then reuses whatever digest is newest in
+  # ECR and reports SUCCESS.
+  #
+  # This used to read `cancel-in-progress: true`, with a comment noting that on
+  # a push "a newer push to main still cancels an in-flight build of an older
+  # one". That is exactly what happened on 2026-11-05: a burst of merges, an
+  # er-api build that takes ~58 minutes, and so NO er-api image completed all
+  # day. P12's metrics, P15's structured logging and P22's allowlist were all
+  # merged, green, and absent from the running binary, while four deploys
+  # reported success on an image built the previous evening.
+  #
+  # The stale-digest `::warning::` in deploy.yml fired on each of them, which is
+  # the only reason this was findable — and it is a warning in a run summary,
+  # which is not where anyone was looking.
+  #
+  # The cost is queued builds during a merge burst instead of cancelled ones.
+  # That is the right trade: a queue is slow and correct, a cancellation is fast
+  # and silently wrong. A `workflow_dispatch` still cancels its own group, which
+  # is keyed on the dispatched ref and so never collides with a push.
+  cancel-in-progress: ${{ github.event_name != 'push' }}
 
 jobs:
   # Which trees moved in this push. `workflow_dispatch` and anything without a
