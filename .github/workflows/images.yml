@@ -33,6 +33,22 @@ on:
       # The observability stack installer. A change to it IS a dev platform
       # release for the same reason a chart change is.
       - "scripts/obs_up.sh"
+      # The deploy workflow itself, for that same reason — and this one was
+      # learned the hard way. `deploy.yml` carries the `helm upgrade` flags,
+      # which is where the executor allowlist actually lives
+      # (`--set executor.dagKinds=…`). #498 flipped the pipeline kinds on,
+      # merged green, and changed NOTHING on the cluster: the commit touched
+      # only `.github/workflows/deploy.yml`, no path here matched, no images run
+      # started, and so no deploy fired. The live dispatcher still read
+      # `lake_maintain,lake_migrate` afterwards.
+      #
+      # It did land eventually, but only by luck — an unrelated commit touching
+      # `rust/**` triggered a run, and a `workflow_run` deploy uses the DEFAULT
+      # BRANCH's workflow file, so it picked up the new flags. Absent that, the
+      # change would have sat unapplied indefinitely. That is precisely the
+      # "'Merged' did not mean 'deployed'" failure this file's own header
+      # describes at length, arriving through a different door.
+      - ".github/workflows/deploy.yml"
   # A Dockerfile change was UNVALIDATABLE before merge: this workflow ran on
   # `push` to main only, so the first exercise of a restructured build was the
   # merge itself, and a break blocked dev deploys until someone reverted it.
