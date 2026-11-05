@@ -240,10 +240,19 @@ dev-suspend:
 	@test -n "$(DEV)" || { echo "usage: make dev-suspend DEV=<name>"; exit 2; }
 	kubectl --context $(ER_DEV_CONTEXT) -n $(DEV) scale deployment --all --replicas=0
 
-# Back up in under a minute. kubectl, not `helm upgrade`: helm's three-way
-# merge sees no manifest diff after a kubectl scale, so it would leave the
-# replica counts at zero. Aurora resumes from 0 ACU on the first connection
-# (~15s).
+# Back up in under a minute. kubectl, not `helm upgrade`, for speed: a
+# `helm upgrade --wait` re-runs the release's hooks (including the schema
+# migrate) to put back a replica count. Aurora resumes from 0 ACU on the first
+# connection (~15s).
+#
+# This comment used to give a different reason — that helm's three-way merge
+# "sees no manifest diff after a kubectl scale, so it would leave the replica
+# counts at zero". That is Helm 2 behaviour and it is false here, which matters
+# because the deploy's third phase retires a colour with exactly this `kubectl
+# scale` and would be unsound if it held. Measured on kind against helm 3.17:
+# install at 1, `kubectl scale` to 0, `helm upgrade` with the value unchanged,
+# and the live object goes back to 1 — Helm 3 patches the live object against
+# the rendered manifest, not against the previous one. Decision: D-BLUEGREEN.
 #
 # The dispatcher too, because `dev-suspend` scales `--all` to zero. Resume used
 # to name only web-api — written when the dispatcher ran in-process inside that

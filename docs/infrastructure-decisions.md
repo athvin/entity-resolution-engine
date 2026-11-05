@@ -23,6 +23,8 @@ Entries are ADR-style: **Decision**, **Context**, **Rejected alternative**, **Da
 
 **Revision 4 — 2026-10-10 (single account).** The three-account organization collapsed to a single AWS account in `us-east-2`. See **D-ACCT** below for the full account-collapse story; the region choice is **D-REGION**. The three-account design remains in git history (and in revisions 1–3 of this log's narrative) as the shape to return to when the team grows.
 
+**Revision 5 — 2026-11-05 (the serving tier stops going down to deploy).** §14.2's Helm paragraph described a deploy that was a deliberate outage: one `web-api` replica under `strategy: Recreate`, with an init container migrating the schema between the old pod's deletion and the new pod's boot. It is now a blue/green colour flip with the schema migration moved ahead of it into a hook that may only add — see **D-BLUEGREEN**, which also records why neither existing Argo rejection (**D-ARGO**, **D-DEPLOY**) answers the progressive-delivery question. This is the first entry here dated after revision 4.
+
 ---
 
 ## D-ACCT — Collapse to a single AWS account
@@ -427,6 +429,38 @@ Two decisions get conflated and have different answers. **One collection layer: 
 **Rejected alternative.** Argo CD / GitOps for the job path — out of scope (see D-ARGO); this is the minimum that turns promote-by-digest from a convention into a property.
 
 **Date.** 2026-10-03.
+
+---
+
+## D-BLUEGREEN — A Helm-native colour flip, not Argo Rollouts or Flagger
+
+**Decision.** `web-api` is rendered as **two Deployments**, `web-api-blue` and `web-api-green`, each with its own replica count and its own image digests; `er-api` and `er-web` carry `er.dupezero.com/color: {{ .Values.color.active }}` in their selectors, and a release moves traffic by flipping that one label. Two further ClusterIP Services, `er-api-preview` and `er-web-preview`, select the **inactive** colour so a new pod is proved before it takes traffic. No new controller, no CRDs: the deploy job reads the live colour out of the Service selector, deploys the other one, smoke-tests it through the preview Service, flips, and only then scales the old colour down.
+
+**Context.** This document rejects Argo twice already, and neither rejection covers this question — a distinction worth putting on the record, because "we said no to Argo" is the obvious and wrong way to short-circuit it. **D-ARGO** rejects Argo *Workflows* for the job path on the grounds that the DAG is inside the process and the engine already owns a complete retry/state/scheduler machine; **D-DEPLOY** notes Argo *CD* is out of scope as a question about who applies manifests. Argo **Rollouts** is a third product answering a third question — progressive traffic shifting — and is not disposed of by either argument.
+
+What settled it is that the controller's marginal value here is **percentage canaries**, and those need a traffic provider. There is no ALB: `ingress.enabled: false`, and the edge (§4.1, Cloudflare/Tailscale) is still unbuilt. Without a traffic provider, Rollouts' blueGreen strategy does what the templating above does — swap a Service selector — in exchange for a CRD, a controller to run and upgrade, and a second owner of the Service object. Under EKS Auto Mode (**D-AUTOMODE**) the standing bias is against running our own controllers for something a built-in expresses, and the whole mechanism is about forty lines of chart.
+
+Two things made it worth doing now rather than at the ALB.
+
+The first is that the old shape was costing **correctness, not just availability**. `web-api` was `replicas: 1` + `strategy: Recreate`, with an init container running `er-server migrate` and a comment explaining that no old code may see a migrated schema mid-flight — so every deploy was a deliberate outage spanning the migration, a Rust boot and an Aurora resume from 0 ACU. Meanwhile a task pod calls back to `er-api` in-cluster, and `exec-task` tolerates 60 s of control-plane unreachability before writing `control_plane_unreachable` and exiting 3 — *charged to the launch budget* (**D-JOBSPEC**). A slow deploy could therefore fail a running hour-long DuckDB task. That is a data-path failure caused by a serving-path deploy, and the colour flip removes the window rather than widening the tolerance.
+
+The second is that the hard half was already built and did not have to be designed. The reconciler auto-applies only `CREATE TABLE` for an absent relation and `ADD COLUMN` for an absent nullable column and refuses everything else, and it already has a third verdict — `Ahead` — for a store carrying columns the running binary does not declare. An ahead store is served correctly by the older colour because lint rule E011 forbids `SELECT *` anywhere, so no query can widen under it. That is the expand phase of expand/contract, enforced and tested against a real Postgres and a real DuckLake before this decision existed.
+
+The init container is consequently replaced by a `pre-upgrade` hook at weight `-5` running `er-server migrate --expect-additive`, which **plans first and refuses, writing nothing**, if the plan contains anything the reconciler would not auto-apply. That refusal is the whole gate, and the bare command cannot stand in for it: `ensure_schema` is six transactions, so by the time its phase-3 reconciler refuses, the baseline replay and the `BeforeReconcile` fixups have committed. Measured on one store state — `--expect-additive` exited 3 having written nothing where a bare `migrate` exited 1 having created a table.
+
+**Breaking releases are refused outright**, with no two-mode escape hatch, because the escape hatch is the path that gets used under pressure. Dropping a column is two releases: N stops reading it, N+1 drops it, and `fixups.rs` will not run a contracting step until the ledger shows the expanding release verified.
+
+Proved rather than assumed: 400 samples of `endpoints/er-web` across a flip showed zero empty endpoint sets, transitioning directly from one pod IP to the other.
+
+One claim this design was built around turned out to be false, and is recorded because it would otherwise be re-derived from a comment still in the tree. `Makefile`'s `dev-resume` states that Helm's *"three-way merge sees no manifest diff after a kubectl scale, so it would leave the replica counts at zero"*, and on that basis retiring a colour by `kubectl scale` looks unsafe: the next release renders a manifest identical to the last one, so an unrestored count would leave the target colour at zero — where both `--atomic --wait` and `kubectl rollout status` pass trivially, because a 0-replica Deployment is vacuously rolled out, and only the preview smoke test would fail. Measured on a kind cluster instead of assumed: install at 1, `kubectl scale` to 0, `helm upgrade` with the value unchanged, and the live object comes back to **1**. That is Helm 3 patching the live object against the rendered manifest rather than against the previous one — the behaviour its release notes describe and the Helm 2 behaviour the comment actually captures. So retirement is `kubectl scale`, the comment is corrected in the same change, and `dev-resume` keeps `kubectl` for the reason that does hold: it is faster than a `helm upgrade --wait`.
+
+**Rejected alternatives.** *Argo Rollouts* and *Flagger* — a controller and CRD whose marginal value over a Service-selector swap is percentage canaries, which need a traffic provider this cluster does not yet have. *A two-mode deploy* that can serve a breaking schema change behind a compatibility flag — rejected as the escape hatch that becomes the default. *A separate preflight Job for the schema gate* — the `pre-upgrade` hook already refuses before any release object is applied, so a preflight would be the same check twice.
+
+**Deferred, not rejected.** ALB **weighted target groups** (`alb.ingress.kubernetes.io/actions.*`) for percentage canaries. The colour Services are the correct substrate for them, so nothing here has to be rewritten; this is the natural follow-on once §4.1's edge exists. It is also the real fix for the one residual risk stated rather than hidden: a browser holding the old colour's HTML requests `/_next/static/<old-build-id>/…` after the flip, which 404s until the App Router recovers with a hard navigation — degraded, not broken, and addressed by per-target-group stickiness rather than by anything in the chart.
+
+**Revisit when.** Percentage canaries or automated metric-gated rollback become wanted, or the ALB lands and stickiness is needed for the `_next/static` window. Note the two measured constraints before a two-colour deploy: the namespace quota is `limits.cpu: 24` and a second colour costs 1.5, and `er-server` has **no connection pool** — handlers connect per request — so two colours double connection establishment against an Aurora instance that may be at 0 ACU.
+
+**Date.** 2026-11-05.
 
 ---
 
