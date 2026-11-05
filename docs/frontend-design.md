@@ -599,6 +599,19 @@ Legend: **Have** = engine/API supports it today, UI just renders it · **Partial
 exists, missing a listed gap · **Gap** = needs backend work (§7) · **Roadmap** = consciously
 later phase.
 
+> **This matrix was audited against the code and corrected. It had drifted in one
+> direction only: every wrong row understated what was built.** Eight rows moved up —
+> mass merge from **Gap**, protected records and synonym lexicons from **Roadmap**,
+> and pre-merge preview, post-merge audit, undo/unmerge and exportable reports from
+> **Partial** — because each names a gap that a shipped route already closes. One row
+> moved the other way for honesty: mass update/delete is **Partial**, not **Roadmap**,
+> since mass update ships and mass delete does not exist at all.
+>
+> Two consequences. **No `Gap` row remains**, which satisfies that line of the §9
+> go-to-market checklist. And a status column is only worth its ink if it is checked
+> against `.route(` in `er-server/src/lib.rs` — a claim here is a hypothesis, and the
+> drift above was costly enough to reach a tracking ticket that repeated it.
+
 ### 6.1 Table stakes (must have to be in the conversation)
 
 | Cloudingo capability | Ours | Notes |
@@ -608,22 +621,22 @@ later phase.
 | Fuzzy matching with thresholds | **Have** | Full probabilistic scoring — with confidence, which they lack |
 | Scoped/conditional matching, group-size rules | **Partial** | Blocking + thresholds cover most; per-filter scope conditions are a config-studio roadmap item |
 | Cross-source matching | **Have** | Native — the engine's entire premise |
-| Side-by-side manual merge with field picker | **Partial** | Side-by-side + lineage exist; per-field manual override at merge time is roadmap (survivorship rules decide fields today) |
-| Mass merge | **Gap** | Bulk assertions + one reconcile job (§7.6); theirs is capped at one page at a time — beatable |
+| Side-by-side manual merge with field picker | **Partial** | Side-by-side + lineage exist, and per-field override now ships as `POST .../mass-update` — 11 overridable golden columns (er-golden SCALAR + ADDRESS), set or clear, staged and drained by `apply_corrections`. The remaining gap is narrower than it was: the override is a bulk post-assembly action, not a field picker inside a merge dialog |
+| Mass merge | **Have** | `POST .../reviews/bulk-resolve` — bulk assertions and one reconcile job, exactly as §7.6 specified. Theirs is capped at one page at a time |
 | Scheduled automated merge | **Have** | Auto-merge above threshold + cron schedules |
 | Master-record selection rules | **Have** | Survivorship chains (priority, recency, frequency, completeness, validated) |
 | Field-level survivorship incl. override-when-blank | **Have** | Per-attribute rule chains |
 | Exception routing to human review | **Have** | The gray band **is** this, principled instead of ad-hoc |
-| Protected / excluded records | **Roadmap** | `never` assertions cover pair-level; record-level "never touch" flag is roadmap |
-| Import with dedupe, field mapping, insert-vs-update | **Partial** | Import + content-hash change detection exist; match-before-insert preview needs score-only mode (§7.16) |
-| Mass update / mass delete | **Roadmap** | Data-maintenance jobs; not this phase |
-| Pre-merge preview | **Partial** | Merge-plans endpoint exists; richer preview with §7.8 |
-| Post-merge audit with per-record IDs and user | **Have** | `entity_events` + lineage + audit_log; person-level attribution needs §2.2 |
-| Undo / unmerge | **Partial** | Event-sourced history + never-assertions + correction pass; needs the unmerge helper (§7.5). Structurally better than their 30-day backup copy |
-| Exportable logs/reports | **Partial** | Merge-plans exports CSV; campaigns (§5.7) generalize it |
+| Protected / excluded records | **Have** | `never` assertions cover pair-level, and record-level flags ship as `.../records/protect`, `/unprotect`, `/suppress`, `/unsuppress` |
+| Import with dedupe, field mapping, insert-vs-update | **Partial** | Import, content-hash change detection and match-before-insert preview all ship (`.../match-preview`, score-only mode). Remaining gap is insert-vs-update policy on the import itself, not the preview |
+| Mass update / mass delete | **Partial** | Mass update ships as `POST .../mass-update` over the 11 overridable golden columns. **Mass delete does not exist** — no route, no job |
+| Pre-merge preview | **Have** | `.../merge-plans` plus the `.../match-scores` read model §7.8 asked for, and `.../match-preview` |
+| Post-merge audit with per-record IDs and user | **Have** | `entity_events` + lineage + `audit_log`, whose `actor` column carries person-level attribution; the BFF writes it on every mutation |
+| Undo / unmerge | **Have** | Event-sourced history, never-assertions, correction pass, and the unmerge helper §7.5 asked for: `POST .../golden-records/{entity_id}/unmerge`. Structurally better than their 30-day backup copy |
+| Exportable logs/reports | **Have** | Merge-plans exports CSV and saved segments ship as `.../segments`, which is the §5.7 generalization |
 | Role-based permissions | **Have** | Four roles enforced server-side |
 | Shared rule libraries | **Have** | Config is org-shared and versioned by nature |
-| Synonym/nickname handling | **Partial** | Variant matching in comparisons; user-editable synonym lexicons are roadmap |
+| Synonym/nickname handling | **Have** | Variant matching in comparisons, plus user-editable lexicons at `.../lexicon` |
 | SOC 2 / encryption posture | **Roadmap** | Phase 4 per backend-design §15; required before enterprise deals, not before first design partners |
 
 ### 6.2 Differentiators to lead with
@@ -665,29 +678,41 @@ later phase.
 
 Phase letters refer to §9. Each item is small-to-medium API work unless marked **engine**.
 
-| # | Gap | Needed by |
-|---|---|---|
-| 7.0 | **CORS or same-origin BFF** (chosen: BFF, §4.3) + **users / org_members / sessions** + per-user actor attribution into `audit_log` and `created_by` fields | A |
-| 7.1 | `GET /v1/orgs` — list/enumerate tenants (with state, counts) | A |
-| 7.2 | Org lifecycle routes: suspend / resume / purge (purge = drop tenant database + delete S3 prefix + key revocation, with grace period; guards for non-active orgs already exist) | D |
-| 7.3 | Cross-org jobs view for the global queue | A (read-only) |
-| 7.4 | Review queue: pagination, filters (status / reason / score band), single-review GET | B |
-| 7.5 | **Unmerge helper**: resolve an entity's member pairs from `entity_events` and post the `never` assertions in one call (named in backend-design §6) | B |
-| 7.6 | **Mass merge / bulk resolve**: accept a batch of assertions + enqueue one reconcile job (vs N writer-lock round-trips) | B |
-| 7.7 | Staged-steward-queue visibility (`pending_count` exists unrouted) — powers "3 decisions queued" | B |
-| 7.8 | `match_scores` read model: browse pairs by score band with evidence (auto-merged browse, richer previews) | B |
-| 7.9 | Assertions: list route + contradiction-check route (engine functions exist: `active_assertions`, `check_contradiction_1`) | B |
-| 7.10 | Schedule enable/disable + update (column exists) | B |
-| 7.11 | `GET /jobs/{id}/logs` — persist + serve per-stage stderr (design §14 names it) | B |
-| 7.12 | Job attribution columns (`created_by`, `schedule_id`) so Runs can say "by Jane" / "by nightly schedule" | B |
-| 7.13 | Small aggregated metrics read (counter series across runs) for dashboard charts | A (nice-to-have; N calls works) |
-| 7.14 | Golden-records search/sort/filter beyond 3-column ILIKE (FTS later) | C |
-| 7.15 | Import receipts route over `ingest_batches` | B |
-| 7.16 | **Engine: score-only match mode** (no writes) — import preview (§5.5), future prevention API (design §11/§12 name it) | C |
-| 7.17 | **Engine: config-driven dbt staging** — ~~remove the crm/billing/webforms hardcoding so sources are self-serve~~ shipped: the unified `stg_records` model renders one union arm per configured source | done |
-| 7.18 | Config diff endpoint (client-side diff acceptable for v1) | C |
-| 7.19 | Saved segments table + parameterized export job (campaigns) | C |
-| 7.20 | Audit read route (org-scoped for tenants, global for super admins); add the missing `webhook.delete` audit write | A (super-admin), D (tenant-facing) |
+> **This list is nineteen-twentieths done, and said otherwise until it was audited
+> against `.route(` in `er-server/src/lib.rs`.** Only **7.2's purge half** and **7.11**
+> are outstanding; everything else ships. The `Status` column below is what changed —
+> the `Gap` text is left as written so the original ask stays legible.
+>
+> For the record of what the control plane actually serves: **88 distinct `/v1`
+> routes**. Count it with
+> `grep -oE '\.route\(\s*"[^"]+"' rust/crates/er-server/src/lib.rs` — and note that
+> `.route(` is frequently split across two lines, so a regex anchored to one line
+> undercounts badly (25 instead of 90). Count the `.route(` occurrences and the
+> captured paths and require them equal before trusting either number.
+
+| # | Gap | Needed by | Status |
+|---|---|---|---|
+| 7.0 | **CORS or same-origin BFF** (chosen: BFF, §4.3) + **users / org_members / sessions** + per-user actor attribution into `audit_log` and `created_by` fields | A | **done** — BFF ships; identity lives in the BFF's own store (`lib/bff/members`, `/settings/members`); `audit_log.actor` and `created_by` are populated |
+| 7.1 | `GET /v1/orgs` — list/enumerate tenants (with state, counts) | A | **done** |
+| 7.2 | Org lifecycle routes: suspend / resume / purge (purge = drop tenant database + delete S3 prefix + key revocation, with grace period; guards for non-active orgs already exist) | D | **partial — the one real gap.** `suspend` and `resume` ship; **`purge` does not exist** |
+| 7.3 | Cross-org jobs view for the global queue | A (read-only) | **done** — `GET /v1/jobs` |
+| 7.4 | Review queue: pagination, filters (status / reason / score band), single-review GET | B | **done** — `reviews_list` is keyset-paginated (`{items, next_cursor}`) with passthrough filters; `review_detail` serves the single GET |
+| 7.5 | **Unmerge helper**: resolve an entity's member pairs from `entity_events` and post the `never` assertions in one call (named in backend-design §6) | B | **done** — `POST .../golden-records/{entity_id}/unmerge` |
+| 7.6 | **Mass merge / bulk resolve**: accept a batch of assertions + enqueue one reconcile job (vs N writer-lock round-trips) | B | **done** — `POST .../reviews/bulk-resolve` |
+| 7.7 | Staged-steward-queue visibility (`pending_count` exists unrouted) — powers "3 decisions queued" | B | **done** — `.../staged`, over the `staged_steward_action` entity |
+| 7.8 | `match_scores` read model: browse pairs by score band with evidence (auto-merged browse, richer previews) | B | **done** — `.../match-scores` and `.../duplicates` |
+| 7.9 | Assertions: list route + contradiction-check route (engine functions exist: `active_assertions`, `check_contradiction_1`) | B | **done** — `.../assertions` and `.../assertions/contradictions` |
+| 7.10 | Schedule enable/disable + update (column exists) | B | **done** — `.../schedules/{schedule_id}` |
+| 7.11 | `GET /jobs/{id}/logs` — persist + serve per-stage stderr (design §14 names it) | B | **outstanding.** `/cancel`, `/resume`, `/tasks` and `/tasks/{task_id}/clear` all ship; no `/logs` route exists |
+| 7.12 | Job attribution columns (`created_by`, `schedule_id`) so Runs can say "by Jane" / "by nightly schedule" | B | **done** — both columns exist on the `job` entity |
+| 7.13 | Small aggregated metrics read (counter series across runs) for dashboard charts | A (nice-to-have; N calls works) | **done** — `.../metrics`, over `metric_snapshot` |
+| 7.14 | Golden-records search/sort/filter beyond 3-column ILIKE (FTS later) | C | **done** — search, sort and filter ship on `.../golden-records`; FTS remains the deliberate later step |
+| 7.15 | Import receipts route over `ingest_batches` | B | **done** — `.../imports/recent` |
+| 7.16 | **Engine: score-only match mode** (no writes) — import preview (§5.5), future prevention API (design §11/§12 name it) | C | **done** — score-only mode plus `.../match-preview`. The prevention API it unblocks is still unbuilt, and is tracked as an epic rather than here |
+| 7.17 | **Engine: config-driven dbt staging** — ~~remove the crm/billing/webforms hardcoding so sources are self-serve~~ shipped: the unified `stg_records` model renders one union arm per configured source | done | **done** |
+| 7.18 | Config diff endpoint (client-side diff acceptable for v1) | C | **satisfied client-side** — `.../config/versions` and `.../config/versions/{version}` make both sides fetchable, which the item explicitly allows for v1. No server-side diff route exists |
+| 7.19 | Saved segments table + parameterized export job (campaigns) | C | **done** — `.../segments` |
+| 7.20 | Audit read route (org-scoped for tenants, global for super admins); add the missing `webhook.delete` audit write | A (super-admin), D (tenant-facing) | **done** — `GET /v1/audit` and `GET /v1/orgs/{org}/audit`; the `webhook.delete` write exists |
 
 Deliberately **not** on the list: SSE/websockets (polling is fine through GTM),
 billing/metering, rate limiting (WAF handles prod — infrastructure §4.1), Salesforce
@@ -755,9 +780,13 @@ empty-state/onboarding polish. *(Billing/Stripe: the phase after this, out of sc
 We are ready to sell against Cloudingo when all of the following are true:
 
 - [ ] Phases A–C complete (D can trail with design partners on manual lifecycle ops).
-- [ ] Every **Table stakes** row in §6.1 reads **Have** or **Partial-with-workaround** — no
-      raw **Gap** rows remain; the three genuinely-roadmap rows (mass update/delete,
-      record-level protection, synonym lexicons) have documented workarounds.
+- [x] Every **Table stakes** row in §6.1 reads **Have** or **Partial-with-workaround** — no
+      raw **Gap** rows remain. **Met.** Of the three rows this line called genuinely
+      roadmap, two now ship outright (record-level protection via
+      `.../records/protect`, synonym lexicons via `.../lexicon`) and the third is
+      half-shipped (mass update ships; mass delete does not exist). The single
+      remaining **Roadmap** row is SOC 2 posture, which is a programme rather than a
+      feature and is tracked separately.
 - [ ] A steward can run the full loop unassisted: onboard → add a source → import → review
       queue to zero → verify golden records with lineage → undo one merge → schedule the
       nightly run → build one campaign — with no operator intervention and no YAML.
