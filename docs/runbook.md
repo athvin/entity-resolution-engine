@@ -219,6 +219,84 @@ otherwise:
 
 Re-run them with the queries below after changing anything.
 
+### The re-run of 2026-11-05 — and the thing it found
+
+Re-run three days later against the November partition (19,770 rows). One probe
+is unchanged, and the spend picture underneath it is not.
+
+> **P1 is still NULL.** `split_line_item_split_cost`,
+> `split_line_item_split_usage_ratio` and `split_line_item_parent_resource_id`
+> are **0 non-null out of 19,770 November rows**. The account-level preference
+> has not been enabled, so three more days of pod-level cost are permanently
+> unrecoverable. Nothing about the per-pod model has moved.
+
+**What the re-run was not looking for: November is on pace for ~6x October.**
+
+| | October (full month) | November (5 days) |
+|---|---|---|
+| total | **$184.23** | **$160.47** |
+
+The top line is new. S3 was not in October's top five; in November it is
+**$76.27**, and all of it is one thing:
+
+| usage type | bucket | USD | units |
+|---|---|---|---|
+| `USE2-DataTransfer-Out-Bytes` | `er-ci-sccache` | **75.37** | 837 GB |
+| `USE2-Requests-Tier2` | `er-ci-sccache` | 0.68 | 1,709,346 |
+
+837 GB at $0.090/GB. That is **internet egress**: GitHub-hosted runners are not
+in the VPC, so an S3 Gateway Endpoint cannot help and every sccache read leaves
+the region at the public rate.
+
+**Nov 4 isolates the cause, for free.** That is the day the Actions billing
+block stopped CI from running at all:
+
+| day | total USD | sccache USD |
+|---|---|---|
+| 2026-11-01 | 19.39 | 0.03 |
+| 2026-11-02 | 32.48 | 12.46 |
+| 2026-11-03 | 51.83 | 31.07 |
+| **2026-11-04** | **21.55** | **0.00** |
+| 2026-11-05 | 35.21 | 32.67 |
+
+A day with no CI costs ~$20 and egresses nothing. A day with CI costs $32–52,
+and the entire difference is this one line. Nov 1 reads as $0.03 only because
+AWS's first 100 GB/month of egress is free — the cumulative allowance was
+consumed during Nov 2, which is why the charge appears to start then rather than
+scaling from the first run.
+
+**This is the price of the CI speedup, and it was not previously measured.**
+`rust-cache` was removed in #424, which made sccache the only cache; the test
+job was then sharded, which multiplied the number of runners each pulling from
+it; and the hit rate is ~99%, so almost every compilation unit downloads its
+cached object. PR wall time went 32–35 min to ~10 min. At ~$31 on each day CI
+runs, that is roughly **$600–900/month** for ~25 minutes of wall clock, against
+a **$600 monthly budget** that will breach around mid-month.
+
+The baseline rose too, independently: EC2 went from ~$1.50/day in October to
+~$7.60/day. That is the observability stack, the second web-api Deployment from
+the colour dimension (#461), and the dispatcher — all real, all new, none of it
+sccache.
+
+**This is a decision, not a bug.** The options, cheapest-to-change first:
+
+1. **Accept it** and raise the budget. Fast CI is worth real money; what was
+   wrong was not knowing the number.
+2. **Move sccache to the GitHub Actions cache backend**
+   (`SCCACHE_GHA_ENABLED`). Egress becomes free, but that cache is ~10 GB per
+   repository with LRU eviction, which this workspace will exceed — so expect
+   the hit rate, and the 10-minute wall time, to degrade. Measure before
+   keeping.
+3. **Self-hosted runners inside the VPC.** The structural fix: S3 traffic
+   becomes in-region and free, *and* Actions minutes stop being metered on a
+   private repository. The cluster, the runner NodePools and the pod plumbing
+   already exist for the batch-orchestration work. Largest change, best
+   end state.
+4. **Narrow what sccache stores** so shards pull less. Smallest saving.
+
+Do not resolve this by deleting the bucket's contents: a cold sccache costs a
+42-minute PR, which is the problem it was built to fix.
+
 **P1 — what do split rows actually key on?** The design joins a pod to its run
 through `task_instances.pod_uid`. This shows what identity the split rows
 actually carry and in what format.
