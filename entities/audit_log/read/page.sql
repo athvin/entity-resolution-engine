@@ -5,6 +5,7 @@ SELECT
   org,
   dataset,
   action,
+  trace_id,
   detail,
   created_at,
   updated_at
