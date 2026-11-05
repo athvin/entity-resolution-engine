@@ -1,0 +1,127 @@
+# The alarms that need no new emission.
+#
+# Every metric here is one CloudWatch publishes on its own, so these work the
+# moment they are applied — nothing in the Rust has to ship first. That is the
+# whole selection criterion: the alarms that depend on `er-server` emitting
+# something wait for P12, and an alarm wired to a metric nobody publishes sits
+# in INSUFFICIENT_DATA forever while looking configured.
+#
+# ## These are runaway detectors, not budgets
+#
+# The thresholds are deliberately generous. The standing instruction on this
+# system is to lean towards over-logging when the call is close, so an alarm
+# that fires at a sensible monthly spend would fire constantly and be muted
+# within a week — and a muted alarm is worse than none, because the console
+# still shows it. Each threshold below is set where the only explanation is a
+# loop, a misconfiguration or a runaway, with the arithmetic stated so the next
+# person can move it on purpose rather than by feel.
+#
+# Spend itself is NOT alarmed here. The two Budgets in envs/core already cover
+# it, they are forecast-aware (which a CloudWatch threshold is not), and
+# `AWS/Billing` `EstimatedCharges` is only published in `us-east-1` — so a spend
+# alarm in this stack would need its own cross-region topic to say something
+# already being said.
+
+# Read rather than hardcoded, matching the `aws_iam_openid_connect_provider`
+# pattern beside it: this fails loudly if envs/core has not been applied, which
+# is the correct ordering signal.
+data "aws_sns_topic" "alerts" {
+  name = "er-alerts"
+}
+
+locals {
+  # 5 GiB/day. At the INFREQUENT_ACCESS rate of $0.25/GB that is ~$1.25/day, or
+  # ~$38/month — well above anything this system produces at one developer's
+  # load, and far enough above it that a breach means a loop rather than a busy
+  # day. The container stream is the one that carries 118 `eprintln!` calls'
+  # worth of output plus every pipeline stage, so it gets the larger share.
+  containers_daily_bytes = 5 * 1024 * 1024 * 1024
+
+  # 1 GiB/day. This stream carries the collector's own export of metrics and
+  # traces, which is structured and bounded; a gigabyte a day of it is already
+  # anomalous.
+  metrics_daily_bytes = 1 * 1024 * 1024 * 1024
+
+  # 500 GiB/day scanned. At $5/TB that is ~$2.50/day. The workgroup already
+  # caps a SINGLE query at 10 GiB (envs/core/athena.tf), so this cannot be one
+  # bad `WHERE` — it is the same query running fifty times, which is what a
+  # scheduled roll-up with a broken partition predicate looks like.
+  athena_daily_bytes = 500 * 1024 * 1024 * 1024
+}
+
+# The observability self-guard, and the reason this file exists at all.
+#
+# The telemetry programme's own failure mode is that it becomes the largest line
+# on the bill. An ingest alarm is the one measurement that catches that, and it
+# has to be a CloudWatch-native metric precisely because a telemetry pipeline
+# cannot be trusted to report on its own runaway.
+resource "aws_cloudwatch_metric_alarm" "containers_log_ingest" {
+  alarm_name  = "er-dev-containers-log-ingest"
+  namespace   = "AWS/Logs"
+  metric_name = "IncomingBytes"
+  dimensions = {
+    LogGroupName = aws_cloudwatch_log_group.containers.name
+  }
+
+  statistic           = "Sum"
+  period              = 86400
+  evaluation_periods  = 1
+  comparison_operator = "GreaterThanThreshold"
+  threshold           = local.containers_daily_bytes
+
+  # A day with no deploys and no runs legitimately ships almost nothing, and
+  # `missing` would otherwise read as a breach once the period rolls over.
+  treat_missing_data = "notBreaching"
+
+  alarm_description = "Container log ingest exceeded 5 GiB in a day. This log group is INFREQUENT_ACCESS, which supports no metric filters or subscription filters, so this alarm is the only guard on it. Expect a crash loop, a retry storm, or a log level left at debug."
+
+  alarm_actions = [data.aws_sns_topic.alerts.arn]
+  ok_actions    = [data.aws_sns_topic.alerts.arn]
+}
+
+resource "aws_cloudwatch_metric_alarm" "metrics_log_ingest" {
+  alarm_name  = "er-dev-metrics-log-ingest"
+  namespace   = "AWS/Logs"
+  metric_name = "IncomingBytes"
+  dimensions = {
+    LogGroupName = aws_cloudwatch_log_group.metrics.name
+  }
+
+  statistic           = "Sum"
+  period              = 86400
+  evaluation_periods  = 1
+  comparison_operator = "GreaterThanThreshold"
+  threshold           = local.metrics_daily_bytes
+
+  treat_missing_data = "notBreaching"
+
+  alarm_description = "Metrics/traces log ingest exceeded 1 GiB in a day. This stream is structured and bounded, so a breach most likely means tail sampling stopped dropping anything — check that `tail_sampling` still precedes `batch` in the collector pipeline."
+
+  alarm_actions = [data.aws_sns_topic.alerts.arn]
+  ok_actions    = [data.aws_sns_topic.alerts.arn]
+}
+
+# Athena is the one service here that bills per byte READ rather than per byte
+# stored, so a mistake costs money immediately and leaves nothing behind to show
+# what happened.
+resource "aws_cloudwatch_metric_alarm" "athena_data_scanned" {
+  alarm_name  = "er-dev-athena-data-scanned"
+  namespace   = "AWS/Athena"
+  metric_name = "DataScannedInBytes"
+  dimensions = {
+    WorkGroup = "er-cost"
+  }
+
+  statistic           = "Sum"
+  period              = 86400
+  evaluation_periods  = 1
+  comparison_operator = "GreaterThanThreshold"
+  threshold           = local.athena_daily_bytes
+
+  treat_missing_data = "notBreaching"
+
+  alarm_description = "Athena scanned more than 500 GiB in a day in the er-cost workgroup. A single query cannot do this — the workgroup caps one at 10 GiB — so this is the same query repeating, i.e. a partition predicate that stopped pruning."
+
+  alarm_actions = [data.aws_sns_topic.alerts.arn]
+  ok_actions    = [data.aws_sns_topic.alerts.arn]
+}
