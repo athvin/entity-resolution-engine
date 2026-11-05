@@ -120,6 +120,18 @@ config:
     #
     # Resource attributes (`service.*`, `deployment.environment.name`,
     # `er.role`) are NOT affected: this touches span attributes only.
+    # `service.name` / `service.version` are in the list because `init.rs` sets
+    # them as FIELDS on the process span, distinct from the resource attributes
+    # of the same names. `collector_allowlist.rs` caught that: without them the
+    # process span loses its own identity while the resource keeps it, which is
+    # the confusing half of a drop.
+    #
+    # NOTE FOR ANYONE EDITING THE LIST BELOW: it is an OTTL expression, and OTTL
+    # has NO comment syntax. A `#` line inside the `>-` block folds into the
+    # expression and the collector refuses the whole config at startup —
+    # `lexer: invalid input text "#..."` — which crashloops the new pod while
+    # the old one keeps serving, so the ConfigMap looks updated and nothing
+    # works. Keep commentary out here, in YAML.
     transform/pii_allowlist:
       error_mode: ignore
       trace_statements:
@@ -141,10 +153,6 @@ config:
                 "busy_ns", "idle_ns", "thread.id", "thread.name",
                 "code.file.path", "code.line.number", "code.module.name",
                 "target",
-                # Set as FIELDS on the process span, distinct from the resource
-                # attributes of the same names. The gate caught these: without
-                # them the process span loses its own identity while the
-                # resource keeps it, which is the confusing half of a drop.
                 "service.name", "service.version"
               ])
 
