@@ -135,6 +135,7 @@ export function RunsContent({ org }: { org: string }) {
                 startRun("run_all_incremental", {});
               }}
               className="rounded-r-none"
+              data-er-action="run.start"
               data-testid="run-now"
             >
               <Play /> {submit.isPending ? "Starting…" : "Run now"}

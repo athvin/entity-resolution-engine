@@ -18,6 +18,8 @@ import {
   type ReviewRow,
 } from "@/lib/query/reviews";
 import { BffRequestError } from "@/lib/api/client";
+import type { UiAction } from "@/lib/telemetry/actions";
+import { type InteractionSource, recordAction } from "@/lib/telemetry/interaction";
 import { ViewsBar } from "@/components/views/views-bar";
 import { MAX_BULK } from "@/lib/domain/adjudicate-bulk";
 import { useDeleteView, useSaveView, useSavedViews } from "@/lib/query/views";
@@ -31,6 +33,18 @@ import { DecisionPanel, probabilityLabel } from "./decision-panel";
 import { RecommendationBadge } from "./recommendation-badge";
 import { SwipeCard } from "./swipe-card";
 import { useDatasetSlug } from "@/lib/use-dataset-slug";
+
+/**
+ * A steward's verdict, as a declared telemetry action.
+ *
+ * Exhaustive over `Resolution` by its type, so adding a fourth verdict is a
+ * compile error here rather than a silently unmeasured decision.
+ */
+const REVIEW_ACTIONS: Record<Resolution, UiAction> = {
+  match: "review.decide.match",
+  no_match: "review.decide.no_match",
+  dismiss: "review.decide.dismiss",
+};
 
 /**
  * What a confidence band is hiding, said out loud.
@@ -214,8 +228,13 @@ export function ReviewInbox({ org, isSteward }: { org: string; isSteward: boolea
   }
 
   const act = useCallback(
-    (resolution: Resolution) => {
+    (resolution: Resolution, source: InteractionSource = "click") => {
       if (!active || !isSteward) return;
+      // Reported here rather than from a `data-er-action` on the buttons,
+      // because this is the one funnel the keyboard shortcuts also take and a
+      // button carrying the attribute as well would count one press twice.
+      // After the early return, so a disabled-path press records nothing.
+      recordAction(REVIEW_ACTIONS[resolution], source);
       resolve.mutate(
         { reviewId: active.id, resolution },
         {
@@ -239,11 +258,11 @@ export function ReviewInbox({ org, isSteward }: { org: string; isSteward: boolea
       } else if (event.key === "k") {
         setCursor((position) => Math.max(position - 1, 0));
       } else if (event.key === "m") {
-        act("match");
+        act("match", "keyboard");
       } else if (event.key === "n") {
-        act("no_match");
+        act("no_match", "keyboard");
       } else if (event.key === "x") {
-        act("dismiss");
+        act("dismiss", "keyboard");
       } else if (event.key === "a") {
         toggleAllLoaded();
       } else {
@@ -439,6 +458,7 @@ export function ReviewInbox({ org, isSteward }: { org: string; isSteward: boolea
                 bulkResolve("match");
               }}
               disabled={bulk.isPending}
+              data-er-action="review.bulk.match"
               data-testid="bulk-match"
             >
               <Check /> Match all
@@ -450,6 +470,7 @@ export function ReviewInbox({ org, isSteward }: { org: string; isSteward: boolea
                 bulkResolve("no_match");
               }}
               disabled={bulk.isPending}
+              data-er-action="review.bulk.no_match"
               data-testid="bulk-no-match"
             >
               <X /> Not matches
@@ -478,6 +499,7 @@ export function ReviewInbox({ org, isSteward }: { org: string; isSteward: boolea
                   ? `Select at most ${String(MAX_BULK)} to ask about at once`
                   : undefined
               }
+              data-er-action="review.bulk.recommend"
               data-testid="bulk-recommend"
             >
               <Sparkles />

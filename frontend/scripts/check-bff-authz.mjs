@@ -51,6 +51,16 @@ export const RULES = [
       "non-operator must not learn the route exists (src/lib/bff/admin.ts).",
   },
   {
+    dir: path.join("src", "app", "api", "telemetry"),
+    required: "requireIdentity",
+    hint:
+      "Call requireIdentity() first. The click-stream beacon writes " +
+      "session-attributed records, and the session id and user come from the " +
+      "httpOnly COOKIE rather than the body — so the browser cannot forge who " +
+      "an interaction belongs to. That is also why this is NOT in " +
+      "UNAUTHENTICATED_DIRS beside csp-report, which genuinely has no session.",
+  },
+  {
     dir: path.join("src", "app", "api", "impersonation"),
     // EITHER guard. Starting an impersonation is a super-admin act; ENDING one
     // needs only that you are the person inside it, so a plain identity check

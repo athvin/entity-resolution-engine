@@ -1,6 +1,7 @@
 import { tableFromIPC, type Table } from "apache-arrow";
 
 import { isBffError, type BffError } from "@/lib/bff/errors";
+import { interactionHeaders } from "@/lib/telemetry/interaction";
 
 /** Thrown by the browser-side fetch helper when the BFF returns its error envelope. */
 export class BffRequestError extends Error {
@@ -16,12 +17,28 @@ export class BffRequestError extends Error {
 }
 
 /**
+ * Attach the click that caused this request, so the backend's spans hang off it.
+ *
+ * Caller-supplied headers win: a caller that set `traceparent` deliberately
+ * knows something this does not. Otherwise the live interaction is used, or —
+ * once its TTL has lapsed — the page-load background root, which says "the page
+ * did this" rather than naming a button that did not.
+ */
+function applyInteraction(headers: Headers): void {
+  if (headers.has("traceparent")) return;
+  for (const [name, value] of Object.entries(interactionHeaders())) {
+    headers.set(name, value);
+  }
+}
+
+/**
  * Browser → BFF fetch. Same-origin only; throws BffRequestError on the shared
  * envelope so TanStack Query error states can switch on `error.error.code`.
  */
 export async function bffFetch<T>(input: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
   if (!headers.has("accept")) headers.set("accept", "application/json");
+  applyInteraction(headers);
   const response = await fetch(input, { ...init, headers });
   const body: unknown = response.status === 204 ? undefined : await response.json();
   if (!response.ok) {
@@ -52,6 +69,7 @@ export interface ArrowPage {
 export async function arrowFetch(input: string, init?: RequestInit): Promise<ArrowPage> {
   const headers = new Headers(init?.headers);
   headers.set("accept", "application/vnd.apache.arrow.stream");
+  applyInteraction(headers);
   const response = await fetch(input, { ...init, headers });
   if (!response.ok) {
     let body: unknown = undefined;

@@ -197,7 +197,12 @@ export function NewDatasetWizard({ org }: { org: string }) {
             {error}
           </p>
         )}
-        <Button type="submit" disabled={create.isPending} data-testid="create-dataset">
+        <Button
+          type="submit"
+          disabled={create.isPending}
+          data-er-action="dataset.create"
+          data-testid="create-dataset"
+        >
           {create.isPending ? "Creating…" : "Create dataset"}
         </Button>
       </form>

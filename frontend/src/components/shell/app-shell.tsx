@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { CommandPalette } from "@/components/palette/command-palette";
 import type { Membership, SessionUser } from "@/lib/auth/types";
+import { installInteractionListener } from "@/lib/telemetry/interaction";
 import { BottomTabs } from "./bottom-tabs";
 import { ImpersonationBanner, type ImpersonationState } from "./impersonation-banner";
 import { NavRail } from "./nav-rail";
@@ -19,6 +20,13 @@ export interface ShellProps {
 
 export function AppShell({ org, user, memberships, impersonation, children }: ShellProps) {
   const [paletteOpen, setPaletteOpen] = useState(false);
+  // One delegated click listener for the whole signed-in surface. Installed
+  // here rather than per-component so nothing has to opt in, and returned as a
+  // teardown so React strict mode's double-invoke does not leave two.
+  useEffect(() => {
+    const uninstall = installInteractionListener();
+    return uninstall;
+  }, []);
   return (
     // `data-app-shell` is the hook `globals.css` keys the fixed-bar scroll
     // padding off — those bars exist only inside this shell.

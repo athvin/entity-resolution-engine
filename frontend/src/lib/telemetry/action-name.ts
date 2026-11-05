@@ -1,28 +1,44 @@
+import { type UiAction, isUiAction } from "./actions";
+
 /**
  * Naming the thing that was clicked, without naming the record it sits inside.
  *
- * ## Why `textContent` is never consulted
+ * ## One source, and why the obvious fallbacks were removed
  *
- * This is the one rule in the file that is not a preference. In a deduplication
- * UI a row-level control sits *inside* a record's rendered values — a "merge"
- * button in a duplicate pair, a "keep this" in a golden-record column — so the
- * nearest readable text is very often somebody's name, email or address. Using
- * it would put the payload on a span, which is §10.4's one prohibition, and it
- * would do so invisibly: the attribute would look like a sensible label right
- * up until someone searched the span store for a customer and found them.
+ * The name comes from `data-er-action` and nothing else, and the value must be a
+ * member of [`UI_ACTIONS`](./actions.ts).
  *
- * So the name comes only from attributes an author wrote deliberately:
+ * An earlier version of this file walked `data-er-action` → `data-testid` →
+ * `aria-label`, reasoning that `textContent` was the only unsafe source because
+ * a row-level control sits inside a record's rendered values. That reasoning was
+ * right about `textContent` and wrong to stop there. In this repo:
  *
- * 1. `data-er-action` — the declared, stable name. What dashboards should key
- *    on, because it survives a refactor that changes the markup.
- * 2. `data-testid` — already present on most interactive elements in this app,
- *    and author-written, so it is a safe and useful fallback.
- * 3. `aria-label` — author-written, and the accessible name is usually the best
- *    short description of what a control does.
+ * ```tsx
+ * aria-label={`Remove ${member.email}`}           // settings/members-list.tsx
+ * data-testid={`member-remove-${member.email}`}   // the same element
+ * aria-label={`Split out ${member.record_key}`}   // records/entity-view.tsx
+ * data-testid={`mark-${member.record_key}`}       // the same element
+ * ```
  *
- * None of those can contain a record value unless somebody puts one there, and
- * an `aria-label` carrying a customer name would already be an accessibility
- * problem worth fixing on its own.
+ * 27 of 63 `aria-label` sites and a comparable share of `data-testid` sites are
+ * interpolated, and the values interpolated into them are exactly the payload a
+ * deduplication engine holds: emails, record keys, attribute names. A click on
+ * "remove member" resolved to `member-remove-alice@example.com`.
+ *
+ * The important part is that none of those call sites is a mistake. A screen
+ * reader user needs to know *which* member the button removes; a Playwright test
+ * needs to address one row of many. Both attributes are doing their job. They
+ * cannot also be a telemetry channel, so telemetry gets its own attribute whose
+ * only purpose is this, with an enumerated set of legal values.
+ *
+ * ## Why membership is checked here and not left to the gate
+ *
+ * `scripts/check-er-actions.mjs` already fails the build on an undeclared
+ * `data-er-action` value, so in a green tree this check never fires. It is here
+ * anyway because the gate covers markup in this repo and the DOM at runtime is
+ * not only that markup: an injected node, a browser extension or a future
+ * third-party embed can carry the attribute too. The gate is the authoring
+ * guarantee; this is the runtime one.
  *
  * ## Why it walks up the tree
  *
@@ -36,52 +52,35 @@
 /** How far up to look before giving up. */
 const MAX_DEPTH = 8;
 
-/** The attributes consulted, in order. Never `textContent`; see the header. */
-const SOURCES = ["data-er-action", "data-testid", "aria-label"] as const;
-
-/** Where a resolved name came from, so coverage can be measured. */
-export type ActionSource = (typeof SOURCES)[number];
+/** The one attribute consulted. Never `textContent`, `data-testid` or
+ *  `aria-label`; see the header for why the latter two were removed. */
+export const ACTION_ATTRIBUTE = "data-er-action";
 
 export interface ResolvedAction {
-  name: string;
-  source: ActionSource;
-  /** True when the name came from `data-er-action` — the declared vocabulary. */
-  declared: boolean;
-}
-
-/** Longest name kept. Beyond this a value is not a label, and whatever it is,
- * it should not become a span attribute at full length. */
-const MAX_NAME_LENGTH = 64;
-
-function readName(element: Element): ResolvedAction | null {
-  for (const source of SOURCES) {
-    const raw = element.getAttribute(source);
-    if (raw === null) continue;
-    const value = raw.trim();
-    if (value === "") continue;
-    return {
-      name: value.slice(0, MAX_NAME_LENGTH),
-      source,
-      declared: source === "data-er-action",
-    };
-  }
-  return null;
+  name: UiAction;
 }
 
 /**
- * The action name for a click target, or `null` when nothing was named.
+ * The action for a click target, or `null` when nothing declared one.
  *
- * `null` is a normal answer and must stay one: most clicks in a page land on
- * text and scroll regions that are not actions at all. Inventing a name for
- * them — from the tag, or from text — would turn ordinary reading into a stream
- * of meaningless interactions and pay to store it.
+ * `null` is the common answer and must stay one: almost every click in a page
+ * lands on text, a scroll region or a layout wrapper. Inventing a name for those
+ * — from the tag, the text, or a neighbouring attribute — would turn ordinary
+ * reading into a priced stream of "interactions" and, in this app, would carry
+ * record values while doing it.
  */
 export function resolveActionName(target: EventTarget | null): ResolvedAction | null {
   let element = target instanceof Element ? target : null;
 
   for (let depth = 0; element !== null && depth < MAX_DEPTH; depth += 1) {
-    const resolved = readName(element);
-    if (resolved !== null) return resolved;
+    const raw = element.getAttribute(ACTION_ATTRIBUTE);
+    if (raw !== null) {
+      const value = raw.trim();
+      // An undeclared value stops the walk rather than continuing past it: the
+      // author named this element, and silently attributing their click to an
+      // ancestor instead would be a confusing answer to a typo.
+      return isUiAction(value) ? { name: value } : null;
+    }
     element = element.parentElement;
   }
   return null;
