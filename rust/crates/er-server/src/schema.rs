@@ -47,6 +47,17 @@ pub fn lake_catalog_hash() -> String {
     )
 }
 
+/// The control-plane catalog version this binary carries, as the ledger records
+/// it. The sibling of [`lake_catalog_hash`], for the half that lives in
+/// Postgres.
+#[must_use]
+pub fn control_catalog_hash() -> String {
+    er_entity_diff::catalog_hash(
+        &er_entities::catalog::catalog(),
+        er_entity_spec::Store::Postgres,
+    )
+}
+
 /// Open a lake read-write from a stored env blob: `ER_LAKE_CATALOG` (ATTACH
 /// metadata) + `ER_LAKE_DATA_PATH` (Parquet location), plus the optional
 /// `ER_LAKE_CATALOG_SCHEMA` — DuckLake's `METADATA_SCHEMA`, the per-lake

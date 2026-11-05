@@ -30,7 +30,7 @@ statements is read or written only through the engine's own stage SQL, not
 through a typed query function.
 
 <!-- BEGIN GENERATED: entities-index -->
-**49 entities, 245 declared statements.**
+**49 entities, 246 declared statements.**
 
 | Entity | Relation | Store | Key | Natural key | History |
 |---|---|---|---|---|---|
@@ -127,7 +127,7 @@ Declared statements per entity and operation:
 | `run_stage` | 1 | 1 | 1 | 0 |
 | `s3_ingest_cursor` | 1 | 1 | 1 | 0 |
 | `schedule` | 2 | 2 | 4 | 1 |
-| `schema_migration` | 1 | 1 | 0 | 0 |
+| `schema_migration` | 1 | 2 | 0 | 0 |
 | `scored_record` | 0 | 2 | 1 | 2 |
 | `staged_steward_action` | 1 | 1 | 2 | 0 |
 | `tag` | 1 | 3 | 1 | 0 |
