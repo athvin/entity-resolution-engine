@@ -191,6 +191,37 @@ One consequence: the toolchain is installed with `rustup` rather than an action,
 because the action selects its channel through its ref and so cannot also carry
 a SHA pin.
 
+`bash scripts/ci/actionlint.sh` is the check, and the `workflow pins (S9)` job
+in `rust.yml` runs it. **It is ungated, deliberately** — `detect` exempts
+`.claude/**`, `infra.yml`, `drift.yml` and every `*.lock.yml`, so a gated pin
+check would skip on exactly the PRs most likely to introduce an unpinned
+action. It is **not yet a required check**; promote it once it has reported
+green on `main` and been observed failing, in that order.
+
+Two things it gets right, both learned the hard way:
+
+- **It is pure bash, with no dependencies.** It used to shell out to
+  `uv run python scripts/actionlint.py` and import `er.versions` for a pinned
+  `actionlint-py` wheel. The Python/dbt removal took that script, the root
+  `pyproject.toml` and `uv.lock` with it, so the checker could not run at all —
+  and because nothing invoked it, the breakage was invisible while this section
+  went on calling S9 enforced. Found 2026-11-03. A gate with no dependencies
+  cannot be deleted by a dependency cleanup.
+- **actionlint proper skips the generated workflows, and the pin check does
+  not.** actionlint 1.7.7 reports 40+ findings across the five `gh aw`-compiled
+  files and not one is a defect: `runs-on: ubuntu-slim`,
+  `concurrency.queue: max`, `job.check_run_id`, `job.workflow_ref` and
+  `permissions.vulnerability-alerts` are all real GitHub features newer than the
+  linter's tables. Linting them would leave this gate permanently red, which
+  teaches people to ignore it. Generated-ness is read from each file's own
+  header marker rather than a filename pattern, so the next gh-aw workflow is
+  excluded automatically — but the **S9 pin check still covers them**, because
+  `gh aw compile` pinning for you is not the same as anyone checking.
+
+Zero `uses:` matches across the whole tree is a **failure**, not a clean run:
+if the pattern ever stops matching, every workflow trivially passes and the
+policy lapses silently, which is the state it was found in.
+
 ## What is deliberately not required
 
 `semgrep` runs but is **not** a required check: its registry packs need network,

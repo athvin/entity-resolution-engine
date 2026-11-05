@@ -120,6 +120,7 @@ job instead — `terraform plan` is the worked example.
 |---|---|---|---|
 | `detect` | detect changes | 5 | `always` |
 | `skills` | agent skills (lint + drift) | 5 | `always` |
+| `workflow-pins` | workflow pins (S9) | 5 | `always` |
 | `lint` | fmt + clippy + docs | 45 | `needs.detect.outputs.code == 'true'` |
 | `entities` | entities | 45 | `needs.detect.outputs.code == 'true'` |
 | `test-shard` | test shard (${{ matrix.slice }}) | 30 | `needs.detect.outputs.code == 'true'` |
