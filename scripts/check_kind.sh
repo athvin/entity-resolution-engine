@@ -367,7 +367,19 @@ EOF
 # And the lake really holds the result: the run is ledgered under the model the
 # work order carried. A pipeline whose pods all exited zero without writing
 # anything would pass every assertion above and fail this one.
-api GET "/v1/orgs/${PORG}/datasets/default/runs" > /tmp/er-kind-runs5.json
+#
+# Fetched WITHOUT `api`: this route is dataset-scoped and opens the lake in the
+# API process, so a 503 is a distinguishable outcome and not a transport
+# failure. `api` uses `curl -fsS`, which would exhaust its five retries on a
+# 503 and then die under `set -e` having printed nothing at all — the body is
+# the whole diagnosis here, so keep it.
+runs_code="$(curl -s -o /tmp/er-kind-runs5.json -w '%{http_code}' \
+    -H "Authorization: Bearer ${OP_TOKEN}" \
+    "${BASE}/v1/orgs/${PORG}/datasets/default/runs")"
+if [ "${runs_code}" != "200" ]; then
+    log "the runs read answered ${runs_code}: $(head -c 300 /tmp/er-kind-runs5.json)"
+    fail "the control plane could not read back the lake the pods just wrote (HTTP ${runs_code})"
+fi
 python3 - /tmp/er-kind-runs5.json "${PJOB}" <<'EOF'
 import json, sys
 
