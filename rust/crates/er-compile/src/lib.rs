@@ -78,6 +78,20 @@ pub enum CompileError {
     WeightsNotHundred { total: String },
     #[error("comparisons.{column} has weight {weight}, which is not in 0..=100")]
     WeightOutOfRange { column: String, weight: String },
+    /// A declared score scale that would produce a model nobody wants.
+    ///
+    /// Refused rather than clamped, because both failure modes are silent in
+    /// the output: at zero bits no pair ever accumulates enough evidence to
+    /// merge and the run reports "no duplicates", and at a negative value
+    /// agreement becomes evidence AGAINST a match, so the model works
+    /// backwards while still producing scores that look like scores.
+    #[error("thresholds.{field} is {value}, which is not in {range}. {reason}")]
+    ScaleOutOfRange {
+        field: &'static str,
+        value: String,
+        range: &'static str,
+        reason: &'static str,
+    },
 }
 
 /// How much evidence a field at full agreement contributes, in bits of log2
@@ -95,6 +109,13 @@ pub enum CompileError {
 ///
 /// The lesson worth keeping: louder is not safer. Over-weighting trades missed
 /// duplicates for false merges, which is the more expensive mistake.
+///
+/// That grid search is no longer only a story: `lake_e2e`'s
+/// `the_score_scale_constant_sits_inside_its_calibrated_region` re-runs it on
+/// every DuckLake tier and reproduces the numbers above exactly — 10 entities at
+/// 60 bits, 18 at 20, 9 at 120. It was prose-only until then, so the number
+/// every compiled model depends on was protected by nothing, and turning it up
+/// "to be safe" would have passed every gate while merging distinct people.
 const DEFAULT_FULL_AGREEMENT_BITS: f64 = 60.0;
 
 /// What disagreement costs, as a fraction of what agreement earns.
@@ -132,6 +153,37 @@ impl Default for CompileOptions {
         CompileOptions {
             full_agreement_bits: DEFAULT_FULL_AGREEMENT_BITS,
             disagreement_ratio: DEFAULT_DISAGREEMENT_RATIO,
+        }
+    }
+}
+
+impl CompileOptions {
+    /// The scale this config asks for, falling back to the global defaults for
+    /// whichever half it does not set.
+    ///
+    /// This is what closes a loop that was open: the defaults were calibrated on
+    /// the person reference model, `compile_with` existed so a different scale
+    /// could be supplied, and **nothing in production ever called it** — so the
+    /// numbers were global in practice however corpus-dependent their own doc
+    /// comments said they were. `er train` reports what a corpus supports; now a
+    /// config can say so.
+    ///
+    /// Defaulting per-field rather than all-or-nothing on purpose: the two knobs
+    /// answer different questions (how loud, and how much a mismatch costs), and
+    /// a tenant acting on a measured bits figure should not have to restate the
+    /// disagreement ratio to do it.
+    #[must_use]
+    pub fn from_config(config: &Config) -> Self {
+        let defaults = Self::default();
+        CompileOptions {
+            full_agreement_bits: config
+                .thresholds
+                .full_agreement_bits
+                .unwrap_or(defaults.full_agreement_bits),
+            disagreement_ratio: config
+                .thresholds
+                .disagreement_ratio
+                .unwrap_or(defaults.disagreement_ratio),
         }
     }
 }
@@ -681,6 +733,59 @@ fn weighted_level(bits: f64) -> ComparisonLevelJson {
     }
 }
 
+/// Refuse a score scale that would compile a model nobody wants.
+///
+/// Checked in `compile_with` rather than at config load, for the same reason
+/// `resolve_weights` is: this is where the numbers are consumed, the existing
+/// `WeightOutOfRange` sets the precedent, and the publish handler already
+/// surfaces a `CompileError` as a 422 — so a bad scale is refused at the publish
+/// that introduced it rather than quietly producing a model that never merges.
+///
+/// The upper bound on bits is deliberately generous rather than tight. The
+/// calibrating grid search found 120 bits already merging distinct people, so
+/// anything far above that is a mistake — but the right value is corpus-
+/// dependent and this has no corpus, so it refuses only the absurd and leaves
+/// the judgement to `er train`'s measurement.
+fn check_scale(options: &CompileOptions) -> Result<(), CompileError> {
+    if !(options.full_agreement_bits.is_finite() && options.full_agreement_bits > 0.0) {
+        return Err(CompileError::ScaleOutOfRange {
+            field: "full_agreement_bits",
+            value: format!("{}", options.full_agreement_bits),
+            range: "0 exclusive to 1000",
+            reason: "at zero no pair ever accumulates enough evidence to merge, and the run \
+                     reports no duplicates rather than a miscalibration",
+        });
+    }
+    if options.full_agreement_bits > 1000.0 {
+        return Err(CompileError::ScaleOutOfRange {
+            field: "full_agreement_bits",
+            value: format!("{}", options.full_agreement_bits),
+            range: "0 exclusive to 1000",
+            reason: "the calibrating grid search found 120 bits already merging distinct \
+                     records, so this would merge the whole corpus",
+        });
+    }
+    if !(options.disagreement_ratio.is_finite() && options.disagreement_ratio >= 0.0) {
+        return Err(CompileError::ScaleOutOfRange {
+            field: "disagreement_ratio",
+            value: format!("{}", options.disagreement_ratio),
+            range: "0 to 1 inclusive",
+            reason: "a negative cost would make a MISMATCHED field evidence in favour of the \
+                     pair, so the model would work backwards",
+        });
+    }
+    if options.disagreement_ratio > 1.0 {
+        return Err(CompileError::ScaleOutOfRange {
+            field: "disagreement_ratio",
+            value: format!("{}", options.disagreement_ratio),
+            range: "0 to 1 inclusive",
+            reason: "above 1 a single mismatch outweighs the agreement it is weighed against, \
+                     so no record with one bad field can ever match",
+        });
+    }
+    Ok(())
+}
+
 /// Resolve each column's weight: the declared ones if any are declared,
 /// otherwise an equal share.
 fn resolve_weights(
@@ -729,7 +834,7 @@ pub struct Compiled {
 /// Returns [`CompileError`] when a declared level is unknown or malformed, a
 /// comparison declares no levels, or the declared weights do not total 100.
 pub fn compile(config: &Config) -> Result<Compiled, CompileError> {
-    compile_with(config, &CompileOptions::default())
+    compile_with(config, &CompileOptions::from_config(config))
 }
 
 /// Compile with an explicit scale. See [`CompileOptions`].
@@ -737,6 +842,7 @@ pub fn compile(config: &Config) -> Result<Compiled, CompileError> {
 /// # Errors
 /// As [`compile`].
 pub fn compile_with(config: &Config, options: &CompileOptions) -> Result<Compiled, CompileError> {
+    check_scale(options)?;
     let weights = resolve_weights(&config.comparisons)?;
     let conjuncts = constraint_conjuncts(&config.constraints);
     let mut notes = Vec::new();
@@ -758,11 +864,22 @@ pub fn compile_with(config: &Config, options: &CompileOptions) -> Result<Compile
     // trained model can. So it records the assumption it made, and `er train`
     // reports what the corpus actually measures — which is the pairing that lets
     // a tenant notice the gap at all.
+    // Declared or defaulted is the part worth distinguishing: a reader of the
+    // compiled model otherwise cannot tell a deliberate scale from an inherited
+    // one, and those warrant different amounts of trust.
+    let provenance = if config.thresholds.full_agreement_bits.is_some()
+        || config.thresholds.disagreement_ratio.is_some()
+    {
+        "declared by this config"
+    } else {
+        "a global default calibrated on the person reference model, not a measurement of your \
+         data — `er train` reports the bits your own corpus supports, and \
+         `thresholds.full_agreement_bits` is where to set them"
+    };
     notes.push(format!(
         "score scale: a field at full agreement is worth {:.0} bits of evidence, divided among \
          the {} comparison(s), and a disagreement costs {:.0}% of what an agreement earns. This \
-         is a global default calibrated on the person reference model, not a measurement of your \
-         data — `er train` reports the bits your own corpus supports",
+         is {provenance}",
         options.full_agreement_bits,
         config.comparisons.len(),
         options.disagreement_ratio * 100.0

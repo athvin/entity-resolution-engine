@@ -19,11 +19,24 @@
 //!
 //! This is deliberately a *measurement*, not a fix. The person number earned its
 //! value from two independent legs — the reference-model sum AND a cluster-count
-//! grid search — and only the first leg can be run for accounts: there is no
-//! account config fixture and no account corpus with a known cluster count, so
-//! re-tuning the constant to 22 would swap one uncalibrated number for another
-//! and move every account tenant's scoring. Recording the gap is what this file
-//! is for; closing it is a decision with evidence attached.
+//! grid search over a corpus with known truth — and only the first can be run
+//! for accounts today.
+//!
+//! The precise reason, since an earlier version of this comment got it wrong by
+//! claiming no account fixture existed: there IS an account config
+//! (`er-standardize/tests/fixtures/acct_test.yaml`) and an account corpus
+//! (`fixtures/static/acct_base`, which `acct_e2e` resolves to 4 entities from 7
+//! records). What `acct_base` does not have is `base_10`'s `truth.csv` and
+//! `traps.csv` — a declared ground truth and the deliberate edge cases that make
+//! a cluster-count grid search mean something. Seven trap-free records is too
+//! thin to calibrate a constant that moves every account tenant's scoring; it
+//! would look like evidence while being weak.
+//!
+//! The grid-search harness itself is no longer missing — `lake_e2e`'s
+//! `the_score_scale_constant_sits_inside_its_calibrated_region` runs it, and now
+//! that `compile` reads `thresholds.full_agreement_bits` it can be pointed at
+//! any corpus. Closing the account gap needs an account corpus with truth, not
+//! new machinery. Recording it is what this file is for.
 
 use dedupe_core::Settings;
 use dedupe_core::model::TrainedModel;
@@ -187,6 +200,117 @@ fn a_real_account_config_compiles_and_inherits_the_person_scale() {
         "the compiled account scale should still be far above what the account model \
          measures: compiled {bits:.1}, measured {measured:.3}, ratio {ratio:.2}. If this \
          fails the gap has closed — re-read the module comment before loosening it."
+    );
+}
+
+#[test]
+fn a_config_can_declare_its_own_scale() {
+    // The third step of measure -> report -> act. #604 measured what a corpus
+    // supports and reported it; this is where that measurement can be used.
+    // Before it, `compile_with` was the seam for a different scale and had no
+    // production caller, so the defaults were global in practice however
+    // corpus-dependent their doc comments said they were.
+    let assumed = CompileOptions::default().full_agreement_bits;
+    assert!(
+        (compiled_bits(TEST_YAML) - assumed).abs() < 1e-6,
+        "the fixture declares no scale, so it inherits the default"
+    );
+
+    // 22 bits is roughly what the committed ACCOUNT model measures, which is
+    // the case that motivated this. Set on the parsed config rather than by
+    // appending YAML, because a second `thresholds:` block would be a duplicate
+    // key rather than an override.
+    let mut config = load_config_str(TEST_YAML).unwrap();
+    config.thresholds.full_agreement_bits = Some(22.0);
+    let compiled = er_compile::compile(&config).expect("a declared scale compiles");
+    let settings = Settings::from_json_str(&compiled.model_json).expect("output parses");
+    let bits = TrainedModel::new(settings).full_agreement_bits().total_bits;
+
+    assert!(
+        (bits - 22.0).abs() < 1e-6,
+        "a declared scale must reach the compiled model: got {bits:.6}"
+    );
+    assert!(
+        (bits - assumed).abs() > 1.0,
+        "and it must actually differ from the default, or this test is vacuous"
+    );
+
+    // The disagreement ratio travels the same way, checked through the
+    // `CompileOptions` the config resolves to rather than through a level's m/u,
+    // because the ELSE arm's weight is what it moves.
+    let mut ratio_only = load_config_str(TEST_YAML).unwrap();
+    ratio_only.thresholds.disagreement_ratio = Some(0.5);
+    let opts = CompileOptions::from_config(&ratio_only);
+    assert!((opts.disagreement_ratio - 0.5).abs() < f64::EPSILON);
+    assert!(
+        (opts.full_agreement_bits - assumed).abs() < f64::EPSILON,
+        "setting one half must not disturb the other"
+    );
+}
+
+#[test]
+fn a_nonsensical_declared_scale_is_refused() {
+    // Both failure modes are silent in the OUTPUT, which is why they are
+    // refused rather than clamped: at zero bits nothing merges and the run
+    // reports "no duplicates", and at a negative ratio agreement becomes
+    // evidence against a match, so the model works backwards while still
+    // producing scores that look like scores.
+    for (bits, ratio, want) in [
+        (Some(0.0), None, "full_agreement_bits"),
+        (Some(-60.0), None, "full_agreement_bits"),
+        (Some(5_000.0), None, "full_agreement_bits"),
+        (None, Some(-0.2), "disagreement_ratio"),
+        (None, Some(1.5), "disagreement_ratio"),
+    ] {
+        let mut config = load_config_str(TEST_YAML).unwrap();
+        config.thresholds.full_agreement_bits = bits;
+        config.thresholds.disagreement_ratio = ratio;
+        let err = er_compile::compile(&config)
+            .expect_err("a nonsensical scale must be refused at compile, so publish refuses it");
+        let text = err.to_string();
+        assert!(
+            text.contains(want),
+            "the refusal must name the field: bits={bits:?} ratio={ratio:?} gave {text}"
+        );
+    }
+
+    // And the boundary values that ARE meaningful still compile, so the guard
+    // is not quietly rejecting usable configs.
+    for (bits, ratio) in [(Some(1.0), None), (None, Some(0.0)), (None, Some(1.0))] {
+        let mut config = load_config_str(TEST_YAML).unwrap();
+        config.thresholds.full_agreement_bits = bits;
+        config.thresholds.disagreement_ratio = ratio;
+        assert!(
+            er_compile::compile(&config).is_ok(),
+            "bits={bits:?} ratio={ratio:?} is extreme but meaningful and must compile"
+        );
+    }
+}
+
+#[test]
+fn the_compiler_records_whether_the_scale_was_declared() {
+    // A reader of a compiled model otherwise cannot tell a deliberate scale
+    // from an inherited one, and those warrant different amounts of trust.
+    let defaulted = er_compile::compile(&load_config_str(TEST_YAML).unwrap()).unwrap();
+    assert!(
+        defaulted
+            .notes
+            .iter()
+            .any(|n| n.contains("score scale") && n.contains("a global default")),
+        "{:?}",
+        defaulted.notes
+    );
+
+    let mut config = load_config_str(TEST_YAML).unwrap();
+    config.thresholds.full_agreement_bits = Some(22.0);
+    let declared = er_compile::compile(&config).unwrap();
+    assert!(
+        declared
+            .notes
+            .iter()
+            .any(|n| n.contains("score scale") && n.contains("declared by this config")),
+        "{:?}",
+        declared.notes
     );
 }
 
