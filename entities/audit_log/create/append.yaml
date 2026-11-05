@@ -8,4 +8,5 @@ params:
   - { name: dataset, type: varchar, nullable: true }
   - { name: action, type: varchar }
   - { name: detail, type: json }
+  - { name: trace_id, type: varchar, nullable: true }
 returns: none

@@ -83,6 +83,24 @@ export function isAcceptableTraceparent(raw: string): boolean {
 }
 
 /** A fresh, sampled context. */
+/**
+ * The trace id out of a `traceparent`, or `null` if it is not one.
+ *
+ * The bare id is what gets persisted, not the whole header. A `traceparent`
+ * also carries the *parent span* id, which is per-hop: the value the browser
+ * sends names a browser span, and the value erserver sees names the BFF's. So
+ * storing the full header would produce a string that cannot be joined against
+ * the span store without parsing, and two rows from the same trace would hold
+ * different strings.
+ *
+ * Validated first rather than slicing blindly, so a malformed header yields
+ * `null` instead of 32 characters of whatever it happened to contain.
+ */
+export function traceIdOf(traceparent: string | null | undefined): string | null {
+  if (typeof traceparent !== "string" || !isAcceptableTraceparent(traceparent)) return null;
+  return traceparent.slice(3, 35);
+}
+
 export function mintTraceparent(): string {
   return `00-${randomHex(TRACE_ID_BYTES)}-${randomHex(SPAN_ID_BYTES)}-${SAMPLED_FLAGS}`;
 }

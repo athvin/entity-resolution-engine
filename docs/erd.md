@@ -33,6 +33,7 @@ erDiagram
         varchar org
         varchar dataset
         varchar action
+        varchar trace_id
         json detail
         timestamp created_at
         timestamp updated_at
@@ -405,6 +406,8 @@ erDiagram
         jsonb detail
         text id PK
         boolean impersonating
+        text session_id
+        text trace_id
         text user_id
     }
     invites {

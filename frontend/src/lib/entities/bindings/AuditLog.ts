@@ -15,6 +15,8 @@ export interface AuditLog {
   dataset: string | null;
   /** The action name (e.g. steward.mass_update). */
   action: string;
+  /** The W3C trace id (32 lowercase hex) of the request that caused this row, when the caller sent one. The JOIN KEY to the span store: spans carry `trace_id`, so this is what turns `which rows did this session write` into `and here is every SQL statement each one ran`. Stored as the bare id rather than the full `traceparent`, because the parent span id is per-hop and would not join. NULL for an unpropagated or non-HTTP caller — a CLI, the dispatcher's own bookkeeping — which is a real and permanent case, not a gap to backfill. */
+  trace_id: string | null;
   /** Structured detail for the action. */
   detail: unknown;
   /** Wall-clock creation time (database default; `at` remains the domain event stamp). */

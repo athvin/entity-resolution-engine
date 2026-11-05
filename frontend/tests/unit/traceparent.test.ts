@@ -5,6 +5,7 @@ import {
   isAcceptableTraceparent,
   mintTraceparent,
   resolveTraceparent,
+  traceIdOf,
 } from "@/lib/telemetry/traceparent";
 
 /**
@@ -111,5 +112,33 @@ describe("resolveTraceparent", () => {
     expect(resolved.inherited).toBe(false);
     expect(resolved.traceparent).not.toBe(unusable);
     expect(isAcceptableTraceparent(resolved.traceparent)).toBe(true);
+  });
+});
+
+describe("traceIdOf", () => {
+  it("returns the 32-hex trace id, not the whole header", () => {
+    // The bare id is what gets persisted. A traceparent also carries the
+    // per-hop PARENT SPAN id, so two rows from one trace would hold different
+    // strings if the header were stored whole — and neither would join against
+    // the span store without parsing.
+    const id = "4bf92f3577b34da6a3ce929d0e0e4736";
+    expect(traceIdOf(`00-${id}-00f067aa0ba902b7-01`)).toBe(id);
+    expect(traceIdOf(`00-${id}-aaaaaaaaaaaaaaaa-01`)).toBe(id);
+  });
+
+  it("returns null rather than 32 characters of garbage", () => {
+    // Validated before slicing: a blind slice of a malformed header yields
+    // something that looks exactly like a trace id and joins to nothing.
+    expect(traceIdOf("not-a-traceparent-but-certainly-long-enough-to-slice")).toBeNull();
+    expect(traceIdOf("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01-extra")).toBeNull();
+    expect(traceIdOf("")).toBeNull();
+    expect(traceIdOf(null)).toBeNull();
+    expect(traceIdOf(undefined)).toBeNull();
+  });
+
+  it("refuses the all-zero trace id", () => {
+    // Every untraced request would otherwise share one plausible-looking id
+    // and appear in the ledger to be the same request.
+    expect(traceIdOf("00-00000000000000000000000000000000-00f067aa0ba902b7-01")).toBeNull();
   });
 });

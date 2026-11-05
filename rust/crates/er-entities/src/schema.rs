@@ -103,6 +103,7 @@ CREATE OR REPLACE TRIGGER er_history_api_keys
   org text,
   dataset text,
   action text NOT NULL,
+  trace_id text,
   detail jsonb NOT NULL DEFAULT '{}'::jsonb,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
