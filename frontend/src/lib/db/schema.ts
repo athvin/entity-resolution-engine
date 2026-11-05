@@ -341,6 +341,26 @@ export const audit = erweb.table(
     impersonating: boolean("impersonating").notNull().default(false),
     action: text("action").notNull(),
     detail: jsonb("detail").notNull().default({}),
+    /** The W3C trace id (32 lowercase hex) of the request that produced this
+     *  row — the join key to the span store, and to erserver's `audit_log`,
+     *  which carries the same id for the same request. Nullable: a row written
+     *  outside a traced request has no honest value. */
+    traceId: text("trace_id"),
+    /** The browser session, read server-side from the httpOnly cookie.
+     *
+     *  This trail is where the session belongs and erserver's `audit_log` is
+     *  deliberately not: er-server could only learn a session from a header,
+     *  and `x-acting-user` is already documented as spoofable by any API-key
+     *  holder by design — a sibling session header would inherit that exactly.
+     *  Here the value comes from the cookie, so it is worth trusting. */
+    sessionId: text("session_id"),
   },
-  (table) => [index("audit_at_idx").on(table.at), index("audit_org_idx").on(table.actingOrg)],
+  (table) => [
+    index("audit_at_idx").on(table.at),
+    index("audit_org_idx").on(table.actingOrg),
+    // The two lookups a support question actually starts from: "show me this
+    // session" and "what else happened in this trace".
+    index("audit_session_idx").on(table.sessionId),
+    index("audit_trace_idx").on(table.traceId),
+  ],
 );

@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS public.audit_log (
   org text,
   dataset text,
   action text NOT NULL,
+  trace_id text,
   detail jsonb NOT NULL DEFAULT '{}'::jsonb,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),

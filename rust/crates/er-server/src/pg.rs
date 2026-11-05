@@ -1247,6 +1247,22 @@ pub async fn pending_count(client: &Client, dataset_id: &str) -> Result<i64, PgE
 /// Append one audit-ledger row (`auth.py` `audit`): one per authenticated
 /// mutation, pairing with the lake's `entity_events`.
 ///
+/// The row carries the **trace id of the request that caused it**, read from
+/// the ambient span rather than passed in. That is what makes this ledger
+/// joinable to the span store: an auditor's "who changed this record" becomes
+/// "and here is every SQL statement that request ran, in order, with timings".
+///
+/// Reading it ambiently rather than adding a parameter is deliberate. There are
+/// 25 call sites, and a second `audit_with` taking the id explicitly would have
+/// left the column mostly NULL for as long as the migration took — which reads
+/// as "these requests had no trace" rather than "nobody has got to this call
+/// site yet". Every one of those sites already runs inside the request span the
+/// HTTP layer opened, so all 25 are correct at once and the 26th is correct the
+/// day it is written.
+///
+/// `None` is a normal and permanent answer for callers with no request behind
+/// them — the dispatcher's own bookkeeping, a CLI, a test.
+///
 /// # Errors
 /// Propagates the insert error.
 pub async fn audit(
@@ -1257,7 +1273,17 @@ pub async fn audit(
     action: &str,
     detail: &serde_json::Value,
 ) -> Result<(), PgError> {
-    er_entities::audit_log::create::append(client, actor, org, dataset, action, detail).await?;
+    let trace_id = er_obs::current_trace_id();
+    er_entities::audit_log::create::append(
+        client,
+        actor,
+        org,
+        dataset,
+        action,
+        detail,
+        trace_id.as_deref(),
+    )
+    .await?;
     Ok(())
 }
 
