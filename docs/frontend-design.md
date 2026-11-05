@@ -51,7 +51,8 @@ session machinery, with password login retained alongside.
 | **Super Admin** | `operator` | Platform staff. Sees all tenants, provisions/suspends/purges them, impersonates any tenant view, watches the global job queue and audit feed. |
 
 These map one-to-one onto the roles already enforced by the server (`viewer < steward <
-admin < operator`, ranked in `server/src/erserver/auth.py`), so the UI invents no new
+admin < operator`, ranked server-side in `er-server`'s `guard` — the Python
+`server/src/erserver/auth.py` that originally held the ranking is gone), so the UI invents no new
 permission model — it renders the one that exists.
 
 ### 2.2 The minimal identity layer (new, control plane)

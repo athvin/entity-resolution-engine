@@ -4,6 +4,17 @@
 
 > This document is the current-state design; live build status is tracked in [plan-to-aws.md](plan-to-aws.md).
 
+> **Its code references predate the Rust rewrite.** The AWS and Kubernetes design
+> here is current, but 56 links pointed at `server/src/erserver/*.py`,
+> `src/er/**/*.py`, `docker/`, `dbt/` and `benchmarks/` files that no longer exist —
+> `git ls-files server` returns nothing. They are now inline code spans rather than
+> links, so they read as what the design was written against instead of 404ing.
+> §1's "the platform today runs as host processes against a Docker Compose
+> substrate" describes the **pre-rewrite starting point**, not the present: the API
+> and dispatcher are `er-server`, and the deployable environment §1 says does not
+> exist has since been built. For current code owners see `rust-conventions`'
+> generated crate map.
+
 ---
 
 ## 1. Context and goals
@@ -16,7 +27,7 @@ This design adds that substrate, with five goals:
 - **Give every developer a complete, isolated environment** in their own namespace, with its own S3 lake prefix, DuckLake catalog databases, and transactional control-plane database — created, suspended, and destroyed in seconds.
 - **Hold real production data in lower environments**, protected by IAM, encryption, and audit rather than by scrubbing or synthesis.
 - **Make prod readable by the whole team and writable only from an explicitly assumed role**, enforced structurally rather than by policy correctness.
-- **Resolve every secret from AWS Secrets Manager** through the `secret://` indirection that already exists in [server/src/erserver/secrets.py](../server/src/erserver/secrets.py).
+- **Resolve every secret from AWS Secrets Manager** through the `secret://` indirection that already exists in `server/src/erserver/secrets.py`.
 
 **Decisions taken** (each developed in its own section; rationale and rejected alternatives in [infrastructure-decisions.md](infrastructure-decisions.md)): a single account in `us-east-2` (§3); IAM Identity Center with permission sets; one EKS cluster per environment, dev-first with prod deferred (§5.4, §15), on **EKS Auto Mode** (§5.5) with `c6id`-family runners; in-namespace Postgres in dev, Aurora in prod (§7.1); idle cost handled by **suspending the namespace** (§5.2); a native Kubernetes Job per run (§6.1) sized vCPU/spill-tiered per record count (§6.5); OpenTelemetry to a swappable collector (§10); cost attributed by tags + CUR + EKS split allocation (§16.1); SOC 2 by building only what cannot be retrofitted (§8.6); **dev behind an internal ALB over Tailscale, prod behind WAF, `er-api` on no load balancer** (§4.1); SES email (§7.5, §9.3); Terraform/Helm applied from CI on `main` (§14.2); and direct-OIDC product SSO in the BFF ([frontend-design.md](frontend-design.md) §2.4).
 
@@ -28,20 +39,20 @@ These are not preferences. Each comes from the existing implementation, and the 
 
 | Constraint | Source | Consequence for infrastructure |
 |---|---|---|
-| `max_locks_per_transaction = 1024` | [docker/compose.yaml:47](../docker/compose.yaml), [frontend/dev/compose.yaml:40](../frontend/dev/compose.yaml) — DuckLake's maintenance sweep drops every expired inlined-data table in one transaction, and the default of 64 fails it with "out of shared memory", poisoning the catalog connection | A cluster parameter group in prod; a `-c` flag on the pod in dev, exactly as both compose files already do |
-| `ERSERVER_MAINT_DSN` needs `CREATEDB`; one `CREATE DATABASE` per tenant | `tenant_db_name` at [server/src/erserver/provision.py:79](../server/src/erserver/provision.py) | Rules out Aurora Serverless v1 and DSQL. Serverless **v2** is fine. A dedicated `er_provisioner` role, never superuser |
-| Advisory locks are session-scoped and held for a run's lifetime | `tenant_lock` in [src/er/lake/catalog.py](../src/er/lake/catalog.py) | No RDS Proxy or transaction-mode pooler between runner and catalog. A dying pod releasing its lock is designed behaviour, not an accident |
-| The job queue and the tenant advisory lock are described as needing one Postgres cluster | [backend-design.md](backend-design.md) §5, [src/er/lake/catalog.py](../src/er/lake/catalog.py) | One Postgres *instance* per environment holding the control-plane DB and every tenant catalog DB. **Worth verifying** — PostgreSQL advisory locks are scoped per database, not per cluster, so this may be over-stated (§18.1). The design satisfies it either way |
-| `ERSERVER_CONFIG_ROOT` and `ERSERVER_DROP_ROOT` are written by the API and read by the runner — and the dispatcher — *by path* | [server/src/erserver/api.py](../server/src/erserver/api.py) import endpoint, [configsvc.py](../server/src/erserver/configsvc.py); `drain_staged` re-loads an org's config each idle pass at [server/src/erserver/dispatcher.py:352](../server/src/erserver/dispatcher.py) | A shared writable filesystem — EFS with the CSI driver — mounted by the API, the dispatcher, *and every runner Job* (§6.2). Pod-local storage cannot work, and this is what blocks a stateless multi-replica API today |
-| DuckDB's temp directory is CWD-relative (`/app/.tmp`, `/app/dbt/.tmp`) and no environment variable relocates it | [benchmarks/storage_sampler.py:29](../benchmarks/storage_sampler.py) | Ephemeral volumes mounted at exactly those two paths (§5.3) |
+| `max_locks_per_transaction = 1024` | `docker/compose.yaml:47`, [frontend/dev/compose.yaml:40](../frontend/dev/compose.yaml) — DuckLake's maintenance sweep drops every expired inlined-data table in one transaction, and the default of 64 fails it with "out of shared memory", poisoning the catalog connection | A cluster parameter group in prod; a `-c` flag on the pod in dev, exactly as both compose files already do |
+| `ERSERVER_MAINT_DSN` needs `CREATEDB`; one `CREATE DATABASE` per tenant | `tenant_db_name` at `server/src/erserver/provision.py:79` | Rules out Aurora Serverless v1 and DSQL. Serverless **v2** is fine. A dedicated `er_provisioner` role, never superuser |
+| Advisory locks are session-scoped and held for a run's lifetime | `tenant_lock` in `src/er/lake/catalog.py` | No RDS Proxy or transaction-mode pooler between runner and catalog. A dying pod releasing its lock is designed behaviour, not an accident |
+| The job queue and the tenant advisory lock are described as needing one Postgres cluster | [backend-design.md](backend-design.md) §5, `src/er/lake/catalog.py` | One Postgres *instance* per environment holding the control-plane DB and every tenant catalog DB. **Worth verifying** — PostgreSQL advisory locks are scoped per database, not per cluster, so this may be over-stated (§18.1). The design satisfies it either way |
+| `ERSERVER_CONFIG_ROOT` and `ERSERVER_DROP_ROOT` are written by the API and read by the runner — and the dispatcher — *by path* | `server/src/erserver/api.py` import endpoint, `configsvc.py`; `drain_staged` re-loads an org's config each idle pass at `server/src/erserver/dispatcher.py:352` | A shared writable filesystem — EFS with the CSI driver — mounted by the API, the dispatcher, *and every runner Job* (§6.2). Pod-local storage cannot work, and this is what blocks a stateless multi-replica API today |
+| DuckDB's temp directory is CWD-relative (`/app/.tmp`, `/app/dbt/.tmp`) and no environment variable relocates it | `benchmarks/storage_sampler.py:29` | Ephemeral volumes mounted at exactly those two paths (§5.3) |
 | 141.48 GiB of *live* spill sampled on the 10M-record full reload, at a **4 GB** DuckDB memory limit in a 10 GiB container | [performance.md](performance.md) | NVMe instance store, not EBS. Ten million records fitting in 10 GiB is also why sizing is CPU-tiered rather than memory-tiered (§6.5) |
 | 2 → 6 DuckDB threads cut a comparable 10M reload **40%** with peak memory flat (9.14 vs 9.37 GiB) — a work-in-progress single-pass measurement (§6.5) | [performance.md](performance.md) | vCPU is the time lever and memory is nearly constant in corpus size. Compute-optimized `c6id` nodes, not memory-optimized `r6id` (§5, §6.5) |
-| The dispatcher's startup reaper assumes it is alone | `queue.reap_stale(leader)` at [server/src/erserver/dispatcher.py:379](../server/src/erserver/dispatcher.py) | `replicas: 1` with `strategy: Recreate` — never RollingUpdate |
-| One active job per org, enforced by the `jobs_one_active_per_org` partial unique index | [server/src/erserver/db.py](../server/src/erserver/db.py) | A tenant scales *up*, never *out*. Size one runner to the largest tenant; scale `ERSERVER_CONCURRENCY` only for cross-tenant throughput |
-| Exit code `None` — killed, OOM, evicted — requeues with `--resume`, bounded by `max_attempts` (default 3) with exponential backoff | `dispose()` in [server/src/erserver/policy.py](../server/src/erserver/policy.py) | Spot interruption is survivable by design, which is what makes spot safe for runners. It is also why eviction is *expensive but bounded* rather than fatal — see §5.3 |
-| The dispatcher holds a permanent leader connection and polls every `ERSERVER_POLL_SECONDS` (default 2s) | [server/src/erserver/dispatcher.py](../server/src/erserver/dispatcher.py), [settings.py](../server/src/erserver/settings.py) | **No database that bills by connection-idleness will ever idle.** This killed Aurora auto-pause as a dev cost strategy (§7.1) |
-| DuckDB reads neither cgroup limits nor host core count | [src/er/lake/ducklake.py](../src/er/lake/ducklake.py) | Every pod limit must be paired with an explicit `ER_DUCKDB_THREADS` / `ER_DUCKDB_MEMORY_LIMIT`. A pod limit alone does nothing |
-| API read-path attaches inherit the *tenant's* DuckDB env | [server/src/erserver/readapi.py](../server/src/erserver/readapi.py) via `resolve_env`, `_POOL_CAPACITY = 8` warm attaches per process | Setting a tenant to 40 GB / 12 threads also sizes the API pods' DuckDB. [backend-design.md](backend-design.md) §8 says API pods *should* pin ~2 GiB / 2 threads; that split is not implemented, so API pod limits must be set defensively |
+| The dispatcher's startup reaper assumes it is alone | `queue.reap_stale(leader)` at `server/src/erserver/dispatcher.py:379` | `replicas: 1` with `strategy: Recreate` — never RollingUpdate |
+| One active job per org, enforced by the `jobs_one_active_per_org` partial unique index | `server/src/erserver/db.py` | A tenant scales *up*, never *out*. Size one runner to the largest tenant; scale `ERSERVER_CONCURRENCY` only for cross-tenant throughput |
+| Exit code `None` — killed, OOM, evicted — requeues with `--resume`, bounded by `max_attempts` (default 3) with exponential backoff | `dispose()` in `server/src/erserver/policy.py` | Spot interruption is survivable by design, which is what makes spot safe for runners. It is also why eviction is *expensive but bounded* rather than fatal — see §5.3 |
+| The dispatcher holds a permanent leader connection and polls every `ERSERVER_POLL_SECONDS` (default 2s) | `server/src/erserver/dispatcher.py`, `settings.py` | **No database that bills by connection-idleness will ever idle.** This killed Aurora auto-pause as a dev cost strategy (§7.1) |
+| DuckDB reads neither cgroup limits nor host core count | `src/er/lake/ducklake.py` | Every pod limit must be paired with an explicit `ER_DUCKDB_THREADS` / `ER_DUCKDB_MEMORY_LIMIT`. A pod limit alone does nothing |
+| API read-path attaches inherit the *tenant's* DuckDB env | `server/src/erserver/readapi.py` via `resolve_env`, `_POOL_CAPACITY = 8` warm attaches per process | Setting a tenant to 40 GB / 12 threads also sizes the API pods' DuckDB. [backend-design.md](backend-design.md) §8 says API pods *should* pin ~2 GiB / 2 threads; that split is not implemented, so API pod limits must be set defensively |
 | The boot order API-then-dispatcher is load-bearing | [frontend/dev/up.sh](../frontend/dev/up.sh) — the dispatcher's leader connection blocks the API's `ensure_schema` DDL indefinitely when they start together | An init container on the dispatcher gating on the API's `/healthz` |
 
 ## 3. Account and organization topology
@@ -137,7 +148,7 @@ This cascades: the `app` node empties and is reclaimed, the dispatcher's permane
 
 ### 5.3 Spill, ephemeral storage, and the eviction trap
 
-DuckDB writes temp files to a `.tmp` directory relative to the process working directory, and nothing in the engine emits `SET temp_directory`. The two concrete paths are `/app/.tmp` for the CLI and runner and `/app/dbt/.tmp` for the dbt subprocess ([benchmarks/storage_sampler.py:29](../benchmarks/storage_sampler.py)).
+DuckDB writes temp files to a `.tmp` directory relative to the process working directory, and nothing in the engine emits `SET temp_directory`. The two concrete paths are `/app/.tmp` for the CLI and runner and `/app/dbt/.tmp` for the dbt subprocess (`benchmarks/storage_sampler.py:29`).
 
 Both runner NodePools set `instanceStorePolicy: RAID0` on their EC2NodeClass, striping the local NVMe and making it the kubelet's ephemeral-storage root; an `emptyDir` then lands on NVMe automatically, so mounting `emptyDir` at those two paths satisfies the spill requirement with no engine change.
 
@@ -169,7 +180,7 @@ A pipeline run is one ephemeral pod, scoped to one tenant, that exits when the r
 dispatcher.launch_runner(payload, env, on_stage=, should_cancel=)
 ```
 
-Today that seam calls `subprocess.Popen([sys.executable, "-m", "erserver.runner", ...])` with the tenant's `ER_*` env merged in. Substituting a Kubernetes Job is a change to one function, which is the whole reason the seam exists. Pod-per-run (rather than long-lived workers) is forced by three facts: the tenant seam is process-scoped env ([src/er/lake/env.py](../src/er/lake/env.py) is the sole reader of `ER_*`); the Postgres advisory writer lock is session-scoped, so a dying pod releases it with no cleanup path; and memory bin-packing against an 8–64 GiB per-run envelope only works if the allocation is per-run.
+Today that seam calls `subprocess.Popen([sys.executable, "-m", "erserver.runner", ...])` with the tenant's `ER_*` env merged in. Substituting a Kubernetes Job is a change to one function, which is the whole reason the seam exists. Pod-per-run (rather than long-lived workers) is forced by three facts: the tenant seam is process-scoped env (`src/er/lake/env.py` is the sole reader of `ER_*`); the Postgres advisory writer lock is session-scoped, so a dying pod releases it with no cleanup path; and memory bin-packing against an 8–64 GiB per-run envelope only works if the allocation is per-run.
 
 ### 6.1 Argo Workflows — not chosen
 
@@ -195,7 +206,7 @@ Job (one per run, in the platform namespace)
   envFrom: per-run Secret (the tenant's ER_* overlay)
 ```
 
-**`backoffLimit: 0` is the single most important field.** The default of 6 would have Kubernetes retry a failed run with no knowledge of the exit-code taxonomy — re-running a config error six times, and worse, re-running a partially-completed pipeline *without* `--resume`. **The EFS mount is the second most important line, because its absence fails late:** the runner's first act is opening the config file by path ([server/src/erserver/runner.py:31](../server/src/erserver/runner.py)), an incremental import lists its CSV drops from `drop_root` at ingest time ([src/er/ingest/sources.py:146](../src/er/ingest/sources.py)), and the dispatcher re-loads an org's config on every idle pass (§2). Config content could in principle travel inline, but drops cannot leave the filesystem (`storage.drop_dir` must be an absolute local path, [src/er/config/schema.py:285](../src/er/config/schema.py)); inline config is a later optimization, not a way out of the mount (D-JOBSPEC).
+**`backoffLimit: 0` is the single most important field.** The default of 6 would have Kubernetes retry a failed run with no knowledge of the exit-code taxonomy — re-running a config error six times, and worse, re-running a partially-completed pipeline *without* `--resume`. **The EFS mount is the second most important line, because its absence fails late:** the runner's first act is opening the config file by path (`server/src/erserver/runner.py:31`), an incremental import lists its CSV drops from `drop_root` at ingest time (`src/er/ingest/sources.py:146`), and the dispatcher re-loads an org's config on every idle pass (§2). Config content could in principle travel inline, but drops cannot leave the filesystem (`storage.drop_dir` must be an absolute local path, `src/er/config/schema.py:285`); inline config is a later optimization, not a way out of the mount (D-JOBSPEC).
 
 Cancellation keeps today's semantics: the dispatcher deletes the Job, Kubernetes sends `SIGTERM`, and the engine stops at the next stage boundary. `terminationGracePeriodSeconds` must exceed the engine's stage-boundary check interval and the dispatcher's existing `TERMINATE_GRACE_SECONDS = 10.0`.
 
@@ -203,7 +214,7 @@ The dispatcher's ServiceAccount gets a namespace-scoped **Role**, not a ClusterR
 
 ### 6.3 Progress reporting
 
-Today `launch_runner` reads the subprocess's stderr pipe directly, parsing one JSON record per stage into `jobs.progress`. A Job pod has no such pipe, so **the runner writes its own progress** to the control-plane database — it already holds a DSN and already emits exactly these records, so the write becomes direct instead of relayed. This survives dispatcher restarts, removes N long-lived log streams, and sits on the same seam §10 needs for trace context, so the two are designed together. (The rejected dispatcher-log-streaming option is in D-PROGRESS.) It is a small change to [server/src/erserver/runner.py](../server/src/erserver/runner.py).
+Today `launch_runner` reads the subprocess's stderr pipe directly, parsing one JSON record per stage into `jobs.progress`. A Job pod has no such pipe, so **the runner writes its own progress** to the control-plane database — it already holds a DSN and already emits exactly these records, so the write becomes direct instead of relayed. This survives dispatcher restarts, removes N long-lived log streams, and sits on the same seam §10 needs for trace context, so the two are designed together. (The rejected dispatcher-log-streaming option is in D-PROGRESS.) It is a small change to `server/src/erserver/runner.py`.
 
 ### 6.4 "Contained to that tenant" — what the containment actually is
 
@@ -218,7 +229,7 @@ Namespace-per-tenant was rejected (D-TENANCY) — it is the right shape for the 
 
 ### 6.5 Sizing the Job: CPU is the lever, memory is nearly flat
 
-Because the dispatcher knows the tenant's record count before it launches anything, the Job is sized per run rather than drawn from a fixed class. The resource classes are **vCPU/spill-tiered with a near-constant memory floor** (per [server/src/erserver/sizing.py](../server/src/erserver/sizing.py)), and [backend-design.md](backend-design.md) §7 has been corrected to match. The measurements behind the inversion from the original memory-tiered classes, and why memory stays flat (DuckDB spills), are in [infrastructure-decisions.md](infrastructure-decisions.md) D-SIZING.
+Because the dispatcher knows the tenant's record count before it launches anything, the Job is sized per run rather than drawn from a fixed class. The resource classes are **vCPU/spill-tiered with a near-constant memory floor** (per `server/src/erserver/sizing.py`), and [backend-design.md](backend-design.md) §7 has been corrected to match. The measurements behind the inversion from the original memory-tiered classes, and why memory stays flat (DuckDB spills), are in [infrastructure-decisions.md](infrastructure-decisions.md) D-SIZING.
 
 **Class shape — tiered on vCPU, with a near-constant memory floor:**
 
@@ -231,9 +242,9 @@ Because the dispatcher knows the tenant's record count before it launches anythi
 Pod memory grows a little because peak container usage was 9.37 GiB against a 4 GB DuckDB limit (Python heap, Arrow buffers, the dbt subprocess); ephemeral storage is sized from measured spill. Two invariants are load-bearing and tested rather than trusted:
 
 - **`ER_DUCKDB_THREADS` and the CPU request are set in the same operation** — §2 records that DuckDB reads neither cgroup limits nor host core count, so `threads` out of step with the vCPU request wastes cores or thrashes, neither failing loudly.
-- **`ER_DUCKDB_MEMORY_LIMIT` stays strictly below the pod memory limit** — the invariant [benchmarks/scales.py](../benchmarks/scales.py) validates (`duckdb_memory_limit < mem_limit`); exceeding it means the OOM killer rather than a graceful spill.
+- **`ER_DUCKDB_MEMORY_LIMIT` stays strictly below the pod memory limit** — the invariant `benchmarks/scales.py` validates (`duckdb_memory_limit < mem_limit`); exceeding it means the OOM killer rather than a graceful spill.
 
-**The plumbing is half-wired.** `PATCH /v1/orgs/{org}/resources` ([server/src/erserver/api.py:451](../server/src/erserver/api.py)) accepts `duckdb_threads` (bounded `ge=1, le=32`) and `duckdb_memory_limit`, merges them into `orgs.env`, resolved at **claim** time. What is missing: deriving the values from record count ([benchmarks/scales.yaml](../benchmarks/scales.yaml) maps counts to envelopes, though its generous memory figures should not transfer) and translating them into pod `resources`. The `le=32` bound caps the useful instance at 32 vCPU — `c6id.8xlarge` is the top of the ladder.
+**The plumbing is half-wired.** `PATCH /v1/orgs/{org}/resources` (`server/src/erserver/api.py:451`) accepts `duckdb_threads` (bounded `ge=1, le=32`) and `duckdb_memory_limit`, merges them into `orgs.env`, resolved at **claim** time. What is missing: deriving the values from record count (`benchmarks/scales.yaml` maps counts to envelopes, though its generous memory figures should not transfer) and translating them into pod `resources`. The `le=32` bound caps the useful instance at 32 vCPU — `c6id.8xlarge` is the top of the ladder.
 
 **Two honest limits.** The thread-scaling measurement stops at 6 threads, so the knee above 6 is unknown — and unlikely to be linear, because the same run showed **reconcile 14% *slower*** at 6 threads, a Python graph step that does not parallelize with DuckDB threads (§18.2). And dynamic sizing makes the §2 API-pod inheritance problem worse: per-run sizing is therefore carried on the **job row**, not merged into `orgs.env`, until the [backend-design.md](backend-design.md) §8 split between tenant and API-pod settings is implemented (§18.10).
 
@@ -271,7 +282,7 @@ Roles, both forms: `er_app` for application traffic, `er_provisioner` with `CREA
 
 ### 7.2 The tenant database name collision
 
-`tenant_db_name(org)` at [server/src/erserver/provision.py:79](../server/src/erserver/provision.py) returns `er_` + `t_<org>_<blake2b(org)[:8]>`. The hash covers the org name alone, so two developers who each provision an org called `acme` derive the same database name.
+`tenant_db_name(org)` at `server/src/erserver/provision.py:79` returns `er_` + `t_<org>_<blake2b(org)[:8]>`. The hash covers the org name alone, so two developers who each provision an org called `acme` derive the same database name.
 
 With Postgres per namespace (§7.1) this is no longer a collision — the databases are in different instances. The fix is still worth shipping, to keep a shared staging/dev cluster viable: a new optional `ERSERVER_TENANT_DB_PREFIX`, defaulting to `er_` so current behaviour is bit-for-bit unchanged. It prefixes the **database name only**, leaving `tenant_namespace()` — and therefore the metadata schema and S3 prefix component — untouched, so a tenant's lake layout stays identical across environments (which is what makes the §13 refresh path tractable).
 
@@ -284,7 +295,7 @@ s3://er-dev-lake/dev/alice/{ns}/     ERSERVER_LAKE_DATA_PATH_TEMPLATE, per dev n
 s3://er-prod-lake/{ns}/              prod
 ```
 
-`ERSERVER_LAKE_DATA_PATH_TEMPLATE` is validated to contain `{ns}` and end with `/` ([server/src/erserver/settings.py:55](../server/src/erserver/settings.py)); both forms satisfy it. Local stacks carry the same shape under the single MinIO bucket: the settings default and the dev stack both use `s3://lake/{ns}/`, and the CI compose stack is its fixed single-tenant instance `s3://lake/er/`. Models stay under the tenant's prefix (`provision.py` sets `model_uri_prefix = f"{plan.data_path}models/"`) so a tenant purge is one prefix delete.
+`ERSERVER_LAKE_DATA_PATH_TEMPLATE` is validated to contain `{ns}` and end with `/` (`server/src/erserver/settings.py:55`); both forms satisfy it. Local stacks carry the same shape under the single MinIO bucket: the settings default and the dev stack both use `s3://lake/{ns}/`, and the CI compose stack is its fixed single-tenant instance `s3://lake/er/`. Models stay under the tenant's prefix (`provision.py` sets `model_uri_prefix = f"{plan.data_path}models/"`) so a tenant purge is one prefix delete.
 
 **Versioning carries a lifecycle policy** (why — D-VERSIONING): noncurrent versions expire after 30 days, incomplete multipart uploads after 7. Without it, a lake bucket where every run rewrites parquet grows without bound, and a run killed mid-write leaves parts that bill silently.
 
@@ -292,7 +303,7 @@ s3://er-prod-lake/{ns}/              prod
 
 ### 7.4 EFS
 
-One filesystem per environment with an access point per namespace, mounted at `ERSERVER_CONFIG_ROOT` and `ERSERVER_DROP_ROOT` — by the API, the dispatcher, and every runner Job (§6.2). Elastic throughput. Content is org YAML and CSV import drops — a few gigabytes, ~$1/mo — and no object store substitutes without an application change. EFS automatic backups (AWS Backup default plan, daily, 35-day retention, pennies) is enabled; what it uniquely protects is CSV drops awaiting ingest, since the org YAMLs are a projection of `config_versions.yaml` in the control-plane DB that `provision.seed_config` rewrites on replay ([server/src/erserver/provision.py:218](../server/src/erserver/provision.py)).
+One filesystem per environment with an access point per namespace, mounted at `ERSERVER_CONFIG_ROOT` and `ERSERVER_DROP_ROOT` — by the API, the dispatcher, and every runner Job (§6.2). Elastic throughput. Content is org YAML and CSV import drops — a few gigabytes, ~$1/mo — and no object store substitutes without an application change. EFS automatic backups (AWS Backup default plan, daily, 35-day retention, pennies) is enabled; what it uniquely protects is CSV drops awaiting ingest, since the org YAMLs are a projection of `config_versions.yaml` in the control-plane DB that `provision.seed_config` rewrites on replay (`server/src/erserver/provision.py:218`).
 
 ### 7.5 Email: SES
 
@@ -410,7 +421,7 @@ A first SOC 2 is expected ([backend-design.md](backend-design.md) §15 phase 4 n
 
 ## 9. Secrets
 
-[server/src/erserver/secrets.py](../server/src/erserver/secrets.py) already resolves an org env value written `secret://NAME` from `ERSERVER_SECRET_<NAME>` in the server's own process environment (`_ENV_PREFIX = "ERSERVER_SECRET_"`), storing only the reference in the control-plane database so a DSN never rides in a job row. That is the seam, and it means secrets *delivery* needs no application change.
+`server/src/erserver/secrets.py` already resolves an org env value written `secret://NAME` from `ERSERVER_SECRET_<NAME>` in the server's own process environment (`_ENV_PREFIX = "ERSERVER_SECRET_"`), storing only the reference in the control-plane database so a DSN never rides in a job row. That is the seam, and it means secrets *delivery* needs no application change.
 
 External Secrets Operator, authenticated by IRSA, projects Secrets Manager entries into Kubernetes Secrets consumed via `envFrom`:
 
@@ -432,11 +443,11 @@ A process environment is fixed at exec time, so on rotation ESO updates the Kube
 
 ### 9.2 S3 credentials: static keys now, IRSA later
 
-`ObjectStore.from_env()` in [src/er/lake/objectstore.py](../src/er/lake/objectstore.py) and `attach_statements()` in [src/er/lake/ducklake.py](../src/er/lake/ducklake.py) both require a literal `ER_S3_ACCESS_KEY_ID` / `ER_S3_SECRET_ACCESS_KEY` and a non-empty scheme-less `ER_S3_ENDPOINT`; there is no credential-chain path and no way to omit the endpoint (`require_env` rejects empty values, since an empty secret attaches a lake that authenticates as nobody).
+`ObjectStore.from_env()` in `src/er/lake/objectstore.py` and `attach_statements()` in `src/er/lake/ducklake.py` both require a literal `ER_S3_ACCESS_KEY_ID` / `ER_S3_SECRET_ACCESS_KEY` and a non-empty scheme-less `ER_S3_ENDPOINT`; there is no credential-chain path and no way to omit the endpoint (`require_env` rejects empty values, since an empty secret attaches a lake that authenticates as nobody).
 
 **Phase 1 (no code change).** One IAM user per environment with a lake-scoped policy, keys in Secrets Manager, with `ER_S3_ENDPOINT=s3.us-east-2.amazonaws.com`, `ER_S3_URL_STYLE=vhost`, `ER_S3_USE_SSL=true`. This works against real S3 today; rotation has the §9.1 restart requirement.
 
-**Phase 4 (the right answer).** A credential-provider mode so DuckDB uses `CREATE SECRET (TYPE s3, PROVIDER credential_chain)` and boto3 uses its default chain, both picking up the IRSA web-identity token, after which no static S3 key exists anywhere. Scheduled separately because it touches [src/er/lake/ducklake.py](../src/er/lake/ducklake.py), [src/er/lake/objectstore.py](../src/er/lake/objectstore.py), and [dbt/profiles/profiles.yml](../dbt/profiles/profiles.yml) together, and `tests/unit/test_dbt_profiles.py` contract-tests those three as field-for-field identical.
+**Phase 4 (the right answer).** A credential-provider mode so DuckDB uses `CREATE SECRET (TYPE s3, PROVIDER credential_chain)` and boto3 uses its default chain, both picking up the IRSA web-identity token, after which no static S3 key exists anywhere. Scheduled separately because it touches `src/er/lake/ducklake.py`, `src/er/lake/objectstore.py`, and `dbt/profiles/profiles.yml` together, and `tests/unit/test_dbt_profiles.py` contract-tests those three as field-for-field identical.
 
 ### 9.3 SES: the second static credential, retired before it was created
 
@@ -536,7 +547,7 @@ Three images, two of which do not exist yet:
 
 | Image | Status | Contents |
 |---|---|---|
-| `er-pipeline` | exists — [docker/Dockerfile](../docker/Dockerfile) | The runner. Baked DuckDB extensions, dbt, and compiled MinIO binaries |
+| `er-pipeline` | exists — `docker/Dockerfile` | The runner. Baked DuckDB extensions, dbt, and compiled MinIO binaries |
 | `er-api` | **new** | Slim: `src/er` + `server/src/erserver`, no dbt, no MinIO. Serves both `er-api` and `er-dispatcher` |
 | `er-web` | **new** | Next.js standalone output on Node 22 |
 
@@ -588,7 +599,7 @@ Suspend is the cost control (§5.2) and `dev-down` is the purge path [backend-de
 
 ## 13. Moving production data to lower environments
 
-Lower environments take real records with no scrub step. The constraint is that a **full-fidelity lake clone is not supported by the engine today**: `er init` records `DATA_PATH` in the catalog and the immutability check at [src/er/lake/init.py:180](../src/er/lake/init.py) raises `PreconditionFailure` (exit 3) on mismatch. Restoring a prod catalog into a dev namespace yields a catalog still pointing at `s3://er-prod-lake/...`, and no supported operation re-homes it.
+Lower environments take real records with no scrub step. The constraint is that a **full-fidelity lake clone is not supported by the engine today**: `er init` records `DATA_PATH` in the catalog and the immutability check at `src/er/lake/init.py:180` raises `PreconditionFailure` (exit 3) on mismatch. Restoring a prod catalog into a dev namespace yields a catalog still pointing at `s3://er-prod-lake/...`, and no supported operation re-homes it.
 
 **Path A — export and re-ingest.** What this design builds.
 
@@ -639,19 +650,19 @@ Bootstrap is two stacks, not one, because the state bucket must live in an accou
 |---|---|---|
 | `er-api` image | new `docker/Dockerfile.api` | Slim, no dbt or MinIO; [backend-design.md](backend-design.md) §4 specifies it |
 | `er-web` image | new `frontend/Dockerfile` | None exists; the BFF runs as a host process today |
-| `ERSERVER_TENANT_DB_PREFIX` | [server/src/erserver/provision.py](../server/src/erserver/provision.py), [settings.py](../server/src/erserver/settings.py) | Shared-cluster tenant isolation (§7.2) |
-| CI push job | [.github/workflows/ci.yaml](../.github/workflows/ci.yaml) | OIDC + `push: true`, adding `id-token: write` |
+| `ERSERVER_TENANT_DB_PREFIX` | `server/src/erserver/provision.py`, `settings.py` | Shared-cluster tenant isolation (§7.2) |
+| CI push job | `.github/workflows/ci.yaml` | OIDC + `push: true`, adding `id-token: write` |
 | Normalize the lake prefix | [configs/default.yaml](../configs/default.yaml), [frontend/dev/env.sh](../frontend/dev/env.sh) | Three inconsistent layouts today (§7.3) |
-| **k8s Job launcher** behind the existing seam | `launch_runner` in [server/src/erserver/dispatcher.py](../server/src/erserver/dispatcher.py) | Replaces `subprocess.Popen` with a Job + watch (§6.2) |
-| **Runner writes its own progress** | [server/src/erserver/runner.py](../server/src/erserver/runner.py), [queue.py](../server/src/erserver/queue.py) | A Job pod has no stderr pipe to the dispatcher (§6.3) |
-| **Per-run resource sizing** from record count | [server/src/erserver/queue.py](../server/src/erserver/queue.py), [policy.py](../server/src/erserver/policy.py), derived from [benchmarks/scales.yaml](../benchmarks/scales.yaml) | CPU-tiered classes on the job row, not `orgs.env` (§6.5) |
-| **`jobs.trace_context`** column | [server/src/erserver/db.py](../server/src/erserver/db.py) | W3C traceparent across the enqueue→pod hop; one trace end to end (§10.2) |
+| **k8s Job launcher** behind the existing seam | `launch_runner` in `server/src/erserver/dispatcher.py` | Replaces `subprocess.Popen` with a Job + watch (§6.2) |
+| **Runner writes its own progress** | `server/src/erserver/runner.py`, `queue.py` | A Job pod has no stderr pipe to the dispatcher (§6.3) |
+| **Per-run resource sizing** from record count | `server/src/erserver/queue.py`, `policy.py`, derived from `benchmarks/scales.yaml` | CPU-tiered classes on the job row, not `orgs.env` (§6.5) |
+| **`jobs.trace_context`** column | `server/src/erserver/db.py` | W3C traceparent across the enqueue→pod hop; one trace end to end (§10.2) |
 | **OTel instrumentation + `force_flush()` on exit** | DONE for the backend: [er-obs](../rust/crates/er-obs), with the flush at `main.rs`'s `exec-task` arm because `process::exit` runs no destructors. The browser half (clicks, beacon) is outstanding. | Spans per stage; an exiting Job otherwise drops its last batch (§10.2) |
 | **Per-run cost on the run row** | BLOCKED, not unbuilt: Split Cost Allocation Data is off, so all ten `split_line_item_*` CUR columns are present and entirely NULL (re-probed 2026-11-05, 0 of 9,341 rows). Console-only to enable, and it does not backfill. | vCPU-hours × node rate, recorded next to the existing counters (§16.2) |
-| Non-root `USER` in all three images | [docker/Dockerfile](../docker/Dockerfile) (none today), both new Dockerfiles | Pod Security `restricted` requires it (§5.6) |
-| Disable FastAPI docs routes outside dev | [server/src/erserver/api.py](../server/src/erserver/api.py) | `/docs`, `/redoc`, `/openapi.json` are the only unauthenticated routes besides `/healthz` (§4.1) |
-| *(optional)* `api_keys.last_used_at` | [server/src/erserver/db.py](../server/src/erserver/db.py), [auth.py](../server/src/erserver/auth.py) | Turns the SOC 2 credential review into a query (§8.6) |
-| *(Phase 4)* S3 credential chain | [src/er/lake/ducklake.py](../src/er/lake/ducklake.py), [objectstore.py](../src/er/lake/objectstore.py), [dbt/profiles/profiles.yml](../dbt/profiles/profiles.yml) | Drop static keys for IRSA; contract-tested together (§9.2) |
+| Non-root `USER` in all three images | `docker/Dockerfile` (none today), both new Dockerfiles | Pod Security `restricted` requires it (§5.6) |
+| Disable FastAPI docs routes outside dev | `server/src/erserver/api.py` | `/docs`, `/redoc`, `/openapi.json` are the only unauthenticated routes besides `/healthz` (§4.1) |
+| *(optional)* `api_keys.last_used_at` | `server/src/erserver/db.py`, `auth.py` | Turns the SOC 2 credential review into a query (§8.6) |
+| *(Phase 4)* S3 credential chain | `src/er/lake/ducklake.py`, `objectstore.py`, `dbt/profiles/profiles.yml` | Drop static keys for IRSA; contract-tested together (§9.2) |
 
 Most of the additions come from one source: putting the runner in its own pod removes the stderr pipe the dispatcher currently relies on, which pulls in progress reporting, trace propagation, and flush-on-exit together. They should land as one piece of work (§10.6).
 
@@ -685,7 +696,7 @@ The live tracker with acceptance criteria is [plan-to-aws.md](plan-to-aws.md); t
 
 **Phase 4 — Hardening and the audit run-up.** The IRSA credential chain (§9.2) — the SES API port that was to retire the SMTP key is **done**, and the key was never created (§9.3) — per-tenant scoped ServiceAccounts (§6.4), dashboards for the [backend-design.md](backend-design.md) §14 metric list, alerting, automated snapshot sharing, GuardDuty in prod, and the point-in-time SOC 2 artifacts (policies, risk assessment, subprocessor inventory including the Anthropic flow, vendor assessments, break-glass procedure, a restore test with its record — §8.6).
 
-*A follow-up worth noting:* an EKS cluster unlocks the GitHub Actions Runner Controller, which resolves a recorded blocker — [benchmarks/scales.yaml](../benchmarks/scales.yaml) asks for `ubuntu-latest-8-cores` and `ubuntu-latest-16-cores` at the `100k` and `1m` scales, neither available today. A `runner-l` node serves them natively. The
+*A follow-up worth noting:* an EKS cluster unlocks the GitHub Actions Runner Controller, which resolves a recorded blocker — `benchmarks/scales.yaml` asks for `ubuntu-latest-8-cores` and `ubuntu-latest-16-cores` at the `100k` and `1m` scales, neither available today. A `runner-l` node serves them natively. The
 dispatched coding agent's Phase 3 ([agent-fleet.md](agent-fleet.md) §5) is the
 other consumer, and it carries the same vCPU-quota prerequisite.
 
@@ -756,7 +767,7 @@ The shared portion is mostly *fixed*, and the variable portion is mostly *direct
 
 ### 16.3 Knowing when a tenant's cost means something is wrong
 
-The purpose is narrow: **a signal for when the current design has stopped working for some customer shape, early enough to act.** The business half needs no new instrumentation — §10.1's `runs`/`run_stages` and the typed `PROMOTED_COUNTERS` ([src/er/obs/counters.py](../src/er/obs/counters.py)) are already written per stage per run. Joined to §16.2's per-run cost, three monthly questions (one Athena query over the CUR, one SQL query over `runs`/`run_stages`): (1) **is any tenant disproportionate** — cost per month normalized to **cost per million records**, where a *small* tenant costing like a big one is the signal; (2) **is cost per million stable, rising, or falling** — the degradation detector, most valuable because it catches problems while still cheap; (3) **how much is spent on runs that failed** — a run dying in the last stage costs nearly what success does, and a thrice-retried spot eviction costs triple (§5.3). A rising cost-per-million for one tenant is a config problem (blocking keys degrading — tune blocking, not instance types); rising across all tenants is systemic (snapshot retention not expiring — §7.3). Two alarms are worth automating: any single tenant exceeding a set share of variable spend, and failed-run spend exceeding a set share of total.
+The purpose is narrow: **a signal for when the current design has stopped working for some customer shape, early enough to act.** The business half needs no new instrumentation — §10.1's `runs`/`run_stages` and the typed `PROMOTED_COUNTERS` (`src/er/obs/counters.py`) are already written per stage per run. Joined to §16.2's per-run cost, three monthly questions (one Athena query over the CUR, one SQL query over `runs`/`run_stages`): (1) **is any tenant disproportionate** — cost per month normalized to **cost per million records**, where a *small* tenant costing like a big one is the signal; (2) **is cost per million stable, rising, or falling** — the degradation detector, most valuable because it catches problems while still cheap; (3) **how much is spent on runs that failed** — a run dying in the last stage costs nearly what success does, and a thrice-retried spot eviction costs triple (§5.3). A rising cost-per-million for one tenant is a config problem (blocking keys degrading — tune blocking, not instance types); rising across all tenants is systemic (snapshot retention not expiring — §7.3). Two alarms are worth automating: any single tenant exceeding a set share of variable spend, and failed-run spend exceeding a set share of total.
 
 ## 17. Verification
 
