@@ -140,6 +140,15 @@ hasnt "$S/log" "never ran" "did NOT claim starvation"
 has   "$S/calls.log" "add-label bus-failed" "bus-failed still applied"
 has   "$S/calls.log" "pr comment 101" "members still told"
 
+echo "=== workflow-touching: excluded, because GITHUB_TOKEN cannot push workflows ==="
+S=$(run workflow-touching); echo "  rc=$(cat "$S/rc")"
+chk "exit 0" "$(cat "$S/rc")" "0"
+has   "$S/log" "touches .github/workflows/" "skipped with the real reason"
+has   "$S/log" "merge it by hand" "told the reader what to do instead"
+has   "$S/log" "batch: 101 102" "the other two still ride"
+hasnt "$S/calls.log" "pr merge 108" "the workflow-touching PR was never merged"
+has   "$S/log" "landed #102" "the batch still landed"
+
 echo
 echo "===================================="
 echo "passed: $pass   failed: $fail"

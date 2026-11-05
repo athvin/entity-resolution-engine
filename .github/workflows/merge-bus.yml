@@ -197,6 +197,31 @@ jobs:
             elif [ "${head#merge-bus/}" != "$head" ]; then
               # Without this the bus batches its own bus PR on the next run.
               reason="is itself a bus branch"
+            elif [ "$(gh pr view "$n" --json files \
+                        --jq '[.files[].path | select(startswith(".github/workflows/"))] | length')" != "0" ]; then
+              # A HARD PLATFORM LIMIT, NOT A POLICY CHOICE. GitHub refuses a
+              # push from an App-authenticated token that creates or updates
+              # anything under `.github/workflows/`:
+              #
+              #   ! [remote rejected] refusing to allow a GitHub App to create
+              #     or update workflow `.github/workflows/rust.yml` without
+              #     `workflows` permission
+              #
+              # And `workflows` is NOT a grantable `GITHUB_TOKEN` scope —
+              # the permissions block accepts only actions, attestations,
+              # checks, contents, deployments, discussions, id-token, issues,
+              # packages, pages, pull-requests, repository-projects,
+              # security-events and statuses. So no `permissions:` line can fix
+              # this; only a PAT carrying the `workflow` scope could, which
+              # would hand a long-lived credential push rights over CI itself.
+              #
+              # Observed on the second live run: everything worked — pre-flight,
+              # batch merge, tree — and the push was rejected. Nothing was left
+              # behind, because the rejection happens before the branch exists.
+              #
+              # Such a PR must be merged by hand. Said plainly here so nobody
+              # reads the skip as the bus being broken.
+              reason="touches .github/workflows/ — GITHUB_TOKEN may not push workflow changes, so merge it by hand"
             else
               case "$state" in
                 CLEAN) ;;

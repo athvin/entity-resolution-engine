@@ -243,6 +243,19 @@ Four properties worth knowing before changing it:
   runs executed a step, and if capacity runs out mid-validation it reports
   `starved` instead of red: no `bus-failed` label, and no comment on the
   members, because during an outage every PR in the repository is equally stuck.
+- **A PR touching `.github/workflows/` can never ride the bus.** GitHub refuses
+  a push from an App-authenticated token that creates or updates anything under
+  that path — *"refusing to allow a GitHub App to create or update workflow …
+  without `workflows` permission"* — and **`workflows` is not a grantable
+  `GITHUB_TOKEN` scope**, so no `permissions:` line fixes it. Only a PAT with
+  the `workflow` scope could, which would hand a long-lived credential push
+  rights over CI itself. The bus therefore skips such PRs at selection, saying
+  so, and they are merged by hand. Found on the second live run, where
+  everything else worked and only the push was rejected.
+- **It needs `actions: read`.** A declared `permissions:` block sets every
+  unnamed scope to `none`, and both the pre-flight and the verdict
+  classification read `/actions/runs`. Omitting it is how the first live run
+  died, with a 403 the stubbed simulator could never have produced.
 - **It stops on red and does not bisect.** A failed batch merges nothing,
   comments the failing contexts on the bus PR and every member, and leaves the
   bus PR open because its branch is the only place the failing combination
