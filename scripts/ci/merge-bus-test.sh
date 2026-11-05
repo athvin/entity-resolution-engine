@@ -123,6 +123,23 @@ has "$S/log" "but the gate validated" "tree assertion FIRED on the divergence"
 has "$S/log" "Something did not land as tested" "says what it means"
 chk "main is missing b.txt" "$(mainfiles "$S")" "src/a.txt src/base.txt "
 
+echo "=== preflight-blind: Actions API unreadable must not kill the run ==="
+S=$(run preflight-blind); echo "  rc=$(cat "$S/rc")"
+chk "exit 0" "$(cat "$S/rc")" "0"
+has "$S/log" "skipping the capacity pre-flight" "warned and carried on"
+has "$S/log" "no readable run history" "said why it proceeded"
+has "$S/log" "landed #101" "the batch still landed"
+hasnt "$S/calls.log" "GARBAGE_RUN_ID" "never requested a garbage run id"
+
+echo "=== verdict-blind: unreadable API must NOT relabel a red batch as starved ==="
+S=$(run verdict-blind); echo "  rc=$(cat "$S/rc")"
+chk "exit non-zero" "$([ "$(cat "$S/rc")" != "0" ] && echo yes || echo no)" "yes"
+has   "$S/log" "rather than guessing at starvation" "declined to guess"
+has   "$S/log" "went **red**" "still reported as red"
+hasnt "$S/log" "never ran" "did NOT claim starvation"
+has   "$S/calls.log" "add-label bus-failed" "bus-failed still applied"
+has   "$S/calls.log" "pr comment 101" "members still told"
+
 echo
 echo "===================================="
 echo "passed: $pass   failed: $fail"

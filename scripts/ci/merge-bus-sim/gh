@@ -128,11 +128,28 @@ api)
       # runs) and the verdict classification (which reads the bus PR's own
       # runs) can disagree — that is what a mid-validation capacity loss is.
       rid="${path#*actions/runs/}"; rid="${rid%%/jobs*}"
+      case "$rid" in ''|*[!0-9]*) printf 'GARBAGE_RUN_ID %s\n' "$rid" >>"$SIM/calls.log" ;; esac
       v="$(get "steps_run_${rid}")"
       [ -n "$v" ] || v="$(get steps_per_run)"
       printf '%s\n' "${v:-0}" ;;
-    *actions/runs?status=completed*) get recent_run_ids | tr ' ' '\n' | sed '/^$/d' ;;
-    *actions/runs?head_sha=*) get bus_run_ids | tr ' ' '\n' | sed '/^$/d' ;;
+    *actions/runs?status=completed*)
+      # Simulates the missing `actions: read` scope, which is how the first
+      # live run died. gh prints to stderr and exits non-zero; the workflow
+      # must not mistake that for data.
+      if [ "$(get api_fails_recent)" = "1" ]; then
+        # Observed in production: the error text reached the caller's word
+        # list, so it is emitted on stdout too. A stub that only writes stderr
+        # tests a tidier failure than the one that actually happened.
+        echo "gh: Resource not accessible by integration (HTTP 403)"
+        echo "gh: Resource not accessible by integration (HTTP 403)" >&2
+        exit 1
+      fi
+      get recent_run_ids | tr ' ' '\n' | sed '/^$/d' ;;
+    *actions/runs?head_sha=*)
+      if [ "$(get api_fails_bus)" = "1" ]; then
+        echo "gh: Resource not accessible by integration (HTTP 403)" >&2; exit 1
+      fi
+      get bus_run_ids | tr ' ' '\n' | sed '/^$/d' ;;
     *) die "api $path" ;;
   esac
   ;;
