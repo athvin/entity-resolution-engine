@@ -66,12 +66,21 @@ hand in `er-server/src/openapi.rs` and covers the control-plane tables plus the
 produced golden marts rather than everything under `entities/`; the pipeline's
 intermediate entities are deliberately absent.
 
-**`every_generated_entity_schema_is_registered` does not enforce its own name.**
-It asserts the *size* of `ApiDoc`'s registration list, so it fires when a
-registration is added or removed and is blind to `entities/`. Add an entity,
-never register its schema, and the size is unchanged and the test is green. No
-gate catches that, so registering a new entity's schema is a step you have to
-remember — put it in the same change as the entity.
+**`wire: [json]` is the declaration that an entity qualifies for a schema, and
+it emits nothing.** Declaring it does not add the entity to `ApiDoc`. What
+reconciles the two is
+`every_json_wire_entity_has_a_schema_or_a_declared_gap`: it derives the
+json-wire set from the catalog, subtracts the registered schemas, and requires
+the difference to equal the `JSON_WIRE_WITHOUT_SCHEMA` backlog in that file. So
+a **new** `wire: [json]` entity fails the Rust test job until someone either
+registers its `ToSchema` or adds it to that list with a reason.
+
+Two things follow. The backlog is real and visible — a sizeable set of entities
+declare the JSON wire today with no schema describing them — and registering one
+is a public-API decision rather than a formality, because it becomes a
+documented schema that `er-openapi-check` then tracks for breaking changes. A
+sibling test holds the other direction: nothing may be registered that does not
+declare `wire: [json]`.
 
 ## What is generated and not yet consumed
 
@@ -145,9 +154,11 @@ frontend-visible break. See the er-server-control-plane skill.
 layers, one source. `make check` catches the first; the Rust snapshot test the
 second; the frontend job the third.
 
-**Added a whole entity.** The same, plus registering its `ToSchema` in
-`openapi.rs` by hand if the control lane serves it as JSON — nothing will tell
-you that you forgot.
+**Added a whole entity.** The same, plus a decision if it declares
+`wire: [json]`: register its `ToSchema` in `openapi.rs`, or add it to
+`JSON_WIRE_WITHOUT_SCHEMA` there. The Rust test job fails until you do one of
+the two, so this is the rare case the gate makes you choose rather than letting
+you forget.
 
 **The frontend needs a field the backend does not return.** The work is
 backend-first: the column goes in the entity, the statement projects it, the

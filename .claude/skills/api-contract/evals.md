@@ -103,24 +103,28 @@ Credit for warning against inventing a parallel hand-written description of the
 operation in the frontend, and for naming what *does* pin the route shape
 (`tools.json`, `envelopes.json`, the mock contract).
 
-## 6. A gate that does not do what its name says
+## 6. `wire: [json]` declares, it does not emit
 
-**Query:** "I added a new entity and forgot to register its component schema in
-`ApiDoc`. Will CI catch that?"
+**Query:** "My new entity declares `wire: [json]` in its generate block, so the
+OpenAPI component schema comes out automatically, right?"
 
 Must:
 
-- Say **no**. `every_generated_entity_schema_is_registered` asserts the size of
-  `ApiDoc`'s hand-written registration list, so an entity that was never
-  registered leaves the size unchanged and the test green.
-- Say no other gate covers it either, so the registration is a step to
-  remember rather than one to be reminded of.
+- Say **no**: `wire: [json]` records that the entity's payloads cross the JSON
+  wire; the component schema is a hand-written `ToSchema` registration in
+  `er-server/src/openapi.rs`.
+- Say CI *will* stop you — `every_json_wire_entity_has_a_schema_or_a_declared_gap`
+  derives the json-wire set from the catalog and fails the Rust test job until
+  the entity is either registered or named in `JSON_WIRE_WITHOUT_SCHEMA`.
+- Say registering means regenerating `openapi.json` and `schema.d.ts` in the
+  same commit.
 
 Must not:
 
-- Read the test's name as its behaviour, or claim `er-entity verify` covers
-  `ApiDoc`.
+- Claim the schema is emitted from the declaration.
+- Claim nothing checks the registration, or that the gate is a count of
+  registered schemas.
 
-Credit for proposing the durable fix — a set difference against `entities/`
-rather than a count — which is the shape `docs/agent-skills.md` recommends for
-exactly this reason.
+Credit for noting that registering is a public-API decision — the schema becomes
+one `er-openapi-check` tracks for breaking changes — which is why the gate forces
+the choice instead of making it.

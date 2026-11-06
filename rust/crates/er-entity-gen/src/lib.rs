@@ -12,7 +12,10 @@
 // through every emitter.
 #![allow(clippy::format_push_string)]
 
-mod casing;
+// Public so a consumer can name a generated type the same way the emitters do.
+// `er-server`'s OpenAPI coverage gate needs the entity-name -> struct-name
+// mapping; deriving it a second time there is how the two would drift.
+pub mod casing;
 mod convert;
 mod ddl;
 mod erd;

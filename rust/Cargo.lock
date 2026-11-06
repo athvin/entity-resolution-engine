@@ -2303,6 +2303,7 @@ dependencies = [
  "er-dag",
  "er-entities",
  "er-entity-diff",
+ "er-entity-gen",
  "er-entity-spec",
  "er-errors",
  "er-golden",
