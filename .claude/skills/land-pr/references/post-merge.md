@@ -65,9 +65,9 @@ were `cancelled` with `jobs=0` and the 3 survivors had 19–22. So:
 
 - A `cancelled` run with no jobs on your merge SHA is **not** a failure and not
   attributable to your diff. Do not debug it.
-- **Re-running it does not help** while merges keep arriving. Tried twice;
-  `run_attempt` reached 2 — which is the proof a re-run took, not the exit
-  code — and was superseded the same way.
+- **Re-running it does not help** while merges keep arriving. Observed once:
+  `run_attempt` went to 2 — which is the proof a re-run took, not the exit
+  code — and attempt 2 was superseded the same way, again with zero jobs.
 - So establish "`main` is green with my change on it" another way: a **later**
   head SHA's run that has your commit as an ancestor
   (`git merge-base --is-ancestor $MERGE_SHA origin/main`), or — strongest when
