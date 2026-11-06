@@ -767,9 +767,18 @@ gen_description_budget() {
 		len=${#desc}
 		rows+=("$(printf '%4d\t%s\t%d' $((1024 - len)) "$slug" "$len")")
 		# Every "for … see …" routing clause, one per line, to size a typical one.
+		#
+		# Split on BOTH sentence and clause boundaries, and ANCHOR the match on
+		# "for". Without the anchor the match runs from the start of the segment
+		# and swallows the entire what clause — the first version of this did
+		# exactly that, reporting 868-character "routing clauses". The median
+		# happened to survive because it ignores outliers, which is luck rather
+		# than a design. awk does the splitting because BSD and GNU sed disagree
+		# about `\n` in a replacement.
 		while IFS= read -r c; do
 			[[ -n $c ]] && clauses+=("${#c}")
-		done < <(printf '%s' "$desc" | tr ';' '\n' | grep -oiE '[^;]*\bfor .*see [a-z0-9-]+' || true)
+		done < <(printf '%s' "$desc" | awk '{gsub(/\. |; /, "\n"); print}' |
+			grep -oiE '^for [^;.]*see [a-z0-9-]+' || true)
 	done
 
 	median=$(printf '%s\n' "${clauses[@]}" | sort -n |

@@ -153,7 +153,7 @@ can still accept a routing clause.
 |  179 | `ducklake-performance` | 845 |
 |  342 | `pentest` | 682 |
 
-The median routing clause here is **59 characters**. Skills with less
+The median routing clause here is **56 characters**. Skills with less
 headroom than that cannot take another one — adding routing to any of them
 means trimming its **what** clause first, which is the documented fix:
 
