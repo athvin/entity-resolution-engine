@@ -22,9 +22,11 @@ stale: [references/diagnostics.md](references/diagnostics.md).
 
 Three facts about the family that are easy to get wrong:
 
-- `E007`, `E008` and `E013` are **documented but never implemented**. Do not
-  rely on them firing. (That drift is the stated reason `docs/entity-lint-rules.md`
-  is now generated and byte-compared.)
+- **Some documented codes are not implemented, and you must not rely on them
+  firing.** Which ones is a set difference the reference derives — do not work
+  from a remembered list, because a code that ships moves between the two halves
+  with nothing else in the tree changing. (That drift is the stated reason
+  `docs/entity-lint-rules.md` is generated and byte-compared.)
 - `E011` (no `SELECT *`) and `E012` (kind matches folder) have **no override**.
   There is no mode or flag that relaxes them.
 - The `E0xx` family is statement-level and lives in `er-sql-check`. The `V0xx`
