@@ -1,6 +1,6 @@
 ---
 name: aws-account-operations
-description: Explains how to operate and introspect this repo's live AWS account — the single-account model where environments are separated by name prefix and permission set rather than by account, so every guardrail is an IAM-layer deny and SCPs apply to nothing; the Identity Center permission sets, which CLI profile reaches each and which carries no guard; the Pod Identity rule binding one namespace and service account to one role; what is and is not alarmed, which is almost nothing; the Budgets and CUR 2.0 cost pipeline; and the two traps that cost real time, namely cost-allocation tags that never backfill and the 8-vCPU quotas that leave a runner pod pending forever. Use when asking what is deployed, investigating a bill, a quota error or a pod that cannot reach AWS, reading logs or CloudTrail, or reaching for the `aws` CLI. All infrastructure here is Terraform — never generate CDK, CloudFormation or SAM. For authoring Terraform and Helm see infra-platform; for CI and image builds see ci-and-supply-chain.
+description: Explains how to operate and introspect this repo's live AWS account — the single-account model where environments are separated by name prefix and permission set rather than by account, so every guardrail is an IAM deny and SCPs apply to nothing; the Identity Center permission sets, which CLI profile reaches each and which is unguarded; the Pod Identity rule binding one namespace and service account to one role; what is and is not alarmed; the Budgets and CUR 2.0 pipeline; and two traps: cost-allocation tags that never backfill and the vCPU quotas that leave a pod Pending. Use when asking what is deployed, investigating a bill, a quota error or a pod that cannot reach AWS, reading logs or CloudTrail, or reaching for the `aws` CLI. All infrastructure here is Terraform — never generate CDK, CloudFormation or SAM. For authoring Terraform and Helm see infra-platform; for CI and image builds see ci-and-supply-chain; for the AWS feature pins see rust-conventions; for lake credentials see ducklake-lakehouse.
 ---
 
 # Operating the account
@@ -58,12 +58,11 @@ inline policy deny".
 Access is by **group membership**, not per-person assignment. Human IAM users do
 not exist; see the reference for the one long-lived key that does.
 
-| Permission set | Session | Reached by |
-|---|---|---|
-| `PlatformAdmin` | PT8H | the `er-platform` CLI profile |
-| `PlatformReadOnly` | PT8H | the `er-readonly` CLI profile |
-| `ProdDataReadOnly` | PT4H | no profile configured |
-| `ProdAdmin` | PT1H | the `er-prodadmin` CLI profile |
+The sets, their session lengths and **which carry an inline policy** are the
+generated table in [references/footprint.md](references/footprint.md). The CLI
+profile that reaches each: `er-platform` → `PlatformAdmin`, `er-readonly` →
+`PlatformReadOnly`, `er-prodadmin` → `ProdAdmin`. `ProdDataReadOnly` has no
+profile configured.
 
 Three things to know before picking one. `PlatformAdmin` carries
 `AdministratorAccess` *plus* an inline guard whose Deny statements block prod
@@ -78,12 +77,11 @@ narrower than its name suggests: lake reads, `rds-db:connect` as `er_readonly`,
 `eks:Describe*` and log reads. It cannot list buckets or read Budgets, so it is
 not a general introspection identity. `PlatformReadOnly` is the one that is —
 account-wide `ReadOnlyAccess`, added for the MCP proxy, which runs as it via the
-`er-readonly` profile. An expired SSO token there is the usual reason the MCP
-server answers nothing: `aws sso login --profile er-readonly`.
+`er-readonly` profile.
 
-The generated reference carries an **Inline policy** column, and a `**none**`
-there is the fact worth noticing: a permission set with no inline policy has no
-deny statements at all, whatever its managed policy allows.
+A `**none**` in that table's **Inline policy** column is the fact worth
+noticing: a permission set with no inline policy has no deny statements at all,
+whatever its managed policy allows.
 
 ## Introspecting the account
 
@@ -98,11 +96,11 @@ Three sources, and picking the wrong one wastes time:
 **The MCP server does not reach account state, and that is by configuration.**
 `.mcp.json` runs the proxy with `--read-only`, which strips `aws___run_script`
 and `aws___get_presigned_url` — `run_script` being the only tool that executes
-anything against the account. What remains is
-`aws___search_documentation`, `aws___read_documentation`,
-`aws___retrieve_skill`, `aws___list_regions`, `aws___get_regional_availability`
-and `aws___get_tasks`. Prefer those over recalling API details from memory; do
-not expect them to tell you what is running.
+anything against the account. What remains is documentation, guidance and region
+metadata; run `/mcp` to see the tools actually offered rather than trusting a
+list here, since they track the vendor's server version. Prefer them over
+recalling API details from memory; do not expect them to tell you what is
+running.
 
 So a live question is a CLI question:
 
@@ -113,9 +111,13 @@ AWS_PROFILE=er-readonly aws eks describe-cluster --name er-dev --query cluster.v
 
 That profile cannot write — `ReadOnlyAccess`, verified by
 `iam simulate-principal-policy` returning `implicitDeny` for `s3:PutObject`,
-`eks:DeleteCluster`, `iam:CreateUser` and the rest. An expired token is the
-usual reason a command fails; the fix is another `aws sso login`, not a config
-change.
+`eks:DeleteCluster`, `iam:CreateUser` and the rest.
+
+**An expired SSO token is the usual reason either the CLI or the MCP server
+stops answering**, and the fix is another `aws sso login --profile er-readonly`
+rather than a config change. The proxy re-reads credentials from disk per
+request, so nothing needs restarting. (This is the one place that fact is
+stated; it was previously repeated four times across this skill.)
 
 **Three guardrail layers, none sufficient alone**: the proxy flag is
 client-side and another client ignores it; the IAM condition keys reach only
@@ -147,20 +149,40 @@ missing policy. Note also that the IMDS hop limit makes node-role fallback
 unreachable, so there is no silent degradation to a broader credential — the
 call just fails, which is the desired behaviour.
 
-## What is not alarmed
+## What is and is not alarmed
 
-Worth knowing before assuming a problem would have paged someone:
+**Read the counts off the generated alerting-surface table in
+[references/footprint.md](references/footprint.md), not off prose here.** This
+section asserted "zero metric alarms, zero metric filters, zero SNS topics"
+after two of those three had stopped being true, and it survived review because
+the other two still were. The table is derived from `infra/terraform/`, so it
+cannot drift that way again.
 
-- Two CloudWatch log groups exist, both with finite retention. **Zero
-  dashboards, zero metric alarms, zero metric filters, zero SNS topics.**
-- Budget notifications go to **one email address** and nowhere else. That is the
-  entire alerting surface.
+What the shape of that table means, which is the part worth carrying:
+
+- **There are two notification paths, not one, and they are deliberately not
+  merged.** Metric alarms publish to an SNS topic with an email subscription;
+  the Budgets email the same address directly. `alerts.tf` explains why they stay
+  separate — Budgets is served from `us-east-1` while a CloudWatch alarm can only
+  publish to a topic in its own region, so "one path" would really be two topics
+  sharing a subscriber, for no gain at one subscriber. **Adding a second
+  destination is what justifies merging them**, and then the move is a `us-east-1`
+  topic beside the existing one with both Budgets repointed.
+- Dashboards and metric filters remain at zero. The metric filter is the sharper
+  absence: nothing turns a log line into a metric, so an alarm can only watch
+  what a service publishes natively.
+- An SNS email subscription is `PENDING` until the address confirms it, Terraform
+  cannot confirm it, and `alerts.tf` notes an unconfirmed subscription looks
+  identical to a working one in the console. **Whether an alarm reaches anyone is
+  a live check, not a read of the declaration** — `sns list-subscriptions-by-topic`
+  and look for a `PendingConfirmation` ARN.
 - Fluent Bit is deliberately **not** granted `logs:CreateLogGroup`, so a shipper
   cannot invent a retention-less group. The OTel collector is granted it, scoped
   to one group ARN.
 
-So "nothing alerted, so nothing is wrong" is not sound reasoning here. Equally,
-proposing a dashboard or alarm is adding the first one, not extending a set.
+So "nothing alerted, so nothing is wrong" is still not sound reasoning — but now
+because the coverage is thin and one subscription may be unconfirmed, not because
+there is nothing there at all.
 
 ## Two traps that cost real time
 
@@ -179,11 +201,12 @@ never place: the fleet request fails `VcpuLimitExceeded` /
 pod sits `Pending` with nothing obvious in its own events. **A pod stuck
 `Pending` with no scheduling event is this, until proven otherwise.**
 
-**Both read `8.0` applied** (AWS default 5). An increase to 64 was requested
-for both on 2026-10-11 and both requests are `CASE_CLOSED` *without having been
-granted* — this skill said "raised to 64" until 2026-10-24, which was wrong. A
-closed case is not a granted one, so read the applied value rather than
-trusting any doc:
+**Read the applied value; never answer this from a document, including this
+one.** The quota is live account state that no generator here can derive, and
+the failure has already happened twice in both directions: an increase request
+was `CASE_CLOSED` *without being granted*, and this skill asserted the
+requested figure as the applied one for two weeks on the strength of that closed
+case. A closed case is not a granted one.
 
 ```
 aws service-quotas get-service-quota --service-code ec2 \
@@ -193,9 +216,13 @@ aws service-quotas list-requested-service-quota-change-history-by-quota \
   --query 'RequestedQuotas[].[Status,DesiredValue]'
 ```
 
-At 8, with the always-on `app` and `system` nodes holding 2 vCPU each, there
-are 6 vCPU of headroom — less than one 8-vCPU `runner-sm` node. No runner node
-of either class can be provisioned until this is raised.
+Then do the arithmetic against what you read, because the ceiling is shared with
+everything already running. Worked example at the AWS default of 8: the
+always-on `app` and `system` nodes hold 2 vCPU each, leaving 6 vCPU of headroom —
+less than one 8-vCPU `runner-sm` node, so no runner node of either class can
+place at all. Substitute the value the command returned; if it exceeds the sum
+of the always-on nodes plus the node class you are asking for, the quota is not
+your problem and the `Pending` pod is something else.
 
 Budgets, the CUR 2.0 pipeline and per-tenant attribution:
 [references/cost-and-billing.md](references/cost-and-billing.md).
@@ -224,9 +251,10 @@ common wrong turn.
 **A pod is stuck `Pending`.** Check the vCPU quotas above before anything else.
 
 **"Why did the bill move?"** Budgets only tell you *that* it did. The CUR 2.0
-export with split cost allocation is the only thing that answers *why* — see
-the cost reference. If the period predates tag activation, the answer may not
-exist.
+export with split cost allocation is the only thing that answers *why*, queried
+either through the `er-cost` Athena workgroup or by reading the delivered
+Parquet with DuckDB — see the cost reference for which to pick. If the period
+predates tag activation, the answer may not exist.
 
 **A new AWS resource is needed.** Write Terraform. Then `terraform fmt
 -check -recursive` and a credential-free `init -backend=false && validate`,

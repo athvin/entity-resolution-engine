@@ -5,6 +5,8 @@
 - Why this file is generated
 - How to read it
 - Resource types declared
+- Services and resource types with nothing declared
+- The alerting surface
 - Identity Center permission sets
 - The AWS SDK surface in the Rust workspace
 - Terraform and provider pins
@@ -32,11 +34,19 @@ read-only `aws describe`/`list` call is the answer today; see the skill body for
 the profile to use.
 
 **A resource type absent from the list is genuinely absent**, and that is often
-the useful fact. There is no CloudFront, ACM, Route 53, WAF, Athena, Glue,
-DynamoDB, Lambda, SQS, SNS, GuardDuty or Security Hub in this account. So:
-TLS termination and DNS are Cloudflare's; there is no edge cache; there is no
-queue service, because the job queue is Postgres `SKIP LOCKED`; and there is no
-alerting path beyond budget email.
+the useful fact — which is why the absences are a *generated* set difference
+below rather than a sentence. The standing consequences of that list: TLS
+termination and DNS are Cloudflare's, there is no edge cache, and there is no
+queue service because the job queue is Postgres `SKIP LOCKED`.
+
+**Read an absence off the generated list, never off prose.** This file used to
+carry a hand-written "there is no … Athena, Glue … SNS …" one screen above the
+count table that listed all three, because the alerting and cost-analytics
+build-out landed and the sentence did not follow. An asserted absence is the one
+claim the thing it describes cannot falsify: a stale positive gets noticed the
+moment someone opens the resource, a stale negative only by a reader who already
+knew better. The set difference cannot drift that way — a service adopted later
+drops off it on the next regeneration.
 
 **Counts are blocks, not instances.** A module instantiated twice (the lake and
 EFS modules are) contributes its resource blocks once to this count while
@@ -119,6 +129,42 @@ Distinct `resource "aws_*"` blocks across `infra/terraform/`, by count:
    1  aws_vpc
    1  aws_vpc_endpoint
 ```
+
+### Services and resource types with nothing declared
+
+Derived by set difference against the types above. A service adopted later
+drops off this list on the next regeneration, so an absence here cannot rot.
+
+- ACM
+- API Gateway
+- AWS Backup
+- CloudFront
+- CloudWatch dashboards
+- CloudWatch metric filters
+- Cost Explorer (aws_ce_*)
+- DynamoDB
+- ElastiCache
+- Elastic Load Balancing
+- EventBridge
+- GuardDuty
+- Lambda
+- Route 53
+- SQS
+- Security Hub
+- Step Functions
+- WAF
+
+### The alerting surface
+
+| Resource type | Declared |
+|---|---|
+| `aws_cloudwatch_metric_alarm` | 3 |
+| `aws_sns_topic` | 1 |
+| `aws_sns_topic_subscription` | 1 |
+| `aws_cloudwatch_dashboard` | 0 |
+| `aws_cloudwatch_log_metric_filter` | 0 |
+| `aws_budgets_budget` | 2 |
+| `aws_cloudwatch_log_group` | 2 |
 
 ### Identity Center permission sets
 
