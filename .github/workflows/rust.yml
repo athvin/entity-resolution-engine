@@ -388,6 +388,19 @@ jobs:
         # would skip.
         working-directory: ${{ github.workspace }}
         run: bash scripts/ci/scripts-home-check.sh
+      - name: the agent-task scripts still validate their inputs
+        # Ungated like its neighbours, and a TEST rather than a run on
+        # purpose: `agent-task.yml` is `workflow_dispatch` only and needs two
+        # secrets this repo does not have, so dispatching it dies at the agent
+        # step having proved nothing about the scripts before it — and leaves
+        # an `agent-wip/<run-id>` branch behind for the trouble.
+        #
+        # The load-bearing half is input validation: `resume` is a dispatch
+        # input that reaches `refs/heads/agent-wip/$RESUME` and the agent's
+        # prompt, so the suite's rejection cases are the point and its happy
+        # paths only stop a reject-everything regex from passing.
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/ci/agent-task-test.sh
       - name: no inline shell logic in workflow `run:` blocks
         # The other half of that convention, and the half the step above
         # cannot see: a `run:` block is shell with NO FILE, so a file-level
