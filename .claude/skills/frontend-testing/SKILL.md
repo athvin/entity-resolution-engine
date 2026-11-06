@@ -1,22 +1,31 @@
 ---
 name: frontend-testing
-description: Explains this repo's frontend test tiers and quality gates — which tier a change belongs in (unit, component, Playwright functional, the Docker-backed full-stack tier that is a release gate rather than a PR gate), the per-PR coverage floor and why it sits where it does, the axe accessibility gate, PGlite as the test database, the Playwright fixture orgs and the container-tag-must-match-dependency rule for visual baselines, plus the known false-green traps. Use when adding or fixing a frontend test, when a Playwright or vitest run fails, when choosing where new coverage belongs, when visual baselines change, or when a frontend CI job is red. For the BFF boundary and its authz gate see frontend-bff; for tokens, styling and interface copy see frontend-design-system; for what to render on a dense data surface and which screens the axe gate is missing see frontend-data-ui; for the public marketing surface see landing-page; for CI job wiring and required checks see ci-and-supply-chain.
+description: Explains this repo's frontend test tiers and quality gates — which tier a change belongs in (unit, component, Playwright functional, the Docker-backed full-stack tier that is a release gate rather than a PR gate), the `postgres.js` driver tier needing a real Postgres, the per-PR coverage floor and why it sits there, the axe accessibility gate, PGlite as the test database, the fixture orgs and the container-tag-must-match-dependency rule for baselines, plus the known false-green traps. Use when adding or fixing a frontend test, when a Playwright or vitest run fails, when choosing where new coverage belongs, when visual baselines change, or when a frontend CI job is red. For the BFF boundary and its authz gate see frontend-bff; for tokens, styling and interface copy see frontend-design-system; for dense data surfaces and which screens the axe gate is missing see frontend-data-ui; for the public marketing surface see landing-page; for CI job wiring and required checks see ci-and-supply-chain.
 ---
 
 # Frontend testing
 
 `docs/frontend-testing.md` is the living standard; this skill is the working
-summary. The frontend gate **blocks merges** — three of its jobs are required
-checks — so a frontend change is not done until its tier passes.
+summary. The frontend gate **blocks merges**: several of its jobs are required
+checks on `main`, and because branch protection is repository configuration
+rather than a file in the tree, no count of them here could stay true — the
+ci-and-supply-chain skill's `required-checks.md` carries each job's status-check
+context. A frontend change is not done until its tier passes.
 
-## The four tiers, and how to choose
+## The test tiers, and how to choose
 
-| Tier | Directory | Command | In CI |
-|---|---|---|---|
-| unit | `tests/unit/` | `pnpm test` | yes, per-PR |
-| component | `tests/component/` | `pnpm test` | yes, per-PR |
-| functional | `tests/functional/` | `pnpm test:e2e` | yes, per-PR |
-| full-stack | `tests/e2e/` | `make frontend-e2e` | **no — release gate** |
+Each tier is `frontend/tests/<tier>/`, the full-stack one being `tests/e2e/`.
+Directories and commands are generated into
+[references/tiers-and-thresholds.md](references/tiers-and-thresholds.md), which
+is the source of truth if this table ever disagrees with it.
+
+| Tier | Command | In CI |
+|---|---|---|
+| unit | `pnpm test` | yes, per-PR |
+| component | `pnpm test` | yes, per-PR |
+| functional | `pnpm test:e2e` | yes, per-PR |
+| driver | `pnpm test:driver` | yes, per-PR — with its own Postgres service |
+| full-stack | `make frontend-e2e` | **no — release gate** |
 
 Choosing:
 
@@ -26,9 +35,14 @@ Choosing:
 - **A flow through real route handlers**, a session, authorization, or anything
   that needs the app actually running → functional. This is where most
   meaningful frontend coverage lives.
+- **Something `postgres.js` itself has to get right** — a binary round trip, a
+  bytea or type-encoding question → driver. It is the only tier that reaches a
+  real PostgreSQL, and `vitest.driver.config.ts` pins `environment: "node"`
+  because under jsdom a Node `Buffer` fails postgres v4's
+  `instanceof Uint8Array` check, so the driver sends bytea as text and the
+  server rejects it — a failure that reads as driver incompatibility and is not.
 - **The whole stack against a real backend** → the full-stack tier. It is real
-  and runnable, but it is **not on the PR path** — it needs Docker and takes
-  about ten minutes.
+  and runnable, but it is **not on the PR path** — it needs Docker.
 
 The full-stack tier runs against one Postgres, a local DuckLake, `er-server`
 and the built Next app. It was dormant from the all-Rust cutover until W0.5b
@@ -39,13 +53,14 @@ it when a change spans BFF → er-server → engine; its sequence is
 ## The coverage floor
 
 Enforced **per-PR** by `pnpm check` (`vitest run --coverage`), scoped to
-`src/lib/**`. The exact thresholds and the Playwright pin are generated:
-[references/tiers-and-thresholds.md](references/tiers-and-thresholds.md).
+`src/lib/**`. The thresholds and the Playwright pin are generated:
+[references/tiers-and-thresholds.md](references/tiers-and-thresholds.md), which
+is also the canonical copy of why the floor sits where it does.
 
-The number sits near 49% and that is the honest ceiling, not a compromise:
-`src/lib/query/**` is deliberately outside the unit tier's remit because those
-hooks are exercised by Playwright. Raising the floor means writing unit tests
-for `src/lib`, **not** re-scoping the measurement to flatter it.
+In short: `src/lib/query/**` is deliberately outside the unit tier's remit
+because Playwright exercises those hooks, so the floor is an honest ceiling and
+not a soft target. Raising it means writing unit tests for `src/lib`, **not**
+re-scoping the measurement to flatter it.
 
 The nightly `coverage` job only publishes the HTML artifact; the gate is the
 per-PR one.
@@ -67,8 +82,10 @@ unchecked** — the gate passes having examined nothing about it. Which routes a
 currently missing is no longer a thing to remember: it is derived, in the
 frontend-data-ui skill's `screens.md`, and regenerated by `make skills-check`.
 
-Note the sweep logs in as a fixture user before every screen, so an
-unauthenticated route cannot be added without making that step conditional.
+The sweep logs in as a fixture user before each screen unless that entry sets
+`anonymous: true`, which is what a route reachable without a session needs — the
+landing page is the entry that uses it. Setting the flag is the whole job; the
+login step is already conditional on it.
 
 ## PGlite is the test database
 
@@ -78,7 +95,9 @@ Postgres.
 
 So the functional tier runs with `ERWEB_DATABASE_URL=pglite://memory` and needs
 no database process, and unit tests that touch the database set the same at
-module top. This is why the frontend gate needs no service container.
+module top. The driver tier is the deliberate exception and the only frontend
+job carrying a Postgres service: PGlite cannot answer a question about
+`postgres.js`, because it never constructs that driver.
 
 The important property: it is the **real drizzle schema and real migrations**,
 not a mock. A query that works against PGlite works against Postgres, and a
@@ -92,12 +111,12 @@ Fixture users, orgs and the login helper live in `tests/functional/helpers.ts`:
 - `ORG` is the **read-only, pixel-compared** org — do not mutate it from a
   test, or you will break the visual baselines for every other spec.
 - `triageOrg(projectName)`, `wizardOrg(projectName)`, `datasetsOrg(projectName)`
-  and their siblings return a **per-project** mutable org, so the three device
+  and their siblings return a **per-project** mutable org, so the device
   projects cannot interfere with each other. Use one for anything that writes.
-  The three projects share ONE mock server, so a journey that creates,
-  suspends or publishes against a shared org races the other two — this is a
-  rule, not a precaution: it is the defect that made the datasets manage
-  journey fail only in the full tier and pass in isolation.
+  The projects share ONE mock server, so a journey that creates, suspends or
+  publishes against a shared org races the others — this is a rule, not a
+  precaution: it is the defect that made the datasets manage journey fail only
+  in the full tier and pass in isolation.
 - `DS` is the dataset every journey works inside. Each fixture org carries one
   named `default`, mirroring the backend's convergence sweep; the
   `datasets-*` orgs carry a second so the switcher, the manage table and the
@@ -109,11 +128,13 @@ Fixture users, orgs and the login helper live in `tests/functional/helpers.ts`:
   that logs in.
 
 The backend is a mock er-server (`tests/mock-erserver/server.mjs`), which also
-serves a scripted model endpoint for the assistant surface.
+serves a scripted model endpoint for the assistant surface. A test needing new
+backend data extends it, and the new shape has to be checked against the real
+OpenAPI document — see the mock-divergence trap below.
 
-Three device projects run: one desktop and two mobile. Visual baselines are
-**Linux-only** (`ignoreSnapshots` when the platform is not Linux), so snapshot
-assertions simply do not run on a Mac.
+Every spec runs once per device project (`playwright.config.ts`: one desktop,
+two mobile). Visual baselines are **Linux-only** (`ignoreSnapshots` when the
+platform is not Linux), so snapshot assertions simply do not run on a Mac.
 
 ## The rule that causes mystery pixel diffs
 
@@ -129,8 +150,8 @@ rendered in the same image CI uses.
 
 ## Known false-green traps
 
-These have all bitten this repo. They are the reason the standard insists a
-gate must be observed **failing** before it is trusted.
+These have all bitten this repo, and they are why a gate is not trusted until it
+has been observed **failing** — break a new one on purpose before relying on it.
 
 - **A piped exit code.** `playwright test | tail` reports the pipe's status, not
   Playwright's, so a failing suite looks green. Never pipe a gate's output in
@@ -145,25 +166,12 @@ gate must be observed **failing** before it is trusted.
   pinned container — `dev/update-baselines.sh` to regenerate, or the same
   image running `pnpm test:e2e --grep @visual` WITHOUT `--update-snapshots`
   to compare the way CI does.
+- **A green `make frontend`.** The local gate runs `pnpm check` and the
+  Playwright functional tier; it does not run the driver tier, which is a
+  required check. `tests/driver/**` sits outside `vitest.config.ts`'s `include`
+  precisely so the PR gate cannot depend on a database being up — so a clean
+  local run cannot speak for that context.
 - **A required check that never reports.** A workflow-level `paths:` filter
   leaves a required check pending forever and blocks every PR — which is why
   `frontend.yml` has no `paths:` filter and uses a `detect` job instead. See the
   ci-and-supply-chain skill.
-
-## Common workflows
-
-**Adding a flow test.** Functional tier. Use `triageOrg()` for a mutable org,
-`login()` for the session, and assert against the real route handlers.
-
-**A test needs new backend data.** Extend the mock er-server, and check its
-shape against the real OpenAPI document — a mock that drifts is a false green.
-
-**Coverage dropped below the floor.** Write unit tests for `src/lib`. Do not
-lower the threshold or widen the exclusions.
-
-**A visual baseline changed.** Decide first whether the change is intended. If
-it is, regenerate with the repo's script (in the pinned image). If you are on a
-Mac, note snapshots did not run locally at all.
-
-**A gate you just added passes.** Break it on purpose and confirm it fails with
-a useful message before trusting it.
