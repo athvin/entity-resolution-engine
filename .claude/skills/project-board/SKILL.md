@@ -105,19 +105,58 @@ their intent, and the intent is all the API will confirm.
 
 What follows from them:
 
-- **A new issue or pull request lands on the board by itself.** `item-add` is
-  therefore usually unnecessary. It is idempotent — re-adding an item already on
-  the board returns the existing `PVTI_` id and creates no duplicate — so it is
-  safe, just redundant.
+- **A new issue lands on the board by itself. A pull request does not.
+  Verified, not inferred.** Every item on the board reads back as an `Issue`,
+  and four pull requests merged in one sitting produced no card at all — so
+  "Auto-add to project" is filtered to issues here. The filter itself is not
+  readable (only `name` and `enabled` are), so probe the shape rather than
+  trusting this line:
+
+  ```sh
+  gh project item-list 2 --owner athvin --limit 400 --format json \
+    --jq '[.items[].content.type]|group_by(.)|map({(.[0]//"null"):length})|add'
+  ```
+
+  For an issue, `item-add` is therefore usually unnecessary. It is idempotent —
+  re-adding an item already on the board returns the existing `PVTI_` id and
+  creates no duplicate — so it is safe, just redundant. For a pull request it
+  would add a card the conventions here do not want.
 - **A new card arrives with `Status` already set.** A draft created through
   `item-create` reads back as `Todo` without `Status` ever being written, because
   "Item added to project" sets it. Do not follow a create with a Status edit.
-- **A merged pull request moves its own card.** The merge bus squash-merges its
-  members, which fires "Pull request merged". Moving those cards by hand after a
-  batch merges is duplicated work, and it races the automation. This one is also
-  worth confirming once by watching a single merge, because the failure is
-  silent in the opposite direction: if the automation does less than its name
-  says, cards quietly stop moving and nobody is told.
+- **A merged pull request moves the card of the issue it closes — it has no
+  card of its own.** "Pull request linked to issue" and "Pull request merged"
+  act on the linked issue, so a pull request closing nothing moves nothing, and
+  the merge bus squash-merging a batch of such pull requests leaves the board
+  untouched. Where a pull request does close an issue, moving that card by hand
+  is duplicated work and races the automation.
+
+  **The Status it writes is `Done`. Verified, not inferred.** Two merged pull
+  requests that closed an issue each left that issue's card on `Done`, with the
+  issue closing about two seconds behind the merge.
+
+  What cannot be separated is *which* automation did it. A merged closing pull
+  request also closes the issue, so "Pull request merged" and "Item closed"
+  both fire, and the workflow configuration stays unreadable. The effect is the
+  same either way — and the route is readable after the fact, from the issue's
+  own timeline rather than from the board:
+
+  ```sh
+  gh api graphql -f query='query{repository(owner:"athvin",name:"entity-resolution-engine"){
+    issue(number:589){timelineItems(itemTypes:[CLOSED_EVENT],last:1){
+      nodes{... on ClosedEvent{closer{__typename}}}}}}}' \
+    --jq '.data.repository.issue.timelineItems.nodes[0].closer.__typename'
+  ```
+
+  | `closer.__typename` | What closed the issue, and so moved the card |
+  |---|---|
+  | `PullRequest` | a merged pull request that referenced it |
+  | `ProjectV2` | the board itself — "Auto-close issue", because someone set `Status` to `Done` |
+  | absent on a `CLOSED` issue | closed directly, by a person or the CLI; "Item closed" still set `Done` |
+
+  That middle row is the independent corroboration of the bullet below: when a
+  card is set to `Done`, the close is attributed to `ProjectV2`, so the board is
+  on record as the actor rather than it being inferred from timing.
 - **`Status` → `Done` closes the underlying issue. Verified, not inferred.** An
   issue observed `OPEN`, then `Status` set to `Done` through `item-edit`, read
   back as `CLOSED / COMPLETED` within seconds. So `Done` is never a bookkeeping
@@ -174,7 +213,7 @@ configuration, the automations — go to GraphQL. `projectV2(number:2)` accepts 
 
 | Doing | Command |
 |---|---|
-| put an existing issue or pull request on the board | `gh project item-add 2 --owner athvin --url <issue-url>` |
+| put an existing issue on the board | `gh project item-add 2 --owner athvin --url <issue-url>` |
 | create a card with no issue behind it | `gh project item-create 2 --owner athvin --title …` |
 | set one field on one card | `gh project item-edit …` |
 | take a card off the board | `item-archive` (keeps it, hidden) or `item-delete` (gone) |
@@ -308,9 +347,10 @@ edit this section as it changes.
 - **`Iteration`** is a 14-day cycle starting Monday. The *current* iteration is
   the first entry of the field's `iterations` array — completed ones move to a
   separate `completedIterations` array, so index 0 is not a guess.
-- **A card follows its pull request, not the reverse.** The merge bus is what
-  moves work to done; see the ci-and-supply-chain skill for why an individual
-  pull request's green can be stale.
+- **A card follows the pull request that closes its issue, not the reverse** —
+  and only if one does; the pull request itself never has a card. The merge bus
+  is what moves work to done; see the ci-and-supply-chain skill for why an
+  individual pull request's green can be stale.
 - **The `[aw] … failed` cards are not work.** They are failure issues from the
   gh-aw agentic workflows, which are `disabled_manually` and fail closed on a
   missing `COPILOT_GITHUB_TOKEN`. They arrived by "Auto-add to project". Closing

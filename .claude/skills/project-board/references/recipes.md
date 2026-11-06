@@ -168,19 +168,37 @@ substitute `sort` on one side only.
 
 ## Find cards the automations left half-filled
 
-The automations set `Status` and nothing else, so this is the real triage queue:
+The automations set `Status` and nothing else. Of the fields they leave alone,
+only a missing `Estimate` means a card was left half-filled — so that, and not
+the absence of any field, is the queue. Like the reconcile recipe above it, this
+returning nothing is the expected steady state:
 
 ```sh
 gh project item-list "$NUM" --owner "$OWNER" --limit 200 --format json --jq '
-  .items[] | select(.priority == null or .estimate == null)
-  | "\(.content.number // "draft")\t\(.status)\t\(.estimate // "-")\t\(.title)"'
+  .items[]
+  | select(.status != "Done")
+  | select(.estimate == null)
+  | select((.title | startswith("[aw] ")) | not)
+  | "\(.content.number // "draft")\t\(.status)\t\(.priority // "-")\t\(.title)"'
 ```
 
-Do not add `.size == null` to that predicate. `Size` is empty on every card by
-convention, so including it matches the whole board and the queue stops
-distinguishing anything — a half-filled card and a fully triaged one come back
-alike. A missing key reads as `null` in `jq`, which is why `== null` works even
-though an unset field is absent from the object rather than present as null.
+Each of those three filters removes a class that is **not** half-filled, and
+leaving any of them out is how this query stops meaning anything:
+
+- **`.status != "Done"`** — a shipped card is not triage work, and most cards
+  without an estimate are closed ones that never needed one.
+- **No `.priority == null` term.** An absent `Priority` is deliberate here: the
+  skill body records that there is no P3 and that the lowest-ranked epics carry
+  no priority at all, so the backlog *is* the cards with none. Including that
+  term floods the queue with correctly-triaged epics, which is how this recipe
+  read before — it reported the backlog as a defect.
+- **No `.size == null` term either.** `Size` is empty on every card by
+  convention, so that term matches the whole board.
+- **`[aw] ` titles excluded** — gh-aw failure issues, which the body notes are
+  not work.
+
+A missing key reads as `null` in `jq`, which is why `== null` works even though
+an unset field is absent from the object rather than present as null.
 
 ## Clear a field
 
