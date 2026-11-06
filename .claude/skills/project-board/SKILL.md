@@ -131,10 +131,32 @@ What follows from them:
   untouched. Where a pull request does close an issue, moving that card by hand
   is duplicated work and races the automation.
 
-  Which Status value the automation writes is still unconfirmed — the name is
-  all the API exposes — so watch one *linked* merge before relying on it. The
-  failure is silent in that direction: if the automation does less than its
-  name says, cards quietly stop moving and nobody is told.
+  **The Status it writes is `Done`. Verified, not inferred.** Two merged pull
+  requests that closed an issue each left that issue's card on `Done`, with the
+  issue closing about two seconds behind the merge.
+
+  What cannot be separated is *which* automation did it. A merged closing pull
+  request also closes the issue, so "Pull request merged" and "Item closed"
+  both fire, and the workflow configuration stays unreadable. The effect is the
+  same either way — and the route is readable after the fact, from the issue's
+  own timeline rather than from the board:
+
+  ```sh
+  gh api graphql -f query='query{repository(owner:"athvin",name:"entity-resolution-engine"){
+    issue(number:589){timelineItems(itemTypes:[CLOSED_EVENT],last:1){
+      nodes{... on ClosedEvent{closer{__typename}}}}}}}' \
+    --jq '.data.repository.issue.timelineItems.nodes[0].closer.__typename'
+  ```
+
+  | `closer.__typename` | What closed the issue, and so moved the card |
+  |---|---|
+  | `PullRequest` | a merged pull request that referenced it |
+  | `ProjectV2` | the board itself — "Auto-close issue", because someone set `Status` to `Done` |
+  | absent on a `CLOSED` issue | closed directly, by a person or the CLI; "Item closed" still set `Done` |
+
+  That middle row is the independent corroboration of the bullet below: when a
+  card is set to `Done`, the close is attributed to `ProjectV2`, so the board is
+  on record as the actor rather than it being inferred from timing.
 - **`Status` → `Done` closes the underlying issue. Verified, not inferred.** An
   issue observed `OPEN`, then `Status` set to `Done` through `item-edit`, read
   back as `CLOSED / COMPLETED` within seconds. So `Done` is never a bookkeeping
