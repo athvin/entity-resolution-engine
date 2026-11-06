@@ -251,13 +251,24 @@ not to look. `dense-surface-facts` derives all four instead.
 ## The gate
 
 ```sh
-make skills-check          # both modes
-bash scripts/skills-check.sh lint    # authoring rules, no toolchain
-bash scripts/skills-check.sh regen   # rebuild generated blocks
-bash scripts/skills-check.sh check   # regen + fail on drift
+make skills-check          # every mode
+bash scripts/skills-check.sh lint        # authoring rules, no toolchain
+bash scripts/skills-check.sh regen       # rebuild generated blocks
+bash scripts/skills-check.sh check       # regen + fail on drift
+bash scripts/skills-check.sh overrides   # the override registry vs CLAUDE.md
+bash scripts/skills-check.sh generators  # the wired generators vs the table above
 ```
 
 `make skills-check` is a prerequisite of `make check`.
+
+**The generator table above is itself gated**, because it is the one list here
+that code can contradict silently: `generators` derives the id set from the
+`splice` calls in `run_regen` and set-differences it against the table, failing
+in both directions — a generator wired but undocumented, or a row no generator
+wires. It was added after `post-merge-surface` sat wired and unlisted, so the
+standard described 12 of 13 generators while every gate stayed green. The
+"Derived from" column stays prose, since what a generator derives *and why* is
+the part worth reading and the part no script can write.
 
 **The two modes are split by what their output derives from, and the CI
 placement follows that split:**
@@ -362,17 +373,18 @@ skill, so it gets the same fix.
 | `screens-coverage` | `frontend-data-ui/references/screens.md` | every `src/app/**/page.tsx` route set-differenced against the axe gate's `SCREENS` array |
 | `dense-surface-facts` | `frontend-data-ui/references/dense-surfaces.md` | `useVirtualizer` and `useSearchParams` call sites, route-level boundary files under `src/app`, and the `<table>` count — each a zero or a one the skill used to state in prose |
 | `aws-footprint` | `aws-account-operations/references/footprint.md` | `resource "aws_*"` types and counts, the permission sets and whether each has an inline policy, the workspace's `aws-*` crates, the provider pins |
-| `post-merge-surface` | `land-pr/references/post-merge.md` | the workflows triggered by a push to `main` rather than by a pull request, with the path filters that decide whether each one runs at all |
 | `er-command-surface` | `er-engine-ops/references/stages-and-flags.md` | `er-cli`'s clap `Cli` globals and `Command` variants, each flag's declared default resolved through `er-versions`' mode constants |
 | `infra-coverage` | `infra-platform/references/coverage.md` | the three stack enumerations in `infra.yml` set-differenced against the stacks in the tree, every `infra/k8s` path against the sites that reference it, and the NodePool manifests against the non-recursive `kubectl apply` |
+| `post-merge-surface` | `land-pr/references/post-merge.md` | each non-gh-aw workflow's `on:` block, narrowed to those that run after a merge, set-differenced against the ones carrying a `pull_request` trigger — what is left is the surface no pull request can pre-test |
 | `skill-inventory` | this document **and** `CLAUDE.md` | every `SKILL.md`'s `name`, `description` and `disable-model-invocation` |
 
 The **set difference** is the shape worth copying — `diagnostics`,
-`screens-coverage`, the inline-policy column of `aws-footprint` and all three
-tables of `infra-coverage` each report a *gap* nobody maintains, so nobody can
-forget it. `screens-coverage` replaced a prose warning that a new screen is
-"otherwise silently unchecked" — the kind of warning that is always true and
-never read. `infra-coverage` replaced a NodePool count that was already wrong.
+`screens-coverage`, `post-merge-surface`, the inline-policy column of
+`aws-footprint` and all three tables of `infra-coverage` each report a *gap*
+nobody maintains, so nobody can forget it. `screens-coverage` replaced a prose
+warning that a new screen is "otherwise silently unchecked" — the kind of
+warning that is always true and never read. `infra-coverage` replaced a NodePool
+count that was already wrong.
 
 One trap when writing one, and it cost a debugging pass: the gap case is
 usually a `grep` that matches nothing, which exits 1 and — under this script's

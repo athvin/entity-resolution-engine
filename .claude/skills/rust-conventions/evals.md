@@ -16,7 +16,8 @@ Must:
 
 - Say **`make check`**, from the repo root.
 - Name `entities-check` as the step the bare cargo trio skips, and say why that
-  matters (it regenerates from `entities/*.yaml` and fails on stale artifacts).
+  matters (it regenerates from the declared entities and fails on a stale
+  committed artifact).
 
 Must not:
 

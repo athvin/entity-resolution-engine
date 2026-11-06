@@ -27,8 +27,14 @@
 #          shell, same as `lint`, and for the same reason: it must run on a
 #          skills-only PR. See the section comment above `skill_overrides`.
 #
-# Usage: skills-check.sh [lint|regen|overrides|check|all]
-#   lint  = authoring rules + overrides
+#   generators
+#          Asserts every generator wired into `run_regen` appears in the
+#          generator table in docs/agent-skills.md, and nothing appears there
+#          that is not wired. Pure shell, for the `lint` reason. See the section
+#          comment above `generator_table_ids`.
+#
+# Usage: skills-check.sh [lint|regen|overrides|generators|check|all]
+#   lint  = authoring rules + overrides + generators
 #   check = regen + fail on drift (what CI runs)
 #   all   = lint + check (what `make skills-check` runs)
 
@@ -483,6 +489,84 @@ run_override_check() {
 	fi
 
 	note "checked $n documented skill overrides"
+}
+
+# ---------------------------------------------------------------------------
+# the generator registry, asserted against the standard's table
+#
+# The table in docs/agent-skills.md cannot be generated — its "Derived from"
+# column is prose explaining a design choice, which is the column worth reading.
+# But the SET of generator ids in it is derivable from `run_regen`, and that set
+# drifted: `post-merge-surface` was wired with the `land-pr` skill and never
+# reached the table, so the standard documented 12 of 13 generators. Nothing
+# failed, because a hand-maintained list disagreeing with code is exactly the
+# defect class this gate exists for everywhere else.
+#
+# Same shape as the override registry check below it: derive both sides, diff
+# the sets, name which side needs the edit. And the same no-`grep -q`-behind-a-
+# pipe rule — `grep -c` or a captured match, never `-q`, on anything a pipe
+# feeds.
+# ---------------------------------------------------------------------------
+
+# Generator ids as the standard's table lists them, one per row and in table
+# order — not deduplicated, because a duplicate row is its own defect and
+# `sort -u` is what hides it.
+generator_table_ids_raw() {
+	sed -n '/^| Generator | Target | Derived from |/,/^$/p' docs/agent-skills.md |
+		sed -E -n 's/^\| `([a-z0-9-]+)` \|.*/\1/p'
+}
+
+# Generator ids as the standard's table lists them.
+generator_table_ids() {
+	generator_table_ids_raw | sort -u
+}
+
+# Generator ids actually spliced by `run_regen`. The splice call is the
+# authority rather than the `gen_*` function names, because a function that is
+# defined and never wired generates nothing.
+wired_generator_ids() {
+	grep -oE 'splice "[^"]+" [a-z0-9-]+ ' "${BASH_SOURCE[0]}" |
+		awk '{ print $NF }' | sort -u
+}
+
+run_generator_check() {
+	echo "skills-check: generators"
+	local wired table missing extra n
+	wired=$(wired_generator_ids)
+	table=$(generator_table_ids)
+
+	if [[ -z $wired ]]; then
+		err "generators: found no splice calls in this script — the id extractor is broken, not the table"
+		return
+	fi
+	if [[ -z $table ]]; then
+		err "generators: docs/agent-skills.md has no generator table (or its header changed) — there is nothing for the wired set to agree with"
+		return
+	fi
+
+	missing=$(comm -23 <(printf '%s\n' "$wired") <(printf '%s\n' "$table") || true)
+	extra=$(comm -13 <(printf '%s\n' "$wired") <(printf '%s\n' "$table") || true)
+
+	local id
+	for id in $missing; do
+		err "generators: \`$id\` is wired into run_regen but absent from the generator table in docs/agent-skills.md — add a row with its target and what it derives from"
+	done
+	for id in $extra; do
+		err "generators: the generator table in docs/agent-skills.md lists \`$id\`, which no splice call wires — remove the row, or wire the generator"
+	done
+
+	# A duplicate row satisfies the set comparison above and still leaves the
+	# table saying two different things about one generator. Two concurrent PRs
+	# each adding the missing row is how it happens, and the set diff cannot see
+	# it because both sides were deduplicated before being compared.
+	local dup
+	dup=$(generator_table_ids_raw | sort | uniq -d || true)
+	for id in $dup; do
+		err "generators: the generator table in docs/agent-skills.md lists \`$id\` more than once — keep one row"
+	done
+
+	n=$(printf '%s\n' "$wired" | grep -c . || true)
+	note "checked $n wired generators against the standard's table"
 }
 
 # ---------------------------------------------------------------------------
@@ -2154,9 +2238,11 @@ case "${1:-all}" in
 lint)
 	run_lint
 	run_override_check
+	run_generator_check
 	;;
 regen) run_regen ;;
 overrides) run_override_check ;;
+generators) run_generator_check ;;
 check)
 	run_regen
 	run_drift_check
@@ -2166,9 +2252,10 @@ all)
 	run_drift_check
 	run_lint
 	run_override_check
+	run_generator_check
 	;;
 *)
-	echo "usage: $0 [lint|regen|overrides|check|all]" >&2
+	echo "usage: $0 [lint|regen|overrides|generators|check|all]" >&2
 	exit 2
 	;;
 esac
