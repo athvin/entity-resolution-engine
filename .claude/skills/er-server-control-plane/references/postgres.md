@@ -38,11 +38,8 @@ means "not local to the transaction", so it persists for the connection.
 History triggers and the DDL ledger read `er.actor` to record who made a
 change; absent it, they fall back to the session user.
 
-This is only correct because handlers connect per request and the dispatcher
-owns one connection. **If a pool is ever introduced, `er.actor` must become
-transaction-scoped first**, or one request's actor will be attributed to
-another's writes. That is a silent data-integrity bug in an audit trail, which
-is the worst place to have one.
+Why that is safe today and what a connection pool would require first is in
+the SKILL body.
 
 ## Schema bootstrap
 
@@ -89,34 +86,24 @@ remove a key this way**. Removing requires an explicit write.
 
 ## Why a lost claim is not an error
 
-`claim` races with every other dispatcher. The database enforces at most one
-active job per org, so when two dispatchers pick the same org's job, one of
-them violates that constraint.
+`claim` races with every other dispatcher, and the loser trips the partial
+unique that allows one active job per DATASET (plus the org-level variant for
+the kinds that carry no dataset). That unique violation is mapped to
+**`Ok(None)`**, never to `Err`; the SKILL body has why, and the mapping is the
+part to preserve when editing this function.
 
-That unique violation is mapped to **`Ok(None)`** — "nothing for me right now" —
-not to `Err`. The reasons:
-
-- It is expected, routine behaviour at any concurrency above one.
-- Returning `Err` from `claim` is fatal to the dispatcher loop by design (a
-  Postgres failure should restart the process), so misclassifying a lost race
-  would crash-loop the dispatcher under normal load.
-- It would also bury real Postgres failures in noise.
-
-If you add a queue operation that can lose a benign race, follow the same
-pattern: distinguish "someone else got there first" from "the database is
-broken".
+The pattern generalizes to any queue operation that can lose a benign race:
+distinguish "someone else got there first" from "the database is broken",
+because `Err` from this layer is fatal to the dispatcher loop by design.
 
 ## API keys
 
 Minted as `erk_{key_id}_{secret}` and stored as a **SHA-256 hex digest** — the
-plaintext is returned once at mint time and never recoverable.
+plaintext is returned once at mint time and never recoverable. Why SHA-256 and
+not argon2 is in the SKILL body.
 
-`lookup_key` resolves a presented key to its org and role. The hash choice is
-deliberate: these are high-entropy generated secrets, so argon2's work factor
-would add per-request latency without adding meaningful resistance. User
-passwords are a different problem with a different answer.
-
-Revocation is scoped by org, so one tenant's admin cannot revoke another's key.
+`lookup_key` resolves a presented key to its org and role. Revocation is scoped
+by org, so one org's admin cannot revoke another's key.
 
 ## Timestamps on the wire
 
@@ -145,5 +132,5 @@ than a second test function. The rust-conventions skill's gates reference
 explains why this failure mode is especially nasty (it passes locally and in
 the default CI job, and only fails where a database exists).
 
-The HTTP tests drive `app()` through `tower::ServiceExt::oneshot` — no
-listening socket — so they are fast and need no port allocation.
+The HTTP tests drive `app()` through `tower::ServiceExt::oneshot`, with no
+listening socket and so no port allocation.

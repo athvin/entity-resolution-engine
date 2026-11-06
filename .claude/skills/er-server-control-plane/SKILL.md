@@ -1,6 +1,6 @@
 ---
 name: er-server-control-plane
-description: Explains this repo's Rust control plane (`er-server`) — how routes and the outer path normalizer are wired in axum, the bearer/API-key auth model and its 404-on-cross-org versus 403-on-role rules, the Postgres SKIP-LOCKED job queue whose two correctness constraints are enforced by the database rather than code, schema bootstrap from the generated baseline, the dispatcher's claim-run-mark loop, and how errors become `{detail}` bodies. Use when adding or reviewing an endpoint, handler, guard or job type, working on `pg.rs` or the dispatcher, debugging a 404/403/409 or a stuck job, or deciding where control-plane state belongs. For the typed OpenAPI contract and the frontend client see api-contract; for declaring a table or statement see entity-framework.
+description: Explains this repo's Rust control plane (`er-server`) — how routes and the outer path normalizer are wired in axum, the bearer/API-key auth model and its 404-on-cross-org versus 403-on-role rules, the Postgres SKIP-LOCKED job queue whose two correctness constraints are enforced by the database rather than code, schema bootstrap from the generated baseline, the dispatcher's claim-run-mark loop, and how errors become `{detail}` bodies. Use when adding or reviewing an endpoint, handler, guard or job type, working on `pg.rs` or the dispatcher, debugging a 404/403/409 or a stuck job, or deciding where control-plane state belongs. For the typed OpenAPI contract and the frontend client see api-contract; for declaring a table or statement see entity-framework; for the stage chain the dispatcher invokes and the determinism contract behind a rerun see er-engine-ops; for the vulnerability classes a handler review must cover see security.
 ---
 
 # The control plane
@@ -33,18 +33,23 @@ without `ER_TEST_PG_DSN`. See the rust-conventions skill's gates reference.
 
 ## Routing: one flat chain and an outer normalizer
 
-Routes are a single flat `Router::new()` chain — roughly sixty `.route()` calls,
-no `.nest()`. `/healthz` and a few globals, then everything tenant-scoped under
+Routes are a single flat `Router::new()` chain of `.route()` calls, no
+`.nest()`. `/healthz` and a few globals, then everything org-scoped under
 `/v1/orgs/{org}/…`.
 
 **Almost everything is dataset-scoped: `/v1/orgs/{org}/datasets/{ds}/…`.** A
 dataset is an independent resolution domain inside an org — its own lake,
-config, models, entity ids and golden records — so the corpus, the queue, the
-registry and the review surfaces all live under one. What stays at the org
-are the things that genuinely belong to the tenant rather than to a corpus:
-lifecycle and `resources`, api-keys, members, audit, webhooks, and the tag
-VOCABULARY. Tag *application* is dataset-scoped, because its subjects are
-lake-local ids.
+config, models, entity ids and golden records — so the records, the queue, the
+registry and the review surfaces all live under one. What stays at the org are
+the things that belong to the whole org rather than to one dataset: lifecycle
+and `resources`, api-keys, members, audit, webhooks, and the tag VOCABULARY.
+Tag *application* is dataset-scoped, because its subjects are lake-local ids.
+
+`org` is this layer's name for what the engine and the lake call a `tenant` —
+the same subject seen from two layers, which is why `migrate-tenants` and
+`tenant_schema_states` sit beside org-scoped routes. Use `org` when writing
+about the control plane, and keep `dataset` for the resolution domain rather
+than reaching for a synonym.
 
 A dataset-scoped handler takes `Path((org, ds))` and does three things in
 order before it touches anything: `guard(&principal, &org, role)` →
@@ -91,12 +96,13 @@ single query rather than fetch-then-check.
 
 Two constraints are enforced **by the database, not by code**:
 
-1. At most one **active** job per DATASET — single-writer per corpus — plus
-   an org-level variant for the kinds that carry no dataset (`provision`, the
-   migrate sweep). A per-org COUNT cap (`orgs.max_concurrent_jobs`, default 1)
-   bounds how many of an org's datasets run at once; a COUNT is not
-   index-enforceable, so `pg::claim` holds an advisory lock for it while the
-   partial uniques remain the database's own backstop.
+1. At most one **active** job per DATASET — the single writer for that
+   resolution domain — plus an org-level variant for the kinds that carry no
+   dataset (`provision`, the migrate sweep). A per-org COUNT cap
+   (`orgs.max_concurrent_jobs`, where NULL inherits the server default
+   `ER_ORG_JOB_CAP`) bounds how many of an org's datasets run at once; a COUNT
+   is not index-enforceable, so `pg::claim` holds an advisory lock for it while
+   the partial uniques remain the database's own backstop.
 2. At most one job per `(org, idempotency_key)`.
 
 So `claim` takes the highest-priority queued job whose org has no active job,
@@ -157,7 +163,8 @@ kind whose whole work is the pre-step. There are no per-run Kubernetes jobs.
 `dispatch_once_with` takes the provisioning profile explicitly for the
 Postgres-tier tests.
 
-- Idle backoff doubles from 500ms to a 5s ceiling.
+- Idle backoff doubles from `IDLE_MIN` to the `IDLE_MAX` ceiling (500ms → 5s as
+  the constants stand; read them rather than trusting this parenthesis).
 - A Postgres failure returns `Err` and is fatal to the caller: the standalone
   binary exits non-zero so Kubernetes restarts it; in in-process mode the
   spawned task logs and the API keeps serving.
@@ -167,6 +174,12 @@ Postgres-tier tests.
 silently skipped.** Inputs resolve from the org row and its `env` — lake catalog
 and data path, config path, deliveries per configured source, model and TF
 paths. A silent skip would make a misconfigured tenant look healthy.
+
+**This body is canonical for every rule and the reasoning behind it.** The
+references carry only what it does not — the function inventory, the exact SQL,
+the field tables — and must not restate a rationale from here. A rationale
+stated twice is a rationale updated once: both references went on describing
+the queue as one-active-job-per-ORG long after this body said per-DATASET.
 
 Handler conventions, the read path, and what is deliberately not ported yet:
 [references/handlers-and-state.md](references/handlers-and-state.md).

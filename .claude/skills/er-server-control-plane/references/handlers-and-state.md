@@ -45,12 +45,20 @@ connect per request.
 
 ## The scope-safe lookup
 
-`org_or_404` is the helper to use rather than hand-rolling a fetch-then-check.
-It resolves the org and returns the standard scope-safe 404 when absent, which
-keeps the "absent" and "not yours" cases indistinguishable from outside.
+`org_or_404` and `dataset_or_404` are the helpers to use rather than
+hand-rolling a fetch-then-check. Each resolves its row and returns the standard
+scope-safe 404 when absent, which keeps the "absent" and "not yours" cases
+indistinguishable from outside.
 
-Child tables carry the org's UUIDv7 as `org_id`, so a scoped query filters
-directly instead of joining up to the org first.
+`org_or_404` is only the first half for a dataset-scoped route. The full chain
+the SKILL body mandates is `guard` → `org_or_404` → `dataset_or_404` →
+`refuse_unless_active_dataset`; a handler that stops at `org_or_404` has
+checked the org boundary and left the dataset unscoped, which is how a read
+returns another dataset's rows instead of a 404.
+
+Child tables carry both `dataset_id` and the org's UUIDv7 as `org_id`. A
+dataset-scoped read filters on `dataset_id`; the denormalized `org_id` is what
+keeps the scope-safe lookup a single query instead of a join up to the org.
 
 The 409 case is separate: a lifecycle transition (suspend/resume) returns 404
 when the org is absent and **409 when it is not in the expected state**. Those
@@ -58,8 +66,12 @@ are different answers to different questions and should not be collapsed.
 
 ## The read path: snapshots and cursors
 
-`read.rs` resolves an org to its lake from `orgs.env`, opens it **read-only**,
-pins a snapshot (DuckLake time travel), and queries `lake.main.*`.
+`read.rs` opens a lake **read-only** from the `env` of the row it was handed,
+pins a snapshot (DuckLake time travel), and reads through generated statements.
+For every dataset-scoped route that row is the DATASET: the call sites pass
+`&d.env` from `dataset_or_404`, not `orgs.env`. The entry point is still named
+`open_org_lake` — the name predates the dataset layer, so it is not evidence of
+its scope.
 
 A page is `{ items, snapshot, next_cursor }`. The cursor is an **opaque
 base64url** of `{s: snapshot, k: last_key}` — the pinned snapshot plus the last
@@ -67,7 +79,7 @@ key emitted — so:
 
 - Paging is **stable against a moving lake**. Page 2 reads the same snapshot
   page 1 did, so rows cannot shift between pages while a run is writing.
-- It is keyset paging, not offset paging, so cost does not grow with depth.
+- It is keyset paging, not offset paging.
 
 The coupling to remember: because a cursor holds a snapshot, **snapshot expiry
 must outlive the longest-lived cursor.** Expiring history out from under a
