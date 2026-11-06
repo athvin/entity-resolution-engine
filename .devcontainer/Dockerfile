@@ -100,19 +100,29 @@ RUN rustup component add rustfmt clippy
 # that directory's uid, gid and mode. So creating them here, owned by the remote
 # user, means every volume arrives writable and nothing ever needs root.
 #
-# The consequence for devcontainer.json is that EVERY volume target must be a
-# path that exists in this image — which is why the cargo target directory is
-# here under $HOME and reached through CARGO_TARGET_DIR, rather than mounted at
-# `rust/target`. A workspace-relative path does not exist at build time (the
-# workspace folder name is not known until `up`), so copy-up cannot apply to it
-# and it would be back to needing a chown.
+# TWO CONSTRAINTS FOLLOW, and both were learned from a red CI run rather than
+# reasoned out. Every volume target must be a path that (1) EXISTS IN THIS IMAGE
+# and (2) LIVES UNDER $HOME.
+#
+# (1) is copy-up's own requirement, and it is why the cargo build directory is
+# here rather than mounted at `rust/target`: a workspace-relative path does not
+# exist at build time, because the workspace folder name is not known until
+# `up`. devcontainer.json reaches it through CARGO_TARGET_DIR instead.
+#
+# (2) is the one that is genuinely surprising. `devcontainers/ci` rewrites the
+# remote user's uid and gid to match the runner (1000 -> 1001), and the only
+# path it chowns afterwards is $HOME. A volume whose copy-up stamped it with the
+# BUILD-TIME uid therefore stops being writable the moment that rewrite happens,
+# everywhere except under $HOME. The cargo registry was at
+# /usr/local/cargo/registry and failed exactly that way in CI while the two
+# $HOME volumes passed; CARGO_HOME now points here so all three are uniform.
 #
 # scripts/ci/devcontainer-smoke.sh asserts all three are writable, and that
-# assertion runs in CI against the real mounts — so a copy-up that stopped
-# working would go red rather than surface as a permission error forty minutes
-# into someone's first build.
+# assertion runs in CI against the real mounts — which is how this was caught,
+# rather than it surfacing as a permission error forty minutes into someone's
+# first build.
 RUN install -d -o vscode -g vscode \
-	/usr/local/cargo/registry \
+	/home/vscode/.cargo/registry \
 	/home/vscode/.duckdb \
 	/home/vscode/.cache/er/cargo-target
 

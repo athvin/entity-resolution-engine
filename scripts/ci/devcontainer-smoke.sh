@@ -102,7 +102,10 @@ esac
 # This runs in CI against the real mounts, which is the point: the previous
 # arrangement failed in CI and said nothing, because the chown that failed
 # carried `|| true`.
-for d in "${CARGO_HOME:-/usr/local/cargo}/registry" \
+# The `-` fallbacks exist only so a bare `docker run` of the image can be
+# smoke-tested; devcontainer.json sets both variables, and postCreate asserts
+# CARGO_HOME matches the mount.
+for d in "${CARGO_HOME:-$HOME/.cargo}/registry" \
 	"${CARGO_TARGET_DIR:-$HOME/.cache/er/cargo-target}" \
 	"$HOME/.duckdb"; do
 	checked=$((checked + 1))

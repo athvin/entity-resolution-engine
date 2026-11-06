@@ -27,16 +27,17 @@ cd "$(dirname "$0")/.."
 
 # ASSERT THE CARGO_HOME MOUNT ACTUALLY LANDED ON CARGO_HOME.
 #
-# devcontainer.json has to name this path literally — `mounts` does not expand
-# `${containerEnv:…}` — so it carries `/usr/local/cargo/registry` as a constant.
-# If a base-image change moved CARGO_HOME, that mount would shadow an unrelated
-# empty directory and cargo would silently re-download the whole registry on
-# every rebuild, which looks like slow networking rather than a broken mount.
-expected="/usr/local/cargo"
+# devcontainer.json sets CARGO_HOME and separately mounts a volume at
+# `$CARGO_HOME/registry`, but `mounts` does not expand `${containerEnv:…}` — so
+# the path is written out literally in two places that cannot read each other.
+# Were they to disagree, the mount would shadow an unrelated empty directory and
+# cargo would silently re-download the whole registry on every rebuild, which
+# reads as slow networking rather than a broken mount.
+expected="/home/vscode/.cargo"
 actual="${CARGO_HOME:-}"
-if [ -n "$actual" ] && [ "$actual" != "$expected" ]; then
-	echo "devcontainer-postcreate: CARGO_HOME is '$actual' but devcontainer.json mounts '$expected/registry'." >&2
-	echo "devcontainer-postcreate: update the mount in .devcontainer/devcontainer.json to match." >&2
+if [ "$actual" != "$expected" ]; then
+	echo "devcontainer-postcreate: CARGO_HOME is '${actual:-<unset>}' but devcontainer.json mounts '$expected/registry'." >&2
+	echo "devcontainer-postcreate: make containerEnv.CARGO_HOME and the mount agree." >&2
 	exit 1
 fi
 

@@ -46,20 +46,29 @@
     // the Docker VM's own filesystem. It also makes copy-up possible: see the
     // Dockerfile's mount-point stanza for why a workspace-relative volume
     // cannot be made writable without root.
-    "CARGO_TARGET_DIR": "/home/vscode/.cache/er/cargo-target"
+    "CARGO_TARGET_DIR": "/home/vscode/.cache/er/cargo-target",
+    // Moved off the base image's /usr/local/cargo for one reason: a volume
+    // outside $HOME stops being writable when `devcontainers/ci` rewrites the
+    // remote user's uid. See the Dockerfile's mount-point stanza — constraint
+    // (2). The `cargo` on PATH is a rustup shim at /usr/local/cargo/bin and
+    // finds its toolchain through RUSTUP_HOME, so moving CARGO_HOME relocates
+    // the registry without moving the binaries.
+    "CARGO_HOME": "/home/vscode/.cargo"
   },
   // NAMED VOLUMES, so the heavy caches never touch the host filesystem. EVERY
-  // TARGET HERE MUST BE A PATH THE Dockerfile PRE-CREATES owned by `vscode` —
-  // that is what makes Docker's copy-up hand the volume over writable, and so
-  // what removes the `sudo chown` this used to need. Adding a volume means
-  // adding its directory there too.
+  // TARGET HERE MUST BE A PATH THE Dockerfile PRE-CREATES owned by `vscode`,
+  // AND MUST LIVE UNDER $HOME — the first is what makes Docker's copy-up hand
+  // the volume over writable, the second is what keeps it writable after the
+  // action rewrites the user's uid. Both constraints are argued in the
+  // Dockerfile's mount-point stanza; adding a volume means adding its directory
+  // there too.
   //
   // The cost is that `docker volume rm` is how you reclaim the space, not
   // deleting a folder — docs/devcontainer.md says so.
   "mounts": [
-    // CARGO_HOME in the devcontainers rust image. The downloaded crate
-    // registry, which is otherwise re-fetched on every rebuild.
-    "source=er-cargo-registry,target=/usr/local/cargo/registry,type=volume",
+    // The downloaded crate registry under the CARGO_HOME set above, otherwise
+    // re-fetched on every rebuild.
+    "source=er-cargo-registry,target=/home/vscode/.cargo/registry,type=volume",
     // Where CARGO_TARGET_DIR above points. This is the 30–80 GB one.
     "source=er-cargo-target,target=/home/vscode/.cache/er/cargo-target,type=volume",
     // DuckDB downloads its extensions here on first use (the same path
