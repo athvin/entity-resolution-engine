@@ -135,14 +135,35 @@ test("a hostile ?next= cannot redirect off-origin after login", async ({ page, b
     expect(new URL(page.url()).origin, `next=${hostile}`).toBe(origin);
     expect(page.url(), `next=${hostile}`).not.toContain("evil.example");
 
-    await page.request.post("/api/auth/logout");
-    // Reload the tenant page we landed on: the server layout answers the now
-    // dead session with its own redirect to /login, which both proves the
-    // logout landed and leaves the page quiescent. Anything less determinate
-    // races webkit's late client-side redirect, which interrupts the next
-    // iteration's goto for timing reasons unrelated to the property under
-    // test.
-    await page.reload();
+    const loggedOut = await page.request.post("/api/auth/logout");
+    // The response IS the proof the session died: the route destroys it
+    // server-side and clears the cookie. Assert that directly rather than
+    // inferring it from a redirect.
+    expect(loggedOut.ok(), `logout after next=${hostile}`).toBeTruthy();
+    // THE NAVIGATION'S OWN PROMISE IS NOT THE ASSERTION — `waitForURL` is.
+    //
+    // This teardown has now failed on mobile-safari two different ways, and
+    // both were the same mistake: treating "the navigation completed" as the
+    // thing to check. It began as `page.reload()`, which webkit cancelled when
+    // the login flow's late client-side redirect superseded it:
+    //
+    //   Error: page.reload: Navigation canceled by policy check
+    //
+    // Replacing that with a plain `page.goto()` to the tenant page, on the
+    // reasoning that a goto has a destination and so cannot be superseded,
+    // was WRONG — playwright rejects a goto that a *different* navigation
+    // interrupts, and the dead session's redirect to /login is exactly that:
+    //
+    //   Error: page.goto: Navigation to ".../acme-dev/default/records" is
+    //   interrupted by another navigation to ".../login?next=%2Facme-dev..."
+    //
+    // That interruption IS the behaviour under test. So the goto is allowed to
+    // reject — `.catch(() => undefined)` is already the idiom a few lines up
+    // in this file — and the next line decides the outcome.
+    //
+    // This cannot pass vacuously: the loop asserted above that we are NOT on
+    // /login, so arriving there can only mean a navigation took us.
+    await page.goto(`/${ORG}/${DS}/records`).catch(() => undefined);
     await page.waitForURL(/\/login/, { timeout: 15_000 });
   }
 });
