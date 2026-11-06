@@ -35,18 +35,18 @@ the same fix.
 | Skill | Covers |
 |---|---|
 | `api-contract` | the utoipa `ApiDoc` whose component schemas come from the generated entity structs |
-| `aws-account-operations` | the single-account model where environments are separated by name prefix and permission set rather than by account |
+| `aws-account-operations` | the single-account model where environments are separated by name prefix and permission set |
 | `ci-and-supply-chain` | the `detect`-job pattern that lets a required check skip without blocking a PR |
-| `ducklake-lakehouse` | the ATTACH options and why each is pinned, the native-temp-catalog rule for intermediates |
+| `ducklake-lakehouse` | the ATTACH options, the native-temp-catalog rule for intermediates |
 | `ducklake-performance` | how to read span and resource evidence without over-claiming |
 | `entity-framework` | the YAML-driven schema and SQL governance where every table is an entity.yaml |
 | `er-engine-ops` | the stage chain (ingest, standardize, match, reconcile, golden) |
 | `er-matching` | blocking rules, comparison levels, m/u probabilities, match weights |
 | `er-server-control-plane` | how routes and the outer path normalizer are wired in axum, the bearer/API-key auth model and its 404-on-cross-org versus 403-on-role rules |
 | `frontend-bff` | that the browser never reaches the Rust control plane, the server-only upstream client versus the browser's same-origin client |
-| `frontend-data-ui` | the charting policy that every chart is hand-rolled DOM/CSS rather than a library or canvas and why |
+| `frontend-data-ui` | the charting policy that every chart is hand-rolled DOM/CSS rather than a library or canvas |
 | `frontend-design-system` | the Tailwind v4 CSS-first tokens in `globals.css` and the two deliberate WCAG deviations from stock shadcn |
-| `frontend-testing` | which tier a change belongs in (unit, component, Playwright functional, the Docker-backed full-stack tier that is a release gate rather than a PR gate) |
+| `frontend-testing` | which tier a change belongs in (unit, component, Playwright functional, the Docker-backed full-stack tier that is a release gate, not a PR gate) |
 | `infra-platform` | the Terraform env/module layout and shared S3 state with lockfile locking |
 | `land-pr` | the PR loop (red → diagnose → fix → push) and the main loop for the push-only workflows a PR can never run (user-invoked only) |
 | `landing-page` | the `(marketing)` route group that prerenders statically inside the same app that serves the BFF |
@@ -102,19 +102,65 @@ are enforced by `scripts/skills-check.sh lint`.
   that bites.** Routing goes both ways, so closing an overlap means appending a
   clause to a *neighbour's* description — and several audits closing unrelated
   overlaps all append to the same line. That is how a field with a 1,024-char
-  cap arrives at the cap without any one author spending it. Before adding a
-  tail, read the headroom:
-
-  ```sh
-  for f in .claude/skills/*/SKILL.md; do d=$(sed -n 's/^description: //p' "$f");
-    printf '%4d  %s\n' $((1024 - ${#d})) "$(basename "$(dirname "$f")")"; done | sort -n
-  ```
+  cap arrives at the cap without any one author spending it. The headroom is
+  **generated** below, because telling an author to run a command before editing
+  is a step they can skip — and the observed failure when they did was an audit
+  **dropping** a routing clause it had already decided was needed.
 
   When a description has no room for the clause, the fix is to shorten *that*
   description rather than to drop the routing — an unclosed overlap costs a
   mis-selected skill at runtime, which is the failure the whole field exists to
   prevent. Trim the "what" clause, which a reader can get from the body; never
   the trigger vocabulary, which only this field carries.
+
+  Worked example, from the audit that hit the wall: `entity-framework` sat at 31
+  characters free and could not take the clause handing E0xx remedies to
+  `sql-analysis`. Trimming four pieces of explanation the body already carried —
+  "and generated frontend types", "and dispatcher", "or schema changes work
+  here", and the planner-stub enumeration — paid for the clause and left more
+  headroom than it started with.
+
+### The description budget
+
+<!-- BEGIN GENERATED: description-budget -->
+Every skill's `description`, against the 1,024-character cap. Sorted by
+headroom, because the only question this table answers is whether a skill
+can still accept a routing clause.
+
+| Headroom | Skill | Length |
+|---:|---|---:|
+|   17 | `skill-audit` | 1007 |
+|   20 | `security` | 1004 |
+|   48 | `project-board` | 976 |
+|   66 | `entity-framework` | 958 |
+|   73 | `aws-account-operations` | 951 |
+|   74 | `frontend-bff` | 950 |
+|   76 | `sql-analysis` | 948 |
+|   77 | `frontend-design-system` | 947 |
+|   80 | `ducklake-lakehouse` | 944 |
+|   85 | `rust-conventions` | 939 |
+|   88 | `er-server-control-plane` | 936 |
+|   88 | `frontend-data-ui` | 936 |
+|   89 | `frontend-testing` | 935 |
+|   90 | `er-engine-ops` | 934 |
+|   90 | `landing-page` | 934 |
+|   96 | `er-matching` | 928 |
+|   99 | `ci-and-supply-chain` | 925 |
+|  123 | `infra-platform` | 901 |
+|  138 | `skill-writer` | 886 |
+|  152 | `land-pr` | 872 |
+|  177 | `api-contract` | 847 |
+|  179 | `ducklake-performance` | 845 |
+|  342 | `pentest` | 682 |
+
+The median routing clause here is **59 characters**. Skills with less
+headroom than that cannot take another one — adding routing to any of them
+means trimming its **what** clause first, which is the documented fix:
+
+- `skill-audit` — 17 characters free
+- `security` — 20 characters free
+- `project-board` — 48 characters free
+<!-- END GENERATED: description-budget -->
 - No `allowed-tools`: it only *pre-approves* tools, it cannot restrict them, and
   nothing here needs pre-approval.
 - `disable-model-invocation: true` only for a procedure with side effects, or
