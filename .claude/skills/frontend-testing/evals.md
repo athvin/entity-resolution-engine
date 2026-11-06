@@ -94,8 +94,9 @@ Must:
 
 - Reach **frontend-testing** without being asked for it by name, and not hand
   the question to ci-and-supply-chain, which owns job wiring rather than tiers.
-- Name the driver tier: `frontend/tests/driver/`, run by `pnpm test:driver`
-  against a real PostgreSQL.
+- Name the driver tier — `tests/driver/`, run by `pnpm test:driver` against a
+  real PostgreSQL. Accept any spelling of the directory the body supports; the
+  tier and the command are what is being checked.
 - Explain the green local gate: `tests/driver/**` is outside
   `vitest.config.ts`'s `include`, so neither `pnpm check` nor `make frontend`
   runs it, and a clean local run cannot speak for that context.
