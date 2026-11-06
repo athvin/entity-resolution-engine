@@ -19,16 +19,33 @@
 //! goes inside `build_routes`, where routing has already happened.** Request-id
 //! minting goes outermost, so even a request that routes nowhere carries one.
 //!
+//! ## The request span is a CONTINUATION, not a root
+//!
+//! [`make_span`] adopts the caller's `traceparent`, so a click in the browser,
+//! the BFF hop, this request and every statement it executes are **one trace**.
+//!
+//! It did not, until this was found by querying real exported spans: the P7
+//! action header was present on a `GET /v1/orgs` span and the trace id of the
+//! request that caused it was nowhere, because `info_span!` with no current
+//! parent starts a fresh root and nothing here ever read the header. The hop
+//! existed on the *job* path only — `jobs.trace_context` stores the traceparent
+//! and `dispatcher.rs` adopts it — so click → job → stage → statement joined up
+//! while click → HTTP request did not. Every read the UI makes was its own
+//! unrelated trace, which is most of them.
+//!
+//! `er_obs::propagate`'s own module doc names "the HTTP request that carried
+//! it" as part of the one trace it exists to build, so this was a missing call
+//! rather than a deliberate boundary.
+//!
 //! ## What is deliberately absent
 //!
-//! No metric instruments. Spans now export over OTLP (see `er_obs::otlp`) but
-//! the collector's `metrics` pipeline still has no producer, so a histogram here
-//! would have nowhere to go — and the cardinality decision it would commit to
-//! is the one worth deferring longest. The spans carry the latency and the
-//! status in the meantime, which the subscriber writes as structured records —
-//! and RED metrics derived from spans are a `spanmetrics` connector in the
-//! collector's config rather than Rust code, which is the cheaper place to put
-//! a cardinality decision that may need reverting.
+//! No metric instruments *here*. `er_obs::metrics` owns the instruments and the
+//! registry that bounds their cardinality (one `er.db.query.duration` histogram
+//! over two closed dimensions); a second, hand-rolled instrument in this layer
+//! would be a cardinality decision made in the wrong place. RED metrics over
+//! `http.route` derive from these spans through a `spanmetrics` connector in the
+//! collector's config, which is the cheaper place to put a decision that may
+//! need reverting.
 
 use axum::body::Body;
 use axum::extract::MatchedPath;
@@ -99,6 +116,11 @@ pub fn is_probe(route: &str) -> bool {
 }
 
 /// Build the span for one request. [`Span::none`] for a probe — see [`is_probe`].
+///
+/// The returned span is a **child of the caller's trace** when the request
+/// carried an acceptable `traceparent`; see the module doc for what was broken
+/// before it was. A fresh root is the correct and permanent answer for a caller
+/// that sent none — a direct API client, a probe, a curl.
 pub fn make_span(req: &Request<Body>) -> Span {
     let route = req
         .extensions()
@@ -131,7 +153,7 @@ pub fn make_span(req: &Request<Body>) -> Span {
     // rather than an oversight. `GET /v1/orgs/{org}/golden-records` takes `q`,
     // a contains-search over record values, so the query string is payload in
     // the one sense this engine must never log. The path carries identifiers.
-    tracing::info_span!(
+    let span = tracing::info_span!(
         "http.server",
         otel.name = %format_args!("{} {}", req.method(), route),
         otel.kind = "server",
@@ -151,7 +173,22 @@ pub fn make_span(req: &Request<Body>) -> Span {
         er.actor = tracing::field::Empty,
         er.role = tracing::field::Empty,
         http.response.status_code = tracing::field::Empty,
-    )
+    );
+
+    // The hop. Validated with the same rule that decides whether a traceparent
+    // is fit to STORE on `jobs.trace_context`, deliberately rather than letting
+    // the propagator judge it: the two must agree, or a context good enough to
+    // parent this span could still be dropped from the job row, and the trace
+    // would then break at a different place than the one anybody is looking at.
+    //
+    // A rejected or absent header leaves the fresh root alone. That is the same
+    // choice `forwarded_traceparent` makes and for the same reason — a bad
+    // correlation handle must never fail an otherwise valid request.
+    if let Some(parent) = crate::forwarded_traceparent_header(req.headers()) {
+        er_obs::adopt_traceparent(&span, &parent);
+    }
+
+    span
 }
 
 /// Record the outcome on the span and emit the request log line.

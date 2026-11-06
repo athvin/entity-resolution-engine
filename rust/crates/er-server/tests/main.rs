@@ -92,3 +92,4 @@ mod pg_webhook_deliver;
 mod pg_webhooks;
 mod profile_value_gate;
 mod response_envelopes;
+mod telemetry_trace_continuation;
