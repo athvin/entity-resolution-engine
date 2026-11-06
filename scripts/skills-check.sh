@@ -792,16 +792,33 @@ gen_tiers_and_thresholds() {
 	# Assigned with a plain case, never inside a command substitution: a
 	# backtick-quoted command name nested in $(...) is parsed as a nested
 	# substitution and gets EXECUTED. This generator is pure text.
-	local t cmd
-	for t in unit component functional e2e; do
+	#
+	# The tiers are listed in pipeline order rather than derived, because the
+	# order carries meaning a glob would lose. The set difference below is what
+	# makes the list safe: `driver` was missing from this table for as long as
+	# the tier existed — a required status check with its own Postgres service,
+	# absent from the one table that answers "where does this test go".
+	local t cmd dir
+	for t in unit component functional driver e2e; do
 		[[ -d frontend/tests/$t ]] || continue
 		case $t in
 		unit | component) cmd='`pnpm test`' ;;
 		functional) cmd='`pnpm test:e2e`' ;;
+		driver) cmd='`pnpm test:driver` — needs a real PostgreSQL; outside `vitest.config.ts`'"'"'s `include`' ;;
 		e2e) cmd='`make frontend-e2e` — release gate, needs Docker (~10 min)' ;;
 		*) cmd='—' ;;
 		esac
 		printf '| %s | `frontend/tests/%s/` | %s |\n' "$t" "$t" "$cmd"
+	done
+	# Any test directory this generator does not know about. `mock-erserver`
+	# and `support` are fixtures rather than tiers; anything else is a tier
+	# nobody added here, and it says so in the table instead of being absent.
+	for dir in frontend/tests/*/; do
+		t=$(basename "${dir%/}")
+		case $t in
+		unit | component | functional | driver | e2e | mock-erserver | support) continue ;;
+		esac
+		printf '| %s | `frontend/tests/%s/` | **unmapped — add it to `gen_tiers_and_thresholds`** |\n' "$t" "$t"
 	done
 }
 

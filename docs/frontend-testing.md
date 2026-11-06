@@ -21,7 +21,10 @@ setup (how to run things, the dev substrate) stays in
    (`rust.yml` now contributes five: `entities` was split out of
    `fmt + clippy + docs` on 2026-10-22, when that job was four serial
    ~10-minute steps and 42m27 on a cache miss. The new context was added to
-   protection only after it had reported green on `main`.)
+   protection only after it had reported green on `main`.) `frontend.yml`
+   contributes a fourth as well: `postgres.js driver contract` joined when the
+   driver tier below was added, which is why no document here states how many
+   required checks there are — the set lives in branch protection, not the tree.
 2. **No `paths:` filter on `frontend.yml`.** A workflow a path filter skips never
    reports, so a required check would sit pending forever on a backend-only PR.
    A `detect` job and an `if:` per job is the mechanism — mirroring what

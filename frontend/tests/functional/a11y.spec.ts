@@ -202,8 +202,10 @@ test.describe("accessibility", () => {
       // on an unchanged test — in a REQUIRED check, so it was failing other
       // people's PRs for a reason their diffs could not explain.
       await page.emulateMedia({ reducedMotion: "reduce" });
-      // The sweep logs in before every screen, so an unauthenticated route
-      // cannot be added without making this step conditional.
+      // The sweep logs in before every screen except the ones that set
+      // `anonymous`, which is all a route reachable without a session needs:
+      // the flag, not a change here. (This comment described the pre-flag
+      // behaviour for long enough that the frontend-testing skill copied it.)
       if (!screen.anonymous) await login(page, USERS.steward);
       await page.goto(screen.path);
       await screen.ready(page);
