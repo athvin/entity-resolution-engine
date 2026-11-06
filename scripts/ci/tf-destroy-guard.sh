@@ -15,10 +15,26 @@
 # replacements trip it too. That is the intended trade — uniform across every
 # applied env, with no per-env carve-out to forget about.
 #
-# THE OPT-IN is the token `ALLOW-DESTROY` in the commit message. The repository
-# squash-merges, so the merge commit message is the PR title plus body: putting
-# the token in the PR title makes the intent reviewable in the same diff as the
-# destroy itself, which a workflow input or a label would not.
+# THE OPT-IN is the token `ALLOW-DESTROY` in the merge commit message, which is
+# what this reads. Stating it in prose makes the intent reviewable in the same
+# diff as the destroy itself, which a workflow input or a label would not.
+#
+# GETTING IT THERE IS THE PART THAT BITES, and this comment used to say "put it
+# in the PR title" as though that were sufficient. It is not. GitHub composes a
+# squash message from the PR title and body only when the PR has **two or more**
+# commits; for a SINGLE-commit PR it uses that commit's own message and ignores
+# the title entirely. A small infra PR is usually one commit, so the advice was
+# wrong in exactly the common case — #509 was retitled to carry the token,
+# merged, and the apply refused anyway, because the lone commit's message
+# predated the retitle.
+#
+# So, reliably, either:
+#   * put the token in the COMMIT message (amend and force-push), or
+#   * pass it explicitly at merge time:
+#       gh pr merge <n> --squash --subject '<subject> ALLOW-DESTROY'
+#
+# A multi-commit PR does take its title, so that advice was not wrong
+# everywhere — only unreliable, which is worse.
 #
 # IT FAILS CLOSED ON UNPARSEABLE INPUT, deliberately. The recurring bug class in
 # this repository is a gate that passes because it never actually looked —
@@ -108,7 +124,12 @@ if [ -n "${GITHUB_ACTIONS:-}" ]; then
         "$destroy" "$TOKEN"
 fi
 printf 'tf-destroy-guard: REFUSED. This apply would destroy %s resource(s).\n' "$destroy" >&2
-printf 'tf-destroy-guard: Nothing has been applied. To allow it, say so in the PR title\n' >&2
-printf 'tf-destroy-guard: (which becomes the squash-merge commit message) by including the\n' >&2
-printf 'tf-destroy-guard: token %s, then merge again.\n' "$TOKEN" >&2
+printf 'tf-destroy-guard: Nothing has been applied. To allow it, the MERGE COMMIT message\n' >&2
+printf 'tf-destroy-guard: must contain the token %s.\n' "$TOKEN" >&2
+printf 'tf-destroy-guard:\n' >&2
+printf 'tf-destroy-guard: Retitling the PR is NOT enough on its own: GitHub only builds the\n' >&2
+printf 'tf-destroy-guard: squash message from the PR title when the PR has two or more\n' >&2
+printf 'tf-destroy-guard: commits. With a single commit it uses that commit message. Either\n' >&2
+printf 'tf-destroy-guard: amend the commit, or merge with an explicit subject:\n' >&2
+printf 'tf-destroy-guard:   gh pr merge <n> --squash --subject '"'"'<subject> %s'"'"'\n' "$TOKEN" >&2
 exit 1
