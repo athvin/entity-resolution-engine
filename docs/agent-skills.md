@@ -129,7 +129,7 @@ can still accept a routing clause.
 
 | Headroom | Skill | Length |
 |---:|---|---:|
-|   17 | `skill-audit` | 1007 |
+|    7 | `skill-audit` | 1017 |
 |   20 | `security` | 1004 |
 |   48 | `project-board` | 976 |
 |   66 | `entity-framework` | 958 |
@@ -147,8 +147,8 @@ can still accept a routing clause.
 |   96 | `er-matching` | 928 |
 |   99 | `ci-and-supply-chain` | 925 |
 |  123 | `infra-platform` | 901 |
+|  135 | `land-pr` | 889 |
 |  138 | `skill-writer` | 886 |
-|  152 | `land-pr` | 872 |
 |  177 | `api-contract` | 847 |
 |  179 | `ducklake-performance` | 845 |
 |  342 | `pentest` | 682 |
@@ -157,7 +157,7 @@ The median routing clause here is **56 characters**. Skills with less
 headroom than that cannot take another one — adding routing to any of them
 means trimming its **what** clause first, which is the documented fix:
 
-- `skill-audit` — 17 characters free
+- `skill-audit` — 7 characters free
 - `security` — 20 characters free
 - `project-board` — 48 characters free
 <!-- END GENERATED: description-budget -->
