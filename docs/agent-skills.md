@@ -160,6 +160,7 @@ So: counts, version numbers, job names, rule codes and thresholds live in
 |---|---|
 | `entity-framework/references/entities-index.md` | `entities/*/entity.yaml` |
 | `rust-conventions/references/crate-map.md` | the crate tree and `rust/Cargo.toml` |
+| `rust-conventions/references/gates.md` | the `check:` target in `Makefile` |
 | `sql-analysis/references/diagnostics.md` | `er-sql-check/src/analyze.rs` vs the design doc's table |
 | `ci-and-supply-chain/references/required-checks.md` | the workflow files and `rust/deny.toml` |
 | `frontend-testing/references/tiers-and-thresholds.md` | `vitest.config.ts`, `package.json`, `frontend.yml` |
@@ -263,7 +264,8 @@ skill, so it gets the same fix.
 | Generator | Target | Derived from |
 |---|---|---|
 | `entities-index` | `entity-framework/references/entities-index.md` | `entities/*/entity.yaml` and the declared statement files |
-| `crate-map` | `rust-conventions/references/crate-map.md` | the `rust/crates/*` tree, each crate's leading `//!`, and the pinned dependency lines |
+| `crate-map` | `rust-conventions/references/crate-map.md` | the `rust/crates/*` tree, each crate's leading `//!`, the pinned dependency lines, and `[workspace.lints]` paired with the comment that justifies each allow |
+| `rust-gates` | `rust-conventions/references/gates.md` | the `check:` target's prerequisites and each one's recipe, plus the count of test files reading `ER_TEST_PG_DSN` |
 | `diagnostics` | `sql-analysis/references/diagnostics.md` | `er-sql-check`'s `analyze.rs` set-differenced against the design doc's table |
 | `required-checks` | `ci-and-supply-chain/references/required-checks.md` | every workflow's jobs, names, timeouts and `if:`, plus `deny.toml` |
 | `tiers-and-thresholds` | `frontend-testing/references/tiers-and-thresholds.md` | `vitest.config.ts` thresholds, the two Playwright pins, the test directories |

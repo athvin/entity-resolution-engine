@@ -1,6 +1,6 @@
 ---
 name: rust-conventions
-description: The authoritative Rust conventions for this workspace — that `make check` (not the bare cargo trio) is the finish line, the enforced rule that an error's Display must never interpolate its own source and how to flatten a chain instead, the workspace lint policy and why each clippy allow exists, the MSRV and edition-2024 consequences, and the TLS/AWS feature pins that must not be relaxed. Use before authoring or reviewing any Rust in this repo, when deciding what to run before calling backend work done, when adding a dependency or a feature, when writing an error type, or when a clippy or doc warning fails the build. This supersedes any generic Rust skill's finish-line checklist. For schema or SQL changes see entity-framework; for the control plane see er-server-control-plane; for why the CI job that ran these gates failed, and the workflow topology behind it, see ci-and-supply-chain.
+description: The authoritative Rust conventions for this workspace — that `make check` (not the bare cargo trio) is the finish line, the enforced rule that an error's Display must never interpolate its own source and how to flatten a chain instead, the workspace lint policy and why each clippy allow exists, the MSRV and edition-2024 consequences, and the TLS/AWS feature pins that must not be relaxed. Use before authoring or reviewing any Rust in this repo, when deciding what to run before calling backend work done, when adding a dependency or a feature, when writing an error type, or when a clippy or doc warning fails the build. This supersedes any generic Rust skill's finish-line checklist. For schema or SQL changes see entity-framework; for the control plane see er-server-control-plane; for why the CI job that ran these gates failed, the workflow topology behind it, and the advisory, licence and ban gates a dependency bump must also clear, see ci-and-supply-chain.
 ---
 
 # Rust in this workspace
@@ -12,24 +12,21 @@ first.
 ## The finish line is `make check`
 
 ```
-make check   # = fmt + lint + entities-check + test
+make check
 ```
 
 Run it from the **repo root** before calling backend work done. It is the
-PR-equivalent gate and mirrors the `rust` workflow's lint and test tiers:
-
-| Step | Command |
-|---|---|
-| `fmt` | `cargo fmt --all --check` |
-| `lint` | `cargo clippy --workspace --all-targets -- -D warnings` |
-| `entities-check` | `cargo run -q -p er-entity-cli -- verify --root ..` |
-| `test` | `cargo test --workspace` |
+PR-equivalent gate and mirrors the `rust` workflow's lint, entities and test
+jobs. The step list is derived from the `check:` target, in
+[references/gates.md](references/gates.md) — do not restate it from memory,
+because it has grown twice.
 
 **`cargo fmt` + `cargo clippy` + `cargo test` on their own are not
 sufficient.** They skip `entities-check`, the entity-framework gate that
-regenerates every artifact from `entities/*.yaml`, fails on a stale committed
-file, and runs the E0xx statement passes. A change can pass clippy and every
-test and still break that gate.
+regenerates every artifact from `entities/`, fails on a stale committed file and
+runs the E0xx statement passes; and they skip `skills-check`, which is the same
+class of gate over `.claude/skills/**`. A change can pass clippy and every test
+and still break either one.
 
 > **Precedence.** Some installed third-party skills — notably
 > `rust-best-practice`, which symposium syncs into `rust/.claude/skills/` —
@@ -40,15 +37,14 @@ test and still break that gate.
 > error-handling skills it ships alongside) is fine and does not conflict —
 > `library-errors` in particular agrees with the Display rule below.
 
-Two gaps in `make check` worth knowing, because CI catches them and your laptop
-does not:
+Its `doc` step is `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
+--document-private-items`, so a doc comment linking to a **private** item is a
+hard failure too — that flag is why, and it is the case that used to pass
+locally and fail CI.
 
-- **`cargo doc` is not in `make check`** but the CI lint job runs it with
-  `RUSTDOCFLAGS=-D warnings`. A broken intra-doc link fails CI after a green
-  local run. Run `cargo doc --workspace --no-deps` when you have touched doc
-  comments.
-- Postgres- and DuckLake-gated tests self-skip without their env vars. See
-  [references/gates.md](references/gates.md).
+The gap that remains is the gated tiers: Postgres- and DuckLake-backed tests
+**self-skip** without their env vars, so a green `make check` says nothing about
+them. See [references/gates.md](references/gates.md).
 
 ## Errors: never interpolate your own source
 
@@ -96,26 +92,30 @@ silently discards the cause. Error modelling in full:
 CI runs `clippy --workspace --all-targets -- -D warnings`, so **every warning
 is a hard failure**, including in tests and benches.
 
-Each allow exists for a stated reason, and the reasons are load-bearing rather
-than concessions — several protect correctness:
+Each allow carries its reason as a comment beside it, and two of them protect
+**correctness** rather than taste — both read like bugs to anyone meeting them
+cold, so do not "fix" either:
 
-| Allowed | Why |
-|---|---|
-| `cast_possible_truncation`, `cast_precision_loss`, `cast_possible_wrap`, `cast_sign_loss` | numeric engine; i64/usize/f64 conversions are pervasive and intentional |
-| `float_cmp` | trained and fixed float parameters **are** compared for exact equality, deliberately |
-| `unreadable_literal` | determinism-critical float/hash constants; reformatting risks a transcription error for zero functional gain |
-| `doc_markdown` | doc prose names DuckDB, DuckLake, SQL — not code spans |
-| `missing_errors_doc`, `missing_panics_doc` | errors and panics are documented in prose |
-| `needless_pass_by_value` | CLI handlers own their parsed config; borrowing would add noise |
-| `must_use_candidate`, `module_name_repetitions`, `too_many_lines`, `items_after_statements`, `struct_excessive_bools` | style preferences that fight the codebase's shape |
+- **`float_cmp`.** Trained and fixed float parameters are compared for exact
+  equality, deliberately. An epsilon tolerance here makes a parameter mismatch
+  invisible, which is the failure it would be introduced to hide.
+- **`unreadable_literal`.** The determinism-critical float and hash constants
+  are transcribed values; reformatting them risks a transcription error for zero
+  functional gain.
+
+The full allow-list with each comment is derived from
+`[workspace.lints.clippy]`: [references/crate-map.md](references/crate-map.md).
 
 Do not add a new `#[allow]` at a call site to silence a pedantic lint without
-saying why in a comment — the workspace table sets the precedent that an allow
-carries its reason.
+saying why in a comment — the workspace block sets the precedent that an allow
+carries its reason, and the generated table shows a blank cell for any that
+does not.
 
 ## MSRV, edition, and what follows from them
 
-- **`rust-version = "1.88"`**, `edition = "2024"`.
+- The workspace pins both; the values are in
+  [references/crate-map.md](references/crate-map.md) rather than here, because
+  an MSRV in prose outlives the bump that moved it.
 - Nothing verifies the floor downward: `rust-toolchain.toml` asks for `stable`
   and CI installs stable. Its live effect is **dependency resolution**, so
   raising it is a dependency decision, not a syntax one.
@@ -167,3 +167,8 @@ output, which the goldens compare.
 
 The current crate inventory and version pins are generated, not written here:
 [references/crate-map.md](references/crate-map.md).
+
+A new dependency also has to clear the supply-chain gates — cargo-deny's
+advisories, licences and bans — and those are the `ci-and-supply-chain` skill's,
+not this one's. `make check` does not run them, so a dependency change can pass
+every gate on this page and still be red in CI.

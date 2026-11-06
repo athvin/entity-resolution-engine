@@ -11,25 +11,33 @@
 
 ## What `make check` covers
 
-```
-make check   # fmt + lint + entities-check + test
-```
+Run from the repo root. It mirrors the `rust` workflow's lint, entities and test
+jobs, so a green `make check` means the three biggest CI jobs should pass.
 
-Run from the repo root. Mirrors the `rust` workflow's lint and test tiers, so a
-green `make check` means the two biggest CI jobs should pass.
+The step list below is **generated from the `check:` target**, because it has
+grown twice — `doc` and `skills-check` were both added after this reference was
+written, and nothing failed while the prose said otherwise.
+
+<!-- BEGIN GENERATED: rust-gates -->
+**`make check` = fmt + lint + doc + entities-check + skills-check + test** — the `check:` target's prerequisites, in order.
+
+| Step | Command |
+|---|---|
+| `fmt` | `cd rust && cargo fmt --all --check` |
+| `lint` | `cd rust && cargo clippy --workspace --all-targets -- -D warnings` |
+| `doc` | `cd rust && RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items` |
+| `entities-check` | `cd rust && cargo run -q -p er-entity-cli -- verify --root ..` |
+| `skills-check` | `bash scripts/skills-check.sh all` |
+| `test` | `cd rust && cargo test --workspace` |
+
+**52 test files read `ER_TEST_PG_DSN`** and self-skip without it.
+<!-- END GENERATED: rust-gates -->
 
 ## What it does not cover
 
-Four classes of failure survive a green `make check`:
+Three classes of failure survive a green `make check`:
 
-**1. `cargo doc`.** CI's lint job runs
-`cargo doc --workspace --no-deps --document-private-items` with
-`RUSTDOCFLAGS=-D warnings`. `make check` does not. A broken intra-doc link
-therefore fails CI after a clean local run — and `--document-private-items`
-means private-item links count too. Run it yourself after touching doc
-comments.
-
-**2. Postgres-backed tests.** They self-skip without `ER_TEST_PG_DSN`:
+**1. Postgres-backed tests.** They self-skip without `ER_TEST_PG_DSN`:
 
 ```rust
 let Ok(dsn) = std::env::var("ER_TEST_PG_DSN") else {
@@ -38,15 +46,19 @@ let Ok(dsn) = std::env::var("ER_TEST_PG_DSN") else {
 ```
 
 Skip, not fail — so `cargo test --workspace` on a laptop with no database
-reports success while leaving the whole control-plane surface unexercised.
-Roughly thirty test files are in this tier.
+reports success while leaving the whole control-plane surface unexercised. The
+size of that tier is in the generated block above, and it is most of the
+control-plane coverage there is.
 
-**3. DuckLake and extension tiers.** Gated on `DEDUPE_E2E_DUCKLAKE=1` and
+**2. DuckLake and extension tiers.** Gated on `DEDUPE_E2E_DUCKLAKE=1` and
 `DEDUPE_E2E_EXTENSIONS=1` (the latter needs network to `INSTALL`). Scale
 goldens are gated on `DEDUPE_SCALE_TESTS` and run on main/nightly only.
 
-**4. The frontend.** Entirely separate (`make frontend`), with its own required
+**3. The frontend.** Entirely separate (`make frontend`), with its own required
 checks.
+
+Dependency advisories, licences and bans are not here either — they are a
+separate CI job, and the `ci-and-supply-chain` skill owns them.
 
 The practical consequence: **a bug in a Postgres or DuckLake path cannot be
 caught by the default test run.** If your change touches `er-server`,
@@ -121,8 +133,9 @@ quietly.
 | Changed | Run |
 |---|---|
 | ordinary Rust logic | `make check` |
-| doc comments | `make check`, then `cargo doc --workspace --no-deps` |
+| doc comments | `make check` (its `doc` step denies rustdoc warnings, private-item links included) |
 | anything in `entities/` | `make check` (its `entities-check` step is the gate) |
+| anything in `.claude/skills/` | `make check` (its `skills-check` step is the gate), or `make skills-check` alone — it needs no toolchain |
 | `er-server`, `pg.rs`, the dispatcher | `make check` **and** the Postgres tier |
 | the session layer, `er-cli`, lake reads/writes | `make check` **and** `make check-e2e` |
 | a new DuckDB extension or comparator | the extension tier too (needs network) |
