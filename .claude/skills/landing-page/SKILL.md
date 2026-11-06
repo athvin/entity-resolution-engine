@@ -49,9 +49,14 @@ or `.xml` response is gated like any page and every crawler gets a 307 to
 `/login`. Those two are literal entries in `MARKETING_PUBLIC_PATHS` in
 `src/lib/site/routes.ts`, which is the list the proxy spreads in. **A page goes
 in `MARKETING_PATHS`, not that list** — `MARKETING_PUBLIC_PATHS` spreads
-`MARKETING_PATHS`, and the sitemap and the nav read it directly, so one edit
-there reaches all three consumers. Adding a page to the public list instead
-makes it reachable while leaving it out of the sitemap and the nav.
+`MARKETING_PATHS`, and `src/app/sitemap.ts` reads it directly, so one edit there
+reaches both consumers. Adding a page to the public list instead makes it
+reachable while leaving it out of the sitemap.
+
+**The nav is not one of those consumers**, despite what `routes.ts` used to say.
+Nothing under `src/components/marketing/` imports either list — the header is a
+wordmark plus the one CTA. A page added to `MARKETING_PATHS` is reachable and in
+the sitemap and **linked from nowhere**; adding the link is a separate edit.
 
 **3. The OG image is a committed PNG, not `opengraph-image.tsx`.** A generated
 one is served **extensionless**, so the proxy intercepts it and a crawler
@@ -170,8 +175,10 @@ or both share one hostname, which needs nothing. See the infra-platform skill.
 
 **Adding a page.** Create it under `(marketing)/`, add
 `export const dynamic = "force-static"`, add its path to `MARKETING_PATHS`
-(which feeds the proxy, the sitemap and the nav at once), register it in the axe
-gate with `anonymous: true`, and confirm `next build` prints `○` beside it.
+(which feeds the proxy and the sitemap at once), **link it from
+`marketing-header.tsx` by hand** because no nav derives from that list, register
+it in the axe gate with `anonymous: true`, and confirm `next build` prints `○`
+beside it.
 
 **Changing copy.** Edit `content.ts`. Then regenerate any baseline whose section
 you touched, in the container.
