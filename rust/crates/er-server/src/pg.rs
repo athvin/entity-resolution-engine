@@ -1288,6 +1288,16 @@ pub async fn audit(
 /// The audit ledger, newest first (`auth.py` `audit_rows`); `before_id` is the
 /// keyset cursor. Optional `org` / `action` filters.
 ///
+/// Returns `trace_id`, which is the whole point of writing it: the column is the
+/// JOIN KEY to the span store, and a join key no reader can reach is a column
+/// that only looks like attribution. `read/page.sql` has always projected it and
+/// the generated `AuditLog` schema has always declared it — this projection was
+/// the one layer that dropped it, so the OpenAPI document promised a field the
+/// API did not send.
+///
+/// Null for a row no traced request caused, which is permanent for the
+/// dispatcher's own bookkeeping and a CLI. See `er_obs::identity`.
+///
 /// # Errors
 /// Propagates the query error.
 pub async fn audit_rows(
@@ -1310,6 +1320,7 @@ pub async fn audit_rows(
                 "org": r.org,
                 "action": r.action,
                 "detail": r.detail,
+                "trace_id": r.trace_id,
             })
         })
         .collect())

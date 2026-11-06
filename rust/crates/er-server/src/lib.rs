@@ -556,7 +556,19 @@ const TRACEPARENT_LEN: usize = 55;
 /// [`forwarded_actor`] gives: a bad header should not fail an otherwise valid
 /// request, and a null `trace_context` is exactly the pre-existing behaviour.
 fn forwarded_traceparent(parts: &Parts) -> Option<String> {
-    let raw = parts.headers.get(TRACEPARENT_HEADER)?.to_str().ok()?.trim();
+    forwarded_traceparent_header(&parts.headers)
+}
+
+/// [`forwarded_traceparent`] over a bare header map.
+///
+/// Split out for [`telemetry::make_span`], which makes the request span a child
+/// of this context and is handed a `&Request` rather than request `Parts`. One
+/// function rather than two readings of the same header, because the span's
+/// parent and the value stored on `jobs.trace_context` have to be the *same*
+/// context — if one accepted a header the other rejected, the trace would break
+/// somewhere other than where it appeared to.
+pub(crate) fn forwarded_traceparent_header(headers: &axum::http::HeaderMap) -> Option<String> {
+    let raw = headers.get(TRACEPARENT_HEADER)?.to_str().ok()?.trim();
     acceptable_traceparent(raw).then(|| raw.to_string())
 }
 

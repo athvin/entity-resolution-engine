@@ -51,7 +51,7 @@ use opentelemetry_http::{Bytes, HttpClient, HttpError, Request, Response};
 use opentelemetry_otlp::{MetricExporter, SpanExporter, WithExportConfig, WithHttpConfig};
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
-use opentelemetry_sdk::trace::SdkTracerProvider;
+use opentelemetry_sdk::trace::{Sampler, SdkTracerProvider};
 
 use crate::init::Role;
 
@@ -251,12 +251,24 @@ pub fn provider_for(
         .with_timeout(timeout)
         .build()?;
 
-    // No sampler is configured, which means `always_on`, and that is deliberate.
+    // `AlwaysOn`, stated rather than left to the default, because the default is
+    // NOT always-on: `SdkTracerProvider` defaults to `ParentBased(AlwaysOn)`,
+    // which honours a REMOTE parent's sampled flag.
+    //
+    // That distinction was harmless only while nothing adopted a remote parent.
+    // Now that `telemetry::make_span` makes the request span a child of the
+    // caller's `traceparent`, the default would let any caller silence this
+    // process's spans by sending `…-00` — a kill switch on our own telemetry,
+    // held by the untrusted side of a header that is spoofable by design. It
+    // would also be invisible: spans would simply stop arriving for that
+    // caller, with nothing logged.
+    //
     // The sampling decision belongs to the collector's `tail_sampling`
     // processor, which can see a trace's outcome — an error, a slow request, an
     // impersonation — before deciding. A head sampler here would throw away
     // exactly the traces worth keeping, before anything knows they matter.
     Ok(SdkTracerProvider::builder()
+        .with_sampler(Sampler::AlwaysOn)
         .with_batch_exporter(exporter)
         .with_resource(
             Resource::builder()
