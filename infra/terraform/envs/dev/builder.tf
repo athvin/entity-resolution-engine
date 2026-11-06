@@ -1,4 +1,4 @@
-# ─── TEMPORARY MVP BUILD CREDENTIAL — DEV-SCOPED, PROD-GUARDED ──────────────
+# ─── MVP BUILD CREDENTIAL — DEV-SCOPED, PROD-GUARDED, KEPT INDEFINITELY ─────
 #
 # A long-lived, never-expiring access key for the autonomous MVP build loop.
 # SSO PlatformAdmin sessions cap at PT8H (modules/identity-center/main.tf:67)
@@ -15,25 +15,40 @@
 #     deliberate omission: `iam:CreateAccessKey` is NOT denied, because the loop
 #     must create the dev lake's access key (lake.tf).
 #   - It is still a leak-sensitive credential; treat er/dev/shared/builder as
-#     sensitive. It should still be removed when the MVP build loop is done
-#     (`git rm` + apply) — it is just no longer a prerequisite for standing up
-#     prod.
+#     sensitive.
+#   - LIFETIME, decided 2026-11-05: this key STAYS. There is no scheduled
+#     retirement and it is not a prod-gate blocker. Remove it only when the
+#     owner says so — not on a milestone, not when "the build loop is done".
+#     Earlier revisions of this comment, of `docs/parity-roadmap.md` and of the
+#     secret's own description all implied a removal date; they were wrong and
+#     are corrected. If you are reading this while planning a retirement, the
+#     answer is that nobody has asked for one.
+#   - The residual exposure, since it is staying: `iam:CreateAccessKey` is not
+#     denied (see the omission above), so a leak lets the holder mint
+#     credentials for a principal carrying no DenyProd*, which routes around
+#     the prod guard. That — not the AdministratorAccess attachment — is the
+#     thing worth watching.
 #
 # APPLY IDENTITY: PlatformAdmin cannot create this (its own DenyAccessKeyCreation
 # blocks iam:CreateAccessKey). Apply under the bootstrap admin:
 #     AWS_PROFILE=er-mgmt terraform -chdir=infra/terraform/envs/dev apply
 #
-# REMOVAL (when the MVP build loop ends): `git rm` this file + apply; destroys
-# the user, key, guard, and secret in one diff. Nothing else references it.
+# REMOVAL — NOT SCHEDULED. Kept indefinitely by owner decision 2026-11-05; this
+# is the procedure for the day someone asks, not a plan to act on. `git rm` this
+# file + apply; destroys the user, key, guard, and secret in one diff. Nothing
+# else in Terraform references it — but the EKS access entry self-granted
+# 2026-10-19 is NOT in Terraform and does not go with it:
+#     aws eks delete-access-entry --cluster-name er-dev \
+#       --principal-arn arn:aws:iam::797781631727:user/er-dev-builder
 # ────────────────────────────────────────────────────────────────────────────
 
 resource "aws_iam_user" "builder" {
   name = "er-dev-builder"
 
   tags = {
-    Retire      = "when-build-loop-done"
+    Retire      = "on-owner-instruction-only"
     ExceptionTo = "infrastructure.md-8.1-no-longlived-human-keys"
-    Purpose     = "temporary MVP autonomous-build-loop credential - dev-scoped prod-guarded"
+    Purpose     = "MVP autonomous-build-loop credential - dev-scoped prod-guarded - kept indefinitely 2026-11-05"
   }
 }
 
@@ -122,7 +137,7 @@ resource "aws_iam_access_key" "builder" {
 # loop reads it from here once into a local `er-builder` profile.
 resource "aws_secretsmanager_secret" "builder" {
   name        = "er/dev/shared/builder"
-  description = "TEMPORARY MVP build-loop key (dev-scoped, prod-guarded). Remove with builder.tf when the build loop is done."
+  description = "Build-loop key (dev-scoped, prod-guarded). Kept indefinitely by owner decision 2026-11-05; remove only on explicit instruction."
 }
 
 resource "aws_secretsmanager_secret_version" "builder" {

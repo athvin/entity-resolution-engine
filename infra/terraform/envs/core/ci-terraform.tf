@@ -535,8 +535,9 @@ data "aws_iam_policy_document" "ci_tf_drift_refresh" {
   # The policy is deliberately NOT contorted to exclude that one secret: the
   # dev stack stores the key in a `secretsmanager_secret_version`, so excluding
   # it would make every dev refresh fail and retire the check. The thing to fix
-  # is the key's existence — see builder.tf, whose own comment says to remove it
-  # when the build loop ends. This is one more argument for doing that.
+  # is the key's existence — but that key is kept indefinitely by owner
+  # decision (2026-11-05, see builder.tf), so this check stays scoped rather
+  # than waiting on a retirement that is not coming.
   statement {
     effect  = "Allow"
     actions = ["secretsmanager:GetSecretValue"]

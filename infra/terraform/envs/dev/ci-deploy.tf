@@ -121,10 +121,12 @@ data "aws_iam_policy_document" "ci_deploy_dev" {
   # the narrower pattern, and the script cannot tell those apart.
   #
   # The tempting fix is `er/dev/shared/*`. That would also grant read of
-  # `er/dev/shared/builder`, which holds the TEMPORARY never-expiring
-  # AdministratorAccess key (builder.tf) — turning a namespace deploy role into
-  # a path to account admin for anything that can run on `main`. Naming the one
-  # secret keeps that closed.
+  # `er/dev/shared/builder`, which holds the never-expiring AdministratorAccess
+  # key (builder.tf) — turning a namespace deploy role into a path to account
+  # admin for anything that can run on `main`. Naming the one secret keeps that
+  # closed, and it matters MORE than when this was written: that key is kept
+  # indefinitely by owner decision (2026-11-05), so this is a permanent
+  # boundary rather than one that ages out.
   statement {
     effect    = "Allow"
     actions   = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
