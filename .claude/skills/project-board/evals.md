@@ -9,6 +9,10 @@ behaviours. Record a pass only if every "must" holds.
 
 Must:
 
+- Load this skill without being told to. The query names neither the skill nor
+  `gh project`, so this is the selection test: if the answer arrives without
+  `project-board` loaded, the `description`'s trigger vocabulary is the defect,
+  not the answer.
 - Actually run `gh project item-list 2 --owner athvin`, not recall contents from
   a summary, a memory entry, or earlier in the conversation.
 - Pass `--limit` explicitly, or state that the default of 30 bounds the answer.
@@ -86,15 +90,17 @@ Credit for noting `item-create` is **not** idempotent, so retrying a create that
 Must:
 
 - Re-derive the option id from `gh project field-list` rather than trusting the
-  pasted one.
+  pasted one, whether or not it matches the board today.
 - Explain that an eight-hex-character option id has no checksum, so a stale one
   fails as `The single select option Id does not belong to the field` — which
   reads like a bug in the command rather than a bad id.
 
 Must not:
 
-- Use the supplied id without verifying it, even though in this case it happens
-  to be correct.
+- Use the supplied id without re-deriving it. Whether this particular id is
+  still valid is deliberately not recorded here: an id written down for a later
+  session is the thing the skill body forbids, so a scorer who wants to know
+  must run `field-list` — the same call the model owed.
 
 Credit for distinguishing the card's `PVTI_` item id from the issue number and
 from the issue's node id.
@@ -120,3 +126,45 @@ Must not:
 
 Credit for noting that through GraphQL the same failure arrives as one
 `INSUFFICIENT_SCOPES` error per requested field, with no `data` key.
+
+## 7. Which skill answers a merge-shaped board question
+
+The adjacency test. The prompt is phrased the way `land-pr` and
+`ci-and-supply-chain` both trigger on, and the board question is the one only
+this skill answers.
+
+**Query:** "#604 just landed. Is its roadmap card still sitting in Todo?"
+
+Must:
+
+- Read the card's `Status` with `gh project item-list`, having loaded
+  `project-board` — not answer from `land-pr` or `ci-and-supply-chain` because
+  the prompt mentions a merge.
+- Treat the card's state as a question to be read, not inferred from the merge.
+
+Must not:
+
+- Explain the merge bus, required checks or why a green can be stale here; that
+  is `ci-and-supply-chain`'s, and this skill's description routes to it.
+- Set the card to `Done` to match the merge. "Pull request merged" owns that
+  move, and `Done` closes the issue.
+
+## 8. `In progress` does not mean someone is working on it
+
+**Query:** "What's being worked on right now, and how many weeks of MVP work
+are left?"
+
+Must:
+
+- Say `In progress` on this board means **part-built** — an epic whose
+  foundation already exists in the engine — and that the ordinary reading
+  ("someone is on it this week") is wrong here.
+- Count the cards whose `Estimate` is unset before quoting any total, and
+  present the total as a floor: a `null` contributes nothing to the sum.
+- Take assignment from the issues' assignees rather than from `Status`.
+
+Must not:
+
+- Report the `In progress` column as this week's active work.
+- Quote a week total as though it covered every MVP card.
+- Reach for `Size`, which is left empty on this board.

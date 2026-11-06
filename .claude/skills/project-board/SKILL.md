@@ -1,6 +1,6 @@
 ---
 name: project-board
-description: Explains how to read and write this project's GitHub Projects board — the `gh project` command surface for user-owned project #2 "Product Roadmap" and the `project` scope it requires, the five ID namespaces and why none of them may be hard-coded, the built-in automations that move cards unasked and the one that can close an issue, the filter and JSON key shapes `item-list` returns, the one-field-per-invocation rule for `item-edit`, and the read-after-write staleness that makes a successful write look like a failed one. Use when asked what is on the board or to add, triage or move a card, when sizing, prioritising or scheduling work into an iteration, when reconciling the board against issues or pull requests, when a `gh project` command fails on a scope or an ID, or when deciding whether a card needs moving at all. For the merge bus, required checks and why a pull request's green can be stale see ci-and-supply-chain; for driving a pull request to green and watching main after the merge see land-pr.
+description: Explains how to read and write this project's GitHub Projects board — the `gh project` command surface for user-owned project #2 "Product Roadmap" and the `project` scope it requires, the five ID namespaces and why none of them may be hard-coded, the built-in automations that move cards unasked and the one that can close an issue, the filter and JSON key shapes `item-list` returns, the one-field-per-invocation rule for `item-edit`, and the read-after-write staleness that makes a successful write look like a failed one. Use when asked what is on the board or to add, triage or move a card, when sizing, prioritising or scheduling work into an iteration, when reconciling the board against issues or pull requests, when a `gh project` command fails on a scope or an ID, or when deciding whether a card needs moving at all. For required checks, the merge bus and stale greens see `ci-and-supply-chain`; for driving a pull request to green and watching main see `land-pr`.
 ---
 
 # The project board
@@ -141,7 +141,7 @@ gh project item-list 2 --owner athvin --query 'status:"In progress"'
 gh project item-list 2 --owner athvin --query '-status:Done'
 ```
 
-Three things about that output:
+About that output:
 
 - **`--limit` defaults to 30.** A board larger than that is silently truncated,
   which reads as "that card is not on the board". Pass `--limit` explicitly on
@@ -265,8 +265,10 @@ gh issue list --state open --limit 200 --json labels \
 
 **A release's week total is only as complete as its estimates.** Cards arrive
 from other writers with `Estimate` unset, and a `null` contributes nothing to a
-sum — so a view that totals "MVP: 64 weeks" silently excludes them. Before
-quoting a total, count the cards missing an estimate:
+sum — so a view that totals a release's weeks silently excludes them, and the
+total it shows is a floor rather than an estimate. Nothing in the repo can
+refresh that number, so do not quote one from this file or from a previous
+session; count the cards missing an estimate first:
 
 ```sh
 gh project item-list 2 --owner athvin --limit 400 --format json --jq '
