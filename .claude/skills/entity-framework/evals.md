@@ -76,3 +76,41 @@ Must:
 
 Credit for listing what `verify` actually runs, in order, and for noting the
 lint pass short-circuits on an error-severity finding.
+
+## 6. A lake column change has two homes
+
+**Query:** "Add a `confidence` double to `golden_records` on the lake."
+
+Must:
+
+- Edit **both** `entities/golden_record/entity.yaml` **and** the S5 registry in
+  `rust/crates/er-schema/src/model.rs`, plus that crate's golden JSON dump.
+- Give the reason: lake tables are created at runtime from the registry
+  (`er_cli::create_ddl_table` over `all_specs()`), not from the entity-generated
+  DDL, so an entity-only change regenerates cleanly, passes `er-entity verify`
+  *and* `er-entity-diff`, then fails inside a run with
+  `Binder Error: Referenced column "…" not found`.
+
+Must not:
+
+- Call the change complete because `er-entity verify` is green.
+- Declare the column `nullable: false` (the lake has no defaults).
+
+## 7. Selection: a stale generated artifact is not always this skill's
+
+**Query:** "CI says the generated TypeScript types are stale. Fix it."
+
+This scenario tests **selection**, not knowledge: the vocabulary ("generated",
+"stale", "TypeScript") is this skill's, and the answer belongs to another.
+
+Must:
+
+- Load **api-contract** and regenerate `frontend/src/lib/api/schema.d.ts` from
+  `openapi.json` via `openapi-typescript`.
+
+Must not:
+
+- Reach for `er-entity gen` on the strength of "generated TypeScript". That
+  emits the entity bindings and readers under
+  `frontend/src/lib/entities/`, which are a different artifact and a different
+  gate, and leaves the OpenAPI types untouched.
