@@ -20,6 +20,29 @@
 resource "aws_cloudwatch_log_group" "containers" {
   name              = "/er/dev/containers"
   retention_in_days = 30
+
+  # P4. Halves the rate on the largest log stream here: $0.25/GB against
+  # STANDARD's $0.50. At the 5 GiB/day the ingest alarm is set to, that is
+  # ~$38/month rather than ~$75.
+  #
+  # DESTRUCTIVE, and that is why this arrived as a draft rather than a merge. A
+  # log group's class is fixed at creation — there is no update API for it — so
+  # changing it in place is a destroy-and-recreate that takes the group's
+  # existing events with it. Up to 30 days of dev container output, which is
+  # debug-tier and the §17 PII probe's input, and nothing else.
+  #
+  # What IA gives up, checked rather than assumed: no metric filters, no Live
+  # Tail, no subscription filters. None of those are used here. Logs Insights
+  # DOES work on IA, so the PII probe still runs, and the ingest alarm in
+  # alarms.tf reads `AWS/Logs IncomingBytes` — a CloudWatch-published metric,
+  # not a metric filter — so it keeps working too.
+  #
+  # The non-destructive alternative, if losing the history is not acceptable:
+  # create a second group with the IA class, grant the shipper both, repoint
+  # `fluent-bit-values.yaml` and the alarm at the new one, and let the old
+  # group age out before removing it. That costs a permanent awkward name and
+  # two PRs, and it is the right trade if the 30 days matter.
+  log_group_class = "INFREQUENT_ACCESS"
 }
 
 # The awsemf exporter's output: EMF-structured events CloudWatch extracts
