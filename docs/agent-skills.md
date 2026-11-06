@@ -173,6 +173,14 @@ The `diagnostics.md` generator is the pattern worth copying: it derives the
 against the codes actually present in the source. Nobody maintains that list,
 so nobody can forget to.
 
+**A zero and a one are counts too, and they rot less visibly.**
+`frontend-data-ui` carried four cardinality claims written as absences — "the
+**only** virtualized surface", "**no** `loading.tsx` anywhere", "the **only**
+`useSearchParams`", "there is **no** `<table>`" — of which the last was false by
+23 components. An absence reads as a convention rather than as inventory, so
+nobody thinks to re-check it, and a skill that states one is telling a session
+not to look. `dense-surface-facts` derives all four instead.
+
 ## The gate
 
 ```sh
@@ -261,6 +269,7 @@ skill, so it gets the same fix.
 | `tiers-and-thresholds` | `frontend-testing/references/tiers-and-thresholds.md` | `vitest.config.ts` thresholds, the two Playwright pins, the test directories |
 | `design-tokens` | `frontend-design-system/references/tokens-and-primitives.md` | `globals.css` tokens with both themes and their `@theme` reachability, `components.json`, the installed primitives, the palette-ban regex |
 | `screens-coverage` | `frontend-data-ui/references/screens.md` | every `src/app/**/page.tsx` route set-differenced against the axe gate's `SCREENS` array |
+| `dense-surface-facts` | `frontend-data-ui/references/dense-surfaces.md` | `useVirtualizer` and `useSearchParams` call sites, route-level boundary files under `src/app`, and the `<table>` count — each a zero or a one the skill used to state in prose |
 | `aws-footprint` | `aws-account-operations/references/footprint.md` | `resource "aws_*"` types and counts, the permission sets and whether each has an inline policy, the workspace's `aws-*` crates, the provider pins |
 | `skill-inventory` | this document **and** `CLAUDE.md` | every `SKILL.md`'s `name`, `description` and `disable-model-invocation` |
 

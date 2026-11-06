@@ -45,12 +45,13 @@ predicate that waits for real content, which means the screen needs a stable
 `data-testid`.
 
 Note the gate's shape when adding one. The sweep logs in as a fixture user
-before every screen, so an unauthenticated route cannot be added without also
-making the login step conditional. It is also desktop-only, on the stated
-grounds that the desktop DOM is a superset of the mobile one — true while the
-responsive pattern is the grid-collapses-to-cards one described in
-`dense-surfaces.md`, and false the moment a screen renders different markup
-below `lg`.
+before each screen **unless the entry sets `anonymous: true`**, which is how the
+landing page is swept — so an unauthenticated route needs that flag and nothing
+else. The harness change this used to require has already been made; the login
+step is conditional today. It is also desktop-only, on the stated grounds that
+the desktop DOM is a superset of the mobile one — true while the responsive
+pattern is the grid-collapses-to-cards one described in `dense-surfaces.md`, and
+false the moment a screen renders different markup below `lg`.
 
 <!-- BEGIN GENERATED: screens-coverage -->
 ### Screens swept by the axe gate

@@ -2,18 +2,58 @@
 
 ## Contents
 
+- Derived tree facts
 - The `records-browser` walkthrough, line by line
 - Why positions travel through CSS custom properties
 - Infinite scroll and the virtualizer, together
-- The responsive table-or-cards pattern
+- Tabular data gets a table; the grid-of-rows is what virtualization costs
 - Snapshot honesty on a paged read
 - Checklist for a new dense surface
 
+## Derived tree facts
+
+Generated from source by `scripts/skills-check.sh regen`. These four were
+sentences here and in the skill body until one of them went false: "there is no
+`<table>`" was wrong by 23 components. A zero or a one is a count like any
+other, so each is read out of the tree rather than written down. Do not
+hand-edit inside the markers.
+
+<!-- BEGIN GENERATED: dense-surface-facts -->
+### Virtualized surfaces
+
+Every `useVirtualizer` call site. A second entry here means the
+walkthrough below is no longer the only precedent, and whichever surface
+is closest to the new one is the better thing to copy:
+
+- `frontend/src/components/records/records-browser.tsx`
+
+### Route-level loading, error and not-found boundaries
+
+Files named `loading.tsx`, `error.tsx` or `not-found.tsx` anywhere under
+`frontend/src/app`:
+
+**None.** Every one of those states is handled inline, per component.
+
+### Client components that read the URL
+
+Every `useSearchParams` call site. While this list reaches no further
+than the login screen, no filtered or searched view in the tenant
+surface can be linked, bookmarked or restored by the back button:
+
+- `frontend/src/app/(auth)/login/page.tsx`
+
+### Semantic tables
+
+Files under `frontend/src` rendering a `<table>` element: **23**.
+Tabular data gets a real `<table>`; the records browser's grid-of-rows is
+what virtualization costs, not the house pattern to copy by default.
+<!-- END GENERATED: dense-surface-facts -->
+
 ## The `records-browser` walkthrough, line by line
 
-`frontend/src/components/records/records-browser.tsx` is the only virtualized
-surface in the tree. Read it before building another one. The load-bearing parts,
-in the order they appear:
+`frontend/src/components/records/records-browser.tsx` is the virtualized surface
+the list above names. Read it before building another one. The load-bearing
+parts, in the order they appear:
 
 **Search is debounced local state.**
 
@@ -27,8 +67,9 @@ responsive; the debounced `q` is what reaches the query, so a keystroke is not a
 request. (This is also why the view is not linkable — see the skill body.)
 
 **Columns are chosen from the tenant's entity type**, not hardcoded:
-`columnsFor(entityType)` against `useOrgEntityType(org)`. A dense surface here
-is multi-tenant over a configurable schema, so a fixed column list is a bug.
+`columnsFor(entityType)` against `useOrgEntityType(org, ds)`. A dense surface
+here is multi-tenant over a configurable schema *per dataset*, so a fixed column
+list is a bug.
 
 **Rows are flattened out of the paged query**, memoized on the page array:
 
@@ -108,10 +149,23 @@ The `isFetchingNextPage` guard is what stops a scroll burst from firing several
 overlapping fetches. The 20-row lead is enough that the next page usually lands
 before the reader reaches the tail.
 
-## The responsive table-or-cards pattern
+## Tabular data gets a table; the grid-of-rows is what virtualization costs
 
-There is no `<table>`. Desktop rows are a CSS grid with explicit fractional
-columns, and the *same* markup collapses to a stacked card below `lg`:
+**Reach for a semantic `<table>` first.** Most dense surfaces here are one —
+the count is in the derived facts above, and the settings, admin, audit, runs
+and profile surfaces are all real `<thead>`/`<th>` tables. A table gives row and
+column semantics to a screen reader for free, which the axe gate this skill
+tells you to register in is measuring.
+
+The records browser is the **exception**, and virtualization is what buys it.
+Two things a `<table>` cannot do: an `<a>` is not a permitted child of `<tbody>`
+and cannot wrap `<tr>`s, so a whole-row link has to be a `<Link>` around a
+non-table row; and absolutely-positioned rows — which is how a virtualizer
+places them — do not lay out inside a `<tbody>`. Pay that cost when the list is
+unbounded, not by default.
+
+So: desktop rows are a CSS grid with explicit fractional columns, and the *same*
+markup collapses to a stacked card below `lg`:
 
 ```tsx
 <div className="lg:grid lg:grid-cols-[1.2fr_1.6fr_1fr_1.4fr] lg:items-center lg:gap-3">
@@ -141,8 +195,9 @@ list that silently mixes two snapshots as the reader pages.
 ## Checklist for a new dense surface
 
 ```
+- [ ] Semantic <table> unless the list is unbounded enough to need virtualizing.
 - [ ] Decide the row height first, then design the row to fit it.
-- [ ] Columns derived from the tenant's entity type, not hardcoded.
+- [ ] Columns derived from the tenant's entity type and dataset, not hardcoded.
 - [ ] Debounce any text filter (250ms) and keep the input on raw state.
 - [ ] Memoize the flattened row array on the page array.
 - [ ] Virtualize with a constant estimateSize + measureElement correction.
