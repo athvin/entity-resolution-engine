@@ -111,11 +111,14 @@ Must:
   - an **account** EC2 vCPU ceiling — the NodeClaim cannot place, so the pod is
     `Unschedulable` and NodeClaims churn; this is the `aws-account-operations`
     case and the fix is a quota increase;
-  - a **Kubernetes `ResourceQuota`** on the namespace — the controller's own
-    message carries `exceeded quota` and no NodeClaim is attempted at all.
+  - a **Kubernetes `ResourceQuota`** on the namespace — charged at admission, so
+    the Job controller never creates a pod at all (`active` is 0) and a
+    `FailedCreate` Event carries `exceeded quota`.
 
-  They sit at different layers and the remedies do not overlap. Raising the
-  namespace ResourceQuota while NodeClaims are churning changes nothing.
+  They sit at different layers and the remedies do not overlap. **Whether a pod
+  exists at all is the discriminator** — churning NodeClaims mean a pod exists
+  and could not be placed; a ResourceQuota means no pod was ever created.
+  Raising the namespace ResourceQuota while NodeClaims churn changes nothing.
 - Read the applied account quota with `get-service-quota` rather than asserting
   it (see the previous scenario).
 

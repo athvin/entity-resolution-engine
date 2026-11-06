@@ -201,6 +201,25 @@ never place: the fleet request fails `VcpuLimitExceeded` /
 pod sits `Pending` with nothing obvious in its own events. **A pod stuck
 `Pending` with no scheduling event is this, until proven otherwise.**
 
+**"Until proven otherwise" has exactly one other candidate, and it is not in
+this account.** A namespace `ResourceQuota` produces the same `Pending` symptom
+from a different layer, and the two are told apart by what the platform tried:
+
+| | Account vCPU ceiling | Namespace `ResourceQuota` |
+|---|---|---|
+| **Is there a pod?** | yes — it exists and is `Unschedulable`, while NodeClaims appear and are torn down | **no** — the quota is charged at admission, so the Job controller never creates one and `active` is 0 |
+| Evidence | `VcpuLimitExceeded` / `MaxSpotInstanceCountExceeded` on the fleet request | a `FailedCreate` Event whose message contains `exceeded quota` |
+| Lives in | Service Quotas, read with `get-service-quota` | the cluster, authored in Terraform/Helm |
+| Fix | a quota increase request, and a closed case is not a granted one | resize the quota, or size the workload to it |
+| Owned by | this skill | the infra-platform skill |
+
+**Whether a pod exists at all is the discriminator**, not the symptom — both
+report `Pending` work and both end in the dispatcher writing a *capacity wait*
+on the `task_instance` row (`er_k8s::classify::pre_start` →
+`PreStartVerdict::CapacityWait`), which deliberately spends no launch, because a
+starved account is the operator's problem and never the tenant's. The verdict is
+therefore the same either way; only the evidence underneath it differs.
+
 **Read the applied value; never answer this from a document, including this
 one.** The quota is live account state that no generator here can derive, and
 the failure has already happened twice in both directions: an increase request
