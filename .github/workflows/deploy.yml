@@ -171,17 +171,10 @@ jobs:
         # above for the `git diff` staleness guard.
         run: bash scripts/ci/deploy-resolve-digests.sh
       - name: Install helm
-        # Version-pinned tarball rather than a third-party action, the same
-        # choice the disk-reclaim step in rust.yml documents: every `uses:` in
-        # this repo is SHA-pinned, and a pinned download needs no SHA to keep
-        # current. `helm version` is the check that the install worked.
-        env:
-          HELM_VERSION: v3.19.0
-        run: |
-          set -euo pipefail
-          curl -fsSL "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz" \
-            | sudo tar xz --strip-components=1 -C /usr/local/bin linux-amd64/helm
-          helm version --short
+        # The shared installer, which owns the pin for all three of its
+        # consumers (here, infra.yml and kind.yml) and states why this is a
+        # pinned tarball rather than a third-party action.
+        run: bash scripts/ci/install-helm.sh
       - name: kubeconfig
         run: aws eks update-kubeconfig --name "$CLUSTER" --region "$AWS_REGION"
       - name: Provision the namespace's EFS access point and secrets
@@ -189,11 +182,7 @@ jobs:
         # namespace identically rather than by two drifting paths. Idempotent:
         # it finds an existing access point and existing secrets.
         id: env
-        run: |
-          set -euo pipefail
-          eval "$(bash scripts/dev_env.sh up "$CI_NAMESPACE")"
-          echo "fs=$ER_EFS_FS_ID" >> "$GITHUB_OUTPUT"
-          echo "ap=$ER_EFS_AP_ID" >> "$GITHUB_OUTPUT"
+        run: bash scripts/ci/deploy-provision-namespace.sh
       - name: Install the observability stack
         # Cluster-scoped, not per-namespace: the log shipper, the OTLP
         # collector gateway and the shared span store serve every namespace on
@@ -244,11 +233,9 @@ jobs:
       # run the real `exec-task` binary, so a mis-assembled order fails there.
 
       - name: The namespace chart
-        run: |
-          set -euo pipefail
-          kubectl apply -f infra/k8s/storage/ebs-gp3.yaml
-          helm upgrade --install "$CI_NAMESPACE" infra/k8s/charts/er-dev-namespace \
-            --namespace default --set "developer=$CI_NAMESPACE" --wait
+        # The cluster-scoped StorageClass goes on first; why, and why `--wait`,
+        # are in scripts/ci/deploy-namespace-chart.sh.
+        run: bash scripts/ci/deploy-namespace-chart.sh
 
       - name: Read the live colour
         # NEVER guessed — the Service selector is the single source of truth
@@ -275,31 +262,15 @@ jobs:
         run: bash scripts/ci/deploy-inactive-colour.sh
 
       - name: Smoke-test the inactive colour
-        # Through the PREVIEW Services, which select the inactive colour. Hitting
-        # the live ones would test what is already in production and pass for the
-        # wrong reason — the failure that would make this whole mechanism
-        # decorative without looking broken.
-        #
-        # Readiness already proves er-server reached the control plane and the
-        # BFF reached er-server (#437 pointed both probes at checks that can
-        # fail). This adds the one thing a probe cannot: that the answer arrives
-        # through a Service, over the network path a real request takes.
+        # Through the PREVIEW Services, which select the inactive colour —
+        # hitting the live ones would pass for the wrong reason. Why that is
+        # the failure that would make this whole mechanism decorative, and
+        # what this adds over the readiness probes, is in
+        # scripts/ci/deploy-smoke-preview.sh.
         if: steps.colour.outputs.first != 'true'
         env:
           TARGET: ${{ steps.colour.outputs.target }}
-        run: |
-          set -euo pipefail
-          kubectl -n "$CI_NAMESPACE" run "smoke-$GITHUB_RUN_ID" --rm -i --restart=Never \
-            --image=curlimages/curl:8.11.1 --quiet -- \
-            sh -ec '
-              code=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 10 http://er-api-preview:8000/readyz)
-              echo "er-api-preview /readyz -> $code"
-              [ "$code" = "200" ] || exit 1
-              code=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 10 http://er-web-preview:3000/api/healthz)
-              echo "er-web-preview /api/healthz -> $code"
-              [ "$code" = "200" ] || exit 1
-            '
-          echo "the $TARGET colour serves through its own Services"
+        run: bash scripts/ci/deploy-smoke-preview.sh
 
       - name: Cut over
         # Phase 2: one selector field on two Services moves traffic; the old
@@ -319,21 +290,11 @@ jobs:
         run: bash scripts/ci/deploy-cutover.sh
 
       - name: Retire the old colour
-        # Phase 3, and the one step that is deliberately NOT --atomic-coupled to
-        # the cutover: it runs only after the cutover has been verified, so a
-        # failure here leaves traffic correctly on the new colour with one
-        # surplus pod — the harmless direction.
-        #
-        # Scaled to zero rather than left warm because two serving pods is
-        # double the steady-state cost of a namespace, and the Deployment is
-        # kept (not deleted) so the next deploy scales it up with its image
-        # already cached. A rollback AFTER this point needs the replica count
-        # back as well as the selector, which is why the summary above prints
-        # the command while the pod is still there.
+        # Phase 3, and the one step deliberately NOT --atomic-coupled to the
+        # cutover. Why that is the harmless direction, and why the Deployment
+        # is scaled to zero rather than deleted, is in
+        # scripts/ci/deploy-retire-colour.sh.
         if: steps.colour.outputs.first != 'true'
         env:
           LIVE: ${{ steps.colour.outputs.live }}
-        run: |
-          set -euo pipefail
-          kubectl -n "$CI_NAMESPACE" scale "deploy/web-api-$LIVE" --replicas=0
-          echo "retired $LIVE"
+        run: bash scripts/ci/deploy-retire-colour.sh

@@ -208,113 +208,28 @@ jobs:
           # One of the two pairs is set: a PR's, or the merge queue's.
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
-        run: |
-          # `merge_group` filters exactly like a PR: an infra-only or skills-only
-          # change in the queue would otherwise pay the full backend gate there,
-          # which is what it skips today on the PR.
-          if [ "$EVENT" != "pull_request" ] && [ "$EVENT" != "merge_group" ]; then
-            {
-              echo "code=true"
-              echo "erd=true"
-              echo "drift=true"
-            } >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          # `base...head` = what the PR introduces. Count changed paths NOT in
-          # the exempt set; any such file means the backend gate must run. This
-          # is a DENYLIST, so an entry added here is one the Rust gate stops
-          # seeing — only add something nothing in `make check` reads (the
-          # header explains why each qualifies, and why `docs/` does not).
-          #
-          # `infra.yml`, `drift.yml` and the `gh aw` agentic set are named FILE
-          # BY FILE and not as `^\.github/workflows/`, which matters: `rust.yml`,
-          # `frontend.yml` and `images.yml` must keep triggering the gates they
-          # define, or a change to a gate would stop reporting on exactly the PR
-          # most likely to break it. The two terraform workflows define no Rust
-          # job and cannot affect the workspace build, and an infra-only PR was
-          # paying the full ~40-minute backend gate — `test` plus the DuckLake
-          # e2e — to prove it.
-          #
-          # Enumerating rather than exempting the directory and listing
-          # exceptions is the FAIL-SAFE direction: a workflow added later runs
-          # the gate until someone argues it should not, instead of skipping it
-          # until someone notices.
-          #
-          # `grep -c` reads all input (unlike `grep -q`, which closes the pipe
-          # early and can SIGPIPE `git diff` under `pipefail` → a flaky false
-          # skip); `|| true` absorbs grep's exit-1-on-zero-matches under `set -e`.
-          #
-          # The agentic entries are named or extension-matched, never the whole
-          # directory — the one place this pattern needs care, because `rust.yml`,
-          # `frontend.yml` and `images.yml` live in `.github/workflows/` too and
-          # must keep triggering the gate they define. `^\.github/workflows/`
-          # would be the `paths:`-filter trap in CLAUDE.md wearing a different
-          # hat. So: the `.md` a human edits, the `.lock.yml` `gh aw compile`
-          # emits from it, the `shared/` imports they pull in, and
-          # `agentics-maintenance.yml`, which that compile also generates.
-          # `.github/aw/` is gh-aw's own metadata (the resolved action SHAs).
-          # None of those shapes can capture a hand-written `.yml` workflow, so
-          # they cannot widen the exemption past what is argued for above.
-          changed="$(git diff --name-only "$BASE_SHA...$HEAD_SHA")"
-          printf 'changed paths:\n%s\n' "$changed"
-          # Kept in `scripts/ci/detect-paths.sh` so the classification can be
-          # unit-tested on a laptop instead of only in anger on a PR. The same
-          # file is sourced by the `key` step below, which is what stops the two
-          # regexes from drifting apart.
-          . scripts/ci/detect-paths.sh
-          verdict="$(printf '%s\n' "$changed" | detect_classify)"
-          printf 'verdict:\n%s\n' "$verdict"
-          printf '%s\n' "$verdict" >> "$GITHUB_OUTPUT"
-      # CONTENT-ADDRESSED SKIP. A PR whose tested tree is byte-identical, over
-      # every path this gate reads, to a tree that already went green on THIS PR
-      # skips the gate. That is the common rebase: main moved under the PR but
-      # only through paths this gate does not read (or not at all), so the
-      # re-run would prove the same thing twice. It also covers re-pushing the
-      # same content with reworded or squashed commits.
+        # The last detect step to become a script; frontend.yml, infra.yml and
+        # images.yml already had one. Its classification lives in
+        # scripts/ci/detect-paths.sh (which argues the denylist and is
+        # unit-tested by scripts/ci/detect-paths-test.sh), and the `key` step
+        # below sources that same file — which is what stops the filter and
+        # the key drifting apart.
+        run: bash scripts/ci/rust-detect.sh
+      # CONTENT-ADDRESSED SKIP: a PR whose tested tree is byte-identical, over
+      # every path this gate reads, to a tree that already went green on THIS
+      # PR skips the gate. frontend.yml has the same mechanism, so the key and
+      # the whole argument for why it is safe to trust — marker provenance,
+      # the ISO-week bound, and what a skip can and cannot let through with no
+      # merge queue enabled — live in scripts/ci/pass-key.sh.
       #
-      # The key is computed from the checked-out merge commit — the tree the
-      # jobs below actually test — not from the PR head, so a moved base whose
-      # change DOES reach a gated path changes the key and the gate runs.
-      #
-      # Why this is safe to trust:
-      #   - Markers are written only by `record-pass` on a `pull_request` run,
-      #     after every required job succeeded. Actions caches written from a
-      #     PR are scoped to that PR's ref, so a PR can only ever skip on a
-      #     result it produced itself — no PR can plant a marker for another.
-      #   - The ISO week is part of the key, bounding the floating inputs the
-      #     tree cannot see (stable rustc via rust-toolchain.toml, DuckDB
-      #     extension downloads, advisory databases) to at most a week.
-      #   - `merge_group` and `push` never consult markers. Note what that does
-      #     and does not buy with no merge queue enabled (see the trigger
-      #     block): nothing re-proves a skip BEFORE it lands, so a PR-level
-      #     skip CAN let a finding reach main. What re-proves it is the
-      #     push-to-main run, which consults no marker — so the skip cannot
-      #     keep a finding hidden on main, only delay it until after the merge.
       # Bypass with the `ci:full` label (or a workflow re-run after removing a
       # marker) when you want the full gate regardless.
       - id: key
         if: github.event_name == 'pull_request' && steps.filter.outputs.code == 'true' && !contains(github.event.pull_request.labels.*.name, 'ci:full')
         working-directory: ${{ github.workspace }}
-        run: |
-          set -euo pipefail
-          # Every path EXCEPT the set the filter above already proves the gate
-          # never reads — the same regex, so the two cannot disagree. Keying the
-          # whole remaining tree (rather than an allowlist of rust/ and friends)
-          # is the fail-safe direction: `make check` also reads frontend/,
-          # docs/, entities/ and scripts/, and a path nobody remembered to list
-          # would otherwise be a silent false skip.
-          # Same file the filter step sources, so the two cannot disagree.
-          . scripts/ci/detect-paths.sh
-
-          # Keep a path if the gate reads it: not exempt, OR exempt by prefix
-          # but individually coupled to a gate (the four docs/CLAUDE.md files).
-          # Dropping the coupled ones would let a change to `docs/erd.md` ride a
-          # pass marker earned before it changed.
-          tree="$(git ls-tree -r HEAD |
-            awk -F'\t' -v ex="$DETECT_EXEMPT" -v co="$DETECT_COUPLED" '$2 !~ ex || $2 ~ co')"
-          printf 'keyed paths: %s\n' "$(printf '%s\n' "$tree" | wc -l)"
-          hash="$( { printf '%s\n' "$tree"; date -u +%G-W%V; } | sha256sum | cut -c1-40)"
-          echo "key=ci-pass-rust-$hash" >> "$GITHUB_OUTPUT"
+        env:
+          GATE: rust
+        run: bash scripts/ci/pass-key.sh
       - id: lookup
         if: steps.key.outputs.key != ''
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -325,16 +240,14 @@ jobs:
       - id: decide
         working-directory: ${{ github.workspace }}
         env:
+          # `code`, not `rust`: this is the name the rest of the workflow reads
+          # as `needs.detect.outputs.code`.
+          GATE: rust
+          OUT: code
           RAN: ${{ steps.filter.outputs.code }}
           HIT: ${{ steps.lookup.outputs.cache-hit }}
           KEY: ${{ steps.key.outputs.key }}
-        run: |
-          if [ "$RAN" = "true" ] && [ "$HIT" = "true" ]; then
-            echo "::notice::rust gate skipped: this exact content already passed on this PR ($KEY)"
-            echo "code=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "code=$RAN" >> "$GITHUB_OUTPUT"
-          fi
+        run: bash scripts/ci/pass-decide.sh
 
   # Deliberately NOT gated on `detect`. The jobs below skip for a PR that only
   # touches `.claude/**` — which is exactly the PR that changes a skill, so a
@@ -456,6 +369,18 @@ jobs:
         # if it asserted nothing.
         working-directory: ${{ github.workspace }}
         run: bash scripts/ci/detect-paths-test.sh
+      - name: the content-addressed pass gate still gates
+        # The step after the classifier in the same chain, and ungated for the
+        # same reason: `detect` consults a pass marker to decide whether the
+        # compile jobs run, so a test for that decision cannot sit behind it.
+        #
+        # Same load-bearing direction, one step worse. A broken classifier
+        # skips the gate for a PR whose paths look exempt; a broken pass gate
+        # skips it on the strength of a green earned by DIFFERENT CONTENT. The
+        # suite drives scripts/ci/pass-key.sh itself against throwaway commits
+        # rather than re-deriving its filter, and fails if it asserted nothing.
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/ci/pass-gate-test.sh
       - name: tracked shell scripts live under scripts/
         # Ungated for the same reason as the steps above: this guards repo
         # layout, not compiled code, so it must run on every PR — a stray
@@ -463,6 +388,17 @@ jobs:
         # would skip.
         working-directory: ${{ github.workspace }}
         run: bash scripts/ci/scripts-home-check.sh
+      - name: no inline shell logic in workflow `run:` blocks
+        # The other half of that convention, and the half the step above
+        # cannot see: a `run:` block is shell with NO FILE, so a file-level
+        # rule is blind to it. That blindness is where seven copies of the
+        # build-cost report and a 56-line untestable `detect` step came from.
+        #
+        # Its own self-test runs first, because a detector breaks by noticing
+        # nothing — and a layout gate that silently stopped matching reports a
+        # clean tree forever. Same failure the S9 pin check had until #467.
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/ci/workflow-shell-check-test.sh && bash scripts/ci/workflow-shell-check.sh
 
   lint:
     name: fmt + clippy + docs
@@ -484,7 +420,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install stable toolchain
-        run: rustup update stable --no-self-update && rustup default stable && rustup component add rustfmt clippy
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/ci/install-rust.sh --components
       - name: Install mold
         # One copy for the seven jobs here that link with mold (agent-task.yml
         # has the eighth): retried, time-boxed, and falling back to the default
@@ -532,22 +469,11 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: bash scripts/skills-check.sh check
       - name: Build cost (sccache stats, target size)
-        # Never a gate: `always()` so a red job still reports, `|| true` so the
-        # reporting itself cannot fail one.
-        #
-        # The sccache hit rate has never been observable in this repo, which is
-        # why nobody could say whether it earns the ~4.3 GiB and ~2,700 entries
-        # it takes out of a 10 GB per-repository cache. It is the input to the
-        # two decisions deferred in the `ci-and-supply-chain` skill's build-cost
-        # reference: whether to move sccache to S3, and whether it could be
-        # dropped (which is also precondition 1 for revisiting headstart).
-        #
-        # Read it as a pair: a cold run shows what the misses cost, a warm run
-        # shows what the hits save. One number alone says nothing.
+        # Diagnostics, never a gate. What the numbers are for, and why nothing
+        # in them can fail the job, is in scripts/ci/build-cost.sh.
         if: always()
-        run: |
-          sccache --show-stats || true
-          du -sh target || true
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/ci/build-cost.sh
 
   # Split out of `lint` on 2026-10-22. That job ran four independent ~10-minute
   # steps SERIALLY and took 42m27 on a cache miss — clippy 10m32, this 10m39,
@@ -647,18 +573,18 @@ jobs:
         # `|| exit 0`. It is advisory until the first external org key, after
         # which the release pipeline runs `er-openapi-check --strict`.
         if: github.event_name == 'pull_request'
-        # Diff the control-lane OpenAPI document against main's and report breaking
-        # component-schema changes (removed schema/field, retype, dropped required).
-        run: |
-          git -C .. fetch --no-tags --depth=1 origin main || exit 0
-          git -C .. show origin/main:frontend/src/lib/api/openapi.json > /tmp/base-openapi.json 2>/dev/null || exit 0
-          cargo run -q -p er-server --bin er-openapi-check -- /tmp/base-openapi.json || true
+        # Diffs the control-plane OpenAPI document against main's and reports
+        # breaking component-schema changes (removed schema/field, retype,
+        # dropped required). The `|| exit 0` / `|| true` chain that makes it
+        # unable to fail this job is in the script.
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/ci/api-breaking-gate.sh
       - name: Build cost (sccache stats, target size)
-        # See the `lint` job's copy for why.
+        # Diagnostics, never a gate. What the numbers are for, and why nothing
+        # in them can fail the job, is in scripts/ci/build-cost.sh.
         if: always()
-        run: |
-          sccache --show-stats || true
-          du -sh target || true
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/ci/build-cost.sh
 
   # SPLIT in two legs, same measurement-driven shape as the e2e tier below. Run
   # 41461727505 decomposed this job's 10m36 step as 3m11 of build and ~7m of
@@ -717,32 +643,17 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Reclaim runner disk
-        # `cargo test --workspace` links a separate debug binary per crate, and
-        # with bundled duckdb and full debug info that exceeds ubuntu-latest's
-        # ~14 GB of free space — the link step then dies with "No space left on
-        # device" (which reads as an unrelated `linking with cc failed`).
-        # `lint` never links and bench/scale build a `-p`-scoped subset, but
-        # `ducklake-e2e` joined this club when the executor added the kube tree
-        # and its tests (its cold build died at the libduckdb `ar` step), so it
-        # carries the same step. These preinstalled toolchains are unused
-        # here and return ~25 GB. Written inline rather than pulling a
-        # third-party action, to keep every `uses:` in this workflow SHA-pinned.
-        # Headroom, not the fix. Measured: this frees the runner from 86 GB to
-        # 111 GB available — and `cargo test --workspace` still exhausted it,
-        # which is what sent the search to the debug-info settings now in
-        # `rust/Cargo.toml`'s `[profile.dev.package."*"]`. Keep both: the build
-        # is large even without C++ symbols.
-        # Removing the tool cache is safe for THIS job specifically: it installs
-        # Rust with rustup and mold with apt, and the two actions it does use
-        # (sccache, rust-cache) are JS, so nothing here reads `setup-*`'s cache.
-        run: |
-          df -h / | tail -1
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
-                      /usr/local/share/boost /usr/share/swift \
-                      /opt/hostedtoolcache
-          df -h / | tail -1
+        # THIS is the tier that needs it: `cargo test --workspace` links a
+        # separate debug binary per crate, which exceeds the runner's free
+        # space. `lint` never links and bench/scale build a `-p`-scoped
+        # subset, so they carry no such step. The errno-28 misdirection, the
+        # 86→111 GB measurement, and why dropping the tool cache is safe are
+        # all in scripts/ci/reclaim-disk.sh.
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/ci/reclaim-disk.sh
       - name: Install stable toolchain
-        run: rustup update stable --no-self-update && rustup default stable
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/ci/install-rust.sh
       - name: Install mold
         # One copy for the seven jobs here that link with mold (agent-task.yml
         # has the eighth): retried, time-boxed, and falling back to the default
@@ -809,13 +720,11 @@ jobs:
           DEDUPE_E2E_EXTENSIONS: "1"
         run: cargo test -p dedupe-core --test main extensions
       - name: Build cost (sccache stats, target size)
-        # See the `lint` job's copy for why. This job is also where the disk wall
-        # shows up, so the `target` size is the number to watch here.
+        # Diagnostics, never a gate. What the numbers are for, and why nothing
+        # in them can fail the job, is in scripts/ci/build-cost.sh.
         if: always()
-        run: |
-          sccache --show-stats || true
-          du -sh target || true
-          df -h / | tail -1
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/ci/build-cost.sh
 
   # The required status check for the test tier — the same shape, for the same
   # reason, as `ducklake-gate` below and infra.yml's `plan-gate`: a matrix
@@ -928,18 +837,16 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Reclaim runner disk
-        # Same step and same reasoning as `test` (errno 28 masquerading as an
-        # `ar` failure). This leg builds only er-cli's targets, so it may not
-        # need the headroom — the Build cost step below prints `du`/`df` so
-        # that removal can be decided by measurement, not assumption.
-        run: |
-          df -h / | tail -1
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
-                      /usr/local/share/boost /usr/share/swift \
-                      /opt/hostedtoolcache
-          df -h / | tail -1
+        # Same step and same reasoning as `test` — see
+        # scripts/ci/reclaim-disk.sh. This leg builds only er-cli's targets, so
+        # it may not need the headroom; the Build cost step below prints
+        # `du`/`df` so that removal can be decided by measurement, not
+        # assumption.
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/ci/reclaim-disk.sh
       - name: Install stable toolchain
-        run: rustup update stable --no-self-update && rustup default stable
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/ci/install-rust.sh
       - name: Install mold
         # One copy for the seven jobs here that link with mold (agent-task.yml
         # has the eighth): retried, time-boxed, and falling back to the default
@@ -981,13 +888,11 @@ jobs:
         # cargo-test-only concept, and the `test` job runs them workspace-wide.
         run: cargo nextest run -p er-cli --no-fail-fast --partition hash:${{ matrix.partition }}
       - name: Build cost (sccache stats, target size)
-        # See the `lint` job's copy for why. The `du`/`df` pair is also the
-        # input for deciding whether this leg can drop the disk-reclaim step.
+        # Diagnostics, never a gate. What the numbers are for, and why nothing
+        # in them can fail the job, is in scripts/ci/build-cost.sh.
         if: always()
-        run: |
-          sccache --show-stats || true
-          du -sh target || true
-          df -h / | tail -1
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/ci/build-cost.sh
 
   ducklake-e2e:
     name: DuckLake e2e server (${{ matrix.slice }})
@@ -1053,21 +958,15 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Reclaim runner disk
-        # Same step and same reasoning as `test`: this job's build grew past
-        # the runner's free space when the executor added the kube tree and
-        # er-server's e2e test targets — the cold libduckdb build then died in
-        # `ar` with "No space left on device" (errno 28 masquerading as a
-        # toolchain error). Safe here for the same reason as on `test`: this
-        # job installs Rust with rustup and mold with apt, and reads nothing
-        # from `setup-*`'s hostedtoolcache.
-        run: |
-          df -h / | tail -1
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
-                      /usr/local/share/boost /usr/share/swift \
-                      /opt/hostedtoolcache
-          df -h / | tail -1
+        # Same step and same reasoning as `test` — see
+        # scripts/ci/reclaim-disk.sh. This job joined that club when the
+        # executor added the kube tree and er-server's e2e test targets: its
+        # cold libduckdb build died in `ar` on a full disk.
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/ci/reclaim-disk.sh
       - name: Install stable toolchain
-        run: rustup update stable --no-self-update && rustup default stable
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/ci/install-rust.sh
       - name: Install mold
         # One copy for the seven jobs here that link with mold (agent-task.yml
         # has the eighth): retried, time-boxed, and falling back to the default
@@ -1148,13 +1047,11 @@ jobs:
           cargo test -p dedupe-cli -p er-entity-diff
           cargo test -p er-server -- --skip pg_
       - name: Build cost (sccache stats, target size)
-        # See the `lint` job's copy for why. The `du`/`df` pair is also the
-        # input for deciding whether a leg can drop the disk-reclaim step.
+        # Diagnostics, never a gate. What the numbers are for, and why nothing
+        # in them can fail the job, is in scripts/ci/build-cost.sh.
         if: always()
-        run: |
-          sccache --show-stats || true
-          du -sh target || true
-          df -h / | tail -1
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/ci/build-cost.sh
 
   # The required status check for the e2e tier. The GitHub behaviour forcing
   # this shape is stated in full above infra.yml's `plan-gate`, which this
@@ -1206,7 +1103,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install stable toolchain
-        run: rustup update stable --no-self-update && rustup default stable
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/ci/install-rust.sh
       - name: Install mold
         # One copy for the seven jobs here that link with mold (agent-task.yml
         # has the eighth): retried, time-boxed, and falling back to the default
@@ -1241,11 +1139,11 @@ jobs:
       # file's header.
       - run: cargo bench -p dedupe-core --no-run
       - name: Build cost (sccache stats, target size)
-        # See the `lint` job's copy for why.
+        # Diagnostics, never a gate. What the numbers are for, and why nothing
+        # in them can fail the job, is in scripts/ci/build-cost.sh.
         if: always()
-        run: |
-          sccache --show-stats || true
-          du -sh target || true
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/ci/build-cost.sh
 
   scale-tests:
     name: scale golden (50k)
@@ -1262,7 +1160,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install stable toolchain
-        run: rustup update stable --no-self-update && rustup default stable
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/ci/install-rust.sh
       - name: Install mold
         # One copy for the seven jobs here that link with mold (agent-task.yml
         # has the eighth): retried, time-boxed, and falling back to the default
@@ -1297,11 +1196,11 @@ jobs:
       # file's header.
       - run: cargo test -p dedupe-core --test main golden_historical_50k
       - name: Build cost (sccache stats, target size)
-        # See the `lint` job's copy for why.
+        # Diagnostics, never a gate. What the numbers are for, and why nothing
+        # in them can fail the job, is in scripts/ci/build-cost.sh.
         if: always()
-        run: |
-          sccache --show-stats || true
-          du -sh target || true
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/ci/build-cost.sh
 
   # --- coverage: nightly + on-demand only (never on PRs or main pushes) ---
   #
@@ -1408,20 +1307,8 @@ jobs:
         # objects come from sccache. It echoes per tree because both earlier
         # fixes went GREEN having done nothing: "it ran" and "it did something"
         # have to be distinguishable in the log.
-        run: |
-          shopt -s nullglob
-          trees=(target/duckdb-sources/*/)
-          if [ ${#trees[@]} -eq 0 ]; then
-            echo "none     target/duckdb-sources/ absent - build script unpacks cold"
-          fi
-          for tree in "${trees[@]}"; do
-            if [ -f "$tree.complete" ]; then
-              echo "intact   $tree"
-            else
-              echo "REPAIRED $tree (no .complete - would panic ENOTEMPTY)"
-              rm -rf "$tree"
-            fi
-          done
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/ci/duckdb-cache-repair.sh
       - uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68 # v2.88.1
         with:
           tool: cargo-llvm-cov

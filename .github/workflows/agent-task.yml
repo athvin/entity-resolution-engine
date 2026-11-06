@@ -96,26 +96,10 @@ jobs:
           RESUME: ${{ inputs.resume }}
           RUN_ID: ${{ github.run_id }}
           BASE: ${{ github.event.repository.default_branch }}
-        run: |
-          # Every value below ends up in a git ref and in the prompt, so it is
-          # validated here and only the validated copy is used downstream.
-          if [ -n "$RESUME" ]; then
-            if ! printf '%s' "$RESUME" | grep -Eq '^[0-9]{1,20}$'; then
-              echo "::error::resume must be the numeric run id that started the task, got '$RESUME'"
-              exit 1
-            fi
-            task_id="$RESUME"
-            checkout_ref="refs/heads/agent-wip/$RESUME"
-          else
-            task_id="$RUN_ID"
-            checkout_ref="refs/heads/$BASE"
-          fi
-          {
-            echo "task_id=$task_id"
-            echo "wip=agent-wip/$task_id"
-            echo "base=$BASE"
-            echo "checkout_ref=$checkout_ref"
-          } >> "$GITHUB_OUTPUT"
+        # Every value here ends up in a git ref and in the prompt, so
+        # `resume` is validated and only the validated copy is used
+        # downstream; see scripts/ci/agent-task-ids.sh for what that guards.
+        run: bash scripts/ci/agent-task-ids.sh
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -136,8 +120,10 @@ jobs:
       # --- toolchain: the prelude of .github/workflows/shared/rust-gate.md,
       # minus the AWS role (see `permissions:` above). Keep the two in step.
       - name: Install stable toolchain
-        working-directory: rust
-        run: rustup update stable --no-self-update && rustup default stable && rustup component add rustfmt clippy
+        # The shared installer, same as rust.yml's six consumers. `rustup` is
+        # not directory-sensitive here — `rust-toolchain.toml` pins the version
+        # it resolves, which is why no version appears at either call site.
+        run: bash scripts/ci/install-rust.sh --components
       - name: Install mold
         # The shared installer (scripts/ci/install-mold.sh), same as rust.yml's
         # seven consumers. One semantic change from the old inline copy, which
@@ -232,14 +218,7 @@ jobs:
         env:
           WIP: ${{ steps.ids.outputs.wip }}
           RUN_ID: ${{ github.run_id }}
-        run: |
-          git add -A
-          if ! git diff --cached --quiet; then
-            git -c user.name="github-actions[bot]" \
-                -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
-                commit -m "wip: agent checkpoint (run $RUN_ID)"
-          fi
-          git push origin "HEAD:refs/heads/$WIP"
+        run: bash scripts/ci/agent-task-checkpoint.sh
 
       - name: Summary
         if: always() && steps.ids.outputs.task_id != ''
@@ -248,21 +227,7 @@ jobs:
           WIP: ${{ steps.ids.outputs.wip }}
           OUTCOME: ${{ steps.claude.outcome }}
           RESULT: ${{ steps.claude.outputs.structured_output }}
-        run: |
-          status=none
-          if [ -n "$RESULT" ]; then
-            status=$(printf '%s' "$RESULT" | jq -r '.status // "none"' 2>/dev/null || echo unparseable)
-          fi
-          {
-            echo "### Agent task \`$TASK_ID\`"
-            echo
-            echo "| | |"
-            echo "|---|---|"
-            echo "| Agent step | \`$OUTCOME\` |"
-            echo "| Reported status | \`$status\` |"
-            echo "| Checkpoint branch | \`$WIP\` |"
-            echo "| Resume with | \`agent-resume $TASK_ID\` |"
-          } >> "$GITHUB_STEP_SUMMARY"
+        run: bash scripts/ci/agent-task-summary.sh
 
   publish:
     name: publish

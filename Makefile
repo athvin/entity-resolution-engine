@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := check
-.PHONY: build fmt lint doc test check check-e2e entities-check skills-check frontend frontend-audit frontend-coverage run frontend-dev frontend-e2e frontend-baselines frontend-dev-reset image-api cluster-objects nodepools kind-up kind-down check-kind measure-runner-startup dev-up dev-suspend dev-resume dev-down obs-up clean symposium
+.PHONY: build fmt lint doc test check check-e2e entities-check skills-check scripts-home-check workflow-shell-check frontend frontend-audit frontend-coverage run frontend-dev frontend-e2e frontend-baselines frontend-dev-reset image-api cluster-objects nodepools kind-up kind-down check-kind measure-runner-startup dev-up dev-suspend dev-resume dev-down obs-up clean symposium
 
 # --- Rust backend: the application (engine, CLI, control plane) lives in rust/ ---
 #
@@ -64,10 +64,19 @@ skills-check:
 scripts-home-check:
 	bash scripts/ci/scripts-home-check.sh
 
+# The other half of the same convention: shell that has no FILE, living in a
+# workflow's `run:` block, which scripts-home-check.sh cannot see. Budgeted
+# rather than banned — see the script's header. Its self-test runs here for
+# the reason skills-check-test.sh does: it is pure bash with no toolchain, no
+# cluster and no credentials, and it tests the very script this target runs.
+# `&&`, not two recipe lines, so the fail-fast is explicit in gates.md too.
+workflow-shell-check:
+	bash scripts/ci/workflow-shell-check-test.sh && bash scripts/ci/workflow-shell-check.sh
+
 # The fast PR-equivalent backend gate (mirrors rust.yml's lint + test tiers),
 # plus the skill gate — a stale generated reference is the same class of defect
 # as a stale generated entity artifact.
-check: fmt lint doc entities-check skills-check scripts-home-check test
+check: fmt lint doc entities-check skills-check scripts-home-check workflow-shell-check test
 
 # The gated e2e tiers: the DuckLake + extension pipeline and the Postgres
 # control-plane queue/dispatch. Needs the DuckDB extensions and a local

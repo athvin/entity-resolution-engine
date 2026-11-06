@@ -59,14 +59,14 @@ Every stack in the tree is reached by at least one tier.
 
 | Path | Referenced by |
 |---|---|
-| `charts` | `.github/workflows/deploy.yml`, `.github/workflows/infra.yml`, `Makefile`, `scripts/check_kind.sh`, `scripts/ci/charts-check.py`, `scripts/ci/charts-render-validate.sh`, `scripts/ci/deploy-cutover.sh`, `scripts/ci/deploy-inactive-colour.sh`, `scripts/ci/infra-detect.sh`, `scripts/kind_env.sh` |
+| `charts` | `Makefile`, `scripts/check_kind.sh`, `scripts/ci/charts-check.py`, `scripts/ci/charts-render-validate.sh`, `scripts/ci/deploy-cutover.sh`, `scripts/ci/deploy-inactive-colour.sh`, `scripts/ci/deploy-namespace-chart.sh`, `scripts/ci/helm-lint.sh`, `scripts/ci/infra-detect.sh`, `scripts/kind_env.sh` |
 | `kind` | `scripts/kind_env.sh` |
 | `network-policy-controller.yaml` | **nothing in the tree** |
 | `nodepools` | `Makefile`, `scripts/measure_runner_startup.sh` |
 | `observability` | `Makefile`, `scripts/obs_up.sh` |
 | `priorityclasses` | `Makefile`, `scripts/kind_env.sh` |
 | `secrets` | **nothing in the tree** |
-| `storage` | `.github/workflows/deploy.yml`, `Makefile` |
+| `storage` | `Makefile`, `scripts/ci/deploy-namespace-chart.sh` |
 
 ### NodePool manifests the cluster apply reaches
 
