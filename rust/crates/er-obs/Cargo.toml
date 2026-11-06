@@ -32,7 +32,7 @@ tokio.workspace = true
 # `aws-lc-sys`, which needs a cmake the build image does not carry. We supply
 # the HTTP client instead — see src/otlp.rs, which carries the measurement.
 opentelemetry = "0.31"
-opentelemetry_sdk = "0.31"
+opentelemetry_sdk = "0.33"
 opentelemetry-otlp = { version = "0.31", default-features = false, features = ["http-proto", "metrics", "trace"] }
 opentelemetry-http = { version = "0.31", default-features = false }
 tracing-opentelemetry = "0.32"
@@ -55,7 +55,7 @@ workspace = true
 [dev-dependencies]
 er-span = { path = "../er-span" }
 opentelemetry = "0.31"
-opentelemetry_sdk = { version = "0.31", features = ["testing"] }
+opentelemetry_sdk = { version = "0.33", features = ["testing"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 
 
