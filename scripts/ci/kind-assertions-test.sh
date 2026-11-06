@@ -103,11 +103,18 @@ open(blk, "w").write(m.group(1))
 
 
 def row(**kw):
+    # DEFAULTS MODEL THE ANNOTATED LEDGER, not the moment before it. The
+    # executor annotates an already-succeeded row with the pod's terminated
+    # reason, so the steady-state success row reads
+    # termination_reason="Completed", exit_code=0 — and defaulting this to
+    # None is exactly how the `is None` guard shipped and failed a green
+    # cutover. The unannotated shape is still covered, as its own case below.
     r = {
         "task_id": "maintain",
         "live": True,
         "state": "succeeded",
-        "termination_reason": None,
+        "termination_reason": "Completed",
+        "exit_code": 0,
         "launches": 1,
         "error_detail": None,
     }
@@ -125,7 +132,36 @@ def row(**kw):
 # KeyError traceback surfacing two hours into a nightly run. Asserting the
 # message is the only way to keep it.
 cases = [
-    ("a clean cutover passes", [row()], True, None),
+    # The annotated success row — what the live ledger actually holds, and the
+    # case that reproduces the 2026-11-06 nightly failure: the previous
+    # `is None` guard refused this and failed the phase for succeeding.
+    ("a clean cutover passes (annotated Completed)", [row()], True, None),
+    # The same attempt read before the executor annotates it. Both are
+    # undisrupted, and which one a run sees is a race, so both must pass or
+    # the phase is flaky rather than correct.
+    (
+        "a clean cutover passes (not yet annotated)",
+        [row(termination_reason=None, exit_code=None)],
+        True,
+        None,
+    ),
+    # FAIL-SAFE: a reason nobody has enumerated must refuse. A denylist of
+    # today's failures would accept anything added to exec_task.rs later,
+    # which is the defect where an omission reads as permission.
+    (
+        "REFUSES an unknown future reason",
+        [row(termination_reason="some_new_reason_added_later")],
+        False,
+        None,
+    ),
+    # "Completed" is the POD's reason, so a nonzero exit contradicts it. A
+    # succeeded row carrying one is incoherent however it got there.
+    (
+        "REFUSES succeeded with a nonzero exit_code",
+        [row(exit_code=1)],
+        False,
+        "exit_code",
+    ),
     # The reachable mid-run failure: three missed heartbeats fence the attempt,
     # step 6 refuses to post a verdict, the finished work is discarded.
     ("REFUSES fenced", [row(termination_reason="fenced")], False, None),
