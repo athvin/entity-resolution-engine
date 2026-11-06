@@ -48,6 +48,7 @@ the same fix.
 | `frontend-design-system` | the Tailwind v4 CSS-first tokens in `globals.css` and the two deliberate WCAG deviations from stock shadcn |
 | `frontend-testing` | which tier a change belongs in (unit, component, Playwright functional, the Docker-backed full-stack tier that is a release gate rather than a PR gate) |
 | `infra-platform` | the Terraform env/module layout and shared S3 state with lockfile locking |
+| `land-pr` | the PR loop (red → diagnose → fix → push) and the main loop for the push-only workflows a PR can never run (user-invoked only) |
 | `landing-page` | the `(marketing)` route group that prerenders statically inside the same app that serves the BFF |
 | `pentest` | a Strix-style run that does recon over the attack surface, fans out a tester subagent per vulnerability category (user-invoked only) |
 | `project-board` | the `gh project` command surface for user-owned project #2 "Product Roadmap" and the `project` scope it requires |
