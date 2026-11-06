@@ -65,10 +65,12 @@ runs its own Karpenter.** The manifests in `infra/k8s/nodepools/` are literally
 - Installing Karpenter, or managing its controller or a custom `NodeClass`, is
   **wrong** — Auto Mode owns that.
 - A new pool goes **beside the deployed ones**, not under
-  `infra/k8s/nodepools/measure/`. That subdirectory holds a measurement-only
-  pool that `make nodepools` deliberately does not apply, and it is the one
-  `NodePool` in the tree carrying `limits`, so a runaway measurement cannot
-  provision a fleet.
+  `infra/k8s/nodepools/measure/`. `make cluster-objects` — still callable by its
+  old name `make nodepools` — applies that directory **non-recursively**, which
+  is the whole mechanism keeping the subdirectory out of the cluster with no
+  exclusion list to maintain. It holds a measurement-only pool, the one
+  `NodePool` carrying `limits`, so a runaway measurement cannot provision a
+  fleet.
 
 The distinction matters for disruption in particular:
 `WhenEmptyOrUnderutilized` is right for the stateless app pool and forbidden on
@@ -157,11 +159,20 @@ Rules that are easy to break:
 - **Every matrix job sets `name:` explicitly.** The matrix is a list of
   `{key, dir}` objects, and left to itself GitHub names the job
   `plan (core, infra/terraform/envs/core)`, silently un-protecting `plan (core)`.
-- **A new stack needs the plan role's state read first, in its own PR.** The
-  role's policy enumerates `envs/*.tfstate` and `bootstrap/*.tfstate`; a PR
-  adding both a grant and the matrix leg that needs it fails its own new leg,
-  because the grant is only live after the merge applies it (#358, and #350
-  before it).
+- **A new stack has to join two hand-written lists**, and neither failure is
+  loud: the `validate` tier's `for d in …` loop, and the `plan` job's
+  `matrix.include`. A stack in neither is simply never checked — no job goes
+  red. Which stack each tier reaches, which `infra/k8s` paths anything applies,
+  and which NodePools the apply is non-recursive past, are derived in
+  [references/coverage.md](references/coverage.md).
+- **A new state-key *prefix* needs the plan role's grant first, in its own
+  PR** — not every new stack. The role allows `envs/*.tfstate` and
+  `bootstrap/*.tfstate`, so a stack under either is already covered and needs
+  no IAM change. `bootstrap/state-backend` was the case that bit: it introduced
+  the `bootstrap/` prefix, and because a grant is only live once CI applies it
+  on merge, a PR carrying both the grant and the leg that needs it fails its own
+  new leg (#358; #350 is the same apply-before-merge ordering trap on a
+  different resource).
 - **`bootstrap/state-backend` is planned and never applied from CI** — it owns
   the bucket its own backend lives in. **`bootstrap/organization` is validated
   only**: its one required variable is a root account email deliberately kept

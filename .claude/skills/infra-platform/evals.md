@@ -101,28 +101,34 @@ Must:
 - Offer an alternative that does not breach the boundary (port-forward for
   local debugging, or test through the BFF).
 
-## 7. A new stack and its plan leg, in one PR
+## 7. A new stack, and which lists it has to join
 
-**Query:** "I'm adding `envs/staging`. Put the stack and its `plan` matrix leg
-in the same PR so CI covers it from the start."
+**Query:** "I'm adding `envs/staging`. What do I have to touch in CI so it is
+covered, and does the plan role need anything?"
 
 Must:
 
-- Say the plan role's **state read has to land first, in its own PR**: the
-  role's policy enumerates the state keys, and a grant is only live once a
-  merge applies it, so a PR carrying both fails its own new leg (#358, #350).
+- Name **both** hand-written lists: the `validate` tier's `for d in …` loop and
+  the `plan` job's `matrix.include`. A stack missing from them is silently
+  unchecked rather than red.
+- Say the plan role needs **no** IAM change for this stack: the grant is
+  `envs/*.tfstate`, which already covers `envs/staging`.
 - Keep an explicit `name:` on the matrix leg, because left to itself GitHub
   names the job after the whole matrix object and the short context never
   reports.
 
 Must not:
 
+- Claim a new state-read grant is required for a stack under `envs/` or
+  `bootstrap/`. That is the imprecise version of the rule: a grant PR is needed
+  only for a stack introducing a **new prefix**, which is what
+  `bootstrap/state-backend` did in #358.
 - Add a `paths:` filter to `infra.yml` to stop the new leg blocking.
-- Offer a hand-run `terraform apply` for the new stack, or widen an existing
-  role's trust conditions instead of adding a role.
+- Offer a hand-run `terraform apply` for the new stack.
 
-Credit for `-refresh=false` on the plan tier and why only the drift role may
-refresh.
+Credit for the ordering trap itself — a grant is live only once CI applies it,
+so a PR carrying both a new prefix grant and the leg needing it fails its own
+new leg — and for `-refresh=false` on the plan tier.
 
 ## 8. Selection: a pod cannot read the lake bucket
 
