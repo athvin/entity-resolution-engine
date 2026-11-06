@@ -8,23 +8,46 @@ against it.
 
 ## Contents
 
-- The measured baseline (2026-10-22)
-- The first measurement after the change
-- `actions/cache/usage` lags; enumerate instead
-- Capping one prefix made the prune a no-op
-- Where it ended up
-- Why cold happens: the Actions cache budget
-- The levers, and which were taken
-- Rejected: headstart
-- Blocked: more cores per job
-- Rejected: removing sccache
-- Shipped: sccache on S3 (2026-10-29)
-- Shipped: the e2e tier split into parallel legs (2026-11-02)
-- Measured: the sharded tiers, same day (2026-11-02)
-- Measured: the second pass, and the workers=2 verdict (2026-11-02, later)
-- Measured: the flake's root cause, the flip, and the buildcache move (2026-11-02, evening)
+Newest first, which is also the order the sections appear in — so the numbers
+get older as you scroll, and the first ones are not the live ones.
+
+- Where it stands now
 - Incident: rust-cache restored a partial target and broke main (2026-11-03)
 - The er-api image build, and the cargo-chef split (2026-11-03)
+- Measured: the flake's root cause, the flip, and the buildcache move (2026-11-02, evening)
+- Measured: the second pass, and the workers=2 verdict (2026-11-02, later)
+- Measured: the sharded tiers, same day (2026-11-02)
+- Shipped: the e2e tier split into parallel legs (2026-11-02)
+- Shipped: sccache on S3 (2026-10-29)
+- Rejected: removing sccache
+- Blocked: more cores per job
+- Rejected: headstart
+- The levers, and which were taken
+- Why cold happens: the Actions cache budget
+- Where it ended up
+- Capping one prefix made the prune a no-op
+- `actions/cache/usage` lags; enumerate instead
+- The first measurement after the change
+- The measured baseline (2026-10-22)
+
+## Where it stands now
+
+The only figures to quote without reading further. Everything below this section
+is history that each later section supersedes — kept because the *reasoning* is
+what stops a decision being re-derived, not because the numbers still hold.
+
+| Thing | Where it is |
+|---|---|
+| PR wall clock | ~10m: rust ~9.8m, frontend ~6m |
+| What bounds it | the `test` tier's rest leg and the lake shards |
+| Primary cache | sccache on **S3**; a PR assumes the read role, `main` the write role |
+| Actions cache | nothing in the Rust gate writes it any more |
+| rust-cache | **removed** from every sccache-backed compile job (it broke them) |
+| buildkit layer cache | **ECR** (`er-buildcache`); `type=gha` survives as cache-FROM only |
+| `cache-prune`'s two budgets | rollback insurance, not live pressure |
+
+The 42m38 → 8m03 → ~13.5m → ~10m progression across the sections below is that
+history in order. Read a section's own date and verdict before quoting it.
 
 ## Incident: rust-cache restored a partial target and broke main (2026-11-03)
 
@@ -607,23 +630,28 @@ faster on 4 cores.
 important") but is **not reachable by editing `runs-on:`**, so the parallelism
 above was taken first. Any core increase needs an account-level decision.
 
-**Context — what this repo can actually run.** The repository is **private and
-owned by a user account**, not an organisation (`gh repo view --json visibility`
-→ `PRIVATE`). That fixes two things:
+**Context — what this repo can actually run.** The repository is owned by a
+**user account**, not an organisation, and that is the half of this that has
+never moved. **Visibility has moved twice, so probe it rather than reading it
+here** — `gh repo view --json visibility` — because the cost half of this
+section inverts on the answer:
 
-- `ubuntu-latest` is 4 vCPU / 16 GB, and **its minutes are metered.** An earlier
-  revision of this section claimed they were free "because standard runners are
-  free for public repositories" — that premise was simply wrong about this repo.
-  A private repository draws on a monthly included-minutes allowance and is
-  billed past it, so the CI runtime measured below is a cost rather than only a
-  wait. The allowance and current consumption are account settings, not
-  repository state, so read them from Billing (or
-  `gh api /users/{user}/settings/billing/actions`, which needs the `user` scope)
-  rather than trusting a figure written here.
-- **GitHub "larger runners" are not available.** They are a Team / Enterprise
-  Cloud feature, provisioned as a runner group in *organisation* settings, and
-  they are metered (~$0.012/min for 4-core Linux, scaling with size). A
-  user-owned repo has no org settings page to create one in.
+- `ubuntu-latest` is 4 vCPU / 16 GB. **Whether its minutes cost anything depends
+  on visibility, and this section has been written wrong in both directions
+  already** — once claiming they were free when the repo was private, then
+  claiming they were metered, which stopped being true when it went public.
+  Standard runners are free for public repositories; a private one draws on a
+  monthly included-minutes allowance and is billed past it. The consequence for
+  reading the rest of this file: every trade recorded below as "+N
+  runner-minutes, accepted deliberately because minutes are metered" was priced
+  under the private reading, and is cheaper than recorded while the repo is
+  public. Read the allowance and consumption from Billing (or
+  `gh api /users/{user}/settings/billing/actions`, which needs the `user`
+  scope), never from a figure written here.
+- **GitHub "larger runners" are not available**, and this one does *not* depend
+  on visibility. They are provisioned as a runner group in *organisation*
+  settings and a user-owned repo has no org settings page to create one in; they
+  are also metered (~$0.012/min for 4-core Linux, scaling with size).
   `gh api repos/.../actions/runners` also confirms no self-hosted runner is
   registered.
 
@@ -642,18 +670,23 @@ workflow.
    Lowest friction, and the only option that addresses both axes at once.
 2. **An organisation on the Team plan**, which unlocks GitHub larger runners.
    Transfer the repo, create a runner group, then use its label. Keeps everything
-   first-party; costs the plan plus metered larger-runner minutes. Since this
-   repo's standard minutes are already metered, moving a job over trades one
-   metered rate for another rather than giving up a free one — which is a
-   smaller step than the earlier public-repo framing implied.
-3. **Self-hosted runners** on the existing AWS/EKS footprint. The usual
-   objection — a fork PR executing arbitrary code on your runner, which is why
-   GitHub advises against self-hosted runners on *public* repositories — mostly
-   does not apply here, because the repository is private and a fork needs
-   granted access. What remains is ordinary and still real: a compromised
-   collaborator account or a malicious dependency gets code execution on
-   infrastructure inside the AWS account, so the runner wants its own
-   least-privileged identity rather than anything the platform roles can reach.
+   first-party; costs the plan plus metered larger-runner minutes. How big a
+   step that is turns on the visibility probe above: against free public-repo
+   standard minutes it means giving up free compute for metered compute, which
+   is the expensive reading of this option.
+3. **Self-hosted runners** on the existing AWS/EKS footprint. **Take the
+   fork-PR objection from the visibility probe, not from this paragraph** — it
+   once read "mostly does not apply here, because the repository is private",
+   and that reasoning dies the moment the repo is public, which is precisely the
+   case GitHub advises against self-hosted runners for. What contains it today
+   is the workflow-approval policy, which is also a setting to read rather than
+   assume:
+   `gh api repos/:owner/:repo/actions/permissions/fork-pr-contributor-approval`
+   — `all_external_contributors` means every fork PR waits for a human. What
+   remains regardless of any of that: a compromised collaborator account or a
+   malicious dependency gets code execution on infrastructure inside the AWS
+   account, so the runner wants its own least-privileged identity rather than
+   anything the platform roles can reach.
    Plus the infrastructure cost and maintenance the other two options do not
    carry.
 
@@ -748,9 +781,10 @@ new tests to a shard — the failure mode of hand-kept filter lists (a new test
 silently in no leg) cannot happen.
 
 The trade: ~+10 runner-minutes per PR run (two extra setup+build prefixes) for
-roughly half the tier's wall clock. Minutes are metered on this private repo;
-the trade was accepted deliberately. Per-leg measurements from the first runs
-are in the next section.
+roughly half the tier's wall clock. Minutes were metered when this was decided
+(see the visibility caveat under "Blocked: more cores per job"), so the trade
+was accepted against a real cost and only gets cheaper if they are free.
+Per-leg measurements from the first runs are in the next section.
 
 ## Measured: the sharded tiers, same day (2026-11-02)
 
@@ -793,8 +827,9 @@ What the after-numbers say the remaining floors are:
 
 Minutes cost of the whole program: the rust PR tier went from ~45 to ~75
 runner-minutes and the frontend tier from ~17 to ~28 — ~+40 minutes per full
-PR cycle, for a wall clock that halved. Accepted deliberately; metered on
-this private repo.
+PR cycle, for a wall clock that halved. Accepted deliberately, and priced
+under the metered-minutes reading that the visibility caveat under "Blocked:
+more cores per job" now governs.
 
 Two side-findings recorded while measuring:
 

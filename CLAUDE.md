@@ -46,10 +46,12 @@ belongs in, what each gate is for, and the rule that every gate must be observed
 **Those greens can be stale, and the merge bus is what re-earns them.** `main`'s
 protection has `strict: false`, so a PR merges on a green it won against a base
 that may since have moved — four PRs each green against an older `main` can all
-merge and leave `main` red. `merge-bus.yml` batches the PRs that are ready,
-proves the *combination* green through an ordinary PR, and only then squash-merges
-the members. GitHub's own merge queue is this feature and cannot be enabled on a
-private user-owned repository, which is why it is a workflow here. The
+merge and leave `main` red. `merge-bus.yml` batches the PRs **labelled
+`merge-bus`**, proves the *combination* green through an ordinary PR, and only
+then squash-merges the members. GitHub's own merge queue is this feature and
+cannot be enabled here, because it is offered only for organization-owned
+repositories and this one is user-owned — visibility is not the blocker — which
+is why it is a workflow here. The
 `ci-and-supply-chain` skill carries the rules; the one that bites is that
 `merge bus` must never become a required check.
 

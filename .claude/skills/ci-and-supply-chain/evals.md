@@ -17,8 +17,10 @@ Must:
   saving, because a job skipped by `if:` reports `skipped`, which branch
   protection accepts.
 
-Credit for noting `infra.yml` *does* have a real `paths:` filter and that this
-is fine because it is not required.
+Credit for naming a workflow that legitimately carries a real `paths:` filter
+because none of its jobs is required — `images.yml` — and for knowing that
+`infra.yml`'s filter was **removed** when `terraform plan` became a required
+context, because the two cannot coexist.
 
 ## 2. A link error that is really a disk error
 
@@ -29,7 +31,8 @@ Must:
 
 - Say this usually means the **runner ran out of disk**, because a full
   `rust/target` is tens of gigabytes.
-- Point at the disk-reclaim step in that job (the only job that has one).
+- Point at the disk-reclaim step, which every Rust compile job carries
+  (`test-shard`, `lake-e2e`, `ducklake-e2e`) — not at one job alone.
 
 Must not:
 
@@ -60,10 +63,13 @@ Must:
 - Say `arrow` is pinned to the major the **`duckdb` crate** pulls, so an
   independent bump is unmergeable and the unblocker is upstream.
 - Recommend closing the PR rather than fixing it.
+- Note that `.github/dependabot.yml` **already excludes** `arrow` from major
+  updates, so a PR that appears anyway is an anomaly to close, not a signal the
+  exclusion is missing.
 
 Must not:
 
-- Claim dependabot already excludes `arrow` (it does not in this tree).
+- Start fixing the compile errors, or relax either pin to make them go away.
 
 ## 5. Adding a new gate
 
@@ -92,3 +98,49 @@ Must:
   silently disagree.
 - Note the npm checker is an allowlist, so unparseable expressions fail by
   design.
+
+## 7. A green PR that compiled nothing
+
+The selection scenario: the phrasing names no skill, and the wrong answer is
+the reassuring one.
+
+**Query:** "This PR shows every required check satisfied and
+`mergeStateStatus` CLEAN. Safe to merge?"
+
+Must:
+
+- Load this skill **without being asked for it**, and not answer from
+  `gh pr checks` alone.
+- Say that a **failed `detect` job** makes every job gated on it report
+  `skipped`, which branch protection accepts as satisfied — so that green can
+  mean nothing ran.
+- Reach the check-run probe: confirm no check-run whose name starts with
+  `detect` concluded `failure` for that head SHA.
+
+Must not:
+
+- Treat CLEAN, or a count of satisfied contexts, as proof the tree was built.
+- Suggest requiring the `detect` contexts as the fix.
+
+Credit for noting the aggregator gates are defeated the same way, because
+`needs.detect.outputs.code` is empty when `detect` failed, so their own
+fail-closed `case` never runs.
+
+## 8. Requiring a matrix leg
+
+**Query:** "Make `plan (core)` and `plan (dev)` required checks so an infra PR
+can't merge without a plan."
+
+Must:
+
+- Refuse, with the mechanism: when the job is skipped by its `if:`, GitHub
+  reports a single check-run under the literal, uninterpolated
+  `plan (${{ matrix.key }})`, so the per-leg contexts never report and a PR
+  that skips the tier blocks forever.
+- Point at the existing non-matrix **aggregator** — `plan-gate`, whose context
+  is `terraform plan` — as the thing already doing this.
+
+Must not:
+
+- Propose adding the contexts to see what happens. This was measured: it left
+  the next non-infra PR unmergeable with the legs stuck on "Expected".
