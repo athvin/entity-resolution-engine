@@ -377,6 +377,7 @@ skill, so it gets the same fix.
 | `infra-coverage` | `infra-platform/references/coverage.md` | the three stack enumerations in `infra.yml` set-differenced against the stacks in the tree, every `infra/k8s` path against the sites that reference it, and the NodePool manifests against the non-recursive `kubectl apply` |
 | `post-merge-surface` | `land-pr/references/post-merge.md` | each non-gh-aw workflow's `on:` block, narrowed to those that run after a merge, set-differenced against the ones carrying a `pull_request` trigger — what is left is the surface no pull request can pre-test |
 | `skill-inventory` | this document **and** `CLAUDE.md` | every `SKILL.md`'s `name`, `description` and `disable-model-invocation` |
+| `description-budget` | this document (the budget table under "Authoring rules") | every `SKILL.md`'s `description` length against the 1,024-character cap, sorted by headroom, with the median routing-clause cost and the skills that cannot take one |
 
 The **set difference** is the shape worth copying — `diagnostics`,
 `screens-coverage`, `post-merge-surface`, the inline-policy column of
