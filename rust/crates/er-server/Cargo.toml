@@ -139,5 +139,7 @@ tower-http = { version = "0.6", default-features = false, features = ["trace", "
 workspace = true
 
 [dev-dependencies]
+er-entity-gen = { path = "../er-entity-gen" }
+er-entity-spec = { path = "../er-entity-spec" }
 er-obs = { path = "../er-obs", features = ["test-support"] }
 futures = "0.3"

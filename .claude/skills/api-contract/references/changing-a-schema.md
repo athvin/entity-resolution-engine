@@ -20,9 +20,10 @@ workspace root.
          statement whose `returns:` must now project the new column)
 - [ ] 2. cd rust && cargo run -q -p er-entity-cli -- gen --root ..
 - [ ] 3. cd rust && cargo run -q -p er-entity-cli -- verify --root ..
-- [ ] 4. For a NEW entity the control lane serves as JSON: register its
-         ToSchema by hand in rust/crates/er-server/src/openapi.rs and update
-         the expected count in its test. No gate reports that you skipped this
+- [ ] 4. For a NEW entity declaring `wire: [json]`: either register its
+         ToSchema in rust/crates/er-server/src/openapi.rs, or add it to
+         JSON_WIRE_WITHOUT_SCHEMA there. The Rust test job fails until one
+         of the two is true
 - [ ] 5. cd rust && cargo run -q -p er-server --bin er-openapi \
             > ../frontend/src/lib/api/openapi.json
 - [ ] 6. cd frontend && pnpm gen:api
@@ -48,20 +49,21 @@ is `ci-and-supply-chain/references/required-checks.md`.
 | a `returns: entity` statement no longer projects every column | **E003** | same |
 | `openapi.json` stale | `openapi_json_matches_the_committed_document` | Rust `test` job |
 | `schema.d.ts` stale | `pnpm gen:api` + `git diff --exit-code` | frontend `check` job |
-| a registration added or removed without updating the expected size | `every_generated_entity_schema_is_registered` | Rust `test` job |
-| **a new entity never registered at all** | **nothing** | — |
+| a new `wire: [json]` entity with no component schema | `every_json_wire_entity_has_a_schema_or_a_declared_gap` | Rust `test` job |
+| a schema registered for an entity that does not declare `wire: [json]` | `no_schema_is_registered_for_an_entity_that_is_not_on_the_json_wire` | Rust `test` job |
 | the change removes or retypes something | `er-openapi-check` | Rust `entities` job — **advisory**, prints only, pull requests only |
 
 Note the split: most of these fail on the **backend** even though they are about
 frontend types. A Rust CI failure mentioning OpenAPI is almost always step 5 or
 6 missing.
 
-The two registration rows are the ones to read twice.
-`every_generated_entity_schema_is_registered` asserts the *size* of `ApiDoc`'s
-hand-written list rather than a set difference against `entities/`, so it cannot
-see an entity that was never registered — which is the gate its name promises.
-It does fire the moment you add a registration, because the expected size then
-disagrees; that is step 4's second half.
+The two registration rows are the ones to read twice, because `wire: [json]`
+emits no schema on its own. The gate derives the json-wire set from the catalog,
+subtracts the registered schemas, and requires what is left to equal the
+`JSON_WIRE_WITHOUT_SCHEMA` list in `openapi.rs`. That list is a backlog meant to
+shrink: deleting a line as you register a schema is step 4's second half, and
+the test also fails on a **stale** entry, so it cannot quietly accumulate names
+and hide the next real gap.
 
 ## What counts as breaking
 

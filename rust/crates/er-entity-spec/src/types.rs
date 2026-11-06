@@ -192,6 +192,12 @@ pub enum Language {
 pub enum Wire {
     /// Arrow IPC — `arrow_schema()` and the TypeScript reader are emitted.
     Arrow,
-    /// JSON — the OpenAPI component schema is emitted.
+    /// JSON — the entity's payloads cross the JSON wire, which qualifies it for
+    /// an OpenAPI component schema.
+    ///
+    /// It does not emit one. Registration is a hand-written list in
+    /// `er-server`'s `openapi.rs`, and declaring `json` here does not add to it;
+    /// `every_json_wire_entity_has_a_schema_or_a_declared_gap` is what forces
+    /// the two to be reconciled.
     Json,
 }

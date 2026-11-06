@@ -143,18 +143,125 @@ mod tests {
         );
     }
 
-    #[test]
-    fn every_generated_entity_schema_is_registered() {
-        // The document carries one component schema per generated entity (14:
-        // 10 control entities + the 4 produced golden marts).
-        let doc = ApiDoc::openapi();
-        let schemas = doc
+    /// Entities that declare `wire: [json]` but carry no component schema.
+    ///
+    /// This is a backlog, not a design. `Wire::Json` means the entity's payloads
+    /// cross the JSON wire, so every name here is reachable as JSON with nothing
+    /// in the document describing it. The list may **shrink** — register the
+    /// `ToSchema` above and delete the line — and must not grow: a new
+    /// `wire: [json]` entity fails the test below until someone decides which it
+    /// is. Registering one is a public-API decision (it becomes a documented
+    /// schema that `er-openapi-check` then tracks for breaking changes), which is
+    /// why the gate forces the decision rather than making it.
+    const JSON_WIRE_WITHOUT_SCHEMA: &[&str] = &[
+        "candidate_key",
+        "column_profile",
+        "entity_link",
+        "ingest_batch",
+        "matching_model",
+        "metric_snapshot",
+        "metric_snapshot_source",
+        "pair_label",
+        "profile_finding",
+        "profile_run",
+        "record_quality",
+        "s3_ingest_cursor",
+        "tag",
+        "tagging",
+        "webhook_delivery",
+    ];
+
+    /// The component schemas `ApiDoc` actually emits, by schema name.
+    fn registered_schemas() -> std::collections::BTreeSet<String> {
+        ApiDoc::openapi()
             .components
             .as_ref()
             .expect("components present")
             .schemas
-            .len();
-        assert_eq!(schemas, 14, "expected one schema per generated entity");
+            .keys()
+            .cloned()
+            .collect()
+    }
+
+    /// Entity names declaring `wire: [json]`, as the struct names utoipa keys a
+    /// component schema by. The casing comes from the generator's own helper, so
+    /// this cannot disagree with how the struct was actually named.
+    fn json_wire_schema_names() -> std::collections::BTreeSet<String> {
+        let catalog = er_entities::catalog::catalog();
+        // Guard the derivation itself. A catalog that came back empty would make
+        // every assertion below vacuous — which is exactly the failure this test
+        // replaces, where a hard-coded count passed while the real gap grew.
+        assert!(
+            catalog.entities().len() > 40,
+            "catalog derivation looks broken: {} entities",
+            catalog.entities().len()
+        );
+        let names: std::collections::BTreeSet<String> = catalog
+            .entities()
+            .iter()
+            .filter(|e| e.generate.wire.contains(&er_entity_spec::Wire::Json))
+            .map(|e| er_entity_gen::casing::to_pascal_case(&e.name))
+            .collect();
+        assert!(
+            names.len() > 20,
+            "json-wire derivation looks broken: {} entities",
+            names.len()
+        );
+        names
+    }
+
+    #[test]
+    fn no_schema_is_registered_for_an_entity_that_is_not_on_the_json_wire() {
+        let stray: Vec<_> = registered_schemas()
+            .difference(&json_wire_schema_names())
+            .cloned()
+            .collect();
+        assert!(
+            stray.is_empty(),
+            "{} schema(s) are registered in ApiDoc for entities that do not \
+             declare `wire: [json]`, so the document describes a shape the \
+             entity does not claim to serialize: {}\n\nEither add `json` to the \
+             entity's `generate.wire` or drop the registration.",
+            stray.len(),
+            stray.join(", ")
+        );
+    }
+
+    #[test]
+    fn every_json_wire_entity_has_a_schema_or_a_declared_gap() {
+        // The real invariant, as a set difference rather than a count: an entity
+        // declaring the JSON wire either has a component schema or is named in
+        // the backlog above. A count could not see a new entity arriving
+        // unregistered, because the count did not change.
+        let expected_gap: std::collections::BTreeSet<String> = JSON_WIRE_WITHOUT_SCHEMA
+            .iter()
+            .map(|n| er_entity_gen::casing::to_pascal_case(n))
+            .collect();
+        let actual_gap: std::collections::BTreeSet<String> = json_wire_schema_names()
+            .difference(&registered_schemas())
+            .cloned()
+            .collect();
+
+        let newly_missing: Vec<_> = actual_gap.difference(&expected_gap).cloned().collect();
+        assert!(
+            newly_missing.is_empty(),
+            "{} entit(ies) declare `wire: [json]` with no component schema and \
+             are not in JSON_WIRE_WITHOUT_SCHEMA: {}\n\nRegister the `ToSchema` \
+             in ApiDoc (then regenerate openapi.json and schema.d.ts), or add \
+             the name to that list with a reason.",
+            newly_missing.len(),
+            newly_missing.join(", ")
+        );
+
+        let stale: Vec<_> = expected_gap.difference(&actual_gap).cloned().collect();
+        assert!(
+            stale.is_empty(),
+            "JSON_WIRE_WITHOUT_SCHEMA names {} entit(ies) that no longer need \
+             to be there: {}\n\nDelete those lines — the list is meant to \
+             shrink, and a stale entry hides the next real gap.",
+            stale.len(),
+            stale.join(", ")
+        );
     }
 
     fn doc(schemas: &str) -> String {

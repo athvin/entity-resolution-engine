@@ -306,7 +306,7 @@ indexes:
   - { name: task_instances_heartbeat, columns: [heartbeat_at], where: "live IS TRUE AND state = 'running'" }
 ```
 
-`natural_key` renders `UNIQUE (job_id, task_id, try_number)` — Airflow's `task_instance_try_key`; `task_instances_live` is its `task_instance_current_key`. Registering `TaskInstance` in `ApiDoc` ([openapi.rs](../rust/crates/er-server/src/openapi.rs)) bumps `every_generated_entity_schema_is_registered` from 12 to 13.
+`natural_key` renders `UNIQUE (job_id, task_id, try_number)` — Airflow's `task_instance_try_key`; `task_instances_live` is its `task_instance_current_key`. `TaskInstance` is registered in `ApiDoc` ([openapi.rs](../rust/crates/er-server/src/openapi.rs)); because it declares `wire: [json]`, `every_json_wire_entity_has_a_schema_or_a_declared_gap` would have failed until it was.
 
 ### 4.3 The lake ledger: `entities/run_stage/entity.yaml`
 
@@ -1077,7 +1077,7 @@ DuckLake snapshots are dagr's durable references: the reference is `(relation se
 
 **UI** (grayscale; state by weight, scale, spacing and motion, never hue, per the [frontend-design-system skill](../.claude/skills/frontend-design-system/SKILL.md)). The job page's phantom `StageTrace` ([job-detail.tsx](../frontend/src/components/runs/job-detail.tsx) renders `progress.stages`, which nothing produces) becomes `useJobTasks(org, jobId)` over `GET /v1/orgs/{org}/jobs/{job_id}/tasks` — wrapped `{tasks}`, ledgered in [envelopes.json](../frontend/src/lib/api/envelopes.json) beside its sibling `/jobs`, typed from `schema.d.ts` `components["schemas"]["TaskInstance"]` rather than another hand-written interface. Per task: state, `try/max_tries`, class (and `escalated_from`), duration, pod and node, exit code, `error_class`/`error_detail`, `termination_reason`, snapshot range, and a disclosure of archived tries. **Retry from here** (steward+, `:clear`) shows the downstream closure and any demand-resolved upstream before confirming; the job-level **Resume** keeps its route as "clear every live non-succeeded task"; **Cancel** appears while `running | canceling`. The frontend's pre-existing `retrying` and `canceling` states ([hooks.ts](../frontend/src/lib/query/hooks.ts) `ACTIVE_JOB_STATES`) finally have producers: a job renders `retrying` when `running` with a live task `up_for_retry`. The BFF route carries `requireOrgAccess`; the mock server gains the route; the a11y sweep gains the screen once a fixture job id exists.
 
-**API.** `TaskInstance` registered in `ApiDoc` (count 12 → 13); the tasks list and `:clear` are additive; `openapi.json` and `schema.d.ts` regenerated and committed together; `er-openapi-check` reports no removal. `/v1/internal/*` is not in the OpenAPI document and not reachable through the BFF.
+**API.** `TaskInstance` registered in `ApiDoc` (required, since it declares `wire: [json]`); the tasks list and `:clear` are additive; `openapi.json` and `schema.d.ts` regenerated and committed together; `er-openapi-check` reports no removal. `/v1/internal/*` is not in the OpenAPI document and not reachable through the BFF.
 
 **Webhooks.** Unchanged: one per settled job outcome — `job.succeeded | failed | canceled` literal at the emit site ([webhook.rs](../rust/crates/er-server/src/webhook.rs) `EVENT_CATALOG`), never per task or try; `job.running` stays absent; no `task.*` entries. A subscriber wanting task detail reads the tasks endpoint from the delivery's `detail_path`. Entity aggregates fire at settle, counting events that are no longer doubled.
 

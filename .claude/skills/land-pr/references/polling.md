@@ -1,7 +1,7 @@
 # Reading a PR's state without being lied to
 
 Every command needed to decide whether a pull request is actually green, and the
-six ways the obvious reading is wrong. Reached from
+ways the obvious reading is wrong. Reached from
 [`../SKILL.md`](../SKILL.md); the failure taxonomy those readings feed into is
 `ci-and-supply-chain`'s.
 
