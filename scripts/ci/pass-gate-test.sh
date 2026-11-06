@@ -22,10 +22,11 @@
 # job, next to detect-paths-test.sh, because that is the one job no path
 # filter and no pass marker can skip.
 #
-# WRITES TO THE OBJECT DATABASE, NOT TO THE WORKING TREE. The probe commits
-# are built in a temporary index (`GIT_INDEX_FILE`) and never referenced, so
-# they are unreachable objects that `git gc` collects; no branch, tag or ref
-# is created and no tracked file is modified. Needs only a depth-1 checkout.
+# WRITES TO THE OBJECT DATABASE, NOT TO THE WORKING TREE. The probe trees are
+# built in a temporary index (`GIT_INDEX_FILE`) and never referenced, so they
+# are unreachable objects that `git gc` collects; no branch, tag or ref is
+# created and no tracked file is modified. Needs only a depth-1 checkout, and
+# no git identity — see the note on `probe` below for why that matters.
 #
 # Run: bash scripts/ci/pass-gate-test.sh
 set -uo pipefail
@@ -107,18 +108,41 @@ esac
 # path. That is the whole claim the skip rests on.
 #
 # ASSERTED BY DRIVING pass-key.sh ITSELF, via PASS_KEY_REF, against throwaway
-# commits built in a temporary index. The working tree is never touched and no
+# TREES built in a temporary index. The working tree is never touched and no
 # ref is created. Re-deriving the filter here instead would be a test with its
 # own copy of the regex — able to pass while the gate keys something else,
 # which is exactly what detect-paths.sh's header warns against.
+#
+# A TREE, NOT A COMMIT, and that is not a simplification — it is the fix for a
+# real CI failure. `git commit-tree` needs a committer identity, and
+# `actions/checkout` configures none: the runner's passwd entry has an empty
+# name, so git refused with `fatal: empty ident name`. It passes on a laptop,
+# where git auto-detects a name from the OS, which is why this was green
+# locally and red on the first run. `pass-key.sh` only ever runs
+# `git ls-tree -r "$REF"`, and that takes a tree-ish — so no commit object is
+# needed, and the test now depends on no ambient git config at all.
 blob="$(printf 'probe\n' | git hash-object -w --stdin)"
 base_tree="$(git rev-parse HEAD^{tree})"
 
-# probe <path> -> commit sha of HEAD's tree with <path> added or replaced
+# probe <path> -> OID of HEAD's tree with <path> added or replaced
 probe() {
 	GIT_INDEX_FILE="$tmp/idx" git read-tree "$base_tree"
 	GIT_INDEX_FILE="$tmp/idx" git update-index --add --cacheinfo "100644,$blob,$1"
-	git commit-tree "$(GIT_INDEX_FILE="$tmp/idx" git write-tree)" -p HEAD -m probe
+	GIT_INDEX_FILE="$tmp/idx" git write-tree
+}
+
+# Guard the helper itself. When `probe` failed in CI it returned empty, and
+# `keyat` then fell through to HEAD — so the comparisons degraded to HEAD
+# against HEAD. `differs` did catch that, but as "two equal keys" rather than
+# as "the probe is broken", which is a slower thing to read.
+probed() {
+	local oid
+	oid="$(probe "$1")"
+	if [ -z "$oid" ]; then
+		echo "FAIL probe helper produced no tree for $1 — cannot assert anything" >&2
+		exit 2
+	fi
+	printf '%s\n' "$oid"
 }
 
 keyat() { # <gate> <ref> -> the key pass-key.sh emits for that tree
@@ -137,7 +161,7 @@ differs() {
 
 # A path the Rust gate reads must move the rust key — and must not move the
 # frontend one.
-c_rust="$(probe 'rust/crates/er-match/src/zz_probe.rs')"
+c_rust="$(probed 'rust/crates/er-match/src/zz_probe.rs')"
 differs 'key: a new rust/ file moves the rust key' "$rk" "$(keyat rust "$c_rust")"
 check 'key: a rust/ file does NOT move the frontend key' \
 	"$fk" "$(keyat frontend "$c_rust")"
@@ -145,23 +169,23 @@ check 'key: a rust/ file does NOT move the frontend key' \
 # The mirror: a frontend path must move the frontend key and not the rust one.
 # `code=false` for a frontend-only PR is false here — `make check` reads
 # frontend/ — so this is the asymmetry the two filters encode, asserted.
-c_front="$(probe 'frontend/src/app/zz_probe.ts')"
+c_front="$(probed 'frontend/src/app/zz_probe.ts')"
 differs 'key: a new frontend/ file moves the frontend key' \
 	"$fk" "$(keyat frontend "$c_front")"
 
 # An exempt path the Rust gate provably never reads must leave the rust key
 # alone — that is the whole point of the skip.
-c_docs="$(probe 'docs/zz_probe.md')"
+c_docs="$(probed 'docs/zz_probe.md')"
 check 'key: an exempt docs/ file does NOT move the rust key' \
 	"$rk" "$(keyat rust "$c_docs")"
 
 # But a COUPLED exempt path must still move it, or a change to the generated
 # ERD could ride a marker earned before it changed. This is the assertion that
 # catches dropping `|| $2 ~ co` from the rust filter.
-c_erd="$(probe 'docs/erd.md')"
+c_erd="$(probed 'docs/erd.md')"
 differs 'key: a coupled docs/erd.md DOES move the rust key' \
 	"$rk" "$(keyat rust "$c_erd")"
-c_claude="$(probe 'CLAUDE.md')"
+c_claude="$(probed 'CLAUDE.md')"
 differs 'key: coupled CLAUDE.md DOES move the rust key' \
 	"$rk" "$(keyat rust "$c_claude")"
 
