@@ -270,7 +270,7 @@ The table below is **generated** from each skill's frontmatter by
 | adding or changing an endpoint's request or response shape | `api-contract` |
 | asking what is deployed, investigating a bill | `aws-account-operations` |
 | a CI job fails for reasons unrelated to the diff | `ci-and-supply-chain` |
-| opening or attaching a lake, choosing a partition or sort key | `ducklake-lakehouse` |
+| opening or attaching a lake, setting `partition_by` or `order_by` on a lake write | `ducklake-lakehouse` |
 | a stage or query is slow, when proposing a partition | `ducklake-performance` |
 | adding or changing a table, column, or SQL statement | `entity-framework` |
 | running or scripting a pipeline stage, setting up a development lake | `er-engine-ops` |

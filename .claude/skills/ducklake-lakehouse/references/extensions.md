@@ -11,15 +11,10 @@
 
 ## What is built in, and needs nothing
 
-The core string metrics ship with DuckDB and need no extension:
-
-- `jaro_winkler_similarity`
-- `levenshtein`
-- `damerau_levenshtein`
-- `jaccard`
-
-These cover the comparison levels the committed models use. Reach for an
-extension only when a level genuinely needs something outside this set.
+The four built-in string metrics are named in the SKILL body. They cover the
+comparison levels every committed model uses, so reach for an extension only
+when a level genuinely needs something outside that set — which is rarer than
+it looks, and is why step 1 of the checklist below is to check.
 
 ## What the named extensions add
 
@@ -42,8 +37,12 @@ nothing — only loading it does.
 
 ## Two loading rules
 
-**Names are validated as bare identifiers.** Every extension name must be ASCII
-alphanumeric or `_`, checked *before* any `INSTALL`/`LOAD` is built:
+Both rules — names validated as bare identifiers, and `install_extensions`
+defaulting to `false` so only `LOAD` runs by default — are stated with their
+reasoning in the SKILL body. Here is what they look like in the code, and the
+two things the body leaves out.
+
+The validation, which runs *before* any `INSTALL`/`LOAD` string is built:
 
 ```rust
 if ext.is_empty() || !ext.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
@@ -51,27 +50,18 @@ if ext.is_empty() || !ext.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 ```
 
-The name is interpolated into SQL, so this check is the only thing standing
-between a configuration value and `LOAD <arbitrary SQL>`. Keep it if you touch
-that code. It is covered by an offline test
-(`rejects_invalid_extension_name`) precisely so the guard is verified without
-needing network.
+It is covered by an **offline** test (`rejects_invalid_extension_name`),
+deliberately, so the guard stays verified without needing network.
 
-**`install_extensions` defaults to `false`.** `LOAD <ext>` always runs;
-`INSTALL <ext> FROM community` runs only when the flag is on, because it needs
-network.
-
-Production does **not** install at runtime. Extension binaries are baked into
-the image and `extension_directory` points at them:
+The production bake points the engine at the baked directory:
 
 ```rust
 SET extension_directory = '<dir>';
 ```
 
-A container that installs from the community registry at startup needs egress
-to it and fails closed when the registry is unreachable or slow — turning a
-registry outage into an application outage. Baking them in also pins the
-version, which matters for anything that feeds a score.
+Baking also **pins the version**, which matters for anything that feeds a
+score — a comparison level whose function changes behaviour between extension
+builds moves match weights without any config change.
 
 ## The engine version *is* the extension mechanism
 
@@ -112,9 +102,17 @@ Loading a real extension needs a network `INSTALL`, so those tests are gated:
 DEDUPE_E2E_EXTENSIONS=1 cargo test -p dedupe-core --test main extensions
 ```
 
-CI runs this tier in the DuckLake e2e job, not in the default `test` job. The
-split matters when adding an extension-dependent comparison: a green
-`cargo test --workspace` says nothing about whether your extension loads.
+CI runs this on the Rust **test shard**, not in the DuckLake e2e tier — it was
+moved there because `cargo test --workspace` has already built `dedupe-core`'s
+test binary by that point, so re-invoking it with the filter is run-only. The
+variable is set for that one step rather than for the job, because `er-compile`
+and `er-sql-check` gate tests behind the same name and a job-level `env` would
+silently start running those on every PR. Exact job and required-check names are
+in the `ci-and-supply-chain` skill's generated required-checks reference.
+
+So the gap this leaves is **local**, not CI: with the variable unset a bare
+`cargo test` silently skips the tier, and says nothing about whether your
+extension loads. `make check-e2e` sets it.
 
 ## Adding an extension-dependent comparison level
 
