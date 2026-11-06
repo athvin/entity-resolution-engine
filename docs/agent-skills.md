@@ -98,6 +98,23 @@ are enforced by `scripts/skills-check.sh lint`.
 - End the description with **negative routing** where two skills are adjacent:
   "For X see *other-skill*." Overlapping triggers are the real cost of a large
   skill collection, not the metadata.
+- **The description is a shared append target, and the cap is the constraint
+  that bites.** Routing goes both ways, so closing an overlap means appending a
+  clause to a *neighbour's* description — and several audits closing unrelated
+  overlaps all append to the same line. That is how a field with a 1,024-char
+  cap arrives at the cap without any one author spending it. Before adding a
+  tail, read the headroom:
+
+  ```sh
+  for f in .claude/skills/*/SKILL.md; do d=$(sed -n 's/^description: //p' "$f");
+    printf '%4d  %s\n' $((1024 - ${#d})) "$(basename "$(dirname "$f")")"; done | sort -n
+  ```
+
+  When a description has no room for the clause, the fix is to shorten *that*
+  description rather than to drop the routing — an unclosed overlap costs a
+  mis-selected skill at runtime, which is the failure the whole field exists to
+  prevent. Trim the "what" clause, which a reader can get from the body; never
+  the trigger vocabulary, which only this field carries.
 - No `allowed-tools`: it only *pre-approves* tools, it cannot restrict them, and
   nothing here needs pre-approval.
 - `disable-model-invocation: true` only for a procedure with side effects, or
