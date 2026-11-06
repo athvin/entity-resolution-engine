@@ -96,28 +96,21 @@ prefix.
 
 ## Object storage: not wired up on `main`
 
-State of the tree today:
+The SKILL body carries the state of the tree — the three mechanisms that are
+absent by name — and the consequences that follow, including not documenting S3
+as supported. Two things it leaves out.
 
-- No `INSTALL httpfs` / `LOAD httpfs`, no `aws` extension load.
-- No `CREATE SECRET` of any kind.
-- No reader for `ER_S3_*` settings.
+**Why it is absent.** This is a regression from the retired Python
+implementation, not a deliberate omission: that server resolved a `secret://`
+indirection in its own secrets module, and it was deleted along with the rest
+of the Python tree with nothing put in its place. So there is no design
+decision to respect here, which is what makes the work below a feature rather
+than a reversal.
 
-A lake at a **filesystem path** works — that is what every test uses, and what
-a development lake is (a directory; DuckLake keeps its catalog in the
-`.ducklake` file and its Parquet under the data path). A lake at **`s3://`
-cannot be reached** from the Rust engine.
-
-This is a regression from the retired Python implementation, not a deliberate
-omission: that server resolved a `secret://` indirection in its own secrets
-module, and it was deleted along with the rest of the Python tree with nothing
-put in its place.
-
-Practical consequences:
-
-- Do not write or review code on the assumption that an `s3://` lake opens.
-- Do not document S3 as supported, in a skill or anywhere else.
-- Treat adding the credential path as a feature with a design, not as a config
-  value someone forgot to set.
+**What a working lake looks like instead.** A filesystem path — which is what
+every test uses, and what a development lake is: a directory, with DuckLake
+keeping its catalog in the `.ducklake` file and its Parquet under the data
+path.
 
 ## In flight
 

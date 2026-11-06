@@ -12,41 +12,30 @@
 
 ## Choosing between partitioning and sort-on-write
 
-With no secondary indexes available, `LakeWriteOptions` carries the only two
-levers:
+The two levers `LakeWriteOptions` carries, what each does, the high-cardinality
+failure mode and the `order_by`-when-unsure default are in the SKILL body. What
+it does not carry:
 
-**`partition_by`** writes one Parquet subtree per distinct value (`col=val/…`).
-A reader filtering on that column opens only the matching subtree — files are
-skipped without being read at all. It suits a column that
-
-- downstream queries actually filter on (not merely select), and
-- has low-to-moderate cardinality.
-
-The failure mode is high cardinality. Partitioning on something like a record
-key produces one tiny file per value, and per-file overhead — open, read
-footer, plan — swamps the scan it saved. Many small files also make every
-subsequent maintenance pass more expensive.
-
-**`order_by`** sorts rows within each file, which tightens the min/max
-zone-maps in the Parquet footers. A reader can then skip row groups inside a
-file. It is safe at any cardinality, helps range scans as well as equality, and
-costs only write-time sort effort.
-
-**Default to `order_by` when unsure.** Reach for `partition_by` when you can
-name the filtering query and the column's cardinality is genuinely bounded.
-
-Both are physical. Neither changes results, so neither can be the fix for a
-correctness problem.
+- **Over-partitioning costs twice.** Per-file overhead — open, read footer,
+  plan — swamps the scan the layout saved, *and* many small files make every
+  subsequent maintenance pass more expensive. The second cost is the one people
+  do not budget for.
+- **`order_by` pays only write-time sort effort**, and tightens the min/max
+  zone-maps in the Parquet footers so a reader skips row groups *within* a
+  file. That is why it is safe at any cardinality and helps range scans as well
+  as equality, where partitioning only skips whole subtrees.
+- **The test before reaching for `partition_by`:** you can name the query that
+  filters on the column, and its cardinality is genuinely bounded. A column
+  downstream merely *selects* does not qualify.
 
 ## What DuckLake does not enforce
 
-- **No secondary indexes.** `CREATE INDEX` is rejected.
-- **No primary-key or unique constraints.** Logical keys are enforced by
-  writers and by tests, which is the stated reason the repo has posterity gates
-  about declared relations rather than relying on the store.
-
-The practical upshot: a duplicate-row bug is always a writer bug. There is no
-constraint that was "supposed to" catch it.
+That there are no secondary indexes and no primary-key or unique constraints is
+in the SKILL body. What follows from it is the part worth carrying here: logical
+keys are enforced by writers and by tests, which is the stated reason the repo
+has posterity gates about declared relations rather than relying on the store.
+So a duplicate-row bug is always a writer bug — there is no constraint that was
+"supposed to" catch it, and no layout change that will.
 
 ## The maintenance operations
 

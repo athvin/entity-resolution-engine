@@ -1,6 +1,6 @@
 ---
 name: ducklake-lakehouse
-description: Explains how this repo reaches DuckLake from Rust — the ATTACH options and why each is pinned, the native-temp-catalog rule for intermediates, DuckLake's lack of secondary indexes and the two physical levers that replace them (partitioning and sort-on-write), extension loading, session presets, and how a tenant's lake is isolated. Use when opening or attaching a lake, choosing a partition or sort key, adding a DuckDB extension, debugging a cross-catalog or transaction error, working on object-store or S3 credentials, or reasoning about per-tenant lake isolation. For whether a partition or sort change is justified at all — the measurements a layout proposal must carry, and reading a profiling artifact — see ducklake-performance; for declaring a lake table or statement see entity-framework; for running pipeline stages see er-engine-ops; for the lake bucket itself and the IAM a pod needs to reach it see infra-platform.
+description: Explains how this repo reaches DuckLake from Rust — the ATTACH options and why each is pinned, the native-temp-catalog rule for intermediates, no secondary indexes and the two levers that replace them (partitioning and sort-on-write), the maintenance operations and their order, extension loading, session presets, and per-tenant lake isolation. Use when opening or attaching a lake, setting `partition_by` or `order_by` on a lake write, reclaiming space or expiring snapshots, adding a DuckDB extension, debugging a cross-catalog or transaction error, working on object-store or S3 credentials, or reasoning about tenant isolation. For whether a partition or sort change is justified at all — mechanism here, measurement there — see ducklake-performance; for declaring a lake table or statement see entity-framework; for running stages and maintenance see er-engine-ops; for tenant isolation as an attack surface see security; for the lake bucket itself and the IAM a pod needs to reach it see infra-platform.
 ---
 
 # DuckLake from Rust
@@ -14,8 +14,7 @@ Three structural facts drive almost every rule below:
 
 1. **DuckLake cannot host temp tables.** All intermediates live in DuckDB's
    native temp catalog; only final outputs go to the lake.
-2. **DuckLake has no secondary indexes.** `CREATE INDEX` is rejected — tables
-   are columnar files, not B-trees.
+2. **DuckLake has no secondary indexes.** `CREATE INDEX` is rejected.
 3. **The lake catalog is never `USE`d.** Every reference is fully qualified
    (`lake.main.golden_records`), so there is no ambient current-catalog state to
    get wrong.
@@ -116,6 +115,12 @@ than an error.
 reorder rows within a result, and the goldens compare bytes.
 
 ## Tenant isolation is physical
+
+Three nouns appear below and they are not interchangeable: an **org** is the
+control-plane row that carries the configuration, **tenant** is the engine-side
+name for that same subject, and a **dataset** is the unit actually isolated —
+one metadata schema plus one data path, several of which can share one org's
+database.
 
 A tenant's data plane is separated by **where its lake is**, not by a predicate
 in its queries. Lake read statements carry no `org_id` filter, so there is no

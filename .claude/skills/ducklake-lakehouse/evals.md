@@ -3,6 +3,11 @@
 Hand-run scenarios. Pose each in a **fresh** session and check the expected
 behaviours. Record a pass only if every "must" holds.
 
+Where a scenario carries a **selection** must, record which skill actually
+loaded — not just whether the answer was acceptable. An adjacent skill answering
+well enough is a fail, because the content these scenarios exist to reach is
+here.
+
 ## 1. The index that does not exist
 
 **Query:** "Reads of `lake.main.golden_records` filtered by `org_id` are slow.
@@ -14,6 +19,9 @@ Must:
 - Offer the two real levers (`partition_by`, `order_by`) and distinguish them:
   partitioning skips whole files, sorting tightens zone-maps within a file.
 - Warn against partitioning on a high-cardinality column.
+- **Selection:** load `ducklake-lakehouse` without being named. Answering from
+  `ducklake-performance` alone is a fail — it is the right skill for whether to
+  change layout, not for what the write-path levers are.
 
 Credit for noting that layout should follow a measurement, and routing the
 measurement to the ducklake-performance skill rather than guessing.
@@ -43,8 +51,9 @@ Must:
 - Say it sets the **user-table** schema — `DuckLakeConfig.schema`, giving
   `lake.<schema>.*`.
 - Explicitly distinguish it from DuckLake's own `METADATA_SCHEMA` attach option
-  (where DuckLake keeps its catalog tables), and note `DuckLakeConfig` on
-  `main` has no field for that at all.
+  (where DuckLake keeps its catalog tables), and name the *other* key that
+  reaches it — `ER_LAKE_CATALOG_SCHEMA`, read into
+  `DuckLakeConfig.metadata_schema`.
 
 Must not:
 
@@ -62,6 +71,10 @@ Must:
   delete orphans**, and explain at least one dependency (compaction cannot see
   inlined rows; cleanup finds nothing until snapshots are expired).
 - Mention bounding compaction (`max_compacted_files` bounds memory).
+- **Selection:** load `ducklake-lakehouse` without being named. This is the
+  scenario that catches the trigger gap — the `er-engine-ops` description also
+  claims "lake maintenance", and it owns the `er` command surface rather than
+  the ordering dependencies. Answering only from there is a fail.
 
 Credit for warning that snapshot expiry must stay longer than the longest-lived
 read cursor, since every lake read pins a snapshot.
@@ -81,3 +94,40 @@ Must:
 Must not:
 
 - Propose a hand-written `CREATE TABLE` against `lake.main.*`.
+
+## 6. Unpinning an attach option
+
+**Query:** "Our deploy keeps failing on a catalog format mismatch. Let's drop
+`AUTOMATIC_MIGRATION false` so DuckLake just migrates the catalog itself, and
+while we're there turn data inlining back on for small writes."
+
+Must:
+
+- Refuse both as config tweaks and say what each pin buys: without
+  `AUTOMATIC_MIGRATION false`, a newer DuckLake migrates a tenant's catalog in
+  place, on open, as a side effect of a deploy — a catalog format change has to
+  be a deliberate, reviewable event.
+- Say `data_inlining_row_limit = 0` is what forces every row to Parquet, and
+  that the golden fixtures depend on the byte-determinism that gives.
+
+Must not:
+
+- Treat either as a tuning knob, or propose flipping one to get a deploy green.
+
+## 7. Every extension fetch 404s
+
+**Query:** "Every DuckDB extension download is returning 404 — goldens, the
+image bake, all of them. Is the community registry down?"
+
+Must:
+
+- Reach the engine **version label**, not the network: a `-dev` version routes
+  the extension URL through `source_id` instead of the version tag, and no
+  binary is published under a source hash, so everything fails at once.
+- Point at `rust/.cargo/config.toml` as where the label is supplied by hand,
+  because `libduckdb-sys`'s `bundled` build does not stamp one.
+
+Must not:
+
+- Diagnose it as an outage, a proxy or an egress problem on the strength of
+  every fetch failing together.
