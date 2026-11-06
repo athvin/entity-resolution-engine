@@ -1,6 +1,6 @@
 ---
 name: ducklake-performance
-description: The measurement discipline and storage-tuning rules for DuckDB/DuckLake performance work in this repo — how to read span and resource evidence without over-claiming, what the committed historical measurements do and do not license you to conclude, which layout levers exist and the experiment matrix a layout proposal must cover, and the live Rust benchmark surface. Use when a stage or query is slow, when proposing a partition, sort, index or extension change, when reading a profiling artifact or a measurement record, or when comparing a candidate against a baseline. For attach options, maintenance ordering and the no-indexes rule see ducklake-lakehouse; for matching internals see er-matching.
+description: The measurement discipline and storage-tuning rules for DuckDB/DuckLake performance work in this repo — how to read span and resource evidence without over-claiming, what the committed historical measurements do and do not license you to conclude, which layout levers exist and the experiment matrix a layout proposal must cover, and the live Rust benchmark surface. Use when a stage or query is slow, when proposing a partition, sort, index or extension change, when reading a profiling artifact or a measurement record, or when comparing a candidate against a baseline. For the ATTACH options and the partitioning and sort-on-write syntax themselves see ducklake-lakehouse — the mechanism is there, whether to change it is here; for matching internals see er-matching; for running the stage at all see er-engine-ops.
 ---
 
 # DuckLake performance
@@ -23,7 +23,7 @@ Read this before planning any measurement, because the answer changed:
 | `docs/performance.md`, `docs/profiling.md` | **historical records**, both banner-marked as such. Preserved for their measurements and findings |
 | `docs/measurements/*.json` | the committed measurement records from those campaigns |
 | `cargo bench -p dedupe-core` (`benches/pipeline.rs`) | the live benchmark surface |
-| the 50k scale goldens | gated, and run on main/nightly rather than per-PR |
+| the 50k scale goldens | gated, and never a per-PR gate — which jobs run them, and when, is in the ci-and-supply-chain skill's generated required-checks reference |
 
 So there is **no campaign driver to run**. Anything that reads like "regenerate
 the report with the campaign script" refers to tooling that no longer exists.
@@ -38,32 +38,24 @@ campaigns and call it a delta.
 
 ## Reading evidence without over-claiming
 
-These rules are implementation-independent, and they are where most analysis
-goes wrong:
+[references/measurement-discipline.md](references/measurement-discipline.md) is
+canonical here — the full checklist, the resource-evidence rules, and the
+comparability keys that decide whether two runs are even comparable. These three
+are repeated deliberately, because they decide most analyses:
 
-- **Never sum nested durations.** Parent and child spans overlap; adding them
-  double-counts. Use the stage ledger and monotonic timestamps.
-- **Separate command startup from stage wall time.** Startup is real cost but it
-  is not the stage's cost.
-- **CPU time can exceed wall time.** That is parallel execution, not a
-  measurement error — and it means CPU totals cannot be read as elapsed time.
+- **Never sum nested durations.** Parent and child spans overlap, so a sum that
+  exceeds the command's own runtime is expected rather than unaccounted
+  overhead — as is CPU time exceeding wall time under parallel execution.
 - **Use unprofiled control time as the end-to-end result.** Profiling has
-  overhead; report it separately. Never compare a profiled time against a
+  overhead; report it separately, and never compare a profiled time against a
   prior unprofiled one.
-- **Peaks are high-water marks**, not per-query allocations, and not additive.
-  cgroup memory includes page cache; process RSS can double-count shared pages.
-- **Missing evidence is not zero.** An unavailable catalog timing cannot be
-  inferred from overall latency, and an unprofiled thread is not an idle one.
-- **A local object-store stand-in cannot establish remote latency or
-  bandwidth.** It can establish CPU and plan behaviour.
+- **Missing evidence is not zero.** An unprofiled thread is not an idle one, and
+  a local object-store stand-in establishes CPU and plan shape, never remote
+  request latency or bandwidth.
 
 Setup, data generation, validation and full-rescore references sit **outside**
 workload timing. Decide that boundary before measuring, not after seeing the
 numbers.
-
-Full checklist, including the comparability keys that decide whether two runs
-are even comparable:
-[references/measurement-discipline.md](references/measurement-discipline.md).
 
 ## Where to look when something is slow
 
@@ -78,14 +70,16 @@ By workload:
   matching separately, affected-record expansion, cluster updates, and
   touched-entity assembly. A small input batch can trigger much larger reads or
   rewrites, which is the usual surprise.
-- **An expensive query** — actual versus estimated cardinalities, rows scanned
-  versus returned, filter and projection pushdown, join fan-out, repeated
-  scans, sorts and windows, file reads, spill. Link every claim to a specific
-  query or operator.
+- **An expensive query** — the plan's estimated-versus-actual cardinalities,
+  rows scanned versus returned, and repeated lake scans. Link every claim to a
+  specific query or operator, never to the stage as a whole.
 
-For the matching stages specifically, blocking is the lever that decides the
-entire candidate population — see the er-matching skill's cost-preview note
-before tuning anything downstream of it.
+For the matching stages specifically, blocking decides the entire candidate
+population before any of them runs: `__dedupe__blocked_id_pairs` carries one
+`UNION ALL` arm per rule, and an array-column (exploding) rule can inflate the
+candidate count on its own. Tune blocking before anything downstream of it —
+the er-matching skill carries the stage table and the `exploding` golden
+fixture.
 
 ## Layout: the levers and the experiment matrix
 
@@ -96,15 +90,13 @@ DuckLake table; that is a local-DuckDB-scratch option only.
 A layout proposal must test **four** arms, not two:
 
 ```
-baseline │ ordered writes │ partitioning │ partitioning + within-partition ordering
+baseline │ ordering alone │ partitioning alone │ both
 ```
 
-and must account for migration cost, small-file growth, and compaction —
-because a layout that reads faster can write slower, and incremental files
-weaken clustering over time.
-
-Storage boundaries, the pruning mechanisms that actually apply, and the full
-rules: [references/tuning.md](references/tuning.md).
+because the arms interact, and because a layout that reads faster can write
+slower. [references/tuning.md](references/tuning.md) is canonical for layout:
+the storage boundaries, the pruning mechanisms that actually apply, and the
+per-arm cost list a proposal must report.
 
 ## What a recommendation must carry
 
