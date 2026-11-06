@@ -16,19 +16,14 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-echo "devcontainer-postcreate: preparing the named volumes"
-
-# A fresh named volume mounts root-owned, so every one of the four in
-# devcontainer.json needs handing to `vscode` once. Idempotent: on a rebuild
-# that reuses the volumes this is a no-op that costs a stat.
+# NO `sudo`, AND NO CHOWN. The named volumes arrive writable because the
+# Dockerfile pre-creates every mount point owned by the remote user and Docker's
+# copy-up hands that ownership to a fresh volume. See the Dockerfile's
+# mount-point stanza; scripts/ci/devcontainer-smoke.sh asserts it held.
 #
-# `|| true` on each: a mount point that is missing (someone opened the folder
-# without the mounts, or a path moved) must not abort the whole script before
-# the assertions below, which are what would explain the problem.
-for d in "${CARGO_HOME:-/usr/local/cargo}/registry" rust/target frontend/node_modules "$HOME/.duckdb"; do
-	[ -d "$d" ] || continue
-	sudo chown -R "$(id -u):$(id -g)" "$d" || true
-done
+# The version this replaced ran `sudo chown … || true`, which failed in
+# `devcontainers/ci` with `sudo: a password is required` and reported success
+# anyway, over a container whose build directory the developer could not write.
 
 # ASSERT THE CARGO_HOME MOUNT ACTUALLY LANDED ON CARGO_HOME.
 #

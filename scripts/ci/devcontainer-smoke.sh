@@ -92,6 +92,31 @@ case "${RUSTFLAGS:-}" in
 	;;
 esac
 
+# EVERY NAMED VOLUME MUST BE WRITABLE, and this is the assertion that replaced
+# a `sudo chown`. The Dockerfile pre-creates each mount point owned by the
+# remote user so Docker's copy-up hands a fresh volume over writable; if that
+# ever stops holding — a base image moving CARGO_HOME, a mount added to
+# devcontainer.json without its directory added to the Dockerfile — the symptom
+# is otherwise a permission error forty minutes into a developer's first build.
+#
+# This runs in CI against the real mounts, which is the point: the previous
+# arrangement failed in CI and said nothing, because the chown that failed
+# carried `|| true`.
+for d in "${CARGO_HOME:-/usr/local/cargo}/registry" \
+	"${CARGO_TARGET_DIR:-$HOME/.cache/er/cargo-target}" \
+	"$HOME/.duckdb"; do
+	checked=$((checked + 1))
+	if [ ! -d "$d" ]; then
+		echo "devcontainer-smoke: $d does not exist — the Dockerfile must pre-create every volume mount point" >&2
+		fail=1
+	elif [ ! -w "$d" ]; then
+		echo "devcontainer-smoke: $d is not writable by $(id -un) — Docker's copy-up did not carry ownership" >&2
+		fail=1
+	else
+		echo "devcontainer-smoke: ok  writable  $d"
+	fi
+done
+
 # POSITIVE CONTROL: a run that asserted nothing is a broken harness, not a
 # clean image. Same zero-matches-is-failure rule as actionlint.sh and
 # scripts-home-check.sh.

@@ -103,17 +103,32 @@ jobs:
         # red — the gate would still pass, because building from scratch works.
         # This is the cheapest possible guard against that silent regression.
         run: bash scripts/ci/devcontainer-image-check.sh
-      # `push: filter` is the action's own "only on a push to the default
-      # branch" mode (refs/heads/main + the `push` event, its defaults), which
-      # is exactly the policy wanted here — a PR builds and proves the image,
-      # `main` builds and publishes it. Spelling it as a ternary on
-      # github.event_name would be the same thing with more to get wrong.
+      # `push: filter` publishes only when the action's ref and event filters
+      # both pass — a PR builds and proves the image, `main` builds and
+      # publishes it.
+      #
+      # `refFilterForPush` IS SET EXPLICITLY BECAUSE ITS DEFAULT IS EMPTY, AND
+      # EMPTY MEANS EVERY BRANCH. Only `eventFilterForPush` defaults to
+      # something restrictive (`push`). Today the `on:` block already confines
+      # `push` to `main`, so the defaults would behave correctly — but that
+      # makes the publishing policy a property of the trigger list, two screens
+      # away, and adding `branches: [release/*]` later would silently start
+      # overwriting the `main` tag. Naming it keeps the policy next to the
+      # thing it governs.
+      #
+      # On the FIRST run of this workflow the `cacheFrom` image does not exist
+      # yet and buildx logs `ERROR: failed to configure registry cache
+      # importer: …: not found`. It is not fatal — the build proceeds without a
+      # cache — and it stops appearing once `main` has published once. Observed
+      # on #743.
       - uses: devcontainers/ci@513af61f4de4f75d37e4438f184ba4358f0fc1ca # v0.3.1900000450
         with:
           imageName: ${{ env.IMAGE }}
           imageTag: ${{ env.IMAGE_TAG }}
           cacheFrom: ${{ env.IMAGE }}:${{ env.IMAGE_TAG }}
           push: filter
+          refFilterForPush: refs/heads/main
+          eventFilterForPush: push
           # Asserts the toolchain inside the image rather than running
           # `make check`, which would be a second cold ~40-minute backend build
           # on a non-required workflow. The script's header argues the split;

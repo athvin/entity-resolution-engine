@@ -34,35 +34,49 @@
     // Matches the DSN rust.yml hands its `postgres:16-alpine` service, so
     // `make check-e2e` needs no argument in here. The server is started by
     // scripts/devcontainer-poststart.sh.
-    "ER_TEST_PG_DSN": "host=localhost port=5432 user=er password=er dbname=er"
+    "ER_TEST_PG_DSN": "host=localhost port=5432 user=er password=er dbname=er",
+    // THE BUILD DIRECTORY LIVES OUTSIDE THE WORKSPACE, and that is the single
+    // most important line in this file for a Windows reader. `rust/target` is
+    // 30–80 GB in this repo (the primary checkout's was measured at 132 GB).
+    // Left at its default it would sit on the workspace bind mount — which on
+    // Windows is a 9p/virtiofs share, making it both ruinously slow and able to
+    // fill Docker Desktop's WSL2 virtual disk through the host filesystem.
+    //
+    // Pointing it at $HOME puts it on the `er-cargo-target` volume below, in
+    // the Docker VM's own filesystem. It also makes copy-up possible: see the
+    // Dockerfile's mount-point stanza for why a workspace-relative volume
+    // cannot be made writable without root.
+    "CARGO_TARGET_DIR": "/home/vscode/.cache/er/cargo-target"
   },
-  // NAMED VOLUMES, NEVER A BIND MOUNT, for all four. On Windows the workspace
-  // reaches the container through a 9p/virtiofs bind, where these directories
-  // are both ruinously slow and able to fill Docker Desktop's WSL2 virtual
-  // disk: `rust/target` alone is 30–80 GB in this repo (the primary checkout's
-  // was measured at 132 GB). A named volume lives in the Docker VM's own
-  // filesystem instead, so it is fast and the host never sees the files.
+  // NAMED VOLUMES, so the heavy caches never touch the host filesystem. EVERY
+  // TARGET HERE MUST BE A PATH THE Dockerfile PRE-CREATES owned by `vscode` —
+  // that is what makes Docker's copy-up hand the volume over writable, and so
+  // what removes the `sudo chown` this used to need. Adding a volume means
+  // adding its directory there too.
   //
   // The cost is that `docker volume rm` is how you reclaim the space, not
   // deleting a folder — docs/devcontainer.md says so.
   "mounts": [
-    // CARGO_HOME in the devcontainers rust image. Asserted by
-    // scripts/devcontainer-postcreate.sh rather than trusted, because a base-
-    // image change moving it would otherwise leave this mount shadowing an
-    // empty directory and silently re-downloading the registry every rebuild.
+    // CARGO_HOME in the devcontainers rust image. The downloaded crate
+    // registry, which is otherwise re-fetched on every rebuild.
     "source=er-cargo-registry,target=/usr/local/cargo/registry,type=volume",
-    "source=er-rust-target,target=${containerWorkspaceFolder}/rust/target,type=volume",
-    "source=er-node-modules,target=${containerWorkspaceFolder}/frontend/node_modules,type=volume",
+    // Where CARGO_TARGET_DIR above points. This is the 30–80 GB one.
+    "source=er-cargo-target,target=/home/vscode/.cache/er/cargo-target,type=volume",
     // DuckDB downloads its extensions here on first use (the same path
     // rust.yml caches as `~/.duckdb/extensions`). Without this volume every
     // rebuild re-fetches them.
     "source=er-duckdb,target=/home/vscode/.duckdb,type=volume"
   ],
-  // A fresh named volume mounts as root-owned, and the four above all have to
-  // be writable by `vscode`; the script chowns them and then asserts the
-  // toolchain. It deliberately does NOT build — a postCreate that ran
-  // `make check` would make first open the 40 minutes the prebuild exists to
-  // avoid.
+  // `frontend/node_modules` is DELIBERATELY NOT a volume, unlike the three
+  // above. It is 783 MB — real, but three orders of magnitude off the hazard
+  // this file is built around — and it is the one cache that cannot live
+  // outside the workspace, since pnpm's symlink layout has to sit beside
+  // `frontend/package.json`. A volume there would be workspace-relative, which
+  // copy-up cannot reach, and keeping it would mean keeping the `sudo chown`
+  // for one directory. Correctness over the last optimisation.
+  //
+  // It deliberately does NOT build — a postCreate that ran `make check` would
+  // make first open the 40 minutes the prebuild exists to avoid.
   "postCreateCommand": "bash scripts/devcontainer-postcreate.sh",
   // Runs on every start, not just creation: there is no init system in the
   // container, so nothing else would bring Postgres back after a stop.
@@ -99,9 +113,17 @@
         // project and the whole editor experience silently degrades to plain
         // text — the single most likely "the container is broken" report.
         "rust-analyzer.linkedProjects": ["rust/Cargo.toml"],
-        // Share one target directory with `make check` instead of letting
-        // rust-analyzer keep its own: a second copy is another 30–80 GB in the
-        // volume, and the two would serialise on the same lock anyway.
+        // `true` means "use a subdirectory of the existing target directory",
+        // so rust-analyzer's `cargo check` stops contending with `make check`
+        // for the Cargo.lock. Without it the editor goes dead for the whole
+        // duration of a gate run — which is forty minutes on a cold build, and
+        // exactly when you are waiting and most likely to go looking at code.
+        //
+        // It does duplicate artifacts, and this repo is unusually sensitive to
+        // that (`rust/target` is 30–80 GB). The duplicate is `cargo check`
+        // output rather than a second full build, so it is a fraction of that —
+        // but it does land in the `er-rust-target` volume, which is where to
+        // look if that volume grows faster than expected.
         "rust-analyzer.cargo.targetDir": true,
         "eslint.workingDirectories": ["frontend"]
       }

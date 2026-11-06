@@ -45,16 +45,32 @@ several Rust jobs carry an explicit disk-reclaim step.
 
 To grow it: Docker Desktop → *Settings* → *Resources* → *Virtual disk limit*.
 
-**`rust/target`, `frontend/node_modules`, the cargo registry and `~/.duckdb` are
-named volumes, not bind mounts.** On Windows a bind mount for these would be
-both ruinously slow and able to fill the WSL2 disk through the host filesystem.
-The consequence is that deleting the folder does not reclaim the space:
+**The build directory is not `rust/target` in here.** `CARGO_TARGET_DIR` points
+at `~/.cache/er/cargo-target`, which is a named volume living in the Docker VM's
+own filesystem — so the biggest directory in the repo never touches the Windows
+bind mount, and never reaches the host disk at all. Three caches work this way:
+
+| Volume | Mounted at | Holds |
+|---|---|---|
+| `er-cargo-target` | `~/.cache/er/cargo-target` | the 30–80 GB build directory |
+| `er-cargo-registry` | `/usr/local/cargo/registry` | downloaded crates |
+| `er-duckdb` | `~/.duckdb` | DuckDB's extensions |
+
+The consequence is that deleting a folder does not reclaim the space:
 
 ```sh
-docker volume rm er-rust-target er-cargo-registry er-node-modules er-duckdb
+docker volume rm er-cargo-target er-cargo-registry er-duckdb
 ```
 
 Those are recreated empty on the next open, so the next build is cold.
+
+`frontend/node_modules` is deliberately *not* a volume — it is 783 MB, and
+pnpm's symlink layout has to sit beside `frontend/package.json`, so it stays on
+the workspace mount. Everything that has to be writable is a path the image
+pre-creates owned by `vscode`, which is what lets Docker's copy-up hand each
+volume over ready to use; **nothing in this container needs `sudo`**. If you add
+a volume to `devcontainer.json`, add its directory to the `Dockerfile` in the
+same change — `scripts/ci/devcontainer-smoke.sh` fails the build if you do not.
 
 ## What is inside, and two things that are not
 

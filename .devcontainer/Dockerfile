@@ -63,11 +63,12 @@ RUN apt-get update \
 # `make check-e2e` is the only gate that exercises the Postgres job queue, and
 # a Windows collaborator who cannot run it cannot touch the control plane.
 #
-# The cluster lives in the image, so it is thrown away on rebuild. That is
-# correct for a test database and is stated in docs/devcontainer.md; the `er`
-# role and database are (re)created idempotently by
-# scripts/devcontainer-poststart.sh, which is also what starts the server —
-# there is no init system in here to do it.
+# Only the BINARIES are installed here. The cluster itself is created at first
+# start by scripts/devcontainer-poststart.sh, in $HOME, owned by whoever is
+# running — see that script's header. Debian's package auto-creates a `main`
+# cluster owned by `postgres` that would need root to start, so it is dropped:
+# one cluster, no privilege question, and nothing listening on 5432 except the
+# one this repo's DSN points at.
 RUN install -d -m 0755 /usr/share/postgresql-common/pgdg \
 	&& curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
 		https://www.postgresql.org/media/keys/ACCC4CF8.asc \
@@ -75,6 +76,7 @@ RUN install -d -m 0755 /usr/share/postgresql-common/pgdg \
 		> /etc/apt/sources.list.d/pgdg.list \
 	&& apt-get update \
 	&& apt-get install -y --no-install-recommends postgresql-16 postgresql-client-16 \
+	&& pg_dropcluster 16 main --stop \
 	&& rm -rf /var/lib/apt/lists/*
 
 # rustfmt and clippy explicitly. The base image ships both, and `make check`
@@ -84,5 +86,34 @@ RUN install -d -m 0755 /usr/share/postgresql-common/pgdg \
 # comes from rust/rust-toolchain.toml (`stable`) and is deliberately not named
 # again; see scripts/ci/install-rust.sh for the same argument in CI.
 RUN rustup component add rustfmt clippy
+
+# THE MOUNT POINTS FOR devcontainer.json's NAMED VOLUMES, pre-created and owned
+# by `vscode`. This is what makes the whole container privilege-free.
+#
+# A fresh named volume mounts root-owned, so the usual recipe is a postCreate
+# `sudo chown`. That recipe is what broke in `devcontainers/ci`
+# (`sudo: a password is required`), and it broke SILENTLY because the chown
+# carried `|| true`.
+#
+# Docker's copy-up removes the need for it: when an empty named volume is
+# mounted over a directory that exists in the image, the volume's root inherits
+# that directory's uid, gid and mode. So creating them here, owned by the remote
+# user, means every volume arrives writable and nothing ever needs root.
+#
+# The consequence for devcontainer.json is that EVERY volume target must be a
+# path that exists in this image — which is why the cargo target directory is
+# here under $HOME and reached through CARGO_TARGET_DIR, rather than mounted at
+# `rust/target`. A workspace-relative path does not exist at build time (the
+# workspace folder name is not known until `up`), so copy-up cannot apply to it
+# and it would be back to needing a chown.
+#
+# scripts/ci/devcontainer-smoke.sh asserts all three are writable, and that
+# assertion runs in CI against the real mounts — so a copy-up that stopped
+# working would go red rather than surface as a permission error forty minutes
+# into someone's first build.
+RUN install -d -o vscode -g vscode \
+	/usr/local/cargo/registry \
+	/home/vscode/.duckdb \
+	/home/vscode/.cache/er/cargo-target
 
 USER vscode
