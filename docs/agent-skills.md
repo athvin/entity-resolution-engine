@@ -49,13 +49,13 @@ the same fix.
 | `frontend-design-system` | the Tailwind v4 CSS-first tokens in `globals.css` and the two deliberate WCAG deviations from stock shadcn |
 | `frontend-testing` | which tier a change belongs in (unit, component, Playwright functional, the Docker-backed full-stack tier that is a release gate, not a PR gate) |
 | `infra-platform` | the Terraform env/module layout and shared S3 state with lockfile locking |
-| `land-pr` | the PR loop (red → diagnose → fix → push) and the main loop for the push-only workflows a PR can never run (user-invoked only) |
+| `land-pr` | the PR loop, the main loop for the push-only workflows a PR can never run (user-invoked only) |
 | `landing-page` | the `(marketing)` route group that prerenders statically inside the same app that serves the BFF |
 | `pentest` | a Strix-style run that does recon over the attack surface, fans out a tester subagent per vulnerability category (user-invoked only) |
-| `project-board` | the `gh project` command surface for user-owned project #2 "Product Roadmap" and the `project` scope it requires |
+| `project-board` | the `gh project` surface for user-owned project #2 "Product Roadmap" and the `project` scope it needs |
 | `rust-conventions` | that `make check` (not the bare cargo trio) is the finish line |
 | `security` | the attack surface (internet-facing Next.js BFF in front of the privileged Rust er-server control plane) |
-| `skill-audit` | the judgment half of the skill standard that the gate cannot mechanise |
+| `skill-audit` | the judgment half of the skill standard the gate cannot mechanise: whether a sentence survives the economy test |
 | `skill-writer` | triages whether the brief should become a skill at all rather than a CLAUDE.md line or a path-scoped rule or a hook (user-invoked only) |
 | `sql-analysis` | the E0xx diagnostics and their remedies, the rewrite step that strips what the planner cannot parse |
 <!-- END GENERATED: skill-inventory -->
@@ -130,11 +130,9 @@ can still accept a routing clause.
 
 | Headroom | Skill | Length |
 |---:|---|---:|
-|    7 | `skill-audit` | 1017 |
-|   12 | `project-board` | 1012 |
-|   20 | `security` | 1004 |
-|   45 | `land-pr` | 979 |
 |   66 | `entity-framework` | 958 |
+|   67 | `security` | 957 |
+|   68 | `skill-audit` | 956 |
 |   73 | `aws-account-operations` | 951 |
 |   74 | `frontend-bff` | 950 |
 |   76 | `sql-analysis` | 948 |
@@ -149,20 +147,19 @@ can still accept a routing clause.
 |   96 | `er-matching` | 928 |
 |   99 | `ci-and-supply-chain` | 925 |
 |  102 | `claim-ticket` | 922 |
+|  111 | `project-board` | 913 |
 |  123 | `infra-platform` | 901 |
+|  133 | `land-pr` | 891 |
 |  138 | `skill-writer` | 886 |
 |  177 | `api-contract` | 847 |
 |  179 | `ducklake-performance` | 845 |
 |  342 | `pentest` | 682 |
 
-The median routing clause here is **56 characters**. Skills with less
+The median routing clause here is **55 characters**. Skills with less
 headroom than that cannot take another one — adding routing to any of them
 means trimming its **what** clause first, which is the documented fix:
 
-- `skill-audit` — 7 characters free
-- `project-board` — 12 characters free
-- `security` — 20 characters free
-- `land-pr` — 45 characters free
+- none; every skill can take another clause
 <!-- END GENERATED: description-budget -->
 - No `allowed-tools`: it only *pre-approves* tools, it cannot restrict them, and
   nothing here needs pre-approval.
