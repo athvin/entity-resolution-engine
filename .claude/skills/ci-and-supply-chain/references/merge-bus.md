@@ -111,3 +111,39 @@ them. It is deliberately **not** an admin, which tightens rather than loosens
 things: every merge it makes must satisfy the required checks, where a human
 running `gh pr merge --admin` bypasses all of them.
 
+## Operating it: four things measured in production
+
+**It approves its own held workflow runs, and must.** A bot-authored pull
+request's runs are created `conclusion: action_required` with ZERO jobs, so they
+never start on their own. `GITHUB_TOKEN` with `actions: write` *may* release
+them — confirmed from the bus's own log on 2026-11-05, `approved run
+42099638414/63/82`, attempt 1 held and attempt 2 triggered by
+`github-actions[bot]`. Without that the design would need a human click per
+round, which is not unattended batching.
+
+**Held-ness is invisible in the PR rollup.** Zero jobs means zero check-runs,
+so `statusCheckRollup` is literally empty (`entries=0`, going to `entries=29`
+the moment the runs are approved) and `/check-runs` answers HTTP 500. Read it
+from `actions/runs?head_sha=…` selecting `conclusion == "action_required"`.
+
+**After an outage the pre-flight refuses for a while, by design.** It asks
+whether the last five *completed* runs executed any steps, so immediately after
+an Actions-minutes block it still sees five starved runs and declines to build —
+correctly, but it is a lagging indicator. Re-run CI on something real first;
+`run_attempt` incrementing is the proof the re-run took, not the exit code.
+
+**A batch branch is always a cold compile.** It is a novel tree, and the PR
+role holds only `er-ci-sccache-read`, so sccache cannot have been warmed — the
+`build-cost.md` "runs cold until it merges" effect reached by being new rather
+than by changing a lockfile, and reached on *every* run. `test shard
+(er-match)` was killed at exactly `timeout-minutes: 30` on a batch whose entire
+content was two lines of shell; that is why the shard now gets 45, matching
+`lint` and the e2e tiers.
+
+**The real cost of not using it.** 44,937 Actions minutes in 2026-11 on this
+repo (~450 gate cycles, $269 gross) with the spending limit reached twice.
+Seven separate candidates were hand-merged out from under an in-flight batch
+in one day — each one a gate run the batch had already paid for. Batching four
+PRs into one validation is the lever; racing the batch by hand is what removes
+it.
+
