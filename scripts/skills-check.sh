@@ -1055,6 +1055,89 @@ gen_aws_footprint() {
 		"$(grep -rc 'resource "aws_iam_openid_connect_provider"' infra/terraform --include='*.tf' | awk -F: '{ s += $2 } END { print s + 0 }')"
 }
 
+# Which workflows can never report on a pull request, and therefore what the
+# post-merge loop is for. A set difference rather than a list: the interesting
+# answer is the GAP between "runs after a merge" and "a PR could have caught
+# it", and nobody has to remember to maintain a gap.
+#
+# Generated-ness is read from each file's own header with the same predicate
+# scripts/ci/actionlint.sh uses, so the next gh-aw workflow is excluded without
+# anyone touching this.
+wf_on_block() {
+	# The `on:` block's own 2-space keys. Deeper indents (`paths:`, `branches:`,
+	# `types:`) are deliberately not matched, and a `#` comment cannot match
+	# `[a-z_]`.
+	awk '
+		/^on:/            { inon = 1; next }
+		inon && /^[^[:space:]]/ { inon = 0 }
+		inon && /^  [a-z_]+:/ {
+			sub(/^  /, "")
+			sub(/:.*/, "")
+			print
+		}
+	' "$1" | sort -u
+}
+
+gen_post_merge_surface() {
+	local wf triggers name examined=0
+	local -a after_merge=() pr_blind=()
+
+	for wf in .github/workflows/*.yml; do
+		[[ -f $wf ]] || continue
+		# Same marker test as the pin checker: generated workflows are gh-aw's.
+		# `grep -c`, never `grep -q`, on anything fed by a pipe — `-q` exits on
+		# the first match and SIGPIPEs the writer, so a FOUND marker can report
+		# as absent. Here that would silently include a gh-aw workflow in the
+		# post-merge surface, which is the fail-OPEN direction.
+		local generated
+		generated=$(head -5 "$wf" | grep -ciE 'generated|DO NOT EDIT|gh aw' || true)
+		((generated == 0)) || continue
+		examined=$((examined + 1))
+		name=$(basename "$wf" .yml)
+		triggers=$(wf_on_block "$wf" | tr '\n' ' ')
+		triggers=${triggers% }
+		case " $triggers " in
+		*" push "* | *" workflow_run "* | *" schedule "*)
+			after_merge+=("$name|$triggers")
+			case " $triggers " in
+			*" pull_request "*) ;;
+			*) pr_blind+=("$name|$triggers") ;;
+			esac
+			;;
+		esac
+	done
+
+	echo "### Workflows that run after a merge to \`main\`"
+	echo
+	if ((examined == 0)); then
+		# A generator that silently examines nothing is worse than none: the
+		# same rename-detection reasoning the pin checker uses.
+		echo "**None examined** — either \`.github/workflows/\` moved or every file"
+		echo "matched the generated-header test. Fix the generator before trusting this."
+		return
+	fi
+	echo "| Workflow | Triggers |"
+	echo "|---|---|"
+	local row
+	for row in "${after_merge[@]}"; do
+		printf '| `%s` | `%s` |\n' "${row%%|*}" "${row#*|}"
+	done
+	echo
+	echo "### Of those, the ones no pull request can pre-test"
+	echo
+	if ((${#pr_blind[@]} == 0)); then
+		echo "Every post-merge workflow also triggers on \`pull_request\`, so the main"
+		echo "loop has no blind spot to cover. Verify before believing it."
+	else
+		echo "These carry no \`pull_request\` trigger, so a green PR says nothing about"
+		echo "them. **This is the surface the main loop exists for.**"
+		echo
+		for row in "${pr_blind[@]}"; do
+			printf '%s\n' "- \`${row%%|*}\` — \`${row#*|}\`"
+		done
+	fi
+}
+
 # The inventory table that docs/agent-skills.md and CLAUDE.md each carry.
 # Derived from the frontmatter so adding a skill cannot leave either one stale —
 # the defect that produced the "no skill states a count" rule in the first
@@ -1228,6 +1311,7 @@ generated_files=(
 	"$skills_dir/frontend-design-system/references/tokens-and-primitives.md"
 	"$skills_dir/frontend-data-ui/references/screens.md"
 	"$skills_dir/aws-account-operations/references/footprint.md"
+	"$skills_dir/land-pr/references/post-merge.md"
 	"docs/agent-skills.md"
 	"CLAUDE.md"
 )
@@ -1260,6 +1344,9 @@ run_regen() {
 
 	gen_aws_footprint >"$tmp"
 	splice "$skills_dir/aws-account-operations/references/footprint.md" aws-footprint "$tmp"
+
+	gen_post_merge_surface >"$tmp"
+	splice "$skills_dir/land-pr/references/post-merge.md" post-merge-surface "$tmp"
 
 	# Two projections of one field, so the two documents cannot disagree about
 	# which skills exist even though they show different columns.

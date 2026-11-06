@@ -53,6 +53,92 @@ private user-owned repository, which is why it is a workflow here. The
 `ci-and-supply-chain` skill carries the rules; the one that bites is that
 `merge bus` must never become a required check.
 
+**A pull request is not done at green — it is done when `main` is green with the
+change on it.** `/land-pr <n>` is the procedure for getting there: the polling
+that does not accept a false green, the merge rules (there is no auto-merge here,
+and a single-commit PR squashes to the *commit* subject rather than the PR
+title), and the post-merge watch over the workflows no pull request can run.
+Use it for any PR being driven to merge rather than improvising the loop —
+`gh pr checks` alone will report a PR green that compiled nothing.
+
+## Work in a worktree, cut from a fresh `main`
+
+**Default to a git worktree for any change that will become a pull request.**
+Several sessions share this clone, and the hazard is concrete: staging with
+`git add -A` from one session commits another's half-finished work, and two
+sessions on one branch interleave commits. A worktree removes both by giving the
+session its own working directory.
+
+Start of session, from the primary checkout, in this order — **the prune comes
+first, because the disk is spent at creation and a new worktree is the thing
+that runs out of it.**
+
+**1. Delete the worktrees that are no longer needed.**
+
+```sh
+git worktree list                 # enumerate before deciding anything
+git worktree remove <path>        # then, for each one established as finished
+git worktree prune                # drop admin entries for directories already gone
+```
+
+Two guards decide "no longer needed", and neither is the obvious one:
+
+- **A live session may be attached, and `locked` is not how to tell.** Check
+  `lsof -a -p <claude pid> -d cwd` for each `claude` process. Removing a
+  worktree out from under a running session breaks it.
+- **Tie the worktree to its pull request and read that.** A closed PR — merged
+  or abandoned — means the worktree is finished. Ask by the worktree's HEAD
+  commit rather than by branch, because harness-cut worktrees are detached and
+  have no branch name to look up:
+
+  ```sh
+  sha=$(git -C <worktree> rev-parse HEAD)
+  gh api "repos/{owner}/{repo}/commits/$sha/pulls" \
+    --jq '.[]|"#\(.number) state=\(.state) merged=\(.merged_at != null)"'
+  ```
+
+  Do **not** substitute `git branch --merged`: squash merges leave the branch
+  unreachable from `main`, and it once reported 2 of 69 branches as merged. If
+  no PR resolves at all, the commit was never pushed — that is unlanded work, so
+  the worktree stays.
+
+`git worktree remove` refusing because the tree is dirty is **information, not
+an obstacle** — uncommitted work there has not landed anywhere. Do not reach for
+`--force` to get past it; find out what the change was first.
+
+**2. Refresh `main`.**
+
+```sh
+git -C <primary checkout> switch main && git pull --ff-only origin main
+```
+
+**3. Cut the new worktree from that refreshed `main`** — the `EnterWorktree`
+tool, or `git worktree add .claude/worktrees/<topic> -b <branch> origin/main`.
+Cutting from a stale `main` is how a change arrives already behind and
+conflicting.
+
+**Then refresh from `main` periodically while the work is open**, and always
+before asking for a merge:
+
+```sh
+git fetch origin && git rebase origin/main      # or merge, if the branch is shared
+```
+
+This is cheaper than it looks. `rust` and `frontend` compute a content-addressed
+pass key, so rebasing over a `main` that moved only through paths the gate
+ignores re-uses the existing green instead of paying for a new one.
+
+What makes step 1 non-negotiable rather than tidy: **each worktree carries its
+own `rust/target`, at tens of gigabytes** — the primary checkout's alone runs
+past 100GB. A full disk surfaces as `linking with cc failed`, exactly the
+misleading CI symptom. A fresh worktree also starts cold, so its first
+`make check` is a full build; that is the cost being paid for isolation, and it
+is another reason not to hold worktrees open past the PR that justified them.
+
+Still check `git branch --show-current` and `git rev-parse HEAD` in the same tool
+call as any commit, and stage by explicit path. A worktree makes the shared-clone
+collision unlikely, not impossible.
+
 ## Layout
 
 The backend is the Rust workspace under `rust/`; the Python/dbt
@@ -191,6 +277,7 @@ The table below is **generated** from each skill's frontmatter by
 | building or restyling a component or page | `frontend-design-system` |
 | adding or fixing a frontend test, when a Playwright or vitest run fails | `frontend-testing` |
 | editing Terraform or a Helm chart, writing a NodePool | `infra-platform` |
+| asked to monitor, watch, babysit or land a pull request (user-invoked only) | `land-pr` |
 | editing or adding a marketing page or its copy | `landing-page` |
 | invoking /pentest, /pentest <category>, /pentest live (user-invoked only) | `pentest` |
 | asked what is on the board or to add, triage or move a card | `project-board` |
