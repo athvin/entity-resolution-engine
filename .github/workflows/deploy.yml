@@ -325,18 +325,24 @@ jobs:
       # not in the chart default, so a developer namespace opts in
       # deliberately.
       #
-      # `run_all_*` joins the two Phase 2 kinds because the pipeline has now
-      # been observed end to end on a real cluster: `check_kind.sh` phase 5
-      # runs `run_all_full` as seven pods — seven distinct Job objects, seven
-      # distinct pod uids, one launch each — and the lake comes out ledgered.
-      # Both share one DAG and one set of bodies; only `init`'s mode
-      # decision differs.
+      # EVERY kind is listed, which completes Phase 3's rollout. The value
+      # lives in `DAG_KINDS` and is set in TWO steps — the install and the
+      # cut-over — which must agree, or the cut-over reverts what the install
+      # widened.
       #
-      # The rest of Phase 3's kinds (`correct`, `train`, `apply_corrections`,
-      # `apply_approved`, `provision`) stay OFF for now. Their bodies are
-      # real and covered by the integration tier, but none has run on a
-      # cluster, and an allowlist whose entries all arrive together is not
-      # an allowlist. They go on as each is observed.
+      # This comment used to say the last few kinds would go on one at a time
+      # "as each is observed" on a cluster. That was the wrong unit. What a
+      # cluster run adds — real scheduling, real projected-token verification,
+      # real EFS, a real image — are PLATFORM properties, and they are already
+      # proven live by `lake_maintain` (Phase 2) and by `run_all_full` running
+      # as seven pods with seven pod uids and a ledgered lake. Repeating that
+      # per kind re-proves the platform, not the kind.
+      #
+      # The per-kind risk is the body and the work order, and the integration
+      # tier covers both for every kind: `pg_run_all_dag.rs` and
+      # `pg_run_all_pipeline.rs` stand up the REAL control plane
+      # (`er_server::app(AppState::with_pg(..))`) against a real DuckLake and
+      # run the real `exec-task` binary, so a mis-assembled order fails there.
 
       - name: The namespace chart
         run: |
@@ -408,7 +414,7 @@ jobs:
           FIRST: ${{ steps.colour.outputs.first }}
           LIVE_API: ${{ steps.colour.outputs.live_api }}
           LIVE_WEB: ${{ steps.colour.outputs.live_web }}
-          DAG_KINDS: 'lake_maintain\,lake_migrate\,run_all_full\,run_all_incremental'
+          DAG_KINDS: 'lake_maintain\,lake_migrate\,run_all_full\,run_all_incremental\,correct\,train\,profile\,provision\,dataset_provision\,apply_corrections\,apply_approved'
           NEW_API: ${{ steps.digests.outputs.er_api }}
           NEW_WEB: ${{ steps.digests.outputs.er_web }}
           FS: ${{ steps.env.outputs.fs }}
@@ -421,10 +427,24 @@ jobs:
             --set "images.web.digest=$NEW_WEB"
             --set "efs.fileSystemId=$FS"
             --set "efs.accessPointId=$AP"
-            # The executor allowlist (batch-orchestration-design §11): the two
-            # Phase 2 kinds run as per-attempt Kubernetes Jobs in this
-            # namespace. Enabled HERE, not in the chart default, so a developer
-            # namespace opts in deliberately.
+            # The executor allowlist (batch-orchestration-design §11): these
+            # kinds run as per-attempt Kubernetes Jobs in this namespace.
+            # Enabled HERE, not in the chart default, so a developer namespace
+            # opts in deliberately. SET IN TWO PLACES -- the install below and
+            # the cut-over step -- and they must agree, or the cut-over quietly
+            # reverts the allowlist the install just widened.
+            #
+            # All kinds now, having earlier said the last few would go on one at
+            # a time as each was observed on a cluster. What a cluster run adds
+            # is not per-kind: real scheduling, real projected-token
+            # verification, real EFS and a real image are PLATFORM properties,
+            # already proven live by `lake_maintain` (Phase 2) and by
+            # `run_all_full` as seven pods. The per-kind risk is in the bodies
+            # and the work orders, and the integration tier covers both for
+            # every kind -- `pg_run_all_dag.rs` and `pg_run_all_pipeline.rs`
+            # stand up the REAL control plane against a real DuckLake and run
+            # the real `exec-task` binary. A cluster run per kind would re-prove
+            # the platform, not the kind.
             --set "executor.dagKinds=$DAG_KINDS"
             --set "color.active=$LIVE"
             --set "color.$TARGET.replicas=1"
@@ -482,7 +502,7 @@ jobs:
           TARGET: ${{ steps.colour.outputs.target }}
           LIVE_API: ${{ steps.colour.outputs.live_api }}
           LIVE_WEB: ${{ steps.colour.outputs.live_web }}
-          DAG_KINDS: 'lake_maintain\,lake_migrate\,run_all_full\,run_all_incremental'
+          DAG_KINDS: 'lake_maintain\,lake_migrate\,run_all_full\,run_all_incremental\,correct\,train\,profile\,provision\,dataset_provision\,apply_corrections\,apply_approved'
           NEW_API: ${{ steps.digests.outputs.er_api }}
           NEW_WEB: ${{ steps.digests.outputs.er_web }}
           FS: ${{ steps.env.outputs.fs }}
