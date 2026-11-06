@@ -51,6 +51,11 @@ finding that the skill duplicates its source is only worth reporting if the dupl
 *verified*; asserting it from resemblance is the "inventing a finding from a filename"
 anti-pattern below.
 
+**For the `drift` lens this is not an exception but the normal mode.** That lens exists to ask
+whether each claim still holds, which cannot be answered from the skill text, so opening the
+named files is the work rather than a detour. The limits below are unchanged — and they are what
+keeps it from becoming a tour of the codebase.
+
 The limits: read only the file the claim names, only to settle that claim, and cite it with a
 `file:line` like any other evidence. This never licenses a tour of the codebase, and it never
 licenses reading outside the repository.
@@ -101,8 +106,10 @@ report it one severity lower and say the intent could not be determined.
 8. **Verify**, below, then deliver.
 
 Running the lenses in the order `economy` → `terms` → `counts` → `evals` → `overrides` →
-`routing` is usually fastest, because the first four read the target once and `routing` is the
-only one needing the whole collection.
+`drift` → `routing` is usually fastest. The first five read the target once; the last two each
+need something outside it — `drift` the source files its claims name, `routing` the whole
+collection — so they go last, and `drift` goes before `routing` because the claim list it probes
+falls out of the reading the earlier lenses already did.
 
 ## Anti-patterns in the audit itself
 
@@ -140,3 +147,6 @@ Answer each. A no means fix it before the report goes out.
    knowledge skill, an `allowed-tools` block, a chained reference?
 8. For a borderline `economy` finding, is it ranked low and worded as borderline rather than
    asserted?
+9. For every `drift` finding, was the probe actually run this session, and does the citation come
+   from the source file rather than from the skill's own quote of it? A skill quoting a line that
+   no longer exists will supply a convincing quote.
