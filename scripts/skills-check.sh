@@ -1085,7 +1085,13 @@ gen_post_merge_surface() {
 	for wf in .github/workflows/*.yml; do
 		[[ -f $wf ]] || continue
 		# Same marker test as the pin checker: generated workflows are gh-aw's.
-		if head -5 "$wf" | grep -qiE 'generated|DO NOT EDIT|gh aw'; then continue; fi
+		# `grep -c`, never `grep -q`, on anything fed by a pipe — `-q` exits on
+		# the first match and SIGPIPEs the writer, so a FOUND marker can report
+		# as absent. Here that would silently include a gh-aw workflow in the
+		# post-merge surface, which is the fail-OPEN direction.
+		local generated
+		generated=$(head -5 "$wf" | grep -ciE 'generated|DO NOT EDIT|gh aw' || true)
+		((generated == 0)) || continue
 		examined=$((examined + 1))
 		name=$(basename "$wf" .yml)
 		triggers=$(wf_on_block "$wf" | tr '\n' ' ')
