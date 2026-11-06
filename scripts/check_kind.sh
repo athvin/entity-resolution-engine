@@ -22,10 +22,11 @@
 #   6. cutover   — `color.active` flips while a task is RUNNING, so the pod's
 #                 control-plane callbacks land on a different er-server process
 #                 than the one that launched it. The attempt must not notice:
-#                 one launch, settles succeeded, and NO termination_reason at
-#                 all — the reachable mid-run failure is `fenced` (three missed
-#                 heartbeats), not `control_plane_unreachable`, which only the
-#                 step-1 work-order loop can write. Phase 2 covers the
+#                 one launch, settles succeeded, exit 0, and a
+#                 termination_reason that is either absent or the pod's own
+#                 "Completed" — the reachable mid-run failure is `fenced`
+#                 (three missed heartbeats), not `control_plane_unreachable`,
+#                 which only the step-1 work-order loop can write. Phase 2 covers the
 #                 dispatcher restarting; this covers the SERVING tier moving
 #                 under an in-flight attempt, which is what a blue/green deploy
 #                 does (D-BLUEGREEN).
@@ -569,9 +570,12 @@ EOF
 #                        and writes `fenced` — the work completed and the
 #                        result is thrown away, which is the expensive one.
 #
-# So the assertion is "no termination_reason at all" rather than a single named
-# reason; see the python block for why naming only the first would be
-# decoration.
+# So the assertion is an ALLOWLIST of undisrupted values — `None` or the
+# literal "Completed" — rather than a single named reason or a bare `is None`.
+# "Completed" is in it because the executor annotates an already-succeeded row
+# with the POD's terminated reason, and that is what Kubernetes calls a
+# container that exited 0; see the python block for why each of the two
+# narrower guards this phase previously shipped could not work.
 #
 # Distinct from phase 2 in what it exercises: the dispatcher is NOT coloured and
 # does not restart here, so adoption is not involved. What is being proved is
@@ -672,24 +676,49 @@ for t in live:
         f"{t['task_id']}: no termination_reason field on the task row — the "
         "ledger shape changed and this phase would prove nothing"
     )
-    # ANY reason, not just the one failure mode. `control_plane_unreachable`
-    # is the WRONG guard for this window and asserting only it would be
-    # decoration: exec_task.rs writes that reason solely in the step-1
-    # work-order loop, which a task already in `running` has passed. The
-    # reachable mid-run mode is `fenced` — the heartbeat thread posts every
-    # 30s and fences after 3 consecutive transport misses (so ~90s), after
-    # which step 6 refuses to post the verdict even though the work finished.
-    # A succeeded task carries no reason at all, so `is None` covers fenced,
-    # sigterm, stale_start, structural_mismatch and control_plane_unreachable
-    # (the last still reachable here by a sibling task that LAUNCHES after the
-    # flip and fetches its work order through the moved Service).
-    assert t["termination_reason"] is None, (
+    # AN ALLOWLIST OF UNDISRUPTED VALUES, not `is None` and not a denylist of
+    # named failures. Both of the obvious guards are wrong here, and this
+    # phase has now shipped each of them:
+    #
+    #   `!= "control_plane_unreachable"` — the FIRST version. exec_task.rs
+    #     writes that reason at exactly one site, the step-1 work-order loop,
+    #     which a task already in `running` has passed. The precondition could
+    #     not hold, so it passed whatever the cutover did.
+    #   `is None` — the SECOND version, and what this replaces. It rested on
+    #     "a succeeded task carries no reason at all", which is FALSE: the
+    #     executor annotates a row that already holds a verdict with the
+    #     POD's terminated reason (executor.rs record_evidence, guarded
+    #     `state IN ('succeeded','skipped')`), and Kubernetes' reason for a
+    #     container that exits 0 is the literal "Completed". So a perfectly
+    #     undisrupted attempt ends up reading `termination_reason='Completed'`
+    #     and the guard failed the phase for succeeding.
+    #
+    # It is also a RACE, which is why `== "Completed"` would be flaky rather
+    # than correct: the annotation lands after the verdict, so a read here
+    # legitimately sees None (not yet annotated) or "Completed" (annotated).
+    # Both mean undisrupted; everything else means the cutover was visible.
+    #
+    # An allowlist is the FAIL-SAFE direction. A denylist of today's reasons
+    # (fenced, sigterm, stale_start, structural_mismatch,
+    # control_plane_unreachable, heartbeat_timeout, config, no_terminal_record)
+    # would silently accept any reason added to exec_task.rs later — the
+    # "exhaustive enumeration" defect, where the omission reads as permission.
+    UNDISRUPTED = (None, "Completed")
+    assert t["termination_reason"] in UNDISRUPTED, (
         f"{t['task_id']}: the cutover was visible to the attempt "
         f"(termination_reason={t['termination_reason']!r}, "
-        f"error_detail={t.get('error_detail')!r}) — 'fenced' means the "
-        "heartbeat missed three posts across the flip; "
-        "'control_plane_unreachable' means a sibling could not fetch its "
-        "work order after it"
+        f"error_detail={t.get('error_detail')!r}) — undisrupted is None or "
+        f"'Completed'; 'fenced' means the heartbeat missed three posts across "
+        "the flip; 'control_plane_unreachable' means a sibling could not fetch "
+        "its work order after it"
+    )
+    # Corroborates "Completed" instead of trusting it. The reason above is the
+    # POD's, so a zero exit is the independent half of the same claim, and a
+    # succeeded row carrying a nonzero exit is incoherent however it got there.
+    # `None` is allowed for the same race as above — unannotated, not yet read.
+    assert t["exit_code"] in (None, 0), (
+        f"{t['task_id']}: state is succeeded but exit_code={t['exit_code']!r} "
+        f"(termination_reason={t['termination_reason']!r})"
     )
     # A relaunch would mean two processes writing one lake — the same invariant
     # phase 2 protects, re-checked because a cutover is a second way to lose it.
@@ -697,8 +726,12 @@ for t in live:
         f"{t['task_id']}: launches={t['launches']} — a cutover must NOT relaunch "
         "a live attempt"
     )
-print("phase 6 ok: the attempt survived the cutover — one launch, no "
-      "control_plane_unreachable")
+# Names what was actually checked. The old wording claimed "no
+# control_plane_unreachable", which is the reason the FIRST version of this
+# guard wrongly keyed on and which a running attempt cannot reach — a green
+# line asserting the wrong thing is how that guard survived review.
+print("phase 6 ok: the attempt survived the cutover — one launch, exit 0, "
+      "and no disrupting termination_reason")
 EOF
 
 # Leave the release as phase 1 found it, so the probe is re-runnable and a
