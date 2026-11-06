@@ -23,7 +23,7 @@ one chart that exists:
 
 > Deliberately hand-rolled DOM/CSS (no canvas): **pixel-deterministic for
 > visual baselines and legible to assistive tech.**
-> — `src/components/review/waterfall-chart.tsx`
+> — `frontend/src/components/review/waterfall-chart.tsx`
 
 Both halves matter. A canvas is one opaque bitmap to a screen reader, and this
 screen's whole job is explaining evidence. And a library that renders through
@@ -60,21 +60,28 @@ whole before starting:
   tier asserts on it;
 - an explicit empty branch returning a sentence, never an empty chart frame.
 
-Pick the form from the data, not from a gallery: bars or a histogram for a
-distribution of cluster sizes or match scores, a bar-from-axis for signed
-contributions, a sparkline for a trend in a tile. **Never a pie chart** — the
-quantities here are compared, not apportioned.
+Pick the form from the data, not from a gallery. `dataviz`'s form heuristic is
+one of the parts of it that survives here, so use that rather than a second copy
+of it; what it does not know are the two house shapes — a bar-from-axis for
+signed contributions, which is the evidence waterfall, and **never a pie
+chart**, because the quantities here are compared rather than apportioned.
 
 Colour is not available as an encoding channel. See the frontend-design-system
 skill for what replaces it; for charts specifically, the channels are bar
-length, side of axis, sign, order, and `bg-foreground` against
-`bg-foreground/70`.
+length, side of axis, sign and order. Tone is available — `bg-foreground`
+against `bg-foreground/70` — but the one existing chart does not spend it: both
+polarities are `bg-foreground/70`, and the side of the axis plus a signed number
+carry the difference. Introducing a second tone is a new channel rather than a
+copy of the precedent.
 
 ## Anything that can exceed a few hundred rows is virtualized
 
 `@tanstack/react-virtual` is the installed tool, and
-`src/components/records/records-browser.tsx` is the **only** virtualized surface
-in the tree — so it is both the worked example and the thing to copy:
+`frontend/src/components/records/records-browser.tsx` is the worked example and
+the thing to copy. Whether it is still the *only* virtualized surface is derived
+rather than asserted here — the call-site list in
+[references/dense-surfaces.md](references/dense-surfaces.md) answers that, and a
+second entry means something closer to your surface may be the better model:
 
 - `useVirtualizer` with a fixed `estimateSize` and `overscan`, against a
   scroll-container ref;
@@ -118,10 +125,12 @@ this number means" — and if the answer is "nowhere", the surface is not done.
 
 ## Loading, empty and error are per-component by convention
 
-There are **no `loading.tsx`, `error.tsx` or `not-found.tsx` files anywhere** in
-`src/app`. No route-level Suspense or error boundaries exist. That is the
-current convention, so follow it rather than introducing a route-level file for
-one screen and leaving the rest inconsistent:
+Every one of these states is handled inline, per component. That no route-level
+`loading.tsx`, `error.tsx` or `not-found.tsx` exists is derived rather than
+asserted here — the list in
+[references/dense-surfaces.md](references/dense-surfaces.md) is read out of
+`frontend/src/app` on every regeneration. Follow the convention rather than
+introducing a route-level file for one screen and leaving the rest inconsistent:
 
 | State | Convention |
 |---|---|
@@ -130,15 +139,13 @@ one screen and leaving the rest inconsistent:
 | not found | a **404 is an empty or pending state**, not an error; `entity-view` and `config-studio` both special-case it |
 | error | narrow `BffRequestError` from `@/lib/api/client` at the call site, with a short lowercase fallback message |
 
-A skeleton should match the shape of what is arriving. A spinner where a table
-will appear tells the reader nothing about what they are waiting for.
-
 ## Filters are component state, and that is a known gap
 
 Filter and search state lives in `useState` with a debounce —
 `records-browser.tsx` is the example. **Nothing in the tenant surface reads or
-writes `searchParams`.** The only `useSearchParams` in the tree is `/login`
-reading its `next` parameter.
+writes `searchParams`.** Which components read the URL at all is derived in
+[references/dense-surfaces.md](references/dense-surfaces.md); while that list
+reaches no further than the login screen, this gap is the whole picture.
 
 The consequence is real and worth saying out loud when working on these
 screens: a filtered or searched view **cannot be linked, bookmarked or shared**,
@@ -152,14 +159,17 @@ in a task about something else.
 
 ## A new screen must be registered in the axe gate
 
-`tests/functional/a11y.spec.ts` holds a hardcoded `SCREENS` array and sweeps
-each entry with `@axe-core/playwright`. **A screen that is not in that array is
-silently unchecked** — the gate passes, having examined nothing about it.
+`frontend/tests/functional/a11y.spec.ts` holds a hardcoded `SCREENS` array and
+sweeps each entry with `@axe-core/playwright`. **A screen that is not in that
+array is silently unchecked** — the gate passes, having examined nothing about
+it.
 
 Which routes are currently missing from it is derived rather than listed:
 [references/screens.md](references/screens.md). Adding a screen means adding an
 entry with a `ready` predicate that waits for real content, which in turn means
-the screen needs a stable `data-testid`.
+the screen needs a stable `data-testid`. A route reachable without a session
+also needs `anonymous: true`, which skips the fixture login for that entry —
+that is a flag to set, not a harness change to make.
 
 Virtualization and table patterns in detail, with the `records-browser`
 walkthrough: [references/dense-surfaces.md](references/dense-surfaces.md).
@@ -172,6 +182,10 @@ position, add `data-testid`s, and write the empty branch first.
 
 **A list that could get long.** Virtualize it with `@tanstack/react-virtual`,
 copying `records-browser.tsx`. Fix the row height before designing the row.
+
+**A table that will not get long.** Use a semantic `<table>` — most dense
+surfaces here are one, and the grid-of-rows in `records-browser.tsx` is the
+price of virtualization rather than the default shape.
 
 **Showing a score.** Render the number with `tabular-nums` and fixed decimals,
 and give the reader a path to its meaning in the same row.

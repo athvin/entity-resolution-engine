@@ -928,6 +928,81 @@ gen_screens_coverage() {
 	fi
 }
 
+# A `- `path`` line per entry, or $2 verbatim when the list is empty.
+bullets() {
+	if [[ -n ${1//[[:space:]]/} ]]; then
+		printf '%s\n' "$1" | while read -r entry; do
+			[[ -n $entry ]] || continue
+			printf '%s\n' "- \`$entry\`"
+		done
+	else
+		printf '%s\n' "$2"
+	fi
+}
+
+# Files under `frontend/src` with a real call to the hook matched by $1, doc
+# comment lines excluded.
+#
+# That exclusion is load-bearing rather than tidy. `column-table.tsx` names
+# `useVirtualizer` in a comment explaining why that table is deliberately *not*
+# virtualized, and the landing page names `useSearchParams()` in a comment
+# about what `force-static` empties. A derived list that counted either would
+# lie in the same direction as the prose it replaced, which is the one way a
+# generated block is worse than nothing.
+hook_call_sites() {
+	grep -rnE "$1" frontend/src 2>/dev/null \
+		| grep -vE '^[^:]+:[0-9]+:[[:space:]]*\*' \
+		| cut -d: -f1 \
+		| sort -u
+}
+
+# The tree facts `frontend-data-ui` used to assert in prose. Each was a
+# cardinality claim — "the only virtualized surface", "no `loading.tsx`
+# anywhere", "the only `useSearchParams`", "there is no `<table>`" — and the
+# last of those was false by 23 components before an audit caught it. A zero or
+# a one is a count like any other, so it is derived here instead of written
+# down.
+gen_dense_surface_facts() {
+	local virt urls boundaries tables
+	virt=$(hook_call_sites 'useVirtualizer\(')
+	urls=$(hook_call_sites 'useSearchParams\(')
+	boundaries=$(
+		find frontend/src/app \
+			\( -name 'loading.tsx' -o -name 'error.tsx' -o -name 'not-found.tsx' \) \
+			2>/dev/null | sort
+	)
+	tables=$(grep -rl '<table' frontend/src 2>/dev/null | wc -l | tr -d '[:space:]')
+
+	echo "### Virtualized surfaces"
+	echo
+	echo "Every \`useVirtualizer\` call site. A second entry here means the"
+	echo "walkthrough below is no longer the only precedent, and whichever surface"
+	echo "is closest to the new one is the better thing to copy:"
+	echo
+	bullets "$virt" "**None** — which contradicts the walkthrough below, so one of the two is wrong."
+	echo
+	echo "### Route-level loading, error and not-found boundaries"
+	echo
+	echo "Files named \`loading.tsx\`, \`error.tsx\` or \`not-found.tsx\` anywhere under"
+	echo "\`frontend/src/app\`:"
+	echo
+	bullets "$boundaries" "**None.** Every one of those states is handled inline, per component."
+	echo
+	echo "### Client components that read the URL"
+	echo
+	echo "Every \`useSearchParams\` call site. While this list reaches no further"
+	echo "than the login screen, no filtered or searched view in the tenant"
+	echo "surface can be linked, bookmarked or restored by the back button:"
+	echo
+	bullets "$urls" "**None.** Nothing in the tree reads the URL."
+	echo
+	echo "### Semantic tables"
+	echo
+	echo "Files under \`frontend/src\` rendering a \`<table>\` element: **$tables**."
+	echo "Tabular data gets a real \`<table>\`; the records browser's grid-of-rows is"
+	echo "what virtualization costs, not the house pattern to copy by default."
+}
+
 gen_aws_footprint() {
 	echo "### Resource types declared"
 	echo
@@ -1310,6 +1385,7 @@ generated_files=(
 	"$skills_dir/frontend-testing/references/tiers-and-thresholds.md"
 	"$skills_dir/frontend-design-system/references/tokens-and-primitives.md"
 	"$skills_dir/frontend-data-ui/references/screens.md"
+	"$skills_dir/frontend-data-ui/references/dense-surfaces.md"
 	"$skills_dir/aws-account-operations/references/footprint.md"
 	"$skills_dir/land-pr/references/post-merge.md"
 	"docs/agent-skills.md"
@@ -1341,6 +1417,9 @@ run_regen() {
 
 	gen_screens_coverage >"$tmp"
 	splice "$skills_dir/frontend-data-ui/references/screens.md" screens-coverage "$tmp"
+
+	gen_dense_surface_facts >"$tmp"
+	splice "$skills_dir/frontend-data-ui/references/dense-surfaces.md" dense-surface-facts "$tmp"
 
 	gen_aws_footprint >"$tmp"
 	splice "$skills_dir/aws-account-operations/references/footprint.md" aws-footprint "$tmp"
