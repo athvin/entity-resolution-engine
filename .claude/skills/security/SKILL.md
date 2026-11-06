@@ -79,8 +79,15 @@ Step 5 is non-negotiable. A security test that passes before the fix is proving 
 
 - **Tenant isolation on the data plane is physical, not row-level.** Lake read statements carry **no
   `org_id` predicate** — isolation rests entirely on `open_org_lake` resolving a distinct
-  `ER_LAKE_CATALOG`/`ER_LAKE_DATA_PATH` per org. If two orgs ever share a catalog, it is *silent,
-  total* cross-tenant exposure with no second line of defence. This invariant must have a test.
+  **`(catalog, catalog schema, data path)`** triple, read from `ER_LAKE_CATALOG`,
+  `ER_LAKE_CATALOG_SCHEMA` and `ER_LAKE_DATA_PATH` (`er-server/src/schema.rs`). **All three
+  dimensions count**: disjoint metadata schemas are independent lakes, which is how several datasets
+  share one `er_t_<org>` database — so a review that checks only the catalog and the data path will
+  pass a pair that is not in fact separated. If two orgs ever resolve to the same triple, it is
+  *silent, total* cross-tenant exposure with no second line of defence. This invariant must have a
+  test: `er-server/tests/pg_lake_catalog_schema.rs` is the one that pins it, including DuckLake's
+  refusal to re-attach a metadata schema under a different `DATA_PATH`. For the attach itself, and
+  the env-var naming that actively misleads here, see `ducklake-lakehouse`.
 - **Three config fields are raw SQL by design**: `blocking[].expr`, `training.deterministic_rules`,
   `training.em_blocking_rules`. Publish-time analysis (`config_check.rs`) checks column *references*
   in `blocking[].expr` only — the two `training` lists get none. Treat config publish as an
