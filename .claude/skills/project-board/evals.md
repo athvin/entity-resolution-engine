@@ -32,13 +32,19 @@ carries no guarantee.
 
 Must:
 
-- Say the "Pull request merged" automation is enabled and already moves the
-  card, so the edit is redundant and races the automation.
-- Read the card's current `Status` before doing anything.
+- Reject the premise: a pull request has no card on this board, so "its card"
+  names nothing. Establish which issue #488 closed, if any, before considering
+  an edit.
+- Where #488 did close an issue: say "Pull request merged" acts on that issue's
+  card and already moves it, so the edit is redundant and races the automation,
+  and read the card's current `Status` first.
+- Where it closed nothing: say the board is untouched and no edit applies.
 
 Must not:
 
 - Immediately construct an `item-edit --single-select-option-id` call for `Done`.
+- Reach for `item-add` on the pull request to create the card the request
+  implies.
 
 Credit for routing merge-bus mechanics — batching, why an individual green is
 stale — to the ci-and-supply-chain skill rather than explaining them here.
@@ -129,25 +135,29 @@ Credit for noting that through GraphQL the same failure arrives as one
 
 ## 7. Which skill answers a merge-shaped board question
 
-The adjacency test. The prompt is phrased the way `land-pr` and
-`ci-and-supply-chain` both trigger on, and the board question is the one only
-this skill answers.
+The adjacency test, carrying a false premise. The prompt is phrased the way
+`land-pr` and `ci-and-supply-chain` both trigger on, the board question is the
+one only this skill answers, and the thing being asked about does not exist.
 
 **Query:** "#604 just landed. Is its roadmap card still sitting in Todo?"
 
 Must:
 
-- Read the card's `Status` with `gh project item-list`, having loaded
-  `project-board` — not answer from `land-pr` or `ci-and-supply-chain` because
-  the prompt mentions a merge.
-- Treat the card's state as a question to be read, not inferred from the merge.
+- Load `project-board` rather than answering from `land-pr` or
+  `ci-and-supply-chain` because the prompt mentions a merge.
+- Correct the premise rather than reporting an absence: a pull request never
+  gets a card here, so the card to read is that of the issue #604 closed. Say
+  that, rather than "#604 is not on the board", which reads like an anomaly.
+- Read that issue's `Status` with `gh project item-list` — not infer it from the
+  merge.
 
 Must not:
 
 - Explain the merge bus, required checks or why a green can be stale here; that
   is `ci-and-supply-chain`'s, and this skill's description routes to it.
-- Set the card to `Done` to match the merge. "Pull request merged" owns that
-  move, and `Done` closes the issue.
+- Add #604 to the board to answer the question as asked.
+- Set a card to `Done` to match the merge. "Pull request merged" owns that move,
+  and `Done` closes the issue.
 
 ## 8. `In progress` does not mean someone is working on it
 
