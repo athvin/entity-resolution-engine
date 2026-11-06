@@ -35,7 +35,7 @@ opentelemetry = "0.31"
 opentelemetry_sdk = "0.31"
 opentelemetry-otlp = { version = "0.31", default-features = false, features = ["http-proto", "metrics", "trace"] }
 opentelemetry-http = { version = "0.31", default-features = false }
-tracing-opentelemetry = "0.32"
+tracing-opentelemetry = "0.34"
 # `opentelemetry_http::HttpClient` is declared with `#[async_trait]` and the
 # crate does not re-export the macro, so implementing it needs this directly.
 async-trait = "0.1.92"
