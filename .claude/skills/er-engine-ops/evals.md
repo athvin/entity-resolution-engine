@@ -99,18 +99,24 @@ and that a corrupted dev lake is cheaper to delete than to debug.
 
 ## 6. Maintenance is not opt-in
 
-**Query:** "We have a paginated export that reads a lake snapshot for about an
-hour. Is it safe to run `er maintain` with no flags while that's running?"
+**Query:** "Our weekly job runs `er maintain` with no flags. We also have a
+resumable export that checkpoints and can sit on a pinned snapshot for a couple
+of weeks. Is that combination safe?"
 
 Must:
 
 - Say **no**: `--expire-older-than` has a default and `maintain` expires
   unconditionally, so there is no compaction-only invocation.
-- Say every lake read pins a snapshot, so expiring under a live cursor breaks
-  the read, and tell the operator to pass a window longer than the longest-lived
-  cursor.
+- Read the window off the generated command surface rather than from memory,
+  and compare it against the two-week cursor — that cursor outlives the default
+  window, which is what makes this combination break.
+- Tell the operator to pass a window longer than the longest-lived cursor
+  explicitly.
 
 Must not:
 
 - Claim a bare `er maintain` only flushes and merges.
-- Quote a window from memory instead of the generated command surface.
+- Claim a cursor *younger* than the window is at risk. Expiry is
+  `now() - INTERVAL <window>` against snapshot creation time, so a
+  minutes-old pin is safe; asserting otherwise is the over-claim this scenario
+  exists to catch.

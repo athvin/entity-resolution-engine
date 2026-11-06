@@ -5,12 +5,15 @@ control plane that runs these same operations as jobs is
 [backend-design.md](backend-design.md); the
 [README](../README.md#architecture-at-a-glance) has the whole platform.*
 
-Commands below run from the repository root. Training is always explicit:
-`er run-all` uses an existing model, it never trains one. Every command takes the
-same three globals — a DuckLake catalog path, a data directory, and the S6 config:
+Commands below run from the repository root — but **cargo does not**: the
+workspace root is `rust/` and there is no manifest at the repository root, so
+the build is the one line here that needs a subshell. Training is always
+explicit: `er run-all` uses an existing model, it never trains one. Every
+command takes the same three globals — a DuckLake catalog path, a data
+directory, and the S6 config:
 
 ```sh
-cargo build -p er-cli --bin er
+(cd rust && cargo build -p er-cli --bin er)
 er() { rust/target/debug/er \
   --catalog "$ER_LAKE/meta.ducklake" --data-path "$ER_LAKE/data" \
   --config configs/test.yaml "$@"; }
@@ -46,11 +49,25 @@ er run-all \
   --run-id demo-run-1
 ```
 
-`er doctor` is the read-only health report: config hash, the latest run, and a
-presence/row-count line per relation:
+`er doctor` is the read-only health report: tenant, config hash, the std and
+survivorship versions, the latest run's id/status/mode, a presence/row-count
+line per relation, and an `ok` flag true only when `int_std_records`,
+`entity_membership` and `golden_records` all exist:
 
 ```sh
 er doctor
+```
+
+`ok: false` exits `1`, so read the JSON rather than branching on the status —
+an unhealthy lake is a finding, not a failed command.
+
+`er profile` is the other read: per-column shape, frequent values and coded
+findings for the `raw` (needs `--source`), `standardized` or `golden` stage,
+persisted to the lake. Re-profiling an unchanged snapshot rewrites its rows
+instead of appending, so asking twice costs one run.
+
+```sh
+er profile --subject standardized --exact-distinct
 ```
 
 Each stage is also its own subcommand for stepwise operation —
@@ -102,13 +119,17 @@ no re-score. Full-refresh deliveries tombstone the records a source omitted
 ## Maintenance
 
 ```sh
-er maintain                      # flush inlined rows, merge small files,
-er maintain --expire-older-than "14 days"   # expire old snapshots
+er maintain                                 # flush, merge — AND expire, at the
+                                            # flag's default window
+er maintain --expire-older-than "30 days"   # the window you actually chose
 ```
 
-Prints a before/after file-count report. Snapshot expiry bounds the lake's
-history window — the read API pins snapshots, so keep the window longer than
-your longest-lived cursor.
+Prints a before/after file-count report. **`--expire-older-than` is not an
+opt-in:** it has a default and `run_maintain` calls `expire_snapshots`
+unconditionally, so there is no invocation that only compacts. Snapshot expiry
+bounds the lake's history window — the read API pins snapshots, so keep the
+window longer than your longest-lived cursor, and pass it explicitly in
+anything scheduled rather than relying on the flag's absence.
 
 ## Inspecting the lake
 
