@@ -1833,6 +1833,22 @@ splice() {
 		return
 	fi
 
+	# Adding a generator takes TWO edits — the splice call here and an entry in
+	# `generated_files`, which is what the drift check iterates. Forgetting the
+	# second produces a file that regenerates locally and is never checked for
+	# staleness, so a stale committed block passes CI. That is not
+	# hypothetical: `infra-coverage` shipped in exactly that state and the hole
+	# only surfaced from mutating a source and watching the gate stay green.
+	# The splice knows the target, so it can assert the pairing itself.
+	local known=0 g
+	for g in "${generated_files[@]}"; do
+		[[ $g == "$target" ]] && known=1 && break
+	done
+	if ((known == 0)); then
+		err "regen: '$target' is spliced but missing from generated_files, so the drift check would never see it"
+		return
+	fi
+
 	local tmp
 	tmp=$(mktemp)
 	awk -v start="$start" -v end="$end" -v payload="$payload" '
@@ -1863,6 +1879,7 @@ generated_files=(
 	"$skills_dir/frontend-data-ui/references/screens.md"
 	"$skills_dir/frontend-data-ui/references/dense-surfaces.md"
 	"$skills_dir/aws-account-operations/references/footprint.md"
+	"$skills_dir/infra-platform/references/coverage.md"
 	"$skills_dir/land-pr/references/post-merge.md"
 	"$skills_dir/er-engine-ops/references/stages-and-flags.md"
 	"docs/agent-skills.md"
