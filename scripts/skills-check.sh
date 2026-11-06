@@ -745,6 +745,69 @@ gen_sql_planner_pins() {
 	echo "re-export. If it ever appears in that list, this section is wrong."
 }
 
+# The description budget. `description` is capped at 1,024 chars and is a SHARED
+# APPEND TARGET: closing an overlap means appending a clause to a neighbour's
+# description, so unrelated audits all spend the same line and it reaches the cap
+# with no single author having spent it. This block exists because the standard's
+# remedy — "read the headroom before adding a tail" — was a command an author had
+# to remember to run, and the failure mode when they did not was an audit
+# DROPPING a routing clause it had already decided was needed.
+#
+# The threshold is DERIVED, not chosen: the median routing clause in the
+# collection. A skill with less headroom than that cannot accept one more
+# clause, which is the only question this table is asked.
+gen_description_budget() {
+	local f slug desc len median
+	local -a rows=() clauses=()
+
+	for f in "$skills_dir"/*/SKILL.md; do
+		[[ -f $f ]] || continue
+		slug=$(basename "$(dirname "$f")")
+		desc=$(sed -n 's/^description: //p' "$f")
+		len=${#desc}
+		rows+=("$(printf '%4d\t%s\t%d' $((1024 - len)) "$slug" "$len")")
+		# Every "for … see …" routing clause, one per line, to size a typical one.
+		#
+		# Split on BOTH sentence and clause boundaries, and ANCHOR the match on
+		# "for". Without the anchor the match runs from the start of the segment
+		# and swallows the entire what clause — the first version of this did
+		# exactly that, reporting 868-character "routing clauses". The median
+		# happened to survive because it ignores outliers, which is luck rather
+		# than a design. awk does the splitting because BSD and GNU sed disagree
+		# about `\n` in a replacement.
+		while IFS= read -r c; do
+			[[ -n $c ]] && clauses+=("${#c}")
+		done < <(printf '%s' "$desc" | awk '{gsub(/\. |; /, "\n"); print}' |
+			grep -oiE '^for [^;.]*see [a-z0-9-]+' || true)
+	done
+
+	median=$(printf '%s\n' "${clauses[@]}" | sort -n |
+		awk '{a[NR]=$1} END{ if (NR==0) {print 0} else {print a[int((NR+1)/2)]} }')
+
+	echo "Every skill's \`description\`, against the 1,024-character cap. Sorted by"
+	echo "headroom, because the only question this table answers is whether a skill"
+	echo "can still accept a routing clause."
+	echo
+	echo "| Headroom | Skill | Length |"
+	echo "|---:|---|---:|"
+	printf '%s\n' "${rows[@]}" | sort -n | while IFS=$'\t' read -r free slug len; do
+		printf '| %s | `%s` | %s |\n' "$free" "$slug" "$len"
+	done
+	echo
+	printf 'The median routing clause here is **%d characters**. Skills with less\n' "$median"
+	echo "headroom than that cannot take another one — adding routing to any of them"
+	echo "means trimming its **what** clause first, which is the documented fix:"
+	echo
+	local blocked=0
+	while IFS=$'\t' read -r free slug len; do
+		if ((free < median)); then
+			printf -- '- `%s` — %d characters free\n' "$slug" "$free"
+			blocked=$((blocked + 1))
+		fi
+	done < <(printf '%s\n' "${rows[@]}" | sort -n)
+	((blocked > 0)) || echo "- none; every skill can take another clause"
+}
+
 gen_required_checks() {
 	echo "Branch protection is repository configuration, not a file in the tree, so"
 	echo "the required set cannot be derived here. What *is* derived: every job, the"
@@ -1975,6 +2038,9 @@ run_regen() {
 	# which skills exist even though they show different columns.
 	gen_skill_inventory covers >"$tmp"
 	splice "docs/agent-skills.md" skill-inventory "$tmp"
+
+	gen_description_budget >"$tmp"
+	splice "docs/agent-skills.md" description-budget "$tmp"
 
 	gen_skill_inventory doing >"$tmp"
 	splice "CLAUDE.md" skill-inventory "$tmp"
