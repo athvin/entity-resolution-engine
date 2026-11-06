@@ -284,6 +284,12 @@ where the cargo `lint` job does not run, and the job concluded `failure` on the
 drift half. That is the exact hole described above, reproduced deliberately
 rather than argued from the code.
 
+What that run also showed is the stake. Every **other** required context
+reported `skipped` — `detect` had correctly skipped every compile job, and
+branch protection accepts `skipped` as satisfied. The drift check was the only
+job that noticed, and at that moment it was the only one that could not block
+the merge.
+
 Worth recording because the two sources disagreed beforehand: `rust.yml`'s
 inline comment asserted both halves had already been observed failing, while
 this document still said they had not. Neither is evidence — the run is. If a
@@ -310,6 +316,7 @@ skill, so it gets the same fix.
 | `screens-coverage` | `frontend-data-ui/references/screens.md` | every `src/app/**/page.tsx` route set-differenced against the axe gate's `SCREENS` array |
 | `dense-surface-facts` | `frontend-data-ui/references/dense-surfaces.md` | `useVirtualizer` and `useSearchParams` call sites, route-level boundary files under `src/app`, and the `<table>` count — each a zero or a one the skill used to state in prose |
 | `aws-footprint` | `aws-account-operations/references/footprint.md` | `resource "aws_*"` types and counts, the permission sets and whether each has an inline policy, the workspace's `aws-*` crates, the provider pins |
+| `post-merge-surface` | `land-pr/references/post-merge.md` | the workflows triggered by a push to `main` rather than by a pull request, with the path filters that decide whether each one runs at all |
 | `er-command-surface` | `er-engine-ops/references/stages-and-flags.md` | `er-cli`'s clap `Cli` globals and `Command` variants, each flag's declared default resolved through `er-versions`' mode constants |
 | `infra-coverage` | `infra-platform/references/coverage.md` | the three stack enumerations in `infra.yml` set-differenced against the stacks in the tree, every `infra/k8s` path against the sites that reference it, and the NodePool manifests against the non-recursive `kubectl apply` |
 | `skill-inventory` | this document **and** `CLAUDE.md` | every `SKILL.md`'s `name`, `description` and `disable-model-invocation` |
