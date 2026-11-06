@@ -46,8 +46,7 @@ interactive browser login, which an unattended build loop cannot do.
 ## Why the prod guard is Deny-based
 
 The user holds `AdministratorAccess` **minus** an inline policy of explicit
-Denies. That ordering matters: in IAM an explicit Deny always wins over any
-Allow, so the guard cannot be escaped by the admin grant, by a future policy
+Denies, so the guard cannot be escaped by the admin grant, by a future policy
 attachment, or by assuming a role the admin policy would otherwise permit.
 
 The Denies cover mutation of production resources by name pattern and by tag:
