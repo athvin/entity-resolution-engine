@@ -46,7 +46,7 @@ is what stops a merge from killing a rollout half-applied.
 
 **`workflow_run` runs carry the triggering SHA.** So
 `gh run list --commit $MERGE_SHA` does find the deploy, but it appears late —
-keep polling until nothing on that SHA has a null `conclusion`, rather than
+keep polling until nothing on that SHA has an empty `conclusion`, rather than
 concluding from one pass. Poll on the conclusion rather than on a list of
 statuses: a run held by a concurrency group reads `pending`, which slips past
 `queued`/`in_progress`. It is one of the false greens in `polling.md`, beside
