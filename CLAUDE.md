@@ -11,7 +11,7 @@ make check   # = fmt + lint + doc + entities-check + skills-check + test
 
 `cargo fmt` / `cargo clippy` / `cargo test` on their own are **not** sufficient —
 they skip `entities-check`, which is the entity-framework gate (`er-entity
-verify`: regenerate every artifact from `entities/*.yaml` and fail if a
+verify`: regenerate every artifact from `entities/*/entity.yaml` and fail if a
 committed file is stale, then plan every statement and run the E0xx passes).
 A change that passes clippy and tests can still break that gate.
 

@@ -32,7 +32,7 @@ doc:
 test:
 	cd rust && cargo test --workspace
 
-# The entity-framework gate: regenerate every artifact from entities/*.yaml and
+# The entity-framework gate: regenerate every artifact from entities/*/entity.yaml and
 # fail if any committed file is stale (run `er-entity gen` to fix), then plan every
 # statement and run the E0xx passes. This is what rust.yml runs as `er-entity verify`.
 entities-check:

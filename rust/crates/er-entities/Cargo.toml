@@ -7,7 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 # GENERATED CRATE. Everything under `src/` is produced by `er-entity gen` from
-# `entities/*.yaml` and committed; do not edit it by hand. This manifest is the
+# `entities/*/entity.yaml` and committed; do not edit it by hand. This manifest is the
 # only hand-written file. The crate carries no DataFusion dependency — only the
 # CLI plans SQL; this crate is plain structs, Arrow schemas and query functions.
 [dependencies]
