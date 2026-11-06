@@ -61,6 +61,10 @@ Default to refuting when uncertain. Weigh these specifically:
 - A `routing` finding: read BOTH descriptions in full. A tail you did not see makes it wrong.
 - A `counts` finding: is the number inventory that drifts, or a measurement with a fixture
   behind it?
+- A `drift` finding: run the probe YOURSELF — grep the symbol, open the path, read the
+  signature. Do not accept the draft's source citation. A finding whose probe you cannot
+  reproduce is refuted, and so is one where the claim turns out to be a deliberate
+  superseded-pattern warning.
 - Any finding the gate in scripts/skills-check.sh already owns is out of scope and should be
   struck.
 

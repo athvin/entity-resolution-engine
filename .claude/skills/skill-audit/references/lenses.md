@@ -11,6 +11,7 @@ no audit, because the author learns to discard the whole report.
 
 - [economy — the primary lens](#economy--the-primary-lens)
 - [counts](#counts)
+- [drift](#drift)
 - [routing](#routing)
 - [evals](#evals)
 - [overrides](#overrides)
@@ -93,6 +94,78 @@ that live **outside** a `<!-- BEGIN GENERATED: … -->` block.
 The remedy to recommend is almost never "delete the number". It is "derive it", and the best
 shape is a **set difference** that reports a gap nobody maintains, because then nobody can
 forget it.
+
+## drift
+
+**The rule:** a skill carries what the model cannot know, so nearly every sentence in one is a
+claim about *this tree* — a path, a symbol, a signature, a flag, an error string, an absence.
+The tree moves and the sentence does not. **No gate reads prose against source**, so this is the
+only lens whose findings nothing else in the repo can catch.
+
+Reads: the target, and then **the files its claims name**. This lens is what makes the bounded
+source-reading exception in `protocol.md` — beside this one, reached from the skill body —
+routine rather than exceptional, under the same limits: read the file the claim names, only to
+settle that claim, and cite it with a `file:line` like any other evidence.
+
+Method:
+
+1. Extract the **checkable** claims: the sentences that would become false if some file changed.
+   Judgment, rationale and intent are not checkable and are not this lens's business.
+2. Probe the cheapest first, one command per claim — `grep` for the symbol, `ls` the path, read
+   the signature, read the heading at the cited section number.
+3. Report what the probe showed, carrying **both** citations: the skill's line and the source's.
+4. A claim you could not settle in one command is not a finding. Say it was left unverified.
+
+**The shapes that rot**, with the probe each one wants:
+
+| Shape | Looks like | Probe |
+|---|---|---|
+| an absence | "the **only** X", "there is **no** Y", "nothing reads Z" | the grep that would find the second one |
+| a deleted or renamed symbol | a client, helper or type named in prose | `grep -r` for the name |
+| a signature | `f(a)` that has since gained an argument | read the definition |
+| a borrowed identifier | a CI job name, a workflow filename, a required check | the workflow file — or, for protection, the API |
+| a "not yet" claim | "X is not wired up", "the harness cannot do Y" | the file that would now do it |
+| a quoted section number | `docs/foo.md` §8 | the heading above that line |
+
+**An absence is the dangerous shape.** It reads as a convention rather than as inventory, so
+nobody thinks to re-check it — a skill stating one is telling a session not to look.
+`frontend-data-ui` said "there is no `<table>`" while 23 components rendered one.
+
+**Findings.**
+
+- A claim the probe falsifies. Quote the skill's sentence, then the source that contradicts it.
+- A **"not yet" or "cannot" claim whose blocker has been removed.** The worst subclass: it tells
+  a session to decline work that is now routine, and nothing about it looks stale.
+- A claim true of one site but stated unqualified, where the tree's dominant pattern is the other
+  way.
+- A claim that names nothing probeable — "the usual pattern", "most handlers do X" — so neither a
+  reader nor the next auditor can check it. This one is **under-specified**, not broken; word it
+  that way.
+
+**Not findings.**
+
+- **A superseded-pattern warning.** "The old shape is everywhere, do not copy it" is *meant* to
+  disagree with the tree; that is the whole point of writing it down.
+- **A claim about an external tool's behaviour**, where this tree is not the authority.
+- **A design decision or an intention.** "Charts are hand-rolled by decision" is not falsified by
+  a charting library appearing transitively in a lockfile.
+- **A measurement with a fixture behind it**, which is dated by the fixture rather than the
+  calendar.
+- **A claim you did not probe.** Inferring staleness from resemblance is the "inventing a finding
+  from a filename" anti-pattern wearing a new hat, and it is worse here than elsewhere because a
+  confident false drift finding sends the author to correct something that was right.
+
+### Where `drift` ends and `counts` begins
+
+They overlap on every number, and the split is by **remedy** rather than by subject:
+
+- `counts` asks *where the fact lives* — prose, or a generated block. Remedy: derive it. A number
+  that is perfectly accurate today still earns a `counts` finding.
+- `drift` asks *whether the claim is true today*. Remedy: correct it, then consider deriving it.
+
+A fact that is both wrong and un-derived is **one** finding, filed under `drift`, with the
+generator named in the Fix — being wrong is the part the author acts on first. Do not file it
+twice.
 
 ## routing
 
@@ -231,7 +304,11 @@ different things.
 
 ## full and quick
 
-`full` runs every lens above and is what `review` does with no `--lens`. Order the report by
+`full` runs every lens above, `drift` included, and is what `review` does with no `--lens`. A
+`full` run that reports no `drift` finding must have *probed* — a run that never opened a source
+file has not cleared that lens, however many sentences it read.
+
+Order the report by
 severity across all lenses rather than lens by lens — a reader wants the worst finding first,
 not the first lens's worst finding.
 

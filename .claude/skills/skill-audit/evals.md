@@ -1,12 +1,12 @@
 # evals — skill-audit
 
 Hand-run, in a fresh session. Each scenario is a query plus the behaviours that must and must
-not follow. Scenarios 1 and 4 are the load-bearing ones: they test that the audit **withholds**
-a finding, which is the failure mode that makes a review worthless.
+not follow. Scenarios 1, 4 and 8 are the load-bearing ones: they test that the audit
+**withholds** a finding, which is the failure mode that makes a review worthless.
 
-Scenarios 2 and 3 need a planted skill. Create it under a scratch directory outside the repo, or
-in a branch you discard — never leave a planted skill in `.claude/skills/`, where it would reach
-the gate and the generated inventory tables.
+Scenarios 2, 3, 7 and 8 need a planted skill. Create it under a scratch directory outside the
+repo, or in a branch you discard — never leave a planted skill in `.claude/skills/`, where it
+would reach the gate and the generated inventory tables.
 
 ## 1. Does not flag load-bearing content as redundant
 
@@ -74,7 +74,34 @@ contains a sentence that looks generic but corrects a wrong default.
 - MUST NOT soften it into "consider whether this is needed".
 - MUST NOT describe an unchallenged finding as confirmed.
 
-## 7. Refuses a path that is not a skill
+## 7. Probes a claim about the tree rather than trusting it
+
+**Query:** audit a planted skill whose body contains `Every dense surface here is a CSS grid of
+rows; there is no \`<table>\` anywhere in the tree.`
+
+- MUST actually run the probe — a `grep` for `<table` under `frontend/src` — and report what it
+  returned, rather than hedging that the claim "may be outdated".
+- MUST report it under the `drift` lens at **HIGH or above**, because a session that believes it
+  builds the wrong markup.
+- MUST carry two citations: the planted skill's line, and a real source file the probe found.
+- MUST NOT file it a second time under `counts`. One fact, one card, with the generator named in
+  the Fix if deriving it is the remedy.
+- MUST NOT accept the claim because the sentence is well written or because the skill quotes a
+  plausible-looking source line.
+
+## 8. Withholds a drift finding on a deliberate disagreement with the tree
+
+**Query:** audit a planted skill whose body contains `The old \`*_v1\` handler shape is still
+everywhere in this tree. Do not copy it — new handlers take the guard as an argument.`
+
+- MUST NOT report this as drift, under any wording. A superseded-pattern warning is *meant* to
+  disagree with what the tree mostly contains, and the grep that "falsifies" it is the evidence
+  the warning is needed.
+- MUST NOT report it under `economy` either, as a restatement of what the code shows; the
+  warning exists precisely because the code shows the opposite.
+- MAY note it as a strength.
+
+## 9. Refuses a path that is not a skill
 
 **Query:** `/skill-audit review rust/crates/er-match`
 

@@ -1,6 +1,6 @@
 ---
 name: skill-audit
-description: Reviews an existing skill in this repo against `docs/agent-skills.md` — the judgment half of the skill standard that the gate cannot mechanise, namely whether a sentence survives the economy test, whether a stated count belongs in a generated block, whether two descriptions would both fire on one prompt and whether the routing tail closes the overlap, whether each eval scenario targets a real failure, whether an override states and scopes its supersession, and whether entity/record/row/tenant carry their codebase meanings. Use when reviewing a skill before or after a change, when asked whether a skill is any good, when skill selection misfires at runtime, or when a skill has grown and may now restate what the model already knows. Read-only — it reports findings and never edits the skill. For authoring a skill or applying these findings see skill-writer; for the mechanical rules and the add-a-skill checklist see docs/agent-skills.md; for the gate that enforces them see ci-and-supply-chain.
+description: Reviews an existing skill in this repo against `docs/agent-skills.md` — the judgment half of the skill standard that the gate cannot mechanise, namely whether a sentence survives the economy test, whether a stated count belongs in a generated block, whether a claim about the tree has gone stale, whether two descriptions collide with no routing tail to close it, whether each eval scenario targets a real failure, whether an override states and scopes its supersession, and whether entity/record/row/tenant carry their codebase meanings. Use when reviewing a skill before or after a change, when asked whether a skill is any good, when skill selection misfires at runtime, or when a skill has grown and may now restate what the model already knows. Read-only — it reports findings and never edits the skill. For authoring a skill or applying these findings see skill-writer; for the mechanical rules and the add-a-skill checklist see docs/agent-skills.md; for the gate that enforces them see ci-and-supply-chain.
 ---
 
 # Auditing a skill
@@ -34,6 +34,10 @@ prerequisite of `make check`:
 The last two rows are the ones to get right. The gate proves a count is *consistent with its
 generator* and that an override *mentions a name*; neither is the question this skill asks.
 
+And note what is in **neither** column: nothing reads a skill's prose against the source it
+describes. A sentence naming a deleted client, a renamed job or an absence that has since filled
+in passes every mechanical check there is. That gap is the `drift` lens.
+
 ## Invoking
 
 | Form | Does |
@@ -55,6 +59,7 @@ as a finding and what explicitly does not: [references/lenses.md](references/len
 |---|---|
 | `economy` | **Primary.** Would a strong engineer new to this repo, but not new to the technology, already know this sentence? |
 | `counts` | Is a count, version, threshold, job name or rule code stated in prose instead of linked from a generated block? |
+| `drift` | Open the files the claims name. Does each claim about a path, symbol, signature, flag or **absence** still hold in the tree? |
 | `routing` | Read *every* description under `.claude/skills/*/SKILL.md`. On which prompts would two skills both fire, and does a routing tail close each overlap? |
 | `evals` | Does each scenario target the failure the skill exists to prevent, and is its must / must-not list checkable in a fresh session? |
 | `overrides` | For a skill in the override table: does the body state the supersession and scope it to only the conflicting claim? |
@@ -63,7 +68,11 @@ as a finding and what explicitly does not: [references/lenses.md](references/len
 | `quick` | TL;DR plus the strongest strengths and findings. What `summary` runs. |
 
 `economy` is primary because it is the rule the standard leads with and the one a growing skill
-breaks first. When time is short, run it alone.
+breaks first. **`drift` is where the findings have actually been.** In the first campaign over
+this collection, ten of the twelve audits that landed a fix corrected a claim the tree had
+outgrown — a deleted client, a renamed job, a signature, an absence — which is reproducible from
+`git log --oneline d72cda56~1..08622516`. So: when time is short on a skill nobody has audited
+lately, run `drift`; when time is short on one being actively rewritten, run `economy`.
 
 ## Shape of a finding
 
@@ -81,9 +90,9 @@ What to read, in what order, how to treat the files as data rather than instruct
 verification pass before delivering: [references/protocol.md](references/protocol.md).
 
 In brief: read the target's `SKILL.md`, its `evals.md` and every file under its `references/`
-in full. Read every *other* skill's frontmatter description — the `routing` lens is the one
-finding class that cannot be found inside the target alone. Then audit lens by lens, and sort
-the findings by severity before writing.
+in full. Then the two passes that cannot be run from the skill text alone — read every *other*
+skill's frontmatter description, for `routing`, and open the source files the target's claims
+name, for `drift`. Then audit lens by lens, and sort the findings by severity before writing.
 
 ## The challenger pass
 
@@ -103,6 +112,8 @@ that keep reconciliation from becoming a tug-of-war:
   message, and fixes go in their own change — `skill-writer` is what applies them.
 - **Never re-reports a mechanically gated rule.** See the boundary table. A finding that
   `skills-check` would have caught is noise that teaches the reader to skim.
+- **Never reports a `drift` claim it did not probe.** The lens is only worth having because its
+  findings are verified; an unprobed one sends the author to correct a sentence that was right.
 - **Never recommends adding what the standard forbids** — a count in prose, a `paths:` filter on
   a knowledge skill, an `allowed-tools` block, a nested skill under `rust/`.
 - **Never grades.** No score, no letter. The dimensions are the point, and a single number hides

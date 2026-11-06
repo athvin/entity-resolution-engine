@@ -42,6 +42,11 @@ compressed scale than a clean skill:
   bands were checked and came back empty.
 - A borderline `economy` finding is **LOW by default**. Asserting MEDIUM on a sentence that might
   be load-bearing is how an audit talks an author into deleting the one line that was doing work.
+- A `drift` finding whose probe **falsified** the claim is at least HIGH: the skill is stating
+  something untrue about the tree a session is about to change. It reaches CRITICAL when the false
+  claim is the one acted on first — naming the wrong call as the safe one, or declaring impossible
+  something the harness has since gained. A `drift` claim that is merely unprobeable is MEDIUM and
+  is worded as **under-specified**.
 
 ## Effort
 
