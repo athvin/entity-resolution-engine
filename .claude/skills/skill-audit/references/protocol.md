@@ -44,6 +44,17 @@ In full, not in excerpts:
 Do not read the rest of another skill's body. The audit is of one skill; a neighbour's
 description is evidence about routing, and its body is out of scope.
 
+**One bounded exception, and it is the difference between a finding and a guess.** When a
+specific claim turns on what the code actually says — a skill restating an error string, a token
+list, a threshold or a signature that some source file owns — read that file and cite it. A
+finding that the skill duplicates its source is only worth reporting if the duplication was
+*verified*; asserting it from resemblance is the "inventing a finding from a filename"
+anti-pattern below.
+
+The limits: read only the file the claim names, only to settle that claim, and cite it with a
+`file:line` like any other evidence. This never licenses a tour of the codebase, and it never
+licenses reading outside the repository.
+
 If a reference is long, read it anyway. The `economy` lens is per-sentence, and a partial read
 produces findings that cite lines the auditor never saw — the one failure mode this protocol
 cannot recover from.
