@@ -508,10 +508,17 @@ run_override_check() {
 # feeds.
 # ---------------------------------------------------------------------------
 
+# Generator ids as the standard's table lists them, one per row and in table
+# order — not deduplicated, because a duplicate row is its own defect and
+# `sort -u` is what hides it.
+generator_table_ids_raw() {
+	sed -n '/^| Generator | Target | Derived from |/,/^$/p' docs/agent-skills.md |
+		sed -E -n 's/^\| `([a-z0-9-]+)` \|.*/\1/p'
+}
+
 # Generator ids as the standard's table lists them.
 generator_table_ids() {
-	sed -n '/^| Generator | Target | Derived from |/,/^$/p' docs/agent-skills.md |
-		sed -E -n 's/^\| `([a-z0-9-]+)` \|.*/\1/p' | sort -u
+	generator_table_ids_raw | sort -u
 }
 
 # Generator ids actually spliced by `run_regen`. The splice call is the
@@ -546,6 +553,16 @@ run_generator_check() {
 	done
 	for id in $extra; do
 		err "generators: the generator table in docs/agent-skills.md lists \`$id\`, which no splice call wires — remove the row, or wire the generator"
+	done
+
+	# A duplicate row satisfies the set comparison above and still leaves the
+	# table saying two different things about one generator. Two concurrent PRs
+	# each adding the missing row is how it happens, and the set diff cannot see
+	# it because both sides were deduplicated before being compared.
+	local dup
+	dup=$(generator_table_ids_raw | sort | uniq -d || true)
+	for id in $dup; do
+		err "generators: the generator table in docs/agent-skills.md lists \`$id\` more than once — keep one row"
 	done
 
 	n=$(printf '%s\n' "$wired" | grep -c . || true)
