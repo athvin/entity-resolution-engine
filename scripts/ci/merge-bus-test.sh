@@ -3,13 +3,17 @@
 #
 #   bash scripts/ci/merge-bus-test.sh
 #
-# `merge-bus.yml` is ~540 lines of bash that merges to `main`, and
-# `workflow_dispatch` only fires for a workflow already on the default branch —
-# so the live path cannot be exercised before the thing is merged. This runs the
-# workflow's REAL step scripts, with a runner's semantics for the parts that
-# carry bugs (per-step `$GITHUB_OUTPUT`, `${{ }}` in `env:`, `if:` gating, a
-# failed step halting the job), against a local bare repo with a stubbed `gh`.
-# Git operations are genuine; only the GitHub API is faked.
+# The bus is ~580 lines of bash that merges to `main` — living in
+# `scripts/ci/merge-bus-{select,build,verdict,report,land}.sh` since #723, with
+# merge-bus.yml reduced to thin `bash scripts/ci/…` steps — and
+# `workflow_dispatch` only fires for a workflow already on the default branch,
+# so the live path cannot be exercised before the thing is merged. This runs
+# the workflow's REAL steps (the YAML is parsed and each step executed, which
+# in turn runs the extracted scripts from the working tree under test), with a
+# runner's semantics for the parts that carry bugs (per-step `$GITHUB_OUTPUT`,
+# `${{ }}` in `env:`, `if:` gating, a failed step halting the job), against a
+# local bare repo with a stubbed `gh`. Git operations are genuine; only the
+# GitHub API is faked.
 #
 # The scenarios, covering the green path and every failure path:
 #   green stacked red starved preflight moved partial reject collide lying
