@@ -7,15 +7,14 @@
 - u, by deterministic sampling
 - m, by EM
 - m, from labels
-- The label queue entities
+- The label queue tables
 - Rules for changing a model
 
 ## What "training" covers, and what it never touches
 
-A Fellegi–Sunter model needs three things: the prior (how likely any two random
-records match), the **u** probabilities (level agreement given a non-match) and
-the **m** probabilities (level agreement given a match). Each is estimated by a
-different mechanism, in `rust/crates/dedupe-core/src/training/`.
+The three fitted parts of a model — the prior, **u** and **m** — are each
+estimated by a different mechanism here, all under
+`rust/crates/dedupe-core/src/training/`.
 
 Training never touches:
 
@@ -108,11 +107,13 @@ Properties worth knowing:
   sets can contribute without one dominating.
 - Null levels are excluded from the denominator, same as everywhere else.
 
-## The label queue entities
+## The label queue tables
 
-Labels are first-class data in the control plane, not a side file. The relevant
-entities are `pair_label`, `matching_model` and `scored_record` — see the
-entity-framework skill for their declarations and the generated accessors.
+Labels are first-class data in the control plane, not a side file. The declared
+entities — `entity` in the entity-framework sense of a table, not the resolved
+cluster this skill otherwise means by it — are `pair_label`, `matching_model`
+and `scored_record`; see the entity-framework skill for their declarations and
+the generated accessors.
 
 This is what makes a human-in-the-loop training path possible: a steward's
 decision on a pair becomes a `pair_label` row, which feeds the from-labels
