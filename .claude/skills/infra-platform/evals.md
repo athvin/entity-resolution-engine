@@ -31,18 +31,21 @@ Must:
   `NodeClass`.
 - Correctly separate the two halves: a `karpenter.sh/v1` `NodePool` manifest
   **is** the right way to shape capacity here, and `infra/k8s/nodepools/`
-  already holds three of them.
+  already holds the deployed ones.
 
 Must not:
 
 - Say this repo does not use Karpenter NodePools, or that
   `infra/k8s/nodepools/` is something other than Karpenter. Both are wrong: the
   manifests carry `apiVersion: karpenter.sh/v1`.
+- Put a new pool in `infra/k8s/nodepools/measure/`, or state a count of the
+  pools rather than reading the directory.
 
-Credit for naming the account vCPU quotas (`L-34B43A08`, `L-1216C47A`) as the
-more likely cause of a pending pod than missing capacity configuration, and for
-the disruption rule — `WhenEmptyOrUnderutilized` suits the app pool and is
-forbidden on the runner pools, because a runner pod is an hour of work.
+Credit for the disruption rule — `WhenEmptyOrUnderutilized` suits the app pool
+and is forbidden on the runner pools, because a runner pod is an hour of work —
+and for reaching for `aws-account-operations` on the account's vCPU quotas,
+which are the more likely cause of a pending pod than missing capacity
+configuration and are **not** carried by this skill.
 
 ## 3. State locking
 
@@ -97,3 +100,48 @@ Must:
   enforces.
 - Offer an alternative that does not breach the boundary (port-forward for
   local debugging, or test through the BFF).
+
+## 7. A new stack and its plan leg, in one PR
+
+**Query:** "I'm adding `envs/staging`. Put the stack and its `plan` matrix leg
+in the same PR so CI covers it from the start."
+
+Must:
+
+- Say the plan role's **state read has to land first, in its own PR**: the
+  role's policy enumerates the state keys, and a grant is only live once a
+  merge applies it, so a PR carrying both fails its own new leg (#358, #350).
+- Keep an explicit `name:` on the matrix leg, because left to itself GitHub
+  names the job after the whole matrix object and the short context never
+  reports.
+
+Must not:
+
+- Add a `paths:` filter to `infra.yml` to stop the new leg blocking.
+- Offer a hand-run `terraform apply` for the new stack, or widen an existing
+  role's trust conditions instead of adding a role.
+
+Credit for `-refresh=false` on the plan tier and why only the drift role may
+refresh.
+
+## 8. Selection: a pod cannot read the lake bucket
+
+**Query:** "Our dispatcher pod gets AccessDenied reading the lake bucket.
+What's wrong?" — posed with **no skill named**.
+
+Must:
+
+- Load this skill without being asked for it by name, and answer from the Pod
+  Identity convention: check the `aws_eks_pod_identity_association` for that
+  exact namespace and ServiceAccount pair.
+- Say there is no node-credential fallback to mask the mistake.
+
+Must not:
+
+- Answer only out of `ducklake-lakehouse` with an ATTACH-level or engine-side
+  credential change, or propose an `eks.amazonaws.com/role-arn` annotation.
+
+Record which skills actually fired. `ducklake-lakehouse` ("object-store or S3
+credentials") and `aws-account-operations` ("a pod that cannot reach AWS") both
+describe this prompt, so the three have to route rather than compete — if the
+lake skill answers alone, the fix is a routing tail, not this skill's body.

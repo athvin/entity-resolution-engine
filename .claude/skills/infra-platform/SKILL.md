@@ -8,6 +8,12 @@ description: Explains how to author this repo's AWS and Kubernetes platform — 
 Single AWS account, one region, two EKS clusters (`er-dev` and `er-prod`).
 Terraform owns the cloud; Helm owns what runs in the cluster.
 
+**Terraform is the only infrastructure language here — never author CDK,
+CloudFormation or SAM.** There is no `cdk.json`, no `template.yaml` and no
+`samconfig`, and that is a decision: a second app would be an unmanaged source
+of truth for the same account. Reading CloudFormation is fine, since an EKS
+addon can surface as a stack AWS manages for you; adding to one is not.
+
 ## Workload AWS access is Pod Identity, never IRSA
 
 This is the convention most likely to be got wrong, because almost every
@@ -50,14 +56,19 @@ otherwise:
   separately installed controllers.
 
 **Karpenter CRDs are nevertheless how you shape capacity here, because Auto Mode
-runs its own Karpenter.** The three manifests in `infra/k8s/nodepools/` are
-literally `apiVersion: karpenter.sh/v1`, `kind: NodePool`, and
+runs its own Karpenter.** The manifests in `infra/k8s/nodepools/` are literally
+`apiVersion: karpenter.sh/v1`, `kind: NodePool`, and
 `docs/infrastructure.md` §5.1 is titled "Karpenter disruption settings". So:
 
 - Writing a `karpenter.sh/v1` `NodePool` is **correct** and is the supported way
   to declare instance families, capacity type and disruption policy.
 - Installing Karpenter, or managing its controller or a custom `NodeClass`, is
   **wrong** — Auto Mode owns that.
+- A new pool goes **beside the deployed ones**, not under
+  `infra/k8s/nodepools/measure/`. That subdirectory holds a measurement-only
+  pool that `make nodepools` deliberately does not apply, and it is the one
+  `NodePool` in the tree carrying `limits`, so a runaway measurement cannot
+  provision a fleet.
 
 The distinction matters for disruption in particular:
 `WhenEmptyOrUnderutilized` is right for the stateless app pool and forbidden on
@@ -73,11 +84,11 @@ policy, not by editing the `aws-auth` ConfigMap.
 |---|---|
 | `envs/core/` | account-wide: CloudTrail, budgets, Config, cost reports, Identity Center, the one ECR registry, the GitHub OIDC role |
 | `envs/dev/` | the dev VPC, EKS, RDS, lake bucket, EFS, secrets, SES, observability, and the builder credential |
-| `envs/prod/` | the production subset — no builder, no secrets, no SES, no observability yet |
+| `envs/prod/` | the production subset — no builder, no secrets, no SES, no observability stack |
 | `bootstrap/organization/`, `bootstrap/state-backend/` | the two chicken-and-egg stacks |
 | `modules/` | `eks`, `network`, `lake`, `efs`, `ses`, `identity-center`, `github-oidc` |
 
-All five stacks share **one S3 backend** with **`use_lockfile = true` and no
+Every stack shares **one S3 backend** with **`use_lockfile = true` and no
 DynamoDB table** — S3 conditional writes provide the lock. Do not add a
 DynamoDB lock table; it is not how this is configured.
 
@@ -87,7 +98,7 @@ also has no builder credential and no secrets stack, which is deliberate.
 ## How Terraform reaches the account
 
 `infra.yml` runs four tiers and **CI owns every apply**: `fmt + validate`
-(credential-free, all five stacks) → `plan` per stack under the read-only
+(credential-free, every stack) → `plan` per stack under the read-only
 `er-ci-tf-plan` role → one sticky PR comment carrying the add/change/destroy
 table and the diffs → `apply` on `main` only, unattended. It reads no stored
 secret; every identity is a federated OIDC role. Do not run a
@@ -137,7 +148,7 @@ Break-glass, when CI cannot do it: assume `ProdAdmin` through SSO, then
 and run Terraform with those credentials — the same identity and permissions CI
 uses, rather than an improvised one.
 
-Five rules that are easy to break:
+Rules that are easy to break:
 
 - **Never add a `paths:` filter to `infra.yml`.** The plan tiers are required
   status checks, and a workflow a path filter skips never reports, so the PR
@@ -169,12 +180,16 @@ policy engine — it cannot tell a benign replace from losing Aurora, and a
 *replace* trips it too.
 
 Because that guard matters more than anything else in the file and its refusal
-path has never fired on a real apply, `apply` gates on a
-`terraform ci helpers (self-test)` job that asserts the refusal, the override
-and the fail-closed branch against fixtures
-(`scripts/ci/tf-helpers-test.sh`, runnable locally, no AWS). Changing a helper
-without updating that suite is how the guard silently stops guarding — the
-suite is mutation-checked, so breaking a helper does turn it red.
+path has never fired on a real apply, `apply` gates on a helpers self-test job
+that asserts the refusal, the override and the fail-closed branch against
+fixtures (`scripts/ci/tf-helpers-test.sh`, runnable locally, no AWS). Changing a
+helper without updating that suite is how the guard silently stops guarding —
+the suite is mutation-checked, so breaking a helper does turn it red.
+
+Job display names rename without warning, so take them from
+`ci-and-supply-chain`'s generated required-checks reference rather than from
+here — including which of these tiers is the aggregator that protection
+actually requires.
 
 ## The two Helm charts
 
@@ -186,7 +201,8 @@ suite is mutation-checked, so breaking a helper does turn it red.
   RBAC, so it must not sit on the pod serving the API behind the BFF. Kinds
   listed in `executor.dagKinds` run as per-attempt Kubernetes Jobs rendered
   from the chart's task-template ConfigMap; everything else still runs
-  in-process inside the dispatcher pod (the legacy arm, deleted in Phase 4).
+  in-process inside the dispatcher pod — the legacy arm, which Phase 4 of the
+  batch-orchestration plan retires.
   `ER_DISPATCH_IN_PROCESS=1` survives only in local dev (`make run`).
 - Only the web service is exposed; the API service has no load balancer in any
   environment. The browser reaches the BFF, and only the BFF reaches the API —

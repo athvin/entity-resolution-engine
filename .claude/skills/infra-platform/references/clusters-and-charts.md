@@ -61,9 +61,9 @@ only identity bound to the namespaced Job-create Role
 
 What follows from it:
 
-- **The topology enforces the BFF boundary.** The API service has no load
-  balancer anywhere, so the only route to the control plane is through the BFF.
-  That is the frontend-bff skill's rule, made physical.
+- **The topology enforces the BFF boundary** — the frontend-bff skill's rule
+  made physical, stated in full in the skill body and visible in
+  `services.yaml` above.
 - **Per-task Kubernetes Jobs exist only for kinds on the `executor.dagKinds`
   allowlist** (empty by default — the executor is inert until a kind is
   listed, and the account's vCPU quota gates listing any). Every other kind
@@ -127,10 +127,8 @@ Then:
 | `make dev-resume DEV=…` | `kubectl scale` back up, then `rollout status` |
 | `make dev-down DEV=…` | uninstall both releases, wait for namespace deletion, tear down the env |
 
-**`dev-resume` is `kubectl`, not `helm`, on purpose.** After a `kubectl scale`
-to zero the manifests are unchanged, so Helm's three-way merge computes no
-diff and a `helm upgrade` would leave the environment down while reporting
-success.
+**`dev-resume` is `kubectl`, not `helm`, on purpose** — the skill body carries
+why, and the asymmetry is load-bearing rather than an inconsistency to tidy.
 
 ## Observability
 
