@@ -197,6 +197,7 @@ The table below is **generated** from each skill's frontmatter by
 | authoring or reviewing any Rust in this repo | `rust-conventions` |
 | reviewing an endpoint or handler for SSRF/injection/tenant-isolation/auth/business-logic abuse | `security` |
 | reviewing a skill before or after a change | `skill-audit` |
+| adding a skill, when deciding whether a rule belongs in a skill or a hook (user-invoked only) | `skill-writer` |
 | an E0xx diagnostic fails, when a statement will not plan | `sql-analysis` |
 <!-- END GENERATED: skill-inventory -->
 

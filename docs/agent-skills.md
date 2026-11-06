@@ -54,6 +54,7 @@ the same fix.
 | `rust-conventions` | that `make check` (not the bare cargo trio) is the finish line |
 | `security` | the attack surface (internet-facing Next.js BFF in front of the privileged Rust er-server control plane) |
 | `skill-audit` | the judgment half of the skill standard that the gate cannot mechanise |
+| `skill-writer` | triages whether the brief should become a skill at all rather than a CLAUDE.md line or a path-scoped rule or a hook (user-invoked only) |
 | `sql-analysis` | the E0xx diagnostics and their remedies, the rewrite step that strips what the planner cannot parse |
 <!-- END GENERATED: skill-inventory -->
 
@@ -90,15 +91,20 @@ are enforced by `scripts/skills-check.sh lint`.
   and hyphens, ≤64 characters, and must not contain reserved words.
 - `description` **(gated)**: ≤1,024 characters, **third person**, and must state
   both **what** the skill covers **and when** to use it. This single field is
-  how the right skill gets selected out of fifteen, so it carries the trigger
-  vocabulary — the nouns and error strings someone would actually type.
+  how the right skill gets selected out of the whole collection, so it carries
+  the trigger vocabulary — the nouns and error strings someone would actually
+  type.
 - End the description with **negative routing** where two skills are adjacent:
   "For X see *other-skill*." Overlapping triggers are the real cost of a large
   skill collection, not the metadata.
 - No `allowed-tools`: it only *pre-approves* tools, it cannot restrict them, and
   nothing here needs pre-approval.
-- `disable-model-invocation: true` only for a side-effecting procedure. Today
-  that is `pentest` alone.
+- `disable-model-invocation: true` only for a procedure with side effects, or
+  one a human should deliberately start: `pentest` runs a campaign, and
+  `skill-writer` writes files into `.claude/skills/`. Both are the shape where
+  the model choosing to begin on its own is the wrong default. A skill that only
+  answers questions must not carry it — the flag also blocks preloading into
+  subagents, so it silently narrows where the knowledge reaches.
 
 **Body**
 

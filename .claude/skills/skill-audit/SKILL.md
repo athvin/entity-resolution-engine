@@ -1,6 +1,6 @@
 ---
 name: skill-audit
-description: Reviews an existing skill in this repo against `docs/agent-skills.md` — the judgment half of the skill standard that the gate cannot mechanise, namely whether a sentence survives the economy test, whether a stated count belongs in a generated block, whether two descriptions would both fire on one prompt and whether the routing tail closes the overlap, whether each eval scenario targets a real failure, whether an override states and scopes its supersession, and whether entity/record/row/tenant carry their codebase meanings. Use when reviewing a skill before or after a change, when asked whether a skill is any good, when skill selection misfires at runtime, or when a skill has grown and may now restate what the model already knows. Read-only — it reports findings and never edits the skill. For the mechanical rules and the add-a-skill checklist see docs/agent-skills.md; for the gate that enforces them see ci-and-supply-chain.
+description: Reviews an existing skill in this repo against `docs/agent-skills.md` — the judgment half of the skill standard that the gate cannot mechanise, namely whether a sentence survives the economy test, whether a stated count belongs in a generated block, whether two descriptions would both fire on one prompt and whether the routing tail closes the overlap, whether each eval scenario targets a real failure, whether an override states and scopes its supersession, and whether entity/record/row/tenant carry their codebase meanings. Use when reviewing a skill before or after a change, when asked whether a skill is any good, when skill selection misfires at runtime, or when a skill has grown and may now restate what the model already knows. Read-only — it reports findings and never edits the skill. For authoring a skill or applying these findings see skill-writer; for the mechanical rules and the add-a-skill checklist see docs/agent-skills.md; for the gate that enforces them see ci-and-supply-chain.
 ---
 
 # Auditing a skill
@@ -100,7 +100,7 @@ that keep reconciliation from becoming a tug-of-war:
 ## What this never does
 
 - **Never edits the audited skill.** It reports; a human decides. Findings go in the final
-  message, and fixes go in their own change.
+  message, and fixes go in their own change — `skill-writer` is what applies them.
 - **Never re-reports a mechanically gated rule.** See the boundary table. A finding that
   `skills-check` would have caught is noise that teaches the reader to skim.
 - **Never recommends adding what the standard forbids** — a count in prose, a `paths:` filter on
