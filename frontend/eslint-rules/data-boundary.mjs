@@ -141,7 +141,7 @@ export const dataBoundary = {
     },
     schema: [],
     messages: {
-      lake: "'{{source}}' opens a data store directly. The frontend never touches DuckDB, DuckLake, S3 or a foreign database — serve the data from er-server and call it through src/lib/api/erserver.ts in a route handler.",
+      lake: "'{{source}}' opens a data store directly. The frontend never touches DuckDB, DuckLake, S3 or a foreign database — serve the data from er-server and reach it with upstreamFetch from src/lib/bff/upstream.ts in a route handler.",
       driver:
         "'{{source}}' constructs a Postgres connection. Only src/lib/db/ may do that; use the handle from `db()` in '@/lib/db' instead.",
       clientImport:
