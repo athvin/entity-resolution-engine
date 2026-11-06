@@ -236,13 +236,20 @@ turns `main` red.
 So the `skills` job now runs `all` (regen + drift + lint), not just `lint`. It
 still needs no toolchain — every generator is grep/awk/sed over checked-in
 files, verified by running the whole thing in a bare container with no cargo,
-node, Docker, terraform or aws. The drift check is **deliberately left in the
-cargo job too**: `skills` is not a required status check, so on its own it
-cannot block a merge.
+node, Docker, terraform or aws.
 
-**Do not read a `.claude`-only PR's green as proof the generated references are
-current** until `agent skills (lint + drift)` is promoted to a required check.
-Check the last push-to-main run instead.
+**`agent skills (lint + drift)` is now a required status check**, so a
+`.claude`-only PR's green is proof the generated references are current — the
+job carries no `if:` and no `needs: detect`, which is what lets it be required
+without ever reporting `skipped`. Before promotion the only honest reading was
+the last push-to-main run, because the one job that checked a skills change
+could not block a merge.
+
+The drift check is still **deliberately left in the cargo job too**, now as a
+backstop rather than the primary: the moment anyone adds an `if:` or a `needs:`
+to the `skills` job, or renames it out of the required set, that copy is what
+still runs on a code PR. It is grep/awk over checked-in files, so the
+duplication costs seconds.
 
 Getting that backwards would produce a gate that is green exactly when it
 matters.
@@ -268,9 +275,18 @@ screen added to or removed from the axe gate, a token added to `globals.css`.
 Testing it with a hand-edited block will show you a passing gate and prove
 nothing.
 
-The `skills` job is not yet a required status check. Per
-`docs/frontend-testing.md`'s rule, promote it only after it has been observed
-failing.
+The `skills` job became a required status check once
+`docs/frontend-testing.md`'s rule was satisfied — a gate is trusted only after
+it has been **observed failing**, and this one was: a throwaway PR (#699) edited
+a projected `description` clause without regenerating, on a `.claude`-only diff
+where the cargo `lint` job does not run, and the job concluded `failure` on the
+drift half. That is the exact hole described above, reproduced deliberately
+rather than argued from the code.
+
+Worth recording because the two sources disagreed beforehand: `rust.yml`'s
+inline comment asserted both halves had already been observed failing, while
+this document still said they had not. Neither is evidence — the run is. If a
+future promotion is proposed on the strength of a comment, get the run.
 
 ### What each generator derives, and from where
 

@@ -149,5 +149,38 @@ else
         "$(grep -n '| *grep -q' "$SCRIPT" | grep -v "printf '%s' \"\$desc\"" | grep -v 'head -3')"
 fi
 
+# --- the description-cap warning must stay a WARNING -------------------------
+#
+# Not race-shaped, but the same silent-breakage shape as everything above: most
+# skills already sit inside the warning band, so promoting `warn` to `err` here
+# turns a clean tree red on an unrelated change. Asserted structurally — there
+# is no way to point the gate at a fixture skills tree, since it cds to the
+# repository root and scans `.claude/skills` directly.
+
+if [ -z "$(extract warn)" ]; then
+    no "warn() not found in $SCRIPT — was it renamed?"
+elif extract warn | grep -q 'fail=1'; then
+    no "warn() sets fail=1 — a warning that fails the gate is an error" \
+        "$(extract warn)"
+else
+    ok "warn() reports without failing the gate"
+fi
+
+cap_line=$(grep -n 'from the 1024 cap' "$SCRIPT" | head -1 || true)
+if [ -z "$cap_line" ]; then
+    no "the description-headroom check is gone from $SCRIPT"
+elif printf '%s' "$cap_line" | grep -q 'err '; then
+    no "the headroom check calls err, not warn" "$cap_line"
+else
+    ok "the description-headroom check calls warn, not err"
+fi
+
+if grep -q 'err "\$slug: description is \${#desc} chars (max 1024)"' "$SCRIPT"; then
+    ok "the hard 1024-char cap is still an error"
+else
+    no "the hard 1024-char cap no longer calls err" \
+        "the warning is not a substitute for the cap — both must exist"
+fi
+
 printf '\nskills-check-test: %s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ] || exit 1

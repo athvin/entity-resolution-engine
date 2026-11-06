@@ -73,6 +73,20 @@ err_quiet() {
 	fail=1
 }
 
+# A finding that is true but must not fail the gate. The description cap is the
+# only user: most skills already sit inside the warning band, so erroring would
+# fail a clean tree, and the point is to be told BEFORE the edit that breaches
+# it rather than by a red PR afterwards.
+#
+# Note this writes to STDOUT, unlike `err_quiet` above. That is safe only
+# because no generator calls it: a warning spliced into a generated block would
+# be the same corruption that function exists to prevent.
+warn_count=0
+warn() {
+	printf '  warning: %s\n' "$*"
+	((warn_count += 1)) || true
+}
+
 # A gate that dies silently reads exactly like a gate that passed. `pipefail`
 # plus a `find` over a directory that happens not to exist is enough to do it,
 # so name the line instead of exiting mute.
@@ -172,6 +186,14 @@ lint_one_skill() {
 		err "$slug: frontmatter has no 'description'"
 	else
 		((${#desc} <= 1024)) || err "$slug: description is ${#desc} chars (max 1024)"
+		# The cap is a cliff, and routing tails are what walk a description up to
+		# it: every audit that closes an overlap appends "For X see y" to BOTH
+		# sides, so unrelated work converges on the same line. Warn while there
+		# is still room to trim deliberately, instead of discovering the limit as
+		# a failed gate on an unrelated change.
+		if ((${#desc} <= 1024)) && ((${#desc} > 964)); then
+			warn "$slug: description is ${#desc} chars, $((1024 - ${#desc})) from the 1024 cap — trim before adding another routing tail"
+		fi
 		# First person in a description is injected into the system prompt and
 		# measurably hurts discovery.
 		if printf '%s' "$desc" | grep -qiE '(^| )(I |I'\''m|I can|we can|you can use this)'; then
@@ -288,7 +310,11 @@ run_lint() {
 		red "FAIL skills-check examined 0 skills — is $skills_dir still the right path?"
 		exit 2
 	fi
-	note "examined $found skills"
+	if ((warn_count > 0)); then
+		note "examined $found skills, $warn_count warning(s)"
+	else
+		note "examined $found skills"
+	fi
 }
 
 # ---------------------------------------------------------------------------

@@ -359,11 +359,15 @@ jobs:
         # checked-in files, which is why this job can stay at 5 minutes with a
         # bare checkout and no cargo, node or Docker.
         #
-        # It is deliberately ALSO left in the cargo `lint` job. This job is not
-        # a required status check, so on its own it cannot block a merge; the
-        # required one covers code PRs while this one covers .claude-only PRs.
-        # Promoting this to required would make the pair redundant — worth doing
-        # now that both halves have been observed failing.
+        # This job IS a required status check, which it can be because it
+        # carries no `if:` and no `needs:` — a required context that reports
+        # `skipped`, or does not report at all, blocks every PR forever.
+        #
+        # The drift check is deliberately ALSO left in the cargo `lint` job, now
+        # as a backstop: add an `if:` or a `needs:` here, or rename this job out
+        # of the required set, and that copy is the only thing still checking a
+        # code PR. Do not delete it as redundant without first removing this
+        # job's required status.
         #
         # working-directory is mandatory: this workflow defaults every `run` to
         # `rust/` (for the cargo jobs), and the script lives at the repo root.
