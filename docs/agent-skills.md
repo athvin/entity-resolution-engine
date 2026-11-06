@@ -371,6 +371,8 @@ failure looks like the server simply not appearing.
 | `impeccable` | out | executes Node scripts and installs hooks; high churn. The hook objection is not vendor-specific — it is why `aws-core` is out too |
 | `ui-ux-pro-max` | out | a style catalogue that produces generic recommendations, against a repo whose design is a fixed constraint |
 | `marketingskills`, `claude-seo` | deferred | reasonable once a marketing surface exists and copy/SEO work begins |
+| `rust-analyzer-lsp` | **installed** | code intelligence over a large Rust workspace: jump to a definition instead of reading files to find it. Official marketplace, no always-on skill cost |
+| `frontend-design` | **installed, then overridden** | the unusual row. It is enabled here *deliberately* so that the supersession below has a subject — its quality floor and writing guidance are wanted, only its palette and aesthetic-risk guidance conflict. It was previously enabled in a developer's own `~/.claude/settings.json`, which made the override's premise invisible to this repo and untrue for anyone else cloning it |
 
 ### Skills we deliberately override
 
