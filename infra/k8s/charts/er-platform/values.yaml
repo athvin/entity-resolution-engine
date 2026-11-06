@@ -1,7 +1,7 @@
 # er-platform values. The committed defaults hold NO credentials and NO
 # environment-specific identifiers beyond the nonprod registry/bucket names —
 # every secret value lives in Secrets Manager and arrives via ExternalSecrets
-# (infrastructure.md §8.5: the committed dev set in frontend/dev/env.sh stays
+# (infrastructure.md §8.5: the committed dev set in scripts/frontend-dev/env.sh stays
 # exclusively in the local Compose path).
 
 # The developer (== namespace) this install serves; defaults to the release

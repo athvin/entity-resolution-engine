@@ -2,7 +2,7 @@
 //!
 //! This existed in the Python control plane and was never ported, which is why
 //! `create_org`'s auto branch answered a flat 503 and why six `ERSERVER_*`
-//! template variables in `frontend/dev/env.sh` were read by nothing. The whole
+//! template variables in `scripts/frontend-dev/env.sh` were read by nothing. The whole
 //! contract around it survived the port intact, though — the `orgs.state` enum
 //! still declares `provisioning`, `publish_config_version` still refuses a
 //! provisioning org, the BFF still posts `{name}` to `/api/admin/orgs` and polls

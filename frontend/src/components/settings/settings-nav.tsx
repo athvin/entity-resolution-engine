@@ -34,7 +34,8 @@ export function SettingsNav({ org }: { org: string }) {
     // rows, same page height, but enough relayout to exceed
     // `maxDiffPixelRatio` and fail `config-studio-mobile-chrome-linux.png`.
     // It slid UNDER that tolerance on desktop and mobile-safari, which is the
-    // silent staleness `update-baselines.sh` runs `--update-snapshots=all` to
+    // silent staleness `scripts/frontend-dev/update-baselines.sh` runs
+    // `--update-snapshots=all` to
     // prevent: all three baselines were rewritten, not the one CI named.
     <nav className="flex flex-wrap gap-1" aria-label="Settings">
       {tabs.map((tab) => (

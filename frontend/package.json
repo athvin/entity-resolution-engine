@@ -30,7 +30,7 @@
     "test:watch": "vitest",
     "test:driver": "vitest run --config vitest.driver.config.ts",
     "test:e2e": "playwright test",
-    "test:e2e:fresh": "bash dev/kill-servers.sh && playwright test",
+    "test:e2e:fresh": "bash ../scripts/frontend-dev/kill-servers.sh && playwright test",
     "test:e2e:full": "playwright test --config playwright.e2e.config.ts",
     "gen:api": "node scripts/gen-api-types.mjs",
     "db:generate": "drizzle-kit generate",

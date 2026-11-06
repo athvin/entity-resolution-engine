@@ -2752,7 +2752,7 @@ Service for address, End User Messaging for phone, in-cluster DNS/TLS probes for
          the test failed before it ever reached the POST; a leaked mock process from an
          earlier run held port 8010; and a copy of the mock placed in `/tmp` never started at
          all, because it imports `./arrow.mjs` relative to its own directory. `pnpm
-         test:e2e:fresh` (which runs `dev/kill-servers.sh`) is the command, and a probe run
+         test:e2e:fresh` (which runs `scripts/frontend-dev/kill-servers.sh`) is the command, and a probe run
          **in place** with the port verified clear is what finally separated the three.
          **Scoped 2026-10-23, and the obvious storage is blocked.** The good news first: V6
          needs no new read. `useRecordPair` already fetches both records' field values for

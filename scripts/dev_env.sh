@@ -10,7 +10,7 @@
 #
 # Secrets are created ONLY IF ABSENT (§12: "created by the same target if
 # absent") and every value is generated or read from the caller's environment —
-# no committed dev credential from frontend/dev/env.sh ever reaches the cloud
+# no committed dev credential from scripts/frontend-dev/env.sh ever reaches the cloud
 # (§8.5). Optional inputs, each parked as an empty/placeholder value otherwise:
 #   ER_DEV_S3_KEY / ER_DEV_S3_SECRET   the §9.2 per-environment lake IAM user's
 #                                      static key pair (placeholder CHANGEME)

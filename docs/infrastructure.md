@@ -53,7 +53,7 @@ These are not preferences. Each comes from the existing implementation, and the 
 | The dispatcher holds a permanent leader connection and polls every `ERSERVER_POLL_SECONDS` (default 2s) | `server/src/erserver/dispatcher.py`, `settings.py` | **No database that bills by connection-idleness will ever idle.** This killed Aurora auto-pause as a dev cost strategy (§7.1) |
 | DuckDB reads neither cgroup limits nor host core count | `src/er/lake/ducklake.py` | Every pod limit must be paired with an explicit `ER_DUCKDB_THREADS` / `ER_DUCKDB_MEMORY_LIMIT`. A pod limit alone does nothing |
 | API read-path attaches inherit the *tenant's* DuckDB env | `server/src/erserver/readapi.py` via `resolve_env`, `_POOL_CAPACITY = 8` warm attaches per process | Setting a tenant to 40 GB / 12 threads also sizes the API pods' DuckDB. [backend-design.md](backend-design.md) §8 says API pods *should* pin ~2 GiB / 2 threads; that split is not implemented, so API pod limits must be set defensively |
-| The boot order API-then-dispatcher is load-bearing | [frontend/dev/up.sh](../frontend/dev/up.sh) — the dispatcher's leader connection blocks the API's `ensure_schema` DDL indefinitely when they start together | An init container on the dispatcher gating on the API's `/healthz` |
+| The boot order API-then-dispatcher is load-bearing | [scripts/frontend-dev/up.sh](../scripts/frontend-dev/up.sh) — the dispatcher's leader connection blocks the API's `ensure_schema` DDL indefinitely when they start together | An init container on the dispatcher gating on the API's `/healthz` |
 
 ## 3. Account and organization topology
 
@@ -382,7 +382,7 @@ The export role's trust policy names the refresh IRSA role ARN specifically. It 
 
 Lower environments hold real production records by design, protected by IAM and encryption rather than scrubbing. Three things follow.
 
-**Committed dev credentials stop being harmless.** [frontend/dev/env.sh](../frontend/dev/env.sh) hardcodes `ERWEB_SESSION_SECRET`, `ERWEB_CREDENTIAL_KEY`, `ERSERVER_OPERATOR_TOKEN`, and the MinIO and Postgres passwords; `admin@dupezone.com / asdfasdf` is seeded by [frontend/dev/create-users.mjs](../frontend/dev/create-users.mjs). Appropriate for a MinIO-backed laptop stack; not for a cluster namespace holding real records. **The rule:** that set stays exclusively in the local Compose path, and every cloud environment — including each developer's namespace — draws all of them from Secrets Manager.
+**Committed dev credentials stop being harmless.** [scripts/frontend-dev/env.sh](../scripts/frontend-dev/env.sh) hardcodes `ERWEB_SESSION_SECRET`, `ERWEB_CREDENTIAL_KEY`, `ERSERVER_OPERATOR_TOKEN`, and the MinIO and Postgres passwords; `admin@dupezone.com / asdfasdf` is seeded by [frontend/dev/create-users.mjs](../frontend/dev/create-users.mjs). Appropriate for a MinIO-backed laptop stack; not for a cluster namespace holding real records. **The rule:** that set stays exclusively in the local Compose path, and every cloud environment — including each developer's namespace — draws all of them from Secrets Manager.
 
 **NetworkPolicy must be explicitly enabled to do anything.** The per-namespace NetworkPolicy in §12 is inert under the Amazon VPC CNI unless the network policy agent is turned on in the addon configuration. Without it you get objects that look like isolation and enforce nothing — between namespaces that now hold real records. This is a one-line addon setting and a silent failure if missed, which is why §17 verifies it behaviourally.
 
@@ -652,7 +652,7 @@ Bootstrap is two stacks, not one, because the state bucket must live in an accou
 | `er-web` image | new `frontend/Dockerfile` | None exists; the BFF runs as a host process today |
 | `ERSERVER_TENANT_DB_PREFIX` | `server/src/erserver/provision.py`, `settings.py` | Shared-cluster tenant isolation (§7.2) |
 | CI push job | `.github/workflows/ci.yaml` | OIDC + `push: true`, adding `id-token: write` |
-| Normalize the lake prefix | [configs/default.yaml](../configs/default.yaml), [frontend/dev/env.sh](../frontend/dev/env.sh) | Three inconsistent layouts today (§7.3) |
+| Normalize the lake prefix | [configs/default.yaml](../configs/default.yaml), [scripts/frontend-dev/env.sh](../scripts/frontend-dev/env.sh) | Three inconsistent layouts today (§7.3) |
 | **k8s Job launcher** behind the existing seam | `launch_runner` in `server/src/erserver/dispatcher.py` | Replaces `subprocess.Popen` with a Job + watch (§6.2) |
 | **Runner writes its own progress** | `server/src/erserver/runner.py`, `queue.py` | A Job pod has no stderr pipe to the dispatcher (§6.3) |
 | **Per-run resource sizing** from record count | `server/src/erserver/queue.py`, `policy.py`, derived from `benchmarks/scales.yaml` | CPU-tiered classes on the job row, not `orgs.env` (§6.5) |

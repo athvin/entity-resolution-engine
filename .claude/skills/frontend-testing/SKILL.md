@@ -167,7 +167,7 @@ has been observed **failing** — break a new one on purpose before relying on i
 - **A locally-green `@visual` test.** Baselines are Linux-only, so
   `toHaveScreenshot` is a NO-OP on a Mac: the test passes having asserted
   nothing, and a new baseline is never written. Verify visual work in the
-  pinned container — `dev/update-baselines.sh` to regenerate, or the same
+  pinned container — `scripts/frontend-dev/update-baselines.sh` to regenerate, or the same
   image running `pnpm test:e2e --grep @visual` WITHOUT `--update-snapshots`
   to compare the way CI does.
 - **A green `make frontend`.** The local gate runs `pnpm check` and the

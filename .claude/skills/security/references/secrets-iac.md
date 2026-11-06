@@ -43,7 +43,7 @@ Two concrete leaks:
   `.gitignore`. A teammate without that global ignore would commit it. **This is the one quick win
   worth doing even while the rest is deferred** — add `.claude/settings.local.json` to the repo
   `.gitignore`.
-- Dev creds are also in `frontend/dev/env.sh`, `frontend/dev/create-users.mjs`,
+- Dev creds are also in `scripts/frontend-dev/env.sh`, `frontend/dev/create-users.mjs`,
   `frontend/playwright*.config.ts`, `frontend/tests/.../helpers.ts`, `frontend/.env.example` — all
   dev-scoped and documented, but confinement is by convention only.
 
