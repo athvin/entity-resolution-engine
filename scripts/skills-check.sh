@@ -543,6 +543,77 @@ gen_crate_map() {
 	grep -E '^(rust-version|edition) *=' rust/Cargo.toml || true
 	grep -E '^(duckdb|arrow|axum|tower|utoipa|tokio-postgres|tokio-postgres-rustls|rustls|sqlparser|thiserror|anyhow|reqwest) *=' rust/Cargo.toml || true
 	echo '```'
+	echo
+	echo "## Workspace lints"
+	echo
+	echo "The policy, from \`[workspace.lints]\` and applied per crate via"
+	echo "\`[lints] workspace = true\`:"
+	echo
+	echo '```toml'
+	grep -E '^(unsafe_code|all|pedantic) *=' rust/Cargo.toml || true
+	echo '```'
+	echo
+	echo "Every \`allow\` and the comment that justifies it. The reason is the"
+	echo "comment in \`Cargo.toml\`, so an allow added without one shows up here as"
+	echo "a blank cell:"
+	echo
+	echo "| Allowed | Why |"
+	echo "|---|---|"
+	# One row per comment block: an allow's reason is the comment above it, and
+	# consecutive allows under one comment share it. Deriving the pairing rather
+	# than restating the table in prose is the point — an allow added to
+	# Cargo.toml lands here, and one added without a comment lands here visibly
+	# unexplained.
+	awk '
+		/^\[workspace\.lints\.clippy\]/ { inblk = 1; next }
+		inblk && /^\[/                  { inblk = 0 }
+		!inblk                          { next }
+		function flush() {
+			if (keys != "") { printf "| %s | %s |\n", keys, why }
+			keys = ""
+		}
+		/^#/ {
+			s = $0
+			sub(/^#[[:space:]]?/, "", s)
+			if (keys != "") { flush(); why = "" }
+			why = (why == "") ? s : why " " s
+			next
+		}
+		/^[a-z_]+ *= *"allow"/ {
+			keys = (keys == "") ? "`" $1 "`" : keys ", `" $1 "`"
+			next
+		}
+		END { flush() }
+	' rust/Cargo.toml
+}
+
+# The composition of `make check`, derived from the `check:` target rather than
+# copied from it. The skill body said `fmt + lint + entities-check + test` for
+# as long as that was true and kept saying it after `doc` and `skills-check`
+# were added — the step list is exactly the kind of fact that drifts silently,
+# because nothing fails when prose and Makefile disagree.
+gen_rust_gates() {
+	local prereqs step recipe pg
+	prereqs=$(awk -F: '/^check:/ { print $2; exit }' Makefile)
+	# shellcheck disable=SC2086 # deliberate word splitting into the step list
+	set -- $prereqs
+	printf '**`make check` = %s** — the `check:` target'"'"'s prerequisites, in order.\n' "$(
+		printf '%s + ' "$@" | sed 's/ + $//'
+	)"
+	echo
+	echo "| Step | Command |"
+	echo "|---|---|"
+	for step in "$@"; do
+		recipe=$(awk -v t="$step" '
+			$0 ~ "^"t":" { grab = 1; next }
+			grab && /^\t/ { s = $0; sub(/^\t/, "", s); print s; next }
+			grab          { exit }
+		' Makefile | paste -sd';' - | sed 's/;/; /g')
+		printf '| `%s` | `%s` |\n' "$step" "$recipe"
+	done
+	echo
+	pg=$(grep -lF 'ER_TEST_PG_DSN' rust/crates/*/tests/*.rs 2>/dev/null | wc -l | tr -d ' ')
+	printf '**%s test files read `ER_TEST_PG_DSN`** and self-skip without it.\n' "$pg"
 }
 
 # The invariant column for one E0xx code, out of the design doc's table.
@@ -1305,6 +1376,7 @@ splice() {
 generated_files=(
 	"$skills_dir/entity-framework/references/entities-index.md"
 	"$skills_dir/rust-conventions/references/crate-map.md"
+	"$skills_dir/rust-conventions/references/gates.md"
 	"$skills_dir/sql-analysis/references/diagnostics.md"
 	"$skills_dir/ci-and-supply-chain/references/required-checks.md"
 	"$skills_dir/frontend-testing/references/tiers-and-thresholds.md"
@@ -1326,6 +1398,9 @@ run_regen() {
 
 	gen_crate_map >"$tmp"
 	splice "$skills_dir/rust-conventions/references/crate-map.md" crate-map "$tmp"
+
+	gen_rust_gates >"$tmp"
+	splice "$skills_dir/rust-conventions/references/gates.md" rust-gates "$tmp"
 
 	gen_diagnostics >"$tmp"
 	splice "$skills_dir/sql-analysis/references/diagnostics.md" diagnostics "$tmp"

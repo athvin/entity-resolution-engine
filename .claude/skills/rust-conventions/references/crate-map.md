@@ -1,9 +1,17 @@
 # The crate map
 
+## Contents
+
+- How to read it
+- The crates, the pins, and the workspace lints (generated)
+
+## How to read it
+
 Generated from the tree by `scripts/skills-check.sh regen`. Do not hand-edit
 below the marker — `make skills-check` regenerates it and fails on drift. Each
-purpose is the crate's own leading `//!` sentence, so it is the crate's
-self-description rather than a second one maintained here.
+purpose is the crate's own leading `//!` sentence, and each lint's reason is the
+comment beside it in `rust/Cargo.toml`, so both are the source's own words
+rather than a second copy maintained here.
 
 Reading it: the crates divide into the engine (`dedupe-*`), the pipeline stages
 (`er-ingest`, `er-standardize`, `er-match`, `er-reconcile`, `er-golden`), the
@@ -13,17 +21,12 @@ plane (`er-server`, `er-pg-tls`), the CLIs, and dependency-light primitives
 `er-versions`) that the rest can depend on without pulling a database into
 their graph.
 
-Three pins in the version block are not free choices:
-
-- `duckdb` is an **`=` pin**, so a DuckDB change is always deliberate and
-  reviewable — it can move emitted SQL and float output, which the goldens
-  compare byte-for-byte.
-- `arrow` must equal the major the `duckdb` crate pulls.
-- `datafusion` (in `er-sql-check`, not the workspace table) must equal the
-  major `ff-analysis` resolves.
-
-Bumping `arrow` or `datafusion` alone can never go green; dependabot is
-configured to leave them alone and the unblocker is upstream.
+Three pins in the version block are not free choices — `duckdb`'s `=` pin and
+the `arrow` and `datafusion` majors that follow another crate's. The rule and
+the reason for each are in the skill body's *Dependencies* section
+([../SKILL.md](../SKILL.md)); the values are below. One addition the body does
+not carry: `datafusion` lives in `er-sql-check`'s manifest, not the workspace
+table, so it does not appear in the generated pin block at all.
 
 <!-- BEGIN GENERATED: crate-map -->
 **33 crates.** The cargo workspace root is `rust/`, not the repo root.
@@ -82,4 +85,29 @@ tokio-postgres-rustls = "0.14"
 arrow = "60"
 utoipa = { version = "6", features = ["chrono"] }
 ```
+
+## Workspace lints
+
+The policy, from `[workspace.lints]` and applied per crate via
+`[lints] workspace = true`:
+
+```toml
+unsafe_code = "deny"
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+```
+
+Every `allow` and the comment that justifies it. The reason is the
+comment in `Cargo.toml`, so an allow added without one shows up here as
+a blank cell:
+
+| Allowed | Why |
+|---|---|
+| `cast_possible_truncation`, `cast_precision_loss`, `cast_possible_wrap`, `cast_sign_loss` | Numeric engine: i64/usize/f64 conversions are pervasive and intentional. |
+| `float_cmp` | We deliberately compare trained/fixed float params for exact equality. |
+| `doc_markdown` | Doc prose mentions DuckDB, DuckLake, SQL — not code spans. |
+| `missing_errors_doc`, `missing_panics_doc` | Public API documents errors/panics in prose, not //! sections. |
+| `must_use_candidate`, `module_name_repetitions`, `too_many_lines`, `items_after_statements`, `struct_excessive_bools` | Style preferences that fight the shape of this codebase. |
+| `unreadable_literal` | Determinism-critical float/hash constants (CPython float-repr thresholds, sampling moduli) — reformatting risks a transcription error for zero functional gain. |
+| `needless_pass_by_value` | CLI command handlers and builder entry points legitimately take their args by value (they own the parsed config); borrowing would just add noise. |
 <!-- END GENERATED: crate-map -->

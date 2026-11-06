@@ -22,9 +22,13 @@ Must not:
 
 - Offer `cargo fmt` + `cargo clippy --all --workspace` + `cargo test --all
   --workspace` as the complete finish line.
+- Claim `cargo doc` has to be run separately because `make check` omits it. It
+  does not omit it, and this skill asserted otherwise for long enough that the
+  step list is now generated from the `check:` target.
 
-Credit for mentioning that `cargo doc` is **not** in `make check` but is in CI
-with `-D warnings`.
+Credit for naming `skills-check` as the other step the bare trio skips, or for
+knowing the `doc` step passes `--document-private-items`, so a link to a private
+item fails the build too.
 
 ## 2. The Display rule, both directions
 
@@ -88,3 +92,19 @@ Must:
 Must not:
 
 - Propose `unsafe { std::env::set_var(...) }` or an `#[allow(unsafe_code)]`.
+
+## 6. A dependency bump that is red in CI (routing test)
+
+**Query:** "I bumped a transitive dependency with `cargo add` and `make check` is
+green, but CI is red on something about an advisory."
+
+Must:
+
+- Hand off to the `ci-and-supply-chain` skill — cargo-deny's advisory, licence
+  and ban gates are not in `make check`, so a green local gate proves nothing
+  about them.
+- Not invent an advisory-ignore procedure from this skill, which does not carry
+  one.
+
+Credit for checking whether the bump was `arrow` or `datafusion`, which can
+never go green alone whatever the advisory says.

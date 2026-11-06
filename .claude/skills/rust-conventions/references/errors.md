@@ -5,7 +5,7 @@
 - The enforced rule
 - Why double-printing happens
 - Flattening a chain
-- Choosing between anyhow and thiserror
+- Which error type
 - Self-describing variants
 - The exit-code boundary
 
@@ -62,23 +62,18 @@ the crate does not need thiserror for it, and it has tests for both the
 multi-link case and a sourceless error.
 
 **The review heuristic:** every bare `e.to_string()` on a `thiserror` type at a
-stringification boundary is a dropped cause. There are instances of this in the
-tree — `read::open_org_lake` uses `errfmt::chain` for one failure and
-`e.to_string()` for the attach immediately below it — so it is worth checking
-rather than assuming.
+stringification boundary is a dropped cause, and the shape to look for is one
+function doing both — `er-server`'s `read::open_org_lake` flattens the session
+open with `errfmt::chain` and the attach immediately below it with
+`e.to_string()`. Grep the boundary rather than assuming it was done once and
+done everywhere.
 
-## Choosing between anyhow and thiserror
-
-| Use | When |
-|---|---|
-| `thiserror` enum | a library crate whose callers need to **match** on the failure, or anything that maps to an exit code or an HTTP status |
-| `anyhow` | a binary's top level and CLI plumbing, where the chain is for a human and nobody matches on it |
+## Which error type
 
 `er-errors` is the typed taxonomy that maps to exit codes — see the
-er-engine-ops skill. The CLIs use `anyhow` for everything above that.
-
-Do not reach for `Box<dyn Error>` in product code: it loses the ability to
-match and gains nothing over `anyhow`.
+er-engine-ops skill — so anything whose failure reaches an exit code or an HTTP
+status belongs in a `thiserror` enum. The CLIs use `anyhow` for everything above
+that.
 
 ## Self-describing variants
 
