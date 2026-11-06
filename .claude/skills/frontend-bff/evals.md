@@ -90,7 +90,7 @@ Must:
   upstream through `upstreamFetch`; the component reading it through a
   `src/lib/query/` hook against the browser client.
 - Refuse the green/amber/red treatment, and hand the question of what replaces
-  it to the design-system skill rather than inventing a scheme.
+  it to the `frontend-design-system` skill rather than inventing a scheme.
 - Not propose a charting library for the bar — that is frontend-data-ui's rule,
   and the answer there is hand-rolled DOM/CSS.
 
