@@ -319,14 +319,16 @@ skill, so it gets the same fix.
 | `post-merge-surface` | `land-pr/references/post-merge.md` | the workflows triggered by a push to `main` rather than by a pull request, with the path filters that decide whether each one runs at all |
 | `er-command-surface` | `er-engine-ops/references/stages-and-flags.md` | `er-cli`'s clap `Cli` globals and `Command` variants, each flag's declared default resolved through `er-versions`' mode constants |
 | `infra-coverage` | `infra-platform/references/coverage.md` | the three stack enumerations in `infra.yml` set-differenced against the stacks in the tree, every `infra/k8s` path against the sites that reference it, and the NodePool manifests against the non-recursive `kubectl apply` |
+| `post-merge-surface` | `land-pr/references/post-merge.md` | each non-gh-aw workflow's `on:` block, narrowed to those that run after a merge, set-differenced against the ones carrying a `pull_request` trigger — what is left is the surface no pull request can pre-test |
 | `skill-inventory` | this document **and** `CLAUDE.md` | every `SKILL.md`'s `name`, `description` and `disable-model-invocation` |
 
 The **set difference** is the shape worth copying — `diagnostics`,
-`screens-coverage`, the inline-policy column of `aws-footprint` and all three
-tables of `infra-coverage` each report a *gap* nobody maintains, so nobody can
-forget it. `screens-coverage` replaced a prose warning that a new screen is
-"otherwise silently unchecked" — the kind of warning that is always true and
-never read. `infra-coverage` replaced a NodePool count that was already wrong.
+`screens-coverage`, `post-merge-surface`, the inline-policy column of
+`aws-footprint` and all three tables of `infra-coverage` each report a *gap*
+nobody maintains, so nobody can forget it. `screens-coverage` replaced a prose
+warning that a new screen is "otherwise silently unchecked" — the kind of
+warning that is always true and never read. `infra-coverage` replaced a NodePool
+count that was already wrong.
 
 One trap when writing one, and it cost a debugging pass: the gap case is
 usually a `grep` that matches nothing, which exits 1 and — under this script's
