@@ -29,7 +29,11 @@ Must:
   `ensureStatic`, naming that `ensureStatic` requires `cacheComponents` and
   fails the build without it.
 - Add `/pricing` to `MARKETING_PATHS` in `src/lib/site/routes.ts` rather than
-  editing the proxy, the sitemap and the nav separately.
+  editing the proxy and the sitemap separately.
+- Say that the nav is **not** driven off that list, so `/pricing` needs a link
+  added to `marketing-header.tsx` or it ships reachable, indexed and
+  unlinked. An answer that stops at `MARKETING_PATHS` has left the page
+  undiscoverable.
 - Register the page in the axe gate's `SCREENS` with `anonymous: true`.
 
 Credit for noting that `/robots.txt` and `/sitemap.xml` need explicit

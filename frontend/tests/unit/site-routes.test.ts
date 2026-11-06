@@ -38,6 +38,21 @@ describe("marketing route constants", () => {
     }
   });
 
+  it("keeps every marketing path inside the public list", () => {
+    // The property the proxy actually depends on, and the one thing in this
+    // file that nothing pinned until now. PUBLIC_PATHS *is* this list, so a
+    // path in MARKETING_PATHS that is absent from it gets a 307 to /login.
+    //
+    // The failure mode is a refactor, not a typo: rewriting
+    // MARKETING_PUBLIC_PATHS as a literal — dropping the spread — leaves every
+    // other assertion here green while new marketing pages become
+    // crawler-invisible. Verified by making exactly that edit and watching this
+    // case fail.
+    for (const path of MARKETING_PATHS) {
+      expect(MARKETING_PUBLIC_PATHS).toContain(path);
+    }
+  });
+
   it("has no duplicate public paths", () => {
     // A duplicate is harmless in the proxy but silently doubles a sitemap entry.
     expect(new Set(MARKETING_PUBLIC_PATHS).size).toBe(MARKETING_PUBLIC_PATHS.length);

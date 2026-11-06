@@ -1,9 +1,10 @@
 /**
  * The public marketing surface: its routes and its canonical origin.
  *
- * No `server-only` import. `src/proxy.ts` spreads MARKETING_PATHS into its
- * PUBLIC_PATHS list and runs on the edge runtime, so this module must stay free
- * of node imports — the same constraint `src/lib/auth/constants.ts` carries.
+ * No `server-only` import. `src/proxy.ts` spreads MARKETING_PUBLIC_PATHS (not
+ * MARKETING_PATHS — the public list is the superset) into its PUBLIC_PATHS list
+ * and runs on the edge runtime, so this module must stay free of node imports —
+ * the same constraint `src/lib/auth/constants.ts` carries.
  *
  * Pure data by design. This file lives under `src/lib/**`, which is the only
  * tree the per-PR coverage floor measures, and coverage runs with Vitest's
@@ -35,12 +36,20 @@
 export const CANONICAL_ORIGIN = "https://dupezero.com";
 
 /**
- * Every path on the marketing surface, in nav order.
+ * Every path on the marketing surface.
  *
- * Single source of truth for three consumers that would otherwise drift:
- * `src/proxy.ts` (reachable without a session), `src/app/sitemap.ts` (what
- * crawlers are told about), and the marketing nav itself. Adding a page means
- * adding it here and nowhere else.
+ * Single source of truth for the two consumers that would otherwise drift:
+ * `src/proxy.ts` (reachable without a session, via MARKETING_PUBLIC_PATHS
+ * below) and `src/app/sitemap.ts` (what crawlers are told about).
+ *
+ * The nav is NOT a third consumer, though this comment claimed it was. Nothing
+ * in `src/components/marketing/` imports this list: `marketing-header.tsx`
+ * carries one wordmark link to `/` and one CTA to PORTAL_ENTRY_PATH, and that
+ * is deliberate — a plain row at every width keeps the mobile DOM a subset of
+ * the desktop one, which is the premise the desktop-only axe sweep rests on.
+ *
+ * So adding a page here makes it reachable and indexed and linked from
+ * nowhere. The link is a separate, manual edit.
  */
 /*
  * Annotated `readonly string[]` rather than left to infer `as const`. With the
