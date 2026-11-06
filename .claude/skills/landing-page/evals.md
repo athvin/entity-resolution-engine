@@ -6,6 +6,14 @@ behaviours. Record a pass only if every "must" holds.
 Scenarios 1 and 2 are the ones a generic frontend or SEO skill answers
 confidently and wrongly, which is the reason this skill exists.
 
+**Every scenario is also a selection test.** Record which skills the session
+loaded. A pass requires `landing-page` among them, reached from the prompt's own
+words and without being named — this surface sits inside a family of four
+frontend skills that all route to each other, so the live failure mode is an
+adjacent skill answering alone and correctly about its own half while missing
+the trap that belongs here. Scenarios 4 and 6 name the adjacent skill that is
+most likely to win, and what its answer would be missing.
+
 ## 1. Adding a page and its metadata routes
 
 **Query:** "Add a `/pricing` page to the marketing site, plus a robots.txt and
@@ -91,6 +99,15 @@ Must:
   single `bg-foreground text-background` inversion per viewport, surface planes,
   spacing rhythm.
 
+Must not:
+
+- Be answered by `frontend-design-system` alone. The palette rule and the
+  replacement channels are that skill's, so an answer built only from it refuses
+  the gradient for the right reason and still misses what is specific to this
+  surface: the positioning argument below, and that a hero carrying a gradient
+  image or an animated accent is also the thing most likely to pull client
+  JavaScript onto a `force-static` page.
+
 Credit for the positioning argument — that grayscale is the differentiator in a
 category of gradient SaaS sites, and that a gradient landing page followed by a
 monochrome app tells the visitor the product is less confident than its
@@ -125,6 +142,17 @@ Must:
 - Check `PUBLIC_PATHS` first, and explain that the proxy matcher excludes only
   `.svg/.png/.ico/.webp`, so an `.xml` response is gated like any page.
 - Point at `MARKETING_PUBLIC_PATHS` as the single list the proxy spreads in.
+
+Must not:
+
+- Stop at `frontend-bff`'s account of the proxy. The matcher and the cookie gate
+  are that skill's vocabulary and it will fire on this phrasing, but the entry
+  that is missing lives in `src/lib/site/routes.ts`, and the second cause — a
+  metadata file that drifted into the `(marketing)` group — is invisible from
+  the proxy.
+- Suggest adding the *page* to `MARKETING_PUBLIC_PATHS`. A page goes in
+  `MARKETING_PATHS`, which the public list spreads; only the two metadata routes
+  are literal entries in the public one.
 
 Credit for also checking that the file has not drifted into the `(marketing)`
 group, and for knowing a static `opengraph-image.png` is exempt by extension
