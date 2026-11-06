@@ -38,14 +38,38 @@ postgres:
 # the difference is deliberate — a ResourceQuota ceiling on cpu or jobs costs
 # nothing until it is used, while ephemeral storage is EBS that gets paid for:
 #
-#   limits.cpu                   3 × 12 (L) + 2 for the app  = 38  → 40
+#   limits.cpu                   3 × 12 (L) + 5 at a cutover = 41  → 40 (!)
 #   requests.memory              3 × 14Gi (L) + app          = 46Gi → 80Gi is already clear
 #   requests.ephemeral-storage   3 × 400Gi (L spill)         = 1200Gi → LEFT at 900Gi
 #
-# So this namespace admits at most TWO concurrent L pods, on purpose. The third
-# is refused by the quota, which the classifier reads as a capacity
-# `FailedCreate`: it waits `executor.quotaWaitSeconds` and does not spend a
-# launch (§7.2's "the capacity wait is the backstop"). Mixed classes are
+# That first line used to read `+ 2 for the app = 38`, which the colour
+# dimension made false. Measured by rendering the chart with both colours up:
+#
+#   er-dispatcher   1.0
+#   web-api-blue    1.5   (api 1 + web 0.5)
+#   web-api-green   1.5   ← the second colour a cutover runs
+#   one hook        0.5   (schema-migrate, db-migrate and tenant-migrate are
+#                          weight-ordered, so helm runs one at a time)
+#   er-tenant-drift 0.5   if the CronJob happens to fire in the window
+#   -------------------
+#   peak            5.0
+#
+# So the sum now EXCEEDS its own ceiling, and the conclusion below survives for
+# a different reason than the arithmetic: this namespace admits at most TWO
+# concurrent L pods because **ephemeral storage** refuses the third
+# (1200 > 900), not because cpu does. At two L pods it is 24 + 5 = 29 of 40 and
+# comfortable.
+#
+# The trap that follows, and the reason this is written out rather than left as
+# a stale `38`: raising requestsEphemeralStorage to 1200Gi to admit a third L
+# pod would make limits.cpu the binding dimension at 41 of 40 — during a
+# cutover, i.e. intermittently and only while a deploy overlaps a full queue,
+# which is the worst way to discover a quota. Raise limitsCpu in the same
+# change, not afterwards.
+#
+# The third L pod is refused by the quota, which the classifier reads as a
+# capacity `FailedCreate`: it waits `executor.quotaWaitSeconds` and does not
+# spend a launch (§7.2's "the capacity wait is the backstop"). Mixed classes are
 # nowhere near it — three S pods are 6 cpu and 120Gi. Raising ephemeral to
 # 1200Gi is a real monthly cost and wants a decision, not a default.
 quota:
