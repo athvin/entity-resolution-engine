@@ -62,6 +62,17 @@ err() {
 	fail=1
 }
 
+# `err` for a caller whose STDOUT is a generated payload. `run_regen` runs every
+# generator as `gen_x >"$tmp"`, so a generator that reports its own failure
+# through `err` writes the words "FAIL regen: …" INTO the reference and splices
+# them in as content — a corrupted block, committed, with the gate green on the
+# next run because the file now matches the generator. Observed exactly once,
+# which was enough. Diagnose on stderr; leave stdout empty so `splice` refuses.
+err_quiet() {
+	red "FAIL $*" >&2
+	fail=1
+}
+
 # A gate that dies silently reads exactly like a gate that passed. `pipefail`
 # plus a `find` over a directory that happens not to exist is enough to do it,
 # so name the line instead of exiting mute.
@@ -1396,6 +1407,143 @@ clip_clause() {
 		}'
 }
 
+# The `er` CLI's whole command surface, from the clap definition that IS that
+# surface. Hand-copying it is what produced the drift this generator replaces:
+# the `profile` subcommand was missing from the skill entirely, `correct` was
+# documented without its `--run-at`, `maintain` was credited with
+# "catalog-option flags" it does not take, and — the one with teeth —
+# `--expire-older-than` was presented as opt-in while clap defaults it to
+# `7 days`, so the invocation the skill called safe expires snapshots.
+#
+# A default is the half most worth deriving: it is a decision recorded in one
+# place and read from another, and nothing fails when the copy goes stale.
+gen_er_command_surface() {
+	local src=rust/crates/er-cli/src/cli.rs body
+
+	if [[ ! -f $src ]]; then
+		err_quiet "regen: $src is missing — the er command surface cannot be derived"
+		return
+	fi
+
+	# The parse runs BEFORE a single header line is printed, and its emptiness
+	# is checked here rather than left to `splice`. A generator whose preamble
+	# is unconditional cannot fail loudly: the payload is never empty, so
+	# `splice` accepts it and the block becomes a header with no table under it
+	# — every subcommand erased, gate green. Observed, not hypothesised: it is
+	# what renaming the `Command` enum produced while this guard sat in awk's
+	# END block instead of out here.
+	body=$(parse_er_command_surface "$src")
+	if [[ -z ${body//[[:space:]]/} ]]; then
+		err_quiet "regen: parsed no subcommands out of $src — the clap definition moved"
+		return
+	fi
+
+	echo "Derived from \`$src\`: the clap \`Cli\` globals and"
+	echo "every \`Command\` variant, each flag carrying the default the code"
+	echo "declares. **required** means clap has no default and refuses the"
+	echo "invocation without it; \`off\` is a boolean switch; \`optional\` is an"
+	echo "\`Option<…>\` the stage treats as absent."
+	echo
+	echo "Each blurb is the subcommand's clap \`about\`, so this block answers"
+	echo "*what*. Everything about *why* — which flags must travel together, which"
+	echo "default is load-bearing — is prose outside these markers."
+	echo
+	printf '%s\n' "$body"
+}
+
+# Two inputs: er-versions first, so a `default_value = er_versions::MODE_FULL`
+# resolves to the string an operator actually passes rather than to a path
+# nobody can type.
+parse_er_command_surface() {
+	awk '
+		function kebab(s,   out, i, c) {
+			out = ""
+			for (i = 1; i <= length(s); i++) {
+				c = substr(s, i, 1)
+				if (c ~ /[A-Z]/) { if (i > 1) out = out "-"; out = out tolower(c) }
+				else out = out c
+			}
+			return out
+		}
+		function dashed(s,   t) { t = s; gsub(/_/, "-", t); return t }
+		function resolve(c,   k) { k = c; sub(/^[A-Za-z_]+::/, "", k); return (k in consts) ? consts[k] : c }
+		function flush_doc(   d) { d = doc; doc = ""; return d }
+
+		# Pass 1: the string constants a default_value can point at.
+		FNR == NR {
+			if (match($0, /^pub const [A-Z_0-9]+: &str = "[^"]*"/)) {
+				split($0, parts, /[ =]+/)
+				key = parts[3]; sub(/:$/, "", key)
+				val = $0; sub(/^[^"]*"/, "", val); sub(/".*$/, "", val)
+				consts[key] = val
+			}
+			next
+		}
+
+		/^struct Cli \{/   { in_cli = 1; cmd = "globals"; order[++n] = cmd; about[cmd] = ""; next }
+		/^enum Command \{/ { in_cmd = 1; next }
+		/^\}/              { in_cli = 0; in_cmd = 0; next }
+		!(in_cli || in_cmd) { next }
+
+		/^[ \t]*\/\/\// {
+			line = $0
+			sub(/^[ \t]*\/\/\/[ ]?/, "", line)
+			if (line == "") next
+			doc = (doc == "" ? line : doc " " line)
+			next
+		}
+		/^[ \t]*#\[arg\(/     { attr = $0; next }
+		/^[ \t]*#\[command\(/ { doc = ""; next }
+		/^[ \t]*\/\//         { next }
+
+		# A variant with fields, then one without.
+		in_cmd && /^    [A-Z][A-Za-z0-9]*[ ]*\{$/ {
+			name = $1; sub(/[ ]*\{$/, "", name)
+			cmd = kebab(name); order[++n] = cmd; about[cmd] = flush_doc(); attr = ""
+			next
+		}
+		in_cmd && /^    [A-Z][A-Za-z0-9]*,$/ {
+			name = $1; sub(/,$/, "", name)
+			cmd = kebab(name); order[++n] = cmd; about[cmd] = flush_doc(); attr = ""
+			next
+		}
+
+		/^[ \t]*[a-z_][a-z_0-9]*:[ ]/ {
+			if (attr == "") { doc = ""; next }
+			field = $1; sub(/:$/, "", field)
+			type = $0; sub(/^[ \t]*[a-z_0-9]*:[ ]*/, "", type); sub(/,$/, "", type)
+			flag = dashed(field)
+			if (match(attr, /long = "[^"]*"/)) flag = substr(attr, RSTART + 8, RLENGTH - 9)
+			if (match(attr, /default_value = "[^"]*"/))          dv = "`" substr(attr, RSTART + 17, RLENGTH - 18) "`"
+			else if (match(attr, /default_value = [A-Za-z_:]+/)) dv = "`" resolve(substr(attr, RSTART + 16, RLENGTH - 16)) "`"
+			else if (match(attr, /default_value_t = [^),]+/))    dv = "`" substr(attr, RSTART + 18, RLENGTH - 18) "`"
+			else if (type ~ /^Option</)                          dv = "optional"
+			else if (type == "bool")                             dv = "off"
+			else if (type ~ /^Vec</)                             dv = "**required**, repeatable"
+			else                                                 dv = "**required**"
+			rows[cmd] = rows[cmd] sprintf("| `--%s` | %s |\n", flag, dv)
+			flags++
+			attr = ""; doc = ""
+			next
+		}
+
+		END {
+			# A parse that finds no commands, or commands with no flags, has
+			# stopped tracking `cli.rs` rather than found a CLI with no flags.
+			# Printing nothing is the signal; the caller turns it into a failure
+			# before it prints a preamble that would hide it.
+			if (n < 2 || flags == 0) exit 0
+			for (i = 1; i <= n; i++) {
+				cmd = order[i]
+				if (cmd == "globals") print "### The globals, on every subcommand\n"
+				else printf "### `er %s`\n\n%s\n\n", cmd, about[cmd]
+				if (rows[cmd] != "") printf "| Flag | Default |\n|---|---|\n%s\n", rows[cmd]
+				else print "No flags.\n"
+			}
+		}
+	' rust/crates/er-versions/src/lib.rs "$src"
+}
+
 gen_skill_inventory() {
 	local mode=$1
 	local dir slug name desc cell manual
@@ -1523,6 +1671,7 @@ generated_files=(
 	"$skills_dir/frontend-data-ui/references/dense-surfaces.md"
 	"$skills_dir/aws-account-operations/references/footprint.md"
 	"$skills_dir/land-pr/references/post-merge.md"
+	"$skills_dir/er-engine-ops/references/stages-and-flags.md"
 	"docs/agent-skills.md"
 	"CLAUDE.md"
 )
@@ -1567,6 +1716,9 @@ run_regen() {
 
 	gen_post_merge_surface >"$tmp"
 	splice "$skills_dir/land-pr/references/post-merge.md" post-merge-surface "$tmp"
+
+	gen_er_command_surface >"$tmp"
+	splice "$skills_dir/er-engine-ops/references/stages-and-flags.md" er-command-surface "$tmp"
 
 	# Two projections of one field, so the two documents cannot disagree about
 	# which skills exist even though they show different columns.

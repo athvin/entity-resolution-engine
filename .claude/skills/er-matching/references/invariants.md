@@ -72,8 +72,7 @@ bounded, and repaired by the periodic correction pass — not asserted away. So
 there are two acceptance tests, one for the invariant and one for its
 falsifiability.
 
-**The two loss vectors**, named in S4.5.6 and the only things `er correct`
-repairs:
+**The two loss vectors**, named in S4.5.6:
 
 - **Incremental candidate generation** — an incremental pass can never pair two
   records that were both already in the corpus, because neither is new. A full
@@ -81,11 +80,19 @@ repairs:
 - **Corpus-dependent term frequency** — TF computed from a growing corpus moves,
   so a snapshot taken earlier drifts from the corpus it is scoring.
 
-`er correct` regenerates candidate pairs over the whole corpus, re-materializes
-TF under a new `tf_snapshot_id`, re-scores at the **active** `model_version`,
-re-clusters the full assertion-adjusted edge set, and re-assembles. Because it
-never trains, `model_version` and every fitted value are unchanged across it,
-so INV-PERM still governs the ids it rewrites.
+**What repairs them is a full run, not `er correct` — whatever the design doc
+says.** S4.5.6 specifies a correction pass that regenerates candidate pairs over
+the whole corpus, re-materializes TF under a new `tf_snapshot_id` and re-scores
+at the active `model_version`. **Neither arm is implemented.** `er correct`
+re-reconciles and re-assembles over the `match_scores` that already exist,
+reusing the prior run's model identity verbatim; its e2e test is named
+`correct_applies_a_staged_assertion_without_rescoring`. So a session told to
+repair incremental drift with `correct` repairs nothing, and T-INC-1b — the TF
+arm's acceptance test — is still outstanding. See the er-engine-ops skill for
+what the pass does do.
+
+Because no correction pass ever trains, `model_version` and every fitted value
+are unchanged across one, so INV-PERM still governs the ids it rewrites.
 
 ## INV-PERM — an unchanged group keeps its id
 
@@ -143,6 +150,6 @@ with grep; do not trust the paths.
 | Invariant | Acceptance test, by intent |
 |---|---|
 | INV-SCORE / D4 | the frozen-TF match goldens: `base_10` scores reproduce regardless of batch membership |
-| INV-EQ | the incremental-equals-full pair: one test for the invariant, one that violates exactly one precondition, shows the bounded divergence, then repairs it with `er correct` |
+| INV-EQ | the incremental-equals-full pair: one test for the invariant, one that violates exactly one precondition and shows the bounded divergence. No committed test repairs that divergence, because the pass that would is unbuilt |
 | INV-PERM | the reconcile scenario goldens (assertion, merge, split, supersession, deletion) |
 | CONTRADICTION-1 | the contradiction golden in `er-reconcile` |

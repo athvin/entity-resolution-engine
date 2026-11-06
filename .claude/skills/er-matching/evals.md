@@ -45,7 +45,8 @@ Must:
 - Not propose a fix to the clustering code on this evidence.
 
 Credit for also noting that if a precondition *was* violated, the divergence is
-correct behaviour and `er correct` is the repair.
+correct behaviour and a **full run** is the repair — and for not offering
+`er correct`, which re-clusters existing scores and repairs neither loss vector.
 
 ## 3. Tuning the compile scale
 

@@ -92,8 +92,11 @@ Two consequences people get wrong:
   between a full and an incremental universe. Comparing ids is a false failure.
 - **INV-EQ is a conditional claim with two known loss vectors** — incremental
   candidate generation (which can never pair two records that were both already
-  in the corpus) and corpus-dependent term frequency. `er correct` exists to
-  repair exactly those two, and nothing else.
+  in the corpus) and corpus-dependent term frequency. The design doc assigns
+  both to `er correct`; **neither arm is built**, so today a full run is what
+  repairs them and `correct` re-clusters existing scores. See
+  [references/invariants.md](references/invariants.md) and the er-engine-ops
+  skill.
 
 ## The SQL pipeline
 
