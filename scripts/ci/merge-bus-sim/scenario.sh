@@ -46,6 +46,16 @@ pullref 201 feat-a-child
 
 git clone --quiet "$SIM/origin.git" "$SIM/landing"
 git -C "$SIM/landing" config user.name s; git -C "$SIM/landing" config user.email s@x
+# The real runner's checkout contains the repo's own scripts/ci/, which is
+# where the workflow's step bodies live since the #723 extraction. The fake
+# landing repo holds only fixture files, so provide the scripts the same way
+# checkout would — untracked, so they never enter the trees the assertions
+# compare. The REAL scripts from the working tree under test, never a copy of
+# the logic.
+mkdir -p "$SIM/landing/scripts/ci"
+for s in select build verdict report land; do
+  cp "$HERE/../merge-bus-$s.sh" "$SIM/landing/scripts/ci/"
+done
 
 cat >"$SIM/state" <<EOF
 bus_number=900
