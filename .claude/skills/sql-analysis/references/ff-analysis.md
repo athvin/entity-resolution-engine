@@ -15,12 +15,12 @@
 **feather-flow**, a separate first-party repository, consumed as:
 
 ```toml
-ff-analysis = { git = "https://github.com/athvin/feather-flow", tag = "er-entity-v0.1.4" }
+ff-analysis = { git = "https://github.com/athvin/feather-flow", tag = "…" }
 ```
 
 It is pinned **by tag**, not by branch or revision range — so the planner this
 repo analyses with is a fixed, named artifact, and changing it is an explicit
-commit here.
+commit here. The tag in force is the first row of the matrix below.
 
 ff-analysis provides `plan_statement` (taking a **pre-parsed AST**, which is
 what lets the rewrite step run first), a `FeatherFlowProvider` catalog, and the
@@ -28,20 +28,38 @@ DuckDB function stubs DataFusion otherwise lacks.
 
 ## The version matrix, and which pins are not free
 
-| Crate | Version | Source |
+Generated from `rust/Cargo.lock` and the two manifests by
+`scripts/skills-check.sh regen`. It is derived because the hand-written version
+of this table had already gone stale by two arrow majors. Do not hand-edit
+inside the markers.
+
+<!-- BEGIN GENERATED: sql-planner-pins -->
+| What | Version | Where it comes from |
 |---|---|---|
-| DataFusion | 52 | brought by ff-analysis |
-| arrow | 57 | brought by ff-analysis |
-| sqlparser | 0.59 | DataFusion's bundled copy, reached as `ff_analysis::sqlparser` |
-| `datafusion-common`, `datafusion-expr` | 52 | pinned here to match |
+| ff-analysis | `er-entity-v0.1.4` (rev `a812d6aed3ed`) | the `tag =` in `er-sql-check/Cargo.toml` |
+| DataFusion | 52.5.0 | brought by ff-analysis; `datafusion-common`/`-expr` are pinned here to match |
+| arrow, analyser side | 57.3.1 | brought by ff-analysis |
+| arrow, rest of the workspace | 60.1.0 (declared `60`) | the major the `duckdb` crate pulls |
+| sqlparser, **the parser** | 0.59.0 | datafusion-expr 52.5.0, re-exported as `ff_analysis::sqlparser` |
+| sqlparser, ff-analysis's own | 0.61.0 | ff-analysis depends on it directly; **not** what the re-export resolves to |
+| sqlparser, the workspace | 0.63 | `rust/Cargo.toml`, for the crates below |
 
-Two statements that are commonly got wrong:
+Crates declaring the standalone `sqlparser`: **dedupe-core**.
+`er-sql-check` is deliberately absent — it parses only through the
+re-export. If it ever appears in that list, this section is wrong.
+<!-- END GENERATED: sql-planner-pins -->
 
-- **`er-sql-check` has no dependency on the standalone `sqlparser` crate.** The
-  workspace's `sqlparser = "0.63"` has exactly one consumer, `dedupe-core`. So
-  "the analyser uses sqlparser 0.63" is false.
-- **The arrow major here (57) differs from the rest of the workspace (58).**
-  The workspace tracks the major the `duckdb` crate pulls.
+Three statements that are commonly got wrong:
+
+- **`er-sql-check` has no dependency on the standalone `sqlparser` crate**, so
+  "the analyser uses the workspace's sqlparser" is false.
+- **The sqlparser that matters is the one `datafusion-expr` resolves**, because
+  `ff_analysis::sqlparser` is literally `pub use datafusion_expr::sqlparser`.
+  ff-analysis *also* depends on a newer sqlparser directly, for its own
+  internals — that copy never parses a statement here, and it is the one
+  `cargo tree` shows you first.
+- **The arrow major on the analyser side differs from the rest of the
+  workspace**, which tracks the major the `duckdb` crate pulls.
 
 `datafusion-common` and `datafusion-expr` are pinned to the same major
 ff-analysis resolves so that the `LogicalPlan` this crate inspects and the plan
@@ -62,6 +80,12 @@ so the analyser can type-check calls the engine really makes. By tag:
 | baseline | store-qualified `get_table_source`, `plan_statement` over a pre-parsed AST; DuckDB json/list stubs — `to_json`, `map_from_entries`, `json_keys`, `array_length`, `now`, `list` |
 | v0.1.2 | the golden-lineage constructs: a custom `ExprPlanner` for DuckDB `MAP {…}` literals and subscript access, window-function stubs (`row_number`, `rank`, `lag`, …), `concat` / `concat_ws` / `element_at` |
 | v0.1.3 | the standardization-stage surface: json payload accessors, `LIST(VARCHAR)`-typed list shaping, unicode normalizers, variadic regexp forms, array-literal planning |
+| v0.1.4 | `sha256`, for the content-derived id mints |
+
+**If the pinned tag in the matrix above has no row in this table, the table is
+behind the pin** — check feather-flow's own history before concluding a function
+is unstubbed and starting a round trip that is already done. That is how the
+`sha256` row came to be missing here for a release.
 
 A stub exists to make a call **plannable and typed**. It does not reimplement
 the function's behaviour — correctness of the SQL's results is the oracle's and

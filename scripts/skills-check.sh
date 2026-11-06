@@ -592,6 +592,51 @@ gen_diagnostics() {
 	fi
 }
 
+# The planner's version matrix. Every number in it had been hand-written, and
+# one had already rotted: the skill said the rest of the workspace pulls arrow
+# 58 while `rust/Cargo.toml` said 60. Derived from `rust/Cargo.lock`, which is
+# tracked, so this still needs no toolchain.
+#
+# The non-obvious derivation is the sqlparser row. THREE majors resolve in this
+# graph and only one is the parser: `ff_analysis::sqlparser` is
+# `pub use datafusion_expr::sqlparser`, so the version that matters is the one
+# datafusion-expr resolves — not the one ff-analysis also depends on directly,
+# which is what `cargo tree` shows first and what makes this easy to get wrong.
+gen_sql_planner_pins() {
+	local lock=rust/Cargo.lock
+	local manifest=rust/crates/er-sql-check/Cargo.toml
+	local tag rev dfexpr arrow_ff arrow_duck arrow_ws sqlp_parser sqlp_ff sqlp_ws consumers
+
+	tag=$(grep -oE 'tag = "[^"]+"' "$manifest" | head -1 | sed 's/.*"\(.*\)"/\1/')
+	rev=$(awk '/^name = "ff-analysis"$/,/^$/' "$lock" |
+		grep -oE 'tag=[^#]*#[0-9a-f]+' | sed 's/.*#//' | cut -c1-12)
+	dfexpr=$(awk '/^name = "datafusion-expr"$/{getline; gsub(/"/,"",$3); print $3; exit}' "$lock")
+	arrow_ff=$(awk '/^name = "ff-analysis"$/,/^$/' "$lock" | grep -oE 'arrow [0-9.]+' | awk '{print $2}')
+	arrow_duck=$(awk '/^name = "duckdb"$/,/^$/' "$lock" | grep -oE 'arrow [0-9.]+' | awk '{print $2}')
+	arrow_ws=$(grep -oE '^arrow = "[^"]+"' rust/Cargo.toml | sed 's/.*"\(.*\)"/\1/')
+	sqlp_parser=$(awk '/^name = "datafusion-expr"$/,/^$/' "$lock" | grep -oE 'sqlparser [0-9.]+' | awk '{print $2}')
+	sqlp_ff=$(awk '/^name = "ff-analysis"$/,/^$/' "$lock" | grep -oE 'sqlparser [0-9.]+' | awk '{print $2}')
+	sqlp_ws=$(grep -oE '^sqlparser = \{ version = "[^"]+"' rust/Cargo.toml | sed 's/.*"\(.*\)"/\1/')
+	# A set difference in spirit: which workspace crates declare the STANDALONE
+	# sqlparser. `er-sql-check` appearing here would falsify the whole section.
+	consumers=$(grep -lE '^sqlparser' rust/crates/*/Cargo.toml 2>/dev/null |
+		sed 's|rust/crates/||; s|/Cargo.toml||' | sort | tr '\n' ' ')
+
+	echo "| What | Version | Where it comes from |"
+	echo "|---|---|---|"
+	printf '| ff-analysis | `%s` (rev `%s`) | the `tag =` in `er-sql-check/Cargo.toml` |\n' "$tag" "$rev"
+	printf '| DataFusion | %s | brought by ff-analysis; `datafusion-common`/`-expr` are pinned here to match |\n' "$dfexpr"
+	printf '| arrow, analyser side | %s | brought by ff-analysis |\n' "$arrow_ff"
+	printf '| arrow, rest of the workspace | %s (declared `%s`) | the major the `duckdb` crate pulls |\n' "$arrow_duck" "$arrow_ws"
+	printf '| sqlparser, **the parser** | %s | datafusion-expr %s, re-exported as `ff_analysis::sqlparser` |\n' "$sqlp_parser" "$dfexpr"
+	printf '| sqlparser, ff-analysis'"'"'s own | %s | ff-analysis depends on it directly; **not** what the re-export resolves to |\n' "$sqlp_ff"
+	printf '| sqlparser, the workspace | %s | `rust/Cargo.toml`, for the crates below |\n' "$sqlp_ws"
+	echo
+	printf 'Crates declaring the standalone `sqlparser`: **%s**.\n' "${consumers% }"
+	echo "\`er-sql-check\` is deliberately absent — it parses only through the"
+	echo "re-export. If it ever appears in that list, this section is wrong."
+}
+
 gen_required_checks() {
 	echo "Branch protection is repository configuration, not a file in the tree, so"
 	echo "the required set cannot be derived here. What *is* derived: every job, the"
@@ -1306,6 +1351,7 @@ generated_files=(
 	"$skills_dir/entity-framework/references/entities-index.md"
 	"$skills_dir/rust-conventions/references/crate-map.md"
 	"$skills_dir/sql-analysis/references/diagnostics.md"
+	"$skills_dir/sql-analysis/references/ff-analysis.md"
 	"$skills_dir/ci-and-supply-chain/references/required-checks.md"
 	"$skills_dir/frontend-testing/references/tiers-and-thresholds.md"
 	"$skills_dir/frontend-design-system/references/tokens-and-primitives.md"
@@ -1329,6 +1375,9 @@ run_regen() {
 
 	gen_diagnostics >"$tmp"
 	splice "$skills_dir/sql-analysis/references/diagnostics.md" diagnostics "$tmp"
+
+	gen_sql_planner_pins >"$tmp"
+	splice "$skills_dir/sql-analysis/references/ff-analysis.md" sql-planner-pins "$tmp"
 
 	gen_required_checks >"$tmp"
 	splice "$skills_dir/ci-and-supply-chain/references/required-checks.md" required-checks "$tmp"
