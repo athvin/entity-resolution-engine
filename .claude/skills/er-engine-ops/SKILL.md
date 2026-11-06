@@ -1,16 +1,21 @@
 ---
 name: er-engine-ops
-description: Explains how to drive this repo's entity-resolution pipeline with the `er` CLI — the stage chain (ingest, standardize, match, reconcile, golden), `run-all`, explicit training, the correction pass, lake maintenance and the read-only doctor report — plus the determinism contract that reruns depend on, model and TF-snapshot identity, the exit-code contract, and who guarantees one writer per tenant. Use when running or scripting a pipeline stage, setting up a development lake, interpreting a run's exit code or failure, deciding between a correction pass and a full rerun, or wiring a stage into the dispatcher. For the matching maths and model internals see er-matching; for ATTACH options, lake layout and the maintenance step order see ducklake-lakehouse; for why a stage is slow and how to measure it see ducklake-performance; for the dispatcher loop that invokes these stages, the Postgres job queue and the database constraint that actually enforces one writer, see er-server-control-plane.
+description: Explains how to drive this repo's entity-resolution pipeline with the `er` CLI — the stage chain (ingest, standardize, match, reconcile, golden), `run-all`, explicit training, the correction pass and what it does not repair, lake maintenance that always expires snapshots, the doctor and profile reports — plus the determinism contract reruns depend on, model and TF-snapshot identity, what the `er` binary's exit status omits, and who guarantees one writer per tenant. Use when running or scripting a pipeline stage, setting up a development lake, profiling a corpus, interpreting a run's exit code or failure, or deciding between a correction pass and a full rerun. For the matching maths and model internals see er-matching; for ATTACH options, lake layout and the maintenance step order see ducklake-lakehouse; for why a stage is slow see ducklake-performance; for the dispatcher loop, the job queue, the constraint that enforces one writer and the exit contract a task pod honours, see er-server-control-plane.
 ---
 
 # Operating the engine
 
 The `er` binary runs the pipeline over one tenant's lake. Every invocation takes
 the same three globals — the DuckLake catalog, the Parquet data directory, and
-the S6 config:
+the S6 config.
+
+Two directories are in play and mixing them is the first thing that fails:
+**cargo must run from `rust/`** (the workspace root — there is no manifest at
+the repository root), while the fixtures, configs and lake paths every flag
+names are rooted at the **repository root**.
 
 ```sh
-cargo build -p er-cli --bin er
+(cd rust && cargo build -p er-cli --bin er)   # from the repo root
 er() { rust/target/debug/er \
   --catalog "$ER_LAKE/meta.ducklake" --data-path "$ER_LAKE/data" \
   --config configs/test.yaml "$@"; }
@@ -23,20 +28,13 @@ down beyond `rm -rf`:
 export ER_LAKE=artifacts/demo && mkdir -p "$ER_LAKE"
 ```
 
-## The subcommands
-
-| Command | Stage | Notes |
-|---|---|---|
-| `ingest` | S4.1 | lands one source's delivery into `raw_records` |
-| `standardize` | S4.2 | builds `int_std_records`; needs the nickname lexicon seed |
-| `match` | S4.3 | scores `match_scores` against a **committed** model |
-| `reconcile` | S4.5 | clusters into `entity_membership` / `entities` / `entity_events` |
-| `golden` | S4.6 | assembles `golden_records` + `golden_lineage` |
-| `run-all` | S4.0 | the whole chain under one run id |
-| `train` | S4.3.2 | fits a model; writes settings JSON + frozen TF snapshot CSV |
-| `correct` | — | re-reconcile + re-assemble over **existing** scores |
-| `maintain` | — | flush inlined, merge small files, expire snapshots |
-| `doctor` | — | read-only health report (JSON on stdout) |
+The stage chain is `ingest` → `standardize` → `match` → `reconcile` → `golden`,
+which `run-all` drives under one run id. Alongside it sit `train`, `correct`,
+`maintain`, `doctor` and `profile`. Every subcommand, every flag and every
+default is **derived from the clap definition** in
+[references/stages-and-flags.md](references/stages-and-flags.md) — read it there
+rather than from memory, because the hand-copied version of that table drifted
+four ways at once.
 
 ## `run-all` never trains
 
@@ -100,75 +98,106 @@ Two consequences:
   configuration fingerprints, status and snapshot range for exactly that
   purpose.
 
-## `correct` versus a full rerun
+## `correct` re-clusters; it does not re-score
 
 `correct` applies staged steward corrections — assertions, overrides, overlays,
 review resolutions — by re-reconciling (assertion-adjusted) and re-assembling
-**over the existing `match_scores`**. No re-ingest, no re-score.
+**over the existing `match_scores`**. No re-ingest, no re-score, and no new TF
+snapshot: it reuses the `model_version` and `tf_snapshot_id` of the latest run,
+because those are the identity the corpus was scored under. The thresholds it
+clusters at travel on that run's row rather than being re-read from today's
+config, so a config edit cannot retroactively re-cut yesterday's scores.
 
-Reach for it when:
+Reach for it when stewards have made decisions that need to take effect. That
+is the whole of what it currently repairs.
 
-- Stewards have made decisions that need to take effect.
-- Incremental drift needs repairing. It refreshes term frequency under a new
-  `tf_snapshot_id` and re-scores the regenerated candidate pairs at the
-  **active** model version — which is precisely the repair for INV-EQ's two loss
-  vectors. It never trains, so INV-PERM still governs the ids it rewrites.
+**What it does not repair, despite what the design doc specifies.** S4.5.6 names
+two INV-EQ loss vectors — incremental candidate generation, which can never pair
+two records that were both already in the corpus, and corpus-dependent term
+frequency — and specifies a correction pass that regenerates candidates over the
+whole corpus, re-materializes TF under a new `tf_snapshot_id` and re-scores at
+the active model version. **Neither arm is built.** The implemented pass is
+reconcile → golden → reviews over scores that already exist; its own e2e test is
+named for the absence (`correct_applies_a_staged_assertion_without_rescoring`).
+So incremental drift is **not** repaired by `correct` today — a full rerun is
+what restores INV-EQ, and T-INC-1b is the acceptance test still outstanding for
+the TF arm.
 
-Reach for a full rerun instead when the model, the config, or standardization
-changed — those move scores, and `correct` deliberately does not re-score from
-scratch.
+Reach for a full rerun whenever the model, the config, or standardization
+changed — those move scores, and `correct` deliberately does not re-score.
 
 Incremental deliveries are just another `run-all` with a new drop directory and
 run id; ingestion detects changed content per record key and appends versions.
 A full-refresh delivery tombstones the records a source omitted
 (`ingest --full-refresh`).
 
-## Maintenance and the snapshot window
+## Maintenance expires snapshots whether or not you ask
 
 ```sh
-er maintain                                 # flush inlined, merge small files
-er maintain --expire-older-than "14 days"   # also expire old snapshots
+er maintain                                 # flush, merge — AND expire, at the
+                                            # flag's default window
+er maintain --expire-older-than "30 days"   # the window you actually chose
 ```
 
-Prints a before/after file-count report. **Keep the expiry window longer than
-your longest-lived cursor** — every lake read pins a snapshot, so expiring
-history out from under a paginated or resumed read breaks it. Ordering of the
-maintenance steps matters; see
+`--expire-older-than` has a default, and `run_maintain` calls
+`expire_snapshots` unconditionally — so there is no invocation of `er maintain`
+that only compacts. **Keep the window longer than your longest-lived cursor**:
+every lake read pins a snapshot, so expiring history out from under a paginated
+or resumed read breaks it, and the default is short enough to do that. Pass the
+window explicitly in anything scheduled. Ordering of the maintenance steps
+matters; see
 [ducklake-lakehouse](../ducklake-lakehouse/references/layout-and-maintenance.md).
 
-## Exit codes
+## What an `er` exit status tells you
 
-Uniform across every `er` command, from `er-errors`. The one that surprises
-people:
+Narrower than it looks, and the distinction is the whole point:
 
-> **Exit `10` is success** — "nothing to do". It sits deliberately outside the
-> S4.7 failure table.
+> **The `er` binary exits `0` or `1`.** It does not depend on `er-errors` at
+> all. Any failure arrives as an `anyhow` error out of `main`, which is exit
+> `1`; `doctor` additionally exits `1` when its report is not `ok`, which is a
+> *finding*, not a crash.
 
-A script that treats any non-zero exit as failure will report healthy no-op
-runs as broken. Check for `10` explicitly. The failure classes and their codes:
+The exit-code contract — including the code that surprises people, **exit `10`
+is success** ("nothing to do") — belongs to `er-server exec-task`, the task-pod
+verb that runs a stage under the dispatcher, and to `run_stages.error_class`
+that goes with it. That is where a wrapper has to treat `0` and `10` alike, and
+where `2` (config) and `3` (precondition) are distinguishable. The classes,
+their exit codes and how to read a failure:
 [references/exit-codes-and-failures.md](references/exit-codes-and-failures.md).
+
+Reading this backwards costs real time in both directions: scripting `er` with
+a branch for exit `2` writes a branch that can never be taken, and reading a
+pod's exit `10` as a failure reports healthy no-op runs as broken.
 
 ## One writer per tenant — whose job that is
 
 A tenant's lake must have one writer at a time, and on `main` that guarantee
 comes from the **control plane's queue**, not from the CLI: the jobs table
-admits at most one active job per org, enforced by Postgres. When the DuckLake
-catalog is itself Postgres, the catalog also serializes writers.
+admits at most one active job per org — `org` is the control plane's name for
+the same subject the engine calls a tenant — enforced by Postgres. When the
+DuckLake catalog is itself Postgres, the catalog also serializes writers.
 
 The gap worth knowing: **running `er` directly bypasses the queue.** Two manual
 runs against one lake are not protected by anything the control plane does. For
 local work that is fine because you are the only writer; do not build an
-operational process on it.
+operational process on it. The queue's own constraints are the
+er-server-control-plane skill's subject.
 
 ## Inspecting a run
 
-`er doctor` is the read-only health report — config hash, the latest run, and a
-presence/row-count line per relation, as JSON. It is the right first command
-when a lake is in an unknown state, because it reads nothing it could damage.
+`er doctor` is the read-only health report — the tenant, the config hash and
+the std/survivorship versions, the latest run's id/status/mode, a
+presence/row-count line per relation, and an `ok` flag that is true only when
+`int_std_records`, `entity_membership` and `golden_records` all exist. It is the
+right first command when a lake is in an unknown state, because it reads
+nothing it could damage. Note the exit status above: `ok: false` is exit `1`, so
+a script must read the JSON rather than branch on the status.
+
+`er profile` is the other read: per-column shape, frequent values and coded
+findings for the raw, standardized or golden stage, persisted to the lake.
+Re-profiling an unchanged snapshot rewrites its rows instead of appending, so
+asking twice costs one run.
 
 For browsing actual data, the read API and the UI are the supported surfaces.
 A `duckdb` shell works for ad-hoc inspection but bypasses snapshot pinning and
 role checks.
-
-Stage-by-stage inputs, outputs and the flags each command takes:
-[references/stages-and-flags.md](references/stages-and-flags.md).

@@ -2,16 +2,27 @@
 
 ## Contents
 
-- The five exit codes
-- The seven error classes
+- Whose contract this is
+- The exit codes
+- The error classes
 - How a class maps to an exit code
 - Retryable means "the cause is outside the run"
 - Reading a failure
 - Rules for new failure paths
 
-## The five exit codes
+## Whose contract this is
 
-Uniform across every `er` command (`er-errors`, the S4.0 contract):
+`er-errors` carries the S4.0 exit-code contract, and its consumers are
+`er-server` and `er-dag` — **not** the `er` CLI, which does not depend on the
+crate at all. So this whole taxonomy is the *task-pod and dispatcher* contract:
+`er-server exec-task` is the process that exits with these codes, and
+`run_stages.error_class` is where the class is recorded.
+
+The `er` binary itself returns `anyhow::Result` from `main`, so it exits `0` or
+`1` and nothing else. Read a code below off a pod's termination record or a job
+row; do not predict one from a local `er` invocation.
+
+## The exit codes
 
 | Code | Name | Meaning |
 |---|---|---|
@@ -26,12 +37,17 @@ failure table: a no-op run is a correct outcome, not an error. Any wrapper that
 does `if exit != 0; then fail` will misreport healthy runs — treat `0` and `10`
 as success.
 
+The kubelet does not share that view: **any** non-zero exit is a `Failed` pod
+phase, exit `10` included, so the success of a no-op is carried by the
+termination record rather than by the phase. Anything reading pod phase alone
+sees a failure that is not one.
+
 `2` and `3` are distinguishable on purpose. `Config` means the input was never
 valid; `Precondition` means the input was fine but the world was not ready
 (a lock held, a required prior stage missing). One is a code or config fix, the
 other is usually a retry or a sequencing fix.
 
-## The seven error classes
+## The error classes
 
 `ErrorClass` is what gets stored in `run_stages.error_class`. The string from
 `as_str()` **is** the stored `VARCHAR` and the S5.2 log value — so renaming a
@@ -71,18 +87,20 @@ failure — retryability is advisory metadata, not a different outcome.
 `lock_conflict`. Those are the two whose cause is external — a flaky network or
 another writer — so repeating the identical run may succeed.
 
-It is **advisory to an operator, and nothing in the CLI acts on it.** There is
-no automatic retry. If you are adding orchestration that retries, this flag is
-the signal to read; do not infer retryability from the message text.
+It is **advisory, and nothing acts on it.** There is no automatic retry
+anywhere — not in the dispatcher, and the CLI never sees the flag at all. If you
+are adding orchestration that retries, this is the signal to read; do not infer
+retryability from the message text.
 
-The four non-retryable classes will fail identically on a retry, which is why
-re-running them wastes a slot: the config is still wrong, the assertions still
-contradict, the fixpoint still will not settle, the data is still bad.
+The remaining classes will fail identically on a retry, which is why re-running
+them wastes a slot: the config is still wrong, the assertions still contradict,
+the fixpoint still will not settle, the data is still bad.
 
 ## Reading a failure
 
-1. **Exit code first.** `2` and `3` mean nothing was attempted — look at config
-   and preconditions, not at the stage logic.
+1. **Exit code first**, when there is one — a pod or job carries it, a local
+   `er` run does not. `2` and `3` mean nothing was attempted, so look at config
+   and preconditions rather than at the stage logic.
 2. **Then `run_stages.error_class` and `error_detail`.** For a contradiction,
    `error_detail` names the offending `assertion_id`s and the closure
    component — that is the whole diagnosis, no further digging needed.

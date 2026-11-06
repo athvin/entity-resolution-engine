@@ -180,6 +180,7 @@ So: counts, version numbers, job names, rule codes and thresholds live in
 | `rust-conventions/references/gates.md` | the `check:` target in `Makefile` |
 | `sql-analysis/references/diagnostics.md` | `er-sql-check/src/analyze.rs` vs the design doc's table |
 | `sql-analysis/references/ff-analysis.md` | `rust/Cargo.lock` plus the workspace and `er-sql-check` manifests |
+| `er-engine-ops/references/stages-and-flags.md` | `er-cli`'s clap `Command` enum |
 | `ci-and-supply-chain/references/required-checks.md` | the workflow files and `rust/deny.toml` |
 | `frontend-testing/references/tiers-and-thresholds.md` | `vitest.config.ts`, `package.json`, `frontend.yml` |
 
@@ -292,6 +293,7 @@ skill, so it gets the same fix.
 | `screens-coverage` | `frontend-data-ui/references/screens.md` | every `src/app/**/page.tsx` route set-differenced against the axe gate's `SCREENS` array |
 | `dense-surface-facts` | `frontend-data-ui/references/dense-surfaces.md` | `useVirtualizer` and `useSearchParams` call sites, route-level boundary files under `src/app`, and the `<table>` count — each a zero or a one the skill used to state in prose |
 | `aws-footprint` | `aws-account-operations/references/footprint.md` | `resource "aws_*"` types and counts, the permission sets and whether each has an inline policy, the workspace's `aws-*` crates, the provider pins |
+| `er-command-surface` | `er-engine-ops/references/stages-and-flags.md` | `er-cli`'s clap `Cli` globals and `Command` variants, each flag's declared default resolved through `er-versions`' mode constants |
 | `skill-inventory` | this document **and** `CLAUDE.md` | every `SKILL.md`'s `name`, `description` and `disable-model-invocation` |
 
 Three of these are **set differences**, and that is the shape worth copying:
