@@ -53,6 +53,7 @@ the same fix.
 | `project-board` | the `gh project` command surface for user-owned project #2 "Product Roadmap" and the `project` scope it requires |
 | `rust-conventions` | that `make check` (not the bare cargo trio) is the finish line |
 | `security` | the attack surface (internet-facing Next.js BFF in front of the privileged Rust er-server control plane) |
+| `skill-audit` | the judgment half of the skill standard that the gate cannot mechanise |
 | `sql-analysis` | the E0xx diagnostics and their remedies, the rewrite step that strips what the planner cannot parse |
 <!-- END GENERATED: skill-inventory -->
 

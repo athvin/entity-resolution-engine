@@ -196,6 +196,7 @@ The table below is **generated** from each skill's frontmatter by
 | asked what is on the board or to add, triage or move a card | `project-board` |
 | authoring or reviewing any Rust in this repo | `rust-conventions` |
 | reviewing an endpoint or handler for SSRF/injection/tenant-isolation/auth/business-logic abuse | `security` |
+| reviewing a skill before or after a change | `skill-audit` |
 | an E0xx diagnostic fails, when a statement will not plan | `sql-analysis` |
 <!-- END GENERATED: skill-inventory -->
 
