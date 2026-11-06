@@ -308,9 +308,16 @@ sccache.
    repository with LRU eviction, which this workspace will exceed — so expect
    the hit rate, and the 10-minute wall time, to degrade. Measure before
    keeping.
-3. **Self-hosted runners inside the VPC.** The structural fix: S3 traffic
-   becomes in-region and free, *and* Actions minutes stop being metered on a
-   private repository. The cluster, the runner NodePools and the pod plumbing
+3. **Self-hosted runners inside the VPC.** The structural fix for the egress
+   itself: S3 traffic becomes in-region and free. **The second half of this
+   argument has expired** — it used to read "*and* Actions minutes stop being
+   metered on a private repository", which was true while the repository was
+   private. Standard GitHub-hosted minutes are free for a public repository, so
+   that saving is already banked and only the egress is left to win. Confirm
+   which regime applies before costing this: `gh repo view --json visibility`.
+   Note it also moves fork-PR code execution onto infrastructure inside the AWS
+   account, which is a materially different exposure on a public repository than
+   on a private one. The cluster, the runner NodePools and the pod plumbing
    already exist for the batch-orchestration work. Largest change, best
    end state.
 4. **Narrow what sccache stores** so shards pull less. Smallest saving.
