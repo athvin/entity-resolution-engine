@@ -486,45 +486,15 @@ jobs:
       - name: Install stable toolchain
         run: rustup update stable --no-self-update && rustup default stable && rustup component add rustfmt clippy
       - name: Install mold
-        # Retried and time-boxed, because this is an unpinned network dependency
-        # on the critical path of six jobs. Observed hanging for 20+ minutes on
-        # two consecutive attempts on 2026-10-22 — and on a required job a hang
-        # is not a failure, it is the 45-minute job timeout, which reads as a
-        # non-green check even though every gate passed. `timeout` bounds each
-        # attempt so a stuck mirror is retried rather than waited on; the step
-        # cap is sized to let all three attempts run (3 x 2 x 120s = 12 min).
+        # One copy for the seven jobs here that link with mold (agent-task.yml
+        # has the eighth): retried, time-boxed, and falling back to the default
+        # linker by stripping mold from RUSTFLAGS — the why and the measured
+        # failure modes live in scripts/ci/install-mold.sh's header. 13 min
+        # lets all three bounded attempts run (3 x 2 x 120s = 12 min).
         timeout-minutes: 13
-        run: |
-          for i in 1 2 3; do
-            # Clear the package lists first, so a retry actually re-fetches.
-            # Observed 2026-11-05: `apt-get update` reached ONLY
-            # packages.microsoft.com and never contacted
-            # azure.archive.ubuntu.com, exited 0 with a partial index, and
-            # `apt-get install -y mold` then reported "Unable to locate package
-            # mold". All three attempts repeated it, because each one Hit:1 the
-            # cache it had just been given rather than refetching — so the retry
-            # loop could not recover from the one state it exists for. mold IS
-            # on the image's archive (2.40.4+dfsg-2.1ubuntu1): a different leg
-            # of the same run, on the same ubuntu-26.04 image, installed it.
-            sudo rm -rf /var/lib/apt/lists/*
-            # ...and make a repository that could not be fetched a FAILURE
-            # rather than a warning. Without this a partial update exits 0 and
-            # the `&&` stops guarding anything: install runs against an index
-            # missing the package it is about to look for, and the error
-            # surfaces as a confusing "no such package" instead of "the mirror
-            # was unreachable".
-            if timeout 120 sudo apt-get update -o APT::Update::Error-Mode=any \
-               && timeout 120 sudo apt-get install -y mold; then
-              exit 0
-            fi
-            echo "mold install attempt $i failed or timed out; retrying"
-            sleep 5
-          done
-          # Fall back rather than fail — mold is a speed optimisation, not a
-          # correctness requirement. See the RUSTFLAGS comment in `env:` for
-          # why this is safe and what it costs.
-          echo "::warning title=mold unavailable, using the default linker::three attempts failed (an apt mirror, not this diff); this job will be much slower and may hit its timeout"
-          echo "RUSTFLAGS=${RUSTFLAGS//-C link-arg=-fuse-ld=mold/}" >> "$GITHUB_ENV"
+        # The script lives at the repo root; this workflow defaults `run` to rust/.
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/ci/install-mold.sh
       # Pushes on main assume the WRITE role; everything else (PRs) the READ
       # role. A PR that could write the cache would be a path for a branch to
       # plant object code a later main build consumes, and poisoning outlives
@@ -626,45 +596,15 @@ jobs:
         # for, or every generated file reads as stale.
         run: rustup update stable --no-self-update && rustup default stable && rustup component add rustfmt
       - name: Install mold
-        # Retried and time-boxed, because this is an unpinned network dependency
-        # on the critical path of six jobs. Observed hanging for 20+ minutes on
-        # two consecutive attempts on 2026-10-22 — and on a required job a hang
-        # is not a failure, it is the 45-minute job timeout, which reads as a
-        # non-green check even though every gate passed. `timeout` bounds each
-        # attempt so a stuck mirror is retried rather than waited on; the step
-        # cap is sized to let all three attempts run (3 x 2 x 120s = 12 min).
+        # One copy for the seven jobs here that link with mold (agent-task.yml
+        # has the eighth): retried, time-boxed, and falling back to the default
+        # linker by stripping mold from RUSTFLAGS — the why and the measured
+        # failure modes live in scripts/ci/install-mold.sh's header. 13 min
+        # lets all three bounded attempts run (3 x 2 x 120s = 12 min).
         timeout-minutes: 13
-        run: |
-          for i in 1 2 3; do
-            # Clear the package lists first, so a retry actually re-fetches.
-            # Observed 2026-11-05: `apt-get update` reached ONLY
-            # packages.microsoft.com and never contacted
-            # azure.archive.ubuntu.com, exited 0 with a partial index, and
-            # `apt-get install -y mold` then reported "Unable to locate package
-            # mold". All three attempts repeated it, because each one Hit:1 the
-            # cache it had just been given rather than refetching — so the retry
-            # loop could not recover from the one state it exists for. mold IS
-            # on the image's archive (2.40.4+dfsg-2.1ubuntu1): a different leg
-            # of the same run, on the same ubuntu-26.04 image, installed it.
-            sudo rm -rf /var/lib/apt/lists/*
-            # ...and make a repository that could not be fetched a FAILURE
-            # rather than a warning. Without this a partial update exits 0 and
-            # the `&&` stops guarding anything: install runs against an index
-            # missing the package it is about to look for, and the error
-            # surfaces as a confusing "no such package" instead of "the mirror
-            # was unreachable".
-            if timeout 120 sudo apt-get update -o APT::Update::Error-Mode=any \
-               && timeout 120 sudo apt-get install -y mold; then
-              exit 0
-            fi
-            echo "mold install attempt $i failed or timed out; retrying"
-            sleep 5
-          done
-          # Fall back rather than fail — mold is a speed optimisation, not a
-          # correctness requirement. See the RUSTFLAGS comment in `env:` for
-          # why this is safe and what it costs.
-          echo "::warning title=mold unavailable, using the default linker::three attempts failed (an apt mirror, not this diff); this job will be much slower and may hit its timeout"
-          echo "RUSTFLAGS=${RUSTFLAGS//-C link-arg=-fuse-ld=mold/}" >> "$GITHUB_ENV"
+        # The script lives at the repo root; this workflow defaults `run` to rust/.
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/ci/install-mold.sh
       # Pushes on main assume the WRITE role; everything else (PRs) the READ
       # role. A PR that could write the cache would be a path for a branch to
       # plant object code a later main build consumes, and poisoning outlives
@@ -804,45 +744,15 @@ jobs:
       - name: Install stable toolchain
         run: rustup update stable --no-self-update && rustup default stable
       - name: Install mold
-        # Retried and time-boxed, because this is an unpinned network dependency
-        # on the critical path of six jobs. Observed hanging for 20+ minutes on
-        # two consecutive attempts on 2026-10-22 — and on a required job a hang
-        # is not a failure, it is the 45-minute job timeout, which reads as a
-        # non-green check even though every gate passed. `timeout` bounds each
-        # attempt so a stuck mirror is retried rather than waited on; the step
-        # cap is sized to let all three attempts run (3 x 2 x 120s = 12 min).
+        # One copy for the seven jobs here that link with mold (agent-task.yml
+        # has the eighth): retried, time-boxed, and falling back to the default
+        # linker by stripping mold from RUSTFLAGS — the why and the measured
+        # failure modes live in scripts/ci/install-mold.sh's header. 13 min
+        # lets all three bounded attempts run (3 x 2 x 120s = 12 min).
         timeout-minutes: 13
-        run: |
-          for i in 1 2 3; do
-            # Clear the package lists first, so a retry actually re-fetches.
-            # Observed 2026-11-05: `apt-get update` reached ONLY
-            # packages.microsoft.com and never contacted
-            # azure.archive.ubuntu.com, exited 0 with a partial index, and
-            # `apt-get install -y mold` then reported "Unable to locate package
-            # mold". All three attempts repeated it, because each one Hit:1 the
-            # cache it had just been given rather than refetching — so the retry
-            # loop could not recover from the one state it exists for. mold IS
-            # on the image's archive (2.40.4+dfsg-2.1ubuntu1): a different leg
-            # of the same run, on the same ubuntu-26.04 image, installed it.
-            sudo rm -rf /var/lib/apt/lists/*
-            # ...and make a repository that could not be fetched a FAILURE
-            # rather than a warning. Without this a partial update exits 0 and
-            # the `&&` stops guarding anything: install runs against an index
-            # missing the package it is about to look for, and the error
-            # surfaces as a confusing "no such package" instead of "the mirror
-            # was unreachable".
-            if timeout 120 sudo apt-get update -o APT::Update::Error-Mode=any \
-               && timeout 120 sudo apt-get install -y mold; then
-              exit 0
-            fi
-            echo "mold install attempt $i failed or timed out; retrying"
-            sleep 5
-          done
-          # Fall back rather than fail — mold is a speed optimisation, not a
-          # correctness requirement. See the RUSTFLAGS comment in `env:` for
-          # why this is safe and what it costs.
-          echo "::warning title=mold unavailable, using the default linker::three attempts failed (an apt mirror, not this diff); this job will be much slower and may hit its timeout"
-          echo "RUSTFLAGS=${RUSTFLAGS//-C link-arg=-fuse-ld=mold/}" >> "$GITHUB_ENV"
+        # The script lives at the repo root; this workflow defaults `run` to rust/.
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/ci/install-mold.sh
       # Pushes on main assume the WRITE role; everything else (PRs) the READ
       # role. A PR that could write the cache would be a path for a branch to
       # plant object code a later main build consumes, and poisoning outlives
@@ -922,30 +832,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      # Checkout only to have scripts/ci/ on disk — the gate reads no code.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: every test leg must have succeeded
-        # No checkout in this job, so the workflow's `working-directory: rust`
-        # default would fail — point the step at the workspace root.
         working-directory: ${{ github.workspace }}
         env:
           # The matrix aggregate: `success` only if every leg succeeded,
           # `failure` if any failed, `skipped` if the whole job was.
-          RESULT: ${{ needs.test-shard.result }}
-        run: |
-          echo "test tier result: $RESULT"
-          case "$RESULT" in
-            success)
-              echo "all test legs succeeded"
-              ;;
-            skipped)
-              # Defensive only: the legs skip exactly when detect says
-              # code != 'true', and then this gate is itself skipped.
-              echo 'legs reported skipped alongside a running gate'
-              ;;
-            *)
-              echo "::error::a test leg did not succeed (result: $RESULT)"
-              exit 1
-              ;;
-          esac
+          GATE_LEGS: |
+            test-shard=${{ needs.test-shard.result }}
+        run: bash scripts/ci/gate-all-legs.sh
 
   security:
     name: cargo-deny (advisories + licenses + bans)
@@ -1045,39 +941,15 @@ jobs:
       - name: Install stable toolchain
         run: rustup update stable --no-self-update && rustup default stable
       - name: Install mold
-        # Retried and time-boxed — see the `test` job's copy for why.
+        # One copy for the seven jobs here that link with mold (agent-task.yml
+        # has the eighth): retried, time-boxed, and falling back to the default
+        # linker by stripping mold from RUSTFLAGS — the why and the measured
+        # failure modes live in scripts/ci/install-mold.sh's header. 13 min
+        # lets all three bounded attempts run (3 x 2 x 120s = 12 min).
         timeout-minutes: 13
-        run: |
-          for i in 1 2 3; do
-            # Clear the package lists first, so a retry actually re-fetches.
-            # Observed 2026-11-05: `apt-get update` reached ONLY
-            # packages.microsoft.com and never contacted
-            # azure.archive.ubuntu.com, exited 0 with a partial index, and
-            # `apt-get install -y mold` then reported "Unable to locate package
-            # mold". All three attempts repeated it, because each one Hit:1 the
-            # cache it had just been given rather than refetching — so the retry
-            # loop could not recover from the one state it exists for. mold IS
-            # on the image's archive (2.40.4+dfsg-2.1ubuntu1): a different leg
-            # of the same run, on the same ubuntu-26.04 image, installed it.
-            sudo rm -rf /var/lib/apt/lists/*
-            # ...and make a repository that could not be fetched a FAILURE
-            # rather than a warning. Without this a partial update exits 0 and
-            # the `&&` stops guarding anything: install runs against an index
-            # missing the package it is about to look for, and the error
-            # surfaces as a confusing "no such package" instead of "the mirror
-            # was unreachable".
-            if timeout 120 sudo apt-get update -o APT::Update::Error-Mode=any \
-               && timeout 120 sudo apt-get install -y mold; then
-              exit 0
-            fi
-            echo "mold install attempt $i failed or timed out; retrying"
-            sleep 5
-          done
-          # Fall back rather than fail — mold is a speed optimisation, not a
-          # correctness requirement. See the RUSTFLAGS comment in `env:` for
-          # why this is safe and what it costs.
-          echo "::warning title=mold unavailable, using the default linker::three attempts failed (an apt mirror, not this diff); this job will be much slower and may hit its timeout"
-          echo "RUSTFLAGS=${RUSTFLAGS//-C link-arg=-fuse-ld=mold/}" >> "$GITHUB_ENV"
+        # The script lives at the repo root; this workflow defaults `run` to rust/.
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/ci/install-mold.sh
       # PRs assume the READ role — see the server leg's copy for the reasoning.
       - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
         with:
@@ -1197,45 +1069,15 @@ jobs:
       - name: Install stable toolchain
         run: rustup update stable --no-self-update && rustup default stable
       - name: Install mold
-        # Retried and time-boxed, because this is an unpinned network dependency
-        # on the critical path of six jobs. Observed hanging for 20+ minutes on
-        # two consecutive attempts on 2026-10-22 — and on a required job a hang
-        # is not a failure, it is the 45-minute job timeout, which reads as a
-        # non-green check even though every gate passed. `timeout` bounds each
-        # attempt so a stuck mirror is retried rather than waited on; the step
-        # cap is sized to let all three attempts run (3 x 2 x 120s = 12 min).
+        # One copy for the seven jobs here that link with mold (agent-task.yml
+        # has the eighth): retried, time-boxed, and falling back to the default
+        # linker by stripping mold from RUSTFLAGS — the why and the measured
+        # failure modes live in scripts/ci/install-mold.sh's header. 13 min
+        # lets all three bounded attempts run (3 x 2 x 120s = 12 min).
         timeout-minutes: 13
-        run: |
-          for i in 1 2 3; do
-            # Clear the package lists first, so a retry actually re-fetches.
-            # Observed 2026-11-05: `apt-get update` reached ONLY
-            # packages.microsoft.com and never contacted
-            # azure.archive.ubuntu.com, exited 0 with a partial index, and
-            # `apt-get install -y mold` then reported "Unable to locate package
-            # mold". All three attempts repeated it, because each one Hit:1 the
-            # cache it had just been given rather than refetching — so the retry
-            # loop could not recover from the one state it exists for. mold IS
-            # on the image's archive (2.40.4+dfsg-2.1ubuntu1): a different leg
-            # of the same run, on the same ubuntu-26.04 image, installed it.
-            sudo rm -rf /var/lib/apt/lists/*
-            # ...and make a repository that could not be fetched a FAILURE
-            # rather than a warning. Without this a partial update exits 0 and
-            # the `&&` stops guarding anything: install runs against an index
-            # missing the package it is about to look for, and the error
-            # surfaces as a confusing "no such package" instead of "the mirror
-            # was unreachable".
-            if timeout 120 sudo apt-get update -o APT::Update::Error-Mode=any \
-               && timeout 120 sudo apt-get install -y mold; then
-              exit 0
-            fi
-            echo "mold install attempt $i failed or timed out; retrying"
-            sleep 5
-          done
-          # Fall back rather than fail — mold is a speed optimisation, not a
-          # correctness requirement. See the RUSTFLAGS comment in `env:` for
-          # why this is safe and what it costs.
-          echo "::warning title=mold unavailable, using the default linker::three attempts failed (an apt mirror, not this diff); this job will be much slower and may hit its timeout"
-          echo "RUSTFLAGS=${RUSTFLAGS//-C link-arg=-fuse-ld=mold/}" >> "$GITHUB_ENV"
+        # The script lives at the repo root; this workflow defaults `run` to rust/.
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/ci/install-mold.sh
       # Pushes on main assume the WRITE role; everything else (PRs) the READ
       # role. A PR that could write the cache would be a path for a branch to
       # plant object code a later main build consumes, and poisoning outlives
@@ -1335,33 +1177,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      # Checkout only to have scripts/ci/ on disk — the gate reads no code.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: every e2e leg must have succeeded
-        # No checkout in this job, so the workflow's `working-directory: rust`
-        # default would fail — point the step at the (empty) workspace root.
         working-directory: ${{ github.workspace }}
         env:
-          # For the matrix job this is the aggregate: `success` only if every
+          # For each matrix job this is the aggregate: `success` only if every
           # leg succeeded, `failure` if any failed, `skipped` if the whole job
           # was.
-          SHARDS: ${{ needs.lake-e2e.result }}
-          SERVER: ${{ needs.ducklake-e2e.result }}
-        run: |
-          echo "lake shards: $SHARDS; server leg: $SERVER"
-          for r in "$SHARDS" "$SERVER"; do
-            case "$r" in
-              success) ;;
-              skipped)
-                # Defensive only: the legs skip exactly when detect says
-                # code != 'true', and then this gate is itself skipped. If a
-                # leg was skipped while the gate runs, detect gated it.
-                echo 'a leg reported skipped alongside a running gate'
-                ;;
-              *)
-                echo "::error::a DuckLake e2e leg did not succeed (result: $r)"
-                exit 1
-                ;;
-            esac
-          done
+          GATE_LEGS: |
+            lake-e2e=${{ needs.lake-e2e.result }}
+            ducklake-e2e=${{ needs.ducklake-e2e.result }}
+        run: bash scripts/ci/gate-all-legs.sh
 
   # --- heavy perf jobs: main + nightly only (skipped on PRs for latency) ---
 
@@ -1381,45 +1208,15 @@ jobs:
       - name: Install stable toolchain
         run: rustup update stable --no-self-update && rustup default stable
       - name: Install mold
-        # Retried and time-boxed, because this is an unpinned network dependency
-        # on the critical path of six jobs. Observed hanging for 20+ minutes on
-        # two consecutive attempts on 2026-10-22 — and on a required job a hang
-        # is not a failure, it is the 45-minute job timeout, which reads as a
-        # non-green check even though every gate passed. `timeout` bounds each
-        # attempt so a stuck mirror is retried rather than waited on; the step
-        # cap is sized to let all three attempts run (3 x 2 x 120s = 12 min).
+        # One copy for the seven jobs here that link with mold (agent-task.yml
+        # has the eighth): retried, time-boxed, and falling back to the default
+        # linker by stripping mold from RUSTFLAGS — the why and the measured
+        # failure modes live in scripts/ci/install-mold.sh's header. 13 min
+        # lets all three bounded attempts run (3 x 2 x 120s = 12 min).
         timeout-minutes: 13
-        run: |
-          for i in 1 2 3; do
-            # Clear the package lists first, so a retry actually re-fetches.
-            # Observed 2026-11-05: `apt-get update` reached ONLY
-            # packages.microsoft.com and never contacted
-            # azure.archive.ubuntu.com, exited 0 with a partial index, and
-            # `apt-get install -y mold` then reported "Unable to locate package
-            # mold". All three attempts repeated it, because each one Hit:1 the
-            # cache it had just been given rather than refetching — so the retry
-            # loop could not recover from the one state it exists for. mold IS
-            # on the image's archive (2.40.4+dfsg-2.1ubuntu1): a different leg
-            # of the same run, on the same ubuntu-26.04 image, installed it.
-            sudo rm -rf /var/lib/apt/lists/*
-            # ...and make a repository that could not be fetched a FAILURE
-            # rather than a warning. Without this a partial update exits 0 and
-            # the `&&` stops guarding anything: install runs against an index
-            # missing the package it is about to look for, and the error
-            # surfaces as a confusing "no such package" instead of "the mirror
-            # was unreachable".
-            if timeout 120 sudo apt-get update -o APT::Update::Error-Mode=any \
-               && timeout 120 sudo apt-get install -y mold; then
-              exit 0
-            fi
-            echo "mold install attempt $i failed or timed out; retrying"
-            sleep 5
-          done
-          # Fall back rather than fail — mold is a speed optimisation, not a
-          # correctness requirement. See the RUSTFLAGS comment in `env:` for
-          # why this is safe and what it costs.
-          echo "::warning title=mold unavailable, using the default linker::three attempts failed (an apt mirror, not this diff); this job will be much slower and may hit its timeout"
-          echo "RUSTFLAGS=${RUSTFLAGS//-C link-arg=-fuse-ld=mold/}" >> "$GITHUB_ENV"
+        # The script lives at the repo root; this workflow defaults `run` to rust/.
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/ci/install-mold.sh
       # Pushes on main assume the WRITE role; everything else (PRs) the READ
       # role. A PR that could write the cache would be a path for a branch to
       # plant object code a later main build consumes, and poisoning outlives
@@ -1467,45 +1264,15 @@ jobs:
       - name: Install stable toolchain
         run: rustup update stable --no-self-update && rustup default stable
       - name: Install mold
-        # Retried and time-boxed, because this is an unpinned network dependency
-        # on the critical path of six jobs. Observed hanging for 20+ minutes on
-        # two consecutive attempts on 2026-10-22 — and on a required job a hang
-        # is not a failure, it is the 45-minute job timeout, which reads as a
-        # non-green check even though every gate passed. `timeout` bounds each
-        # attempt so a stuck mirror is retried rather than waited on; the step
-        # cap is sized to let all three attempts run (3 x 2 x 120s = 12 min).
+        # One copy for the seven jobs here that link with mold (agent-task.yml
+        # has the eighth): retried, time-boxed, and falling back to the default
+        # linker by stripping mold from RUSTFLAGS — the why and the measured
+        # failure modes live in scripts/ci/install-mold.sh's header. 13 min
+        # lets all three bounded attempts run (3 x 2 x 120s = 12 min).
         timeout-minutes: 13
-        run: |
-          for i in 1 2 3; do
-            # Clear the package lists first, so a retry actually re-fetches.
-            # Observed 2026-11-05: `apt-get update` reached ONLY
-            # packages.microsoft.com and never contacted
-            # azure.archive.ubuntu.com, exited 0 with a partial index, and
-            # `apt-get install -y mold` then reported "Unable to locate package
-            # mold". All three attempts repeated it, because each one Hit:1 the
-            # cache it had just been given rather than refetching — so the retry
-            # loop could not recover from the one state it exists for. mold IS
-            # on the image's archive (2.40.4+dfsg-2.1ubuntu1): a different leg
-            # of the same run, on the same ubuntu-26.04 image, installed it.
-            sudo rm -rf /var/lib/apt/lists/*
-            # ...and make a repository that could not be fetched a FAILURE
-            # rather than a warning. Without this a partial update exits 0 and
-            # the `&&` stops guarding anything: install runs against an index
-            # missing the package it is about to look for, and the error
-            # surfaces as a confusing "no such package" instead of "the mirror
-            # was unreachable".
-            if timeout 120 sudo apt-get update -o APT::Update::Error-Mode=any \
-               && timeout 120 sudo apt-get install -y mold; then
-              exit 0
-            fi
-            echo "mold install attempt $i failed or timed out; retrying"
-            sleep 5
-          done
-          # Fall back rather than fail — mold is a speed optimisation, not a
-          # correctness requirement. See the RUSTFLAGS comment in `env:` for
-          # why this is safe and what it costs.
-          echo "::warning title=mold unavailable, using the default linker::three attempts failed (an apt mirror, not this diff); this job will be much slower and may hit its timeout"
-          echo "RUSTFLAGS=${RUSTFLAGS//-C link-arg=-fuse-ld=mold/}" >> "$GITHUB_ENV"
+        # The script lives at the repo root; this workflow defaults `run` to rust/.
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/ci/install-mold.sh
       # Pushes on main assume the WRITE role; everything else (PRs) the READ
       # role. A PR that could write the cache would be a path for a branch to
       # plant object code a later main build consumes, and poisoning outlives
@@ -1760,105 +1527,14 @@ jobs:
       # reports when it stops short rather than looking finished.
       MAX_DELETES: "4000"
     steps:
+      # Checkout only to have scripts/ci/ on disk — the prune reads no code.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Prune
-        # No checkout, so step off the workflow's `rust` working-directory
-        # default, which would not exist.
+        # The enumeration-not-usage-endpoint rationale and the concurrency
+        # measurements live in the script's own comments; the BUDGETS above
+        # keep the measured numbers next to the knobs they size.
         working-directory: ${{ github.workspace }}
-        run: |
-          set -euo pipefail
-
-          # Totals by ENUMERATION, not from `actions/cache/usage`. That
-          # endpoint is a lagging aggregate: measured 2026-10-22 immediately
-          # after this job deleted 29 entries worth ~2.7 GiB, it returned the
-          # identical byte count on three reads 45s apart while the enumerated
-          # sum tracked live writes —
-          #
-          #     reported 10.02 GiB   enumerated 7.27 GiB   delta 2.75 GiB
-          #     reported 10.02 GiB   enumerated 7.33 GiB   delta 2.69 GiB
-          #     reported 10.02 GiB   enumerated 7.28 GiB   delta 2.74 GiB
-          #
-          # i.e. the delta was exactly what had been deleted. Reporting from it
-          # would print an unchanged before/after and make a working prune look
-          # like a no-op — a hygiene job whose only output lies about its own
-          # effect. The enumeration costs one extra paginated sweep.
-          report() {
-            gh api --paginate "repos/$GITHUB_REPOSITORY/actions/caches?per_page=100" \
-              --jq '.actions_caches[].size_in_bytes' |
-              awk '{s+=$1; n++}
-                   END {printf "%d entries, %d bytes (%.2f GiB enumerated)\n", n, s, s/1073741824}'
-          }
-
-          echo "::group::before"
-          echo "total: $(report)"
-          gh api --paginate "repos/$GITHUB_REPOSITORY/actions/caches?per_page=100" \
-            --jq '.actions_caches[] | "\(.size_in_bytes)\t\(.key | split("/")[0])"' |
-            awk -F'\t' '{c[$2]++; s[$2]+=$1}
-                        END {for (k in c) printf "%7d entries %9.1f MiB  %s\n", c[k], s[k]/1048576, k}' |
-            sort -k3 -rn
-          echo "::endgroup::"
-
-          # One pass per capped prefix. Each is independent: a prefix already
-          # under budget contributes no deletions, which is the correct no-op.
-          grand_deleted=0
-          while read -r prefix budget_mib; do
-            [ -n "$prefix" ] || continue
-
-            entries=$(mktemp)
-            gh api --paginate \
-              "repos/$GITHUB_REPOSITORY/actions/caches?per_page=100&key=$prefix&sort=last_accessed_at&direction=asc" \
-              --jq '.actions_caches[] | "\(.id)\t\(.size_in_bytes)"' >"$entries"
-
-            total=$(awk -F'\t' '{s+=$2} END {print s+0}' "$entries")
-            budget=$((budget_mib * 1048576))
-            printf '%s: %d entries, %d MiB (budget %d MiB)\n' \
-              "$prefix" "$(wc -l <"$entries")" "$((total / 1048576))" "$budget_mib"
-
-            if [ "$total" -le "$budget" ]; then
-              echo "  under budget; nothing to do"
-              continue
-            fi
-
-            # Choose the victims in one pass, then delete them CONCURRENTLY. A
-            # sequential loop is what the first version did and it does not fit
-            # in any sane timeout: one DELETE is a separate HTTPS round trip
-            # (~150 ms) and the backlog was 5,595 entries / 5,846 MiB, i.e.
-            # ~3,400 deletions. Measured: it ran past 10 minutes having cleared
-            # only part of it. `xargs -P 8` does 1,586 in 2m00.
-            #
-            # MAX_DELETES bounds a single run so the job cannot become unbounded
-            # work if a backlog is ever huge; it converges over successive runs
-            # instead. Anything dropped is reported, never silent.
-            remaining_cap=$((MAX_DELETES - grand_deleted))
-            if [ "$remaining_cap" -le 0 ]; then
-              printf '  deletion cap %d already spent; the next run continues here\n' "$MAX_DELETES"
-              continue
-            fi
-
-            doomed=$(mktemp)
-            awk -F'\t' -v budget="$budget" -v total="$total" -v cap="$remaining_cap" '
-              total <= budget { exit }
-              NR > cap        { exit }
-              { print $1; total -= $2 }
-            ' "$entries" >"$doomed"
-            want=$(wc -l <"$doomed")
-            printf '  deleting %d oldest-accessed entries (cap %d remaining)\n' "$want" "$remaining_cap"
-
-            # `|| true` per delete: a concurrent run may have evicted it
-            # already, which is not a failure. xargs would otherwise exit 123
-            # and, under `set -e`, fail a job whose whole point is hygiene.
-            export GITHUB_REPOSITORY
-            xargs -r -P 8 -I{} sh -c \
-              'gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/caches/{}" --silent 2>/dev/null || true' \
-              <"$doomed"
-
-            grand_deleted=$((grand_deleted + want))
-            if [ "$want" -ge "$remaining_cap" ]; then
-              printf '  hit the deletion cap with %s still over budget; the next run continues\n' "$prefix"
-            fi
-          done <<<"$BUDGETS"
-
-          printf 'deleted %d entries in total\n' "$grand_deleted"
-          echo "total: $(report)"
+        run: bash scripts/ci/cache-prune.sh
 
   # Writes the content-addressed pass marker `detect` looks up. Runs only on a
   # PR, only when the gate actually ran (not when it was itself skipped by a
