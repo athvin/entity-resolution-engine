@@ -76,6 +76,9 @@ on:
     paths:
       - infra/k8s/**
       - scripts/obs_up.sh
+      # The deploy's own extracted steps: without these, an edit to a deploy
+      # script would never trigger the workflow that runs it.
+      - scripts/ci/deploy-*.sh
   # The manual path, for redeploying a sha whose images already exist.
   workflow_dispatch:
     inputs:
@@ -129,6 +132,13 @@ jobs:
       # commit by design. It changes the stale-digest message below from a
       # warning into a note — see the reasoning there.
       PLATFORM_ONLY: ${{ github.event_name == 'push' }}
+      # The executor allowlist (batch-orchestration-design §11): these kinds
+      # run as per-attempt Kubernetes Jobs in this namespace. Enabled HERE,
+      # not in the chart default, so a developer namespace opts in
+      # deliberately. Job-level so the install and the cut-over read ONE
+      # value — they used to carry two copies that had to agree, or the
+      # cut-over quietly reverted the allowlist the install just widened.
+      DAG_KINDS: 'lake_maintain\,lake_migrate\,run_all_full\,run_all_incremental\,correct\,train\,profile\,provision\,dataset_provision\,apply_corrections\,apply_approved'
     steps:
       - name: Name the commit being deployed
         run: echo "deploying $DEPLOY_SHA"
@@ -154,107 +164,12 @@ jobs:
           aws-region: us-east-2
       - name: Resolve image digests
         id: digests
-        # §14.2: a deploy passes a DIGEST, never a tag, and gates on that digest
-        # being present in the registry first. Promotion-by-digest is only a
-        # property if the thing being deployed is identified by content.
-        #
-        # Images are tagged by full sha and built only when their own tree
-        # moved, so for any given commit one of them may legitimately have no
-        # sha tag. In that case reuse the newest digest already in the repo —
-        # that IS what is running — and say so in the log. Nothing is deployed
-        # by tag either way, and an empty result is fatal.
-        run: |
-          set -euo pipefail
-          for repo in er-api er-web; do
-            d="$(aws ecr describe-images --repository-name "$repo" \
-                   --image-ids "imageTag=$DEPLOY_SHA" \
-                   --query 'imageDetails[0].imageDigest' --output text 2>/dev/null || true)"
-            if [ -z "$d" ] || [ "$d" = "None" ]; then
-              d="$(aws ecr describe-images --repository-name "$repo" \
-                     --query 'reverse(sort_by(imageDetails,&imagePushedAt))[0].imageDigest' \
-                     --output text 2>/dev/null || true)"
-              # A WARNING, not just a log line. Reusing a digest is correct
-              # when that tree genuinely did not change — but it also happens
-              # when the build that should have produced one was skipped or
-              # never ran, and then a GREEN deploy ships code from an arbitrary
-              # number of commits back. Observed: the images run carrying the
-              # telemetry exporter died in an outage, the next merge was
-              # frontend-only so er-api was correctly skipped, and the deploy
-              # reported success while rolling an image nine commits stale.
-              #
-              # The annotation puts it in the run summary where it is read,
-              # rather than 140 lines into a step log where it was not.
-              # Two cases reach here and they deserve different volumes.
-              #
-              # On the `workflow_run` path a missing image is SUSPICIOUS: an
-              # images run did happen, so either that tree genuinely did not
-              # change or a build was skipped and this deploy is about to ship
-              # older code. That is the case the warning was added for, and it
-              # must stay loud.
-              #
-              # On the `push` path — a platform-only commit under
-              # `infra/k8s/**` — no image was built BY DESIGN, so reuse is the
-              # expected and correct outcome every single time. Warning there
-              # would fire on every such deploy and teach the reader to ignore
-              # the annotation, which would cost exactly the signal the loud
-              # case exists to provide.
-              if [ "$PLATFORM_ONLY" = "true" ]; then
-                echo "::notice title=$repo digest reused (platform-only deploy)::no image tagged $DEPLOY_SHA, which is expected: this commit touched only infra/k8s, so nothing was built. Rolling the newest digest in ECR ($d), which is what is already running."
-              else
-                echo "::warning title=$repo reused a stale digest::no image tagged $DEPLOY_SHA; rolled the newest digest in ECR instead ($d). Correct if that tree did not change in this commit — but if its build was skipped or failed, this deploy shipped older code than $DEPLOY_SHA."
-              fi
-              echo "$repo: no image tagged $DEPLOY_SHA — REUSED newest digest $d"
-              echo "reused_${repo//-/_}=1" >> "$GITHUB_OUTPUT"
-
-              # REFUSE, rather than warn, when the tree that builds this image
-              # actually moved between what is running and what is being
-              # deployed.
-              #
-              # The warning above was not enough, and the evidence is specific:
-              # it fired on four deploys on 2026-11-05 — P12's metrics, P15's
-              # structured logging, P22's gate and P7's action header all
-              # merged, green, and absent from the running binary — and nobody
-              # read it, including the person who added it for exactly this
-              # failure. Something that must not be missed has to fail a check,
-              # not annotate one.
-              #
-              # The question is answerable because the reused digest carries
-              # the sha it WAS built from. `git diff <that sha>..<DEPLOY_SHA>`
-              # over the image's own source paths says whether this deploy
-              # would ship older code than it claims. No image tag and no
-              # source change is the legitimate case (#587's platform-only
-              # path, or a tree that genuinely did not move); no image tag WITH
-              # a source change is the bug.
-              built_from="$(aws ecr describe-images --repository-name "$repo" \
-                              --image-ids "imageDigest=$d" \
-                              --query 'imageDetails[0].imageTags[0]' --output text 2>/dev/null || true)"
-              case "$repo" in
-                er-api) watched="rust Dockerfile entities" ;;
-                er-web) watched="frontend" ;;
-                *)      watched="" ;;
-              esac
-              if [ -n "$built_from" ] && [ "$built_from" != "None" ] && [ -n "$watched" ]; then
-                # shellcheck disable=SC2086
-                if ! git cat-file -e "${built_from}^{commit}" 2>/dev/null; then
-                  echo "::warning title=$repo cannot verify the reused digest::its tag '$built_from' is not a commit in this checkout, so the staleness check could not run"
-                elif changed="$(git diff --name-only "$built_from".."$DEPLOY_SHA" -- $watched)" && [ -n "$changed" ]; then
-                  echo "::error title=$repo would ship older code than $DEPLOY_SHA::the newest digest in ECR was built from $built_from, and these paths changed between it and $DEPLOY_SHA. Refusing to deploy rather than reporting success on a stale image. Build it with: gh workflow run images.yml -f ref=$DEPLOY_SHA"
-                  echo "$changed" | head -20
-                  exit 1
-                else
-                  echo "$repo: reuse verified — no change under '$watched' between $built_from and $DEPLOY_SHA"
-                fi
-              fi
-            else
-              echo "$repo: $DEPLOY_SHA -> $d"
-              echo "reused_${repo//-/_}=0" >> "$GITHUB_OUTPUT"
-            fi
-            if [ -z "$d" ] || [ "$d" = "None" ]; then
-              echo "::error::no digest in ECR for $repo; refusing to deploy by tag"
-              exit 1
-            fi
-            echo "${repo//-/_}=$d" >> "$GITHUB_OUTPUT"
-          done
+        # §14.2: a deploy passes a DIGEST, never a tag — the reuse rules, the
+        # warning-versus-notice volumes and the staleness REFUSE live in
+        # scripts/ci/deploy-resolve-digests.sh with the code. Reads DEPLOY_SHA
+        # and PLATFORM_ONLY from the job env; needs the full-history checkout
+        # above for the `git diff` staleness guard.
+        run: bash scripts/ci/deploy-resolve-digests.sh
       - name: Install helm
         # Version-pinned tarball rather than a third-party action, the same
         # choice the disk-reclaim step in rust.yml documents: every `uses:` in
@@ -296,29 +211,13 @@ jobs:
         run: bash scripts/obs_up.sh
       - name: Say what was deployed
         # The summary is the artifact someone reads a week later when asking
-        # "was that change actually out?". A digest alone does not answer it;
-        # whether it came from THIS commit does.
+        # "was that change actually out?" — see the script.
         env:
           API_REUSED: ${{ steps.digests.outputs.reused_er_api }}
           WEB_REUSED: ${{ steps.digests.outputs.reused_er_web }}
-        run: |
-          {
-            echo "### deploy — dev (\`ci\` namespace)"
-            echo ""
-            echo "| image | digest | from this commit? |"
-            echo "|---|---|---|"
-            for pair in "er-api:$API_REUSED:${{ steps.digests.outputs.er_api }}" \
-                        "er-web:$WEB_REUSED:${{ steps.digests.outputs.er_web }}"; do
-              name="${pair%%:*}"; rest="${pair#*:}"; reused="${rest%%:*}"; digest="${rest#*:}"
-              if [ "$reused" = "1" ]; then
-                echo "| \`$name\` | \`${digest:0:19}…\` | **no — reused the newest digest in ECR** |"
-              else
-                echo "| \`$name\` | \`${digest:0:19}…\` | yes |"
-              fi
-            done
-            echo ""
-            echo "Commit: \`$DEPLOY_SHA\`"
-          } >> "$GITHUB_STEP_SUMMARY"
+          API_DIGEST: ${{ steps.digests.outputs.er_api }}
+          WEB_DIGEST: ${{ steps.digests.outputs.er_web }}
+        run: bash scripts/ci/deploy-summary.sh
 
       # The executor allowlist (batch-orchestration-design §11): these kinds
       # run as per-attempt Kubernetes Jobs in this namespace. Enabled HERE,
@@ -326,9 +225,9 @@ jobs:
       # deliberately.
       #
       # EVERY kind is listed, which completes Phase 3's rollout. The value
-      # lives in `DAG_KINDS` and is set in TWO steps — the install and the
-      # cut-over — which must agree, or the cut-over reverts what the install
-      # widened.
+      # lives in the job-level `DAG_KINDS` env, which the install and the
+      # cut-over both read — one value, so the cut-over can no longer revert
+      # an allowlist the install widened.
       #
       # This comment used to say the last few kinds would go on one at a time
       # "as each is observed" on a cluster. That was the wrong unit. What a
@@ -352,118 +251,28 @@ jobs:
             --namespace default --set "developer=$CI_NAMESPACE" --wait
 
       - name: Read the live colour
-        # NEVER guessed. The Service selector is the single source of truth for
-        # which colour is serving — the same field the cutover moves — so this
-        # cannot drift from reality the way a stored value or a convention
-        # would. `make dev-resume` reads it the same way.
-        #
-        # Absent selector == first install: there is no live colour, so there is
-        # nothing to cut over FROM and the deploy takes the simple path below.
+        # NEVER guessed — the Service selector is the single source of truth
+        # (D-BLUEGREEN); the reading and the first-install path live in
+        # scripts/ci/deploy-read-colour.sh.
         id: colour
-        run: |
-          set -euo pipefail
-          live="$(kubectl -n "$CI_NAMESPACE" get svc er-web \
-            -o jsonpath='{.spec.selector.er\.dupezero\.com/color}' 2>/dev/null || true)"
-          if [ -z "$live" ]; then
-            echo "no live colour (first install) — deploying blue directly"
-            echo "first=true" >> "$GITHUB_OUTPUT"
-            echo "live=blue" >> "$GITHUB_OUTPUT"
-            echo "target=blue" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          case "$live" in
-            blue) target=green ;;
-            green) target=blue ;;
-            *) echo "::error::svc/er-web selects unknown colour '$live'"; exit 1 ;;
-          esac
-          # The digests the LIVE colour is already serving, so the upgrade that
-          # deploys the target does not re-render the live Deployment and
-          # restart the pod taking traffic. `image: reg/repo@sha256:…` -> the
-          # digest only.
-          live_api="$(kubectl -n "$CI_NAMESPACE" get deploy "web-api-$live" \
-            -o jsonpath='{.spec.template.spec.containers[?(@.name=="er-server")].image}' | sed 's/.*@//')"
-          live_web="$(kubectl -n "$CI_NAMESPACE" get deploy "web-api-$live" \
-            -o jsonpath='{.spec.template.spec.containers[?(@.name=="er-web")].image}' | sed 's/.*@//')"
-          echo "live=$live target=$target"
-          echo "live api=$live_api web=$live_web"
-          {
-            echo "first=false"
-            echo "live=$live"
-            echo "target=$target"
-            echo "live_api=$live_api"
-            echo "live_web=$live_web"
-          } >> "$GITHUB_OUTPUT"
+        run: bash scripts/ci/deploy-read-colour.sh
 
       - name: Deploy the inactive colour
-        # Phase 1 of the cutover. Traffic does NOT move here: `color.active`
-        # stays on the live colour, and the new digests go into the other one.
-        #
-        # THE SCHEMA GATE IS THE HOOK, not a step here. `er-schema-migrate`
-        # (weight -5) runs `er-server migrate --expect-additive`, which plans
-        # first and refuses — writing nothing — if the release is breaking.
-        # Helm runs hooks before any release object is applied, so a breaking
-        # release fails with the live colour untouched. A separate preflight Job
-        # would be the same check twice.
-        #
-        # `images.api/web.digest` is what the HOOK migrates with: the colour
-        # blocks say what each Deployment runs, while `images.*` means "the
-        # release this upgrade is about".
+        # Phase 1 of the cutover: traffic does NOT move here. The schema gate
+        # is the `er-schema-migrate` helm hook, and the live colour is pinned
+        # to what it already serves — both explained in
+        # scripts/ci/deploy-inactive-colour.sh with the code.
         env:
           LIVE: ${{ steps.colour.outputs.live }}
           TARGET: ${{ steps.colour.outputs.target }}
           FIRST: ${{ steps.colour.outputs.first }}
           LIVE_API: ${{ steps.colour.outputs.live_api }}
           LIVE_WEB: ${{ steps.colour.outputs.live_web }}
-          DAG_KINDS: 'lake_maintain\,lake_migrate\,run_all_full\,run_all_incremental\,correct\,train\,profile\,provision\,dataset_provision\,apply_corrections\,apply_approved'
           NEW_API: ${{ steps.digests.outputs.er_api }}
           NEW_WEB: ${{ steps.digests.outputs.er_web }}
           FS: ${{ steps.env.outputs.fs }}
           AP: ${{ steps.env.outputs.ap }}
-        run: |
-          set -euo pipefail
-          args=(
-            --namespace "$CI_NAMESPACE" --set "developer=$CI_NAMESPACE"
-            --set "images.api.digest=$NEW_API"
-            --set "images.web.digest=$NEW_WEB"
-            --set "efs.fileSystemId=$FS"
-            --set "efs.accessPointId=$AP"
-            # The executor allowlist (batch-orchestration-design §11): these
-            # kinds run as per-attempt Kubernetes Jobs in this namespace.
-            # Enabled HERE, not in the chart default, so a developer namespace
-            # opts in deliberately. SET IN TWO PLACES -- the install below and
-            # the cut-over step -- and they must agree, or the cut-over quietly
-            # reverts the allowlist the install just widened.
-            #
-            # All kinds now, having earlier said the last few would go on one at
-            # a time as each was observed on a cluster. What a cluster run adds
-            # is not per-kind: real scheduling, real projected-token
-            # verification, real EFS and a real image are PLATFORM properties,
-            # already proven live by `lake_maintain` (Phase 2) and by
-            # `run_all_full` as seven pods. The per-kind risk is in the bodies
-            # and the work orders, and the integration tier covers both for
-            # every kind -- `pg_run_all_dag.rs` and `pg_run_all_pipeline.rs`
-            # stand up the REAL control plane against a real DuckLake and run
-            # the real `exec-task` binary. A cluster run per kind would re-prove
-            # the platform, not the kind.
-            --set "executor.dagKinds=$DAG_KINDS"
-            --set "color.active=$LIVE"
-            --set "color.$TARGET.replicas=1"
-            --set "color.$TARGET.api.digest=$NEW_API"
-            --set "color.$TARGET.web.digest=$NEW_WEB"
-          )
-          if [ "$FIRST" != "true" ]; then
-            # Pin the live colour to what it is ALREADY serving. Without this
-            # the live Deployment re-renders to the new digest and restarts the
-            # pod taking traffic, which is the outage this exists to remove.
-            args+=(
-              --set "color.$LIVE.replicas=1"
-              --set "color.$LIVE.api.digest=$LIVE_API"
-              --set "color.$LIVE.web.digest=$LIVE_WEB"
-            )
-          fi
-          helm upgrade --install er-platform infra/k8s/charts/er-platform \
-            "${args[@]}" --atomic --wait --timeout 10m
-          kubectl -n "$CI_NAMESPACE" rollout status "deploy/web-api-$TARGET" --timeout=5m
+        run: bash scripts/ci/deploy-inactive-colour.sh
 
       - name: Smoke-test the inactive colour
         # Through the PREVIEW Services, which select the inactive colour. Hitting
@@ -493,49 +302,21 @@ jobs:
           echo "the $TARGET colour serves through its own Services"
 
       - name: Cut over
-        # Phase 2: the whole cutover is this one field on two Service objects.
-        # The old colour keeps running, so a rollback is the same field moving
-        # back — see the summary this writes.
+        # Phase 2: one selector field on two Services moves traffic; the old
+        # colour keeps running so rollback is the same field moving back. The
+        # verification and the rollback summary live in
+        # scripts/ci/deploy-cutover.sh.
         if: steps.colour.outputs.first != 'true'
         env:
           LIVE: ${{ steps.colour.outputs.live }}
           TARGET: ${{ steps.colour.outputs.target }}
           LIVE_API: ${{ steps.colour.outputs.live_api }}
           LIVE_WEB: ${{ steps.colour.outputs.live_web }}
-          DAG_KINDS: 'lake_maintain\,lake_migrate\,run_all_full\,run_all_incremental\,correct\,train\,profile\,provision\,dataset_provision\,apply_corrections\,apply_approved'
           NEW_API: ${{ steps.digests.outputs.er_api }}
           NEW_WEB: ${{ steps.digests.outputs.er_web }}
           FS: ${{ steps.env.outputs.fs }}
           AP: ${{ steps.env.outputs.ap }}
-        run: |
-          set -euo pipefail
-          helm upgrade er-platform infra/k8s/charts/er-platform \
-            --namespace "$CI_NAMESPACE" --set "developer=$CI_NAMESPACE" \
-            --set "images.api.digest=$NEW_API" --set "images.web.digest=$NEW_WEB" \
-            --set "efs.fileSystemId=$FS" --set "efs.accessPointId=$AP" \
-            --set "executor.dagKinds=$DAG_KINDS" \
-            --set "color.active=$TARGET" \
-            --set "color.$TARGET.replicas=1" \
-            --set "color.$TARGET.api.digest=$NEW_API" \
-            --set "color.$TARGET.web.digest=$NEW_WEB" \
-            --set "color.$LIVE.replicas=1" \
-            --set "color.$LIVE.api.digest=$LIVE_API" \
-            --set "color.$LIVE.web.digest=$LIVE_WEB" \
-            --atomic --wait --timeout 10m
-          now="$(kubectl -n "$CI_NAMESPACE" get svc er-web \
-            -o jsonpath='{.spec.selector.er\.dupezero\.com/color}')"
-          [ "$now" = "$TARGET" ] || { echo "::error::cutover did not take: svc selects '$now'"; exit 1; }
-          echo "traffic is on $TARGET"
-          {
-            echo "### Cut over to \`$TARGET\`"
-            echo
-            echo "The \`$LIVE\` colour is still running. To roll back:"
-            echo
-            echo '```'
-            echo "helm upgrade er-platform infra/k8s/charts/er-platform \\"
-            echo "  --namespace $CI_NAMESPACE --reuse-values --set color.active=$LIVE"
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+        run: bash scripts/ci/deploy-cutover.sh
 
       - name: Retire the old colour
         # Phase 3, and the one step that is deliberately NOT --atomic-coupled to
