@@ -37,6 +37,7 @@ the same fix.
 | `api-contract` | the utoipa `ApiDoc` whose component schemas come from the generated entity structs |
 | `aws-account-operations` | the single-account model where environments are separated by name prefix and permission set |
 | `ci-and-supply-chain` | the `detect`-job pattern that lets a required check skip without blocking a PR |
+| `claim-ticket` | selects the most important unclaimed card in the board's In progress queue (or takes a given issue number) (user-invoked only) |
 | `ducklake-lakehouse` | the ATTACH options, the native-temp-catalog rule for intermediates |
 | `ducklake-performance` | how to read span and resource evidence without over-claiming |
 | `entity-framework` | the YAML-driven schema and SQL governance where every table is an entity.yaml |
@@ -130,8 +131,9 @@ can still accept a routing clause.
 | Headroom | Skill | Length |
 |---:|---|---:|
 |    7 | `skill-audit` | 1017 |
+|   12 | `project-board` | 1012 |
 |   20 | `security` | 1004 |
-|   48 | `project-board` | 976 |
+|   45 | `land-pr` | 979 |
 |   66 | `entity-framework` | 958 |
 |   73 | `aws-account-operations` | 951 |
 |   74 | `frontend-bff` | 950 |
@@ -146,8 +148,8 @@ can still accept a routing clause.
 |   90 | `landing-page` | 934 |
 |   96 | `er-matching` | 928 |
 |   99 | `ci-and-supply-chain` | 925 |
+|  102 | `claim-ticket` | 922 |
 |  123 | `infra-platform` | 901 |
-|  135 | `land-pr` | 889 |
 |  138 | `skill-writer` | 886 |
 |  177 | `api-contract` | 847 |
 |  179 | `ducklake-performance` | 845 |
@@ -158,8 +160,9 @@ headroom than that cannot take another one — adding routing to any of them
 means trimming its **what** clause first, which is the documented fix:
 
 - `skill-audit` — 7 characters free
+- `project-board` — 12 characters free
 - `security` — 20 characters free
-- `project-board` — 48 characters free
+- `land-pr` — 45 characters free
 <!-- END GENERATED: description-budget -->
 - No `allowed-tools`: it only *pre-approves* tools, it cannot restrict them, and
   nothing here needs pre-approval.
