@@ -9,6 +9,25 @@
 //! others. Doing it that way rather than writing a second JSON-shaped profiler
 //! is what keeps one set of aggregates (and one golden) covering all three.
 //!
+//! # The cluster-size distribution belongs elsewhere
+//!
+//! The design listed a cluster-size distribution among the golden subject's
+//! metrics — how big the resolved entities are, which is a real over-merge
+//! signal. It is not here, and should not be added here.
+//!
+//! Two reasons, both structural. A profile is one row per COLUMN
+//! (`column_profiles`) plus run-level scalars (`profile_runs`); a histogram over
+//! entity sizes is neither, so it would arrive as the first bounded-JSON column
+//! on `profile_runs` purely to fit a shape the table was not designed for — and
+//! the design's own rule is to keep these tables narrow. More decisively,
+//! `metric_snapshot` already carries `largest_group`, which is the headline of
+//! exactly that distribution; putting the distribution in the profile would
+//! split one concept across two tables that are written by different stages and
+//! read by different screens.
+//!
+//! So it is a `metric_snapshot` column beside `largest_group`, in whatever
+//! change next touches the metrics stage. Nothing here is blocked on it.
+//!
 //! Persistence is the staging-temp-plus-MERGE pattern `write_metric_snapshot`
 //! established: build a temp table shaped like the target, call the generated
 //! upsert, drop the temp. The MERGE keys on each table's natural key, so
