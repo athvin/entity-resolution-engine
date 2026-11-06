@@ -153,9 +153,13 @@ rendered in the same image CI uses.
 These have all bitten this repo, and they are why a gate is not trusted until it
 has been observed **failing** — break a new one on purpose before relying on it.
 
-- **A piped exit code.** `playwright test | tail` reports the pipe's status, not
-  Playwright's, so a failing suite looks green. Never pipe a gate's output in
-  CI without `pipefail`.
+- **A piped exit code, which bites by hand rather than in CI.** A pipeline
+  reports its last command's status, so `pnpm test:e2e | tail` reads green over
+  a failing suite — put the gate last in a compound invocation. No gate step in
+  `frontend.yml` pipes, and that is the only reason it is safe there: its `run:`
+  steps take GitHub's default `bash -e {0}`, which carries **no** `pipefail`
+  (only an explicit `shell: bash` or `set -o pipefail` adds it, as `detect`'s
+  pass-key step does). A step that must pipe has to opt in.
 - **Semgrep's zero findings on a parse error.** A ruleset that fails to parse
   reports no findings, which is indistinguishable from "clean".
 - **A mock that diverges from the real router.** A mock backend answering a

@@ -44,7 +44,7 @@ also seeds a basic convenience login for manual poking — `admin@dupezone.com` 
 
 ## Tests
 
-Four tiers. Which one a change belongs in, and what each gate is for, is
+Which tier a change belongs in, and what each gate is for, is
 [docs/frontend-testing.md](../docs/frontend-testing.md).
 
 ```sh
@@ -57,20 +57,28 @@ corepack pnpm test
 # (desktop Chromium 1440x900, iPhone 15 WebKit, Pixel 7)
 corepack pnpm build && corepack pnpm test:e2e
 
+# + a real PostgreSQL: the postgres.js driver contract, and nothing else.
+# Outside vitest.config.ts's include, so `pnpm check` never runs it.
+ERWEB_DATABASE_URL=postgresql://… corepack pnpm test:driver
+
 # the supply chain (needs network): HIGH/CRITICAL advisories + the licence
 # allowlist — the frontend's cargo-deny equivalent
 make frontend-audit
 ```
 
-**The full-stack tier (`tests/e2e/`) is dormant.** It needs a seeded tenant, and
-`make frontend-seed` has neither a Makefile target nor an implementation —
-`frontend/dev/seed.py` was deleted in the all-Rust cutover with no replacement.
-See [docs/frontend-testing.md](../docs/frontend-testing.md#dormant-the-full-stack-tier)
-before reviving it.
+**The full-stack tier (`tests/e2e/`) is a release gate, not a PR gate.** It
+needs Docker and a seeded tenant: `make frontend-dev`, `make frontend-seed`,
+`corepack pnpm build`, then `make frontend-e2e`. It was dormant from the
+all-Rust cutover until W0.5b restored the substrate — `frontend/dev/seed.py` was
+deleted then and `frontend/dev/seed.mjs` replaced it — so treat any older note
+calling it unavailable as stale. See
+[docs/frontend-testing.md](../docs/frontend-testing.md#the-full-stack-tier).
 
 The gate runs on every PR and **blocks the merge**: `lint + types + unit`,
-`playwright functional tier` and `pnpm audit + licenses` are required status
-checks. `make frontend` is the local equivalent of the first two.
+`playwright functional tier`, `pnpm audit + licenses` and
+`postgres.js driver contract` are required status checks. `make frontend` covers
+the first two locally; it does **not** run the driver tier, so a green
+`make frontend` cannot speak for that last context.
 
 The mock tier exists because BFF→erserver calls happen server-side, where
 browser-level route interception can't reach: `tests/mock-erserver/server.mjs`

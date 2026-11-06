@@ -34,12 +34,13 @@ Other gates, each run on its own because they need external services:
 **The frontend gate blocks merges now.** `lint + types + unit`, `playwright
 functional tier`, `pnpm audit + licenses` and `postgres.js driver contract` are
 required status checks on `main` alongside the Rust and Terraform ones — before
-2026-10-20 the frontend CI ran and was then ignored at merge time. The required
-set is branch-protection configuration rather than a file in the tree, so no
-count of it anywhere here can be gated; read it from the repository settings. `.github/workflows/frontend.yml` therefore has no `paths:`
-filter: it uses the same `detect`-job pattern `rust.yml` does, because a workflow
-a path filter skips never reports, and a required check that never reports blocks
-every backend-only PR forever.
+2026-10-20 the frontend CI ran and was then ignored at merge time.
+`.github/workflows/frontend.yml` therefore has no `paths:` filter: it uses the
+same `detect`-job pattern `rust.yml` does, because a workflow a path filter
+skips never reports, and a required check that never reports blocks every
+backend-only PR forever. The required set itself is branch-protection
+configuration rather than a file in the tree, so no count of it anywhere here
+can be gated; read it from the repository settings.
 
 `docs/frontend-testing.md` is the frontend standard — which test tier a change
 belongs in, what each gate is for, and the rule that every gate must be observed
