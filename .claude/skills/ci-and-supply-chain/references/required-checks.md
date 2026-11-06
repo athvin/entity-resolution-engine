@@ -123,8 +123,8 @@ job instead — `terraform plan` is the worked example.
 | `detect` | detect changes | 5 | `always` |
 | `skills` | agent skills (lint + drift) | 5 | `always` |
 | `workflow-pins` | workflow pins (S9) | 5 | `always` |
-| `lint` | fmt + clippy + docs | 45 | `needs.detect.outputs.code == 'true'` |
-| `entities` | entities | 45 | `needs.detect.outputs.code == 'true'` |
+| `lint` | fmt + clippy + docs | 45 | `needs.detect.outputs.code == 'true' \|\| needs.detect.outputs.drift == 'true'` |
+| `entities` | entities | 45 | `needs.detect.outputs.code == 'true' \|\| needs.detect.outputs.erd == 'true'` |
 | `test-shard` | test shard (${{ matrix.slice }}) | 45 | `needs.detect.outputs.code == 'true'` |
 | `test-gate` | test | 5 | `${{ !cancelled() && needs.detect.outputs.code == 'true' }}` |
 | `security` | cargo-deny (advisories + licenses + bans) | 10 | `needs.detect.outputs.code == 'true'` |

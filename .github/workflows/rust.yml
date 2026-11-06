@@ -28,9 +28,37 @@
 # caught by the ungated `skills` job. Note those are matched per FILE rather than
 # as a directory, because this file and its three siblings live there too.
 #
-# The skip stops there. `docs/**` must still run the gate, because `entities`
-# runs `er-entity verify` (docs/erd.md staleness) and `lint` verifies the
-# generated skill references.
+# `docs/**` and `CLAUDE.md` are exempt too, but NOT wholesale — and the reason
+# the earlier blanket "docs must run the gate" rule existed is worth keeping in
+# view, because it was correct about the risk and only wrong about the scope.
+# Exactly four files under those prefixes are coupled to a gate, and they split
+# across two different jobs, which is why one `code` output could not express it:
+#
+#   docs/erd.md                       a GENERATED artifact; `er-entity verify`
+#                                     fails on staleness      -> `entities`
+#   docs/entity-framework-design.md   the set-difference source for
+#                                     skills-check's `diagnostics` generator
+#                                                             -> drift (`lint`)
+#   docs/agent-skills.md, CLAUDE.md   skill-inventory generator TARGETS; a
+#                                     hand-edit inside a generated block is
+#                                     drift                   -> drift (`lint`)
+#
+# So `detect` emits two more outputs, `erd` and `drift`, and those two jobs gate
+# on `code OR <their own>`. Everything else still gates on `code` alone. A PR of
+# nothing but skills and docs therefore runs `lint` and nothing else, and a PR of
+# pure prose under `docs/` runs no compile job at all.
+#
+# Why this mattered: the `.claude/**` exemption was close to dead letter. Any
+# skill whose DESCRIPTION changes regenerates rows in `docs/agent-skills.md` and
+# `CLAUDE.md` — so the commit that exempted skills was immediately defeated by
+# the regeneration those same skills require, and the full ~40-minute backend
+# gate ran on prose anyway. The exemption only ever worked for a skill-body edit
+# that left every description untouched.
+#
+# `lint` still compiles clippy to verify a markdown table, which is wasteful but
+# is the cheapest thing that can BLOCK: the `skills` job runs the same drift
+# check and is not a required status check, so it cannot. Promoting it is the
+# follow-up that would let `lint` skip here too.
 #
 # A JOB'S `name:` IS ITS BRANCH-PROTECTION CONTEXT. Renaming one silently
 # un-protects it, and adding a required context for a job that does not yet
@@ -156,6 +184,11 @@ jobs:
     timeout-minutes: 5
     outputs:
       code: ${{ steps.decide.outputs.code }}
+      # `docs/erd.md` changed: `entities` must run `er-entity verify`.
+      erd: ${{ steps.filter.outputs.erd }}
+      # A generated-skill-reference input or target changed: `lint` must run the
+      # drift check, which is the only copy of it that can block a merge.
+      drift: ${{ steps.filter.outputs.drift }}
       pass_key: ${{ steps.key.outputs.key }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -173,7 +206,11 @@ jobs:
           # change in the queue would otherwise pay the full backend gate there,
           # which is what it skips today on the PR.
           if [ "$EVENT" != "pull_request" ] && [ "$EVENT" != "merge_group" ]; then
-            echo "code=true" >> "$GITHUB_OUTPUT"
+            {
+              echo "code=true"
+              echo "erd=true"
+              echo "drift=true"
+            } >> "$GITHUB_OUTPUT"
             exit 0
           fi
           # `base...head` = what the PR introduces. Count changed paths NOT in
@@ -213,13 +250,14 @@ jobs:
           # they cannot widen the exemption past what is argued for above.
           changed="$(git diff --name-only "$BASE_SHA...$HEAD_SHA")"
           printf 'changed paths:\n%s\n' "$changed"
-          exempt='^(\.claude/|infra/terraform/|scripts/ci/tf-|\.github/aw/|\.github/workflows/((infra|drift)\.yml$|shared/|agentics-maintenance\.yml$|[A-Za-z0-9._-]+\.md$|[A-Za-z0-9._-]+\.lock\.yml$))'
-          noncode="$(printf '%s\n' "$changed" | grep -cvE "$exempt" || true)"
-          if [ "${noncode:-0}" -gt 0 ]; then
-            echo "code=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "code=false" >> "$GITHUB_OUTPUT"
-          fi
+          # Kept in `scripts/ci/detect-paths.sh` so the classification can be
+          # unit-tested on a laptop instead of only in anger on a PR. The same
+          # file is sourced by the `key` step below, which is what stops the two
+          # regexes from drifting apart.
+          . scripts/ci/detect-paths.sh
+          verdict="$(printf '%s\n' "$changed" | detect_classify)"
+          printf 'verdict:\n%s\n' "$verdict"
+          printf '%s\n' "$verdict" >> "$GITHUB_OUTPUT"
       # CONTENT-ADDRESSED SKIP. A PR whose tested tree is byte-identical, over
       # every path this gate reads, to a tree that already went green on THIS PR
       # skips the gate. That is the common rebase: main moved under the PR but
@@ -255,10 +293,15 @@ jobs:
           # is the fail-safe direction: `make check` also reads frontend/,
           # docs/, entities/ and scripts/, and a path nobody remembered to list
           # would otherwise be a silent false skip.
-          include='.'
-          exempt='^(\.claude/|infra/terraform/|scripts/ci/tf-|\.github/aw/|\.github/workflows/((infra|drift)\.yml$|shared/|agentics-maintenance\.yml$|[A-Za-z0-9._-]+\.md$|[A-Za-z0-9._-]+\.lock\.yml$))'
+          # Same file the filter step sources, so the two cannot disagree.
+          . scripts/ci/detect-paths.sh
 
-          tree="$(git ls-tree -r HEAD | awk -F'\t' -v re="$include" '$2 ~ re' | awk -F'\t' -v re="$exempt" 're == "" || $2 !~ re')"
+          # Keep a path if the gate reads it: not exempt, OR exempt by prefix
+          # but individually coupled to a gate (the four docs/CLAUDE.md files).
+          # Dropping the coupled ones would let a change to `docs/erd.md` ride a
+          # pass marker earned before it changed.
+          tree="$(git ls-tree -r HEAD |
+            awk -F'\t' -v ex="$DETECT_EXEMPT" -v co="$DETECT_COUPLED" '$2 !~ ex || $2 ~ co')"
           printf 'keyed paths: %s\n' "$(printf '%s\n' "$tree" | wc -l)"
           hash="$( { printf '%s\n' "$tree"; date -u +%G-W%V; } | sha256sum | cut -c1-40)"
           echo "key=ci-pass-rust-$hash" >> "$GITHUB_OUTPUT"
@@ -387,11 +430,25 @@ jobs:
         # before checking anything, which is how the `skills` job first failed.
         working-directory: ${{ github.workspace }}
         run: bash scripts/ci/actionlint.sh
+      - name: the `detect` path classifier still classifies
+        # Lives in this job because it must be UNGATED. `detect` decides whether
+        # the compile jobs run, so a test for it placed in a job that `detect`
+        # gates would skip on exactly the PR that broke it — the same reasoning
+        # that keeps the pin check and the `skills` job off `detect`.
+        #
+        # The direction that matters is a false SKIP: a classifier that exempts
+        # too much lets a real code change merge without the backend gate, and
+        # nothing goes red to say so. The suite asserts both directions and fails
+        # if it asserted nothing.
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/ci/detect-paths-test.sh
 
   lint:
     name: fmt + clippy + docs
     needs: detect
-    if: needs.detect.outputs.code == 'true'
+    # `drift` too: this job carries the only generated-reference drift check that
+    # can BLOCK a merge, because the `skills` job is not a required status check.
+    if: needs.detect.outputs.code == 'true' || needs.detect.outputs.drift == 'true'
     runs-on: ubuntu-latest
     # 45, not 30: on a cold cache this job has to build the bundled duckdb C++
     # tree before clippy can lint 27 crates and rustdoc can document them, and
@@ -528,7 +585,8 @@ jobs:
   entities:
     name: entities
     needs: detect
-    if: needs.detect.outputs.code == 'true'
+    # `erd` too: `docs/erd.md` is a generated artifact this job byte-compares.
+    if: needs.detect.outputs.code == 'true' || needs.detect.outputs.erd == 'true'
     runs-on: ubuntu-latest
     # 45 for the same reason as `lint`: on a cold cache this builds the bundled
     # duckdb C++ tree plus a second full arrow before it can verify anything.
