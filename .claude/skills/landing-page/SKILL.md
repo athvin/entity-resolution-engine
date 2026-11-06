@@ -1,6 +1,6 @@
 ---
 name: landing-page
-description: Explains this repo's public marketing surface — the `(marketing)` route group that prerenders statically inside the same app that serves the BFF, why `output: 'export'` and `ensureStatic` are both unavailable here, the metadata routes that must sit at the app root to get their file extension, the PUBLIC_PATHS entries without which crawlers are redirected to login, how a public page gets an absolute origin without `NEXT_PUBLIC_*`, the JSON-LD approach that needs no HTML-injection sink, and the fact that the surface inherits the grayscale rule. Use when editing or adding a marketing page or its copy, touching robots, sitemap, canonical URLs, Open Graph or structured data, changing where the portal CTA points, or when a crawler sees a redirect instead of a page. For tokens, type scale and copy voice see frontend-design-system; for the proxy and the browser/server line see frontend-bff; for the axe gate and visual baselines see frontend-testing.
+description: Explains this repo's public marketing surface — the `(marketing)` route group that prerenders statically inside the same app that serves the BFF, why `output: 'export'` and `ensureStatic` are both unavailable here, the metadata routes that must sit at the app root to get their file extension, the PUBLIC_PATHS entries without which crawlers are redirected to login, how a public page gets an absolute origin without `NEXT_PUBLIC_*`, the JSON-LD approach that needs no HTML-injection sink, and the grayscale rule it inherits. Use when editing or adding a marketing page or its copy, touching robots, sitemap, canonical URLs, Open Graph or structured data, changing where the portal CTA points, or when a crawler sees a redirect instead of a page. For tokens, type scale and copy voice see frontend-design-system; for a table, chart or stat on a marketing section see frontend-data-ui; for the proxy and the browser/server line see frontend-bff; for the axe gate and visual baselines see frontend-testing.
 ---
 
 # The marketing surface
@@ -46,8 +46,12 @@ extension — a robots.txt that does not exist, from a file that looks correct.
 **2. `/robots.txt` and `/sitemap.xml` need explicit `PUBLIC_PATHS` entries.**
 The proxy matcher excludes only `.svg`, `.png`, `.ico` and `.webp`, so a `.txt`
 or `.xml` response is gated like any page and every crawler gets a 307 to
-`/login`. Both come from `MARKETING_PUBLIC_PATHS` in `src/lib/site/routes.ts`,
-which the proxy spreads in — add a page there and all three consumers follow.
+`/login`. Those two are literal entries in `MARKETING_PUBLIC_PATHS` in
+`src/lib/site/routes.ts`, which is the list the proxy spreads in. **A page goes
+in `MARKETING_PATHS`, not that list** — `MARKETING_PUBLIC_PATHS` spreads
+`MARKETING_PATHS`, and the sitemap and the nav read it directly, so one edit
+there reaches all three consumers. Adding a page to the public list instead
+makes it reachable while leaving it out of the sitemap and the nav.
 
 **3. The OG image is a committed PNG, not `opengraph-image.tsx`.** A generated
 one is served **extensionless**, so the proxy intercepts it and a crawler
@@ -146,8 +150,9 @@ presentation data there reports 0% and spends the budget.
 - **Add the route to the axe gate's `SCREENS`** with `anonymous: true` — the
   sweep logs in before every screen otherwise.
 - **Scope visual baselines to a section**, never `fullPage`, and regenerate with
-  `make frontend-baselines`. `ignoreSnapshots` is true off Linux, so a macOS run
-  reports green having compared nothing.
+  `make frontend-baselines`. The off-Linux `ignoreSnapshots` false green applies
+  here like anywhere else; the frontend-testing skill is the source of truth for
+  that trap and the rest of them.
 - **Keep the mobile layout a subset of desktop.** The axe sweep is desktop-only
   on the stated grounds that the desktop DOM is a superset; a nav drawer that
   renders different markup below `lg` breaks that premise and earns a mobile
