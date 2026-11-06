@@ -89,50 +89,7 @@ jobs:
           PUSH_AFTER: ${{ github.event.after }}
           MQ_BASE: ${{ github.event.merge_group.base_sha }}
           MQ_HEAD: ${{ github.event.merge_group.head_sha }}
-        run: |
-          # Which two commits bound "what changed" depends on the event.
-          case "$EVENT" in
-            pull_request)
-              # `base...head` = what the PR introduces.
-              RANGE="$BASE_SHA...$HEAD_SHA"
-              ;;
-            merge_group)
-              # The queue's candidate against the main it will land on — the
-              # same question a PR asks, about the exact tree that will merge.
-              RANGE="$MQ_BASE...$MQ_HEAD"
-              ;;
-            push)
-              # The merge that just landed. A squash-merged PR already ran this
-              # same gate against an all-but-identical tree, so re-running it
-              # for a backend-only merge buys nothing and costs the Playwright
-              # container every time. `before` is all-zeroes on a branch's first
-              # push and unresolvable after a force-push, so fall back to
-              # running rather than skipping — a wasted run beats a silent one.
-              if [ -z "$PUSH_BEFORE" ] || [ "$PUSH_BEFORE" = "0000000000000000000000000000000000000000" ] \
-                 || ! git cat-file -e "$PUSH_BEFORE^{commit}" 2>/dev/null; then
-                echo "frontend=true" >> "$GITHUB_OUTPUT"
-                exit 0
-              fi
-              RANGE="$PUSH_BEFORE...$PUSH_AFTER"
-              ;;
-            *)
-              # schedule / workflow_dispatch: nothing to diff against.
-              echo "frontend=true" >> "$GITHUB_OUTPUT"
-              exit 0
-              ;;
-          esac
-          # Count changed paths under `frontend/` (or this workflow); any match
-          # means the gate must run. `grep -c` reads all input (unlike `grep -q`,
-          # which closes the pipe early and can SIGPIPE `git diff` under
-          # `pipefail` → a flaky false skip); `|| true` absorbs grep's
-          # exit-1-on-zero-matches under `set -e`.
-          changed="$(git diff --name-only "$RANGE")"
-          hits="$(printf '%s\n' "$changed" | grep -cE '^(frontend/|scripts/frontend-dev/|\.github/workflows/frontend\.yml$)' || true)"
-          if [ "${hits:-0}" -gt 0 ]; then
-            echo "frontend=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "frontend=false" >> "$GITHUB_OUTPUT"
-          fi
+        run: bash scripts/ci/frontend-detect.sh
       # CONTENT-ADDRESSED SKIP. A PR whose tested tree is byte-identical, over
       # every path this gate reads, to a tree that already went green on THIS PR
       # skips the gate. That is the common rebase: main moved under the PR but
@@ -165,9 +122,10 @@ jobs:
         run: |
           set -euo pipefail
           # Exactly the paths the filter above treats as this gate's inputs —
-          # the same regex, so a change the filter would ignore cannot change
-          # the key and vice versa.
-          include='^(frontend/|scripts/frontend-dev/|\.github/workflows/frontend\.yml$)'
+          # the same sourced regex, so a change the filter would ignore cannot
+          # change the key and vice versa.
+          . scripts/ci/frontend-paths.sh
+          include="$FRONTEND_INCLUDE"
           exempt=''
 
           tree="$(git ls-tree -r HEAD | awk -F'\t' -v re="$include" '$2 ~ re' | awk -F'\t' -v re="$exempt" 're == "" || $2 !~ re')"
@@ -347,31 +305,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      # Checkout only to have scripts/ci/ on disk — the gate reads no code.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: every shard must have succeeded
-        # No checkout in this job, so the workflow's `working-directory:
-        # frontend` default would fail — point the step at the workspace root.
         working-directory: ${{ github.workspace }}
         env:
           # For the matrix job this is the aggregate: `success` only if every
           # shard succeeded, `failure` if any failed, `skipped` if the whole
           # job was.
-          RESULT: ${{ needs.e2e.result }}
-        run: |
-          echo "playwright shard tier result: $RESULT"
-          case "$RESULT" in
-            success)
-              echo "all shards succeeded"
-              ;;
-            skipped)
-              # Defensive only: the shards skip exactly when detect says
-              # frontend != 'true', and then this gate is itself skipped.
-              echo 'shards reported skipped alongside a running gate'
-              ;;
-            *)
-              echo "::error::a playwright shard did not succeed (result: $RESULT)"
-              exit 1
-              ;;
-          esac
+          GATE_LEGS: |
+            e2e=${{ needs.e2e.result }}
+        run: bash scripts/ci/gate-all-legs.sh
 
   # The ONLY job here that loads postgres.js. Every other tier — the unit files
   # and both Playwright webServers — points ERWEB_DATABASE_URL at

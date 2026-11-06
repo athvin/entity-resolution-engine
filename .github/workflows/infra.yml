@@ -129,67 +129,7 @@ jobs:
         # confidently-computed empty diff may skip: an absent, all-zero or
         # unreachable before-SHA (a force-push, a freshly-created branch) means
         # "assume infra changed" rather than "assume it did not".
-        run: |
-          case "$EVENT" in
-            pull_request)
-              range="$PR_BASE...$PR_HEAD"
-              ;;
-            merge_group)
-              range="$MQ_BASE...$MQ_HEAD"
-              ;;
-            push)
-              if [ -z "$PUSH_BEFORE" ] \
-                 || [ "$PUSH_BEFORE" = "0000000000000000000000000000000000000000" ] \
-                 || ! git cat-file -e "${PUSH_BEFORE}^{commit}" 2>/dev/null; then
-                echo "cannot compute the pushed range (before='$PUSH_BEFORE') — assuming infra changed"
-                echo "infra=true" >> "$GITHUB_OUTPUT"
-                echo "charts=true" >> "$GITHUB_OUTPUT"
-                exit 0
-              fi
-              range="$PUSH_BEFORE...$PUSH_AFTER"
-              ;;
-            *)
-              echo "event '$EVENT' carries no diff — assuming infra changed"
-              echo "infra=true" >> "$GITHUB_OUTPUT"
-              echo "charts=true" >> "$GITHUB_OUTPUT"
-              exit 0
-              ;;
-          esac
-
-          # `grep -c` reads all its input, unlike `grep -q`, which closes the
-          # pipe early and can SIGPIPE `git diff` under `pipefail` into a flaky
-          # false skip; `|| true` absorbs grep's exit-1-on-zero-matches under
-          # `set -e`. Same idiom and same reason as rust.yml's detect job.
-          #
-          # `scripts/ci/tf-*` is in the pattern on purpose: the apply guard and
-          # the comment assembler live there, and a fix to one of them that did
-          # not run this workflow would ship untested.
-          changed="$(git diff --name-only "$range")"
-          printf 'changed paths in %s:\n%s\n' "$range" "$changed"
-          n="$(printf '%s\n' "$changed" \
-                | grep -cE '^(infra/terraform/|scripts/ci/tf-|\.github/workflows/infra\.yml$)' || true)"
-          if [ "${n:-0}" -gt 0 ]; then
-            echo "infra=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "infra=false" >> "$GITHUB_OUTPUT"
-          fi
-
-          # The HELM half, computed separately because it shares none of the
-          # terraform tiers' inputs: a chart change must not trigger a
-          # `terraform plan`, and a terraform change must not pay for a chart
-          # render. Same allowlist direction, same `grep -c`, same reason.
-          #
-          # `scripts/ci/charts-check.py` is in the pattern for the reason
-          # `scripts/ci/tf-*` is in the one above: a fix to the gate that did
-          # not run the gate would ship untested.
-          c="$(printf '%s\n' "$changed" \
-                | grep -cE '^(infra/k8s/charts/|scripts/ci/charts-check\.py$|\.github/workflows/infra\.yml$)' || true)"
-          if [ "${c:-0}" -gt 0 ]; then
-            echo "charts=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "charts=false" >> "$GITHUB_OUTPUT"
-          fi
-
+        run: bash scripts/ci/infra-detect.sh
   # The three shell helpers this workflow calls, asserted against fixtures.
   #
   # `apply` gates on this job, which is the point of it existing rather than
@@ -277,25 +217,7 @@ jobs:
         # would be skipped rather than caught — which is why the step prints the
         # skipped count rather than hiding it, and why the selector gate below
         # checks relationships that no schema could express anyway.
-        run: |
-          set -euo pipefail
-          render() {
-            echo "== $1 =="
-            shift
-            helm template "$@" > /tmp/render.yaml
-            kubeconform -strict -summary -ignore-missing-schemas \
-              -kubernetes-version 1.32.0 /tmp/render.yaml
-          }
-          render "er-platform (dev profile)" er-platform infra/k8s/charts/er-platform \
-            --namespace ci --set developer=ci \
-            --set efs.fileSystemId=fs-0 --set efs.accessPointId=fsap-0 \
-            --set ingress.enabled=true \
-            --set 'ingress.certificateArn=arn:aws:acm:us-east-2:0:certificate/0'
-          render "er-platform (kind profile)" er-platform infra/k8s/charts/er-platform \
-            --namespace er -f infra/k8s/charts/er-platform/values-kind.yaml
-          render "er-dev-namespace" ci infra/k8s/charts/er-dev-namespace \
-            --namespace default --set developer=ci \
-            --set webIngressFromVpc.enabled=true
+        run: bash scripts/ci/charts-render-validate.sh
       - name: Selectors resolve, and the edge hole is web-only
         # The check none of the above can make: does a selector match any pod
         # that exists? See the script's header — a NetworkPolicy that matched
@@ -422,30 +344,7 @@ jobs:
         # `-detailed-exitcode`: 0 = no changes, 2 = changes, 1 = error. Without
         # it a plan that errors and a plan that is empty are the same exit code,
         # which is how a broken plan gets read as "nothing to do".
-        run: |
-          mkdir -p planout
-          set +e
-          terraform -chdir="$DIR" init -input=false > planout/plan.txt 2>&1
-          code=$?
-          if [ "$code" -eq 0 ]; then
-            terraform -chdir="$DIR" plan \
-              -no-color -lock=false -refresh=false -input=false -detailed-exitcode \
-              > planout/plan.txt 2>&1
-            code=$?
-          else
-            # An init failure leaves its own log in plan.txt, so the comment
-            # shows why rather than an empty diff. Normalised to 1 = error.
-            code=1
-          fi
-          set -e
-
-          tail -c 60000 planout/plan.txt
-          bash scripts/ci/tf-plan-meta.sh planout/plan.txt "$code" > planout/meta.txt
-          cat planout/meta.txt
-          if [ "$code" -eq 1 ]; then
-            echo "::error::terraform plan failed for $DIR"
-            exit 1
-          fi
+        run: bash scripts/ci/tf-plan-run.sh
       - name: upload the plan for the comment job
         # `always()`: a FAILED plan is exactly the one a reviewer needs to see,
         # and the comment job reads these artifacts.
@@ -499,33 +398,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      # Checkout only to have scripts/ci/ on disk — the gate reads no code.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: every plan leg must have succeeded
         env:
           # For a matrix job this is the aggregate: `success` only if every leg
           # succeeded, `failure` if any did, `skipped` if the whole job was.
-          RESULT: ${{ needs.plan.result }}
-        # `skipped` is accepted, and only one thing produces it here: a fork PR,
-        # which is issued no `id-token` and so cannot assume the plan role at all
-        # (the `plan` job skips itself for exactly that reason). Treating it as a
-        # failure would make every fork PR unmergeable, which is the bug this job
-        # was added to fix, pointed the other way.
-        run: |
-          echo "plan tier result: $RESULT"
-          case "$RESULT" in
-            success)
-              echo "all plan legs succeeded"
-              ;;
-            skipped)
-              # Single quotes: backticks inside a double-quoted string are
-              # command substitution, and the first draft of this line silently
-              # ran `validate` and printed its empty output instead of the word.
-              echo 'plan tier skipped — a fork PR (no id-token) or a merge-queue run (the PR already planned); fmt + validate is the gate'
-              ;;
-            *)
-              echo "::error::the terraform plan tier did not succeed (result: $RESULT)"
-              exit 1
-              ;;
-          esac
+          #
+          # `skipped` passes with a note, and only one thing produces it here: a
+          # fork PR, which is issued no `id-token` and so cannot assume the plan
+          # role at all (the `plan` job skips itself for exactly that reason).
+          # Treating it as a failure would make every fork PR unmergeable, which
+          # is the bug this job was added to fix, pointed the other way.
+          GATE_LEGS: |
+            plan=${{ needs.plan.result }}
+        run: bash scripts/ci/gate-all-legs.sh
 
   comment:
     name: plan comment
@@ -579,27 +466,7 @@ jobs:
         # and `-e` aborts on it. `--slurp` collects every page into one array so
         # the filter emits exactly one line (and nothing closes the stream
         # early); `--arg` keeps the marker out of the jq program text.
-        run: |
-          if ! bash scripts/ci/tf-plan-comment.sh tfplans > body.md; then
-            echo "no plan artifacts to report — leaving any existing comment alone"
-            exit 0
-          fi
-          echo "comment body: $(wc -c < body.md) bytes"
-          jq -Rs '{body: .}' < body.md > payload.json
-
-          comments="$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/issues/$PR/comments")"
-          id="$(printf '%s' "$comments" | jq -r --arg m "$MARKER" \
-                  '[.[][] | select(.body | contains($m))] | .[0].id // empty')"
-          if [ -n "$id" ]; then
-            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" \
-              --input payload.json > /dev/null
-            echo "updated comment $id"
-          else
-            gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR/comments" \
-              --input payload.json > /dev/null
-            echo "created the plan comment"
-          fi
-
+        run: bash scripts/ci/tf-comment-upsert.sh
   apply:
     name: apply (${{ matrix.key }})
     # `helpers` is in here deliberately: a broken `tf-destroy-guard.sh` must

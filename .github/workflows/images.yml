@@ -24,6 +24,7 @@ on:
       - "rust/**"
       - "frontend/**"
       - ".github/workflows/images.yml"
+      - "scripts/ci/images-detect.sh"
       # The charts and the namespace provisioning script, because a change to
       # either IS a dev platform release (§14.2) even when no image moved. The
       # image jobs skip in that case and `deploy-dev` reuses the digests already
@@ -132,31 +133,7 @@ jobs:
           EVENT: ${{ github.event_name }}
           BEFORE: ${{ github.event.before }}
           SHA: ${{ github.sha }}
-        run: |
-          if [ "$EVENT" != "push" ] || [ -z "$BEFORE" ] \
-            || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] \
-            || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
-            echo "rust=true" >> "$GITHUB_OUTPUT"
-            echo "frontend=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          changed="$(git diff --name-only "$BEFORE...$SHA")"
-          # `grep -c` (not -q) reads all input: -q closes the pipe early and can
-          # SIGPIPE `git diff` under pipefail, which reads as a false skip.
-          for tree in rust frontend; do
-            n="$(printf '%s\n' "$changed" | grep -cE "^${tree}/" || true)"
-            if [ "${n:-0}" -gt 0 ]; then
-              echo "${tree}=true" >> "$GITHUB_OUTPUT"
-            else
-              echo "${tree}=false" >> "$GITHUB_OUTPUT"
-            fi
-          done
-          # A change to this workflow rebuilds both.
-          if printf '%s\n' "$changed" | grep -qE '^\.github/workflows/images\.yml$'; then
-            echo "rust=true" >> "$GITHUB_OUTPUT"
-            echo "frontend=true" >> "$GITHUB_OUTPUT"
-          fi
-
+        run: bash scripts/ci/images-detect.sh
   er-api:
     needs: detect
     # Never on a pull_request: this job PUSHES, and the ECR role's OIDC trust
