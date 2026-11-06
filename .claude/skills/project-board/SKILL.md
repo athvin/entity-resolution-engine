@@ -239,14 +239,40 @@ get made. `item-add` is idempotent and `item-create` is not.
 
 ## Conventions here
 
-The board is GitHub's stock "Product Roadmap" template, and every card is an
-issue carrying exactly one **class** label:
+The board is GitHub's stock "Product Roadmap" template. Most cards are issues
+carrying one **class** label:
 
 | Class | What it is | Also carries |
 |---|---|---|
 | `epic` | a DataGroomr parity epic, titled `E<n> — <name>` | `mvp` or `post-appexchange` |
 | `docs-backlog` | open work found in `docs/` and verified against the code | `mvp` or `post-appexchange` |
+| `ci-backlog` | CI, runner and merge-bus work | — |
+| `obs-backlog` | observability work | — |
+| `followup` | a small operational follow-up an investigation surfaced; not an epic and not a `docs/` finding | a release flag only when it gates one |
 | `shipped` | a built capability documented in `docs/`, recorded so the board shows the product and not only its gaps | nothing — closed, so the release question is moot |
+
+**This table is a snapshot and will go stale, because the board has several
+writers.** Concurrent sessions file cards here: `ci-backlog` and `obs-backlog`
+both arrived that way without this file being touched, and `obs-backlog` showed
+up between writing the row above and verifying it. Some cards carry no class at all — auto-added `[aw]` failure
+issues and anything opened straight on GitHub. So **derive the classes you are
+reasoning about** rather than trusting the list:
+
+```sh
+gh issue list --state open --limit 200 --json labels \
+  --jq '[.[].labels[].name]|group_by(.)|map({(.[0]):length})|add'
+```
+
+**A release's week total is only as complete as its estimates.** Cards arrive
+from other writers with `Estimate` unset, and a `null` contributes nothing to a
+sum — so a view that totals "MVP: 64 weeks" silently excludes them. Before
+quoting a total, count the cards missing an estimate:
+
+```sh
+gh project item-list 2 --owner athvin --limit 400 --format json --jq '
+  [.items[]|select(.status!="Done")|select(.labels|index("mvp"))] as $m
+  | "estimated \([$m[]|select(.estimate)]|length) of \($m|length)"'
+```
 
 **`docs/` understates what is built, consistently.** The checkboxes, the
 `frontend-design.md` §6.1 status column and its §7 gap list have all been
