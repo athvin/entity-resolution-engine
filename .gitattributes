@@ -1,1 +1,21 @@
 .github/workflows/*.lock.yml linguist-generated=true
+
+# LINE ENDINGS, for the Windows checkout the devcontainer exists to serve
+# (#584). Git on Windows defaults `core.autocrlf` to `true`, which rewrites
+# these files to CRLF on checkout — and a CRLF shell script fails inside the
+# Linux container with `bad interpreter: /usr/bin/env bash^M`, or worse, runs
+# and misbehaves because a trailing `\r` joined the last word of every line.
+# `skills-check.sh` failing that way reads as a logic bug in the gate, which is
+# the specific trap the ticket names.
+#
+# `eol=lf` is checkout-side and unconditional, so it overrides whatever
+# `core.autocrlf` the collaborator has set.
+*.sh text eol=lf
+Makefile text eol=lf
+
+# The two tracked shell scripts with no extension, which the pattern above
+# cannot match. `scripts/ci/scripts-home-check.sh` finds these by their shebang
+# rather than their name, so this list and that gate agree on what a script is;
+# re-derive it with that script's own shebang test if one is ever added.
+scripts/symposium text eol=lf
+scripts/ci/merge-bus-sim/gh text eol=lf

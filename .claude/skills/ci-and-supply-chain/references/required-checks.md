@@ -55,6 +55,13 @@ job instead — `terraform plan` is the worked example.
 |---|---|---|---|
 | `deploy-dev` | deploy dev (ci namespace) | 30 | `github.event_name == 'workflow_dispatch' \|\| github.event_name == 'push' \|\| (github.eve …` |
 
+### `devcontainer.yml`
+
+| Job | Status-check context | Timeout | Condition |
+|---|---|---|---|
+| `detect` | detect changes | 5 | `always` |
+| `build` | devcontainer build | 30 | `needs.detect.outputs.devcontainer == 'true'` |
+
 ### `drift.yml`
 
 | Job | Status-check context | Timeout | Condition |

@@ -1,0 +1,110 @@
+// The development container for this repo — see docs/devcontainer.md, and
+// .devcontainer/Dockerfile for why mold is mandatory and cmake is absent.
+//
+// `cacheFrom` is what makes "Reopen in Container" a pull rather than a
+// ~40-minute first build, which #584 identifies as the difference between this
+// being used and being abandoned. The image it names is published to GHCR by
+// .github/workflows/devcontainer.yml on every push to `main`. GHCR because it
+// needs NO secret, and this repo holding zero secrets is an invariant worth
+// keeping; ECR would require the collaborator to hold AWS credentials and run
+// `aws ecr get-login-password` before the container would open at all.
+{
+  "name": "entity-resolution-engine",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "cacheFrom": "ghcr.io/athvin/entity-resolution-engine-devcontainer:main"
+  },
+  "features": {
+    // Pinned to an exact feature version, not the `:2` floating major, for the
+    // same reason every `uses:` in .github/workflows is pinned to a SHA: a
+    // moving reference makes the image non-reproducible and a regression
+    // unattributable. `nodeGypDependencies` off — nothing here builds a native
+    // node addon, and it would pull in python3 and build tooling for nothing.
+    "ghcr.io/devcontainers/features/node:2.1.1": {
+      "version": "22",
+      "nodeGypDependencies": false
+    }
+  },
+  "containerEnv": {
+    // NOT optional on aarch64. Without mold the bundled-DuckDB link fails with
+    // `undefined reference to duckdb_register_static_extensions` — see the
+    // Dockerfile header. scripts/ci/devcontainer-smoke.sh asserts this is still
+    // set, because it is the kind of line a local override silently drops.
+    "RUSTFLAGS": "-C link-arg=-fuse-ld=mold",
+    // Matches the DSN rust.yml hands its `postgres:16-alpine` service, so
+    // `make check-e2e` needs no argument in here. The server is started by
+    // scripts/devcontainer-poststart.sh.
+    "ER_TEST_PG_DSN": "host=localhost port=5432 user=er password=er dbname=er"
+  },
+  // NAMED VOLUMES, NEVER A BIND MOUNT, for all four. On Windows the workspace
+  // reaches the container through a 9p/virtiofs bind, where these directories
+  // are both ruinously slow and able to fill Docker Desktop's WSL2 virtual
+  // disk: `rust/target` alone is 30–80 GB in this repo (the primary checkout's
+  // was measured at 132 GB). A named volume lives in the Docker VM's own
+  // filesystem instead, so it is fast and the host never sees the files.
+  //
+  // The cost is that `docker volume rm` is how you reclaim the space, not
+  // deleting a folder — docs/devcontainer.md says so.
+  "mounts": [
+    // CARGO_HOME in the devcontainers rust image. Asserted by
+    // scripts/devcontainer-postcreate.sh rather than trusted, because a base-
+    // image change moving it would otherwise leave this mount shadowing an
+    // empty directory and silently re-downloading the registry every rebuild.
+    "source=er-cargo-registry,target=/usr/local/cargo/registry,type=volume",
+    "source=er-rust-target,target=${containerWorkspaceFolder}/rust/target,type=volume",
+    "source=er-node-modules,target=${containerWorkspaceFolder}/frontend/node_modules,type=volume",
+    // DuckDB downloads its extensions here on first use (the same path
+    // rust.yml caches as `~/.duckdb/extensions`). Without this volume every
+    // rebuild re-fetches them.
+    "source=er-duckdb,target=/home/vscode/.duckdb,type=volume"
+  ],
+  // A fresh named volume mounts as root-owned, and the four above all have to
+  // be writable by `vscode`; the script chowns them and then asserts the
+  // toolchain. It deliberately does NOT build — a postCreate that ran
+  // `make check` would make first open the 40 minutes the prebuild exists to
+  // avoid.
+  "postCreateCommand": "bash scripts/devcontainer-postcreate.sh",
+  // Runs on every start, not just creation: there is no init system in the
+  // container, so nothing else would bring Postgres back after a stop.
+  "postStartCommand": "bash scripts/devcontainer-poststart.sh",
+  "remoteUser": "vscode",
+  // Advisory, and honoured by Codespaces rather than by local Docker — but it
+  // is the one machine-readable place to state the figure a Windows reader
+  // needs: a full `rust/target` plus the toolchain wants ~60 GB of headroom,
+  // and Docker Desktop's WSL2 disk defaults well below that. A full disk
+  // surfaces as `linking with cc failed`, which reads as a link error.
+  "hostRequirements": {
+    "storage": "64gb"
+  },
+  "forwardPorts": [3000],
+  "portsAttributes": {
+    "3000": {
+      "label": "frontend (next dev)"
+    }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "rust-lang.rust-analyzer",
+        "tamasfe.even-better-toml",
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "bradlc.vscode-tailwindcss",
+        "ms-playwright.playwright",
+        "hashicorp.terraform"
+      ],
+      "settings": {
+        // Point rust-analyzer at the workspace root, which is `rust/` and not
+        // the repo root (CLAUDE.md, Layout). Without this it finds no cargo
+        // project and the whole editor experience silently degrades to plain
+        // text — the single most likely "the container is broken" report.
+        "rust-analyzer.linkedProjects": ["rust/Cargo.toml"],
+        // Share one target directory with `make check` instead of letting
+        // rust-analyzer keep its own: a second copy is another 30–80 GB in the
+        // volume, and the two would serialise on the same lock anyway.
+        "rust-analyzer.cargo.targetDir": true,
+        "eslint.workingDirectories": ["frontend"]
+      }
+    }
+  }
+}
