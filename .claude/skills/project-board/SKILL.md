@@ -1,6 +1,6 @@
 ---
 name: project-board
-description: Explains how to read and write this project's GitHub Projects board — the `gh project` command surface for user-owned project #2 "Product Roadmap" and the `project` scope it requires, the five ID namespaces and why none of them may be hard-coded, the built-in automations that move cards unasked and the one that can close an issue, the filter and JSON key shapes `item-list` returns, the one-field-per-invocation rule for `item-edit`, and the read-after-write staleness that makes a successful write look like a failed one. Use when asked what is on the board or to add, triage or move a card, when sizing, prioritising or scheduling work into an iteration, when reconciling the board against issues or pull requests, when a `gh project` command fails on a scope or an ID, or when deciding whether a card needs moving at all. For required checks, the merge bus and stale greens see `ci-and-supply-chain`; for driving a pull request to green and watching main see `land-pr`.
+description: Explains how to read and write this project's GitHub Projects board — the `gh project` command surface for user-owned project #2 "Product Roadmap" and the `project` scope it requires, the five ID namespaces none of which may be hard-coded, the built-in automations that move cards unasked and the one that can close an issue, `item-list`'s filter and JSON key shapes, the one-field-per-invocation rule for `item-edit`, and the read-after-write staleness that makes a successful write look failed. Use when asked what is on the board or to add, triage or move a card, when sizing, prioritising or scheduling work into an iteration, when reconciling the board against issues or pull requests, when a `gh project` command fails on a scope or an ID, or when deciding whether a card needs moving at all. For required checks, the merge bus and stale greens see `ci-and-supply-chain`; for driving a pull request to green and watching main see `land-pr`; for claiming a card and starting work on it see `claim-ticket`.
 ---
 
 # The project board
@@ -326,10 +326,11 @@ The conventions below are practice rather than a property of the board, so
 edit this section as it changes.
 
 - **`Status`** is `Todo` / `In progress` / `Done`, and the automations own most
-  of its movement. Treat a hand edit as the exception. `In progress` here means
-  **part-built** — an epic whose foundation already exists in the engine — not
-  that someone is working on it this week. That reading is a local convention
-  and will mislead anyone who assumes the usual one.
+  of its movement. Treat a hand edit as the exception. `In progress` is the
+  **active queue** — work deliberately slated to be taken on now. (Older epic
+  cards used it to mean *part-built*, and some still read that way.) It does
+  **not** say anyone is on a card: that is a *claim* — assignee plus an open
+  draft pull request — which is the `claim-ticket` skill's procedure.
 - **`Priority`** is `P0` / `P1` / `P2`. There is no P3 — the absence of a
   priority is the backlog, and that is load-bearing: the lowest-ranked epics
   carry no priority at all rather than a notional P2.
