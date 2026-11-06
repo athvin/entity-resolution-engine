@@ -1,0 +1,10 @@
+crm_id,company,website,phone,street,city,state,zip,last_modified,persona_id
+c1,Acme Inc.,https://www.acme.com,(415) 555-0100,1 Main St,Springfield,CA,90001,2026-01-01,A1
+c2,Globex Corporation,http://globex.com,415-555-0200,2 Oak Ave,Metropolis,NY,10001,2026-01-02,A2
+c3,Globex Financial Services,https://globexfinancial.com,415-555-0250,2 Oak Ave,Metropolis,NY,10001,2026-01-03,A3
+c4,Initech,https://initech.io,415-555-0300,3 Pine Rd,Gotham,IL,60601,2026-01-04,A4
+c5,Umbrella Corp,https://example.com,415-555-0400,9 Elm St,Raccoon City,OH,44101,2026-01-05,A5
+c6,Summit Partners LLP,https://summitpartnerslaw.com,415-555-0500,10 Cedar St,Springfield,CA,90001,2026-01-06,A6
+c8,Hooli Systems,https://hooli.com,650-555-0700,1 Infinite Loop,Cupertino,CA,95014,2026-01-08,A8
+c9,Vandelay Industries,https://vandelay.com,650-555-0700,1 Infinite Loop,Cupertino,CA,95014,2026-01-09,A9
+c10,Wonka Industries,https://example.com,415-555-0800,1 Chocolate Way,Springfield,CA,90001,2026-01-10,A10

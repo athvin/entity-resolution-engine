@@ -1,0 +1,7 @@
+vendor_id,name,url,tel,addr1,town,region,postcode,modified,persona_id
+v1,"ACME, LLC",acme.com,+14155550100,1 Main Street,Springfield,CA,90001,2026-02-01,A1
+v3,Globex Financial Svcs,globexfinancial.com,4155550250,2 Oak Avenue,Metropolis,NY,10001,2026-02-03,A3
+v4,Initech Ltd,https://initech.io/about,415.555.0300,3 Pine Road,Gotham,IL,60601,2026-02-04,A4
+v6,Summit Partners,summitpartnerslaw.com,+14155550500,10 Cedar Street,Springfield,CA,90001,2026-02-06,A6
+v8,Hooli Systems Inc,hooli.com,6505550700,1 Infinite Loop,Cupertino,CA,95014,2026-02-08,A8
+v10,Wonka Industrie,example.com,,1 Chocolate Way,Springfield,CA,90001,2026-02-10,A10

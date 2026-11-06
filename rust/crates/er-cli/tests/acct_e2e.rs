@@ -145,3 +145,247 @@ fn acct_run_all_clusters_accounts_and_assembles_golden() {
 
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+/// Partition from `entity_id -> member` rows: the set of clusters, insensitive
+/// to the entity ids themselves.
+fn partition(pairs: &[(String, String)]) -> BTreeSet<BTreeSet<String>> {
+    let mut by: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for (entity, member) in pairs {
+        by.entry(entity.clone()).or_default().insert(member.clone());
+    }
+    by.into_values().collect()
+}
+
+/// A hand-authored scenario's declared ground truth, as a partition over
+/// `record_key`s. `truth.csv` is read only by tests — the pipeline never sees
+/// it — and it is what makes a cluster-count grid mean anything: without it the
+/// grid can only report that the number moved, not which direction is wrong.
+fn truth_partition(scenario: &str) -> BTreeSet<BTreeSet<String>> {
+    let csv = std::fs::read_to_string(repo_fixture(&format!("{scenario}/truth.csv"))).unwrap();
+    let mut by: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for line in csv.lines().skip(1).filter(|l| !l.trim().is_empty()) {
+        let f: Vec<&str> = line.split(',').map(str::trim).collect();
+        assert_eq!(
+            f.len(),
+            3,
+            "truth.csv row is persona,source,record_id: {line}"
+        );
+        by.entry(f[0].to_string())
+            .or_default()
+            .insert(format!("{}:{}", f[1], f[2]));
+    }
+    by.into_values().collect()
+}
+
+/// What one resolve of `acct_10` produced: the entity partition, and the
+/// per-pair `evidence` of every scored pair. The evidence is kept because the
+/// central finding here is about two pairs whose evidence is *identical*, and a
+/// cluster count alone cannot show that.
+struct Resolved {
+    clusters: BTreeSet<BTreeSet<String>>,
+    evidence: BTreeMap<(String, String), String>,
+}
+
+impl Resolved {
+    fn of(&self, a: &str, b: &str) -> &str {
+        self.evidence
+            .get(&(a.to_string(), b.to_string()))
+            .map_or_else(|| panic!("no scored pair {a} <-> {b}"), String::as_str)
+    }
+}
+
+/// Resolve `acct_10` with `cfg` compiled at `bits` (and optionally an overridden
+/// `auto_merge`).
+fn resolve_acct_10(tag: &str, bits: f64, cfg: &str, auto_merge: Option<f64>) -> Resolved {
+    let tmp = std::env::temp_dir().join(format!("er_cli_acctscale_{tag}_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(tmp.join("data")).unwrap();
+    let catalog = tmp.join("catalog.ducklake").to_string_lossy().into_owned();
+    let data_path = tmp.join("data").to_string_lossy().into_owned();
+    let session = er_cli::open_lake(&catalog, &data_path).unwrap();
+
+    let mut config = load_config_str(&std::fs::read_to_string(repo_fixture(cfg)).unwrap()).unwrap();
+    config.thresholds.full_agreement_bits = Some(bits);
+    if let Some(am) = auto_merge {
+        config.thresholds.auto_merge = am;
+    }
+    let compiled = er_compile::compile(&config).expect("the account config compiles at this scale");
+
+    let deliveries: Vec<(String, String)> = ["crm", "vendors", "billing"]
+        .iter()
+        .map(|s| {
+            (
+                (*s).to_string(),
+                std::fs::read_to_string(repo_fixture(&format!("acct_10/base/{s}.csv"))).unwrap(),
+            )
+        })
+        .collect();
+    let tf_csv = repo_fixture("acct_model_v1.tf.csv");
+    let lexicon: Vec<(String, String)> = Vec::new();
+
+    er_cli::run_all(
+        &session,
+        &config,
+        &er_cli::PipelineInputs {
+            mode: "full",
+            rebuild_reason: None,
+            segment: None,
+            lexicon: &lexicon,
+            deliveries: &deliveries,
+            model: &er_cli::MatchModel {
+                settings_json: &compiled.model_json,
+                tf_csv_path: Path::new(&tf_csv),
+                model_version: "acct_grid",
+                tf_snapshot_id: "ACCTTFSNAP0000000000000001",
+            },
+            run_id: "01ACCTGRID000000000000000000",
+            ingested_at: "2026-03-01 00:00:00",
+            scored_at: "2026-03-02 00:00:00",
+            run_at: "2026-03-03 00:00:00",
+        },
+    )
+    .unwrap();
+
+    let rows: Vec<(String, String)> = session
+        .query_strings(
+            "select entity_id, record_key from lake.main.entity_membership order by record_key",
+        )
+        .unwrap()
+        .into_iter()
+        .map(|r| (r[0].clone(), r[1].clone()))
+        .collect();
+    let evidence: BTreeMap<(String, String), String> = session
+        .query_strings(
+            "select rec_a_key, rec_b_key, coalesce(evidence,'') \
+             from lake.main.match_scores order by rec_a_key, rec_b_key",
+        )
+        .unwrap()
+        .into_iter()
+        .map(|r| ((r[0].clone(), r[1].clone()), r[2].clone()))
+        .collect();
+    let out = Resolved {
+        clusters: partition(&rows),
+        evidence,
+    };
+    drop(session);
+    let _ = std::fs::remove_dir_all(&tmp);
+    out
+}
+
+const BASE_CFG: &str = "acct_10/config.yaml";
+const JW_CFG: &str = "acct_10/config_domain_jw.yaml";
+
+/// Hooli and Vandelay are two distinct companies that share a switchboard
+/// number and a coworking address — the `shared_switchboard` trap.
+const HOOLI: [&str; 2] = ["crm:c8", "vendors:v8"];
+const VANDELAY: [&str; 2] = ["billing:b9", "crm:c9"];
+
+/// **The finding.** At the shipped `DEFAULT_FULL_AGREEMENT_BITS` the compiled
+/// account model fuses Hooli Systems and Vandelay Industries into one account.
+///
+/// This is the concrete cost of the measurement in
+/// `er-compile/tests/score_scale_calibration.rs`: the committed person model
+/// measures ~60 bits of full agreement, the committed account model ~21.8, and
+/// `compile` hands both the same 60. Scoring an account corpus ~2.7x louder than
+/// its own reference model supports is not a safe direction — it buys recall with
+/// false merges, which the constant's own doc comment calls the more expensive
+/// mistake. Here it is, costing one.
+#[test]
+fn the_shipped_score_scale_merges_two_distinct_accounts() {
+    if !enabled() {
+        eprintln!("skipping Account scale (set DEDUPE_E2E_DUCKLAKE=1 to run)");
+        return;
+    }
+    let truth = truth_partition("acct_10");
+    assert_eq!(
+        truth.len(),
+        10,
+        "acct_10 declares 10 accounts over 20 records"
+    );
+
+    let default_bits = er_compile::CompileOptions::default().full_agreement_bits;
+    let got = resolve_acct_10("default", default_bits, BASE_CFG, None);
+
+    let fused: BTreeSet<String> = HOOLI
+        .iter()
+        .chain(VANDELAY.iter())
+        .map(|s| (*s).to_string())
+        .collect();
+    assert!(
+        got.clusters.contains(&fused),
+        "expected the shipped scale to fuse Hooli with Vandelay; got {:?}",
+        got.clusters
+    );
+    assert_ne!(
+        got.clusters, truth,
+        "if this now equals truth the scale has been recalibrated — update the finding, do not delete it"
+    );
+}
+
+/// Why the scale alone cannot be fixed: the false merge above and a **true**
+/// duplicate carry byte-identical evidence.
+///
+/// `billing:b4` (ITCH Systems, `intiech.io`) is the same company as
+/// `crm:c4`/`vendors:v4` (Initech, `initech.io`) — a d/b/a alias on a
+/// transposed domain. Against the four comparisons this model has, that pair and
+/// the Hooli/Vandelay pair agree on exactly the same fields (postal and phone)
+/// and disagree on exactly the same fields (name and domain). Same gamma vector,
+/// same per-field weights, same total.
+///
+/// So **no value of `full_agreement_bits` and no `auto_merge` threshold can
+/// accept one and reject the other.** Any monotone rescaling moves both together.
+/// This is why the account gap was never a matter of picking a better constant.
+#[test]
+fn a_true_duplicate_and_a_false_merge_are_indistinguishable_to_this_model() {
+    if !enabled() {
+        eprintln!("skipping Account scale (set DEDUPE_E2E_DUCKLAKE=1 to run)");
+        return;
+    }
+    let got = resolve_acct_10("identical", 44.0, BASE_CFG, None);
+    let true_dup = got.of("billing:b4", "crm:c4");
+    let false_pair = got.of("crm:c8", "crm:c9");
+    assert_eq!(
+        true_dup, false_pair,
+        "a true duplicate and a false pair must be shown to carry the SAME evidence; \
+         if they now differ, the comparison space gained a discriminating feature"
+    );
+    assert!(
+        true_dup.contains("\"gamma_domain_norm\":0"),
+        "both score domain as a plain disagreement — the model has no near-match \
+         level on domain, which is the missing feature: {true_dup}"
+    );
+}
+
+/// The remedy, measured: a near-match level on `domain_norm` plus a scale and a
+/// threshold that fit the account model resolve `acct_10` exactly.
+///
+/// `intiech.io` vs `initech.io` is one transposition; `hooli.com` vs
+/// `vandelay.com` is unrelated. A `jaro_winkler` level separates them —
+/// 12.0 bits against 4.3 — where `exact | else` cannot. The level alone is not
+/// enough, because at `auto_merge: 0.95` *both* still clear the bar; and the
+/// threshold alone is not enough, because at 60 bits the false pair's
+/// probability exceeds even 0.995. All three have to move together, which is
+/// the actual answer to "what should the account scale be".
+#[test]
+fn the_account_corpus_resolves_exactly_at_a_measured_scale_and_threshold() {
+    if !enabled() {
+        eprintln!("skipping Account scale (set DEDUPE_E2E_DUCKLAKE=1 to run)");
+        return;
+    }
+    let truth = truth_partition("acct_10");
+
+    let fitted = resolve_acct_10("fitted", 44.0, JW_CFG, Some(0.99));
+    assert_eq!(
+        fitted.clusters, truth,
+        "44 bits + a domain near-match level + auto_merge 0.99 must resolve acct_10 exactly"
+    );
+
+    // The scale is load-bearing independently of the threshold: at the shipped
+    // 60 bits the false pair clears even a 0.995 auto_merge.
+    let default_bits = er_compile::CompileOptions::default().full_agreement_bits;
+    let loud = resolve_acct_10("loud_strict", default_bits, JW_CFG, Some(0.995));
+    assert_ne!(
+        loud.clusters, truth,
+        "a stricter threshold alone must NOT be able to rescue the shipped scale"
+    );
+}
