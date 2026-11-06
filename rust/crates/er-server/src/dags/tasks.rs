@@ -485,9 +485,44 @@ impl Task<Session> for Finish {
                 false
             }
         };
+        // The entity-event counts for the webhook aggregate (O3c-2), read here
+        // because this is the last task of the run AND the last place a lake
+        // session exists. The control plane settles the job moments later and
+        // can emit, but cannot count — so the number has to cross in this
+        // task's output. See `FinishReport`.
+        //
+        // Best-effort, exactly as the legacy arm was: the run's results are
+        // already written, so failing a teardown because a COUNT could not be
+        // read would destroy work in order to describe it. An empty vector
+        // means "nothing to announce", which is also the right answer for a
+        // kind of job that reconciles nothing.
+        let entity_counts = match er_entities::entity_event::read::counts_by_kind_live(
+            ctx.session.connection(),
+            &ctx.order.run_id,
+        ) {
+            Ok(rows) => rows
+                .into_iter()
+                .filter_map(|r| {
+                    let n = r.n.unwrap_or(0);
+                    (n > 0).then_some(crate::dags::plans::EntityCount {
+                        event_type: r.event_type,
+                        n,
+                    })
+                })
+                .collect(),
+            Err(e) => {
+                tracing::warn!(
+                    er.run_id = %ctx.order.run_id,
+                    error = %e,
+                    "the entity-event counts are unavailable"
+                );
+                Vec::new()
+            }
+        };
         Ok(Outcome::Done(
             Plan(FinishReport {
                 settled: if closed { "closed" } else { "no_run_row" }.to_string(),
+                entity_counts,
             }),
             er_dag::Counters::default(),
         ))

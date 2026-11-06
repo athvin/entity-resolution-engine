@@ -395,6 +395,33 @@ impl Executor {
                 "the job settled"
             );
             let _ = webhook::emit_job_event(&self.client, &settled).await;
+            // The entity-event aggregate (O3c-2), which the legacy arm emitted
+            // from `run_job`'s tail. It is NOT part of `emit_job_event`: that
+            // sends one `job.*` per outcome, while this sends at most one
+            // `entity.*` per kind.
+            //
+            // The counts come from `finish`'s durable output rather than from a
+            // lake read here, because this process cannot open a lake. Reading
+            // them off the row map costs nothing — the readiness pass already
+            // loaded it.
+            //
+            // Absent for every kind with no `finish` task, and that is correct:
+            // `lake_maintain`, `train` and `profile` reconcile no entities, so
+            // there is nothing to announce.
+            if let Some(counts) = live
+                .get("finish")
+                .and_then(|row| row.output.as_ref())
+                .and_then(|out| out.get("doc"))
+                .and_then(|doc| doc.get("entity_counts"))
+                .and_then(|v| {
+                    serde_json::from_value::<Vec<crate::dags::plans::EntityCount>>(v.clone()).ok()
+                })
+                .filter(|c| !c.is_empty())
+            {
+                let pairs: Vec<(String, i64)> =
+                    counts.into_iter().map(|c| (c.event_type, c.n)).collect();
+                crate::dispatcher::emit_entity_aggregates(&self.client, &settled, &pairs).await;
+            }
         }
         Ok(worked)
     }

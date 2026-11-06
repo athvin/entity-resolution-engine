@@ -182,12 +182,122 @@ impl PlanDoc for StagedApproved {
     const STABLE_NAME: &'static str = "staged_approved";
 }
 
+/// One kind of entity event and how many of them a run produced.
+///
+/// Named fields rather than a `(String, i64)` tuple because this lands in a
+/// task's durable output, which an operator reads in the task ledger: a
+/// `{"event_type": "entity.created", "n": 12}` row says what it is, and
+/// `["entity.created", 12]` does not.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EntityCount {
+    pub event_type: String,
+    pub n: i64,
+}
+
 /// `finish`'s record of the settle verdict it composed (`finish` consumes no
-/// lake edge; its work order carries the leaf verdicts — §4.3).
+/// lake edge; its work order carries the leaf verdicts — §4.3), plus the
+/// entity-event counts the webhook aggregate needs.
+///
+/// The counts ride in the OUTPUT because of where they can be read versus
+/// where they can be sent. Counting is a lake query, and only a pod holds a
+/// lake session (§3.5 draws that line at the lake and the control plane is on
+/// the wrong side of it); emitting is a Postgres write, and only the control
+/// plane holds that client. The legacy arm had both halves in one function and
+/// its comment says exactly this — "Read HERE because this is the half that
+/// holds the lake session; the half that can emit holds the Postgres client".
+/// Split across a pod boundary, the task's durable output is the channel
+/// between those halves.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FinishReport {
     pub settled: String,
+    /// Empty for a run that reconciled nothing, which is the honest answer
+    /// rather than a missing reading — including a `finish` that fired after a
+    /// failed `init`, since it is a teardown and runs on `AllTerminal`.
+    #[serde(default)]
+    pub entity_counts: Vec<EntityCount>,
 }
 impl PlanDoc for FinishReport {
     const STABLE_NAME: &'static str = "finish_report";
+}
+
+#[cfg(test)]
+mod finish_report_tests {
+    use super::{EntityCount, FinishReport};
+    use er_dag::DurableOutput as _;
+
+    /// The counts must survive the POD BOUNDARY, and the boundary is JSON.
+    ///
+    /// `finish` runs in a pod and serializes its output; the control plane
+    /// settles the job and digs the counts back out with a fixed key path
+    /// (`output["doc"]["entity_counts"]`). Nothing type-checks that path — it
+    /// is `Value::get` on strings — so a rename on either side would compile
+    /// and then silently emit no aggregate, which is exactly the failure this
+    /// whole change is fixing. This test is that path, written out.
+    #[test]
+    fn the_settle_path_recovers_what_finish_published() {
+        let published = er_dag::Plan(FinishReport {
+            settled: "closed".to_string(),
+            entity_counts: vec![
+                EntityCount {
+                    event_type: "entity.created".to_string(),
+                    n: 12,
+                },
+                EntityCount {
+                    event_type: "entity.merged".to_string(),
+                    n: 3,
+                },
+            ],
+        })
+        .serialize_reference()
+        .expect("finish's output serializes");
+
+        // Byte-for-byte the chain in `Executor::readiness_for`'s settle branch.
+        let recovered: Vec<EntityCount> = published
+            .get("doc")
+            .and_then(|doc| doc.get("entity_counts"))
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .expect("the settle path finds the counts");
+
+        let pairs: Vec<(String, i64)> =
+            recovered.into_iter().map(|c| (c.event_type, c.n)).collect();
+        assert_eq!(
+            pairs,
+            vec![
+                ("entity.created".to_string(), 12),
+                ("entity.merged".to_string(), 3)
+            ]
+        );
+    }
+
+    /// A run that reconciled nothing publishes an empty vector, and the settle
+    /// path must read that as "nothing to announce" rather than as a missing
+    /// reading. `finish` is a teardown on `AllTerminal`, so it also runs after
+    /// a failed `init` that never opened a run row.
+    #[test]
+    fn an_empty_count_set_round_trips_as_empty() {
+        let published = er_dag::Plan(FinishReport {
+            settled: "no_run_row".to_string(),
+            entity_counts: vec![],
+        })
+        .serialize_reference()
+        .unwrap();
+        let recovered: Vec<EntityCount> = published
+            .get("doc")
+            .and_then(|doc| doc.get("entity_counts"))
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .expect("an empty vector is still a reading");
+        assert!(recovered.is_empty());
+    }
+
+    /// An output written before this field existed must still deserialize —
+    /// `#[serde(default)]` is what makes a task row from an older binary
+    /// readable, and a `finish_report` in the ledger outlives the release that
+    /// wrote it.
+    #[test]
+    fn an_output_from_before_the_field_existed_still_reads() {
+        let old = serde_json::json!({ "settled": "closed" });
+        let report: FinishReport = serde_json::from_value(old).expect("the old shape deserializes");
+        assert_eq!(report.settled, "closed");
+        assert!(report.entity_counts.is_empty());
+    }
 }
