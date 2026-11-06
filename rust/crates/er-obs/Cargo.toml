@@ -41,6 +41,14 @@ tracing-opentelemetry = "0.32"
 async-trait = "0.1.92"
 reqwest.workspace = true
 
+[features]
+# The `testing` module: a span-capture subscriber for crates that must assert a
+# span's lineage. It forwards to `opentelemetry_sdk/testing` so that the caller
+# needs no `opentelemetry*` dependency of its own — this manifest stays the one
+# place those versions are named, which is what lets them move as a group.
+# Enable it from `[dev-dependencies]`, never from a normal dependency.
+test-support = ["opentelemetry_sdk/testing"]
+
 [lints]
 workspace = true
 

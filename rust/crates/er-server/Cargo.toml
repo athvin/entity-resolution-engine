@@ -139,4 +139,5 @@ tower-http = { version = "0.6", default-features = false, features = ["trace", "
 workspace = true
 
 [dev-dependencies]
+er-obs = { path = "../er-obs", features = ["test-support"] }
 futures = "0.3"

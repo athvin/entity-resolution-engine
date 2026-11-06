@@ -23,6 +23,11 @@ pub mod metrics;
 pub mod otlp;
 pub mod propagate;
 pub mod registry;
+// The span-capture harness, for crates that must assert a span's lineage
+// without declaring the OTel versions themselves. Feature-gated so it is not
+// part of the shipped library — see the module doc for why it is here at all.
+#[cfg(feature = "test-support")]
+pub mod testing;
 
 pub use blocking::spawn_blocking_in_span;
 pub use executions::{Execution, ExecutionRecorder};
