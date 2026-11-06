@@ -558,7 +558,7 @@ fight font rendering.
 by reverting it and re-running on identical code, which produced the same
 44813 → 44811 byte delta again. `--update-snapshots=all` rewrites
 unconditionally (that is the point: see the reasoning in
-`frontend/dev/update-baselines.sh`), so a difference below
+`scripts/frontend-dev/update-baselines.sh`), so a difference below
 `maxDiffPixelRatio` is written out even though the comparison would pass. CI is
 unaffected.
 

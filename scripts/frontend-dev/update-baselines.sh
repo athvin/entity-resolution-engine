@@ -7,7 +7,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-FRONTEND_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+FRONTEND_DIR="${REPO_ROOT}/frontend"
 IMAGE="mcr.microsoft.com/playwright:v1.63.0-jammy"
 
 docker run --rm -v "${FRONTEND_DIR}:/host" -w /tmp "${IMAGE}" bash -eu -o pipefail -c '

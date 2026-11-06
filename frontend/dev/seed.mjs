@@ -11,7 +11,8 @@
  * create-users.mjs upserts. Re-running produces a second delivery of the same
  * CSVs, which change detection records as unchanged.
  *
- * Usage: node dev/seed.mjs            (expects env.sh to have been sourced)
+ * Usage: node dev/seed.mjs            (expects scripts/frontend-dev/env.sh to
+ * have been sourced)
  */
 import { spawnSync } from "node:child_process";
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -25,7 +26,7 @@ const STATE = join(DEV, ".state");
 const need = (key) => {
   const value = process.env[key];
   if (!value) {
-    throw new Error(`${key} is not set — source frontend/dev/env.sh first`);
+    throw new Error(`${key} is not set — source scripts/frontend-dev/env.sh first`);
   }
   return value;
 };

@@ -119,7 +119,7 @@ async fn async_main(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>>
     // separate Deployment as "the alternative topology". The §6.7 split
     // inverted that: the chart ships `er-dispatcher` as its own Deployment,
     // because the identity that creates Jobs must not sit on the pod serving
-    // the API behind the BFF. `frontend/dev/env.sh` is the only thing that sets
+    // the API behind the BFF. `scripts/frontend-dev/env.sh` is the only thing that sets
     // this, where one process is what a developer wants.
     let in_process_dispatcher = if let Some(dsn) =
         dsn.filter(|_| env_flag("ER_DISPATCH_IN_PROCESS"))
@@ -190,7 +190,7 @@ async fn async_main(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>>
     // job is usually the longer of the two.
     //
     // Unbounded on purpose. This path is `ER_DISPATCH_IN_PROCESS`, which only
-    // the local dev stack sets (`frontend/dev/env.sh`) — there is no kubelet
+    // the local dev stack sets (`scripts/frontend-dev/env.sh`) — there is no kubelet
     // here to SIGKILL past a grace period, and a dev process that exits when
     // both halves are done is the behaviour a developer wants. The deployed
     // dispatcher is its own Deployment with its own

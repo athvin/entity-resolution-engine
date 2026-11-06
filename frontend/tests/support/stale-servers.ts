@@ -8,7 +8,8 @@ import path from "node:path";
  * `playwright.config.ts` sets `reuseExistingServer` outside CI, which is what
  * makes the iteration loop fast — and what lets a server left running from an
  * earlier build keep serving the old bundle, or a mock-erserver left running
- * ignore fixture edits. `dev/kill-servers.sh` has always been the remedy. What
+ * ignore fixture edits. `scripts/frontend-dev/kill-servers.sh` has always been
+ * the remedy. What
  * was missing was DETECTION: a stale server produces confident, wrong results,
  * and the only symptom is tests that disagree with CI for no visible reason.
  *
@@ -114,4 +115,4 @@ export function nextBundleIsStale(root: string): { newest: string } | null {
 
 /** The one remedy, named the same way everywhere. */
 export const REMEDY =
-  "run `pnpm test:e2e:fresh` (or `bash dev/kill-servers.sh`) so both servers restart from source";
+  "run `pnpm test:e2e:fresh` (or `bash ../scripts/frontend-dev/kill-servers.sh`) so both servers restart from source";

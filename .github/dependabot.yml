@@ -32,7 +32,7 @@ updates:
         update-types: ["minor", "patch"]
     ignore:
       # Pinned to the Playwright Docker image tag in frontend/playwright.config.ts's
-      # CI container and frontend/dev/update-baselines.sh. The committed visual
+      # CI container and scripts/frontend-dev/update-baselines.sh. The committed visual
       # baselines are rendered in that exact image, so the package and the tag must
       # move together, by hand. See frontend/README.md.
       - dependency-name: "@playwright/test"

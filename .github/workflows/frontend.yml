@@ -19,7 +19,7 @@
 #              Playwright image v1.63.0-jammy so the browsers are preinstalled
 #              and, crucially, the visual snapshots compare against the same
 #              font-rendering environment the committed baselines were generated
-#              in (frontend/dev/update-baselines.sh uses this exact image).
+#              in (scripts/frontend-dev/update-baselines.sh uses this exact image).
 #   - audit:   the frontend's cargo-deny equivalent — advisories + licenses.
 #   - semgrep: static analysis for the BFF's own risk classes.
 #
@@ -127,7 +127,7 @@ jobs:
           # `pipefail` → a flaky false skip); `|| true` absorbs grep's
           # exit-1-on-zero-matches under `set -e`.
           changed="$(git diff --name-only "$RANGE")"
-          hits="$(printf '%s\n' "$changed" | grep -cE '^(frontend/|\.github/workflows/frontend\.yml$)' || true)"
+          hits="$(printf '%s\n' "$changed" | grep -cE '^(frontend/|scripts/frontend-dev/|\.github/workflows/frontend\.yml$)' || true)"
           if [ "${hits:-0}" -gt 0 ]; then
             echo "frontend=true" >> "$GITHUB_OUTPUT"
           else
@@ -167,7 +167,7 @@ jobs:
           # Exactly the paths the filter above treats as this gate's inputs —
           # the same regex, so a change the filter would ignore cannot change
           # the key and vice versa.
-          include='^(frontend/|\.github/workflows/frontend\.yml$)'
+          include='^(frontend/|scripts/frontend-dev/|\.github/workflows/frontend\.yml$)'
           exempt=''
 
           tree="$(git ls-tree -r HEAD | awk -F'\t' -v re="$include" '$2 ~ re' | awk -F'\t' -v re="$exempt" 're == "" || $2 !~ re')"

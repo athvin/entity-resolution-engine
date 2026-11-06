@@ -124,18 +124,18 @@ frontend-coverage:
 
 # The whole dev stack in one command (container + migrations + er-server + seed + web).
 run:
-	bash frontend/dev/run.sh
+	bash scripts/frontend-dev/run.sh
 
 # The control-plane Postgres container + erweb migrations + er-server; blocks.
 frontend-dev:
-	bash frontend/dev/up.sh
+	bash scripts/frontend-dev/up.sh
 
 # Seed the demo tenant: org, api keys, published config, base_10 resolved, logins.
 # Needs `make frontend-dev` running in another terminal.
 frontend-seed:
 	@bash -c 'set -euo pipefail; \
 	  export REPO_ROOT="$$PWD"; \
-	  source frontend/dev/env.sh; \
+	  source scripts/frontend-dev/env.sh; \
 	  node frontend/dev/seed.mjs'
 
 # The full-stack tier: Playwright against the real stack. Needs `make frontend-dev`
@@ -146,7 +146,7 @@ frontend-e2e:
 # Regenerate visual baselines inside the pinned Playwright Linux image so they
 # are stable across contributor machines.
 frontend-baselines:
-	bash frontend/dev/update-baselines.sh
+	bash scripts/frontend-dev/update-baselines.sh
 
 frontend-dev-reset:
 	docker compose -f frontend/dev/compose.yaml down -v

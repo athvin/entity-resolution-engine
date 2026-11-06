@@ -29,7 +29,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-COMPOSE=(docker compose -f "${SCRIPT_DIR}/compose.yaml")
+COMPOSE=(docker compose -f "${REPO_ROOT}/frontend/dev/compose.yaml")
 
 source "${SCRIPT_DIR}/env.sh"
 

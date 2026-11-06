@@ -52,7 +52,7 @@ Consequences that rippled through the design: the §8.2 guard statements moved f
 
 **Decision.** `us-east-2`, single region, no DR replication in this phase.
 
-**Context.** Chosen when the Identity Center organization instance was created there — its primary region is permanent. Every service this design uses is available in us-east-2 at the same price points; the repo's `ER_S3_REGION` sites (`docker/compose.yaml`, [frontend/dev/env.sh](../frontend/dev/env.sh), `dbt/profiles/profiles.yml`) match.
+**Context.** Chosen when the Identity Center organization instance was created there — its primary region is permanent. Every service this design uses is available in us-east-2 at the same price points; the repo's `ER_S3_REGION` sites (`docker/compose.yaml`, [scripts/frontend-dev/env.sh](../scripts/frontend-dev/env.sh), `dbt/profiles/profiles.yml`) match.
 
 **Rejected alternative.** Multi-region and a real DR posture — deferred (§18.6 carries it as a stated accepted risk rather than an omission).
 
