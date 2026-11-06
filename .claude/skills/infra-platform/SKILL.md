@@ -157,11 +157,18 @@ Rules that are easy to break:
 - **Every matrix job sets `name:` explicitly.** The matrix is a list of
   `{key, dir}` objects, and left to itself GitHub names the job
   `plan (core, infra/terraform/envs/core)`, silently un-protecting `plan (core)`.
-- **A new stack needs the plan role's state read first, in its own PR.** The
-  role's policy enumerates `envs/*.tfstate` and `bootstrap/*.tfstate`; a PR
-  adding both a grant and the matrix leg that needs it fails its own new leg,
-  because the grant is only live after the merge applies it (#358, and #350
-  before it).
+- **A new stack has to join two hand-written lists**, and neither failure is
+  loud: the `validate` tier's `for d in …` loop, and the `plan` job's
+  `matrix.include`. A stack in neither is simply never checked — no job goes
+  red. The generated coverage table reports exactly that gap.
+- **A new state-key *prefix* needs the plan role's grant first, in its own
+  PR** — not every new stack. The role allows `envs/*.tfstate` and
+  `bootstrap/*.tfstate`, so a stack under either is already covered and needs
+  no IAM change. `bootstrap/state-backend` was the case that bit: it introduced
+  the `bootstrap/` prefix, and because a grant is only live once CI applies it
+  on merge, a PR carrying both the grant and the leg that needs it fails its own
+  new leg (#358; #350 is the same apply-before-merge ordering trap on a
+  different resource).
 - **`bootstrap/state-backend` is planned and never applied from CI** — it owns
   the bucket its own backend lives in. **`bootstrap/organization` is validated
   only**: its one required variable is a root account email deliberately kept
