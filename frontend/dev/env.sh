@@ -27,10 +27,12 @@ export ER_OPERATOR_TOKEN="dev-operator-token"
 # The port must stay 8000 because ERSERVER_BASE_URL and the e2e Playwright
 # config both hardcode it; the binary's own default is 8080.
 export ER_SERVER_ADDR="127.0.0.1:8000"
-# One process serves the API and drains the job queue (the merged `web-api`
-# topology). A single-replica dev stack wants exactly that, and it removes the
-# half-up failure mode where an API accepts jobs nothing will ever execute.
-export ER_DISPATCH_IN_PROCESS="1"
+# NOT set, and deliberately absent rather than set to 0. The dispatcher runs as
+# its own process (`up.sh` starts `er-dispatcher`), which is the topology the
+# chart ships and the only one that survives Phase 4 of the
+# batch-orchestration design — `ER_DISPATCH_IN_PROCESS` goes with the legacy
+# arm. up.sh checks the dispatcher is alive, because two processes make the
+# half-up state reachable again.
 # No SES in a dev stack; `log` prints what would have been sent, which is what
 # keeps invite/reset flows honest without a verified identity.
 export ER_MAIL_BACKEND="log"

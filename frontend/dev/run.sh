@@ -13,11 +13,12 @@
 # in a fresh terminal fails env validation on `ERWEB_DATABASE_URL`. Sourcing
 # `env.sh` here means the child inherits them.
 #
-# The other rough edge is gone rather than handled. A half-up stack used to be
-# silent — the Python API answered while nothing drained the queue, so every run
-# sat in `queued` forever — and this script detected and named it. er-server now
-# runs the dispatcher IN-PROCESS (`ER_DISPATCH_IN_PROCESS=1`), so a healthy API
-# is a running dispatcher by construction and that state is unreachable.
+# The other rough edge is handled in `up.sh` rather than here. A half-up stack
+# is silent — the API answers while nothing drains the queue, so every run sits
+# in `queued` forever. That state was briefly unreachable, while the dispatcher
+# ran in-process; it is reachable again now that `up.sh` starts `er-dispatcher`
+# as its own process (the topology the chart ships), so `up.sh` asserts the
+# dispatcher survived boot and names it when it did not.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
