@@ -146,10 +146,19 @@ retention.
 | Path | Purpose |
 |---|---|
 | `infra/k8s/nodepools/` | `karpenter.sh/v1` `NodePool`s consumed by Auto Mode's own Karpenter — writing one is correct, installing Karpenter is not |
-| `infra/k8s/observability/` | the namespace and the three upstream chart value files |
+| `infra/k8s/priorityclasses/` | the task PriorityClass, applied beside the pools by the same target and by the kind probe |
+| `infra/k8s/observability/` | the namespace plus the upstream charts' value files |
 | `infra/k8s/secrets/` | the External Secrets ClusterSecretStore |
 | `infra/k8s/storage/` | the gp3 StorageClass |
 | `infra/k8s/network-policy-controller.yaml` | the policy controller |
 
-These are applied directly rather than through a chart because they are
-cluster-scoped and installed once, not per release.
+This table is **purpose only**. For what applies each path, read the generated
+coverage table in `coverage.md`, beside this one and reached from the skill
+body — the inventory here went stale twice, once omitting `priorityclasses/`
+entirely and once counting the observability value files wrongly.
+
+They are cluster-scoped and installed once rather than per release, which is
+why they are not chart templates. But "applied directly" is doing less work
+than it sounds: `secrets/` and `network-policy-controller.yaml` are referenced
+by no target, script or workflow in the tree, so they are applied by hand or
+not at all. Do not assume a cluster has them.

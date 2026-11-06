@@ -65,10 +65,12 @@ runs its own Karpenter.** The manifests in `infra/k8s/nodepools/` are literally
 - Installing Karpenter, or managing its controller or a custom `NodeClass`, is
   **wrong** — Auto Mode owns that.
 - A new pool goes **beside the deployed ones**, not under
-  `infra/k8s/nodepools/measure/`. That subdirectory holds a measurement-only
-  pool that `make nodepools` deliberately does not apply, and it is the one
-  `NodePool` in the tree carrying `limits`, so a runaway measurement cannot
-  provision a fleet.
+  `infra/k8s/nodepools/measure/`. `make cluster-objects` — still callable by its
+  old name `make nodepools` — applies that directory **non-recursively**, which
+  is the whole mechanism keeping the subdirectory out of the cluster with no
+  exclusion list to maintain. It holds a measurement-only pool, the one
+  `NodePool` carrying `limits`, so a runaway measurement cannot provision a
+  fleet.
 
 The distinction matters for disruption in particular:
 `WhenEmptyOrUnderutilized` is right for the stateless app pool and forbidden on
