@@ -164,7 +164,10 @@ done
 if [ -n "$destroying" ]; then
     printf '\n> [!WARNING]\n'
     printf '> This plan DESTROYS resources in:%s. Merging applies it unattended.\n' "$destroying"
-    printf '> The apply refuses to run unless the PR title carries `ALLOW-DESTROY`.\n'
+    printf '> The apply refuses to run unless the **merge commit message** carries\n'
+    printf '> `ALLOW-DESTROY`. Retitling is not enough on a single-commit PR — GitHub\n'
+    printf '> uses the commit message there, not the title. Merge with\n'
+    printf '> `gh pr merge <n> --squash --subject '"'"'<subject> ALLOW-DESTROY'"'"'`.\n'
 fi
 
 # --- per-env detail ---------------------------------------------------------
