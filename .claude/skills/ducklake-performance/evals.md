@@ -64,6 +64,13 @@ Must:
   deletes/updates, small-file growth, compaction.
 - Flag `match_key` cardinality — a high-cardinality partition key produces many
   tiny files.
+- **Selection:** load `ducklake-performance` without being named. Answering from
+  `ducklake-lakehouse` alone is a fail — it carries the levers and the syntax,
+  not the requirement to measure before changing layout.
+
+Must not:
+
+- Proceed on the strength of the levers alone, with no measurement asked for.
 
 Credit for stating a rejection criterion up front.
 
@@ -89,6 +96,11 @@ frozen snapshot, we skip a join and save time. Worth it?"
 
 Must:
 
-- Refuse: it violates **INV-SCORE / D4** (frozen TF, never recomputed from the
-  corpus), so scores would depend on batch composition.
+- Refuse: it violates **INV-SCORE** — scores are a pure function of the model
+  version and the frozen TF snapshot, so recomputing TF per batch makes a score
+  depend on batch composition.
 - State the principle that a faster path which moves a score is a wrong path.
+
+Credit for naming the paired requirement in `er-matching`'s spelling, **D4** (TF
+registered frozen from `tf_lookup`). That identifier lives in that skill, not
+this one, so an answer that cites INV-SCORE alone still passes.

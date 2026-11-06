@@ -110,9 +110,10 @@ effects do not accrue to one side. Report the median and the spread, not a best
 case.
 
 The live surface for this is `cargo bench -p dedupe-core` (`benches/pipeline.rs`,
-`harness = false`). CI compiles the benches on main and nightly but does not
-run them as a gate, so benchmark numbers are something you produce
-deliberately, not something CI hands you.
+`harness = false`). CI compiles the benches but never runs them as a gate —
+which job does that, and on which events, is in the ci-and-supply-chain skill's
+generated required-checks reference — so benchmark numbers are something you
+produce deliberately, not something CI hands you.
 
 State the **rejection criterion before running**. Deciding afterwards what
 counts as success is how a neutral result becomes a reported win.
@@ -120,14 +121,9 @@ counts as success is how a neutral result becomes a reported win.
 ## Handling artifacts
 
 Profiling artifacts may contain tenant data — SQL text, literal values, sampled
-rows.
+rows. The handling rule and the analysis-scope rule are both in the skill body;
+two obligations that are only here:
 
-- Keep analysis **local**. Do not send artifact SQL or values to an external
-  service.
 - Apply the same access controls you would to source data.
 - Retain the artifact directory alongside any finding you publish, so the claim
   stays checkable.
-- Save durable findings in `docs/`.
-
-And a scope rule: when the request is analysis, do not change production schema
-or configuration, and do not launch an expensive run to satisfy curiosity.

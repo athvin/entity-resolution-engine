@@ -112,8 +112,8 @@ semantic outputs before adopting it.
 
 **Hard limits on what a speed change may do:** do not cross tenant or
 writer-lock boundaries, and do not alter blocking, model or TF generations to
-gain speed. A faster path that changes a score is a wrong path — INV-SCORE, see
-the er-matching skill.
+gain speed. The INV-SCORE rule those limits enforce is stated in the skill body,
+and the invariant itself belongs to the er-matching skill.
 
 ## Budget each subsystem independently
 
