@@ -45,6 +45,13 @@ expect 'the classifier itself (fail-safe)' "$ALL" 'scripts/ci/detect-paths.sh'
 expect 'this test (fail-safe)' "$ALL" 'scripts/ci/detect-paths-test.sh'
 expect 'rust.yml itself' "$ALL" '.github/workflows/rust.yml'
 expect 'frontend.yml itself' "$ALL" '.github/workflows/frontend.yml'
+# The devcontainer's exemption covers `.devcontainer/` and `devcontainer.yml`
+# and must stop there. These two live under `scripts/`, which the regex does not
+# cover, and the direction that matters is the FALSE SKIP: were `devcontainer-`
+# ever folded into the exemption as a prefix, an edit to a tracked shell script
+# would stop running the gate.
+expect 'a devcontainer lifecycle script' "$ALL" 'scripts/devcontainer-postcreate.sh'
+expect 'the devcontainer detect helper' "$ALL" 'scripts/ci/devcontainer-detect.sh'
 expect 'a doc AND a rust file' "$ALL" 'docs/architecture.md' 'rust/crates/er-match/src/lib.rs'
 expect 'a skill AND a rust file' "$ALL" '.claude/skills/er-matching/SKILL.md' 'rust/Cargo.lock'
 expect 'a hook AND a rust file' "$ALL" 'scripts/hooks/aws-write-guard.sh' 'rust/crates/er-match/src/lib.rs'
@@ -60,6 +67,15 @@ expect 'the aws write-guard hook' "$NONE" 'scripts/hooks/aws-write-guard.sh'
 expect 'an agentic workflow' "$NONE" '.github/workflows/ci-triage.md'
 expect 'its compiled lock' "$NONE" '.github/workflows/ci-triage.lock.yml'
 expect 'infra.yml' "$NONE" '.github/workflows/infra.yml'
+# #584's Direction B: a `.devcontainer/`-only PR must not pay the backend gate,
+# and must not be blocked by it. Both halves of the exemption, because they are
+# separate alternations in the regex.
+expect 'the devcontainer image' "$NONE" '.devcontainer/Dockerfile'
+expect 'its devcontainer.json' "$NONE" '.devcontainer/devcontainer.json'
+expect 'devcontainer.yml' "$NONE" '.github/workflows/devcontainer.yml'
+expect 'the whole devcontainer change' "$NONE" \
+	'.devcontainer/Dockerfile' '.devcontainer/devcontainer.json' \
+	'.github/workflows/devcontainer.yml'
 
 # --- `lint` only, for the drift check -------------------------------------
 # This is the shape of a real skill PR: the inventory rows regenerate into

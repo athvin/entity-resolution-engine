@@ -35,9 +35,28 @@
 # resolved action SHAs). None of those shapes can capture a hand-written
 # `.yml` workflow, so they cannot widen the exemption past what is argued
 # for here.
+#
+# `.devcontainer/` and `devcontainer.yml` join that list for the same reason
+# `infra.yml` did: they define no Rust job and cannot affect the workspace
+# build. The development image is built BY `.github/workflows/devcontainer.yml`
+# and read by nothing in `make check` — no crate, no manifest and no gate
+# script references `.devcontainer/`.
+#
+# What keeps that exemption honest is that every gate which DOES read those two
+# paths is ungated. `scripts-home-check.sh` would catch a stray
+# `.devcontainer/*.sh`, `workflow-shell-check.sh` budgets `devcontainer.yml`'s
+# `run:` blocks and `actionlint.sh` checks its pins — and all three run in
+# rust.yml's `workflow pins (S9)` job, which is deliberately NOT gated on
+# `detect`. So exempting these removes them from the compile tier's sight
+# without removing them from anything that actually inspects them.
+#
+# Note what is NOT exempt and must not become so: `scripts/devcontainer-*.sh`
+# and `scripts/ci/devcontainer-*.sh`. They live under `scripts/`, which this
+# regex does not cover, so a change to one pays the full backend gate. That is
+# the fail-safe direction and is left alone.
 
 # Everything the Rust gate never reads.
-DETECT_EXEMPT='^(\.claude/|docs/|CLAUDE\.md$|infra/terraform/|scripts/ci/tf-|scripts/hooks/|\.github/aw/|\.github/workflows/((infra|drift)\.yml$|shared/|agentics-maintenance\.yml$|[A-Za-z0-9._-]+\.md$|[A-Za-z0-9._-]+\.lock\.yml$))'
+DETECT_EXEMPT='^(\.claude/|\.devcontainer/|docs/|CLAUDE\.md$|infra/terraform/|scripts/ci/tf-|scripts/hooks/|\.github/aw/|\.github/workflows/((infra|drift|devcontainer)\.yml$|shared/|agentics-maintenance\.yml$|[A-Za-z0-9._-]+\.md$|[A-Za-z0-9._-]+\.lock\.yml$))'
 
 # A generated artifact `er-entity verify` re-renders and byte-compares.
 DETECT_ERD='^docs/erd\.md$'

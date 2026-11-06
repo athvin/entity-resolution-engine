@@ -1,0 +1,137 @@
+name: devcontainer
+# Builds .devcontainer/ on PRs that touch it, and on `main` also publishes the
+# image to GHCR so devcontainer.json's `cacheFrom` resolves to a warm prebuild.
+# That prebuild is the point: #584 identifies a pull-instead-of-a-40-minute-
+# first-build as the difference between the container being used and abandoned.
+#
+# NO `paths:` FILTER, and a `detect` job instead — even though nothing here is a
+# required status check and a filter would therefore be legal (`images.yml` and
+# `kind.yml` both carry one for exactly that reason). #584 asked for the detect
+# pattern from day one so that promoting this job to required later is a
+# branch-protection edit rather than a workflow rewrite: a filtered workflow
+# NEVER REPORTS on a PR it skips, and a required context that never reports
+# blocks every PR forever. A job skipped by `if:` reports `skipped`, which
+# branch protection accepts. See CLAUDE.md and the ci-and-supply-chain skill.
+#
+# DO NOT add `devcontainer build` to the required set until it has reported
+# green on `main` once, and has been observed failing. A required context for a
+# job that does not yet exist on `main` is the other half of the same trap.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# `packages: write` is what publishes to GHCR, and it is the reason this
+# workflow needs no secret at all — the job's own GITHUB_TOKEN is the registry
+# credential. This repository holds ZERO secrets and that is an invariant worth
+# keeping (`gh api repos/:owner/:repo/actions/secrets --jq .total_count` → 0),
+# which is why GHCR was chosen over ECR: ECR would additionally require the
+# Windows collaborator to hold AWS credentials and run
+# `aws ecr get-login-password` before the container would open.
+#
+# Declaring this block sets every scope not named to `none`, which is how
+# merge-bus.yml lost `actions: read` three times — so both scopes are named.
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: devcontainer-${{ github.ref }}
+  # Cancel a superseded PR build; NEVER cancel a push build. On `main` this run
+  # produces the artifact the next cold `Reopen in Container` pulls, not a check
+  # on the commit — the same argument images.yml's concurrency block makes at
+  # length, and for the same reason: a cancelled build leaves the registry
+  # carrying an older image while the workflow reports nothing wrong.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  # One place for the registry name. devcontainer.json's `cacheFrom` carries the
+  # same string and cannot read this, so the two are checked against each other
+  # by scripts/ci/devcontainer-image-check.sh below.
+  IMAGE: ghcr.io/athvin/entity-resolution-engine-devcontainer
+  IMAGE_TAG: main
+
+jobs:
+  detect:
+    name: detect changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      devcontainer: ${{ steps.filter.outputs.devcontainer }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: filter
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.event.after }}
+        run: bash scripts/ci/devcontainer-detect.sh
+
+  build:
+    name: devcontainer build
+    needs: detect
+    if: needs.detect.outputs.devcontainer == 'true'
+    runs-on: ubuntu-latest
+    # 30, not 10: the image installs PGDG Postgres and compiles nothing, so the
+    # steady-state build is a few minutes — but a base-image or feature change
+    # lands cold with no layer cache at all, and the `cacheFrom` pull itself is
+    # a network dependency.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      # Always, not only on push: `cacheFrom` PULLS from this registry, so a PR
+      # that cannot authenticate gets a cold build and a misleading wall-clock.
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: devcontainer.json's cacheFrom still names the image this job pushes
+        # A two-copy string with no mechanism keeping them equal is how the
+        # prebuild stops being used: `cacheFrom` would point at a tag nothing
+        # publishes, every open would build from scratch, and NOTHING would go
+        # red — the gate would still pass, because building from scratch works.
+        # This is the cheapest possible guard against that silent regression.
+        run: bash scripts/ci/devcontainer-image-check.sh
+      # `push: filter` publishes only when the action's ref and event filters
+      # both pass — a PR builds and proves the image, `main` builds and
+      # publishes it.
+      #
+      # `refFilterForPush` IS SET EXPLICITLY BECAUSE ITS DEFAULT IS EMPTY, AND
+      # EMPTY MEANS EVERY BRANCH. Only `eventFilterForPush` defaults to
+      # something restrictive (`push`). Today the `on:` block already confines
+      # `push` to `main`, so the defaults would behave correctly — but that
+      # makes the publishing policy a property of the trigger list, two screens
+      # away, and adding `branches: [release/*]` later would silently start
+      # overwriting the `main` tag. Naming it keeps the policy next to the
+      # thing it governs.
+      #
+      # On the FIRST run of this workflow the `cacheFrom` image does not exist
+      # yet and buildx logs `ERROR: failed to configure registry cache
+      # importer: …: not found`. It is not fatal — the build proceeds without a
+      # cache — and it stops appearing once `main` has published once. Observed
+      # on #743.
+      - uses: devcontainers/ci@513af61f4de4f75d37e4438f184ba4358f0fc1ca # v0.3.1900000450
+        with:
+          imageName: ${{ env.IMAGE }}
+          imageTag: ${{ env.IMAGE_TAG }}
+          cacheFrom: ${{ env.IMAGE }}:${{ env.IMAGE_TAG }}
+          push: filter
+          refFilterForPush: refs/heads/main
+          eventFilterForPush: push
+          # Asserts the toolchain inside the image rather than running
+          # `make check`, which would be a second cold ~40-minute backend build
+          # on a non-required workflow. The script's header argues the split;
+          # what CI needs to catch here is "the image lost a tool", and that is
+          # what this sees.
+          runCmd: bash scripts/ci/devcontainer-smoke.sh

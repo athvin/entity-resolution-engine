@@ -85,6 +85,7 @@ were `cancelled` with `jobs=0` and the 3 survivors had 19–22. So:
 | Workflow | Triggers |
 |---|---|
 | `deploy` | `push workflow_dispatch workflow_run` |
+| `devcontainer` | `pull_request push workflow_dispatch` |
 | `drift` | `schedule workflow_dispatch` |
 | `frontend-experiments` | `schedule workflow_dispatch` |
 | `frontend` | `merge_group pull_request push schedule workflow_dispatch` |
