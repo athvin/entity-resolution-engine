@@ -92,7 +92,7 @@ import is a build error.
 **If a module holds a credential, reads env, or touches the database, add
 `import "server-only"` as the first line.** It is cheap and it converts a whole
 class of leak into a compile error. That covers `src/lib/env.ts`, `upstream.ts`
-and the rest of `src/lib/bff/`, `src/lib/db/`, `src/lib/auth/session.ts` and
+and most of `src/lib/bff/`, `src/lib/db/`, `src/lib/auth/session.ts` and
 `password.ts`, and every AI, adjudication and usage helper that reads a stored
 key. The set grows with the app, so no enumeration of it here would stay true —
 learn the rule instead.
@@ -106,9 +106,19 @@ decision someone could undo by accident:
 | `src/lib/auth/redirect.ts` | the login page is a client component |
 | `src/lib/db/schema.ts` | `drizzle-kit generate` loads it in plain Node, where `server-only` throws |
 
-Those three carry a stated reason. Treat a server module **without** the import
-and **without** such a reason as missing it rather than as a fourth exception —
-the import is additive and costs nothing, so the asymmetry is the tell.
+A fourth shape sits outside the set without being an exception at all: a module
+that takes what it needs as a **parameter** instead of reading it.
+`src/lib/bff/readiness.ts` is the worked example — the upstream base URL is
+passed in rather than read, deliberately, "so the environment branch is reachable
+in a test" (`env()` memoizes its first successful parse for the life of the
+process), and `/readyz` is anonymous so no credential is involved. It holds
+nothing, so the rule never fires on it and the missing import is correct.
+
+So the tell is the rule's **trigger**, not the directory. A module that does hold
+a credential, read env or touch the database, and carries neither the import nor
+a reason, is missing it — the import is additive and costs nothing, so that
+asymmetry is worth acting on. A module under `src/lib/bff/` that holds none of
+those things is not evidence of anything.
 
 Vitest aliases `server-only` to a stub (`tests/server-only-stub.ts`) so unit
 tests can import these modules outside a React Server context. That alias is
