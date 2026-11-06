@@ -43,10 +43,13 @@ comm -13 \
 # 3. Is anything still unfinished on this SHA? Ask by CONCLUSION, not status.
 #    `status` has more values than the two obvious ones — a run held by a
 #    concurrency group reads `pending` — and enumerating them is how a poll
-#    reports "all concluded" over a run that has not started. A null conclusion
-#    is the one predicate that covers every unfinished state.
+#    reports "all concluded" over a run that has not started.
+#
+#    Compare against the EMPTY STRING, not null: `gh` serialises an unfinished
+#    run's conclusion as `""`, so `select(.conclusion == null)` matches nothing
+#    and silently reports the same false green. `// ""` normalises both.
 gh run list --commit "$SHA" --json workflowName,status,conclusion \
-  --jq '[.[]|select(.conclusion == null)]'
+  --jq '[.[]|select((.conclusion // "") == "")]'
 ```
 
 Two properties make this worth the three calls. It asks GitHub for the required
@@ -112,8 +115,15 @@ held by a concurrency group reads **`pending`**, which is neither `queued` nor
 `select(.status=="queued" or .status=="in_progress")` reports nothing
 outstanding while a run sits unstarted. Measured here: a post-merge watch
 printed "ALL CONCLUDED" over a `rust` run that was `pending` and went on to be
-cancelled without ever running a job. Poll `conclusion == null` instead — it is
-the only predicate that does not need the status vocabulary to be complete.
+cancelled without ever running a job.
+
+Poll `(.conclusion // "") == ""` instead — it is the only predicate that does
+not need the status vocabulary to be complete. Note the `// ""`: `gh run list`
+and `gh run view` both serialise an unfinished run's conclusion as the **empty
+string**, not `null`, so the obvious `select(.conclusion == null)` matches
+nothing and reproduces the very false green it was meant to fix. Verified
+against a live `pending` run: the null form counted 0 outstanding, this one
+counted 1.
 
 ## Reading a failure's cause from execution rather than conclusion
 
