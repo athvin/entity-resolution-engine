@@ -1384,6 +1384,18 @@ wf_on_block() {
 # infra/terraform. Scoped per job because `plan` and `apply` carry separate
 # matrices and conflating them would report prod as planned when it is only
 # applied through the second-hop role.
+# Membership test with no subprocess at all. The obvious spelling — piping the
+# list into a quiet exact-match grep — is forbidden in this file by
+# scripts/ci/skills-check-test.sh, and rightly: a quiet grep closes the pipe at
+# its first match, which SIGPIPEs the writer under `pipefail` and can report a
+# FOUND match as missing. That test is textual, so this comment deliberately
+# describes the bad form rather than spelling it. The needle is quoted inside
+# the pattern so a path matches literally rather than as a glob.
+in_list() {
+	local needle=$1 list=$2
+	[[ $'\n'$list$'\n' == *$'\n'"$needle"$'\n'* ]]
+}
+
 infra_job_stacks() {
 	local wf=.github/workflows/infra.yml job=$1
 	awk -v want="$job" '
@@ -1422,9 +1434,9 @@ gen_infra_coverage() {
 	printf '%s\n' "$stacks" | while read -r s; do
 		[[ -n $s ]] || continue
 		local v=— p=— a=—
-		printf '%s\n' "$validate" | grep -qxF "$s" && v=yes
-		printf '%s\n' "$plan" | grep -qxF "$s" && p=yes
-		printf '%s\n' "$apply" | grep -qxF "$s" && a=yes
+		in_list "$s" "$validate" && v=yes
+		in_list "$s" "$plan" && p=yes
+		in_list "$s" "$apply" && a=yes
 		printf '%s\n' "| \`$s\` | $v | $p | $a |"
 	done
 	echo
