@@ -2222,6 +2222,139 @@ fn a_required_match_restricts_candidates_to_pairs_that_agree_on_it() {
 /// describes it — and compares the partitions. Agreement means the DSL was an
 /// accurate description of the matching all along, and that a tenant editing
 /// `comparisons:` now gets the behaviour the config claims.
+/// The grid search `DEFAULT_FULL_AGREEMENT_BITS` rests on, made reproducible.
+///
+/// That constant's doc comment records its own derivation and the experiment
+/// that confirmed it: "at 20 bits the compiled model finds 18 clusters where
+/// there are 10 ... and at 120 bits it finds 9 — it has started *merging
+/// distinct people*. 55–60 bits reproduces the committed membership exactly."
+///
+/// **No committed test reproduced any of it.** The experiment was run once by
+/// hand and its result written into prose, so the number every compiled model
+/// depends on was protected by nothing: changing it to 120 "to be safe" would
+/// have passed every gate while silently merging distinct people — the failure
+/// the comment itself calls the more expensive one.
+///
+/// Now that `compile` reads `thresholds.full_agreement_bits`, the grid is three
+/// ordinary resolves. Costs ~1 minute in this tier, which is the right price
+/// for the only evidence behind the scale.
+#[test]
+fn the_score_scale_constant_sits_inside_its_calibrated_region() {
+    if !enabled() {
+        eprintln!("skipping DuckLake e2e (set DEDUPE_E2E_DUCKLAKE=1 to run)");
+        return;
+    }
+
+    /// Resolve base_10 with the config compiled at `bits`, and return the
+    /// entity partition.
+    fn resolve_at_scale(tag: &str, bits: f64) -> BTreeSet<BTreeSet<String>> {
+        let tmp = std::env::temp_dir().join(format!("er_cli_{tag}_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(tmp.join("data")).unwrap();
+        let catalog = tmp.join("catalog.ducklake").to_string_lossy().into_owned();
+        let data_path = tmp.join("data").to_string_lossy().into_owned();
+        let session = er_cli::open_lake(&catalog, &data_path).unwrap();
+
+        let mut config = load_config_str(include_str!("fixtures/test.yaml")).unwrap();
+        config.thresholds.full_agreement_bits = Some(bits);
+        let compiled = er_compile::compile(&config).expect("the config compiles at this scale");
+
+        let lexicon: Vec<(String, String)> = include_str!("fixtures/nickname_variants.csv")
+            .lines()
+            .skip(1)
+            .filter(|l| !l.is_empty())
+            .map(|l| {
+                let (a, b) = l.split_once(',').unwrap();
+                (a.to_string(), b.to_string())
+            })
+            .collect();
+        let deliveries: Vec<(String, String)> = ["crm", "billing", "webforms"]
+            .iter()
+            .map(|s| {
+                (
+                    (*s).to_string(),
+                    std::fs::read_to_string(repo_fixture(&format!("base_10/base/{s}.csv")))
+                        .unwrap(),
+                )
+            })
+            .collect();
+        let tf_csv = repo_fixture("model_test_v1.tf.csv");
+        er_cli::run_all(
+            &session,
+            &config,
+            &er_cli::PipelineInputs {
+                mode: "full",
+                rebuild_reason: None,
+                segment: None,
+                lexicon: &lexicon,
+                deliveries: &deliveries,
+                model: &er_cli::MatchModel {
+                    settings_json: &compiled.model_json,
+                    tf_csv_path: std::path::Path::new(&tf_csv),
+                    model_version: "v0001",
+                    tf_snapshot_id: "01JWMDTFSNAP00000000000001",
+                },
+                run_id: "01RUNALLFULL0000000000000000",
+                ingested_at: "2026-01-01 00:00:00",
+                scored_at: "2026-01-02 00:00:00",
+                run_at: "2026-01-03 00:00:00",
+            },
+        )
+        .unwrap();
+        let partition = partition(&membership_rows(&session));
+        drop(session);
+        let _ = std::fs::remove_dir_all(&tmp);
+        partition
+    }
+
+    let golden = membership_golden("base_10", "base");
+    let default_bits = er_compile::CompileOptions::default().full_agreement_bits;
+
+    let at_default = resolve_at_scale("scale_default", default_bits);
+    let too_quiet = resolve_at_scale("scale_quiet", 20.0);
+    let too_loud = resolve_at_scale("scale_loud", 120.0);
+    eprintln!(
+        "SCALE GRID: truth={} default({default_bits})={} quiet(20)={} loud(120)={}",
+        golden.len(),
+        at_default.len(),
+        too_quiet.len(),
+        too_loud.len()
+    );
+
+    // The claim that matters: the shipped default resolves the fixture into its
+    // committed entities, membership for membership.
+    assert_eq!(
+        at_default, golden,
+        "the default scale must reproduce base_10's committed membership"
+    );
+
+    // Too quiet never accumulates enough evidence for the pairs that disagree
+    // on a field or two, so it splits entities and finds MORE of them.
+    //
+    // The exact counts are pinned rather than the direction, because the
+    // constant's doc comment states these exact numbers and this test exists to
+    // be their gate. A failure here means the calibrating EVIDENCE moved, not
+    // that a threshold needs nudging — read the comment on
+    // `DEFAULT_FULL_AGREEMENT_BITS` and update it with the new measurement
+    // rather than loosening this.
+    assert_eq!(
+        too_quiet.len(),
+        18,
+        "the comment claims 20 bits finds 18 clusters where there are {}",
+        golden.len()
+    );
+
+    // Too loud starts merging distinct records, so it finds FEWER. This is the
+    // direction the constant's comment calls the more expensive mistake, and
+    // the one a well-meaning "turn it up" would cause.
+    assert_eq!(
+        too_loud.len(),
+        9,
+        "the comment claims 120 bits finds 9 clusters where there are {}",
+        golden.len()
+    );
+}
+
 #[test]
 fn a_model_compiled_from_the_config_resolves_base_10_like_the_trained_one() {
     if !enabled() {

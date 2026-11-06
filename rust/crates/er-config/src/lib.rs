@@ -224,6 +224,40 @@ pub fn canonical_attributes(entity_type: EntityType) -> &'static [&'static str] 
 pub struct Thresholds {
     pub auto_merge: f64,
     pub review_low: f64,
+    /// How much evidence a field at full agreement contributes, in bits of log2
+    /// Bayes factor, when an untrained model is compiled from this config.
+    /// Absent means `er-compile`'s global default.
+    ///
+    /// **Why it belongs beside the thresholds rather than in a block of its
+    /// own.** A threshold is meaningless without the scale it is measured on:
+    /// `auto_merge: 20` means "most of the evidence" at a 22-bit scale and
+    /// "a third of it" at 60. The two numbers have to be read together, and
+    /// `er_cli::TrainReport::scale_divergence` exists precisely because they can
+    /// drift apart — a config published before training carries the assumed
+    /// scale, a model trained afterwards carries the measured one.
+    ///
+    /// **Why it is optional, and must stay so.** `er-compile`'s default was
+    /// calibrated on the committed PERSON reference model, which measures 59.9
+    /// bits; the committed ACCOUNT model measures 21.8, and compiled with the
+    /// same 60. Until now there was no way for a tenant to say so: the
+    /// `compile_with` seam existed with no production caller, so the constant
+    /// was global in practice however corpus-dependent its own doc comment said
+    /// it was. `er train` reports what a corpus actually supports
+    /// (`TrainReport::full_agreement_bits`); this is where that measurement can
+    /// be acted on.
+    ///
+    /// `skip_serializing_if` is load-bearing, for the reason `entity_type`,
+    /// `approval` and `models` each carry it: the canonical document feeds
+    /// `config_hash`, so an absent value must serialise to nothing and leave
+    /// every existing tenant's hash — and therefore every committed golden —
+    /// byte-identical.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub full_agreement_bits: Option<f64>,
+    /// What a disagreement costs, as a fraction of what an agreement earns.
+    /// Absent means `er-compile`'s global default. Same hash-stability rule as
+    /// [`Thresholds::full_agreement_bits`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disagreement_ratio: Option<f64>,
 }
 
 /// How a member's edges combine with the members before it (E5b-2d).
@@ -980,6 +1014,48 @@ mod tests {
         config.models[0].threshold = Some(0.99);
         assert_ne!(before, config_hash(&config));
         assert!(canonical_document(&config).contains("\"threshold\""));
+    }
+
+    /// The same `config_hash` obligation as the member threshold above, for the
+    /// score scale.
+    ///
+    /// This one carries more weight than most: `full_agreement_bits` decides
+    /// every m/u a compiled model carries, so if an absent value serialised
+    /// — even as `null` — every existing tenant's hash would move, every
+    /// compiled model would be rebuilt, and every committed golden would have to
+    /// be regenerated. The whole point of making it optional is that today's
+    /// behaviour is byte-identical.
+    #[test]
+    fn an_absent_score_scale_hashes_identically() {
+        let mut config = load_config_str(DEFAULT_YAML).unwrap();
+        let before = config_hash(&config);
+        assert!(
+            config.thresholds.full_agreement_bits.is_none()
+                && config.thresholds.disagreement_ratio.is_none(),
+            "the committed fixture must not declare a scale, or this proves nothing"
+        );
+        let doc = canonical_document(&config);
+        assert!(
+            !doc.contains("full_agreement_bits") && !doc.contains("disagreement_ratio"),
+            "an absent scale must not appear in the canonical document: {doc}"
+        );
+
+        // And a DECLARED scale does move the hash — it changes every level's
+        // m/u, so a config that set it and hashed the same would be unhashed
+        // config driving the model.
+        config.thresholds.full_agreement_bits = Some(22.0);
+        assert_ne!(
+            before,
+            config_hash(&config),
+            "a declared scale must be hashed, or it would change the model without \
+             changing the version"
+        );
+        assert!(canonical_document(&config).contains("full_agreement_bits"));
+
+        // The other half independently, so neither rides on the other.
+        let mut only_ratio = load_config_str(DEFAULT_YAML).unwrap();
+        only_ratio.thresholds.disagreement_ratio = Some(0.5);
+        assert_ne!(before, config_hash(&only_ratio));
     }
 
     #[test]
