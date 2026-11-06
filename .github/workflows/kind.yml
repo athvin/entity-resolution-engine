@@ -8,6 +8,11 @@
 # frontend-testing standard says a gate must be observed failing before it is
 # trusted, and this one has not been yet. It also builds the full release
 # image in-job (~40 min cold), which is the wrong cost for every PR.
+#
+# Two jobs, and the split is the point. `probe` is the nightly cluster run.
+# `assertions` runs on PRs that touch the probe and mutation-tests its
+# assertion blocks in about a second — because a neutered assertion makes the
+# nightly greener rather than redder, so the nightly cannot catch it.
 name: kind
 
 on:
@@ -15,6 +20,16 @@ on:
   schedule:
     # Nightly, offset from the drift run.
     - cron: "41 6 * * *"
+  # PRs get the one-second fixture test below and NOT the two-hour probe. A
+  # `paths:` filter is safe here only because nothing in this workflow is a
+  # required status check — on `rust.yml` or `frontend.yml` the same filter
+  # would leave a required context permanently unreported, which is why those
+  # two use a `detect` job instead (ci-and-supply-chain).
+  pull_request:
+    paths:
+      - scripts/check_kind.sh
+      - scripts/ci/kind-assertions-test.sh
+      - .github/workflows/kind.yml
 
 permissions:
   contents: read
@@ -24,8 +39,25 @@ defaults:
     shell: bash
 
 jobs:
+  # Why this runs on PRs when the probe does not: the probe's python assertion
+  # blocks are the least-exercised correctness-critical code here — a cluster,
+  # an image build and two hours, nightly. And an assertion that can no longer
+  # fail makes the probe GREENER, so the nightly cannot detect its own
+  # neutering. Only a per-PR mutation test can. Seconds, no cluster, no docker.
+  assertions:
+    name: kind probe assertions (fixtures)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: mutation tests for the probe's assertion blocks
+        run: bash scripts/ci/kind-assertions-test.sh
+
   probe:
     name: kind probe (executor e2e)
+    # Never on a pull request: ~2h and a full release image build. The
+    # `assertions` job above is the PR-path coverage.
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     # 120, not 90: the cold image build is ~40 min on its own and the pipeline
     # phase adds seven sequential pods, each paying a cold DuckDB open, against

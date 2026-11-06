@@ -27,6 +27,25 @@ erserver:
   email:
     backend: log
 
+# Three pods carry these requests during the probe's phase 6 — the dispatcher
+# and BOTH colours of web-api — so trimming them is worth three times what
+# trimming any single pod is, which is why this is the lever rather than the
+# executor classes. See the budget sums under `executor:` below.
+#
+# REQUESTS ONLY; the limits stay at the chart's `cpu: "1"`. A request is a
+# scheduling reservation, not a ceiling, so a 100m er-server still bursts to a
+# full core on an idle kind node — the startup probe's `ensure_schema` is
+# unaffected. Lowering a LIMIT would have throttled it; lowering the request
+# only stops it reserving capacity phase 6 needs for a pod that must actually
+# be scheduled.
+api:
+  resources:
+    requests: { cpu: 100m, memory: 512Mi }
+
+dispatcher:
+  resources:
+    requests: { cpu: 100m, memory: 512Mi }
+
 executor:
   # The whole point: these kinds run as per-attempt Kubernetes Jobs, on the one
   # kind node, with no nodepool pinning. `run_all_full` is here because the
@@ -53,27 +72,49 @@ executor:
   #   preemptionPolicy=Never
   #
   # The arithmetic, measured rather than estimated. Committed on the node
-  # before any task pod exists:
+  # before any task pod exists, with the `api`/`dispatcher` overrides below:
   #
   #   kube-system   0.95   (apiserver .25, controller-manager .20, etcd .10,
   #                         scheduler .10, kindnet .10, coredns 2x.10)
   #   er-postgres   0.10   (infra/k8s/kind/postgres.yaml)
-  #   er-dispatcher 0.25
-  #   web-api       0.25   (ONE container here — `web.enabled: false` above)
+  #   er-dispatcher 0.10
+  #   web-api       0.10   (ONE container here — `web.enabled: false` above)
   #   ------------------
-  #   total         1.55
+  #   steady state  1.25
   #
-  # A standard GitHub-hosted runner on a private repository is 2 vCPU, so ~0.45
-  # is left and a 1-CPU request can never be scheduled. That the refusal
-  # happened at all is itself the measurement: with 4 allocatable there would
-  # have been 2.45 free and no failure. `requests == limits` for these pods and
-  # `preemptionPolicy: Never`, so there is no burst and nothing to evict.
+  # A standard GitHub-hosted runner on a private repository is 2 vCPU, so a
+  # 1-CPU request could never be scheduled against the 1.55 this used to
+  # commit. That the refusal happened at all is itself the measurement: with 4
+  # allocatable there would have been 2.45 free and no failure.
   #
-  # 250m leaves ~200m of headroom at 1.8/2.0 committed. The cost is wall clock,
-  # not correctness: a quarter-core DuckDB stage is slower, which phase 5's
-  # 1800s budget for seven sequential pods absorbs. Do not raise this without
-  # redoing the sum above — the next 100m is the difference between a probe
-  # that runs and one that reports a timeout for a pod that never started.
+  # 250m leaves 0.50 spare against one task pod. The cost is wall clock, not
+  # correctness: a quarter-core DuckDB stage is slower, which phase 5's 1800s
+  # budget for seven sequential pods absorbs. `requests == limits` for task
+  # pods and `preemptionPolicy: Never`, so there is no burst and nothing to
+  # evict.
+  #
+  # The binding case is NOT a single task pod — it is the probe's phase 6,
+  # which is the only point where three pods the steady state lacks exist at
+  # once:
+  #
+  #   steady state            1.25
+  #   + idle colour's web-api 0.10   (phase 6 scales it to replicas: 1)
+  #   + a task pod            0.25
+  #   + er-schema-migrate     0.10   (a PRE-UPGRADE hook, so every helm
+  #                                   upgrade re-fires it — including the
+  #                                   `color.active` flip that happens while
+  #                                   the task is in flight)
+  #   ---------------------------
+  #   peak                    1.70   of ~2.0
+  #
+  # er-db-migrate is deliberately absent from that sum: it is guarded by
+  # `web.enabled`, off here. Verified by rendering this profile, not assumed.
+  #
+  # Do not raise any of these without redoing both sums — the next 100m is the
+  # difference between a probe that runs and one that reports a timeout for a
+  # pod that never started. `check_kind.sh` asserts the phase 6 figure before
+  # the phase runs, so a change that breaks it fails with both numbers rather
+  # than as a five-minute `helm --wait` timeout.
   classes:
     S: { cpu: "250m", memory: 1Gi, duckdbMemory: 500MB, spill: 2Gi, nodepool: "" }
     M: { cpu: "250m", memory: 1Gi, duckdbMemory: 500MB, spill: 2Gi, nodepool: "" }
