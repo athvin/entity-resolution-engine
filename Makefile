@@ -44,8 +44,20 @@ entities-check:
 # blocks inside skill references from entities/, the crate tree, analyze.rs, the
 # workflows and the frontend config, then fails on drift. See
 # docs/agent-skills.md.
+#
+# The self-test runs here too, and it is the one `scripts/ci/*-test.sh` that
+# belongs in a make target: it tests the very script this target runs, and it is
+# pure bash with no toolchain, no cluster and no cloud credentials — unlike
+# tf-helpers-test.sh (needs terraform) or kind-assertions-test.sh (needs a
+# cluster), which is why those stay CI-only. Leaving it CI-only cost a full gate
+# cycle on #694: `make skills-check` passed clean while the skills job failed on
+# a piped `grep -q` the self-test exists to reject.
+# One line with `&&`, not two recipe lines: `gates.md` renders a multi-line
+# recipe as `a; b`, which reads as "b runs even if a fails" when make in fact
+# stops at the first failing line. `&&` makes the fail-fast explicit in both
+# places rather than only in make's semantics.
 skills-check:
-	bash scripts/skills-check.sh all
+	bash scripts/ci/skills-check-test.sh && bash scripts/skills-check.sh all
 
 # The fast PR-equivalent backend gate (mirrors rust.yml's lint + test tiers),
 # plus the skill gate — a stale generated reference is the same class of defect

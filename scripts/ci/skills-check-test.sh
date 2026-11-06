@@ -182,5 +182,72 @@ else
         "the warning is not a substitute for the cap — both must exist"
 fi
 
+# --- the aws-footprint absence list is a real set difference ---------------
+#
+# `gen_aws_footprint` derives "services with nothing declared" by matching a
+# hand-maintained candidate list against the `resource "aws_*"` types in
+# `infra/terraform`. The candidate list is the only input a human edits, so it
+# is the only place a typo can hide — and the failure is SILENT, because a
+# pattern that matches nothing simply reports its service as absent and the
+# drift check sees a self-consistent file.
+#
+# That is the exact shape of the bug this generator replaced: the skill asserted
+# "there is no ... Athena, Glue ... SNS ..." while all three were declared. An
+# absence is the one claim the thing it describes cannot falsify, so it needs an
+# assertion rather than a reader.
+#
+# Two checks, neither hard-coding which services exist today:
+#   (a) every alternation is a well-formed `aws_*` resource-type prefix
+#   (b) the set difference holds BOTH ways — a candidate whose pattern matches a
+#       declared type must NOT be on the absence list, and one that matches
+#       nothing MUST be
+if [ -d infra/terraform ]; then
+    shape_bad=""
+    logic_bad=""
+    declared=$(grep -rhoE 'resource "aws_[a-z0-9_]+"' infra/terraform \
+        | sed -e 's/^resource "//' -e 's/"$//' | sort -u || true)
+    absence=$(sed -n '/^### Services and resource types with nothing declared/,/^### /p' \
+        .claude/skills/aws-account-operations/references/footprint.md \
+        | sed -n 's/^- //p' || true)
+    candidates=$(sed -n '/local -a candidates=(/,/^\t)/p' "$SCRIPT" | sed -n 's/.*"\(.*\)".*/\1/p')
+
+    while IFS= read -r entry; do
+        [ -n "$entry" ] || continue
+        label=${entry%%|*}
+        pattern=${entry#*|}
+        matched=0
+        while IFS= read -r alt; do
+            [ -n "$alt" ] || continue
+            case $alt in
+                aws_*) : ;;
+                *) shape_bad="$shape_bad $label:'$alt'" ;;
+            esac
+            hit=$(printf '%s\n' "$declared" | grep -cE "^$alt" || true)
+            [ "${hit:-0}" -gt 0 ] && matched=1
+        done <<<"$(printf '%s\n' "$pattern" | tr '|' '\n')"
+
+        listed=$(printf '%s\n' "$absence" | grep -cFx "$label" || true)
+        if [ "$matched" = 1 ] && [ "${listed:-0}" -gt 0 ]; then
+            logic_bad="$logic_bad [$label declared but listed absent]"
+        elif [ "$matched" = 0 ] && [ "${listed:-0}" -eq 0 ]; then
+            logic_bad="$logic_bad [$label absent but not listed]"
+        fi
+    done <<<"$candidates"
+
+    if [ -z "$shape_bad" ]; then
+        ok "every aws-footprint candidate pattern is a well-formed aws_* prefix"
+    else
+        no "a candidate pattern is not an aws_* resource-type prefix" "$shape_bad"
+    fi
+
+    if [ -z "$logic_bad" ]; then
+        ok "the aws-footprint absence list agrees with infra/terraform both ways"
+    else
+        no "the aws-footprint absence list disagrees with infra/terraform" "$logic_bad"
+    fi
+else
+    ok "no infra/terraform here — aws-footprint absence checks skipped"
+fi
+
 printf '\nskills-check-test: %s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ] || exit 1

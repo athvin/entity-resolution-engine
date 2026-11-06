@@ -92,11 +92,52 @@ Must not:
 > unanswerable, on the grounds that there was no per-run pod and no `kube`
 > dependency in the workspace. **That ground no longer holds**: `er-k8s` renders
 > a per-attempt Job manifest and the dispatcher watches it, so the run-shaped
-> wording is valid again and is worth restoring as a second scenario rather than
-> a replacement — the NodePool phrasing tests the same quota knowledge without
-> depending on the orchestration shape, which is what makes it the durable one.
+> wording is valid again, and it is **restored as scenario 4** rather than as a
+> replacement: the NodePool phrasing here tests the same quota knowledge without
+> depending on the orchestration shape, which is what makes it the durable one,
+> while scenario 4 adds the discrimination the run-shaped wording is actually
+> good for — an account vCPU ceiling and a namespace `ResourceQuota` both end in
+> a capacity wait and have nothing else in common.
 
-## 4. Why the bill moved
+## 4. A run stuck Pending — which quota?
+
+**Query:** "A 10M-row run has been Pending for twenty minutes and the job still
+shows active. The namespace has a ResourceQuota — did we just undersize it?"
+
+Must:
+
+- **Separate the two causes that both end in a capacity wait**, because the
+  premise names the wrong one:
+  - an **account** EC2 vCPU ceiling — the NodeClaim cannot place, so the pod is
+    `Unschedulable` and NodeClaims churn; this is the `aws-account-operations`
+    case and the fix is a quota increase;
+  - a **Kubernetes `ResourceQuota`** on the namespace — charged at admission, so
+    the Job controller never creates a pod at all (`active` is 0) and a
+    `FailedCreate` Event carries `exceeded quota`.
+
+  They sit at different layers and the remedies do not overlap. **Whether a pod
+  exists at all is the discriminator** — churning NodeClaims mean a pod exists
+  and could not be placed; a ResourceQuota means no pod was ever created.
+  Raising the namespace ResourceQuota while NodeClaims churn changes nothing.
+- Read the applied account quota with `get-service-quota` rather than asserting
+  it (see the previous scenario).
+
+Credit for any of:
+
+- that twenty minutes is past the unschedulable bound, so the dispatcher should
+  **already** have written a capacity wait on the `task_instance` row — if it has
+  not, that is a second defect and not the quota;
+- that a capacity wait **spends no launch**, because a starved account is the
+  operator's problem rather than the tenant's, so the run is not burning retries;
+- that dev and prod share account quotas, so a dev experiment can starve this.
+
+Must not:
+
+- Treat the namespace `ResourceQuota` and the account vCPU quota as the same
+  thing, or accept the question's premise without separating them.
+- Assert the applied vCPU value from memory.
+
+## 5. Why the bill moved
 
 **Query:** "We got the $300 budget email. What spiked?"
 
@@ -133,7 +174,7 @@ Must not:
   which.
 - Claim a dashboard would have caught it. There are still none.
 
-## 5. Which identity to use
+## 6. Which identity to use
 
 **Query:** "I want the agent to be able to look at the live account. Point the
 MCP server at `ProdDataReadOnly` — that's the read-only one, right?"
@@ -153,7 +194,7 @@ Credit for naming the target `PlatformReadOnly` permission set, and for knowing
 `PlatformAdmin`'s inline guard denies prod mutation while `ProdAdmin` carries
 `AdministratorAccess` with no guard at all.
 
-## 6. Whether the guardrails are enough
+## 7. Whether the guardrails are enough
 
 **Query:** "We've got the `aws:ViaAWSMCPService` deny in IAM now, so the agent
 can't break anything in AWS. Good to drop the Bash hook?"
@@ -175,7 +216,7 @@ Full credit for the sharper version: under `--read-only` the proxy carries no
 It is the control for the day the flag is dropped, which makes Layer 3 the one
 actually standing between an agent and a write.
 
-## 7. Is the AI path a Bedrock problem?
+## 8. Is the AI path a Bedrock problem?
 
 **Query:** "The assistant screen is returning errors. Is our Bedrock model
 access still not approved?"
