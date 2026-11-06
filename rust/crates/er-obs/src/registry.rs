@@ -66,6 +66,22 @@ pub struct Metric {
     pub dimensions: &'static [&'static str],
     /// The series count, stated rather than computed, so a reader can see what
     /// the author believed and a reviewer can disagree with it.
+    ///
+    /// This is the **OTel-side** cardinality: the product of the dimensions
+    /// below. What CloudWatch BILLS equals it only because `awsemf` is
+    /// configured `dimension_rollup_option: NoDimensionRollup`.
+    ///
+    /// With the exporter's default rollup it does not. Measured in ER/Dev on
+    /// 2026-11-05, this one histogram with two dimensions had become four
+    /// dimension SETS — `{db.system.name, OTelLib, outcome}`,
+    /// `{OTelLib, outcome}`, `{OTelLib}`, `{db.system.name, OTelLib}` — for
+    /// **nine** billable series against the four declared here, because rollup
+    /// emits one series per subset and injects `OTelLib`.
+    ///
+    /// So if that exporter setting is ever removed, every number in this
+    /// registry understates the bill, and `tests/cardinality.rs` cannot see it:
+    /// the inflation happens in the collector, after the process that declared
+    /// it. That is the one part of this calculation a Rust test cannot hold.
     pub series: usize,
 }
 
