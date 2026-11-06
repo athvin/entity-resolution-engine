@@ -21,7 +21,8 @@ merge to main
             └─ blue/green rollout into the `ci` namespace
 ```
 
-Four things about that chain decide what "green on main" means.
+What follows decides what "green on main" means (this list grows; do not reason
+from its length).
 
 **`images` is paths-filtered, and that is safe here.** It is not a required
 check, so the rule against `paths:` on a required workflow does not apply. The
@@ -45,8 +46,38 @@ is what stops a merge from killing a rollout half-applied.
 
 **`workflow_run` runs carry the triggering SHA.** So
 `gh run list --commit $MERGE_SHA` does find the deploy, but it appears late —
-keep polling until nothing on that SHA is `queued` or `in_progress`, rather than
-concluding from one pass.
+keep polling until nothing on that SHA has a null `conclusion`, rather than
+concluding from one pass. Poll on the conclusion rather than on a list of
+statuses: a run held by a concurrency group reads `pending`, which slips past
+`queued`/`in_progress`. It is one of the false greens in `polling.md`, beside
+this one and reached from the skill body.
+
+**Your merge SHA's `rust` and `frontend` runs may never run at all, and that is
+not about your change.** `cancel-in-progress` is `${{ github.event_name ==
+'pull_request' }}` in both workflows, so a push to `main` does **not** cancel
+the run in flight — but the concurrency group still admits only one *waiting*
+run, so each new merge supersedes the previously **pending** one. During a burst
+of merges the first and last runs complete and the ones between are cancelled
+having created **zero jobs**.
+
+Measured on `main` during a run of skill PRs: of 8 consecutive `rust` runs, 5
+were `cancelled` with `jobs=0` and the 3 survivors had 19–22. So:
+
+- A `cancelled` run with no jobs on your merge SHA is **not** a failure and not
+  attributable to your diff. Do not debug it.
+- **Re-running it does not help** while merges keep arriving. Tried twice;
+  `run_attempt` reached 2 — which is the proof a re-run took, not the exit
+  code — and was superseded the same way.
+- So establish "`main` is green with my change on it" another way: a **later**
+  head SHA's run that has your commit as an ancestor
+  (`git merge-base --is-ancestor $MERGE_SHA origin/main`), or — strongest when
+  the change's only applicable gate runs locally — the gate itself against
+  `origin/main` in a throwaway worktree:
+
+  ```bash
+  git worktree add --detach /tmp/main-verify origin/main
+  cd /tmp/main-verify && make skills-check    # or the gate your diff touches
+  ```
 
 <!-- BEGIN GENERATED: post-merge-surface -->
 ### Workflows that run after a merge to `main`

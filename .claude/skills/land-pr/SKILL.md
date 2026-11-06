@@ -187,7 +187,7 @@ This is the moment the user would otherwise assume the work was finished.
 
 The post-merge chain is two hops and paths-filtered at the first:
 `merge → images (only if image inputs changed) → deploy (via workflow_run, only
-if images succeeded)`. Three consequences decide what "done" means, and
+if images succeeded)`. These consequences decide what "done" means, and
 [`references/post-merge.md`](references/post-merge.md) carries them with the
 generated list of what runs only after a merge:
 
@@ -196,6 +196,11 @@ generated list of what runs only after a merge:
   never exist is the common way this loop hangs.
 - **A cancelled `images` run produces no deploy and is not a failure**, so
   nothing reports it. Merged does not mean deployed.
+- **Your merge SHA's `rust`/`frontend` run may be cancelled with zero jobs**, and
+  that is the concurrency group superseding a *pending* run as the next merge
+  lands — not your diff, and not fixable by re-running. Establish green from a
+  later head SHA that has your commit as an ancestor, or by running the gate
+  against `origin/main` directly.
 - **A green deploy is not a running change.** Verify by a log line the process
   itself emits — not the image digest, not the workflow conclusion. A rejected
   config crashloops the *new* pod while the old one keeps serving, which is a

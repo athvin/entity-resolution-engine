@@ -9,7 +9,7 @@ six ways the obvious reading is wrong. Reached from
 
 - [The one assertion to run before any merge](#the-one-assertion-to-run-before-any-merge)
 - [Why `gh pr checks` is not that assertion](#why-gh-pr-checks-is-not-that-assertion)
-- [The six false greens](#the-six-false-greens)
+- [The false greens](#the-false-greens)
 - [Reading a failure's cause from execution rather than conclusion](#reading-a-failures-cause-from-execution-rather-than-conclusion)
 - [mergeStateStatus, state by state](#mergestatestatus-state-by-state)
 - [Polling without hammering the API](#polling-without-hammering-the-api)
@@ -40,9 +40,13 @@ comm -13 \
   <(gh api repos/{owner}/{repo}/branches/main/protection \
       --jq '.required_status_checks.contexts[]' | sort -u)
 
-# 3. Is anything still running on this SHA?
+# 3. Is anything still unfinished on this SHA? Ask by CONCLUSION, not status.
+#    `status` has more values than the two obvious ones — a run held by a
+#    concurrency group reads `pending` — and enumerating them is how a poll
+#    reports "all concluded" over a run that has not started. A null conclusion
+#    is the one predicate that covers every unfinished state.
 gh run list --commit "$SHA" --json workflowName,status,conclusion \
-  --jq '[.[]|select(.status=="queued" or .status=="in_progress")]'
+  --jq '[.[]|select(.conclusion == null)]'
 ```
 
 Two properties make this worth the three calls. It asks GitHub for the required
@@ -67,9 +71,11 @@ to decide a merge on:
 - It does not know which contexts are required, so it cannot tell a red
   non-required check (`semgrep`, the nightly tiers) from a red required one.
 
-## The six false greens
+## The false greens
 
-Each of these has cost real time here, and each reads as a passing PR.
+Each of these has cost real time here, and each reads as a passing PR. **This
+list grows — do not reason from its length**, and do not treat "none of these
+applies" as proof of green when the assertion above has not been run.
 
 **1. A failed `detect` job.** Covered above and the most dangerous, because the
 PR is genuinely `CLEAN` and genuinely mergeable — by a human or by the merge
@@ -99,6 +105,15 @@ The `ci:full` label forces a full run.
 child merged, with a real `mergeCommit`, while its code never reaches `main`.
 Confirm with `git log origin/main --oneline -1 <mergeCommit>`, or grep `main`
 for a string the PR introduced.
+
+**7. A poll that enumerates statuses instead of asking for a conclusion.** A run
+held by a concurrency group reads **`pending`**, which is neither `queued` nor
+`in_progress`, so the obvious predicate
+`select(.status=="queued" or .status=="in_progress")` reports nothing
+outstanding while a run sits unstarted. Measured here: a post-merge watch
+printed "ALL CONCLUDED" over a `rust` run that was `pending` and went on to be
+cancelled without ever running a job. Poll `conclusion == null` instead — it is
+the only predicate that does not need the status vocabulary to be complete.
 
 ## Reading a failure's cause from execution rather than conclusion
 
