@@ -183,6 +183,8 @@ What stays JSON: commands and their responses on the control lane (submit a job,
 
 The frontend never defines a shape. For every entity with `typescript` in its `generate` block it receives three generated files and uses nothing else: `bindings/<Entity>.ts`, the type; `readers/<Entity>.ts`, the function that turns an Arrow `Table` into `Entity[]`; and the entity's component schema inside `schema.d.ts`, which types the control-lane routes through `openapi-fetch`. A data-lane hook is `arrowFetch(path)` returning `{ rows: Entity[], snapshot, nextCursor }`, where `rows` came through the reader. A control-lane hook is the existing typed client. Components, BFF route handlers and mock fixtures import these; an `interface` keyword in frontend code that describes server data is a review failure.
 
+**The control-lane half of that paragraph is the design, not the state.** `schema.d.ts` is generated and byte-gated, but no module under `frontend/src` imports it and `openapi-fetch` has no call sites — the types that actually reach components come from `bindings/<Entity>.ts`, and `bffFetch<T>` takes its type from the caller. The document also carries no `paths`, so there is nothing for `openapi-fetch` to type a route against yet. See the `api-contract` skill for what the gates do and do not prove.
+
 ```mermaid
 flowchart LR
   L1["1. entities/*.yaml<br/>columns, types, nullability, key, version, generate block<br/><i>check: spec validation at gen</i>"]
