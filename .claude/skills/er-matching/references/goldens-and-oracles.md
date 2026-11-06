@@ -33,10 +33,14 @@ the other side.
 | `exploding` | array-column blocking rules, where candidate counts can blow up |
 | `historical_50k` | scale; gated behind an env var and run on main/nightly, not per-PR |
 
-Each holds the emitted SQL per stage (`predict_01___dedupe__blocked_id_pairs.sql`,
-`predict_05___dedupe__comparison_vectors.sql`, …) alongside the resulting
-Parquet/JSON. So the exact SQL a release emits is readable without running
-anything — which is the fastest way to answer "what changed?" after a refactor.
+**Only `fake_1000` carries the emitted SQL**, and knowing that saves a hunt:
+its `sql/` subdirectory holds one file per emitted statement
+(`predict_01___dedupe__blocked_id_pairs.sql`,
+`predict_05___dedupe__comparison_vectors.sql`, …) and `stages/` holds the
+per-stage Parquet beside it. So the exact SQL a release emits is readable
+without running anything — the fastest way to answer "what changed?" after a
+refactor. `exploding` and `historical_50k` are output-and-model fixtures only,
+a handful of files each; there is no SQL under them to read.
 
 Scenario fixtures (`base_10`, the assertion/merge/split/supersession/deletion
 cases, `model_test_v1.json` + its `.tf.csv`) live under `fixtures/static/` and
@@ -60,8 +64,9 @@ regeneration is needed, regenerate the dataset and commit the manifest with it.
 ## The Splink parity oracle
 
 `rust/crates/er-match/tests/gen_match_golden.py` replicates the scoring core
-with **direct Splink 5.0.0 calls** (`from splink import DuckDBAPI, Linker`),
-using:
+with **direct Splink calls** (`from splink import DuckDBAPI, Linker`) — the
+version that produced a given baseline is in that dataset's
+`MANIFEST.generated_with`, below — using:
 
 - the same committed settings model,
 - frozen TF injected via `register_term_frequency_lookup` — never recomputed,
@@ -80,11 +85,9 @@ Sibling parity generators exist for the other stages — `er-reconcile`
 `er-config`. They follow the same pattern: a Python reference implementation
 committed next to the baseline it produced.
 
-**Splink's presence is provenance, not a leftover.** The oracle, the
-`splink_udfs` extension, `MANIFEST.generated_with`, and the historical banners
-in the specification are all load-bearing evidence that the Rust rewrite
-matches the implementation it replaced. Removing them would make that claim
-unfalsifiable.
+**Splink's presence is provenance, not a leftover** — the skill body states
+which remnants that covers and why removing them would make the parity claim
+unfalsifiable. This oracle is the load-bearing one of them.
 
 ## Why the comparison runs in SQL
 
@@ -115,7 +118,11 @@ concluding the maths changed.
 
 `MANIFEST.generated_with` records the toolchain that produced the fixtures —
 the Python, Splink, DuckDB and pandas versions. That field is the first thing
-to read when a golden fails for no apparent reason.
+to read when a golden fails for no apparent reason, with one caveat: it is
+only as complete as the generator that wrote it. `fake_1000` carries all four
+versions, `historical_50k` fewer, and `exploding` has no `generated_with` at
+all — so for that dataset there is no recorded toolchain to compare against,
+and a diff there has to be explained some other way.
 
 Note the DuckDB version recorded there is the one the baselines were generated
 on, and the workspace's `duckdb` pin has moved since (it is an `=` pin precisely

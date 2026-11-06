@@ -25,19 +25,22 @@ limitation: DuckLake cannot host temp tables. So the shape of every run is
 That last point is why a write stage looks oddly isolated: mixing a lake write
 with cross-catalog reads in one transaction is what it is avoiding.
 
-The prefix was renamed from `__splink__df_*`. Splink survives on purpose as
-provenance (the parity oracle, the `splink_udfs` extension,
-`MANIFEST.generated_with`, historical banners in the spec) — those are not
-leftovers to tidy.
+The prefix was renamed from `__splink__df_*`, and what that leaves behind is
+stated once in the skill body — which also says why those remnants are
+load-bearing rather than leftovers to tidy.
 
 ## The predict backbone, stage by stage
+
+The order below is the dependency order, not the emission order: blocking
+self-joins the bare `__dedupe__concat`, so a candidate pair exists or not
+before any TF value is in play.
 
 | Stage | What it holds |
 |---|---|
 | `__dedupe__concat` | the vertical concat of all inputs — one row per record, source-tagged |
-| `__dedupe__concat_with_tf` | the same, joined to the term-frequency tables; `_left` / `_right` variants exist for link-type runs |
-| `__dedupe__blocked_id_pairs` | candidate pairs: one `UNION ALL` arm per blocking rule, each carrying `match_key` = the rule's index as a string literal. `_non_unique` is the pre-dedup form |
-| `blocked_with_cols` | candidates widened with the comparison columns from both sides |
+| `__dedupe__blocked_id_pairs` | candidate pairs from `__dedupe__concat` self-joined: one `UNION ALL` arm per blocking rule, each carrying `match_key` = the rule's index as a string literal. `_non_unique` is the pre-dedup form |
+| `__dedupe__concat_with_tf` | the concat joined to the term-frequency tables; `_left` / `_right` variants exist for link-type runs |
+| `blocked_with_cols` | the pairs inner-joined to `__dedupe__concat_with_tf` on each side, widening them with the comparison columns |
 | `__dedupe__comparison_vectors` | the gamma level per comparison, as `CASE` expressions |
 | `__dedupe__match_weight_parts` | per-comparison `mw_<name>` columns, plus `mw_tf_adj_<name>` where TF adjustment applies |
 | `__dedupe__predict` | the summed match weight and the match probability |
@@ -118,8 +121,7 @@ already in the corpus. That is the first INV-EQ loss vector.
 
 ## Reading a stage when debugging
 
-Work **down** the pipeline, not up. The first question for "why didn't these
-match?" is always whether a candidate pair exists at all:
+The skill body gives the ladder; this is what each rung actually tells you.
 
 1. `__dedupe__blocked_id_pairs` — is the pair there? If not, this is a blocking
    problem and nothing about comparisons or weights is relevant yet.
@@ -130,6 +132,9 @@ match?" is always whether a candidate pair exists at all:
    a `mw_tf_adj_` column move it.
 4. `__dedupe__predict` — the total and the probability.
 
-The committed golden SQL files are named for these stages
-(`predict_01___dedupe__blocked_id_pairs.sql` and so on), so the exact SQL a
-given release emits is readable without running anything.
+`fake_1000`'s committed golden SQL is named for these stages — one file per
+emitted statement under `rust/fixtures/golden/fake_1000/sql/`, in `predict_`,
+`cluster_`, `training_` and `u_sampled_` families
+(`predict_01___dedupe__blocked_id_pairs.sql` and so on), with the per-stage
+outputs beside them under `stages/`. So the exact SQL a given release emits is
+readable without running anything. The other two datasets carry outputs only.

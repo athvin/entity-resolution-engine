@@ -115,9 +115,37 @@ identity and needs a steward unmerge, whereas a missed merge leaves a duplicate
 that the next pass can still catch.
 
 55–60 reproduces the committed membership across every disagreement ratio
-tried, so 60 sits inside the stable band rather than at its edge. Treat it as a
-calibrated constant. If a change appears to need a different scale, the real
-question is which comparison's weight is wrong.
+tried, so 60 sits inside the stable band rather than at its edge.
+
+### The calibration is person-only, and that is a recorded gap
+
+Both legs of that derivation — summing the committed model's own exact-level
+Bayes factors, and the grid search above — were run on the committed **person**
+model. `compile` hands every config the same constant: `compile_with` never
+consults `config.entity_type`, and the production entry point passes
+`CompileOptions::default()`.
+
+The committed **account** model measures far less full-agreement evidence over
+its four comparisons, so an account config is compiled substantially louder
+than its own reference model — in the direction this section calls the
+expensive mistake. `er-compile/tests/score_scale_calibration.rs` holds the two
+measurements and the reason it is deliberately a measurement rather than a fix:
+the person number earned its value from two independent legs, and only the
+Bayes-factor leg can be run for accounts today, because the committed account
+corpus has no declared truth or trap set to grid-search against. Read that file
+before quoting a number.
+
+So: on a person config, treat 60 as a calibrated constant, and if a change
+appears to need a different scale the real question is which comparison's
+weight is wrong. On an account config, the scale itself is the open question,
+and `compile` now reads `thresholds.full_agreement_bits` so a corpus with truth
+can be pointed at.
+
+**The knob only exists on the compile path.** `full_agreement_bits` scales
+parameters as a model is compiled, so it does nothing to a model that was
+loaded from a committed JSON — which is what scenario tests pin. A grid search
+that produces a flat cluster count is almost always that: the knob never
+reached the model under test.
 
 ## Null policy and derived keys
 
