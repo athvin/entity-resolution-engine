@@ -100,30 +100,39 @@ RUN rustup component add rustfmt clippy
 # that directory's uid, gid and mode. So creating them here, owned by the remote
 # user, means every volume arrives writable and nothing ever needs root.
 #
-# TWO CONSTRAINTS FOLLOW, and both were learned from a red CI run rather than
-# reasoned out. Every volume target must be a path that (1) EXISTS IN THIS IMAGE
-# and (2) LIVES UNDER $HOME.
+# A volume target must EXIST IN THIS IMAGE for copy-up to apply at all, which
+# is why the cargo build directory is created here rather than mounted at
+# `rust/target`: a workspace-relative path does not exist at build time, because
+# the workspace folder name is not known until `up`. devcontainer.json reaches
+# it through CARGO_TARGET_DIR instead.
 #
-# (1) is copy-up's own requirement, and it is why the cargo build directory is
-# here rather than mounted at `rust/target`: a workspace-relative path does not
-# exist at build time, because the workspace folder name is not known until
-# `up`. devcontainer.json reaches it through CARGO_TARGET_DIR instead.
+# THE OWNERSHIP IS NOT UNIFORM ACROSS THE THREE, AND IT MUST NOT BE, because
+# `devcontainers/ci` REWRITES the remote user's uid and gid to match the runner
+# (1000 -> 1001) and then chowns only $HOME. Measured directly:
 #
-# (2) is the one that is genuinely surprising. `devcontainers/ci` rewrites the
-# remote user's uid and gid to match the runner (1000 -> 1001), and the only
-# path it chowns afterwards is $HOME. A volume whose copy-up stamped it with the
-# BUILD-TIME uid therefore stops being writable the moment that rewrite happens,
-# everywhere except under $HOME. The cargo registry was at
-# /usr/local/cargo/registry and failed exactly that way in CI while the two
-# $HOME volumes passed; CARGO_HOME now points here so all three are uniform.
+#   copy-up owner BEFORE rewrite:  /usr/local=1000:1000   $HOME=1000:1000
+#   owner AFTER rewrite:           /usr/local=1000:1000   $HOME=1001:1001
+#     /usr/local: NOT writable        $HOME: writable
 #
-# scripts/ci/devcontainer-smoke.sh asserts all three are writable, and that
-# assertion runs in CI against the real mounts — which is how this was caught,
-# rather than it surfacing as a permission error forty minutes into someone's
-# first build.
+# So the two under $HOME are owned by the user and the chown follows them. The
+# cargo registry cannot be: CARGO_HOME is pinned to /usr/local/cargo by an
+# UNCONDITIONAL `export` in the base image's /etc/bash.bashrc, which the CLI's
+# `userEnvProbe` re-applies over `containerEnv` and which every interactive
+# shell re-applies again — so relocating it under $HOME does not work, it only
+# looks like it does until something reads the variable.
+#
+# The base image already answers this for the parent directory: /usr/local/cargo
+# is mode 2777 with group `rustlang`, deliberately permissive so that ANY uid can
+# write it. `registry` does not exist there, so it is created the same way rather
+# than narrowed to 0755 — narrowing it to the build-time uid is precisely the bug
+# this comment exists to prevent, and it was shipped once.
+#
+# scripts/ci/devcontainer-smoke.sh asserts all three are writable, and runs in CI
+# against the real mounts after the rewrite — which is how this was caught, rather
+# than it surfacing as a permission error forty minutes into someone's first build.
 RUN install -d -o vscode -g vscode \
-	/home/vscode/.cargo/registry \
 	/home/vscode/.duckdb \
-	/home/vscode/.cache/er/cargo-target
+	/home/vscode/.cache/er/cargo-target \
+	&& install -d -m 2777 -g rustlang /usr/local/cargo/registry
 
 USER vscode

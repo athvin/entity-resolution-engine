@@ -102,10 +102,27 @@ esac
 # This runs in CI against the real mounts, which is the point: the previous
 # arrangement failed in CI and said nothing, because the chown that failed
 # carried `|| true`.
+# CARGO_TARGET_DIR MUST BE SET, and this is the assertion that catches the
+# quietest failure in the whole arrangement. devcontainer.json sets it so the
+# 30–80 GB build directory lands on a named volume; if it ever stops being set,
+# cargo falls back to `rust/target` — on the workspace bind mount, which on
+# Windows is the slow, disk-filling path this container exists to avoid. Nothing
+# fails. The build just silently goes to the wrong place.
+#
+# It is the one variable here that containerEnv can actually carry: CARGO_HOME
+# is pinned by an unconditional export in the base image's /etc/bash.bashrc,
+# which the CLI's `userEnvProbe` re-applies over containerEnv.
+checked=$((checked + 1))
+if [ -z "${CARGO_TARGET_DIR:-}" ]; then
+	echo "devcontainer-smoke: CARGO_TARGET_DIR is unset — the build directory would land on the workspace bind mount" >&2
+	fail=1
+else
+	echo "devcontainer-smoke: ok  CARGO_TARGET_DIR  ${CARGO_TARGET_DIR}"
+fi
+
 # The `-` fallbacks exist only so a bare `docker run` of the image can be
-# smoke-tested; devcontainer.json sets both variables, and postCreate asserts
-# CARGO_HOME matches the mount.
-for d in "${CARGO_HOME:-$HOME/.cargo}/registry" \
+# smoke-tested; under devcontainer.json both are set.
+for d in "${CARGO_HOME:-/usr/local/cargo}/registry" \
 	"${CARGO_TARGET_DIR:-$HOME/.cache/er/cargo-target}" \
 	"$HOME/.duckdb"; do
 	checked=$((checked + 1))

@@ -56,6 +56,14 @@ bind mount, and never reaches the host disk at all. Three caches work this way:
 | `er-cargo-registry` | `/usr/local/cargo/registry` | downloaded crates |
 | `er-duckdb` | `~/.duckdb` | DuckDB's extensions |
 
+The registry is the odd one out: `CARGO_HOME` cannot be moved, because the base
+image pins it with an unconditional `export` in `/etc/bash.bashrc` that the
+devcontainer CLI's env probe re-applies over `containerEnv`. So that volume
+lives outside `$HOME` and is kept writable by *mode* (2777, as the base image
+already does for `/usr/local/cargo`) rather than by owner — which matters
+because `devcontainers/ci` rewrites the container user's uid and chowns only
+`$HOME`.
+
 The consequence is that deleting a folder does not reclaim the space:
 
 ```sh

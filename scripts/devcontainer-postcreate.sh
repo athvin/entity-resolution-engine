@@ -25,19 +25,20 @@ cd "$(dirname "$0")/.."
 # `devcontainers/ci` with `sudo: a password is required` and reported success
 # anyway, over a container whose build directory the developer could not write.
 
-# ASSERT THE CARGO_HOME MOUNT ACTUALLY LANDED ON CARGO_HOME.
+# ASSERT THE REGISTRY MOUNT STILL LANDS ON CARGO_HOME.
 #
-# devcontainer.json sets CARGO_HOME and separately mounts a volume at
-# `$CARGO_HOME/registry`, but `mounts` does not expand `${containerEnv:…}` — so
-# the path is written out literally in two places that cannot read each other.
-# Were they to disagree, the mount would shadow an unrelated empty directory and
-# cargo would silently re-download the whole registry on every rebuild, which
-# reads as slow networking rather than a broken mount.
-expected="/home/vscode/.cargo"
+# devcontainer.json mounts a volume at the literal `/usr/local/cargo/registry`,
+# because `mounts` cannot expand a variable. CARGO_HOME is not ours to choose —
+# the base image pins it with an unconditional export in /etc/bash.bashrc — so
+# this is a one-way check: if a future base image moves it, the mount would
+# shadow an unrelated empty directory and cargo would silently re-download the
+# whole registry on every rebuild, which reads as slow networking rather than as
+# a broken mount.
+expected="/usr/local/cargo"
 actual="${CARGO_HOME:-}"
 if [ "$actual" != "$expected" ]; then
 	echo "devcontainer-postcreate: CARGO_HOME is '${actual:-<unset>}' but devcontainer.json mounts '$expected/registry'." >&2
-	echo "devcontainer-postcreate: make containerEnv.CARGO_HOME and the mount agree." >&2
+	echo "devcontainer-postcreate: update the mount in .devcontainer/devcontainer.json to match." >&2
 	exit 1
 fi
 

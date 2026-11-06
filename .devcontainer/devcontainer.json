@@ -46,29 +46,36 @@
     // the Docker VM's own filesystem. It also makes copy-up possible: see the
     // Dockerfile's mount-point stanza for why a workspace-relative volume
     // cannot be made writable without root.
-    "CARGO_TARGET_DIR": "/home/vscode/.cache/er/cargo-target",
-    // Moved off the base image's /usr/local/cargo for one reason: a volume
-    // outside $HOME stops being writable when `devcontainers/ci` rewrites the
-    // remote user's uid. See the Dockerfile's mount-point stanza — constraint
-    // (2). The `cargo` on PATH is a rustup shim at /usr/local/cargo/bin and
-    // finds its toolchain through RUSTUP_HOME, so moving CARGO_HOME relocates
-    // the registry without moving the binaries.
-    "CARGO_HOME": "/home/vscode/.cargo"
+    "CARGO_TARGET_DIR": "/home/vscode/.cache/er/cargo-target"
+    // NO CARGO_HOME HERE, AND IT IS NOT AN OVERSIGHT. Setting it is futile: the
+    // base image's /etc/bash.bashrc carries an unconditional
+    // `export CARGO_HOME="/usr/local/cargo"`, which the CLI's `userEnvProbe`
+    // re-applies over this block and every interactive shell re-applies again.
+    // A value set here reads back as /usr/local/cargo, so the only thing it
+    // would buy is a mount pointing somewhere cargo never looks.
+    //
+    // CARGO_TARGET_DIR above survives precisely because nothing in that bashrc
+    // mentions it — which is the asymmetry to remember, not a rule about
+    // containerEnv. scripts/ci/devcontainer-smoke.sh asserts it is still set,
+    // because if it ever stops being, the 30–80 GB silently lands on the
+    // workspace bind mount: the exact Windows hazard this file exists to avoid,
+    // with nothing going red.
   },
   // NAMED VOLUMES, so the heavy caches never touch the host filesystem. EVERY
-  // TARGET HERE MUST BE A PATH THE Dockerfile PRE-CREATES owned by `vscode`,
-  // AND MUST LIVE UNDER $HOME — the first is what makes Docker's copy-up hand
-  // the volume over writable, the second is what keeps it writable after the
-  // action rewrites the user's uid. Both constraints are argued in the
-  // Dockerfile's mount-point stanza; adding a volume means adding its directory
-  // there too.
+  // TARGET HERE MUST BE A PATH THE Dockerfile PRE-CREATES, because that is what
+  // makes Docker's copy-up hand the volume over writable — and it must be
+  // pre-created so that it SURVIVES the uid rewrite `devcontainers/ci` performs:
+  // owned by the user under $HOME, or mode-permissive outside it. The Dockerfile's
+  // mount-point stanza argues both; adding a volume means adding its directory
+  // there too, with the right one of those two treatments.
   //
   // The cost is that `docker volume rm` is how you reclaim the space, not
   // deleting a folder — docs/devcontainer.md says so.
   "mounts": [
-    // The downloaded crate registry under the CARGO_HOME set above, otherwise
-    // re-fetched on every rebuild.
-    "source=er-cargo-registry,target=/home/vscode/.cargo/registry,type=volume",
+    // The downloaded crate registry. CARGO_HOME is /usr/local/cargo and cannot
+    // be moved (see containerEnv above), so this one lives outside $HOME and is
+    // kept writable by mode rather than by owner.
+    "source=er-cargo-registry,target=/usr/local/cargo/registry,type=volume",
     // Where CARGO_TARGET_DIR above points. This is the 30–80 GB one.
     "source=er-cargo-target,target=/home/vscode/.cache/er/cargo-target,type=volume",
     // DuckDB downloads its extensions here on first use (the same path
