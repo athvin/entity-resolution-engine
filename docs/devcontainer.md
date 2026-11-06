@@ -23,9 +23,38 @@ extension.
    below. This is the step people skip.
 3. `Ctrl+Shift+P` → **Dev Containers: Reopen in Container**.
 
-The first open **pulls a prebuilt image** rather than building one, because
-`devcontainer.json` names a `cacheFrom` that `.github/workflows/devcontainer.yml`
-publishes to GHCR on every push to `main`. Expect a few minutes, not forty.
+Either way the first open takes **a couple of minutes**, and then the first
+`make check` takes a good deal longer. Those are two different costs and it is
+worth knowing which is which.
+
+### The prebuild, and what it is actually worth
+
+`devcontainer.json` names a `cacheFrom` image that
+`.github/workflows/devcontainer.yml` publishes to GHCR on every push to `main`.
+#584 justified it as "a pull instead of a 40-minute first build". **Measured, it
+is not that**, and the numbers are recorded here so nobody re-derives them:
+
+| | |
+|---|---|
+| building the image from scratch | **~90 s** |
+| pulling the published prebuild (1.19 GB) | **~106 s** |
+| the first `make check` after either | **~18 min** |
+
+The 40 minutes was never the image — it is the first `cargo` build, and no image
+can shortcut it: the *toolchain* is baked in, the *compiled workspace* is not.
+On wall-clock the prebuild is a wash.
+
+**What it does buy is not speed but determinism:** a pull does not reach
+`deb.debian.org` or `apt.postgresql.org`, so it cannot fail or stall behind a
+corporate proxy, and everyone gets byte-identical apt and PGDG layers rather
+than whatever those mirrors served that day.
+
+**On an ARM host the prebuild simply does not apply.** It is published
+single-architecture (amd64, built on a GitHub `ubuntu-latest` runner), so on
+Apple silicon or Windows-on-ARM the `cacheFrom` misses and the image builds
+natively instead. That is a cache miss, not a failure — you pay the ~90 s and
+get a correct arm64 image. Making it multi-arch would need an arm64 runner leg,
+and given the figures above it has not been judged worth it.
 
 ## The disk, which is the thing that actually goes wrong
 
@@ -134,7 +163,7 @@ make frontend-baselines
 | `linking with cc failed` | the disk is full; see above |
 | `bad interpreter: /usr/bin/env bash^M`, or a gate script failing for no reason | CRLF line endings. `.gitattributes` forces `eol=lf` on `*.sh`, `Makefile` and the two extensionless scripts — re-clone if your checkout predates it |
 | rust-analyzer finds no project | the cargo workspace root is `rust/`, not the repo root. `devcontainer.json` sets `rust-analyzer.linkedProjects` for this; check it survived a settings merge |
-| the first open builds from scratch | the `cacheFrom` image could not be pulled. It is public; a corporate proxy blocking `ghcr.io` is the usual reason, and the build still succeeds, just slowly |
+| the first open builds from scratch | expected on an ARM host — the prebuild is amd64-only, so `cacheFrom` misses. On amd64 it means the image could not be pulled: the package is public (an anonymous `docker manifest inspect` succeeds), so a proxy blocking `ghcr.io` is the usual reason. Either way the build succeeds and costs ~90 s |
 | `make check` fails on a missing tool | run `bash scripts/ci/devcontainer-smoke.sh` — it names which one, and is the same assertion CI runs on the image |
 
 ## Changing the image
