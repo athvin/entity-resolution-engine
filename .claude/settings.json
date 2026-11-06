@@ -18,22 +18,22 @@
           {
             "type": "command",
             "if": "Bash(aws *)",
-            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/aws-write-guard.sh"
+            "command": "${CLAUDE_PROJECT_DIR}/scripts/hooks/aws-write-guard.sh"
           },
           {
             "type": "command",
             "if": "Bash(terraform *)",
-            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/aws-write-guard.sh"
+            "command": "${CLAUDE_PROJECT_DIR}/scripts/hooks/aws-write-guard.sh"
           },
           {
             "type": "command",
             "if": "Bash(kubectl *)",
-            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/aws-write-guard.sh"
+            "command": "${CLAUDE_PROJECT_DIR}/scripts/hooks/aws-write-guard.sh"
           },
           {
             "type": "command",
             "if": "Bash(helm *)",
-            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/aws-write-guard.sh"
+            "command": "${CLAUDE_PROJECT_DIR}/scripts/hooks/aws-write-guard.sh"
           }
         ]
       }
