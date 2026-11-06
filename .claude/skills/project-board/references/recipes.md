@@ -89,24 +89,26 @@ see the skill body on "Auto-close issue".
 
 ## Triage an issue onto the current iteration
 
-Four fields is four `item-edit` calls; there is no batch form.
+Four fields is four `item-edit` calls; there is no batch form. The four are
+`Priority`, `Estimate`, `Iteration` and `Target date` — **not `Size`**, which is
+left empty here. Filling it reintroduces the second, disagreeing estimate the
+convention in the skill body exists to avoid.
 
 ```sh
 ISSUE=123
+WEEKS=3        # engineering-weeks remaining, which is what Estimate carries
 ITEM=$(gh project item-list "$NUM" --owner "$OWNER" --limit 200 --format json \
   --jq ".items[] | select(.content.number==$ISSUE) | .id")
 
 # field ids
 F_PRIO=$(gh project field-list "$NUM" --owner "$OWNER" --format json --jq '.fields[]|select(.name=="Priority")|.id')
-F_SIZE=$(gh project field-list "$NUM" --owner "$OWNER" --format json --jq '.fields[]|select(.name=="Size")|.id')
+F_EST=$(gh project field-list  "$NUM" --owner "$OWNER" --format json --jq '.fields[]|select(.name=="Estimate")|.id')
 F_ITER=$(gh project field-list "$NUM" --owner "$OWNER" --format json --jq '.fields[]|select(.name=="Iteration")|.id')
 F_DUE=$(gh project field-list  "$NUM" --owner "$OWNER" --format json --jq '.fields[]|select(.name=="Target date")|.id')
 
-# option ids, by name
+# option id, by name — Priority is the only single-select of the four
 O_P1=$(gh project field-list "$NUM" --owner "$OWNER" --format json \
   --jq '.fields[]|select(.name=="Priority")|.options[]|select(.name=="P1")|.id')
-O_M=$(gh project field-list "$NUM" --owner "$OWNER" --format json \
-  --jq '.fields[]|select(.name=="Size")|.options[]|select(.name=="M")|.id')
 
 # the current iteration is iterations[0] — completed ones live in a separate array
 O_ITER=$(gh api graphql -f query='query{user(login:"athvin"){projectV2(number:2){
@@ -114,7 +116,7 @@ O_ITER=$(gh api graphql -f query='query{user(login:"athvin"){projectV2(number:2)
   --jq '.data.user.projectV2.field.configuration.iterations[0].id')
 
 gh project item-edit --id "$ITEM" --project-id "$PROJ" --field-id "$F_PRIO" --single-select-option-id "$O_P1"
-gh project item-edit --id "$ITEM" --project-id "$PROJ" --field-id "$F_SIZE" --single-select-option-id "$O_M"
+gh project item-edit --id "$ITEM" --project-id "$PROJ" --field-id "$F_EST"  --number "$WEEKS"
 gh project item-edit --id "$ITEM" --project-id "$PROJ" --field-id "$F_ITER" --iteration-id "$O_ITER"
 gh project item-edit --id "$ITEM" --project-id "$PROJ" --field-id "$F_DUE"  --date 2026-12-01
 
@@ -122,6 +124,10 @@ gh project item-edit --id "$ITEM" --project-id "$PROJ" --field-id "$F_DUE"  --da
 gh project item-list "$NUM" --owner "$OWNER" --limit 200 --format json \
   --jq ".items[] | select(.content.number==$ISSUE)"
 ```
+
+`Estimate` is a plain `ProjectV2Field` of `dataType` `NUMBER`, so it takes
+`--number` and has no option id to derive — the single-select lookup that
+`Priority` needs would return nothing for it.
 
 Leave `Status` alone: "Item added to project" has already set it.
 
@@ -133,7 +139,7 @@ gh project item-list "$NUM" --owner "$OWNER" --limit 200 --format json --jq '
     (.content.number // "draft"),
     .status,
     (.priority // "-"),
-    (.size // "-"),
+    (.estimate // "-"),
     (.iteration.title // "-"),
     (.["target date"] // "-"),
     .title
@@ -166,9 +172,15 @@ The automations set `Status` and nothing else, so this is the real triage queue:
 
 ```sh
 gh project item-list "$NUM" --owner "$OWNER" --limit 200 --format json --jq '
-  .items[] | select(.priority == null or .size == null)
-  | "\(.content.number // "draft")\t\(.status)\t\(.title)"'
+  .items[] | select(.priority == null or .estimate == null)
+  | "\(.content.number // "draft")\t\(.status)\t\(.estimate // "-")\t\(.title)"'
 ```
+
+Do not add `.size == null` to that predicate. `Size` is empty on every card by
+convention, so including it matches the whole board and the queue stops
+distinguishing anything — a half-filled card and a fully triaged one come back
+alike. A missing key reads as `null` in `jq`, which is why `== null` works even
+though an unset field is absent from the object rather than present as null.
 
 ## Clear a field
 
