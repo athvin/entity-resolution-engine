@@ -23,9 +23,11 @@ finished:
 
 **Layer 1 is doing more of the work than the layering implies.** `--read-only`
 does not merely hide write tools, it removes the only tool that reaches the
-account at all: `aws___run_script`. Probed against the live endpoint, the
-server offers six tools with the flag and eight without, the two extra being
-`run_script` and `get_presigned_url`.
+account at all: `aws___run_script`. Probed against the live endpoint, the flag
+withholds exactly two tools — `run_script` and `get_presigned_url` — and
+everything that remains is documentation, guidance or region metadata. Use
+`/mcp` for the current list rather than a count written down here; the vendor
+sets it.
 
 Two consequences follow, and both are easy to state wrongly:
 
@@ -66,10 +68,6 @@ Two configuration details that bite:
   whose CLI args cannot be edited, and it means an environment variable can
   silently override the checked-in profile choice.
 
-The proxy reads credentials from disk on every request, so refreshing an expired
-SSO session takes effect without restarting anything. An `ExpiredTokenException`
-means `aws sso login`, not a broken config.
-
 ### The profile this runs as
 
 `er-readonly` → the `PlatformReadOnly` permission set, which carries the
@@ -81,9 +79,8 @@ write. `ProdDataReadOnly` could not serve here — it covers the prod lake,
 `rds-db:connect`, `eks:Describe*` and logs, so it cannot list buckets or read
 Budgets, which is most of what introspection asks.
 
-An expired SSO token is the usual reason the server answers nothing. The fix is
-`aws sso login --profile er-readonly`, not a config change — the proxy re-reads
-credentials from disk per request, so no restart is needed.
+An `ExpiredTokenException` here is a token to refresh, not a broken config; the
+skill body carries the command and why no restart is needed.
 
 ## Layer 2: IAM condition keys, server-side
 

@@ -6,22 +6,26 @@
 - `aws sso login` does not work for a locally-run `er-server`
 - Bedrock: permission is applied, model access is not
 - Nothing in the workspace calls Bedrock today
-- S3 is reached by DuckDB, not by the SDK
+- Two S3 paths, with two different identities
 - The one long-lived access key
 
 ## One crate has AWS dependencies, and its feature pins are load-bearing
 
-`er-server` is the **only** crate in the workspace with AWS dependencies:
+`er-server` is the **only** crate in the workspace with AWS dependencies. Which
+crates those are is the generated table in `footprint.md`, reached from the skill
+body — read it there rather than from a list here, because this section carried a
+hand-copied three-crate `toml` block that was still describing `aws-sdk-s3` as a
+future addition after it had been added.
+
+What matters is the *shape* every one of them must keep:
 
 ```toml
-aws-config            = { version = "1.8.11", default-features = false, features = ["rt-tokio", "behavior-version-latest"] }
-aws-sdk-sesv2         = { version = "1.85.0", default-features = false, features = ["rt-tokio", "behavior-version-latest"] }
-aws-smithy-http-client = { version = "1.1.4", default-features = false, features = ["rustls-ring"] }
+{ version = "…", default-features = false, features = ["rt-tokio", "behavior-version-latest"] }
 ```
 
-`default-features = false` on all three is **not** tidiness, and relaxing it
-breaks the build rather than merely adding weight. Two independent reasons,
-both recorded in `Cargo.toml` beside the deps:
+`default-features = false` is **not** tidiness, and relaxing it breaks the build
+rather than merely adding weight. Two independent reasons, both recorded in
+`Cargo.toml` beside the deps:
 
 1. The default feature set pulls `aws-lc-rs`, whose `-sys` crate needs `cmake`
    that the `rust:1-bookworm` build image does not have. `rustls-ring` is the
@@ -31,9 +35,8 @@ both recorded in `Cargo.toml` beside the deps:
    authenticates by **EKS Pod Identity**, which is the container-credentials
    provider already in the base chain.
 
-Adding `aws-sdk-s3`, `aws-sdk-sts` or any other AWS crate means repeating the
-same `default-features = false` + explicit-features shape. Use `cargo add` with
-`--no-default-features` rather than hand-editing, per the repo convention.
+Adding any further AWS crate means repeating that same shape. Use `cargo add`
+with `--no-default-features` rather than hand-editing, per the repo convention.
 
 ## `aws sso login` does not work for a locally-run `er-server`
 
@@ -45,9 +48,10 @@ That is intended. Dev wants `ER_MAIL_BACKEND=log`, which is what the absent
 credential degrades to. A locally-run server failing to send real email is the
 correct behaviour, not a setup problem to debug.
 
-(The excluded providers also require Rust 1.88, which was a second reason to
-leave them out — though the workspace floor is 1.88 regardless now, after
-`time`'s RUSTSEC-2026-0009 fix forced it.)
+(The excluded providers also require a Rust newer than the floor was at the
+time, which was a second reason to leave them out — moot now that
+`time`'s RUSTSEC-2026-0009 fix raised the workspace floor anyway. The MSRV
+itself belongs to the rust-conventions skill; it is not restated here.)
 
 ## Bedrock: permission is applied, model access is not
 
@@ -83,18 +87,31 @@ holding onto:
   a configuration and credential change at that seam rather than a rewrite —
   which is why the IAM half is worth having applied in advance.
 
-## S3 is reached by DuckDB, not by the SDK
+## Two S3 paths, with two different identities
 
-The engine does not use `aws-sdk-s3`. Lake access goes through DuckDB's own S3
-support, which requires literal `ER_S3_ACCESS_KEY_ID`, `ER_S3_SECRET_ACCESS_KEY`
-and a non-empty scheme-less `ER_S3_ENDPOINT` — there is no credential-chain path
-and the endpoint cannot be omitted. An empty secret would attach a lake that
+Getting these the wrong way round sends a debugging session to the wrong layer,
+so they are worth separating explicitly:
+
+| Path | Reached by | Identity |
+|---|---|---|
+| **lake** reads and writes | DuckDB's own S3 support, via ATTACH | the static `ER_S3_*` key |
+| **dropped-object ingestion** — the poller that downloads a delivered object into the tenant's `drop_root` | `aws-sdk-s3` | EKS Pod Identity |
+
+The lake path takes literal `ER_S3_ACCESS_KEY_ID`, `ER_S3_SECRET_ACCESS_KEY` and
+a non-empty scheme-less `ER_S3_ENDPOINT` — there is no credential-chain path and
+the endpoint cannot be omitted. An empty secret would attach a lake that
 authenticates as nobody, so empty values are rejected rather than defaulted.
 
 The ATTACH options and lake semantics belong to the ducklake-lakehouse skill.
-What matters here is the operational consequence: **the engine's S3 identity is
-a static key, not Pod Identity**, so it is invisible to the Pod Identity
-reasoning that covers every other workload, and it does not expire.
+What matters here is the operational consequence: **the lake's S3 identity is a
+static key, not Pod Identity**, so it is invisible to the Pod Identity reasoning
+that covers every other workload, and it does not expire. The ingestion poller
+is the opposite — ordinary Pod Identity, so a failure there *is* an association
+question.
+
+The ingestion path keeps the engine reading the local filesystem, which is why
+`delivery_preconditions` / `finish_delivery` stay the single landing path rather
+than the engine gaining a second way in.
 
 ## The one long-lived access key
 

@@ -5,7 +5,7 @@
 - Budgets answer "that", and only by email
 - CUR 2.0 is the only thing that answers "why"
 - Split cost allocation, and why per-tenant cost is tractable
-- Querying it: there is no Athena yet
+- Querying it: the Athena path, and the cheaper one beside it
 - The tag-activation trap, restated
 - Knowing when a tenant's cost means something is wrong
 
@@ -13,8 +13,13 @@
 
 Two monthly COST budgets exist, at **$300** and **$600**, each with an `ACTUAL`
 and a `FORECASTED` notification at 100% of its limit. Every notification goes to
-**one email address** and nowhere else — there is no SNS topic in the account,
-so there is no path to Slack, PagerDuty or a Lambda.
+**one email address by direct subscription** — not through SNS, so there is no
+fan-out to Slack, PagerDuty or a Lambda on the budget path.
+
+An SNS topic does exist, for CloudWatch alarms, and the budgets are deliberately
+not routed through it; the skill body has the region reason. The consequence for
+cost work is just that a budget notification cannot be intercepted, transformed
+or fanned out without first repointing it at a `us-east-1` topic.
 
 The two-budget ladder is the whole signal: crossing $300 is "look at this", and
 crossing $600 is "something is wrong". Neither tells you what moved, and neither
@@ -65,21 +70,34 @@ tenants × metrics × resolution. **Per-tenant cost comes from the CUR and the
 `runs` table; per-tenant *metrics* do not exist and should not be added.** Use
 `resource_class` as the metric dimension.
 
-## Querying it: there is no Athena yet
+## Querying it: the Athena path, and the cheaper one beside it
 
-There is **no Athena workgroup, no Glue catalog and no `aws_ce_*` resource** in
-the account. The design doc notes that anything programmatic — a per-tenant
-monthly figure, a cost-per-million-records trend — needs the CUR queried with
-Athena, and that it must be partitioned or every query scans the whole history.
+`infra/terraform/envs/core/athena.tf` declares the query path: an `er-cost`
+workgroup, a Glue database `er_cur` and an external table `cur2` over the
+delivered Parquet. Three settings decide how a query behaves, and all three are
+enforced rather than advisory:
 
-So today the options are the Billing console's Cost Explorer views, or reading
-the Parquet directly. Reading it directly is unusually cheap here, because the
-engine already is a DuckDB process that reads Parquet from S3 — a one-off
-analysis does not need new infrastructure.
+| Setting | Consequence |
+|---|---|
+| `enforce_workgroup_configuration` | a query cannot opt out of the cap or redirect its output |
+| `bytes_scanned_cutoff_per_query` (10 GiB) | a query that forgot its `billing_period` filter **fails** rather than succeeding expensively |
+| `projection.enabled` on the table | partitions are computed, never registered — so no `MSCK REPAIR` and no partition backlog |
 
-Standing up Athena or Glue for this is a real addition, not a configuration
-change, and it is the kind of thing the `aws-data-analytics` plugin was
-deliberately left out to avoid being nudged toward. Decide it as infrastructure.
+The table resolves Parquet columns **by name** (`parquet.column.index.access =
+"false"`), which is what makes declaring a subset of the export's columns safe;
+by position a subset would silently read the wrong data.
+
+The workgroup publishes `DataScannedInBytes` to CloudWatch and an alarm watches
+it, so the cost model's own cost is metered. That is the thing to check before
+assuming a query is free.
+
+**Athena is not always the right answer, and the alternative is unusually
+strong here.** The engine already is a DuckDB process that reads Parquet from
+S3, so a one-off analysis can read the CUR directly with no workgroup, no scan
+cap and no per-query charge. Reach for Athena when the query wants the Glue
+schema and partition projection; reach for DuckDB for anything exploratory.
+Cost Explorer in the Billing console remains the zero-setup option for a shape
+rather than a number.
 
 ## The tag-activation trap, restated
 

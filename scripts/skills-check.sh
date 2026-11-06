@@ -1169,6 +1169,89 @@ gen_aws_footprint() {
 		| sort -k1,1nr -k2,2 || true
 	echo '```'
 	echo
+	# A SET DIFFERENCE, deliberately, and it exists to retire a specific failure.
+	# The skill carried a hand-written sentence — "there is no CloudFront, ACM,
+	# Route 53, WAF, Athena, Glue, DynamoDB, Lambda, SQS, SNS, GuardDuty or
+	# Security Hub in this account" — nine lines above the count table that listed
+	# an Athena workgroup, a Glue catalog and three SNS resources.
+	#
+	# An asserted ABSENCE is the one claim the thing it describes cannot falsify.
+	# A stale positive gets noticed when someone opens the resource; a stale
+	# negative is only caught by a reader who already knew better. So the candidate
+	# list is the input and the absences are DERIVED: a service adopted later drops
+	# off this list on the next regeneration with nobody editing anything, which is
+	# the `screens-coverage` shape docs/agent-skills.md recommends.
+	#
+	# Output order is the array's, not `sort`'s, so this block cannot shift under a
+	# different LC_ALL the way the count table above once did.
+	echo "### Services and resource types with nothing declared"
+	echo
+	echo "Derived by set difference against the types above. A service adopted later"
+	echo "drops off this list on the next regeneration, so an absence here cannot rot."
+	echo
+	local -a candidates=(
+		"ACM|aws_acm_"
+		"API Gateway|aws_api_?gateway"
+		"Athena|aws_athena_"
+		"AWS Backup|aws_backup_"
+		"CloudFront|aws_cloudfront_"
+		"CloudWatch dashboards|aws_cloudwatch_dashboard"
+		"CloudWatch metric alarms|aws_cloudwatch_metric_alarm"
+		"CloudWatch metric filters|aws_cloudwatch_log_metric_filter"
+		"Cost Explorer (aws_ce_*)|aws_ce_"
+		"DynamoDB|aws_dynamodb_"
+		"ElastiCache|aws_elasticache_"
+		"Elastic Load Balancing|aws_alb|aws_lb"
+		"EventBridge|aws_cloudwatch_event_|aws_scheduler_"
+		"Glue|aws_glue_"
+		"GuardDuty|aws_guardduty_"
+		"Lambda|aws_lambda_"
+		"Route 53|aws_route53"
+		"SQS|aws_sqs_"
+		"SNS|aws_sns_"
+		"Security Hub|aws_securityhub_"
+		"Step Functions|aws_sfn_"
+		"WAF|aws_waf"
+	)
+	local declared absent=0 entry label pattern hits
+	declared=$(grep -rhoE 'resource "aws_[a-z0-9_]+"' infra/terraform \
+		| sed -e 's/^resource "//' -e 's/"$//' | sort -u || true)
+	for entry in "${candidates[@]}"; do
+		label=${entry%%|*}
+		# Everything after the first field is an alternation of prefixes, so a
+		# service spelled more than one way (aws_lb / aws_alb) counts as present
+		# when EITHER appears.
+		pattern=${entry#*|}
+		# CAPTURE then match. Never pipe a writer into `grep -q`: `-q` exits on
+		# the first hit, which SIGPIPEs the writer and returns 141 — so a FOUND
+		# service reports as absent, the exact inversion this block exists to
+		# prevent. `-c` consumes all of its input instead.
+		# `scripts/ci/skills-check-test.sh` greps this file for the piped form
+		# and fails on a reintroduction, including from inside a comment.
+		hits=$(printf '%s\n' "$declared" | grep -cE "^($pattern)" || true)
+		if [[ ${hits:-0} -eq 0 ]]; then
+			printf -- '- %s\n' "$label"
+			absent=$((absent + 1))
+		fi
+	done
+	[[ $absent -gt 0 ]] || echo "- (every candidate service has at least one resource declared)"
+	echo
+	# The alerting surface gets its own derived block because the skill body's
+	# strongest claim was about it, and that claim was wrong in the way a reader
+	# could not catch: "zero metric alarms, zero metric filters, zero SNS topics"
+	# survived a skim because two of the three were still true.
+	echo "### The alerting surface"
+	echo
+	echo "| Resource type | Declared |"
+	echo "|---|---|"
+	local rt
+	for rt in aws_cloudwatch_metric_alarm aws_sns_topic aws_sns_topic_subscription \
+		aws_cloudwatch_dashboard aws_cloudwatch_log_metric_filter \
+		aws_budgets_budget aws_cloudwatch_log_group; do
+		printf '| `%s` | %s |\n' "$rt" \
+			"$(grep -rhoE "resource \"$rt\"" infra/terraform | wc -l | tr -d ' ')"
+	done
+	echo
 	echo "### Identity Center permission sets"
 	echo
 	echo "| Permission set | Session | Inline policy |"

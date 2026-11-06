@@ -64,36 +64,37 @@ Must:
 
 - Name the account vCPU quotas as the first thing to check —
   *All Standard Spot Instance Requests* (`L-34B43A08`) and *Running On-Demand
-  Standard instances* (`L-1216C47A`), defaulting to **8 vCPU each**, measured in
-  vCPUs rather than instances, so a 16-vCPU node can never place.
+  Standard instances* (`L-1216C47A`) — and say they are measured in **vCPUs,
+  not instances**, so one large node can exhaust the ceiling on its own.
 - Describe the signature: the fleet request fails
   `VcpuLimitExceeded` / `MaxSpotInstanceCountExceeded`, the NodeClaim is torn
   down and retried, and the pod stays Pending throughout — which is why there is
   nothing obvious in the pod's own events.
+- **Reach for `get-service-quota` rather than answering the ceiling from
+  memory**, then do the headroom arithmetic against what it returns.
 
 Credit for connecting it to the single-account model: dev and prod share
 service quotas.
 
-Credit for knowing the applied value is **8 on both**, and extra credit for
-reaching for `get-service-quota` rather than answering from memory. This line
-awarded credit for "both were raised to 64" until 2026-10-24; that was wrong —
-the 2026-10-11 increase requests are `CASE_CLOSED` but were never granted, and
-`Quota.Value` is `8.0`. An answer that asserts 64 is now a **miss**, because at
-8 there are only 6 vCPU of headroom behind the always-on nodes and no runner
-node of either class can place at all.
+Must not:
 
-> **Maintainer's note on the wording.** This asks about a *NodePool scale-up*,
-> deliberately, not about a stuck pipeline run. The earlier wording — "a 10M-row
-> run has been Pending for twenty minutes, the job shows active" — was not
-> answerable as posed: there is no per-run runner pod. The k8s Job launcher was
-> never built, the Rust dispatcher runs the matching `er-cli` op in-process and
-> awaits it inline (`rust/crates/er-server/src/dispatcher.rs`), and the workspace
-> carries no `kube` or `k8s-openapi` dependency. A correct answer to that wording
-> had to open by rejecting the premise, which made "name the quotas first"
-> impossible to satisfy and scored a right answer as a miss. The quota knowledge
-> is unchanged and still correct — it was really observed on 2026-10-11
-> (`docs/infrastructure.md:98`) — so the scenario moved, not the must-list. If
-> the Job launcher is ever built, the original wording becomes valid again.
+- **State the applied quota as a remembered fact.** This is the trap the
+  scenario now exists to catch, and it has sprung twice in opposite directions:
+  the eval credited "both were raised to 64" until 2026-10-24 (the increase
+  requests were `CASE_CLOSED` without being granted), and then credited a
+  specific lower figure, which is equally a guess the day a request is granted.
+  A closed case is not a granted one, and neither is a document. Any number not
+  read from the account in the answer itself is a miss, whichever number it is.
+
+> **Maintainer's note on the wording.** This asks about a *NodePool scale-up*
+> rather than a stuck pipeline run. The earlier run-shaped wording — "a 10M-row
+> run has been Pending for twenty minutes" — was retired in 2026-10 as
+> unanswerable, on the grounds that there was no per-run pod and no `kube`
+> dependency in the workspace. **That ground no longer holds**: `er-k8s` renders
+> a per-attempt Job manifest and the dispatcher watches it, so the run-shaped
+> wording is valid again and is worth restoring as a second scenario rather than
+> a replacement — the NodePool phrasing tests the same quota knowledge without
+> depending on the orchestration shape, which is what makes it the durable one.
 
 ## 4. Why the bill moved
 
@@ -101,13 +102,14 @@ node of either class can place at all.
 
 Must:
 
-- Say Budgets only tells you *that* it moved — two COST budgets at $300 and
-  $600, `ACTUAL` and `FORECASTED` at 100%, delivered to **one email address**
-  and nowhere else, with no SNS topic and so no other path.
+- Say Budgets only tells you *that* it moved — two COST budgets, `ACTUAL` and
+  `FORECASTED` at 100%, delivered to one email address by **direct**
+  subscription rather than through SNS, so the budget path cannot fan out.
 - Point at the CUR 2.0 export (hourly, per-resource, Parquet, with split cost
   allocation) as the only thing that answers *why*.
-- Note there is **no Athena or Glue** in the account, so querying means Cost
-  Explorer or reading the Parquet directly.
+- Name a query path that exists: the `er-cost` Athena workgroup over the Glue
+  `cur2` table, **or** reading the delivered Parquet directly with DuckDB, which
+  needs no workgroup and pays no per-query scan.
 
 Credit for any of: that split cost allocation makes per-developer and
 per-tenant compute cost tractable because an environment is a namespace and a
@@ -116,9 +118,20 @@ common cause than any tenant's workload; or that spend predating cost-allocation
 tag activation is permanently unattributable because activation does not
 backfill.
 
+Full credit for knowing the workgroup's 10 GiB `bytes_scanned_cutoff_per_query`
+makes a query that forgot its `billing_period` filter **fail** rather than
+succeed expensively, and that `DataScannedInBytes` is itself alarmed — so the
+cost of asking about cost is metered.
+
 Must not:
 
-- Claim an alarm or dashboard would have caught it. There are none.
+- Say there is no Athena or Glue, or no SNS topic. All three exist; this line
+  awarded credit for asserting their absence until 2026-11-06, which was wrong
+  from the moment the cost-analytics and alerting stacks landed. The absences
+  that remain are **dashboards and metric filters**, and the generated
+  absence list in `references/footprint.md` is the only safe source for which is
+  which.
+- Claim a dashboard would have caught it. There are still none.
 
 ## 5. Which identity to use
 
