@@ -30,10 +30,13 @@
 # `rust.yml`, `frontend.yml` and `infra.yml` all trigger on bare `pull_request`,
 # so the batch earns every required context with correct `detect` behaviour and
 # NO change to any of them. Wiring the native merge queue would have been more
-# work, not less — `merge_group` is not a `pull_request` event, so all three
-# `detect` jobs would fall through to their fail-safe default (`code=true`,
-# `frontend=true`, "assuming infra changed") and every merge-group build would
-# run every gate at full cost.
+# work, not less, AT THE TIME — `merge_group` was not a `pull_request` event, so
+# all three `detect` jobs would have fallen through to their fail-safe default
+# (`code=true`, `frontend=true`, "assuming infra changed") and every
+# merge-group build would have run every gate at full cost. That gap has since
+# been closed: each `detect` now classifies a `merge_group` event like a PR. So
+# this is no longer the reason to prefer a pull request — the reason is that the
+# queue cannot be enabled on a user-owned repository at all.
 #
 # THIS JOB MUST NEVER BE A REQUIRED STATUS CHECK. A job's `name:` is its
 # branch-protection context, and this one runs only on `workflow_dispatch`, so it

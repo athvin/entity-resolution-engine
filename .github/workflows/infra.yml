@@ -72,9 +72,11 @@ name: infra
 
 on:
   pull_request:
-  # The merge queue (see rust.yml's trigger block). `terraform plan` is a
-  # required context, so this workflow must report on queue runs or every queued
-  # PR waits forever. `detect` diffs the queue's base...head like a PR; `plan`
+  # Merge-queue wiring, which nothing consumes today (see rust.yml's trigger
+  # block for why the queue cannot be enabled here). `terraform plan` is a
+  # required context, so this workflow would have to report on queue runs or
+  # every queued PR would wait forever — which is why the trigger is kept
+  # against the day one exists. `detect` diffs the queue's base...head like a PR; `plan`
   # itself skips here (its `if:` admits only push and same-repo PRs), which
   # `plan-gate` accepts — the PR already ran its plan, and `validate` still runs.
   merge_group:

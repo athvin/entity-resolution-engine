@@ -30,13 +30,12 @@ name: frontend
 
 on:
   pull_request:
-  # The merge queue. A queued PR is tested once more as the exact tree that will
-  # land (main + everything ahead of it in the queue), which is what lets
-  # branch protection drop "require branches to be up to date": nobody rebases
-  # just to re-satisfy a stale check. `detect` applies its usual path filter to
-  # the queue's own base...head (the exact tree that will land), but never
-  # consults the content-addressed pass markers, so whatever the PR's change
-  # reaches is re-proved against the real merge result before it lands.
+  # Merge-queue wiring, which NOTHING CONSUMES TODAY (see rust.yml's trigger
+  # block for why the queue cannot be enabled here, and `merge-bus.yml` for the
+  # substitute that actually proves a combination). Kept so a queue, if one ever
+  # existed, would not stall on a workflow missing `merge_group:`. `detect`
+  # applies its usual path filter to the queue's own base...head but never
+  # consults the content-addressed pass markers.
   merge_group:
   push:
     branches: [main]
@@ -153,9 +152,11 @@ jobs:
       #   - The ISO week is part of the key, bounding the floating inputs the
       #     tree cannot see (stable rustc via rust-toolchain.toml, DuckDB
       #     extension downloads, advisory databases) to at most a week.
-      #   - `merge_group` and `push` never consult markers, so the merge queue
-      #     re-proves everything before it lands. A PR-level skip can delay a
-      #     finding to the queue; it cannot get one onto main.
+      #   - `merge_group` and `push` never consult markers. With no merge queue
+      #     enabled (see the trigger block), nothing re-proves a skip BEFORE it
+      #     lands — the push-to-main run does, consulting no marker. So a
+      #     PR-level skip can let a finding reach main, but cannot keep it
+      #     hidden there.
       # Bypass with the `ci:full` label (or a workflow re-run after removing a
       # marker) when you want the full gate regardless.
       - id: key
