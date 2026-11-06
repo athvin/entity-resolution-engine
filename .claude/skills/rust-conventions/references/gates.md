@@ -27,7 +27,7 @@ written, and nothing failed while the prose said otherwise.
 | `lint` | `cd rust && cargo clippy --workspace --all-targets -- -D warnings` |
 | `doc` | `cd rust && RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items` |
 | `entities-check` | `cd rust && cargo run -q -p er-entity-cli -- verify --root ..` |
-| `skills-check` | `bash scripts/skills-check.sh all` |
+| `skills-check` | `bash scripts/ci/skills-check-test.sh && bash scripts/skills-check.sh all` |
 | `test` | `cd rust && cargo test --workspace` |
 
 **52 test files read `ER_TEST_PG_DSN`** and self-skip without it.
