@@ -141,11 +141,19 @@ er maintain --expire-older-than "30 days"   # the window you actually chose
 
 `--expire-older-than` has a default, and `run_maintain` calls
 `expire_snapshots` unconditionally — so there is no invocation of `er maintain`
-that only compacts. **Keep the window longer than your longest-lived cursor**:
-every lake read pins a snapshot, so expiring history out from under a paginated
-or resumed read breaks it, and the default is short enough to do that. Pass the
-window explicitly in anything scheduled. Ordering of the maintenance steps
-matters; see
+that only compacts.
+
+**Keep the window longer than your longest-lived cursor**: every lake read pins
+a snapshot, so expiring history out from under a paginated or resumed read
+breaks it. Be exact about which cursor is at risk, because the obvious reading
+is wrong in both directions. The call is
+`ducklake_expire_snapshots(older_than => now() - INTERVAL <window>)`, so it
+removes snapshots *created* before that instant — a cursor that pinned a
+snapshot minutes ago is safe under the default, and a resumed run or a
+checkpointed export holding a snapshot pinned days ago is the one that breaks.
+What makes the bare invocation dangerous is that it expires at all, on a window
+nobody chose; pass the window explicitly in anything scheduled. Ordering of the
+maintenance steps matters; see
 [ducklake-lakehouse](../ducklake-lakehouse/references/layout-and-maintenance.md).
 
 ## What an `er` exit status tells you
