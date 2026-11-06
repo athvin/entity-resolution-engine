@@ -108,6 +108,24 @@ gate reports success; and `er-entity` embeds its own rule registry, so a
 prebuilt binary from another branch reports a false "stale generated file" —
 let `make` build it.
 
+**Start fixing at once, but hold the push until the run finishes.** Begin
+diagnosing and fixing locally the moment a job goes red — that work is free. Do
+**not** push while other required jobs are still running. Two reasons, and the
+second is the expensive one:
+
+- A later job may fail too, and one push should carry every fix that run
+  earned. Pushing per-failure spends a fix iteration on each.
+- **`cancel-in-progress` is true for `pull_request`**, so a push cancels the
+  in-flight run. The jobs that had not yet reported never do, and their evidence
+  is gone — so you cannot know whether there was more to fix, and the next run
+  has to rediscover it from scratch. Measured on this skill's own PR: a push
+  made while `rust` was mid-flight cancelled one test shard and left eight e2e
+  jobs with no conclusion at all.
+
+Wait for the run to reach a conclusion, collect **every** failure, then push
+once. The exception is a failure that makes the rest of the run meaningless —
+`detect` red, or a compile error every downstream job is blocked on.
+
 **Fix.** The smallest change that addresses the root cause, committed on the PR
 branch with a message saying what was failing and why this fixes it. Push
 normally; `--force-with-lease` only over your own commits after a rebase, never
