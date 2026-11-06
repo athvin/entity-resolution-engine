@@ -11,10 +11,13 @@ cross-tenant bug — add the predicate."
 Must:
 
 - Explain that isolation on the data plane is **physical**: `open_org_lake`
-  resolves a distinct catalog and data path per org, so there is no `org_id`
-  column to filter on in a lake read.
-- State the consequence rather than softening it: if two orgs ever resolve to
-  the same catalog it is **silent, total** exposure with nothing to catch it.
+  resolves a distinct `(catalog, catalog schema, data path)` triple per
+  **dataset**, so there is no `org_id` column to filter on in a lake read.
+- Get the unit and the arity right: two datasets of one org **share a catalog**
+  by design, separated by DuckLake's `METADATA_SCHEMA`, so "they share a
+  catalog" is not by itself a breach — a collision in all three is.
+- State the consequence rather than softening it: if two datasets ever resolve
+  to the same triple it is **silent, total** exposure with nothing to catch it.
 - Note the invariant **still has no test** — `pg_tenant_isolation.rs` does not
   exist yet — and that the harness map says to clone `pg_orgs.rs`.
 

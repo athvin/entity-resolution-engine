@@ -41,7 +41,7 @@ user input into SQL outside a declared statement.
 |---|---|
 | Attack-surface inventory (route/sink → tier → guard → gap) | [references/attack-surface.md](references/attack-surface.md) |
 | **Category → exact test harness → how to extend** (the core) | [references/harness-map.md](references/harness-map.md) |
-| Tenant isolation (org_id rows + lake-catalog invariant + impersonation) | [references/tenant-isolation.md](references/tenant-isolation.md) |
+| Tenant isolation (org_id rows + the lake-location triple + impersonation) | [references/tenant-isolation.md](references/tenant-isolation.md) |
 | Injection (governed SQL, config-as-code SQL, CSV, path, `:action`) | [references/injection.md](references/injection.md) |
 | SSRF / egress (webhook + LLM-tool + the IMDS limit) | [references/ssrf-egress.md](references/ssrf-egress.md) |
 | AuthN / session (cookies/CSRF, brute-force, key hashing, error leak) | [references/authn-session.md](references/authn-session.md) |
@@ -79,8 +79,15 @@ Step 5 is non-negotiable. A security test that passes before the fix is proving 
 
 - **Tenant isolation on the data plane is physical, not row-level.** Lake read statements carry **no
   `org_id` predicate** — isolation rests entirely on `open_org_lake` resolving a distinct
-  `ER_LAKE_CATALOG`/`ER_LAKE_DATA_PATH` per org. If two orgs ever share a catalog, it is *silent,
-  total* cross-tenant exposure with no second line of defence. This invariant must have a test.
+  **`(catalog, catalog schema, data path)`** triple, read from `ER_LAKE_CATALOG`,
+  `ER_LAKE_CATALOG_SCHEMA` and `ER_LAKE_DATA_PATH` (`er-server/src/schema.rs`). **All three
+  dimensions count**: disjoint metadata schemas are independent lakes, which is how several datasets
+  share one `er_t_<org>` database — so a review that checks only the catalog and the data path will
+  pass a pair that is not in fact separated. If two datasets ever resolve to the same triple, it is
+  *silent, total* cross-tenant exposure with no second line of defence. This invariant must have a
+  test: `er-server/tests/pg_lake_catalog_schema.rs` is the one that pins it, including DuckLake's
+  refusal to re-attach a metadata schema under a different `DATA_PATH`. For the attach itself, and
+  the env-var naming that actively misleads here, see `ducklake-lakehouse`.
 - **Three config fields are raw SQL by design**: `blocking[].expr`, `training.deterministic_rules`,
   `training.em_blocking_rules`. Publish-time analysis (`config_check.rs`) checks column *references*
   in `blocking[].expr` only — the two `training` lists get none. Treat config publish as an
@@ -110,7 +117,7 @@ A condensed index; the full table with exact files and line hints is
 
 | Category | Prove it by | Test home |
 |---|---|---|
-| Cross-tenant lake read | two orgs made to share a catalog → one reads the other | NEW `er-server/tests/pg_tenant_isolation.rs` |
+| Cross-tenant lake read | two datasets made to resolve to the same `(catalog, catalog schema, data path)` triple → one reads the other | NEW `er-server/tests/pg_tenant_isolation.rs` |
 | Webhook SSRF → IMDS (**guarded**) | register `http://169.254.169.254/...`; delivery refuses it | units in `webhook.rs`, `tests/pg_webhooks.rs`, + the `tests/egress_guard.rs` posterity gate |
 | Config-as-code SQL | publish a config whose rule calls a subquery/function | `config_check.rs` unit tests |
 | CSV formula injection | a record name `=cmd()` exported uninjected | unit in `read.rs` (`merge_plans_csv`) |

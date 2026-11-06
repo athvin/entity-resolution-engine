@@ -95,7 +95,9 @@ internet ──▶ BFF (Next.js, frontend/src/)  ──erk_ key / operator token
 **High**
 1. Webhook SSRF → cloud metadata (`169.254.169.254`); k8s egress unrestricted (`networkpolicy.yaml`:
    "Egress is deliberately unrestricted").
-2. Tenant-isolation invariant: no two `orgs.env` rows may share `ER_LAKE_CATALOG`/`ER_LAKE_DATA_PATH`.
+2. Tenant-isolation invariant: no two `dataset.env` rows may resolve to the same
+   `(catalog, catalog schema, data path)` triple. Datasets of one org share a catalog by design, so
+   the catalog alone is not the boundary.
 3. Config-as-code SQL: `blocking[].expr`, `training.deterministic_rules`, `em_blocking_rules`.
 4. Assertion abuse: forced merges via nonexistent/foreign keys, no volume cap, no 4-eyes.
 

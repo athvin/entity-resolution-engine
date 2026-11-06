@@ -25,7 +25,7 @@ reference — if a finding has no row here, add the row before writing the test.
 
 | # | Class | Code under test | Test home | Shape |
 |---|---|---|---|---|
-| 1 | Lake-catalog uniqueness (tenant isolation) | `er-server/src/read.rs` `open_org_lake` | **NEW** `er-server/tests/pg_tenant_isolation.rs` (clone `pg_orgs.rs`) | env-gated pg |
+| 1 | Lake-location uniqueness across datasets — the `(catalog, catalog schema, data path)` triple, not the catalog alone | `er-server/src/read.rs` `open_org_lake`, `src/schema.rs` `open_lake_env` | **NEW** `er-server/tests/pg_tenant_isolation.rs` (clone `pg_orgs.rs`). Not covered by `pg_lake_catalog_schema.rs`, which pins DuckLake's re-attach refusal rather than cross-dataset uniqueness | env-gated pg |
 | 2 | Cross-org read → 404 | `er-server/src/lib.rs` `guard` | extend `er-server/tests/pg_auth.rs` | env-gated pg |
 | 3 | Webhook SSRF → IMDS (**guard built**) | `er-server/src/webhook.rs` `client`/`post`/`emit`; reg in `lib.rs` `create_webhook` | units in `webhook.rs`; `tests/pg_webhooks.rs` (register blocked) + `tests/pg_webhook_deliver.rs` (deliver refused); **`tests/egress_guard.rs`** is the posterity gate — it fails if `er-server/src` names the unguarded entry points, `Egress::Unguarded`, or `reqwest::Client::new()` | unit + env-gated pg + static gate |
 | 4 | Config-as-code raw SQL | `er-config/src/lib.rs` `BlockingRule.expr`, `Training.deterministic_rules`, `em_blocking_rules`; `er-server/src/config_check.rs` | extend `config_check.rs` `#[cfg(test)] mod tests` (parse the two `training` lists it ignores today) | unit |
