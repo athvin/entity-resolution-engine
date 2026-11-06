@@ -20,8 +20,10 @@ plan (`~/.claude/plans/typed-painting-cat.md`) and `docs/research-cloudingo.md`.
    ships behavioral tests; coverage may not regress; the PR hot path stays fast.
 
 **Builder-key ⇄ prod:** the never-expiring `AdministratorAccess` key in `infra/terraform/envs/dev/builder.tf`
-gets the §8.2 `DenyProd*` guards when prod lands (PR 0.4) so it cannot mutate `er-prod-*`; it is not deleted
-(the build loop still needs non-expiring creds). Prod deploys use the CI github-oidc role, never the builder key.
+**already carries** the §8.2 `DenyProd*` guards, so it cannot mutate `er-prod-*` — they landed with the key
+rather than waiting on prod (this entry used to say "when prod lands (PR 0.4)"). It is **not deleted**, and as
+of 2026-11-05 there is no scheduled retirement at all: it goes only when the owner says so. Prod deploys use
+the CI github-oidc role, never the builder key.
 
 ## Already shipped before this program (baseline)
 Explainable probabilistic Fellegi-Sunter matching (per-pair probability + evidence waterfall), incremental
