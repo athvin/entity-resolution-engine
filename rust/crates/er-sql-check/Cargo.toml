@@ -22,7 +22,7 @@ repository.workspace = true
 # normalizers, variadic regexp forms, and array-literal planning (the
 # source_metadata lambdas are rewritten out by this crate before planning).
 # It brings datafusion 52 / arrow 57 /
-# sqlparser 0.59 — a separate arrow major from the duckdb-pulled arrow 58 the rest
+# sqlparser 0.59 — a separate arrow major from the duckdb-pulled arrow 60 the rest
 # of the workspace uses. The two never unify: the analyser works in
 # ff_analysis::SqlType and the oracle compares type-name strings, so the split is
 # contained to this crate.
@@ -47,7 +47,7 @@ thiserror = { workspace = true }
 [dev-dependencies]
 # The oracle proves the type map against a real DuckDB: it builds a table from the
 # generated DDL and compares DuckDB's DESCRIBE to the entity. duckdb brings arrow
-# 58 (vs the analyser's arrow 57), but the oracle compares type-name strings, so
+# 60 (vs the analyser's arrow 57), but the oracle compares type-name strings, so
 # the two never meet. er-entity-gen renders the lake DDL the oracle loads.
 duckdb = { workspace = true }
 er-entity-gen = { path = "../er-entity-gen" }

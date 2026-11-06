@@ -162,6 +162,7 @@ So: counts, version numbers, job names, rule codes and thresholds live in
 | `rust-conventions/references/crate-map.md` | the crate tree and `rust/Cargo.toml` |
 | `rust-conventions/references/gates.md` | the `check:` target in `Makefile` |
 | `sql-analysis/references/diagnostics.md` | `er-sql-check/src/analyze.rs` vs the design doc's table |
+| `sql-analysis/references/ff-analysis.md` | `rust/Cargo.lock` plus the workspace and `er-sql-check` manifests |
 | `ci-and-supply-chain/references/required-checks.md` | the workflow files and `rust/deny.toml` |
 | `frontend-testing/references/tiers-and-thresholds.md` | `vitest.config.ts`, `package.json`, `frontend.yml` |
 
@@ -267,6 +268,7 @@ skill, so it gets the same fix.
 | `crate-map` | `rust-conventions/references/crate-map.md` | the `rust/crates/*` tree, each crate's leading `//!`, the pinned dependency lines, and `[workspace.lints]` paired with the comment that justifies each allow |
 | `rust-gates` | `rust-conventions/references/gates.md` | the `check:` target's prerequisites and each one's recipe, plus the count of test files reading `ER_TEST_PG_DSN` |
 | `diagnostics` | `sql-analysis/references/diagnostics.md` | `er-sql-check`'s `analyze.rs` set-differenced against the design doc's table |
+| `sql-planner-pins` | `sql-analysis/references/ff-analysis.md` | the resolved ff-analysis tag/rev, the two arrow majors and which crate pulls each, the three sqlparser majors and which one `ff_analysis::sqlparser` re-exports, and which workspace crates declare the standalone `sqlparser` |
 | `required-checks` | `ci-and-supply-chain/references/required-checks.md` | every workflow's jobs, names, timeouts and `if:`, plus `deny.toml` |
 | `tiers-and-thresholds` | `frontend-testing/references/tiers-and-thresholds.md` | `vitest.config.ts` thresholds, the two Playwright pins, the test directories |
 | `design-tokens` | `frontend-design-system/references/tokens-and-primitives.md` | `globals.css` tokens with both themes and their `@theme` reachability, `components.json`, the installed primitives, the palette-ban regex |

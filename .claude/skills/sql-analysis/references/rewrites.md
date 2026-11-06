@@ -16,9 +16,10 @@ The analyser plans against a catalog assembled from two sources:
 1. **The entity catalog** — every `entities/*/entity.yaml`, split by declared
    store (`duckdb` for lake entities, `postgres` for control-plane ones).
 2. **The engine's relation registry** (`er-schema`) — the intermediate lake
-   tables that are *not* entities (`int_std_records`, `golden_lineage`,
-   `entity_membership`, `entities`), so stage SQL can be planned alongside the
-   entity-owned marts.
+   tables that are *not* declared entities: `int_std_records`,
+   `golden_lineage`, `entity_membership`, and the resolved-cluster table
+   confusingly named `entities`. Registering them is what lets stage SQL be
+   planned alongside the entity-owned marts.
 
 A statement is planned against **its own store only**. That is what E009
 enforces: a qualified relation must resolve to an entity of the statement's own

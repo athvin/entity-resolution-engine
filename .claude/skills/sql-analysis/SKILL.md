@@ -1,6 +1,6 @@
 ---
 name: sql-analysis
-description: Explains the static SQL analyser (`er-sql-check`) that plans every declared statement in this repo — the E0xx diagnostics and their remedies, the rewrite step that strips what the planner cannot parse, what `mode: partial` does and does not skip, the two-store catalog, the execution oracle that checks declared types against a real database, and the ff-analysis (feather-flow) dependency that supplies the planner and its DuckDB function stubs. Use when an E0xx diagnostic fails, when a statement will not plan, when adding SQL that calls a DuckDB function the analyser does not know, when the oracle disagrees with a declared type, or when deciding between a declared statement and a plan-vector-tested generator. For writing the entity or statement YAML itself see entity-framework.
+description: Explains the static SQL analyser (`er-sql-check`) that plans every declared statement in this repo — the E0xx diagnostics and their remedies, the rewrite step that strips what the planner cannot parse, what `mode: partial` does and does not skip, the two-store catalog, the execution oracle that checks declared types against a real database, and the ff-analysis (feather-flow) dependency that supplies the planner and its DuckDB function stubs. Use when an E0xx diagnostic fails, when a statement will not plan, when adding SQL that calls a DuckDB function the analyser does not know, when the oracle disagrees with a declared type, or when deciding between a declared statement and a plan-vector-tested generator. This skill owns the E0xx remedies and the oracle's verdict; for writing the entity or statement YAML itself see entity-framework; for `dedupe-core`'s model-derived SQL, which is golden-governed and never analysed, see er-matching.
 ---
 
 # The SQL analyser
@@ -22,9 +22,11 @@ stale: [references/diagnostics.md](references/diagnostics.md).
 
 Three facts about the family that are easy to get wrong:
 
-- `E007`, `E008` and `E013` are **documented but never implemented**. Do not
-  rely on them firing. (That drift is the stated reason `docs/entity-lint-rules.md`
-  is now generated and byte-compared.)
+- **Some documented codes are not implemented, and you must not rely on them
+  firing.** Which ones is a set difference the reference derives — do not work
+  from a remembered list, because a code that ships moves between the two halves
+  with nothing else in the tree changing. (That drift is the stated reason
+  `docs/entity-lint-rules.md` is generated and byte-compared.)
 - `E011` (no `SELECT *`) and `E012` (kind matches folder) have **no override**.
   There is no mode or flag that relaxes them.
 - The `E0xx` family is statement-level and lives in `er-sql-check`. The `V0xx`
@@ -39,32 +41,42 @@ that actually means:
 
 | Still runs | Skipped |
 |---|---|
-| parsing, the full AST | DataFusion planning |
-| E004, E005, E010, E011, E012 | E003's plan-derived output check |
-| the rewrite step | — |
+| the rewrite step, then parsing | DataFusion planning |
+| **every AST pass**, E014 and E015 included | E003's plan-derived output check |
+| E002's undeclared-`$param` check, by text | E002's declared-type-vs-inferred half — no plan, no inference |
 
 So `partial` is **not** an escape hatch from the rules. It is specifically "the
 planner cannot derive this statement's output schema; the oracle will supply it
 instead". The YAML makes the exception visible — it is never a silent fallback.
 
-The common legitimate case is `MERGE`, which DataFusion cannot plan at all.
+The common legitimate case is `MERGE`, which DataFusion cannot plan at all — and
+that is exactly why the AST half matters. E014 (`updated_at` is assigned) and
+E015 (the `ON` clause matches the `natural_key`) have **no other subject**: a
+MERGE is always partial, so if `partial` skipped the AST passes those two rules
+could never fire at all. Read the "still runs" column as the whole AST pass set
+rather than a list, because the set grows.
+
+One real narrowing, and it is the only one: a partial statement that will not
+parse *even after the rewrite* falls back to text heuristics — a `SELECT *`
+regex and a leading-verb check, nothing else. That is the weakest check in the
+system and the actual cost of exotic SQL.
 
 ## The rewrite step
 
 Before planning, constructs the planner cannot read are stripped — and each
 removal **records what it stripped so a later pass can enforce the rule it stood
-for**. That coupling is the point: removing the snapshot pin is what lets E006
-check that the pin was there.
+for**. That coupling is the point, and these are the three removals where it is
+load-bearing:
 
-| Construct | Why |
-|---|---|
-| `AT (VERSION => $snapshot)` | DuckLake time travel; sqlparser 0.59 cannot parse `=>`. Recorded, then enforced by E006 |
-| `name := value` named args | DataFusion's planner rejects named arguments; dropping the prefix makes them positional, which is all schema inference needs |
-| `MERGE INTO` | split — the source query is planned, target assignments checked by name and type against the entity |
-| `RETURNING` | removed; output schema comes from the entity's columns |
-| `ON CONFLICT DO NOTHING` / `DO UPDATE SET` | removed after the assignment list is checked |
-| `FOR UPDATE` / `SKIP LOCKED` / `NOWAIT` | removed; they do not affect schema |
-| named params | rewritten to positional placeholders carrying their declared types |
+| Construct | Rewrite | Rule it preserves |
+|---|---|---|
+| `AT (VERSION => $snapshot)` | stripped, the snapshot param recorded | **E006** — removing the pin is what lets E006 check the pin was there |
+| `MERGE INTO` | split: source query planned, target assignments checked by name and type against the entity | **E005**, **E014**, **E015** |
+| named params | rewritten to positional placeholders carrying their declared types | **E002** |
+
+[references/rewrites.md](references/rewrites.md) is the canonical list and
+carries the rest — `RETURNING`, `ON CONFLICT`, the locking clauses,
+named-argument prefixes — each with the rule it preserves or an explicit "none".
 
 If you add SQL using a construct the planner chokes on, the first question is
 whether a rewrite belongs here rather than whether the statement needs
@@ -95,27 +107,31 @@ has to prove.
 This is the part nobody guesses, and the reason this skill exists.
 
 `er-sql-check` does **not** depend on the standalone `sqlparser` crate. It
-parses and plans only through
-`ff-analysis = { git = "…/feather-flow", tag = … }`, which brings
-**DataFusion 52 / arrow 57 / sqlparser 0.59**. The workspace's
-`sqlparser = "0.63"` has exactly one consumer, and it is `dedupe-core`.
+parses and plans only through `ff-analysis`, pinned by tag to the first-party
+feather-flow repository. So *"the repo uses the workspace's sqlparser for SQL
+static analysis"* is wrong: `ff_analysis::sqlparser` is
+`pub use datafusion_expr::sqlparser`, and the workspace's own `sqlparser` has
+exactly one consumer — `dedupe-core`.
 
-So: *"the repo uses sqlparser 0.63 for SQL static analysis"* is wrong, and the
-arrow major here (57) deliberately differs from the duckdb-pulled 60 the rest of
-the workspace uses. The split never unifies and is contained to this crate,
-because the analyser works in `ff_analysis::SqlType` and the oracle compares
-type-name strings.
+That re-export is also the trap. Three sqlparser majors resolve in this build
+graph, and `cargo tree` shows ff-analysis's **own** direct dependency, not the
+one that actually parses. The pins, and which row is the parser, are derived
+from `Cargo.lock` in [references/ff-analysis.md](references/ff-analysis.md) —
+read them there rather than from memory.
 
-**The workflow that follows:** DataFusion does not know DuckDB's functions, so
-ff-analysis carries stubs for them — `to_json`, `map_from_entries`,
-`json_keys`, `array_length`, `list`, window functions, `concat_ws`,
-`element_at`, a custom planner for DuckDB `MAP {…}` literals and subscript
-access, unicode normalizers, variadic regexp forms, array-literal planning.
+The arrow major on the analyser side deliberately differs from the one the
+`duckdb` crate pulls for the rest of the workspace. The split never unifies and
+is contained to this crate, because the analyser works in `ff_analysis::SqlType`
+and the oracle compares type-name strings.
+
+**The workflow that follows:** DataFusion does not know DuckDB's function
+library, so ff-analysis carries stubs for the ones this engine's SQL calls. What
+is covered sits in the reference, tag by tag — the set grows with every
+feather-flow release, so check it rather than assuming a function is missing.
 
 If your SQL calls a DuckDB function the planner has never heard of, the fix is
 **a stub in ff-analysis, in another repository, plus a tag bump here**. It is
-not a change you can make in this repo alone. Full procedure:
-[references/ff-analysis.md](references/ff-analysis.md).
+not a change you can make in this repo alone.
 
 Also: `datafusion-common` and `datafusion-expr` are pinned to the same major
 ff-analysis resolves, so the `LogicalPlan` types unify. Bumping either alone
