@@ -1213,7 +1213,7 @@ gen_aws_footprint() {
 		"Step Functions|aws_sfn_"
 		"WAF|aws_waf"
 	)
-	local declared absent=0 entry label pattern
+	local declared absent=0 entry label pattern hits
 	declared=$(grep -rhoE 'resource "aws_[a-z0-9_]+"' infra/terraform \
 		| sed -e 's/^resource "//' -e 's/"$//' | sort -u || true)
 	for entry in "${candidates[@]}"; do
@@ -1222,7 +1222,14 @@ gen_aws_footprint() {
 		# service spelled more than one way (aws_lb / aws_alb) counts as present
 		# when EITHER appears.
 		pattern=${entry#*|}
-		if ! printf '%s\n' "$declared" | grep -qE "^($pattern)"; then
+		# CAPTURE then match. Never pipe a writer into `grep -q`: `-q` exits on
+		# the first hit, which SIGPIPEs the writer and returns 141 — so a FOUND
+		# service reports as absent, the exact inversion this block exists to
+		# prevent. `-c` consumes all of its input instead.
+		# `scripts/ci/skills-check-test.sh` greps this file for the piped form
+		# and fails on a reintroduction, including from inside a comment.
+		hits=$(printf '%s\n' "$declared" | grep -cE "^($pattern)" || true)
+		if [[ ${hits:-0} -eq 0 ]]; then
 			printf -- '- %s\n' "$label"
 			absent=$((absent + 1))
 		fi
