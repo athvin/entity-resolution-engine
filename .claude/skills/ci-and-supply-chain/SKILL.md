@@ -330,8 +330,10 @@ gate judges it, and squash-merges the members only if that goes green.
 Dispatch-only, `dry_run: true` by default, report-and-stop on red.
 
 GitHub's **merge queue is this feature and cannot be enabled here** — it is
-organization-only, private repositories needing Enterprise Cloud, and this one
-is private and user-owned.
+offered only for **organization-owned** repositories, and this one is owned by a
+user account. Visibility is not the blocker and has moved, so do not reason from
+it; ownership is. Moving the repo under an organisation is the trigger to
+revisit, because the queue would replace the bus.
 
 Four things bite, and each cost a live run or a false green to learn: it needs
 **`actions: read`** (an unnamed scope is `none`); it can **never carry a PR
