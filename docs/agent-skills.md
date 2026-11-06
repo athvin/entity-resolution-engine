@@ -183,6 +183,7 @@ So: counts, version numbers, job names, rule codes and thresholds live in
 | `er-engine-ops/references/stages-and-flags.md` | `er-cli`'s clap `Command` enum |
 | `ci-and-supply-chain/references/required-checks.md` | the workflow files and `rust/deny.toml` |
 | `frontend-testing/references/tiers-and-thresholds.md` | `vitest.config.ts`, `package.json`, `frontend.yml` |
+| `infra-platform/references/coverage.md` | `infra.yml`'s three stack enumerations, `infra/k8s/`, and the `kubectl apply` sites |
 
 Each has a `<!-- BEGIN GENERATED: id -->` / `<!-- END GENERATED: id -->` pair.
 Prose outside the markers survives regeneration; **do not hand-edit inside
@@ -294,13 +295,21 @@ skill, so it gets the same fix.
 | `dense-surface-facts` | `frontend-data-ui/references/dense-surfaces.md` | `useVirtualizer` and `useSearchParams` call sites, route-level boundary files under `src/app`, and the `<table>` count — each a zero or a one the skill used to state in prose |
 | `aws-footprint` | `aws-account-operations/references/footprint.md` | `resource "aws_*"` types and counts, the permission sets and whether each has an inline policy, the workspace's `aws-*` crates, the provider pins |
 | `er-command-surface` | `er-engine-ops/references/stages-and-flags.md` | `er-cli`'s clap `Cli` globals and `Command` variants, each flag's declared default resolved through `er-versions`' mode constants |
+| `infra-coverage` | `infra-platform/references/coverage.md` | the three stack enumerations in `infra.yml` set-differenced against the stacks in the tree, every `infra/k8s` path against the sites that reference it, and the NodePool manifests against the non-recursive `kubectl apply` |
 | `skill-inventory` | this document **and** `CLAUDE.md` | every `SKILL.md`'s `name`, `description` and `disable-model-invocation` |
 
-Three of these are **set differences**, and that is the shape worth copying:
-`diagnostics`, `screens-coverage` and the inline-policy column of
-`aws-footprint` each report a *gap* nobody maintains, so nobody can forget it.
-`screens-coverage` replaced a prose warning that a new screen is "otherwise
-silently unchecked" — the kind of warning that is always true and never read.
+The **set difference** is the shape worth copying — `diagnostics`,
+`screens-coverage`, the inline-policy column of `aws-footprint` and all three
+tables of `infra-coverage` each report a *gap* nobody maintains, so nobody can
+forget it. `screens-coverage` replaced a prose warning that a new screen is
+"otherwise silently unchecked" — the kind of warning that is always true and
+never read. `infra-coverage` replaced a NodePool count that was already wrong.
+
+One trap when writing one, and it cost a debugging pass: the gap case is
+usually a `grep` that matches nothing, which exits 1 and — under this script's
+`set -o pipefail` — kills the whole regen. `bash -n` cannot see it and the
+symptom is an empty generated block. Wrap the search in `{ …; || true; }`, and
+test the generator against a tree where the gap is non-empty.
 
 A caution learned writing these: generated content grows, so a reference can
 cross the 100-line table-of-contents threshold without anyone editing it. Give

@@ -160,7 +160,9 @@ Rules that are easy to break:
 - **A new stack has to join two hand-written lists**, and neither failure is
   loud: the `validate` tier's `for d in …` loop, and the `plan` job's
   `matrix.include`. A stack in neither is simply never checked — no job goes
-  red. The generated coverage table reports exactly that gap.
+  red. Which stack each tier reaches, which `infra/k8s` paths anything applies,
+  and which NodePools the apply is non-recursive past, are derived in
+  [references/coverage.md](references/coverage.md).
 - **A new state-key *prefix* needs the plan role's grant first, in its own
   PR** — not every new stack. The role allows `envs/*.tfstate` and
   `bootstrap/*.tfstate`, so a stack under either is already covered and needs

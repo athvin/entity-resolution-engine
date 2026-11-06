@@ -1380,6 +1380,116 @@ wf_on_block() {
 	' "$1" | sort -u
 }
 
+# Every `dir:` under one job's `matrix.include`, as a stack path relative to
+# infra/terraform. Scoped per job because `plan` and `apply` carry separate
+# matrices and conflating them would report prod as planned when it is only
+# applied through the second-hop role.
+infra_job_stacks() {
+	local wf=.github/workflows/infra.yml job=$1
+	awk -v want="$job" '
+		/^  [a-z][a-z0-9-]*:[[:space:]]*$/ { in_job = ($0 ~ "^  " want ":[[:space:]]*$") }
+		in_job && /dir:[[:space:]]*infra\/terraform\// {
+			sub(/.*dir:[[:space:]]*infra\/terraform\//, "")
+			sub(/[[:space:]]*$/, "")
+			print
+		}
+	' "$wf" | sort -u
+}
+
+gen_infra_coverage() {
+	local stacks validate plan apply uncovered
+	local s k sites
+
+	# A stack is a directory with its own backend, which is what gives it a
+	# separate state key. Deriving it from `*.tf` instead would count `modules/`.
+	stacks=$(
+		find infra/terraform -name backend.tf -not -path '*/.terraform/*' \
+			| sed -e 's#^infra/terraform/##' -e 's#/backend\.tf$##' \
+			| sort -u
+	)
+	# The validate tier is a shell loop, not a matrix: `for d in a b c; do`.
+	validate=$(
+		sed -n 's/.*for d in \(.*\); do.*/\1/p' .github/workflows/infra.yml \
+			| tr ' ' '\n' | sed '/^$/d' | sort -u
+	)
+	plan=$(infra_job_stacks plan)
+	apply=$(infra_job_stacks apply)
+
+	echo "### Terraform stacks and the tiers that cover them"
+	echo
+	echo "| Stack | \`validate\` | \`plan\` | \`apply\` |"
+	echo "|---|---|---|---|"
+	printf '%s\n' "$stacks" | while read -r s; do
+		[[ -n $s ]] || continue
+		local v=— p=— a=—
+		printf '%s\n' "$validate" | grep -qxF "$s" && v=yes
+		printf '%s\n' "$plan" | grep -qxF "$s" && p=yes
+		printf '%s\n' "$apply" | grep -qxF "$s" && a=yes
+		printf '%s\n' "| \`$s\` | $v | $p | $a |"
+	done
+	echo
+
+	# The gap: a stack no tier touches at all. `plan`-only and `validate`-only
+	# are both deliberate and documented, so neither is reported as a gap —
+	# only a stack that nothing checks.
+	uncovered=$(
+		comm -23 <(printf '%s\n' "$stacks") \
+			<(printf '%s\n%s\n%s\n' "$validate" "$plan" "$apply" | sort -u) || true
+	)
+	if [[ -n ${uncovered//[[:space:]]/} ]]; then
+		echo "**Checked by no tier:**"
+		echo
+		printf '%s\n' "$uncovered" | while read -r s; do
+			[[ -n $s ]] || continue
+			printf '%s\n' "- \`$s\` — in the tree with its own state key, and no job reads it."
+		done
+	else
+		echo "Every stack in the tree is reached by at least one tier."
+	fi
+	echo
+
+	echo "### Where each \`infra/k8s\` path is applied from"
+	echo
+	echo "| Path | Referenced by |"
+	echo "|---|---|"
+	for k in infra/k8s/*; do
+		[[ -e $k ]] || continue
+		# Every site that names the path, whatever the mechanism — kubectl for
+		# plain manifests, helm for the chart directories, `kind create` for the
+		# cluster config. Reporting the referencing file rather than guessing the
+		# verb keeps this true as mechanisms change.
+		# `|| true` is load-bearing under `pipefail`: a path referenced nowhere
+		# makes grep exit 1, and that is the row this table exists to print.
+		# Without it the whole regen dies on the first unreferenced path.
+		sites=$(
+			{ grep -rlF "$k" Makefile scripts .github/workflows 2>/dev/null || true; } \
+				| { grep -vxF 'scripts/skills-check.sh' || true; } \
+				| sort -u | tr '\n' ' ' | sed -e 's/ $//' -e 's/ /`, `/g'
+		)
+		if [[ -n $sites ]]; then
+			printf '%s\n' "| \`${k#infra/k8s/}\` | \`$sites\` |"
+		else
+			printf '%s\n' "| \`${k#infra/k8s/}\` | **nothing in the tree** |"
+		fi
+	done
+	echo
+
+	echo "### NodePool manifests the cluster apply reaches"
+	echo
+	echo "\`kubectl apply -f <dir>\` is non-recursive, so only the top level is"
+	echo "applied."
+	echo
+	echo "| Manifest | Applied |"
+	echo "|---|---|"
+	{ grep -rlF 'kind: NodePool' infra/k8s/nodepools 2>/dev/null || true; } | sort | while read -r s; do
+		if [[ $(dirname "$s") == infra/k8s/nodepools ]]; then
+			printf '%s\n' "| \`${s#infra/k8s/nodepools/}\` | yes |"
+		else
+			printf '%s\n' "| \`${s#infra/k8s/nodepools/}\` | no — in a subdirectory |"
+		fi
+	done
+}
+
 gen_post_merge_surface() {
 	local wf triggers name examined=0
 	local -a after_merge=() pr_blind=()
@@ -1796,6 +1906,9 @@ run_regen() {
 
 	gen_aws_footprint >"$tmp"
 	splice "$skills_dir/aws-account-operations/references/footprint.md" aws-footprint "$tmp"
+
+	gen_infra_coverage >"$tmp"
+	splice "$skills_dir/infra-platform/references/coverage.md" infra-coverage "$tmp"
 
 	gen_post_merge_surface >"$tmp"
 	splice "$skills_dir/land-pr/references/post-merge.md" post-merge-surface "$tmp"
