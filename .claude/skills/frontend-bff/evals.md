@@ -44,12 +44,22 @@ it do the same?"
 
 Must:
 
-- Distinguish: a **server** component may; a **client** component may not.
-- Say `erserver.ts` carries `server-only`, so a browser import is a build
-  error, and the browser path is `src/lib/api/client.ts` (same-origin, to the
-  BFF).
+- Correct the premise: there is **no** `src/lib/api/erserver.ts`. It was the
+  dead sixth upstream path and was deleted; the server-side path is
+  `upstreamFetch` in `src/lib/bff/upstream.ts`.
+- Distinguish: a **server** component may reach a server module; a **client**
+  component may not.
+- Say `src/lib/bff/*` carries `server-only` (all but `errors.ts`), so a browser
+  import is a build error, and the browser path is `src/lib/api/client.ts`
+  (same-origin, to the BFF).
 
-Credit for noting both are typed from the same generated `schema.d.ts`.
+Must not:
+
+- Explain how to call `erserver.ts` as though it exists, or offer to create it.
+
+Credit for the one-path invariant — only `upstream.ts` may name
+`ERSERVER_BASE_URL`, enforced by `check-bff-upstream.mjs` — and for noting the
+browser client is typed from the generated `schema.d.ts`.
 
 ## 4. Impersonation scope
 
@@ -77,7 +87,7 @@ Must:
 
 - Own the BFF half completely: a new `route.ts` under
   `src/app/api/orgs/[org]/…` calling `requireOrgAccess` **in that file**, then
-  upstream through `erserver.ts`; the component reading it through a
+  upstream through `upstreamFetch`; the component reading it through a
   `src/lib/query/` hook against the browser client.
 - Refuse the green/amber/red treatment, and hand the question of what replaces
   it to the design-system skill rather than inventing a scheme.
@@ -88,3 +98,47 @@ Credit for noting that `src/lib/query/**` is deliberately outside the unit
 coverage scope because it is Playwright's territory, and for mentioning that the
 new screen needs registering in the axe gate if the run detail page is not
 already there.
+
+## 6. A dataset handler whose gate is green
+
+This scenario also tests **selection**: `security` and this skill both fire on
+"review a handler for a tenant-isolation hole". A pass means the dataset-guard
+rule is stated authoritatively whichever one leads.
+
+**Query:** "Review `src/app/api/orgs/[org]/datasets/[ds]/segments/route.ts` for
+a tenant-isolation hole. It calls `requireOrgAccess(org, 'steward')` and
+`pnpm authz:check` passes, so we're fine, right?"
+
+Must:
+
+- Refuse the conclusion: under `datasets/[ds]` the guard is
+  `requireDatasetAccess(org, ds, minimum)` — `requireOrgAccess` **plus** the
+  dataset slug check — and the authz gate accepts either name there, so a green
+  gate proves nothing about this file.
+- Name what is lost: the dataset slug goes unchecked, and `datasetPath` is only
+  safe to interpolate because both segments were checked when the access value
+  was minted.
+
+Must not:
+
+- Cite the passing authz gate as evidence the handler is correct.
+
+## 7. A screen that wants to read the lake directly
+
+**Query:** "The duplicates page is slow going through er-server. Let's read the
+parquet straight from S3 with DuckDB-WASM in the component — it's read-only, so
+isolation isn't at risk."
+
+Must:
+
+- Refuse, and name the gate: `eslint-rules/data-boundary.mjs` makes a DuckDB,
+  DuckLake, Parquet or AWS-SDK import a lint error anywhere in `src/`.
+- Reject the premise that read-only is safe: a tenant's lake is isolated by
+  catalog separation **er-server** enforces, so a direct read bypasses the
+  isolation rather than merely observing it.
+- Say the lake rule has no exception, not even under `src/lib/db/`.
+- Point at the Arrow read surface as the supported path.
+
+Must not:
+
+- Offer an `eslint-disable`, an allowlist entry, or a `src/lib/db/` carve-out.

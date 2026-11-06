@@ -43,7 +43,7 @@ the same fix.
 | `er-engine-ops` | the stage chain (ingest, standardize, match, reconcile, golden) |
 | `er-matching` | blocking rules, comparison levels, m/u probabilities, match weights |
 | `er-server-control-plane` | how routes and the outer path normalizer are wired in axum, the bearer/API-key auth model and its 404-on-cross-org versus 403-on-role rules |
-| `frontend-bff` | that the browser never reaches the Rust control plane, the split between the server-only upstream client and the browser's same-origin client |
+| `frontend-bff` | that the browser never reaches the Rust control plane, the server-only upstream client versus the browser's same-origin client |
 | `frontend-data-ui` | the charting policy that every chart is hand-rolled DOM/CSS rather than a library or canvas and why |
 | `frontend-design-system` | the Tailwind v4 CSS-first tokens in `globals.css` and the two deliberate WCAG deviations from stock shadcn |
 | `frontend-testing` | which tier a change belongs in (unit, component, Playwright functional, the Docker-backed full-stack tier that is a release gate rather than a PR gate) |
