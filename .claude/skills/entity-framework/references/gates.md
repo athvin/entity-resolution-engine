@@ -29,10 +29,11 @@ generated rather than maintained:
 Two things to know when a finding appears:
 
 - **Severity matters.** Error-severity findings fail the gate and block
-  generation. `Severity::Warning` findings print and do not fail — V15 (tenant
-  scope is indexed) is the current warning, and
-  `er-entity-lint/tests/tree_is_clean.rs` pins exactly which entities carry that
-  debt, so adding a new one fails the test.
+  generation. `Severity::Warning` findings print and do not fail. Which codes
+  are warnings is a column of the generated rule reference above, not a list
+  here — and the tenancy rules are among them, so a scope mistake reports
+  without blocking. `er-entity-lint/tests/tree_is_clean.rs` pins exactly which
+  entities carry that debt, so adding a new one fails the test.
 - **The pass reports everything at once**, unlike the old fail-fast validator.
   A new entity converges in one run; expect several codes from one mistake (a
   missing `id` reports both V1 and V2, since the key can no longer name it).
@@ -48,7 +49,7 @@ every rule must carry title, reasoning and both examples. Codes are append-only.
 ## The verify gate (staleness + orphans + analyser)
 
 **Command:** `cd rust && cargo run -q -p er-entity-cli -- verify --root ..`
-**Runs in:** CI's `lint` job (`.github/workflows/rust.yml`), `make check`
+**Runs in:** CI's `entities` job (`.github/workflows/rust.yml`), `make check`
 (target `entities-check`).
 
 Four checks in one:
@@ -148,7 +149,7 @@ this is the determinism proof every framework change rides on.
 In `rust/crates/er-sql-check/src/stage.rs` (`cargo test -p er-sql-check`):
 the golden-record and lineage mart assembly (person + account), the
 standardize stg/int_std SQL (person + account), and the merge-plan generator
-(every policy × protect × since = 20 vectors). A generator change that emits an
+(every policy × protect × since combination). A generator change that emits an
 un-plannable shape fails here, not at runtime. New config-driven SQL must add
 its vectors alongside these. (If planning needs a new DuckDB function stub,
 that lives in the pinned `ff-analysis` — bump requires a feather-flow tag.)
@@ -156,7 +157,7 @@ that lives in the pinned `ff-analysis` — bump requires a feather-flow tag.)
 ## Running everything locally
 
 ```bash
-make check          # fmt + clippy + er-entity verify + workspace tests
+make check          # the backend PR gate; the Makefile owns its target list
 cd rust && DEDUPE_E2E_DUCKLAKE=1 DEDUPE_E2E_EXTENSIONS=1 \
   cargo test -q -p er-cli --test lake_e2e   # the determinism tier
 ```

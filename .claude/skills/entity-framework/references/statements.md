@@ -82,8 +82,8 @@ returns: none
 ```
 
 Control (Postgres) statement — `entities/job/update/claim.yaml`: `mode:
-partial` (FOR UPDATE SKIP LOCKED), `returns: entity` with an explicit 19-column
-RETURNING list in the SQL (E011 in practice).
+partial` (FOR UPDATE SKIP LOCKED), `returns: entity` with a RETURNING list
+naming every column in the SQL (E011 in practice).
 
 Cross-entity read — `entities/assertion/create/from_review.yaml` declares
 `reads: [review]` because its INSERT..SELECT reads `lake.main.review_queue`.
@@ -104,7 +104,11 @@ Cross-entity read — `entities/assertion/create/from_review.yaml` declares
 | E012 | the SQL's verb matches its folder | move the file or change the statement |
 | E014 | an UPDATE, MERGE matched-update arm or `ON CONFLICT DO UPDATE` assigns `updated_at` | add `updated_at = $updated_at` (lake, run-logical) or `updated_at = now()` (control) to the SET list |
 | E015 | a MERGE's ON clause matches on exactly the declared `natural_key` (or `[id]` when none) | declare the natural key on the entity, or fix the ON clause to match it |
-| E007 / E008 / E013 | documented in the design doc, deliberately not implemented yet (control WHERE-presence, COPY TO, the `functions/` yaml tree) | nothing — do not claim them in reviews |
+
+The design doc documents further codes that are **deliberately not implemented**
+and never fire. Which ones is a set difference the sql-analysis skill generates
+from `analyze.rs`, so read its diagnostics reference rather than a list here —
+and never claim an unimplemented rule in a review.
 
 Partial-mode statements get no plan, so E003's type proof is replaced by the
 oracle: `er-sql-check/tests/oracle.rs` DESCRIBEs every lake read against a real

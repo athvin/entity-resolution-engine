@@ -1,6 +1,6 @@
 ---
 name: entity-framework
-description: Explains this repo's entity framework — the YAML-driven schema and SQL governance where every table is an entity.yaml, every persistent SQL statement is a declared .sql+.yaml file (or a plan-vector-tested generator), and er-entity-gen emits the Rust structs, DuckLake/Postgres DDL, Arrow schemas, TypeScript bindings and typed query functions. Use when adding or changing a table, column, or SQL statement; when adding a lake read or write; when `er-entity verify`, an E0xx diagnostic, the oracle, or a posterity gate (declared_names, freeform_sql, lake e2e, pg coverage) fails; or when asked how entities/, the generated er-entities crate, or schema changes work here. For the analyser's own internals — the rewrite step, `mode: partial`, the ff-analysis planner and its function stubs — see sql-analysis; for the engine's golden-governed model SQL see er-matching.
+description: Explains this repo's entity framework — the YAML-driven schema and SQL governance where every table is an entity.yaml, every persistent SQL statement is a declared .sql+.yaml file (or a plan-vector-tested generator), and er-entity-gen emits the Rust structs, DuckLake/Postgres DDL, Arrow schemas, TypeScript bindings and typed query functions. Use when adding or changing a table, column, or SQL statement; when adding a lake read or write; when `er-entity verify`, an E0xx diagnostic, the oracle, or a posterity gate (declared_names, freeform_sql, lake e2e, pg coverage) fails; or when asked how entities/, the generated er-entities crate, or schema changes work here. For the analyser's internals — the rewrite step, `mode: partial`, the ff-analysis planner and its stubs — see sql-analysis; for the engine's golden-governed model SQL see er-matching; for the OpenAPI document and generated frontend types see api-contract; for the boot reconciler and dispatcher see er-server-control-plane.
 ---
 
 # The entity framework
@@ -65,8 +65,8 @@ The order is always definition → regenerate → use. Copy this checklist:
 `verify` = the entity lint pass (V-rules) + the byte-exact staleness check +
 orphan scan + the analyser's E0xx passes, in that order. The lint pass
 **short-circuits on an error-severity finding**, because every later pass
-assumes a conforming catalog. It is CI's gate (the `lint` job) and part of
-`make check`. A change that skips step 2 fails CI with "N generated file(s) are
+assumes a conforming catalog. It is CI's gate — the `entities` job's *entity
+framework verify* step, not the `lint` job — and part of `make check`. A change that skips step 2 fails CI with "N generated file(s) are
 stale or missing".
 
 `er-entity check` and `er-entity verify` are the **same code path** — both
@@ -83,15 +83,17 @@ store's own `schema_migrations` ledger keyed by the catalog hash (a `verified`
 row marks a new catalog version that found the store current). Where it runs:
 `ensure_schema` at boot and the web-api init container (`public.*`); the start
 of every lake job, provisioning, and the deploy's `er-server migrate-tenants`
-sweep (every tenant's `lake.main.*`, with the outcome cached in
-`public.tenant_schema_states`). Stage-materialised lake relations are skipped —
+sweep — one `lake_migrate` job per active **dataset**, falling back to one
+org-level job for an org with no datasets yet, with the outcome cached in
+`public.tenant_schema_states`. A "tenant" in these names is an (org, dataset)
+lake position, not an org; see Tenancy below. Stage-materialised lake relations are skipped —
 each run rebuilds them whole. A column the store carries that the catalog does
 not declare is **ahead**: reported, never dropped, never refused (E011 makes
 an old binary safe against it). From the command line, `er-entity diff` and
 `er-entity migrate [--apply]` take `--store postgres --dsn <dsn>` or `--store
 duckdb --lake-catalog <metadata> --lake-data-path <path>`; `--apply` is the
 same reconciler, ledger included. A breaking lake difference means a rebuild
-of that tenant; a breaking control difference means a hand-written migration,
+of that dataset's lake; a breaking control difference means a hand-written migration,
 verified by the next boot. Bump an entity's `version` only on a breaking
 change (type change, rename, drop); an added nullable column is not one.
 
@@ -112,8 +114,9 @@ the reconciler at the next job start, provisioning or deploy sweep; never
 hand-write DDL. A lake relation that is engine-internal (not an entity) goes in
 the `er-schema` registry instead — those are the only two doors ("there is no
 third place", CONTRIBUTING.md). A lake *entity* must also appear in that
-registry (`er_schema::model::ddl_specs`, with the golden JSON updated), because
-the declared-names gates read the registry.
+registry (the spec list in `er-schema`'s `model.rs`, read at runtime through
+`all_specs()`, with the golden JSON updated), because the declared-names gates
+read the registry.
 
 **Add a lake read** — a `.sql` + `.yaml` under `entities/<entity>/read/`.
 Two shapes:
@@ -153,8 +156,8 @@ its golden fixtures — do not add analyser coverage there.
 ## Tenancy: a row belongs to a dataset, not to an org
 
 A **dataset** is an independent resolution domain inside an org — its own
-lake, config, models, entity ids and golden records. A new table whose rows
-belong to one corpus therefore declares BOTH:
+lake, config, models, entity ids and golden records. A new **control-plane**
+table whose rows belong to one corpus therefore declares BOTH:
 
 ```yaml
 natural_key: [dataset_id, …]        # the dataset is part of identity
@@ -169,8 +172,16 @@ columns:
     references: { relation: datasets, column: id }
 ```
 
-**V17** checks that shape. Reads filter on `dataset_id`; `org_id` is there for
+**V17** reports that shape — at *warning* severity, so it prints and does
+**not** fail the gate: a malformed dataset-scoped table ships unless someone
+reads the lint output. Reads filter on `dataset_id`; `org_id` is there for
 scope-safety and for the genuinely org-level surfaces.
+
+On the lake there is no scope column at all — isolation is catalog separation,
+so a lake read carries no `org_id` or `dataset_id` predicate. V17 skips every
+non-Postgres entity, and V11 (error severity) refuses a `references:` or an
+index on a DuckLake entity, so copying the shape above onto a lake table fails
+generation outright.
 
 Three things stay org-scoped, and the reasons are worth knowing before you
 copy the pattern: `jobs` and `task_instances` keep a NULLABLE `dataset_id`
@@ -210,21 +221,20 @@ hash does not need a build at that commit, since `Catalog::load_dir` over a
   DB-minted ledgers), `created_at`/`updated_at` always, FKs named
   `<singular(relation)>_id` referencing `id`.
 - **E002 (lake)**: `list<varchar>` params cannot bind (duckdb-rs has no LIST
-  binding). The IN-list idiom: pass one varchar of `chr(31)`-joined values and
-  `WHERE col IN (SELECT unnest(string_split($keys, chr(31))))` (`mode: partial`).
+  binding) — pass one `chr(31)`-joined varchar instead.
 - **E009**: reading another entity's relation requires naming it under `reads:`.
-- **Aggregates**: wrap lake aggregates other than `count(*)` in explicit
-  `CAST(.. AS BIGINT)` — DuckDB types `sum(BIGINT)` as HUGEINT and the oracle
-  will fail the statement. Aggregate results are plan-nullable: declare them
-  nullable and `unwrap_or(0)` at the call site.
-- **Optional filters**: `($p IS NULL OR col > $p)` with a `nullable: true`
-  param; `LIMIT $limit` binds fine.
+- **Aggregates**: anything but `count(*)` needs an explicit
+  `CAST(.. AS BIGINT)` (DuckDB types `sum(BIGINT)` as HUGEINT and the oracle
+  fails it), and its result column must be declared nullable.
+- **Optional filters**: need a param declared `nullable: true` — statement
+  params default non-null, the opposite of columns.
 
-The full rule table with remedies: [references/statements.md](references/statements.md).
-Note that **`E007`, `E008` and `E013` are documented but never implemented** —
-do not rely on them firing. The analyser's own internals, the rewrite step and
-the generated list of which codes are really live belong to the sql-analysis
-skill.
+The full rule table with remedies, and the exact spelling of every idiom above:
+[references/statements.md](references/statements.md), which is the canonical
+copy of both. Some codes the design doc documents are **not implemented** and
+never fire; which ones is derived rather than maintained, so read the generated
+diagnostics reference in the sql-analysis skill rather than trust a list here.
+That skill also owns the analyser's internals and the rewrite step.
 
 Those are the **statement** rules (`E0xx`, in `er-sql-check`). The **entity**
 rules (`V0xx`, in `er-entity-lint`) are a separate family and documented
