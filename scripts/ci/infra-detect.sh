@@ -62,8 +62,21 @@ fi
 # `scripts/ci/charts-check.py` is in the pattern for the reason
 # `scripts/ci/tf-*` is in the one above: a fix to the gate that did
 # not run the gate would ship untested.
+#
+# `helm-lint.sh`, `install-chart-tools.sh` and `install-helm.sh` are
+# named for exactly that reason, and they are here because extracting
+# them from infra.yml would otherwise have REMOVED them from this
+# pattern's sight: they were inline in `.github/workflows/infra.yml`,
+# which the last alternative matches, so the tier re-ran on any edit
+# to them. As files they match nothing above. That is the
+# `paths:`-filter trap in CLAUDE.md — a change to a gate no longer
+# triggering the gate it defines — arriving through a refactor rather
+# than through a filter.
+#
+# `install-helm.sh` owns the helm pin for three workflows, so a bump
+# to it must render the charts with the helm that will deploy them.
 c="$(printf '%s\n' "$changed" \
-      | grep -cE '^(infra/k8s/charts/|scripts/ci/charts-check\.py$|scripts/ci/charts-render-validate\.sh$|\.github/workflows/infra\.yml$)' || true)"
+      | grep -cE '^(infra/k8s/charts/|scripts/ci/charts-check\.py$|scripts/ci/charts-render-validate\.sh$|scripts/ci/helm-lint\.sh$|scripts/ci/install-chart-tools\.sh$|scripts/ci/install-helm\.sh$|\.github/workflows/infra\.yml$)' || true)"
 if [ "${c:-0}" -gt 0 ]; then
   echo "charts=true" >> "$GITHUB_OUTPUT"
 else
