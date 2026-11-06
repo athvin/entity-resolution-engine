@@ -187,7 +187,7 @@ The frontend never defines a shape. For every entity with `typescript` in its `g
 
 ```mermaid
 flowchart LR
-  L1["1. entities/*.yaml<br/>columns, types, nullability, key, version, generate block<br/><i>check: spec validation at gen</i>"]
+  L1["1. entities/*/entity.yaml<br/>columns, types, nullability, key, version, generate block<br/><i>check: spec validation at gen</i>"]
   L2["2. one generator run<br/>Rust struct + arrow_schema(), TS binding + TS reader, openapi.json<br/><i>check: verify, stale output fails CI</i>"]
   L3["3. er-server writes<br/>query_arrow gives batches; batch.schema() must equal arrow_schema() or 500<br/><i>check: oracle in CI + runtime assert</i>"]
   L4["4. Arrow IPC stream<br/>schema message first, then batches; BFF pipes the bytes after checking the status<br/><i>check: schema travels with the data</i>"]
@@ -669,7 +669,7 @@ Four crates in this repo's workspace, one generated crate, one dependency on fea
 **The binary.** `er-entity`, in `er-cli` beside `er`:
 
 ```
-er-entity gen          # entities/*.yaml -> er-entities, DDL, bindings, readers
+er-entity gen          # entities/*/entity.yaml -> er-entities, DDL, bindings, readers
 er-entity check        # plan every statement, run passes, emit query modules; non-zero on error
 er-entity diff         # desired vs actual for one store; non-zero when the plan is not empty
 er-entity migrate      # plan | apply, per store

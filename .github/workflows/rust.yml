@@ -593,7 +593,7 @@ jobs:
   # duckdb / arrow 58 / aws — is contradicted by that 0m42.
   #
   # REQUIRED status check. It is the entity-framework gate: regenerate every
-  # artifact from entities/*.yaml and fail if any committed file (Rust struct,
+  # artifact from entities/*/entity.yaml and fail if any committed file (Rust struct,
   # DuckLake/Postgres DDL, query fns) is stale, then plan every statement and run
   # the E0xx passes.
   entities:

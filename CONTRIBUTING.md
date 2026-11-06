@@ -11,7 +11,7 @@ make check
 `make check` is the PR-equivalent backend gate, mirroring CI
 (`.github/workflows/rust.yml`): `cargo fmt --check`, clippy with `-D warnings`,
 the entity-framework gate (`er-entity verify` — regenerate every artifact from
-`entities/*.yaml`, fail on stale committed files, then plan every statement and
+`entities/*/entity.yaml`, fail on stale committed files, then plan every statement and
 run the E0xx passes), and `cargo test --workspace`. It needs no lake.
 
 ## Gated end-to-end tiers
@@ -41,7 +41,7 @@ validation performed. Tests should exercise observable behavior, including
 relevant merge, split, deletion or incremental cases when changing resolution
 logic.
 
-Table shapes are declared once: entity-owned relations in `entities/*.yaml`
+Table shapes are declared once: entity-owned relations in `entities/*/entity.yaml`
 (run `cd rust && cargo run -p er-entity-cli -- gen --root ..` after editing and
 commit the regenerated artifacts), the remaining engine-internal lake relations
 in `er-schema`'s registry (`rust/crates/er-schema/src/model.rs`, gated by

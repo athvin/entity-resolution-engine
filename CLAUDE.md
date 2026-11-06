@@ -11,7 +11,7 @@ make check   # = fmt + lint + doc + entities-check + skills-check + test
 
 `cargo fmt` / `cargo clippy` / `cargo test` on their own are **not** sufficient —
 they skip `entities-check`, which is the entity-framework gate (`er-entity
-verify`: regenerate every artifact from `entities/*.yaml` and fail if a
+verify`: regenerate every artifact from `entities/*/entity.yaml` and fail if a
 committed file is stale, then plan every statement and run the E0xx passes).
 A change that passes clippy and tests can still break that gate.
 
@@ -81,16 +81,33 @@ that runs out of it.**
 **1. Delete the worktrees that are no longer needed.**
 
 ```sh
-git worktree list                 # enumerate before deciding anything
-git worktree remove <path>        # then, for each one established as finished
-git worktree prune                # drop admin entries for directories already gone
+scripts/worktree-audit.sh         # verdict per worktree, with the reason
+scripts/worktree-audit.sh --size  # same, plus du (slow)
 ```
 
-Two guards decide "no longer needed", and neither is the obvious one:
+It is **read-only**: it prints `KEEP` with the reasons, or `REMOVABLE` with the
+`git worktree remove` line to run, and never removes anything itself. Run those
+lines, then `git worktree prune` to drop admin entries for directories already
+gone.
 
-- **A live session may be attached, and `locked` is not how to tell.** Check
-  `lsof -a -p <claude pid> -d cwd` for each `claude` process. Removing a
-  worktree out from under a running session breaks it.
+Four guards decide "no longer needed", and the one people reach for first is the
+weakest:
+
+- **`locked` is not how to tell, and neither is `lsof`.** Checking
+  `lsof -a -p <claude pid> -d cwd` per `claude` process is proof of attachment
+  when it hits, and proves nothing when it misses: the dominant pattern here is
+  a session whose cwd is the **primary checkout** driving its worktree with
+  `git -C <path>`, which holds no descriptor there. Measured with 19 worktrees
+  open — 15 had a commit land in the previous 22 minutes, while only 7 were any
+  process's cwd. One of them committed 12 seconds before being evaluated as
+  unattached.
+- **Local git activity is the signal that catches those.** The per-worktree git
+  directory's `index` and `logs/HEAD` are rewritten by any operation a session
+  performs in that tree, so their mtime is liveness. Do not substitute the age
+  of the commit `HEAD` points at: a worktree cut from a week-old commit is brand
+  new, and one cut from a commit that landed a minute ago may be abandoned. And
+  read the mtime with `git --no-optional-locks status` — a plain `git status`
+  refreshes the index and so overwrites the timestamp you came to read.
 - **Tie the worktree to its pull request and read that.** A closed PR — merged
   or abandoned — means the worktree is finished. Ask by the worktree's HEAD
   commit rather than by branch, because harness-cut worktrees are detached and
@@ -103,13 +120,16 @@ Two guards decide "no longer needed", and neither is the obvious one:
   ```
 
   Do **not** substitute `git branch --merged`: squash merges leave the branch
-  unreachable from `main`, and it once reported 2 of 69 branches as merged. If
-  no PR resolves at all, the commit was never pushed — that is unlanded work, so
-  the worktree stays.
+  unreachable from `main`, and it once reported 2 of 69 branches as merged. A
+  `422` from that endpoint means the commit is not on the remote at all — that
+  is unlanded work, so the worktree stays.
+- **A dirty tree stays.** `git worktree remove` refusing is **information, not
+  an obstacle** — uncommitted work there has not landed anywhere. Do not reach
+  for `--force` to get past it; find out what the change was first.
 
-`git worktree remove` refusing because the tree is dirty is **information, not
-an obstacle** — uncommitted work there has not landed anywhere. Do not reach for
-`--force` to get past it; find out what the change was first.
+**"Nothing is removable" is a normal answer** while the fleet is busy, and it is
+what the audit reported with 19 worktrees open. Re-run when things are quiet
+rather than forcing.
 
 **2. Refresh `main`.**
 
@@ -133,12 +153,21 @@ This is cheaper than it looks. `rust` and `frontend` compute a content-addressed
 pass key, so rebasing over a `main` that moved only through paths the gate
 ignores re-uses the existing green instead of paying for a new one.
 
-What makes step 1 non-negotiable rather than tidy: **each worktree carries its
-own `rust/target`, at tens of gigabytes** — the primary checkout's alone runs
-past 100GB. A full disk surfaces as `linking with cc failed`, exactly the
-misleading CI symptom. A fresh worktree also starts cold, so its first
-`make check` is a full build; that is the cost being paid for isolation, and it
-is another reason not to hold worktrees open past the PR that justified them.
+What makes step 1 matter is disk, but **the cost is paid at the first build, not
+at creation** — and that changes where to look. A worktree carries its own
+`rust/target` only once something in it has compiled: a skills or docs session
+that never runs `make check` stays around a gigabyte. Measured across 19 open
+worktrees: **83GB in total, concentrated in one 24GB outlier that had built,**
+while most carried no `rust/target` at all. The primary checkout's own
+`rust/target` was **132GB** — larger than every worktree combined.
+
+So the worktree count is a poor proxy for the problem. `--size` on the audit
+names the expensive ones, and if the disk is genuinely tight the primary
+checkout's `target` is the first place to look, not the worktree list. A full
+disk surfaces as `linking with cc failed`, exactly the misleading CI symptom. A
+fresh worktree also starts cold, so its first `make check` is a full build —
+which is both the cost of isolation and the moment a worktree starts being
+expensive to keep.
 
 Still check `git branch --show-current` and `git rev-parse HEAD` in the same tool
 call as any commit, and stage by explicit path. A worktree makes the shared-clone
