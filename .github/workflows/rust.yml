@@ -456,6 +456,13 @@ jobs:
         # if it asserted nothing.
         working-directory: ${{ github.workspace }}
         run: bash scripts/ci/detect-paths-test.sh
+      - name: tracked shell scripts live under scripts/
+        # Ungated for the same reason as the steps above: this guards repo
+        # layout, not compiled code, so it must run on every PR — a stray
+        # script is most likely to arrive on exactly the PR a path filter
+        # would skip.
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/ci/scripts-home-check.sh
 
   lint:
     name: fmt + clippy + docs

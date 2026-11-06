@@ -192,6 +192,11 @@ The weekly/manual smoke workflow currently has no measured baseline and reports
 `NO_BASELINE`. `10k`, `100k` and `1m` remain defined workloads; their dispatch
 options stay disabled until reviewed measurements exist.
 
+> **These commands no longer run.** `scripts/ci/bench.sh`, the `uv` report
+> tooling and the `benchmarks/` tree were removed with the Python pipeline,
+> per the note at the top of this document. The invocation is kept as the
+> record of how a baseline was produced and promoted.
+
 ```sh
 COMPOSE_PROJECT_NAME=er-benchmark bash scripts/ci/bench.sh
 uv run python benchmarks/report.py \

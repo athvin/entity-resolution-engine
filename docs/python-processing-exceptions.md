@@ -1,5 +1,11 @@
 # Python processing exceptions
 
+> **Historical record.** This audits the retired Python/Splink pipeline, whose
+> sources (the module paths and utilities named below, such as
+> `golden/assemble.py` and `scripts/regen_fixture_model.py`) no longer exist
+> in the tree. It is preserved for the SQL-pushdown findings; the live engine
+> is the Rust workspace under `rust/`.
+
 *Engine-internals audit (single-tenant engine). Below the product/tenancy layers;
 see the [README](../README.md#architecture-at-a-glance).*
 

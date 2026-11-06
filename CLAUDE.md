@@ -6,7 +6,7 @@ Before calling backend work done, run **`make check`** from the repo root. It is
 the PR-equivalent gate and mirrors `.github/workflows/rust.yml`:
 
 ```
-make check   # = fmt + lint + doc + entities-check + skills-check + test
+make check   # = fmt + lint + doc + entities-check + skills-check + scripts-home-check + test
 ```
 
 `cargo fmt` / `cargo clippy` / `cargo test` on their own are **not** sufficient —
@@ -269,6 +269,13 @@ documentation topics, so those idioms remain one search away. Reading
 CloudFormation is fine — an EKS addon may surface as a stack AWS manages for
 you. Adding to it is not. The `aws-account-operations` skill carries the
 operating rules; the `infra-platform` skill carries the authoring ones.
+
+**Shell scripts live under `scripts/`.** Every tracked `*.sh` or
+shell-shebang file sits under `scripts/` (`scripts/ci/` for CI helpers,
+`scripts/frontend-dev/` for the dev stack, `scripts/hooks/` for Claude Code
+hooks), so shell is reused rather than rewritten. Enforced by
+`scripts/ci/scripts-home-check.sh`, which runs in `make check` and in
+rust.yml's `workflow pins (S9)` job.
 
 **Use `cargo add`** to add dependencies or features rather than editing
 `Cargo.toml` by hand.

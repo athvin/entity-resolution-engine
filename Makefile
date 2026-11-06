@@ -59,10 +59,15 @@ entities-check:
 skills-check:
 	bash scripts/ci/skills-check-test.sh && bash scripts/skills-check.sh all
 
+# Tracked shell scripts live under scripts/ (CLAUDE.md conventions). CI runs
+# the same script in rust.yml's `workflow pins (S9)` job, ungated.
+scripts-home-check:
+	bash scripts/ci/scripts-home-check.sh
+
 # The fast PR-equivalent backend gate (mirrors rust.yml's lint + test tiers),
 # plus the skill gate — a stale generated reference is the same class of defect
 # as a stale generated entity artifact.
-check: fmt lint doc entities-check skills-check test
+check: fmt lint doc entities-check skills-check scripts-home-check test
 
 # The gated e2e tiers: the DuckLake + extension pipeline and the Postgres
 # control-plane queue/dispatch. Needs the DuckDB extensions and a local

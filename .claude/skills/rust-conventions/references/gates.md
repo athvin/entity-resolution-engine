@@ -19,7 +19,7 @@ grown twice — `doc` and `skills-check` were both added after this reference wa
 written, and nothing failed while the prose said otherwise.
 
 <!-- BEGIN GENERATED: rust-gates -->
-**`make check` = fmt + lint + doc + entities-check + skills-check + test** — the `check:` target's prerequisites, in order.
+**`make check` = fmt + lint + doc + entities-check + skills-check + scripts-home-check + test** — the `check:` target's prerequisites, in order.
 
 | Step | Command |
 |---|---|
@@ -28,6 +28,7 @@ written, and nothing failed while the prose said otherwise.
 | `doc` | `cd rust && RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items` |
 | `entities-check` | `cd rust && cargo run -q -p er-entity-cli -- verify --root ..` |
 | `skills-check` | `bash scripts/ci/skills-check-test.sh && bash scripts/skills-check.sh all` |
+| `scripts-home-check` | `bash scripts/ci/scripts-home-check.sh` |
 | `test` | `cd rust && cargo test --workspace` |
 
 **52 test files read `ER_TEST_PG_DSN`** and self-skip without it.
