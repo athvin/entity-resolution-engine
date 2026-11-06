@@ -16,15 +16,27 @@
 | Helper | Lives in | Returns |
 |---|---|---|
 | `requireOrgAccess(org, minimum)` | `src/lib/bff/proxy.ts` | `EffectiveOrgAccess` — identity, org, effective role, and `viaOperator` |
+| `requireDatasetAccess(org, ds, minimum)` | `src/lib/bff/proxy.ts` | `EffectiveDatasetAccess` — the above plus a slug-checked `dataset` |
 | `requireSuperAdmin()` | `src/lib/bff/admin.ts` | the `Identity` |
+
+`requireDatasetAccess` is `requireOrgAccess` followed by `requireDatasetSlug`,
+and it is what makes `datasetPath(access, suffix)` safe to interpolate: both
+segments were checked when the access value was minted, so the path cannot
+traverse. Use it for every handler under `datasets/[ds]` — the authz gate accepts
+the org-level helper there too, so this is the one guard choice no gate makes
+for you.
 
 `viaOperator` records that the caller is acting through the operator token — a
 super admin with no membership in that org. Keep it in mind when writing audit
 entries: "who did this" and "under what authority" are different questions.
 
-Role comparison goes through `ROLE_RANK`, matching the backend's
-`viewer < steward < admin < operator` lattice. Do not compare role strings
-directly.
+Role comparison goes through `ROLE_RANK`; do not compare role strings directly.
+**It ranks only the three membership roles** — `viewer < steward < admin` — and
+`OrgRole` has no fourth member, so `operator` is not a minimum you can ask for.
+The backend's enum does carry `Operator`, and that asymmetry is the point:
+operator authority never arrives as a rank at the BFF, it arrives out of band
+through `requireSuperAdmin()` and is recorded on the access value as
+`viaOperator`.
 
 ## Impersonation replaces powers, it does not add them
 
@@ -75,21 +87,28 @@ and return that rather than letting a 500 escape.
 ## The `server-only` set
 
 Modules importing `server-only` cannot be pulled into a client bundle; the
-import is a build error. The set includes:
+import is a build error.
 
-- `src/lib/env.ts` — the environment reader
-- `src/lib/api/erserver.ts` — the upstream client with the bearer
-- all of `src/lib/bff/*` except `errors.ts`, the error envelope the browser
-  client shares
-- `src/lib/auth/{session,password}.ts` — `redirect.ts` is deliberately
-  shared, because the login page is a client component
-- `src/lib/db/*` except `schema.ts`, which `drizzle-kit generate` loads in
-  plain Node, where `server-only` throws
-- `src/lib/assistant/tools.ts`
+**If a module holds a credential, reads env, or touches the database, add
+`import "server-only"` as the first line.** It is cheap and it converts a whole
+class of leak into a compile error. That covers `src/lib/env.ts`, `upstream.ts`
+and the rest of `src/lib/bff/`, `src/lib/db/`, `src/lib/auth/session.ts` and
+`password.ts`, and every AI, adjudication and usage helper that reads a stored
+key. The set grows with the app, so no enumeration of it here would stay true —
+learn the rule instead.
 
-**If you write a module that holds a credential, reads env, or touches the
-database, add `import "server-only"` as the first line.** It is cheap and it
-converts a whole class of leak into a compile error.
+What does not grow is the list of **deliberate exceptions**, and each is a
+decision someone could undo by accident:
+
+| Shared on purpose | Why |
+|---|---|
+| `src/lib/bff/errors.ts` | the error envelope the browser client shares |
+| `src/lib/auth/redirect.ts` | the login page is a client component |
+| `src/lib/db/schema.ts` | `drizzle-kit generate` loads it in plain Node, where `server-only` throws |
+
+Those three carry a stated reason. Treat a server module **without** the import
+and **without** such a reason as missing it rather than as a fourth exception —
+the import is additive and costs nothing, so the asymmetry is the tell.
 
 Vitest aliases `server-only` to a stub (`tests/server-only-stub.ts`) so unit
 tests can import these modules outside a React Server context. That alias is
@@ -134,15 +153,25 @@ lost.
 
 ```
 - [ ] 1. File under src/app/api/orgs/[org]/… or src/app/api/admin/…
-- [ ] 2. First statement: requireOrgAccess(org, minimum) or requireSuperAdmin()
-- [ ] 3. Call upstream via src/lib/api/erserver.ts (typed from schema.d.ts)
-- [ ] 4. Map failures to a BffFailure with a useful status and code
-- [ ] 5. No NEXT_PUBLIC_* anywhere; add `import "server-only"` to new server modules
-- [ ] 6. pnpm authz:check (or pnpm check) — it exits 2 if it examined no routes
-- [ ] 7. Add a unit test for the handler's authz branches
+         (a NEW top-level api/ directory also needs a RULES or
+          UNAUTHENTICATED_DIRS entry, or the authz gate fails on it)
+- [ ] 2. Wrap the body in respond(async () => …) so failures become the envelope
+- [ ] 3. Inside that file, before forwarding: requireOrgAccess(org, minimum) —
+         or requireDatasetAccess(org, ds, minimum) under datasets/[ds] —
+         or requireSuperAdmin()
+- [ ] 4. Go upstream via upstreamFetch from src/lib/bff/upstream.ts
+- [ ] 5. Map failures to a BffFailure with a useful status and code
+- [ ] 6. No NEXT_PUBLIC_* anywhere; add `import "server-only"` to new server modules
+- [ ] 7. pnpm check — authz:check exits 2 if it examined no routes, and
+         check-bff-upstream.mjs rejects a second path to ERSERVER_BASE_URL
+- [ ] 8. Add a unit test for the handler's authz branches
 ```
 
-Step 2 says *in that file*. The authz gate is textual and per-file precisely
+Step 3 says *in that file*. The authz gate is textual and per-file precisely
 because a helper that authorizes "somewhere upstream" is unverifiable by
 inspection — and the consequence of a miss is an unauthenticated path to a
 privileged upstream credential.
+
+It also says *which* guard. Under `datasets/[ds]` the gate counts either name, so
+picking the org-level helper there is the one authorization mistake in this
+checklist that goes green.
