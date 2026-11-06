@@ -1,15 +1,19 @@
 ---
 name: ci-and-supply-chain
-description: Explains this repo's CI topology and dependency gates — the `detect`-job pattern that lets a required check skip without blocking a PR, why no required workflow may ever carry a `paths:` filter, the disk-reclaim step the Rust test job needs, the SHA-pinning policy for actions, and the supply-chain gates (cargo-deny advisories/licences/bans, pnpm audit with its reasoned allowlist, and the licence list mirrored between Rust and npm). Use when a CI job fails for reasons unrelated to the diff, when adding or re-wiring a workflow or job, when a dependency bump cannot go green, when an advisory or licence gate fires, or when deciding whether a check should be required. For local gates see rust-conventions; for the frontend test tiers see frontend-testing; for driving a pull request to green and then watching main see land-pr; for the board that tracks the work see project-board; for `infra.yml`'s Terraform tiers, its plan and apply roles and the destroy guard see infra-platform.
+description: Explains this repo's CI topology and dependency gates — the `detect`-job pattern that lets a required check skip without blocking a PR, why no required workflow may ever carry a `paths:` filter, the disk-reclaim step the Rust compile jobs need, the SHA-pinning policy for actions, the merge bus that proves a batch green together, and the supply-chain gates (cargo-deny advisories/licences/bans, pnpm audit with its reasoned allowlist, and the licence list mirrored between Rust and npm). Use when a CI job fails for reasons unrelated to the diff, when `main` goes red after PRs merged green, when adding or re-wiring a workflow or job, when a dependency bump cannot go green, when an advisory or licence gate fires, or when deciding whether a check should be required. For local gates see rust-conventions; for frontend test tiers see frontend-testing; for driving a PR to green and then main see land-pr; for the board card see project-board; for `infra.yml`'s Terraform tiers and destroy guard see infra-platform.
 ---
 
 # CI and the supply chain
 
-Five workflows: `rust`, `frontend`, `infra`, `images`, `drift`. Jobs across the
-first three are required status checks, so a change is not mergeable until they
-pass. `drift` runs only on a schedule and `workflow_dispatch`, so it can never
-be required — a red run there is information about the account disagreeing with
-its state file, not about a diff.
+`rust`, `frontend` and `infra` are the workflows whose jobs are required status
+checks, so a change is not mergeable until they pass. Every other workflow —
+the image build, the deploy, the kind probe, the merge bus, the agentic set —
+reports nothing branch protection waits on; all of them, with their contexts,
+timeouts and conditions, are generated into
+[references/required-checks.md](references/required-checks.md), which is where
+to count them rather than here. `drift` runs only on a schedule and
+`workflow_dispatch`, so it can never be required — a red run there is
+information about the account disagreeing with its state file, not about a diff.
 
 Branch protection is repository configuration rather than a file in the tree, so
 `gh api repos/:owner/:repo/branches/main/protection` is the only authority on
@@ -84,8 +88,8 @@ it skips the gate rather than failing it.
 The same false skip is reachable by a second route, and this one is not a bug in
 any `detect` job: **if a `detect` job fails, every job gated on it reports
 `skipped`, and branch protection accepts `skipped` as satisfied.** A PR can
-therefore show all twelve required contexts satisfied with not one of them
-having run.
+therefore show every required context satisfied with not one of them having
+run.
 
 Measured on #473 (2026-11-05): two Rust files changed, all three `detect` jobs
 failed in the Actions-minutes outage (cause 0 below), every required context
@@ -98,11 +102,11 @@ e2e` carry `if: !cancelled() && needs.detect.outputs.code == 'true'`, and with
 `detect` failed that output is empty, so the gate's own fail-closed `case`
 never executes. The aggregator pattern assumes `detect` succeeds.
 
-Requiring the `detect` contexts in branch protection is **not** the fix — there
-are three of them under two names, and a required context that legitimately does
-not report blocks every PR forever. What is cheap is checking it at the point of
-use: before trusting a PR's green, confirm no check-run whose name starts with
-`detect` concluded `failure`:
+Requiring the `detect` contexts in branch protection is **not** the fix — the
+`detect` jobs share two names across four workflows, and a required context that
+legitimately does not report blocks every PR forever. What is cheap is checking
+it at the point of use: before trusting a PR's green, confirm no check-run whose
+name starts with `detect` concluded `failure`:
 
 ```
 gh api repos/:owner/:repo/commits/<head_sha>/check-runs --paginate \
@@ -113,10 +117,25 @@ The merge bus does exactly this and refuses such a candidate. Anyone merging by
 hand after an outage should too.
 
 `rust.yml`'s detect skips the compile jobs for PRs that touch nothing outside
-`.claude/**`, `infra/terraform/**`, `scripts/ci/tf-*` and the two terraform
-workflows (`infra.yml`, `drift.yml`). That set and no more — `docs/` changes
-still run the gate, because `entities` verifies `docs/erd.md` and `lint`
-verifies the generated skill references.
+its exempt set. **That set lives in `scripts/ci/detect-paths.sh` as
+`DETECT_EXEMPT`, not in the workflow** — the `filter` step and the
+content-addressed `key` step both source it, which is what stops the two
+regexes from drifting apart. Read it there rather than from a copy: besides
+`infra/terraform/**`, `scripts/ci/tf-*`, `.claude/**` and the two terraform
+workflows (`infra.yml`, `drift.yml`), it exempts the whole agentic set —
+`.github/aw/`, `.github/workflows/shared/`, `agentics-maintenance.yml`, and
+every `*.md` and `*.lock.yml` under `.github/workflows/`.
+
+**`docs/` and `CLAUDE.md` are exempt as prefixes too, so a documentation change
+does _not_ run the gate.** Four files beneath them are gate inputs and are
+re-admitted **by name**: `docs/erd.md` through `DETECT_ERD`, and
+`docs/entity-framework-design.md`, `docs/agent-skills.md` and `CLAUDE.md`
+through `DETECT_DRIFT`. Those set `erd`/`drift`, never `code`, so they wake
+`entities` and `lint` alone rather than the compile tier. Re-admitting by name
+instead of punching holes in the exempt pattern is deliberate, because the four
+do not all belong to the same job. The consequence to plan around: **a new
+generated artifact placed under `docs/` is unchecked until it is named in one of
+those two patterns.**
 
 Each entry is there because nothing in the Rust gate reads it: no crate or
 manifest references `infra/`, and `make check` touches it nowhere. The one real
@@ -148,15 +167,26 @@ risk runs the other way: a tree that *should* gate them has to be added by
 hand. A terraform PR skips the frontend gate for free and never reaches
 `images.yml`, which runs on `push` only.
 
-## Merge queue and content-addressed skips
+## `merge_group` wiring, and content-addressed skips
 
-`rust`, `frontend` and `infra` all trigger on `merge_group`, so `main` is
-protected by the merge queue instead of "require branches to be up to date": a
-PR is green against the base it was opened on, and the queue re-tests the exact
-tree that will land. **Adding a required job to a workflow without
-`merge_group:` stalls every queued PR**, the same failure as a `paths:` filter.
-In the queue, each `detect` diffs `merge_group.base_sha...head_sha` with its
-usual filter; `rust.yml`'s `bench-compile`/`scale-tests` exclude the event, and
+`rust`, `frontend` and `infra` all trigger on `merge_group`. **Nothing consumes
+that today**, and the trigger is not evidence that anything does: GitHub's merge
+queue is not enabled here and cannot be (see the merge bus below, which is the
+substitute), and `main`'s protection is `strict: false`, so neither the queue
+nor "require branches to be up to date" is what protects it. **No run examines a
+combination of PRs except the merge bus.** Probe rather than trust prose, the
+same way branch protection is probed above:
+
+```
+gh api graphql -f query='{repository(owner:"athvin",
+  name:"entity-resolution-engine"){mergeQueue(branch:"main"){id}}}'
+```
+
+`null` is no queue. The wiring stays because it is nearly free and because the
+day a queue did exist, a workflow missing `merge_group:` would stall every
+queued PR — the same failure as a `paths:` filter. The event handling is already
+written: each `detect` diffs `merge_group.base_sha...head_sha` with its usual
+filter, `rust.yml`'s `bench-compile`/`scale-tests` exclude the event, and
 `infra.yml`'s `plan` skips there (accepted by `plan-gate`).
 
 On a PR, `rust` and `frontend` `detect` also compute a **pass key**: a hash of
@@ -315,11 +345,17 @@ simulator: [references/merge-bus.md](references/merge-bus.md). Run
 `bash scripts/ci/merge-bus-test.sh` when you touch it.
 ## Agentic workflows
 
-Four `gh-aw` workflows and the `agent-task.yml` dispatcher are **merged and
-disabled**: `engine: copilot` needs a real `COPILOT_GITHUB_TOKEN`, the repo has
-no secrets, and all four therefore died at `activation` on every trigger. They
-fail *closed* — the agent, detection and `safe_outputs` steps skip and nothing
-is posted — so a disabled run is not a silent one.
+The `gh-aw` workflows and the `agent-task.yml` dispatcher are **merged and
+inert**, and the *reason* has already changed once, so read the engine from each
+workflow's own `.md` rather than from here. They first ran `engine: copilot` and
+died at `activation` on a missing `COPILOT_GITHUB_TOKEN`; they now declare
+`engine: claude` and die on a missing `ANTHROPIC_API_KEY`. What has not changed
+is the cause underneath both: this repository holds **zero** secrets, which is
+also the thing to check rather than assume —
+`gh api repos/:owner/:repo/actions/secrets --jq .total_count`. There is no
+zero-secret path to running any engine. They fail *closed* — the agent,
+detection and `safe_outputs` steps skip and nothing is posted — so an inert run
+is not a silent one.
 
 Re-enabling them, the safe-output boundary, the `sccache` env that must match
 `rust.yml` byte-for-byte, and the disk-reclaim step that must NOT be copied are

@@ -13,12 +13,13 @@ before merging" is off — so a PR may merge on a green it earned against a base
 that has since moved. With five or six PRs open at once, four PRs each green
 against an older `main` can all merge and leave `main` red, and no run ever
 examined the combination. `merge-bus.yml` is that missing run: it batches the
-PRs that are ready, opens a PR for the combination so the ordinary gate judges
-it, and merges the members only if that goes green.
+PRs **labelled `merge-bus`**, opens a PR for the combination so the ordinary
+gate judges it, and merges the members only if that goes green.
 
 GitHub's **merge queue is this feature and cannot be enabled here** — it is
-offered only for organization-owned repositories, public on any plan or private
-on Enterprise Cloud, and this one is private and user-owned. Probed, not
+offered only for **organization-owned** repositories, and this one is owned by a
+user account. Visibility is not the blocker and has moved since this was
+written, so do not reason from it; ownership is the blocker. Probed, not
 assumed: `rulesets` is `[]` and `mergeQueue(branch:"main")` is `null`. The
 self-hosted alternatives are worse rather than better: bors-ng is archived, and
 rust-lang/bors and Prow's `tide` are long-running GitHub Apps needing a hosted
@@ -26,14 +27,23 @@ service, a webhook endpoint and an App key — more standing credential than a
 workflow file, and each restates the required checks in bot config where they
 can drift from protection silently.
 
-Four properties worth knowing before changing it:
+Properties worth knowing before changing it (this list grows; it is not four):
 
 - **It opens a pull request, and that is why it cost no edits elsewhere.** The
   three required workflows trigger on bare `pull_request`, so a batch branch
   earns every context with correct `detect` behaviour. Wiring the native queue
-  would have been *more* work: `merge_group` is not a `pull_request` event, so
-  all three `detect` jobs would fall through to their fail-safe default and
-  every merge-group build would run every gate at full cost.
+  would have been *more* work at the time, because `merge_group` is not a
+  `pull_request` event and all three `detect` jobs would have fallen through to
+  their fail-safe default, running every gate at full cost. That gap has since
+  been closed in the workflows — each `detect` now classifies a
+  `merge_group` event like a PR — so the argument no longer holds, and it is
+  recorded here only so the decision is not re-derived from a premise that
+  moved.
+- **Selection is opt-in by label, and by nothing else.** The bus takes
+  `gh pr list --label merge-bus`, oldest first. A dispatch with no labelled PR
+  exits having merged nothing and says so — "no open PR carries the merge-bus
+  label" — which from the outside looks exactly like a successful run, so read
+  the log rather than the conclusion.
 - **Eligibility asks GitHub rather than restating the required set.** With the
   review requirement at zero, `mergeStateStatus == CLEAN` *is* "every required
   check is satisfied", so the bus enumerates no contexts and cannot drift from
@@ -141,7 +151,10 @@ content was two lines of shell; that is why the shard now gets 45, matching
 `lint` and the e2e tiers.
 
 **The real cost of not using it.** 44,937 Actions minutes in 2026-11 on this
-repo (~450 gate cycles, $269 gross) with the spending limit reached twice.
+repo — ~450 gate cycles — with the spending limit reached twice. The $269 gross
+that was costed at assumed the private-repo metered rate; the **minutes** are
+the durable half of that measurement and the dollars are not, because whether
+they cost anything turns on repository visibility, which has moved.
 Seven separate candidates were hand-merged out from under an in-flight batch
 in one day — each one a gate run the batch had already paid for. Batching four
 PRs into one validation is the lever; racing the batch by hand is what removes

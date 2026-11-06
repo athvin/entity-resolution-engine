@@ -1,10 +1,10 @@
 # Agentic workflows, and the dispatched agent
 
 Moved out of the skill body: `ci-and-supply-chain/SKILL.md` is loaded at the
-start of every session that touches CI, and this subsystem is **merged and
-disabled**. Detail about a feature that cannot currently run belongs one hop
-away rather than in the body — which is also what kept the body over its
-500-line authoring limit.
+start of every session that touches CI, and this subsystem is **merged but
+inert** — it has no secret to run on, whichever engine it declares. Detail about
+a feature that cannot currently run belongs one hop away rather than in the
+body, which is also what keeps the body under its 500-line authoring limit.
 
 ## Contents
 
@@ -68,8 +68,10 @@ subscription OAuth token), and every other engine wants its own key. The
 invariant and the feature are mutually exclusive, which is the thing to know
 before reasoning about either.
 
-They now run `engine: claude` on `ANTHROPIC_API_KEY`, with the model chosen per
-workflow by whether the agent exercises judgement:
+They now declare `engine: claude` and need `ANTHROPIC_API_KEY` — **which is not
+set**, so they still fail at `activation`, on a different secret name. Nothing
+about leaving Copilot made them runnable. The model is chosen per workflow by
+whether the agent exercises judgement:
 
 | Workflow | Model | Why |
 |---|---|---|
@@ -85,9 +87,9 @@ set `effort` on a Haiku workflow** — Haiku 4.5 rejects the parameter.
 
 One consequence of leaving Copilot: `GH_AW_MAX_DAILY_AI_CREDITS` (5000) is
 denominated in Copilot credits and does not bind a BYO-key run, so the spend
-ceiling is whatever limit is configured Anthropic-side. These fire on every
-dependabot push and every red CI run, so that limit is load-bearing rather than
-belt-and-braces.
+ceiling is whatever limit is configured Anthropic-side. These trigger on every
+dependabot push and every red CI run, so the moment a key is set that limit is
+load-bearing rather than belt-and-braces — set it before the secret, not after.
 
 They fail **closed**, which is the one thing that went right: `activation`
 failing leaves `agent`, `detection` and `safe_outputs` all `skipped`, so a
@@ -110,11 +112,15 @@ holds only the workflow token, with `contents: write`, and checkpoints to
 checks out the agent's tree, mints a GitHub App token and opens the PR. Design
 and rationale: `docs/agent-fleet.md`.
 
-It carries two stored secrets beyond the gh-aw agents' `ANTHROPIC_API_KEY`, and
-unlike that one they are **environment-scoped**: `CLAUDE_CODE_OAUTH_TOKEN` in the
+It expects two secrets beyond the gh-aw agents' `ANTHROPIC_API_KEY`, and unlike
+that one they are to be **environment-scoped**: `CLAUDE_CODE_OAUTH_TOKEN` in an
 `agent` environment and `AGENT_APP_KEY` in `agent-publish`, both restricted to
-`main`, so a PR branch that edits a workflow cannot read them. Do not move either
-to repository scope, and do not let the `agent` job reference `AGENT_APP_KEY`.
+`main`, so a PR branch that edits a workflow cannot read them. **Neither
+environment exists yet** — the repository's only environments are the three
+`infra-apply-*` ones — so the paragraph above is the rule for creating them, not
+a description of what is configured, and the isolation it describes is not in
+force today. When they are created: do not put either secret at repository
+scope, and do not let the `agent` job reference `AGENT_APP_KEY`.
 
 **Its `agent` job must not gain `id-token: write`.** `er-ci-tf-plan` trusts any
 ref of this repository, so a job that can mint an OIDC token can read Terraform
