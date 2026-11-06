@@ -1,0 +1,6 @@
+billing_id,account_name,web,telephone,address_line1,city,state_code,postal,updated_at,persona_id
+b1,Acme Incorporated,www.acme.com,415.555.0100,1 Main St.,Springfield,CA,90001,2026-03-01,A1
+b2,Hexagon Global Holdings,globex.com,415-555-0200,2 Oak Ave,Metropolis,NY,10001,2026-03-02,A2
+b4,ITCH Systems,intiech.io,415-555-0300,3 Pine Rd,Gotham,IL,60601,2026-03-04,A4
+b7,Summit Partners,summitlandscape.com,212-555-0600,77 Harbor Rd,Metropolis,NY,10001,2026-03-07,A7
+b9,Vandelay Industries,vandelay.com,650-555-0700,1 Infinite Loop,Cupertino,CA,95014,2026-03-09,A9
