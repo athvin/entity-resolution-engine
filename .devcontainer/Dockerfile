@@ -86,3 +86,8 @@ RUN install -d -m 0755 /usr/share/postgresql-common/pgdg \
 RUN rustup component add rustfmt clippy
 
 USER vscode
+
+# DELIBERATE BREAK — probe only, never merged. Proves `devcontainer build` goes
+# red on a Dockerfile defect (docs/frontend-testing.md: observe a gate failing
+# before trusting it).
+RUN apt-get update && apt-get install -y --no-install-recommends this-package-does-not-exist-584
