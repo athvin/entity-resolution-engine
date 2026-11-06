@@ -376,6 +376,7 @@ skill, so it gets the same fix.
 | `er-command-surface` | `er-engine-ops/references/stages-and-flags.md` | `er-cli`'s clap `Cli` globals and `Command` variants, each flag's declared default resolved through `er-versions`' mode constants |
 | `infra-coverage` | `infra-platform/references/coverage.md` | the three stack enumerations in `infra.yml` set-differenced against the stacks in the tree, every `infra/k8s` path against the sites that reference it, and the NodePool manifests against the non-recursive `kubectl apply` |
 | `post-merge-surface` | `land-pr/references/post-merge.md` | each non-gh-aw workflow's `on:` block, narrowed to those that run after a merge, set-differenced against the ones carrying a `pull_request` trigger — what is left is the surface no pull request can pre-test |
+| `description-budget` | this document | every `SKILL.md`'s `description` length against the 1,024-character cap, sorted by headroom, plus the median length of the `for … see …` routing clauses it would have to make room for |
 | `skill-inventory` | this document **and** `CLAUDE.md` | every `SKILL.md`'s `name`, `description` and `disable-model-invocation` |
 
 The **set difference** is the shape worth copying — `diagnostics`,
