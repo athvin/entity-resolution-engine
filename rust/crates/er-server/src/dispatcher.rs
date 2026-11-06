@@ -1128,7 +1128,7 @@ fn entity_event_name(kind: &str) -> Option<&'static str> {
 /// no catalog entry is LOGGED rather than dropped silently, so a ledger kind
 /// that gains a writer surfaces as an operator-visible line instead of as
 /// events that quietly never arrive.
-async fn emit_entity_aggregates(
+pub(crate) async fn emit_entity_aggregates(
     client: &tokio_postgres::Client,
     job: &Job,
     counts: &[(String, i64)],
