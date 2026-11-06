@@ -6,7 +6,8 @@ Before calling backend work done, run **`make check`** from the repo root. It is
 the PR-equivalent gate and mirrors `.github/workflows/rust.yml`:
 
 ```
-make check   # = fmt + lint + doc + entities-check + skills-check + scripts-home-check + test
+make check   # = fmt + lint + doc + entities-check + skills-check
+             #   + scripts-home-check + workflow-shell-check + test
 ```
 
 `cargo fmt` / `cargo clippy` / `cargo test` on their own are **not** sufficient —
@@ -276,6 +277,26 @@ shell-shebang file sits under `scripts/` (`scripts/ci/` for CI helpers,
 hooks), so shell is reused rather than rewritten. Enforced by
 `scripts/ci/scripts-home-check.sh`, which runs in `make check` and in
 rust.yml's `workflow pins (S9)` job.
+
+**That rule has a blind spot, and it has its own gate.** A workflow's
+`run:` block is shell with **no file**, so a file-level check cannot see it —
+which is where it accumulated: seven copies of the build-cost report, four of
+the disk reclaim, three helm installs each pinning `HELM_VERSION`
+separately, and a 56-line `detect` step whose classification could not be
+unit-tested because it was YAML. `scripts/ci/workflow-shell-check.sh` closes
+it, and the rule is a **budget, not a ban**:
+
+- more than **3 lines** of shell in a `run:` block → extract it;
+- **any** control flow (`if`, `for`, `while`, `case`, a function), at any
+  length → extract it, because that is a decision nothing can test in place.
+
+Comments and blank lines are free, folded `run: >` scalars are one command
+however long, and `gh aw`-generated workflows are skipped. Extract to
+`scripts/ci/<name>.sh`, call it with `run: bash scripts/ci/<name>.sh`, and
+pass values in through `env:` rather than interpolating `${{ }}` into shell.
+It runs in `make check` and in the same ungated S9 job, with its self-test
+first — a detector breaks by noticing nothing, which reads exactly like a
+clean tree.
 
 **Use `cargo add`** to add dependencies or features rather than editing
 `Cargo.toml` by hand.

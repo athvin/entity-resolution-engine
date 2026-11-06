@@ -19,6 +19,22 @@
 #
 # Note what is NOT exempt and must not become so: this file. A change to the
 # classifier itself has to run the gate it classifies for.
+#
+# THE WORKFLOW ENTRIES ARE NAMED FILE BY FILE, never as `^\.github/workflows/`,
+# and that is the one part of this regex that needs care. `rust.yml`,
+# `frontend.yml` and `images.yml` live in that directory too and must keep
+# triggering the gates they define — otherwise a change to a gate would stop
+# reporting on exactly the PR most likely to break it, which is the
+# `paths:`-filter trap in CLAUDE.md wearing a different hat. What IS exempt:
+# `infra.yml` and `drift.yml`, which define no Rust job and cannot affect the
+# workspace build (an infra-only PR was paying the full ~40-minute backend
+# gate — `test` plus the DuckLake e2e — to prove it), and the `gh aw` agentic
+# set: the `.md` a human edits, the `.lock.yml` `gh aw compile` emits from it,
+# the `shared/` imports they pull in, `agentics-maintenance.yml` which that
+# compile also generates, and `.github/aw/` (gh-aw's own metadata, the
+# resolved action SHAs). None of those shapes can capture a hand-written
+# `.yml` workflow, so they cannot widen the exemption past what is argued
+# for here.
 
 # Everything the Rust gate never reads.
 DETECT_EXEMPT='^(\.claude/|docs/|CLAUDE\.md$|infra/terraform/|scripts/ci/tf-|scripts/hooks/|\.github/aw/|\.github/workflows/((infra|drift)\.yml$|shared/|agentics-maintenance\.yml$|[A-Za-z0-9._-]+\.md$|[A-Za-z0-9._-]+\.lock\.yml$))'

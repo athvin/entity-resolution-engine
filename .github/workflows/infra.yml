@@ -178,22 +178,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install helm and kubeconform
-        # Version-pinned tarballs rather than third-party actions, the same
-        # choice images.yml's helm install documents: every `uses:` here is
-        # SHA-pinned, and a pinned download needs no SHA to keep current. The
-        # version echo is the check that the install worked rather than
-        # silently leaving a missing binary for a later step to trip over.
-        env:
-          HELM_VERSION: v3.19.0
-          KUBECONFORM_VERSION: v0.7.0
-        run: |
-          set -euo pipefail
-          curl -fsSL "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz" \
-            | sudo tar xz --strip-components=1 -C /usr/local/bin linux-amd64/helm
-          curl -fsSL "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" \
-            | sudo tar xz -C /usr/local/bin kubeconform
-          helm version --short
-          kubeconform -v
+        # helm comes from scripts/ci/install-helm.sh, which owns that pin for
+        # all three of its consumers (here, deploy.yml and kind.yml); the
+        # version-pinned-tarball argument and the install check are stated
+        # there.
+        run: bash scripts/ci/install-chart-tools.sh
       - name: Install PyYAML
         # Explicit rather than relying on the runner image carrying it: the
         # selector gate imports yaml, and a gate that cannot run must fail
@@ -201,11 +190,7 @@ jobs:
         # a script's output.
         run: python3 -m pip install --quiet 'pyyaml==6.0.2'
       - name: helm lint
-        run: |
-          set -euo pipefail
-          helm lint infra/k8s/charts/er-platform \
-            --set efs.fileSystemId=fs-0 --set efs.accessPointId=fsap-0
-          helm lint infra/k8s/charts/er-dev-namespace --set developer=ci
+        run: bash scripts/ci/helm-lint.sh
       - name: Render and schema-validate every profile
         # Three renders, because they are three different manifest sets and a
         # template guarded by `if` is unchecked in the profiles that disable it:
@@ -254,12 +239,7 @@ jobs:
         # account's root email, deliberately kept out of version control) is not
         # required here. That is also why it cannot join the plan tier, which
         # would need the value.
-        run: |
-          for d in bootstrap/state-backend bootstrap/organization envs/core envs/dev envs/prod; do
-            echo "== validate $d =="
-            terraform -chdir="infra/terraform/$d" init -backend=false -input=false
-            terraform -chdir="infra/terraform/$d" validate -no-color
-          done
+        run: bash scripts/ci/tf-validate-all.sh
 
   plan:
     name: plan (${{ matrix.key }})
@@ -359,16 +339,11 @@ jobs:
         if: always()
         # Kept alongside the comment: this is the UNTRUNCATED copy, and the
         # comment links here when a plan is too large to inline.
-        run: |
-          {
-            echo "### terraform plan — ${{ matrix.key }}"
-            echo ""
-            sed 's/^/    /' planout/meta.txt 2>/dev/null || true
-            echo ""
-            echo '```terraform'
-            tail -c 40000 planout/plan.txt 2>/dev/null || true
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+        env:
+          TITLE: terraform plan — ${{ matrix.key }}
+          PLAN: planout/plan.txt
+          META: planout/meta.txt
+        run: bash scripts/ci/tf-step-summary.sh
 
   # The required status check for the plan tier, and the reason it exists is a
   # GitHub behaviour worth stating exactly.
@@ -541,17 +516,11 @@ jobs:
         #
         # Locking ON here, unlike the plan tier: this one writes. Refreshing
         # too — the apply role can read what the plan role deliberately cannot,
-        # which is where out-of-band drift is actually caught.
-        #
-        # `tfplan` MUST NOT be uploaded as an artifact and `show -json` MUST NOT
-        # be printed: a saved plan file carries sensitive values in cleartext,
-        # while the `show -no-color` human form below redacts them to
-        # `(sensitive value)`. Only the redacted form may leave this job.
-        run: |
-          terraform -chdir="$DIR" init -input=false
-          terraform -chdir="$DIR" plan -out=tfplan \
-            -no-color -input=false -lock-timeout=5m
-          terraform -chdir="$DIR" show -no-color tfplan > applyplan.txt
+        # which is where out-of-band drift is actually caught. That is also
+        # why it is a separate script from scripts/ci/tf-plan-run.sh, which
+        # argues the point; what may and may not leave this job (only the
+        # redacted `applyplan.txt`, never `tfplan`) is argued there too.
+        run: bash scripts/ci/tf-apply-plan.sh
       - name: destroy guard
         # Fails closed on anything it cannot classify. See the script.
         run: bash scripts/ci/tf-destroy-guard.sh applyplan.txt
@@ -561,11 +530,7 @@ jobs:
         run: terraform -chdir="$DIR" apply -no-color -input=false -lock-timeout=5m tfplan
       - name: summary
         if: always()
-        run: |
-          {
-            echo "### terraform apply — ${{ matrix.key }}"
-            echo ""
-            echo '```terraform'
-            tail -c 40000 applyplan.txt 2>/dev/null || echo "(no plan was produced)"
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+        env:
+          TITLE: terraform apply — ${{ matrix.key }}
+          PLAN: applyplan.txt
+        run: bash scripts/ci/tf-step-summary.sh

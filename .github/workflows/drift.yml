@@ -126,15 +126,9 @@ jobs:
         # never be printed — there is deliberately no upload step in this
         # workflow. The classifier below emits only addresses and attribute
         # NAMES; the `show -no-color` text that reaches the summary redacts
-        # values to `(sensitive value)`.
-        run: |
-          mkdir -p driftout
-          terraform -chdir="$DIR" init -input=false
-          terraform -chdir="$DIR" plan -refresh-only -out=driftplan \
-            -no-color -lock=false -input=false
-          terraform -chdir="$DIR" show -no-color driftplan > driftout/out.txt
-          terraform -chdir="$DIR" show -json    driftplan > driftout/plan.json
-          tail -c 60000 driftout/out.txt
+        # values to `(sensitive value)`. The script restates this next to the
+        # two files it writes.
+        run: bash scripts/ci/tf-drift-plan.sh
       - name: classify the refresh
         # The classifier's own exit code IS the verdict: 0 no real drift, 1 real
         # drift, 2 unparseable. So this step needs no plumbing — it fails the job

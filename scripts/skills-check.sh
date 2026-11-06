@@ -1593,10 +1593,29 @@ gen_infra_coverage() {
 			| sort -u
 	)
 	# The validate tier is a shell loop, not a matrix: `for d in a b c; do`.
+	#
+	# SEARCHED IN BOTH PLACES THE LOOP CAN LIVE, because it has already moved
+	# once: it was inline in infra.yml until the loop was extracted to
+	# scripts/ci/tf-validate-all.sh, and this generator — which named only the
+	# workflow — then rendered every stack as validate=— and reported
+	# `bootstrap/organization` as covered by no tier. A silently WRONG
+	# generated reference, which is worse than a stale one, because the gate
+	# goes green on it the moment it is committed.
 	validate=$(
-		sed -n 's/.*for d in \(.*\); do.*/\1/p' .github/workflows/infra.yml \
+		sed -n 's/.*for d in \(.*\); do.*/\1/p' \
+			scripts/ci/tf-validate-all.sh .github/workflows/infra.yml 2> /dev/null \
 			| tr ' ' '\n' | sed '/^$/d' | sort -u
 	)
+	# POSITIVE CONTROL. Zero stacks means the loop moved again, not that
+	# nothing is validated — `infra.yml`'s validate tier is the only cover
+	# `bootstrap/organization` has. Fail on stderr and emit nothing, so
+	# `splice` refuses rather than committing an all-dashes column.
+	if [[ -z ${validate//[[:space:]]/} ]]; then
+		err_quiet "regen: infra coverage found no \`for d in …; do\` validate loop" \
+			"in scripts/ci/tf-validate-all.sh or .github/workflows/infra.yml —" \
+			"it has moved; point gen_infra_coverage at its new home"
+		return 1
+	fi
 	plan=$(infra_job_stacks plan)
 	apply=$(infra_job_stacks apply)
 
