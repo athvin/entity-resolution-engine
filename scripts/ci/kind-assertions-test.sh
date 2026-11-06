@@ -249,13 +249,21 @@ else
 fi
 
 # ---- the cutover guards are present at all -------------------------------
-# Textual, deliberately: these three live in bash rather than python, and the
+# Textual, deliberately: these four live in bash rather than python, and the
 # cost of asserting them properly is a cluster. A grep cannot prove they work,
 # but it can prove nobody deleted them, which is the realistic regression.
+#
+# The CPU preflight is in this list for a reason worth stating: deleting it
+# does not make phase 6 fail, it makes phase 6 fail LATER and about something
+# else — a `helm --wait` timeout, or a job that "never reached succeeded" —
+# which is precisely the misattribution it was added to prevent. A guard whose
+# removal degrades the diagnosis rather than the verdict is invisible to every
+# other check here.
 for needle in \
     'carries no er.dupezero.com/color selector' \
     'cutover did not take' \
-    'restore failed'; do
+    'restore failed' \
+    'needs ${need}m of CPU and only ${free}m is free'; do
     if grep -qF "$needle" "$PROBE"; then
         ok "the guard '${needle}' is still present"
     else

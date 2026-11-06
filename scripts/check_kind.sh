@@ -51,6 +51,82 @@ MAINORG="${ORG}"
 log() { echo "check_kind: $*" >&2; }
 fail() { echo "check_kind: FAIL — $*" >&2; exit 1; }
 
+# ---- the node's CPU budget ------------------------------------------------
+# This exists because the failure it describes is UNREADABLE without it, and
+# that cost three runs to work out. A pod the scheduler refuses sits `Pending`
+# until whatever phase is waiting on it gives up, so an over-committed node
+# reports `job … never reached succeeded (last: running)` — a timeout, about a
+# job — when the truth is one line of `kubectl describe pod`:
+#
+#   FailedScheduling  0/1 nodes are available: 1 Insufficient cpu.
+#   preemption: not eligible due to preemptionPolicy=Never
+#
+# The two numbers that turn the first message into the second are allocatable
+# CPU and the sum of what is already requested. Neither was printed anywhere,
+# so both are printed here — unconditionally, not only on failure, because the
+# budget is the thing that has to be re-derived every time this moves and a
+# green run is exactly when nobody records it. The arithmetic it answers to
+# lives in infra/k8s/charts/er-platform/values-kind.yaml.
+#
+# Prints "<allocatable_millis> <requested_millis>".
+cpu_budget() {
+    kubectl --context "${CTX}" get nodes -o json >/tmp/er-kind-nodes.json
+    kubectl --context "${CTX}" get pods --all-namespaces -o json >/tmp/er-kind-pods.json
+    python3 - /tmp/er-kind-nodes.json /tmp/er-kind-pods.json <<'PY'
+import json, sys
+
+
+def millis(v):
+    if v is None:
+        return 0
+    v = str(v)
+    return int(float(v[:-1])) if v.endswith("m") else int(float(v) * 1000)
+
+
+nodes = json.load(open(sys.argv[1]))["items"]
+pods = json.load(open(sys.argv[2]))["items"]
+
+alloc = sum(millis(n["status"]["allocatable"]["cpu"]) for n in nodes)
+
+req = 0
+for p in pods:
+    # A finished pod holds no capacity, so counting it would overstate the
+    # commitment — and this probe leaves a trail of Succeeded task pods.
+    if p.get("status", {}).get("phase") in ("Succeeded", "Failed"):
+        continue
+    spec = p["spec"]
+    app = sum(millis(c.get("resources", {}).get("requests", {}).get("cpu"))
+              for c in spec.get("containers", []))
+    # Init containers run before the app containers and never alongside them,
+    # so the scheduler charges max(sum of app, largest init), not the sum. A
+    # native sidecar (restartPolicy: Always) would break that; this chart has
+    # none, and the web-api init container went away with PR10 anyway.
+    init = max([millis(c.get("resources", {}).get("requests", {}).get("cpu"))
+                for c in spec.get("initContainers", [])] or [0])
+    req += max(app, init)
+
+print(alloc, req)
+PY
+}
+
+log_cpu_budget() {
+    local alloc req
+    read -r alloc req <<<"$(cpu_budget)"
+    log "node CPU budget: ${req}m requested of ${alloc}m allocatable ($((alloc - req))m free)"
+}
+
+# assert_cpu_room <needed_millis> <what-it-is-for>
+#
+# Fails FAST and with the numbers, instead of letting the phase below discover
+# the same thing as a timeout several minutes later.
+assert_cpu_room() {
+    local need="$1" what="$2" alloc req free
+    read -r alloc req <<<"$(cpu_budget)"
+    free=$((alloc - req))
+    [ "${free}" -ge "${need}" ] || fail "${what} needs ${need}m of CPU and only ${free}m is free (${req}m requested of ${alloc}m allocatable). A pod the scheduler refuses sits Pending until this phase's wait expires, so leaving this to be discovered below would report a timeout rather than the scheduling refusal it is — see the budget table in infra/k8s/charts/er-platform/values-kind.yaml."
+    log "${what}: needs ${need}m, ${free}m free"
+}
+
 OP_TOKEN="$(kubectl --context "${CTX}" -n "${NS}" get secret er-erserver-env \
     -o jsonpath='{.data.ERSERVER_OPERATOR_TOKEN}' | base64 -d)"
 
@@ -190,6 +266,11 @@ wait_state() { # job_id want timeout_s
 }
 
 tasks_json() { api GET "/v1/orgs/${ORG}/datasets/${DS}/jobs/$1/tasks"; }
+
+# The budget, before anything is enqueued: this is the steady state every
+# phase below adds a task pod to, and recording it on a GREEN run is what makes
+# the next move legible. A single task pod needs the executor class's cpu.
+log_cpu_budget
 
 # ---- phase 1: green -------------------------------------------------------
 log "phase 1: the green path"
@@ -520,6 +601,26 @@ case "${LIVE_COLOUR}" in
     *)     fail "svc/er-api selects colour '${LIVE_COLOUR}', which is neither blue nor green" ;;
 esac
 log "live=${LIVE_COLOUR} idle=${IDLE_COLOUR}"
+
+# This phase is the only one that needs THREE pods the steady state does not
+# have, and on a two-vCPU runner that is where the budget runs out:
+#
+#   the idle colour's web-api   api.resources.requests.cpu
+#   a task pod                  executor.classes.<class>.cpu
+#   er-schema-migrate           100m — a pre-upgrade hook, so EVERY helm
+#                               upgrade below re-fires it, including the
+#                               `color.active` flip that happens while the
+#                               task is in flight
+#
+# er-db-migrate is not in that list on purpose: it is guarded by
+# `web.enabled`, which the kind profile turns off. Checked, rather than
+# assumed, by rendering the profile.
+#
+# 450m is that sum at the kind profile's current numbers. Asserting it here
+# costs one kubectl round trip and converts a five-minute `helm --wait`
+# timeout, or a 420s wait on a job whose pod never started, into a sentence
+# naming both figures. Raise it in step with values-kind.yaml.
+assert_cpu_room 450 "phase 6 (the idle colour, a task pod, and the pre-upgrade hook)"
 
 # Bring the idle colour up BEFORE enqueuing, so the only thing that happens
 # inside the attempt's window is the selector flip. Its image comes from
