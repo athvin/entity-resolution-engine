@@ -150,6 +150,6 @@ with grep; do not trust the paths.
 | Invariant | Acceptance test, by intent |
 |---|---|
 | INV-SCORE / D4 | the frozen-TF match goldens: `base_10` scores reproduce regardless of batch membership |
-| INV-EQ | the incremental-equals-full pair: one test for the invariant, one that violates exactly one precondition and shows the bounded divergence. No committed test repairs that divergence, because the pass that would is unbuilt |
+| INV-EQ | `an_incremental_batch_lands_where_a_full_rerun_would` for the invariant, plus a cost assertion that the incremental pass scores only the batch — equivalence alone is satisfiable by quietly re-scoring everything. **No test exhibits a violated precondition diverging:** the drift guard refuses that run instead (`the_run_ledger_records_the_fingerprint_the_drift_guard_reads` asserts `decision.refused()`), and nothing repairs a divergence because the pass that would is unbuilt |
 | INV-PERM | the reconcile scenario goldens (assertion, merge, split, supersession, deletion) |
 | CONTRADICTION-1 | the contradiction golden in `er-reconcile` |
