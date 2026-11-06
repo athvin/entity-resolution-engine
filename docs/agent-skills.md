@@ -205,13 +205,24 @@ not to look. `dense-surface-facts` derives all four instead.
 ## The gate
 
 ```sh
-make skills-check          # both modes
-bash scripts/skills-check.sh lint    # authoring rules, no toolchain
-bash scripts/skills-check.sh regen   # rebuild generated blocks
-bash scripts/skills-check.sh check   # regen + fail on drift
+make skills-check          # every mode
+bash scripts/skills-check.sh lint        # authoring rules, no toolchain
+bash scripts/skills-check.sh regen       # rebuild generated blocks
+bash scripts/skills-check.sh check       # regen + fail on drift
+bash scripts/skills-check.sh overrides   # the override registry vs CLAUDE.md
+bash scripts/skills-check.sh generators  # the wired generators vs the table above
 ```
 
 `make skills-check` is a prerequisite of `make check`.
+
+**The generator table above is itself gated**, because it is the one list here
+that code can contradict silently: `generators` derives the id set from the
+`splice` calls in `run_regen` and set-differences it against the table, failing
+in both directions — a generator wired but undocumented, or a row no generator
+wires. It was added after `post-merge-surface` sat wired and unlisted, so the
+standard described 12 of 13 generators while every gate stayed green. The
+"Derived from" column stays prose, since what a generator derives *and why* is
+the part worth reading and the part no script can write.
 
 **The two modes are split by what their output derives from, and the CI
 placement follows that split:**
