@@ -21,7 +21,7 @@
 # classifier itself has to run the gate it classifies for.
 
 # Everything the Rust gate never reads.
-DETECT_EXEMPT='^(\.claude/|docs/|CLAUDE\.md$|infra/terraform/|scripts/ci/tf-|\.github/aw/|\.github/workflows/((infra|drift)\.yml$|shared/|agentics-maintenance\.yml$|[A-Za-z0-9._-]+\.md$|[A-Za-z0-9._-]+\.lock\.yml$))'
+DETECT_EXEMPT='^(\.claude/|docs/|CLAUDE\.md$|infra/terraform/|scripts/ci/tf-|scripts/hooks/|\.github/aw/|\.github/workflows/((infra|drift)\.yml$|shared/|agentics-maintenance\.yml$|[A-Za-z0-9._-]+\.md$|[A-Za-z0-9._-]+\.lock\.yml$))'
 
 # A generated artifact `er-entity verify` re-renders and byte-compares.
 DETECT_ERD='^docs/erd\.md$'

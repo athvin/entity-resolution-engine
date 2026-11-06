@@ -123,9 +123,9 @@ Two things to weigh when editing it:
 
 ## Layer 3: the Bash guard
 
-A `PreToolUse` hook gated by `if: "Bash(aws *)"`, `"Bash(terraform *)"` and
-`"Bash(kubectl *)"`, plus a committed `permissions.deny` list for the
-unambiguously destructive shapes.
+A `PreToolUse` hook gated by `if: "Bash(aws *)"`, `"Bash(terraform *)"`,
+`"Bash(kubectl *)"` and `"Bash(helm *)"`, plus a committed `permissions.deny`
+list for the unambiguously destructive shapes.
 
 Its decision rule, in order:
 
