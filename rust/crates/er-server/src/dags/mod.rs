@@ -4,9 +4,15 @@
 //! [`verify_all`] runs every assembly at boot, so a graph problem is a refusal
 //! to start, not a log line (batch-orchestration-design §3.2/§3.3).
 //!
-//! Phase 1 ships the model and the compiled graphs with **no executor**: the
-//! task bodies are declared (their shapes are what the compile-time wiring
-//! checks) and refuse to run until `er-server exec-task` lands in Phase 2.
+//! Every kind's every node has a runnable body, pod or control, and
+//! `tests/dag_task_coverage.rs` is what holds that true — the dispatch tables
+//! and the graphs are two lists that have to agree, and the one time they did
+//! not, `profile`'s `reconcile_schema` had no arm and every profile job failed
+//! at its first task.
+//!
+//! This note used to say Phase 1 shipped the graphs with "**no executor**" and
+//! bodies that "refuse to run until `er-server exec-task` lands in Phase 2".
+//! Phases 2 and 3 landed; the sentence did not move.
 
 pub mod control;
 pub mod edges;
@@ -181,15 +187,6 @@ fn completed<O: er_dag::DurableOutput>(
     })
 }
 
-/// Run one pod task body by name — the verb's runtime dispatch (§6.3 step 5):
-/// rehydrate the positional inputs, run exactly one try with no retry, backoff
-/// or timeout of its own, serialize the durable output.
-///
-/// Phase 2 runs the maintenance kinds; every other body still refuses, and the
-/// refusal is a `precondition` failure on the row rather than a silent skip.
-///
-/// # Errors
-/// The task's own classified failure, or a malformed input reference.
 /// Run one CONTROL task body (§3.6): the Postgres half of a kind, executed
 /// inside the dispatcher with the control plane's own credentials.
 ///
@@ -279,6 +276,19 @@ fn control_pin<T: er_dag::DurableOutput>(
     })
 }
 
+/// Run one pod task body by name — the verb's runtime dispatch (§6.3 step 5):
+/// rehydrate the positional inputs, run exactly one try with no retry, backoff
+/// or timeout of its own, serialize the durable output.
+///
+/// Every kind in [`JobKind::ALL`] has a body for every node of its DAG, which
+/// `tests/dag_task_coverage.rs` is what proves — the fallback arm's refusal is
+/// now reachable only by a task id no DAG registers. This doc comment used to
+/// say "Phase 2 runs the maintenance kinds; every other body still refuses",
+/// and it had become false while sitting detached above `run_control_task`,
+/// where it documented the wrong function.
+///
+/// # Errors
+/// The task's own classified failure, or a malformed input reference.
 pub fn run_pod_task(
     kind: JobKind,
     task_id: &str,
@@ -286,9 +296,10 @@ pub fn run_pod_task(
 ) -> Result<PodTaskRun, er_dag::TaskError> {
     use er_dag::Task as _;
     match (kind, task_id) {
-        (JobKind::LakeMaintain | JobKind::LakeMigrate | JobKind::Train, "reconcile_schema") => {
-            completed(tasks::ReconcileSchema.run(ctx, ())?)
-        }
+        (
+            JobKind::LakeMaintain | JobKind::LakeMigrate | JobKind::Train | JobKind::Profile,
+            "reconcile_schema",
+        ) => completed(tasks::ReconcileSchema.run(ctx, ())?),
         (JobKind::LakeMaintain, "maintain") => {
             let schema = pin::<er_dag::Plan<plans::SchemaReconciled>>(ctx, 0)?;
             completed(tasks::Maintain.run(ctx, (schema,))?)
