@@ -60,11 +60,13 @@ updates:
         patterns: ["*"]
         update-types: ["minor", "patch"]
     ignore:
-      # Five crates whose major is not ours to choose alone. Three must equal the
-      # major an EXTERNAL dependency already resolved; two must equal EACH OTHER.
-      # Either way the failure is a trait or type mismatch rather than a version
-      # conflict, because the same name arrives under two crate versions and
-      # stops being the same thing.
+      # Crates whose major is not ours to choose alone, in three groups: three
+      # must equal the major an EXTERNAL dependency already resolved (`arrow`,
+      # the two `datafusion-*`); two must equal EACH OTHER (`sha2`/`hmac`); five
+      # must move as ONE SET with a fixed offset (the `opentelemetry*` crates and
+      # `tracing-opentelemetry`). Either way the failure is a trait or type
+      # mismatch rather than a version conflict, because the same name arrives
+      # under two crate versions and stops being the same thing.
       #
       # `arrow` must match whatever `duckdb` pulls, because Arrow values cross
       # that boundary. Held at 58 while duckdb was on 1.10506.1, because arrow
@@ -101,4 +103,51 @@ updates:
       - dependency-name: "sha2"
         update-types: ["version-update:semver-major"]
       - dependency-name: "hmac"
+        update-types: ["version-update:semver-major"]
+      # The `opentelemetry*` set plus `tracing-opentelemetry` are the same
+      # must-equal-each-other shape as sha2/hmac, one crate larger and with an
+      # offset: er-obs/Cargo.toml has carried the rule since the crate existed —
+      # "`opentelemetry*` crates exchange types with each other while
+      # `tracing-opentelemetry` sits exactly ONE minor ahead — 0.32 pairs with
+      # opentelemetry 0.31. Bump them in one commit."
+      #
+      # That rule was in the manifest and NOT here, which is the whole defect:
+      # nothing stopped the bot proposing them one at a time, so it did, and each
+      # one failed alone. #731 (tracing-opentelemetry 0.32.1 -> 0.34.0) and #732
+      # (opentelemetry_sdk 0.31.0 -> 0.33.1) both went red on the same trait
+      # mismatch the manifest predicts:
+      #
+      #   error[E0277]: the trait bound
+      #     `opentelemetry_sdk::trace::SdkTracer: opentelemetry::trace::tracer::Tracer`
+      #     is not satisfied
+      #
+      # — two `Tracer` traits in the graph, one per opentelemetry major, so the
+      # SDK's tracer does not implement the one `tracing-opentelemetry` wants.
+      # `Context::span` and `OpenTelemetryLayer::with_filter` fail the same way.
+      # Both PRs were closed rather than fixed, because the unblocker is a
+      # coordinated bump of all five and never a change inside either PR.
+      #
+      # `semver-major` IS the right update-type even though the breaking
+      # position for a `0.x` crate is the minor, and it is worth recording the
+      # evidence rather than reasoning from the pair above — that one landed
+      # 2026-11-06, after its own incident, so it has never actually been
+      # exercised and proves nothing yet.
+      #
+      # The evidence is how these two arrived. The `groups` block above sweeps
+      # `update-types: ["minor", "patch"]` across `patterns: ["*"]`, and a real
+      # minor lands in it with the group in its title — #348, "Bump sha2 from
+      # 0.11.0 to 0.11.1 in the rust-minor-patch group". #731 and #732 arrived
+      # as TWO UNGROUPED PRs, which is what dependabot does for an update the
+      # group's update-types exclude. So it classified 0.31 -> 0.33 as major,
+      # and a `semver-major` ignore is what holds it. Patch releases still flow
+      # through the group.
+      - dependency-name: "opentelemetry"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "opentelemetry_sdk"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "opentelemetry-otlp"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "opentelemetry-http"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "tracing-opentelemetry"
         update-types: ["version-update:semver-major"]
