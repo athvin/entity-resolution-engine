@@ -1305,14 +1305,42 @@ impl Task<Session> for LakeInit {
         ctx: &mut TaskCtx<'_, Session>,
         _input: Self::Input,
     ) -> Result<Outcome<Self::Output>, TaskError> {
-        // `reconcile_lake_env` opens its OWN session from the tenant env: the
-        // lake this task initialises may not have existed when the pod's ctx
-        // session was opened, so the probe handle is not the one to use.
-        let outcome = crate::schema::reconcile_lake_env(&ctx.order.lake_env);
-        let (_status, hash, detail) = crate::schema::tenant_state(&outcome);
+        // Reconcile through the session this task ALREADY HOLDS.
+        //
+        // This used to call `crate::schema::reconcile_lake_env`, which opens
+        // its own session from the tenant env, reasoning that "the lake this
+        // task initialises may not have existed when the pod's ctx session was
+        // opened, so the probe handle is not the one to use". That premise is
+        // false in this DAG: `create_catalog` is `lake_init`'s upstream and it
+        // creates the catalog, so the file exists before this pod starts.
+        //
+        // The cost of the second handle was the bug (#778). Two sessions
+        // attached the same catalog file inside one process, and the ctx
+        // session — attached BEFORE the reconcile and dropped AFTER it, since
+        // it lives to the end of `exec_task::run_inner` — wrote its own
+        // earlier view back over the committed metadata. What survived was the
+        // reconciler's parquet data files with no catalog rows pointing at
+        // them: a provisioned lake whose relations were all absent, while the
+        // task reported success because its `catalog_hash` is computed from
+        // the compiled catalog rather than read back.
+        let outcome = er_entity_diff::reconcile_lake(
+            ctx.session.connection(),
+            &er_entities::catalog::catalog(),
+            &crate::schema::applied_by(),
+        )
+        .map_err(|e| match e {
+            // The breaking message already lists every difference.
+            e @ er_entity_diff::ReconcileError::Breaking(_) => e.to_string(),
+            other => format!("lake schema: {}", crate::errfmt::chain(&other)),
+        });
+        let (status, hash, detail) = crate::schema::tenant_state(&outcome);
         match outcome {
             Ok(_) => Ok(Outcome::Done(
-                Plan(LakeInitialized { catalog_hash: hash }),
+                Plan(LakeInitialized {
+                    catalog_hash: hash,
+                    status: status.to_string(),
+                    detail: detail.clone(),
+                }),
                 er_dag::Counters(serde_json::json!({ "detail": detail })),
             )),
             Err(message) => Err(engine_error(&message)),

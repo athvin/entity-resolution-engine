@@ -129,10 +129,21 @@ impl PlanDoc for CatalogCreated {
     const STABLE_NAME: &'static str = "catalog_created";
 }
 
-/// `lake_init`'s receipt: the reconciled lake's catalog hash.
+/// `lake_init`'s receipt: the reconciled lake's catalog hash, plus the two
+/// fields `tenant_schema_states` needs.
+///
+/// It carries `status` and `detail` for the same reason `SchemaReconciled`
+/// does — the finish handler writes that row, because the pod holds no
+/// control-plane credential (§6.4). Without them a PROVISIONED tenant got no
+/// row at all, so the deploy report and the drift check, which read the table
+/// precisely to avoid opening a lake, could not see it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LakeInitialized {
     pub catalog_hash: String,
+    #[serde(default)]
+    pub status: String,
+    #[serde(default)]
+    pub detail: String,
 }
 impl PlanDoc for LakeInitialized {
     const STABLE_NAME: &'static str = "lake_initialized";

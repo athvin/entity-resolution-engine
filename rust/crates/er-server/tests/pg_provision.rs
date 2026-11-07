@@ -22,6 +22,7 @@ use er_server::{AppState, app, pg};
 use tower::ServiceExt;
 
 use crate::common;
+use crate::executor_harness;
 
 const TEST_YAML: &str = include_str!("../../er-cli/tests/fixtures/test.yaml");
 
@@ -228,9 +229,16 @@ async fn provisioning_a_tenant_end_to_end() {
     // ---- phase 5: the provision job builds the lake at the catalog version --
     //
     // Needs the ducklake extension (the lake is opened to create its tables),
-    // which is why this phase is gated like the lake tiers are. The dispatcher's
-    // profile normally comes from the process environment, which a test cannot
-    // set, so the job arm is driven with the same profile the request used.
+    // which is why this phase is gated like the lake tiers are.
+    //
+    // The profile goes to the EXECUTOR rather than into a dispatcher call:
+    // `create_catalog` reads it from `ExecutorConfig`, which is the seam that
+    // makes this testable on the task path at all. A test here cannot set an
+    // environment variable — `std::env::set_var` is `unsafe` in edition 2024
+    // and the workspace denies `unsafe_code` — so before that seam existed,
+    // nothing under `tests/` so much as mentioned `create_catalog` or
+    // `lake_init`, and provisioning had no coverage on the only path that
+    // runs it.
     if std::env::var("DEDUPE_E2E_DUCKLAKE").as_deref() == Ok("1") {
         let profile = Ok(Some(Profile {
             mode: Mode::Local,
@@ -240,18 +248,28 @@ async fn provisioning_a_tenant_end_to_end() {
             data_template: None,
             env_extra: serde_json::from_str(r#"{"ER_DUCKDB_THREADS":"2"}"#).unwrap(),
         }));
-        // `off` rather than `logging`: provisioning is not a reported kind, so a
-        // mailer that CAN send would pass this test whether the gate works or
-        // not — one that cannot send turns a stray report into an error.
-        let ran = er_server::dispatcher::dispatch_once_with(
-            &client,
-            &profile,
-            &er_server::mail::Mailer::off(),
-            None,
-        )
-        .await
-        .unwrap();
-        assert!(ran, "the provision job should have been claimed");
+        let queued = pg::list_jobs(&client, &org.id)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|j| j.kind == "provision")
+            .expect("the provision job is queued");
+        let mut harness =
+            executor_harness::Harness::start_with_profile(&dsn, root.clone(), profile).await;
+        let settled = harness
+            .run_to_settlement(&client, &org.id, &queued.id)
+            .await;
+        assert_eq!(
+            settled,
+            "succeeded",
+            "the provision job settled {settled:?}: {:?}",
+            er_entities::task_instance::read::by_job(&client, &org.id, &queued.id)
+                .await
+                .unwrap()
+                .iter()
+                .map(|r| (r.task_id.clone(), r.state.clone(), r.error_detail.clone()))
+                .collect::<Vec<_>>()
+        );
         let org = pg::get_org(&client, "acme").await.unwrap().unwrap();
         assert_eq!(org.state, "active", "provisioning promotes the org");
         // The default dataset was converged while the org was still

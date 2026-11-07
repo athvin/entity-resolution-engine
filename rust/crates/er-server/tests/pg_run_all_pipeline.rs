@@ -106,6 +106,8 @@ async fn run_all_full_runs_as_seven_pods_and_reproduces_base_10() {
     let (api, mut frames) = FakePodApi::new(format!("http://{addr}"), tmp.clone());
     let api = Arc::new(api);
     let cfg = ExecutorConfig {
+        // Neither kind here provisions, so no profile is needed.
+        profile: Ok(None),
         dag_kinds: ["run_all_full".to_string(), "train".to_string()]
             .into_iter()
             .collect(),

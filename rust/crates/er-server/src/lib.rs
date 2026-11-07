@@ -4697,10 +4697,18 @@ async fn attempt_finish(
                         // The pod holds no control-plane credential (§6.4), so
                         // a reconcile_schema task's tenant-state report lands
                         // here, from its output document.
+                        // BOTH receipts that reconcile a lake. `lake_init`
+                        // emits `lake_initialized`, and filtering only on
+                        // `schema_reconciled` meant a provisioned tenant never
+                        // got a `tenant_schema_states` row — the one table the
+                        // deploy report and the drift check consult so they do
+                        // not have to open a lake.
                         let schema_doc = body
                             .output
                             .as_ref()
-                            .filter(|o| o["plan"] == "schema_reconciled")
+                            .filter(|o| {
+                                o["plan"] == "schema_reconciled" || o["plan"] == "lake_initialized"
+                            })
                             .map(|o| o["doc"].clone());
                         if let Some(doc) = schema_doc
                             && let Some(dsn) = state.dsn.clone()

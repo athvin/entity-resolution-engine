@@ -134,7 +134,35 @@ impl ControlTask<PgClient> for EmitWriteBack {
 /// request that made it — so a profile switched off in between is a stated
 /// refusal rather than a panic.
 #[derive(Default)]
-pub struct CreateCatalog;
+pub struct CreateCatalog {
+    /// The resolved profile, or `None` for "auto-provisioning is not
+    /// configured" — which is what `Default` means and what an operator who
+    /// set no `ER_PROVISION_MODE` gets.
+    profile: Option<crate::provision::Profile>,
+    /// A misconfiguration, already rendered: `ProfileError` is not `Clone` and
+    /// the DAG builder needs this type to be `Default`, so the message is
+    /// carried rather than the error.
+    profile_error: Option<String>,
+}
+
+impl CreateCatalog {
+    /// Build the task from the executor's resolved profile.
+    #[must_use]
+    pub fn from_profile(
+        profile: &Result<Option<crate::provision::Profile>, crate::provision::ProfileError>,
+    ) -> Self {
+        match profile {
+            Ok(p) => CreateCatalog {
+                profile: p.clone(),
+                profile_error: None,
+            },
+            Err(e) => CreateCatalog {
+                profile: None,
+                profile_error: Some(e.to_string()),
+            },
+        }
+    }
+}
 
 impl ControlTask<PgClient> for CreateCatalog {
     const NAME: &'static str = "create_catalog";
@@ -160,21 +188,20 @@ impl ControlTask<PgClient> for CreateCatalog {
                     "the org this job provisions no longer exists".to_string(),
                 ))
             })?;
-        let profile = match crate::provision::Profile::from_env() {
-            Ok(Some(p)) => p,
-            Ok(None) => {
-                return Err(TaskError::Failed(er_errors::ErError::config(
-                    "auto-provisioning is not configured on this dispatcher \
-                     (ER_PROVISION_MODE)"
-                        .to_string(),
-                )));
-            }
-            Err(e) => {
-                return Err(TaskError::Failed(er_errors::ErError::config(format!(
-                    "auto-provisioning is misconfigured: {e}"
-                ))));
-            }
-        };
+        // From the executor's config, not the environment: see
+        // `ExecutorConfig::profile` for why that seam has to exist.
+        if let Some(detail) = &self.profile_error {
+            return Err(TaskError::Failed(er_errors::ErError::config(format!(
+                "auto-provisioning is misconfigured: {detail}"
+            ))));
+        }
+        let profile = self.profile.clone().ok_or_else(|| {
+            TaskError::Failed(er_errors::ErError::config(
+                "auto-provisioning is not configured on this dispatcher \
+                 (ER_PROVISION_MODE)"
+                    .to_string(),
+            ))
+        })?;
         let plan = profile.plan(&org.name);
         crate::provision::create_workspace(&plan, &profile.config_template)
             .map_err(|e| TaskError::Failed(er_errors::ErError::config(e)))?;
@@ -252,6 +279,34 @@ impl ControlTask<PgClient> for Activate {
                         .with_class(er_errors::ErrorClass::TransientIo),
                 )
             })?;
+        // The default dataset was converged at org creation with the ORG's
+        // state of that moment — `provisioning` — and nothing else ever moves
+        // it: the boot sweep is DO-NOTHING on existing rows. Flip it with the
+        // org, under the same expected-state guard, or every auto-provisioned
+        // tenant keeps a dataset the guard rightly renders as still being set
+        // up.
+        //
+        // The legacy arm did this and the task path did not, so a tenant
+        // provisioned through the executor read as perpetually setting up.
+        // Best-effort and logged, exactly as it was: the org IS active by
+        // then, and failing here would retry a provision whose lake exists.
+        if moved
+            && let Err(e) = crate::pg::set_dataset_state(
+                ctx.client,
+                &org.id,
+                "default",
+                "active",
+                "provisioning",
+            )
+            .await
+        {
+            tracing::warn!(
+                er.job_id = %ctx.order.job_id,
+                er.org = %org.name,
+                error = %e,
+                "provisioned the org but its default dataset stayed provisioning"
+            );
+        }
         Ok(Outcome::Done(
             Plan(OrgActivated { activated: moved }),
             er_dag::Counters(serde_json::json!({ "already_active": !moved })),
