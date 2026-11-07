@@ -25,6 +25,8 @@ use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header, jw
 use serde::Deserialize;
 use tokio::sync::Mutex;
 
+mod ring_jwt;
+
 /// The audience the task template's projected volume binds (§6.2).
 pub const AUDIENCE: &str = "er-control-plane";
 /// Bounded clock-skew tolerance on `exp`/`nbf` (§6.4).
@@ -123,6 +125,9 @@ pub struct Verifier {
 impl Verifier {
     #[must_use]
     pub fn new(source: Box<dyn JwksSource>) -> Self {
+        // Every `decode` goes through a `Verifier`, so installing here is
+        // ahead of jsonwebtoken's first use of its process default.
+        ring_jwt::install();
         Verifier {
             source,
             cache: Mutex::new(Cache {
@@ -313,6 +318,7 @@ mod tests {
     }
 
     fn mint(kid: &str, aud: &str, exp_offset: i64, pod: Option<(&str, &str)>) -> String {
+        ring_jwt::install();
         let mut header = Header::new(Algorithm::RS256);
         header.kid = Some(kid.to_string());
         let mut k8s = json!({ "namespace": "er-dev-test" });

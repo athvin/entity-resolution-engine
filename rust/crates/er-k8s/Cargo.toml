@@ -8,14 +8,14 @@ repository.workspace = true
 description = "The Kubernetes half of batch-orchestration-design §6: the PodApi seam, the per-attempt Job manifest, the watch/observer discipline, and the pure pre-start and terminal classifiers."
 
 [dependencies]
-# kube 4.0.x is the recorded dependency decision (design §11 Phase 0): it holds
-# under the workspace's 1.88 floor where 4.2 wants 1.89, and it must never pull
+# kube 5.0.x, with the workspace floor raised to 1.89 for it (design §11 Phase 0
+# named that raise as the recorded dependency decision). It must never pull
 # aws-lc-rs — rustls/ring is the one crypto stack this image links.
-kube = { version = "=4.0.0", default-features = false, features = ["client", "rustls-tls", "ring", "runtime"] }
-# 0.28 is what kube 4.0 pins; its newest API-types feature is v1_33, which
-# serves a 1.36 cluster fine for the stable batch/v1 + core/v1 surface this
-# crate touches (the design named v1_36; that feature arrives with kube 4.2).
-k8s-openapi = { version = "0.28", features = ["v1_33"] }
+kube = { version = "=5.0.0", default-features = false, features = ["client", "rustls-tls", "ring", "runtime"] }
+# 0.29 is what kube 5.0 pins; the two must move together, or the build carries
+# two copies of every API type. v1_33 serves a 1.36 cluster fine for the stable
+# batch/v1 + core/v1 surface this crate touches.
+k8s-openapi = { version = "0.29", features = ["v1_33"] }
 futures = "0.3"
 serde.workspace = true
 serde_json.workspace = true
