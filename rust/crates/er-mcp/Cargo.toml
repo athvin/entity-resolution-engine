@@ -20,6 +20,7 @@ serde_json = { workspace = true }
 reqwest = { workspace = true }
 tokio = { workspace = true }
 er-obs = { version = "0.1.0", path = "../er-obs" }
+tracing.workspace = true
 
 [lints]
 workspace = true

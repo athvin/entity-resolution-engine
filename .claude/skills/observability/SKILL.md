@@ -47,7 +47,8 @@ it needs no registry entry. The table is the decision:
 |---|---|---|
 | Identity — statement, relation, org, dataset, run, stage, request, action | a span attribute | free on a span; a metric prices it per series |
 | A distribution or rate a dashboard needs | a metric, declared in `er-obs/src/registry.rs` | and only over dimensions drawn from a closed vocabulary |
-| Text — an error message, a diagnostic, a human-readable narration | a `tracing::` event | events stay in-account; see failure 3 below |
+| Text an operator will read later — an error, a diagnostic | a `tracing::` event | events stay in-account; see failure 3 below |
+| Text the person who ran the command reads now | `eprintln!` on stderr | only for an interactive role; see the rule at the bottom |
 | A per-stage count | a promoted counter or the free-form payload in `er-obs/src/counters.rs` | it belongs on `run_stages`, not on a metric |
 
 "Lean towards over-logging" cashes in at the **filter**, not at the call site:
@@ -233,9 +234,16 @@ lie, and why a clean run cannot find the defects that matter.
 
 ## Old patterns, and what is deliberately unwired
 
-- **`eprintln!` is the pre-`tracing` idiom** and conversion is incomplete.
-  `references/surface.md` derives where it still is. User-facing CLI output is
-  correctly an `eprintln!`; a diagnostic a dashboard should see is not.
+- **`eprintln!` is not uniformly the pre-`tracing` idiom**, and "convert them
+  all" is the wrong instinct. Ask `er_obs::Role::is_deployed`: for a **deployed**
+  role (`Api`, `Dispatcher`, `Task`, `Mcp`) nobody is watching the terminal, so a
+  diagnostic must be a structured event or it reaches an operator with no
+  ancestry and no target to filter by. For an **interactive** role (`Cli`,
+  `EntityCli`, `Dedupe`) stderr *is* the product — `er-entity check`'s output is
+  asserted by tests — and routing it through the subscriber would wrap it in JSON
+  and put it behind `RUST_LOG`, where a narrow filter makes it vanish. Both
+  idioms in one file is the expected end state, not a half-finished migration.
+  `references/surface.md` derives the split, so it cannot drift from the arms.
 - **`er_obs::logging::stage_record_line` has no callers on purpose.** Its key
   set is validated exactly against the promoted counters, and calling it with
   those defaulted to zero would fill `run_stages` with zeros that every

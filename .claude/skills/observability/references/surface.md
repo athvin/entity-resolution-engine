@@ -78,6 +78,7 @@ be grouped, filtered by target, or joined to a trace.
 **Product files emitting structured events:**
 
 - `er-cli/src/lib.rs`
+- `er-mcp/src/main.rs`
 - `er-obs/src/identity.rs`
 - `er-obs/src/init.rs`
 - `er-obs/src/otlp.rs`
@@ -99,20 +100,44 @@ be grouped, filtered by target, or joined to a trace.
 - `er-server/src/telemetry.rs`
 - `er-span/src/lib.rs`
 
-**Product files still writing `eprintln!` and no structured event.**
-This is the gap worth reading, and it is not all defect: a CLI's
-user-facing error output is correctly an `eprintln!`, while a diagnostic
-a dashboard should see is not. Judge each by whether anything downstream
-needs to group it:
+The set below is split by `er_obs::init::Role::is_deployed`, because
+whether a bare `eprintln!` is a defect depends entirely on whether
+anyone is watching the terminal. Deployed roles are
+`Api Dispatcher Mcp Task`;
+interactive ones are
+`Cli Dedupe EntityCli`.
 
-- `dedupe-cli/src/main.rs`
-- `er-cli/src/cli.rs`
-- `er-cli/src/profile.rs`
-- `er-entity-cli/src/main.rs`
-- `er-mcp/src/main.rs`
-- `er-server/src/bin/er-openapi-check.rs`
+#### The actual gap — a deployed process writing unstructured stderr
 
-**Mid-conversion — both idioms in one file:**
+Nobody reads these terminals. Each line here reaches an operator only
+through Fluent Bit, with no span ancestry to attribute it and no target
+to filter it by. **These are worth converting:**
+
+**None.** Every deployed role emits structured events.
+
+#### Correct as-is — interactive output
+
+Here stderr **is the product**: `er-entity check`'s output is asserted
+by tests, `er-entity lint` prints diagnostics a human acts on, and
+`dedupe`'s "wrote N rows" is read by whoever typed the command.
+Routing these through the subscriber would wrap them in JSON and put
+them behind `RUST_LOG`. **Do not convert them:**
+
+- `dedupe-cli/src/main.rs` — `Role::Dedupe`
+- `er-cli/src/cli.rs` — `Role::Cli`
+- `er-cli/src/profile.rs` — `Role::Cli`
+- `er-entity-cli/src/main.rs` — `Role::EntityCli`
+
+#### Cannot emit — no subscriber installed
+
+These binaries never call `er_obs::init`, so a `tracing` event
+would go nowhere. `eprintln!` is the only channel they have:
+
+- `er-server/src/bin/er-openapi-check.rs` — installs no subscriber
+
+**Mid-conversion — both idioms in one file.** Expected and not a
+defect: a deployed role's operational diagnostics become events while
+its genuine user-facing output stays an `eprintln!`.
 
 - `er-cli/src/lib.rs`
 - `er-obs/src/init.rs`
