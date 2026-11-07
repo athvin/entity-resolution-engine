@@ -1034,7 +1034,7 @@ const REPORT_TO_KEY: &str = "ER_RUN_REPORT_TO";
 ///
 /// Pure so the whole decision is testable without a mailer, a Postgres or a
 /// job: every branch below is a rule someone will want to change later.
-fn run_report_messages(
+pub(crate) fn run_report_messages(
     org_name: &str,
     env: &Value,
     job: &Job,

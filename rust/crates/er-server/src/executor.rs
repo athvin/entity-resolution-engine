@@ -145,6 +145,11 @@ pub struct Executor {
     client: Client,
     api: Arc<dyn PodApi>,
     cfg: ExecutorConfig,
+    /// Outbound mail for the run report the settle sends. Built here rather
+    /// than handed in so `connect`'s signature stays what the integration
+    /// tests already call; with no SES configuration this is the `off` mailer
+    /// and `send` is a no-op.
+    mailer: crate::mail::Mailer,
     epoch: String,
     /// Per-launch pre-start clocks (first observation of the standing
     /// evidence); an executor restart re-arms the bounds, which is safe — a
@@ -166,6 +171,7 @@ impl Executor {
             client,
             api,
             cfg,
+            mailer: crate::mail::Mailer::from_env().await,
             epoch: er_ids::new_v7(),
             pending_since: BTreeMap::new(),
         })
@@ -406,7 +412,7 @@ impl Executor {
             // Absent for every kind with no `finish` task, and that is correct:
             // `lake_maintain`, `train` and `profile` reconcile no entities, so
             // there is nothing to announce.
-            if let Some(counts) = live
+            let pairs: Vec<(String, i64)> = live
                 .get("finish")
                 .and_then(|row| row.output.as_ref())
                 .and_then(|out| out.get("doc"))
@@ -414,14 +420,62 @@ impl Executor {
                 .and_then(|v| {
                     serde_json::from_value::<Vec<crate::dags::plans::EntityCount>>(v.clone()).ok()
                 })
-                .filter(|c| !c.is_empty())
-            {
-                let pairs: Vec<(String, i64)> =
-                    counts.into_iter().map(|c| (c.event_type, c.n)).collect();
+                .unwrap_or_default()
+                .into_iter()
+                .map(|c| (c.event_type, c.n))
+                .collect();
+            if !pairs.is_empty() {
                 crate::dispatcher::emit_entity_aggregates(&self.client, &settled, &pairs).await;
             }
+            self.send_run_report(&settled, &pairs).await;
         }
         Ok(worked)
+    }
+
+    /// The run report for a settled job, one message per configured recipient.
+    ///
+    /// This rides the settle last, after the outcome webhook and the entity
+    /// aggregate, because a subscriber watching all three should see the
+    /// outcome first.
+    ///
+    /// It belongs here rather than only in the legacy arm, and that was a real
+    /// gap: `run_report_messages` had exactly one caller, `dispatch_claimed`,
+    /// while the deploy routed every kind to this executor. So the report had
+    /// already stopped being sent in dev and in production — nothing reported
+    /// it, because a mail that is not sent looks identical to a tenant who
+    /// never configured one. Deleting the arm (#645) would have made that
+    /// permanent and silent.
+    ///
+    /// Best-effort throughout, exactly as it was: the job's outcome is already
+    /// persisted, and reporting an outcome is not part of producing it. A
+    /// tenant with no `ER_RUN_REPORT_TO`, or a kind no steward waits on, sends
+    /// nothing — `run_report_messages` owns those rules and is unit-tested
+    /// without a mailer.
+    async fn send_run_report(&self, settled: &Job, entity_counts: &[(String, i64)]) {
+        // The org is read for its name and `env`; a job whose org has vanished
+        // simply sends nothing.
+        let org = match pg::get_org_by_id(&self.client, &settled.org_id).await {
+            Ok(Some(org)) => org,
+            Ok(None) => return,
+            Err(e) => {
+                tracing::warn!(er.job_id = %settled.id, error = %e, "the run report was skipped: reading the org failed");
+                return;
+            }
+        };
+        for message in
+            crate::dispatcher::run_report_messages(&org.name, &org.env, settled, entity_counts)
+        {
+            if let Err(e) = self.mailer.send(&message).await {
+                tracing::warn!(
+                    er.job_id = %settled.id,
+                    error = %e,
+                    // `message.to` is deliberately NOT a field: it is a
+                    // recipient address, and §10.4 keeps plaintext email off
+                    // anything exportable.
+                    "sending the run report failed"
+                );
+            }
+        }
     }
 
     // ---- control tasks ------------------------------------------------------
