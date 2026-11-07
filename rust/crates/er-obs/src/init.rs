@@ -69,33 +69,48 @@ impl Role {
         }
     }
 
-    /// Whether this role runs as a **deployed process** rather than at the
-    /// terminal of the person who started it.
+    /// Whether this role runs **unattended** — with nobody reading its stderr
+    /// as the output of a command they just typed.
     ///
     /// This decides where a diagnostic belongs, and it is the one question
     /// `eprintln!` versus `tracing::warn!` actually turns on:
     ///
-    /// - **Deployed.** Nobody is watching the terminal. stderr is read later by
-    ///   an operator, through Fluent Bit and CloudWatch, so a diagnostic has to
-    ///   be a structured event — it needs span ancestry to be attributable to a
-    ///   run or a tenant, and a target so the default filter can hold its
-    ///   volume down. A bare `eprintln!` here is a line nobody can group,
-    ///   filter or join to a trace.
-    /// - **Interactive.** stderr **is the product**. `er-entity check`'s output
-    ///   is asserted by tests, `er-entity lint` prints diagnostics a human acts
+    /// - **Unattended.** Nobody is watching. stderr is consumed by something
+    ///   else later — a log shipper, a host process — so a diagnostic has to be
+    ///   a structured event: it needs span ancestry to be attributable to a run
+    ///   or a tenant, and a target so the default filter can hold its volume
+    ///   down. A bare `eprintln!` here is a line nobody can group, filter or
+    ///   join to a trace.
+    /// - **Attended.** stderr **is the product**. `er-entity check`'s output is
+    ///   asserted by tests, `er-entity lint` prints diagnostics a human acts
     ///   on, and `dedupe`'s "wrote N rows to …" is read by whoever typed the
     ///   command. Routing those through the subscriber would wrap them in JSON
     ///   and put them behind `RUST_LOG`, where a narrow filter makes them
     ///   vanish. `eprintln!` is correct, and converting it is a regression.
     ///
+    /// ## Why not `is_deployed`, which this was first called
+    ///
+    /// Because that name is checkably false for [`Role::Mcp`], and the original
+    /// justification for it — "stderr is read later by an operator, through
+    /// Fluent Bit and CloudWatch" — describes only the pod roles. **`er-mcp` is
+    /// not deployed at all:** it appears nowhere in `infra/`, is not an image
+    /// target, and is in no Dockerfile. An MCP client spawns it as a stdio
+    /// subprocess, so there is no cluster and no Fluent Bit in its path.
+    ///
+    /// It still belongs on this side, which is the point: its stderr is
+    /// surfaced by the host client rather than read as a command's output, and
+    /// its parse-rejection path fires on untrusted input at runtime. So
+    /// "unattended" and "deployed" are different questions, and only the first
+    /// one predicts the right logging idiom.
+    ///
     /// Stated as a value rather than left to this module's prose because
     /// `.claude/skills/observability` derives its structured-logging gap from
     /// these arms. The first version of that gap counted every file with an
     /// `eprintln!` and no `tracing` event, which named six files of correct
-    /// interactive output as if they were defects — a measurement that would
-    /// have driven exactly the wrong change.
+    /// attended output as if they were defects — a measurement that would have
+    /// driven exactly the wrong change.
     #[must_use]
-    pub const fn is_deployed(self) -> bool {
+    pub const fn is_unattended(self) -> bool {
         match self {
             Self::Api | Self::Dispatcher | Self::Task | Self::Mcp => true,
             Self::Cli | Self::EntityCli | Self::Dedupe => false,
@@ -170,8 +185,8 @@ pub const DEFAULT_FILTER: &str = concat!(
 /// events", which was wrong twice over and is worth not restoring. The count was
 /// stale, and the premise was false: most of those are an **interactive** role's
 /// output, where stderr is the product and converting it is a regression — see
-/// [`Role::is_deployed`], which is where that distinction is a value rather than
-/// a claim in prose.
+/// [`Role::is_unattended`], which is where that distinction is a value rather
+/// than a claim in prose.
 ///
 /// Nothing is lost in-account. Every event still reaches stderr through the
 /// structured JSON layer and Fluent Bit still ships it to CloudWatch, which is
@@ -447,27 +462,32 @@ mod tests {
     }
 
     #[test]
-    fn the_deployed_roles_are_the_ones_nobody_is_watching() {
-        // The pod verb is the arm worth pinning. `Role::Cli` is the `er`
-        // pipeline CLI a human invokes (`er_cli::cli::run()` parses argv),
-        // while the pod runs `exec-task` as `Role::Task` — so "is this the
-        // engine?" is NOT the question, and classifying by crate instead of by
-        // role would put `Task` on the wrong side.
-        for deployed in [Role::Api, Role::Dispatcher, Role::Task, Role::Mcp] {
+    fn the_unattended_roles_are_the_ones_nobody_is_watching() {
+        // Two arms are worth pinning for opposite reasons.
+        //
+        // `Task` because the obvious shortcut is wrong: `Role::Cli` is the `er`
+        // pipeline CLI a human invokes (`er_cli::cli::run()` parses argv) while
+        // the pod runs `exec-task` as `Role::Task`, so "is this the engine?" is
+        // NOT the question and classifying by crate would misfile it.
+        //
+        // `Mcp` because it is unattended WITHOUT being deployed — nothing in
+        // `infra/`, no image target, no Dockerfile — which is exactly why this
+        // predicate is not called `is_deployed`.
+        for unattended in [Role::Api, Role::Dispatcher, Role::Task, Role::Mcp] {
             assert!(
-                deployed.is_deployed(),
-                "{} is deployed: its stderr is read by an operator, not by the \
-                 person who started it, so its diagnostics must be structured",
-                deployed.service_name()
+                unattended.is_unattended(),
+                "{} runs unattended: nobody reads its stderr as the output of a \
+                 command they typed, so its diagnostics must be structured",
+                unattended.service_name()
             );
         }
-        for interactive in [Role::Cli, Role::EntityCli, Role::Dedupe] {
+        for attended in [Role::Cli, Role::EntityCli, Role::Dedupe] {
             assert!(
-                !interactive.is_deployed(),
-                "{} is interactive: its stderr IS its product, so `eprintln!` \
-                 is correct there and routing it through the subscriber would \
-                 put it behind RUST_LOG",
-                interactive.service_name()
+                !attended.is_unattended(),
+                "{} is attended: its stderr IS its product, so `eprintln!` is \
+                 correct there and routing it through the subscriber would put \
+                 it behind RUST_LOG",
+                attended.service_name()
             );
         }
     }

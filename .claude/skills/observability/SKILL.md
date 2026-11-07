@@ -235,15 +235,21 @@ lie, and why a clean run cannot find the defects that matter.
 ## Old patterns, and what is deliberately unwired
 
 - **`eprintln!` is not uniformly the pre-`tracing` idiom**, and "convert them
-  all" is the wrong instinct. Ask `er_obs::Role::is_deployed`: for a **deployed**
-  role (`Api`, `Dispatcher`, `Task`, `Mcp`) nobody is watching the terminal, so a
-  diagnostic must be a structured event or it reaches an operator with no
-  ancestry and no target to filter by. For an **interactive** role (`Cli`,
-  `EntityCli`, `Dedupe`) stderr *is* the product — `er-entity check`'s output is
-  asserted by tests — and routing it through the subscriber would wrap it in JSON
-  and put it behind `RUST_LOG`, where a narrow filter makes it vanish. Both
-  idioms in one file is the expected end state, not a half-finished migration.
-  `references/surface.md` derives the split, so it cannot drift from the arms.
+  all" is the wrong instinct. Ask `er_obs::Role::is_unattended`: for an
+  **unattended** role (`Api`, `Dispatcher`, `Task`, `Mcp`) nobody reads that
+  stderr as the output of a command they typed, so a diagnostic must be a
+  structured event or it is consumed later with no ancestry and no target to
+  filter by. For an **attended** role (`Cli`, `EntityCli`, `Dedupe`) stderr *is*
+  the product — `er-entity check`'s output is asserted by tests — and routing it
+  through the subscriber would wrap it in JSON and put it behind `RUST_LOG`,
+  where a narrow filter makes it vanish. Both idioms in one file is the expected
+  end state, not a half-finished migration.
+
+  The predicate is **not** "does it run in the cluster". `Mcp` is unattended
+  without being deployed at all — `er-mcp` is in no Dockerfile and no chart, and
+  an MCP client spawns it over stdio — which is the arm that forced the rename
+  from `is_deployed`. `references/surface.md` derives the split, so it cannot
+  drift from the arms.
 - **`er_obs::logging::stage_record_line` has no callers on purpose.** Its key
   set is validated exactly against the promoted counters, and calling it with
   those defaulted to zero would fill `run_stages` with zeros that every

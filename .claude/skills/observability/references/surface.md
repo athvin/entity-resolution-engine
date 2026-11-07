@@ -100,22 +100,27 @@ be grouped, filtered by target, or joined to a trace.
 - `er-server/src/telemetry.rs`
 - `er-span/src/lib.rs`
 
-The set below is split by `er_obs::init::Role::is_deployed`, because
+The set below is split by `er_obs::init::Role::is_unattended`, because
 whether a bare `eprintln!` is a defect depends entirely on whether
-anyone is watching the terminal. Deployed roles are
+anyone is reading that stderr as the output of a command they typed.
+Unattended roles are
 `Api Dispatcher Mcp Task`;
-interactive ones are
+attended ones are
 `Cli Dedupe EntityCli`.
 
-#### The actual gap — a deployed process writing unstructured stderr
+Note `Mcp` is unattended without being **deployed** — `er-mcp` is in
+no Dockerfile and no chart — which is why the predicate is not called
+`is_deployed`.
 
-Nobody reads these terminals. Each line here reaches an operator only
-through Fluent Bit, with no span ancestry to attribute it and no target
-to filter it by. **These are worth converting:**
+#### The actual gap — an unattended process writing unstructured stderr
 
-**None.** Every deployed role emits structured events.
+Nobody reads these terminals. Each line here is consumed later by a log
+shipper or a host process, with no span ancestry to attribute it and no
+target to filter it by. **These are worth converting:**
 
-#### Correct as-is — interactive output
+**None.** Every unattended role emits structured events.
+
+#### Correct as-is — attended output
 
 Here stderr **is the product**: `er-entity check`'s output is asserted
 by tests, `er-entity lint` prints diagnostics a human acts on, and
@@ -136,7 +141,7 @@ would go nowhere. `eprintln!` is the only channel they have:
 - `er-server/src/bin/er-openapi-check.rs` — installs no subscriber
 
 **Mid-conversion — both idioms in one file.** Expected and not a
-defect: a deployed role's operational diagnostics become events while
+defect: an unattended role's operational diagnostics become events while
 its genuine user-facing output stays an `eprintln!`.
 
 - `er-cli/src/lib.rs`

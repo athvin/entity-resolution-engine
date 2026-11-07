@@ -2160,19 +2160,19 @@ gen_obs_surface() {
 	# have meant breaking them. A metric that makes correct code look like debt
 	# is worse than no metric.
 	#
-	# Classification comes from `Role::is_deployed`, a value in `er-obs` with
+	# Classification comes from `Role::is_unattended`, a value in `er-obs` with
 	# its own test, NOT from the role's doc comment. Every claim this skill
 	# borrowed from a module doc has so far been wrong, so the arms are read
 	# from the match and a crate with no `er_obs::init` call at all is dropped:
 	# it has no subscriber, so it physically cannot emit an event and listing it
 	# is noise.
-	local deployed_roles undeployed_roles deployed_gap interactive_gap nosub
-	deployed_roles=$(
-		sed -n '/const fn is_deployed/,/^    }/p' "$crates/er-obs/src/init.rs" 2>/dev/null |
+	local unattended_roles attended_roles unattended_gap attended_gap nosub
+	unattended_roles=$(
+		sed -n '/const fn is_unattended/,/^    }/p' "$crates/er-obs/src/init.rs" 2>/dev/null |
 			grep -E '=> true' | grep -oE 'Self::[A-Za-z]+' | sed 's/Self:://' | sort -u || true
 	)
-	undeployed_roles=$(
-		sed -n '/const fn is_deployed/,/^    }/p' "$crates/er-obs/src/init.rs" 2>/dev/null |
+	attended_roles=$(
+		sed -n '/const fn is_unattended/,/^    }/p' "$crates/er-obs/src/init.rs" 2>/dev/null |
 			grep -E '=> false' | grep -oE 'Self::[A-Za-z]+' | sed 's/Self:://' | sort -u || true
 	)
 	# file -> the Role(s) whose process it runs in.
@@ -2200,8 +2200,8 @@ gen_obs_surface() {
 			;;
 		esac
 	}
-	deployed_gap=""
-	interactive_gap=""
+	unattended_gap=""
+	attended_gap=""
 	nosub=""
 	if [[ -n ${onlybare//[[:space:]]/} ]]; then
 		while read -r f; do
@@ -2223,20 +2223,20 @@ gen_obs_surface() {
 			# by name and caught it here, which is also why this comment
 			# describes it in words: the detector is textual, so spelling the
 			# construct out in a comment trips it just as the real thing does.
-			verdict=interactive
+			verdict=attended
 			while read -r r; do
 				[[ -n $r ]] || continue
-				[[ $'\n'$deployed_roles$'\n' == *$'\n'"$r"$'\n'* ]] && verdict=deployed
+				[[ $'\n'$unattended_roles$'\n' == *$'\n'"$r"$'\n'* ]] && verdict=unattended
 			done <<<"$rs"
-			if [[ $verdict == deployed ]]; then
-				deployed_gap+="- \`$f\` — \`Role::$label\`"$'\n'
+			if [[ $verdict == unattended ]]; then
+				unattended_gap+="- \`$f\` — \`Role::$label\`"$'\n'
 			else
-				interactive_gap+="- \`$f\` — \`Role::$label\`"$'\n'
+				attended_gap+="- \`$f\` — \`Role::$label\`"$'\n'
 			fi
 		done <<<"$onlybare"
 	fi
-	deployed_gap=${deployed_gap%$'\n'}
-	interactive_gap=${interactive_gap%$'\n'}
+	unattended_gap=${unattended_gap%$'\n'}
+	attended_gap=${attended_gap%$'\n'}
 	nosub=${nosub%$'\n'}
 
 	echo "### Which side of the split each crate is on"
@@ -2297,26 +2297,31 @@ gen_obs_surface() {
 	echo
 	bullets "$structured" "**None**, which would mean the subscriber has nothing to collect."
 	echo
-	echo "The set below is split by \`er_obs::init::Role::is_deployed\`, because"
+	echo "The set below is split by \`er_obs::init::Role::is_unattended\`, because"
 	echo "whether a bare \`eprintln!\` is a defect depends entirely on whether"
-	echo "anyone is watching the terminal. Deployed roles are"
-	echo "\`$(printf '%s' "$deployed_roles" | tr '\n' ' ' | sed 's/ $//')\`;"
-	echo "interactive ones are"
-	echo "\`$(printf '%s' "$undeployed_roles" | tr '\n' ' ' | sed 's/ $//')\`."
+	echo "anyone is reading that stderr as the output of a command they typed."
+	echo "Unattended roles are"
+	echo "\`$(printf '%s' "$unattended_roles" | tr '\n' ' ' | sed 's/ $//')\`;"
+	echo "attended ones are"
+	echo "\`$(printf '%s' "$attended_roles" | tr '\n' ' ' | sed 's/ $//')\`."
 	echo
-	echo "#### The actual gap — a deployed process writing unstructured stderr"
+	echo "Note \`Mcp\` is unattended without being **deployed** — \`er-mcp\` is in"
+	echo "no Dockerfile and no chart — which is why the predicate is not called"
+	echo "\`is_deployed\`."
 	echo
-	echo "Nobody reads these terminals. Each line here reaches an operator only"
-	echo "through Fluent Bit, with no span ancestry to attribute it and no target"
-	echo "to filter it by. **These are worth converting:**"
+	echo "#### The actual gap — an unattended process writing unstructured stderr"
 	echo
-	if [[ -n ${deployed_gap//[[:space:]]/} ]]; then
-		printf '%s\n' "$deployed_gap"
+	echo "Nobody reads these terminals. Each line here is consumed later by a log"
+	echo "shipper or a host process, with no span ancestry to attribute it and no"
+	echo "target to filter it by. **These are worth converting:**"
+	echo
+	if [[ -n ${unattended_gap//[[:space:]]/} ]]; then
+		printf '%s\n' "$unattended_gap"
 	else
-		echo "**None.** Every deployed role emits structured events."
+		echo "**None.** Every unattended role emits structured events."
 	fi
 	echo
-	echo "#### Correct as-is — interactive output"
+	echo "#### Correct as-is — attended output"
 	echo
 	echo "Here stderr **is the product**: \`er-entity check\`'s output is asserted"
 	echo "by tests, \`er-entity lint\` prints diagnostics a human acts on, and"
@@ -2324,8 +2329,8 @@ gen_obs_surface() {
 	echo "Routing these through the subscriber would wrap them in JSON and put"
 	echo "them behind \`RUST_LOG\`. **Do not convert them:**"
 	echo
-	if [[ -n ${interactive_gap//[[:space:]]/} ]]; then
-		printf '%s\n' "$interactive_gap"
+	if [[ -n ${attended_gap//[[:space:]]/} ]]; then
+		printf '%s\n' "$attended_gap"
 	else
 		echo "**None.**"
 	fi
@@ -2340,7 +2345,7 @@ gen_obs_surface() {
 		echo
 	fi
 	echo "**Mid-conversion — both idioms in one file.** Expected and not a"
-	echo "defect: a deployed role's operational diagnostics become events while"
+	echo "defect: an unattended role's operational diagnostics become events while"
 	echo "its genuine user-facing output stays an \`eprintln!\`."
 	echo
 	bullets "$both" "**None.**"
