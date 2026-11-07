@@ -401,20 +401,36 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # actionlint itself is advisory here — the script runs it when present and
-      # says so when it is not, so a hiccup installing it can never fail the
-      # pinning half. Installed through the action this repo already pins rather
-      # than a fresh third-party one.
-      - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
-        with:
-          tool: actionlint
-        continue-on-error: true
+      - name: install actionlint (pinned, checksum-verified)
+        # This replaced `taiki-e/install-action` with `tool: actionlint` and
+        # `continue-on-error: true`, which could NEVER succeed: that action
+        # resolves an unknown tool as a Rust crate and actionlint is a Go binary
+        # absent from its TOOLS.md. Every run logged `× For crate actionlint:
+        # actionlint is not found`, the swallowed failure left the binary absent,
+        # and the linting half skipped while the job stayed green on the pin
+        # check alone. No `continue-on-error` here: a failed install is now a
+        # failed job, which is the only way absence can stop reading as success.
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/ci/install-actionlint.sh
       - name: every `uses:` is SHA-pinned with its tag comment
         # Mandatory: this workflow defaults every `run` to `rust/`, and the
         # script lives at the repo root. Without it the step dies with exit 127
         # before checking anything, which is how the `skills` job first failed.
+        #
+        # ACTIONLINT_REQUIRED=1 is the other half of the fix above: it makes a
+        # missing binary a failure rather than a logged skip, so the two steps
+        # cannot quietly go back to proving only the pin half.
         working-directory: ${{ github.workspace }}
+        env:
+          ACTIONLINT_REQUIRED: "1"
         run: bash scripts/ci/actionlint.sh
+      - name: the actionlint-required branch still fails when it should
+        # A detector breaks by noticing nothing, and the branch above is exactly
+        # the one that spent months reporting success while running nothing. Its
+        # self-test is here, ungated, beside the siblings that test the same
+        # class of defect.
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/ci/actionlint-required-test.sh
       - name: the `detect` path classifier still classifies
         # Lives in this job because it must be UNGATED. `detect` decides whether
         # the compile jobs run, so a test for it placed in a job that `detect`
