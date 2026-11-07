@@ -18,13 +18,21 @@
 # enforced it. The check that cannot be deleted by a dependency cleanup is the
 # one with no dependencies.
 #
-# actionlint proper is still worth running and is NOT reimplemented here. If a
-# binary is on PATH this script runs it; if not, it says so and continues,
-# because an advisory linter must not be able to fail the pinning gate. Bringing
-# it back under a pin is follow-up work, not a reason to leave S9 unguarded.
+# actionlint proper is still worth running and is NOT reimplemented here. It is
+# now installed under a pin by `scripts/ci/install-actionlint.sh` and is
+# MANDATORY in CI: the workflow sets ACTIONLINT_REQUIRED=1, which turns a
+# missing binary into a failure instead of a skip. Without the binary and
+# without that variable — a developer's laptop — the linting half still skips
+# and the pin check still runs, so this script needs no toolchain locally.
+#
+# That ordering is deliberate. It was advisory first because the pin check had
+# to be guarded immediately and an advisory linter must never be able to fail
+# the pinning half. Advisory then stayed advisory long enough to never run at
+# all (see the ACTIONLINT_REQUIRED branch at the bottom for how that happened).
 #
 # Usage: bash scripts/ci/actionlint.sh [workflow-dir]   # default .github/workflows
-# Exit:  0 clean · 1 an unpinned `uses:` or an actionlint finding · 2 nothing to lint
+# Env:   ACTIONLINT_REQUIRED=1 — a missing actionlint binary is a failure (CI)
+# Exit:  0 clean · 1 an unpinned `uses:`, an actionlint finding, or required-and-absent · 2 nothing to lint
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -122,8 +130,27 @@ if command -v actionlint >/dev/null 2>&1; then
             "${#HANDWRITTEN[@]}" "$(( ${#WORKFLOWS[@]} - ${#HANDWRITTEN[@]} ))"
         actionlint "${HANDWRITTEN[@]}" || status=1
     fi
+elif [[ "${ACTIONLINT_REQUIRED:-0}" == "1" ]]; then
+    # THE HOLE THIS CLOSES. The branch below is correct for a developer who has
+    # not installed actionlint, and catastrophic in CI: it prints a line nobody
+    # reads and exits 0, so "the linter never ran" is indistinguishable from
+    # "the linter found nothing". That was the real state from the day the
+    # Python removal broke the install until 2026-11-07 — `taiki-e/install-action`
+    # could never install actionlint (not a Rust crate, absent from its TOOLS.md)
+    # and `continue-on-error: true` hid it, so this gate's linting half had never
+    # executed once while reporting success.
+    #
+    # So CI sets ACTIONLINT_REQUIRED=1 and absence becomes a failure. The
+    # installer is `scripts/ci/install-actionlint.sh`; if it ran, the binary is
+    # here, and if it did not, that is the thing to be told about.
+    printf 'actionlint: REQUIRED but not on PATH.\n' >&2
+    printf 'ACTIONLINT_REQUIRED=1 means the linting half must run, and it did not.\n' >&2
+    printf 'scripts/ci/install-actionlint.sh should have installed it — check that step.\n' >&2
+    printf 'The S9 pin check above still ran and its verdict stands.\n' >&2
+    status=1
 else
     printf 'actionlint: binary not on PATH; S9 pin check ran, workflow linting skipped\n'
+    printf '(set ACTIONLINT_REQUIRED=1 to make this a failure, as CI does)\n'
 fi
 
 exit "$status"
