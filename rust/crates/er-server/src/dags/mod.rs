@@ -294,7 +294,8 @@ pub fn run_pod_task(
         }
         (JobKind::ApplyCorrections, "apply_staged") => {
             let plan = pin::<er_dag::Plan<plans::RunPlan>>(ctx, 0)?;
-            completed(tasks::ApplyStaged.run(ctx, (plan,))?)
+            let drained = pin::<er_dag::Plan<plans::DrainedActions>>(ctx, 1)?;
+            completed(tasks::ApplyStaged.run(ctx, (plan, drained))?)
         }
         (JobKind::ApplyCorrections, "reconcile") => {
             let plan = pin::<er_dag::Plan<plans::RunPlan>>(ctx, 0)?;
@@ -452,7 +453,11 @@ fn apply_corrections() -> Dag {
     let mut d = Builder::new(JobKind::ApplyCorrections.dag_name());
     let drained = d.control::<DrainActions>(());
     let plan = d.then::<CorrectionsInit>((drained,));
-    let applied = d.then::<ApplyStaged>((plan,));
+    // `drained` is a DIRECT upstream of `apply_staged`, not just a transitive
+    // one through `init`. `compose_input` pins direct upstreams only, so the
+    // drained payloads had no route to the pod that applies them (#760) —
+    // `init`'s `RunPlan` does not carry them and was never going to.
+    let applied = d.then::<ApplyStaged>((plan, drained));
     let ents = d.then::<CorrectionsReconcile>((plan, applied));
     let done = d.then::<Assemble>((plan, ents));
     // `settle_actions` takes the APPLIED receipt, not just the drained set:

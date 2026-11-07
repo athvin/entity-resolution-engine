@@ -314,10 +314,26 @@ impl ControlTask<PgClient> for DrainActions {
                         .with_class(er_errors::ErrorClass::TransientIo),
                 )
             })?;
-        let action_ids: Vec<String> = pending.into_iter().map(|a| a.id).collect();
+        // The ids AND the payloads. `apply_staged` runs in a pod with no
+        // control-plane credential (§6.4), so whatever it needs has to travel
+        // along this edge; keeping only the ids is what left it applying
+        // nothing (#760). The ids stay as their own field because
+        // `settle_actions` and the counters read them.
+        let action_ids: Vec<String> = pending.iter().map(|a| a.id.clone()).collect();
+        let actions: Vec<crate::dags::plans::DrainedAction> = pending
+            .into_iter()
+            .map(|a| crate::dags::plans::DrainedAction {
+                id: a.id,
+                action: a.action,
+                created_by: a.created_by,
+            })
+            .collect();
         let count = action_ids.len();
         Ok(Outcome::Done(
-            Plan(DrainedActions { action_ids }),
+            Plan(DrainedActions {
+                action_ids,
+                actions,
+            }),
             er_dag::Counters(serde_json::json!({ "drained": count })),
         ))
     }
