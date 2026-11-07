@@ -53,6 +53,7 @@ the same fix.
 | `landing-page` | the `(marketing)` route group that prerenders statically inside the same app that serves the BFF |
 | `observability` | the `er-span`/`er-obs` split where library crates carry only `tracing` while a binary installs the subscriber |
 | `pentest` | a Strix-style run that does recon over the attack surface, fans out a tester subagent per vulnerability category (user-invoked only) |
+| `pr-review` | reviewing a pull request, a branch or the working diff before merge (user-invoked only) |
 | `project-board` | the `gh project` surface for user-owned project #2 "Product Roadmap" and the `project` scope it needs |
 | `rust-conventions` | that `make check` (not the bare cargo trio) is the finish line |
 | `security` | the attack surface (internet-facing Next.js BFF in front of the privileged Rust er-server control plane) |
@@ -132,16 +133,17 @@ can still accept a routing clause.
 | Headroom | Skill | Length |
 |---:|---|---:|
 |   31 | `aws-account-operations` | 993 |
+|   36 | `security` | 988 |
 |   40 | `frontend-bff` | 984 |
 |   41 | `er-server-control-plane` | 983 |
+|   62 | `rust-conventions` | 962 |
 |   66 | `entity-framework` | 958 |
-|   67 | `security` | 957 |
 |   68 | `skill-audit` | 956 |
 |   72 | `infra-platform` | 952 |
+|   75 | `land-pr` | 949 |
 |   76 | `sql-analysis` | 948 |
 |   77 | `frontend-design-system` | 947 |
 |   80 | `ducklake-lakehouse` | 944 |
-|   85 | `rust-conventions` | 939 |
 |   88 | `frontend-data-ui` | 936 |
 |   89 | `frontend-testing` | 935 |
 |   90 | `er-engine-ops` | 934 |
@@ -151,8 +153,8 @@ can still accept a routing clause.
 |  102 | `claim-ticket` | 922 |
 |  104 | `ducklake-performance` | 920 |
 |  111 | `project-board` | 913 |
+|  129 | `pr-review` | 895 |
 |  130 | `observability` | 894 |
-|  133 | `land-pr` | 891 |
 |  138 | `skill-writer` | 886 |
 |  177 | `api-contract` | 847 |
 |  342 | `pentest` | 682 |
@@ -162,6 +164,7 @@ headroom than that cannot take another one — adding routing to any of them
 means trimming its **what** clause first, which is the documented fix:
 
 - `aws-account-operations` — 31 characters free
+- `security` — 36 characters free
 - `frontend-bff` — 40 characters free
 - `er-server-control-plane` — 41 characters free
 <!-- END GENERATED: description-budget -->
@@ -235,6 +238,7 @@ So: counts, version numbers, job names, rule codes and thresholds live in
 | `frontend-testing/references/tiers-and-thresholds.md` | `vitest.config.ts`, `package.json`, `frontend.yml` |
 | `infra-platform/references/coverage.md` | `infra.yml`'s three stack enumerations, `infra/k8s/`, and the `kubectl apply` sites |
 | `observability/references/surface.md` | `er-obs`'s roles and gates, and `tracing` sites vs. remaining `eprintln!` |
+| `pr-review/references/not-a-finding.md` | the tests that scan this workspace's own Rust source and assert the offender list is empty |
 
 Each has a `<!-- BEGIN GENERATED: id -->` / `<!-- END GENERATED: id -->` pair.
 Prose outside the markers survives regeneration; **do not hand-edit inside
@@ -382,6 +386,7 @@ skill, so it gets the same fix.
 | `infra-coverage` | `infra-platform/references/coverage.md` | the three stack enumerations in `infra.yml` set-differenced against the stacks in the tree, every `infra/k8s` path against the sites that reference it, and the NodePool manifests against the non-recursive `kubectl apply` |
 | `post-merge-surface` | `land-pr/references/post-merge.md` | each non-gh-aw workflow's `on:` block, narrowed to those that run after a merge, set-differenced against the ones carrying a `pull_request` trigger — what is left is the surface no pull request can pre-test |
 | `obs-surface` | `observability/references/surface.md` | `er-obs`'s `Role::service_name` match arms, the telemetry gates found by their own module docs, and `tracing` event sites set-differenced against the files still writing only `eprintln!` |
+| `review-gates` | `pr-review/references/not-a-finding.md` | every `rust/crates/*/tests/*.rs` that reads `.rs` source with `read_to_string` and asserts `is_empty()` — the structural gates whose finding would be a red test — each with the first line of its own module doc as the claim, and whether a tier variable makes it self-skip in `make check` |
 | `description-budget` | this document | every `SKILL.md`'s `description` length against the 1,024-character cap, sorted by headroom, plus the median length of the `for … see …` routing clauses it would have to make room for |
 | `skill-inventory` | this document **and** `CLAUDE.md` | every `SKILL.md`'s `name`, `description` and `disable-model-invocation` |
 The **set difference** is the shape worth copying — `diagnostics`,

@@ -344,6 +344,7 @@ The table below is **generated** from each skill's frontmatter by
 | editing or adding a marketing page or its copy | `landing-page` |
 | adding a span, metric, counter, gauge, log line or trace attribute | `observability` |
 | invoking /pentest, /pentest <category>, /pentest live (user-invoked only) | `pentest` |
+| reviewing a pull request, a branch or the working diff before merge (user-invoked only) | `pr-review` |
 | asked what is on the board or to add, triage or move a card | `project-board` |
 | authoring or reviewing any Rust in this repo | `rust-conventions` |
 | reviewing an endpoint or handler for SSRF/injection/tenant-isolation/auth/business-logic abuse | `security` |

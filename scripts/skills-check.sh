@@ -2351,6 +2351,76 @@ gen_obs_surface() {
 	bullets "$both" "**None.**"
 }
 
+# The source-scanning structural gates: tests that read this workspace's own
+# Rust source and assert the offender list is empty.
+#
+# Why this set and not "every test with the word gate in its module doc": that
+# wider scan returns the golden tiers and every e2e too, and a reviewer told
+# `golden_em.rs` is a gate learns nothing about what not to report. The three
+# textual conditions below — reads `.rs`, reads it with `read_to_string`,
+# asserts `is_empty()` — select exactly the files whose finding would be a red
+# test naming the offending line, which is the only property `pr-review` needs.
+#
+# The honest limit, stated in the reference's prose: gates that derive from a
+# registry or from the handlers rather than from source text (`cardinality.rs`,
+# `dispatch_coverage.rs`, `response_envelopes.rs`) are invisible here. Each is
+# named in the dimension reference it belongs to instead.
+gen_review_gates() {
+	local f stem crate doc claim skips rows=""
+	for f in rust/crates/*/tests/*.rs; do
+		grep -qE '"rs"|\.rs"' "$f" || continue
+		grep -q 'read_to_string' "$f" || continue
+		grep -q 'is_empty()' "$f" || continue
+
+		stem=${f#rust/crates/}
+		# The module doc's first SENTENCE is the claim: every one of these files
+		# opens with a one-sentence statement of what it forbids. Taking the
+		# first *line* instead truncates mid-clause at the wrap column, which is
+		# how `workspace_self_contained.rs` read as "no source under `rust/` may".
+		doc=$(awk '
+			/^\/\/!/ { sub(/^\/\/![[:space:]]?/, ""); if ($0 ~ /^[[:space:]]*$/) exit; printf "%s ", $0; next }
+			{ exit }
+		' "$f")
+		# Cut at the first period FOLLOWED BY A SPACE, never at a bare period:
+		# `lake.main.<relation>`, `pg_*.rs` and `§3.3/§3.6` are all periods
+		# inside the sentence, and cutting on them produced rows reading
+		# "any qualified `lake." — a table that looks maintained and says nothing.
+		claim=$(printf '%s' "$doc" | sed -e 's/\. .*/./' -e 's/[[:space:]]*$//' -e 's/|/\\|/g')
+		# A doc whose first sentence never ends inside the opening paragraph
+		# would otherwise widen the table without bound.
+		if ((${#claim} > 220)); then
+			claim="${claim:0:200}…"
+		fi
+		[[ -n ${claim//[[:space:]]/} ]] || claim="_(no module doc — read the file)_"
+		# A gate behind a tier variable self-skips in `make check`, which is
+		# the one fact that changes whether a reviewer may raise its subject.
+		if grep -qE 'ER_TEST_PG_DSN|DEDUPE_E2E' "$f"; then
+			skips="e2e tier"
+		else
+			skips="\`make check\`"
+		fi
+		rows+="| \`$stem\` | $claim | $skips |"$'\n'
+	done
+
+	echo "| Gate | What it forbids | Runs in |"
+	echo "|---|---|---|"
+	if [[ -n ${rows//[[:space:]]/} ]]; then
+		printf '%s' "$rows" | sort
+	else
+		echo "| **None found** | the detector matched nothing, which means it broke rather than that the gates were deleted | — |"
+	fi
+	echo
+	echo "Every row above fails with the offending **file and line** in the"
+	echo "message. A finding that restates one is not a false positive — it is"
+	echo "worse, because it arrives with evidence and still wastes the cycle."
+	echo
+	echo "The \`Runs in\` column is the only reason to read a row twice. A gate in"
+	echo "\`make check\` has already spoken by the time a PR is reviewable, so its"
+	echo "subject is settled. A gate in the e2e tier self-skips without its tier"
+	echo "variable, so on a diff whose e2e leg has not reported yet its subject is"
+	echo "still open — raise it, and say which gate will confirm it."
+}
+
 # The files `regen` owns. The drift check diffs ONLY these: diffing the whole
 # skills tree would report an author's in-progress prose edits as generated
 # staleness, which is exactly the moment the message would be most confusing.
@@ -2375,6 +2445,7 @@ generated_files=(
 	"$skills_dir/land-pr/references/post-merge.md"
 	"$skills_dir/er-engine-ops/references/stages-and-flags.md"
 	"$skills_dir/observability/references/surface.md"
+	"$skills_dir/pr-review/references/not-a-finding.md"
 	"docs/agent-skills.md"
 	"CLAUDE.md"
 )
@@ -2428,6 +2499,9 @@ run_regen() {
 
 	gen_obs_surface >"$tmp"
 	splice "$skills_dir/observability/references/surface.md" obs-surface "$tmp"
+
+	gen_review_gates >"$tmp"
+	splice "$skills_dir/pr-review/references/not-a-finding.md" review-gates "$tmp"
 
 	# Two projections of one field, so the two documents cannot disagree about
 	# which skills exist even though they show different columns.
