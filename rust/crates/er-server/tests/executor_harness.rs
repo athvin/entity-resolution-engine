@@ -94,6 +94,7 @@ impl Harness {
         let (api, frames) = FakePodApi::new(format!("http://{addr}"), data_root);
         let api = Arc::new(api);
         let cfg = ExecutorConfig {
+<<<<<<< HEAD
             profile,
             // Every kind: this harness is generic, and a test's job must not
             // fail to route because the harness forgot to list its kind. The
@@ -102,6 +103,11 @@ impl Harness {
                 .iter()
                 .map(|k| k.as_str().to_string())
                 .collect(),
+=======
+            // No `dag_kinds`: the per-kind allowlist is gone, so the executor
+            // owns every kind and the harness has nothing to opt its test's
+            // kind into.
+>>>>>>> 598428be (fix(test): the harness stops opting kinds in, now that there is no allowlist)
             in_flight_cap: 2,
             template: er_k8s::manifest::REFERENCE_TEMPLATE.to_string(),
             image_digest: None,
