@@ -39,6 +39,16 @@ const QUOTA_WAIT_SECS: i64 = 30;
 
 /// Configuration, from the chart through the environment.
 pub struct ExecutorConfig {
+    /// The provisioning profile `create_catalog` needs, resolved once here
+    /// rather than read from the environment inside the task.
+    ///
+    /// This is the seam `dispatch_once_with` has and the executor path lacked.
+    /// A Postgres-tier test cannot set an environment variable —
+    /// `std::env::set_var` is `unsafe` in edition 2024 and the workspace denies
+    /// `unsafe_code` — so a task calling `Profile::from_env()` itself cannot be
+    /// driven by a test at all, which is why provisioning had no coverage on
+    /// the path that runs it.
+    pub profile: Result<Option<crate::provision::Profile>, crate::provision::ProfileError>,
     pub dag_kinds: BTreeSet<String>,
     pub in_flight_cap: i64,
     /// The Job template (the chart's ConfigMap, mounted as a file).
@@ -83,6 +93,7 @@ impl ExecutorConfig {
             Err(_) => er_k8s::manifest::REFERENCE_TEMPLATE.to_string(),
         };
         Some(ExecutorConfig {
+            profile: crate::provision::Profile::from_env(),
             dag_kinds,
             in_flight_cap,
             template,
@@ -518,7 +529,7 @@ impl Executor {
             order: &order,
             client: &self.client,
         };
-        match dags::run_control_task(kind, &row.task_id, &mut ctx).await {
+        match dags::run_control_task(kind, &row.task_id, &mut ctx, &self.cfg.profile).await {
             Ok(run) => {
                 let _ = er_entities::task_instance::update::finish_control(
                     &self.client,

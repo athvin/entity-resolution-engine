@@ -62,6 +62,22 @@ impl Harness {
     /// `data_root` is the directory the fake pods run against — the same
     /// temporary tree the test wrote the tenant's lake and drop files into.
     pub async fn start(dsn: &str, data_root: PathBuf) -> Harness {
+        Harness::start_with_profile(dsn, data_root, Ok(None)).await
+    }
+
+    /// [`start`] with the provisioning profile handed in.
+    ///
+    /// The seam a `provision` test needs: `create_catalog` takes its profile
+    /// from `ExecutorConfig` rather than the environment, because a test here
+    /// cannot set an environment variable at all — `std::env::set_var` is
+    /// `unsafe` in edition 2024 and the workspace denies `unsafe_code`. This is
+    /// the executor-path equivalent of `dispatch_once_with`'s profile
+    /// argument, which exists for exactly that reason.
+    pub async fn start_with_profile(
+        dsn: &str,
+        data_root: PathBuf,
+        profile: Result<Option<er_server::provision::Profile>, er_server::provision::ProfileError>,
+    ) -> Harness {
         // The REAL control plane, so a pod fetches a real work order over HTTP
         // rather than one the test assembled. A mis-built order fails here,
         // which is the whole point of running the tier this way.
@@ -78,6 +94,7 @@ impl Harness {
         let (api, frames) = FakePodApi::new(format!("http://{addr}"), data_root);
         let api = Arc::new(api);
         let cfg = ExecutorConfig {
+            profile,
             // Every kind: this harness is generic, and a test's job must not
             // fail to route because the harness forgot to list its kind. The
             // field goes away with the allowlist in #645.
@@ -109,13 +126,20 @@ impl Harness {
     ) -> String {
         let mut state = String::new();
         for _ in 0..MAX_PUMPS {
+            // Claim on every iteration, which is what `dispatcher::run_loop`
+            // does. `pg::claim` takes the oldest queued row for an org with no
+            // active job, so claiming once would pump someone else's job while
+            // the one under test sat `queued`.
+            let _ = er_server::dispatcher::dispatch_once(client, None, Some(&mut self.executor))
+                .await
+                .expect("dispatch_once");
             pump(&mut self.executor, &mut self.frames).await;
             state = pg::get_job(client, org_id, job_id)
                 .await
                 .unwrap()
                 .map(|j| j.state)
                 .unwrap_or_default();
-            if state != "running" && state != "dispatching" {
+            if state != "running" && state != "dispatching" && state != "queued" {
                 break;
             }
             tokio::time::sleep(PUMP_EVERY).await;

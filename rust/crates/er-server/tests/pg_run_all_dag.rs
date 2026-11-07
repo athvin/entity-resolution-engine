@@ -80,6 +80,8 @@ async fn lake_maintain_runs_end_to_end_through_the_executor() {
     let (api, mut frames) = FakePodApi::new(format!("http://{addr}"), tmp.clone());
     let api = Arc::new(api);
     let cfg = ExecutorConfig {
+        // Neither kind here provisions, so no profile is needed.
+        profile: Ok(None),
         dag_kinds: ["lake_maintain".to_string()].into_iter().collect(),
         in_flight_cap: 2,
         template: er_k8s::manifest::REFERENCE_TEMPLATE.to_string(),

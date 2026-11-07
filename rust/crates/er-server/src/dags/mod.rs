@@ -205,15 +205,18 @@ pub async fn run_control_task(
     kind: JobKind,
     task_id: &str,
     ctx: &mut er_dag::ControlCtx<'_, PgClient>,
+    profile: &Result<Option<crate::provision::Profile>, crate::provision::ProfileError>,
 ) -> Result<PodTaskRun, er_dag::TaskError> {
     use er_dag::ControlTask as _;
     match (kind, task_id) {
         // `provision`: create_catalog and activate are control halves, with
         // lake_init the pod between them — the split §3.5 made because
         // anything opening a lake is a pod task.
-        (JobKind::Provision | JobKind::DatasetProvision, "create_catalog") => {
-            completed(control::CreateCatalog.run(ctx, ()).await?)
-        }
+        (JobKind::Provision | JobKind::DatasetProvision, "create_catalog") => completed(
+            control::CreateCatalog::from_profile(profile)
+                .run(ctx, ())
+                .await?,
+        ),
         (JobKind::Provision | JobKind::DatasetProvision, "activate") => {
             let lake = control_pin::<er_dag::Plan<plans::LakeInitialized>>(ctx, 0)?;
             completed(control::Activate.run(ctx, (lake,)).await?)
