@@ -342,6 +342,7 @@ The table below is **generated** from each skill's frontmatter by
 | editing Terraform or a Helm chart, writing a NodePool | `infra-platform` |
 | asked to monitor, watch, babysit or land a pull request (user-invoked only) | `land-pr` |
 | editing or adding a marketing page or its copy | `landing-page` |
+| adding a span, metric, counter, gauge, log line or trace attribute | `observability` |
 | invoking /pentest, /pentest <category>, /pentest live (user-invoked only) | `pentest` |
 | asked what is on the board or to add, triage or move a card | `project-board` |
 | authoring or reviewing any Rust in this repo | `rust-conventions` |

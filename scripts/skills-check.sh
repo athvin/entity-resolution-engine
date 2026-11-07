@@ -2063,6 +2063,163 @@ splice() {
 	mv "$tmp" "$target"
 }
 
+# The observability surface: the roles, the gates, and the derived gap between
+# what emits structured events and what still only reaches bare stderr.
+#
+# The metrics themselves are deliberately NOT here. `docs/telemetry-reference.md`
+# is generated from `er-obs/src/registry.rs` by that crate's own test and
+# byte-compared by it, so a second generator over the same source would be a
+# second thing to keep in step for no gain — the skill links to that file
+# instead.
+#
+# The third block is the one no other gate owns. `collector_allowlist.rs` checks
+# declared attributes against the collector's allowlist and `cardinality.rs`
+# checks the registry's dimensions, but nothing anywhere derives how far
+# structured logging has actually reached. The module docs stated that count in
+# prose once and it was wrong within weeks, which is the exact defect a set
+# difference fixes.
+gen_obs_surface() {
+	local crates=rust/crates
+	local roles gates structured bare both onlybare emitters collectors
+
+	# Which side of the split each crate sits on, read off the manifests. Both
+	# crates' module docs say `er-obs` is for "binaries", and that is not the
+	# line: `er-cli` and `er-server` each have a `lib.rs` and each take it. The
+	# real rule is entry point versus engine, and a manifest cannot describe it
+	# wrongly the way a doc comment can.
+	emitters=$(
+		grep -l 'er-span' "$crates"/*/Cargo.toml 2>/dev/null |
+			xargs -n1 dirname | xargs -n1 basename |
+			grep -vxE 'er-span|er-obs' | sort -u || true
+	)
+	collectors=$(
+		grep -lE '^er-obs' "$crates"/*/Cargo.toml 2>/dev/null |
+			xargs -n1 dirname | xargs -n1 basename | sort -u || true
+	)
+
+	# `Role::service_name`'s match arms: `Self::Api => "er-api",`. Read from the
+	# impl rather than from a hand-kept list, because a new entry point is
+	# precisely when this table would otherwise go stale.
+	roles=$(
+		sed -n '/const fn service_name/,/^    }/p' "$crates/er-obs/src/init.rs" 2>/dev/null |
+			grep -oE 'Self::[A-Za-z]+ => "[^"]+"' |
+			sed -E 's/Self::([A-Za-z]+) => "(.*)"/\1|\2/' || true
+	)
+
+	# Every test whose own module doc names it as enforcing a telemetry rule.
+	# Matched on the file's leading `//!` so a renamed test is still found and a
+	# test that stops being about telemetry drops out on its own.
+	#
+	# The summary is the first *sentence*, assembled from the whole leading
+	# paragraph rather than from `head -1`. House style wraps a module doc at the
+	# column, so `head -1` clipped `span_boundaries.rs` to "no bare
+	# `spawn_blocking` in the" — a description that stops before its own object
+	# reads as a broken generator, which is how it was caught.
+	gates=$(
+		grep -lE '^//!' "$crates"/er-obs/tests/*.rs "$crates"/er-schema/tests/*.rs 2>/dev/null |
+			while read -r f; do
+				local summary
+				summary=$(
+					awk '/^\/\/![[:space:]]*$/ { exit }
+					     /^\/\/!/ { sub(/^\/\/! ?/, ""); printf "%s ", $0; next }
+					     { exit }' "$f" |
+						sed -E -e 's/\. .*$/./' -e 's/[[:space:]]+$//'
+				)
+				printf '%s\n' "$summary" |
+					grep -qiE 'span|metric|telemetr|pii|allowlist|cardinalit|blocking hop' &&
+					printf '%s|%s\n' "${f#rust/crates/}" "$summary"
+			done || true
+	)
+
+	# Product sources only. `tests/`, `benches/` and `examples/` are excluded for
+	# the reason `span_boundaries.rs` excludes the first two: an orphaned span or
+	# a bare println in a harness costs nothing, and an example's stderr output
+	# is user-facing by definition, so listing it as a gap would be noise that
+	# nobody can act on.
+	structured=$(
+		grep -rlE '\btracing::(trace|debug|info|warn|error)!|\b(trace|debug|info|warn|error)_span!' \
+			--include='*.rs' "$crates" 2>/dev/null |
+			grep -vE '/(tests|benches|examples)/' | sed "s#^$crates/##" | sort -u || true
+	)
+	bare=$(
+		grep -rlF 'eprintln!' --include='*.rs' "$crates" 2>/dev/null |
+			grep -vE '/(tests|benches|examples)/' | sed "s#^$crates/##" | sort -u || true
+	)
+	# Wrapped: a `comm` over an empty side is the gap case, and the gap case is
+	# the one that must not kill the regen under `set -o pipefail`.
+	both=$(comm -12 <(printf '%s\n' "$bare") <(printf '%s\n' "$structured") || true)
+	onlybare=$(comm -23 <(printf '%s\n' "$bare") <(printf '%s\n' "$structured") || true)
+
+	echo "### Which side of the split each crate is on"
+	echo
+	echo "**Depend on \`er-span\` — they emit and collect nothing.** Instrumenting"
+	echo "one of these must not reach for \`er-obs\`:"
+	echo
+	bullets "$emitters" "**None**, which would mean nothing in the engine is instrumented."
+	echo
+	echo "**Depend on \`er-obs\` — they own an entry point and install the"
+	echo "subscriber.** Note this is not the same as \"binary crates\": some of"
+	echo "these have a \`lib.rs\` too, which is why both crates' module docs"
+	echo "describing the line as bin-versus-lib are imprecise:"
+	echo
+	bullets "$collectors" "**None**, which would mean no process installs a subscriber."
+	echo
+	echo "### Roles"
+	echo
+	echo "What each entry point passes to \`er_obs::init\`, and the"
+	echo "\`service.name\` and \`er.role\` it therefore reports as:"
+	echo
+	echo "| \`Role\` | \`service.name\` |"
+	echo "|---|---|"
+	if [[ -n ${roles//[[:space:]]/} ]]; then
+		printf '%s\n' "$roles" | while IFS='|' read -r variant service; do
+			[[ -n $variant ]] || continue
+			printf '| `%s` | `%s` |\n' "$variant" "$service"
+		done
+	else
+		echo "| — | the \`service_name\` match could not be read; the impl has moved |"
+	fi
+	echo
+	echo "### The gates"
+	echo
+	echo "Every test enforcing a rule in the skill body, with the first line of"
+	echo "its own module doc. All of them run under \`make check\` and none under"
+	echo "the bare cargo trio:"
+	echo
+	if [[ -n ${gates//[[:space:]]/} ]]; then
+		printf '%s\n' "$gates" | while IFS='|' read -r path summary; do
+			[[ -n $path ]] || continue
+			printf -- '- `%s` — %s\n' "$path" "$summary"
+		done
+	else
+		echo "- **None found**, which cannot be right — the test trees have moved"
+		echo "  and this block is no longer reading them."
+	fi
+	echo
+	echo "### Structured events versus bare stderr"
+	echo
+	echo "A \`tracing\` event carries its span ancestry, so it is attributable to a"
+	echo "run, a job and a tenant; an \`eprintln!\` is a line on stderr and nothing"
+	echo "more. Fluent Bit ships both, so neither is lost — but only the first can"
+	echo "be grouped, filtered by target, or joined to a trace."
+	echo
+	echo "**Product files emitting structured events:**"
+	echo
+	bullets "$structured" "**None**, which would mean the subscriber has nothing to collect."
+	echo
+	echo "**Product files still writing \`eprintln!\` and no structured event.**"
+	echo "This is the gap worth reading, and it is not all defect: a CLI's"
+	echo "user-facing error output is correctly an \`eprintln!\`, while a diagnostic"
+	echo "a dashboard should see is not. Judge each by whether anything downstream"
+	echo "needs to group it:"
+	echo
+	bullets "$onlybare" "**None** — every file that writes to stderr also emits structured events."
+	echo
+	echo "**Mid-conversion — both idioms in one file:**"
+	echo
+	bullets "$both" "**None.**"
+}
+
 # The files `regen` owns. The drift check diffs ONLY these: diffing the whole
 # skills tree would report an author's in-progress prose edits as generated
 # staleness, which is exactly the moment the message would be most confusing.
@@ -2086,6 +2243,7 @@ generated_files=(
 	"$skills_dir/infra-platform/references/coverage.md"
 	"$skills_dir/land-pr/references/post-merge.md"
 	"$skills_dir/er-engine-ops/references/stages-and-flags.md"
+	"$skills_dir/observability/references/surface.md"
 	"docs/agent-skills.md"
 	"CLAUDE.md"
 )
@@ -2136,6 +2294,9 @@ run_regen() {
 
 	gen_er_command_surface >"$tmp"
 	splice "$skills_dir/er-engine-ops/references/stages-and-flags.md" er-command-surface "$tmp"
+
+	gen_obs_surface >"$tmp"
+	splice "$skills_dir/observability/references/surface.md" obs-surface "$tmp"
 
 	# Two projections of one field, so the two documents cannot disagree about
 	# which skills exist even though they show different columns.
