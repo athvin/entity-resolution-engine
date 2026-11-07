@@ -97,7 +97,7 @@ One writer per **dataset** is enforced by three partial unique indexes on
 each dataset owns, `jobs_one_active_org_level` for the kinds that carry no
 dataset (`provision`, the migrate sweep), and `jobs_idempotency` so a retried
 submit is not a second run. The advisory lock `pg::claim` does take serves the
-per-org *cap* on how many of an org's datasets may run at once
+per-org *cap* instead — how many of an org's datasets may run at once
 (`orgs.max_concurrent_jobs`, default 1 — the single-writer profile this
 started as), because a COUNT is not index-enforceable; the uniques remain the
 database's own backstop.

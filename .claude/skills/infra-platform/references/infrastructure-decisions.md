@@ -34,6 +34,10 @@ Entries are ADR-style: **Decision**, **Context**, **Rejected alternative**, **Da
 - [D-SPILL — Explicit ephemeral-storage sizing (the eviction trap)](#d-spill--explicit-ephemeral-storage-sizing-the-eviction-trap)
 - [D-PROGRESS — The runner writes its own progress, not dispatcher log-streaming](#d-progress--the-runner-writes-its-own-progress-not-dispatcher-log-streaming)
 - [D-JOBSPEC — `backoffLimit: 0` and the mandatory EFS mount](#d-jobspec--backofflimit-0-and-the-mandatory-efs-mount)
+- [D-TASKJOB — A Job per task attempt, not per run](#d-taskjob--a-job-per-task-attempt-not-per-run)
+- [D-CHANNEL — The pod reaches the control plane over HTTP, never with a DSN](#d-channel--the-pod-reaches-the-control-plane-over-http-never-with-a-dsn)
+- [D-FUSION — Contiguous same-class tasks share one pod](#d-fusion--contiguous-same-class-tasks-share-one-pod)
+- [D-KUEUE — Kueue not now, with a recorded revisit trigger](#d-kueue--kueue-not-now-with-a-recorded-revisit-trigger)
 - [D-VERSIONING — Lake bucket lifecycle policy (omitted by the first draft)](#d-versioning--lake-bucket-lifecycle-policy-omitted-by-the-first-draft)
 - [D-ROTATION — Secret rotation needs a restart (a reloader), and two keys must not auto-rotate](#d-rotation--secret-rotation-needs-a-restart-a-reloader-and-two-keys-must-not-auto-rotate)
 - [D-SES — SES SMTP is a second static credential with no rotation story that fixes it](#d-ses--ses-smtp-is-a-second-static-credential-with-no-rotation-story-that-fixes-it)
@@ -58,6 +62,8 @@ Entries are ADR-style: **Decision**, **Context**, **Rejected alternative**, **Da
 **Revision 4 — 2026-10-10 (single account).** The three-account organization collapsed to a single AWS account in `us-east-2`. See **D-ACCT** below for the full account-collapse story; the region choice is **D-REGION**. The three-account design remains in git history (and in revisions 1–3 of this log's narrative) as the shape to return to when the team grows.
 
 **Revision 5 — 2026-11-05 (the serving tier stops going down to deploy).** §14.2's Helm paragraph described a deploy that was a deliberate outage: one `web-api` replica under `strategy: Recreate`, with an init container migrating the schema between the old pod's deletion and the new pod's boot. It is now a blue/green colour flip with the schema migration moved ahead of it into a hook that may only add — see **D-BLUEGREEN**, which also records why neither existing Argo rejection (**D-ARGO**, **D-DEPLOY**) answers the progressive-delivery question. This is the first entry here dated after revision 4.
+
+**Revision 6 — 2026-11-07 (the run becomes a multi-pod DAG).** Phase 4 of the batch-orchestration plan deleted the dispatcher's in-process arm, so a run is no longer one process executing a library DAG — it is a compiled graph whose every task attempt is its own Kubernetes Job. That is **D-ARGO's own stated revisit trigger**, fired, which is why this revision opens with it: the decision is re-affirmed, but one of its three original arguments ("Argo would have nothing to orchestrate") is now void and is marked as such rather than left to read as current. Four decisions are amended where the unit of work moved underneath them — **D-JOBSPEC** (per attempt, TTL 300), **D-PROGRESS** (through a channel, never with a DSN), **D-SIZING** (class per task, with OOM escalation), **D-TENANCY** (the anticipated ServiceAccount parameter is real) — and four are new: **D-TASKJOB**, **D-CHANNEL**, **D-FUSION**, **D-KUEUE**. D-DISRUPT and D-SPILL are deliberately unchanged, and each says why.
 
 ---
 
@@ -114,7 +120,18 @@ Argo **CD** is a separate question. GitOps for deploying the platform itself is 
 
 **Revisit when.** A run ever becomes a genuine multi-pod DAG — sharding match across pods, which the one-writer-per-tenant constraint currently forbids — or if workflow visualisation for non-engineers becomes a product requirement. Neither is true now.
 
-**Date.** 2026-10-03.
+**Amended 2026-11-07 (#645) — the revisit trigger fired, and the decision stands on two of its three legs.** A run IS a multi-pod DAG now: the in-process arm is deleted, and every task attempt is its own Job (**D-TASKJOB**). So the first paragraph above is history, not current state, and the strongest argument in it is **void** — it is no longer true that "the DAG is inside the process", that there is "no artifact to pass between pods", or that Argo "would have nothing to orchestrate". There is a graph, there are edges, and the edges carry references.
+
+What did not change is the reason the decision was actually load-bearing, and it is the same two objections:
+
+- **Retry semantics are still richer than a `retryStrategy` can express**, and they moved rather than went away. The budget is per task attempt with Airflow's arithmetic — `try_number <= max_tries`, deterministic jitter in `[min, 2·min)`, base and cap differing by task kind (30 s/900 s for a pod, 5 s/60 s for a control task) — plus an OOM escalation that retries the *next resource class up* and invalidates the fusion segment when it does (**D-SIZING**). An infrastructure failure that ran no user code is requeued without spending a try at all, on a separate `launches` budget. None of that is expressible as a `backoffLimit`, which is exactly why **D-JOBSPEC** pins it to `0`.
+- **Two sources of truth for run state is still the fatal one.** `task_instances` is the ledger the API, the clear/resume endpoints and the frontend read, and it carries the structural and policy fingerprints a resume is checked against. A `Workflow` object would shadow it and the two would disagree the first time one was restarted — the identical argument, now about a richer table.
+
+The honest new cost of keeping this: the scheduler, readiness evaluator, fingerprinting and resume algorithm are ours to maintain, in `er-dag` and `er-server/src/dags/`. That was a real trade and it was made with the measurements in mind — a per-task pod costs ~3 s on a warm node, which is what makes the graph affordable at this granularity and what **D-FUSION** exists to bound.
+
+**Revisit when** (restated, since the original trigger is spent). Fan-out inside a stage ever becomes dynamic — N deliveries as N parallel tasks rather than one task looping — because the graph's shape is a compile-time constant here and that is the one thing the design refuses outright; or workflow visualisation for non-engineers becomes a product requirement.
+
+**Date.** 2026-10-03; amended 2026-11-07.
 
 ---
 
@@ -249,7 +266,13 @@ The resolving check (D1, 2026-10-10): Auto Mode honours `karpenter.sh/do-not-dis
 
 **Rejected alternative.** Namespace-per-tenant would add hard RBAC, NetworkPolicy, and quota boundaries, at the cost of namespace proliferation across hundreds of tenants, per-namespace secret plumbing, and a dispatcher needing cluster-wide job-create rights — which trades away more isolation than it buys (a dispatcher able to create pods cluster-wide undercuts D-CLUSTER's separate-clusters argument). It is the right shape for the enterprise tier that [backend-design.md](../../er-server-control-plane/references/backend-design.md) §7 already earmarks for dedicated buckets and STS-scoped credentials, and not before. The forward-looking seam: once §9.2's IRSA work lands, the per-run pod can carry a per-tenant ServiceAccount scoped to that tenant's prefix alone — the "per-tenant STS credentials" item in [backend-design.md](../../er-server-control-plane/references/backend-design.md) §15 phase 4 — so the Job spec anticipates a ServiceAccount parameter even while every run shares one.
 
-**Date.** 2026-10-03.
+**Amended 2026-11-07 (#645).** Two corrections, one of them to this decision's own title.
+
+**The anticipated ServiceAccount parameter is real.** Task pods run as `er-runner`, which is a distinct identity from the `er-dispatcher` that creates Jobs and from the `web-api` that serves the BFF. It still carries one tenant's scope only by convention rather than by IAM, so the enterprise-tier work is unchanged — but the parameter is no longer a sketch in a Job spec.
+
+**"lock" in the title overstates one third of the containment, and this is the correction worth reading.** One writer per dataset is enforced by three partial unique indexes on `jobs` — `jobs_one_active_per_dataset`, `jobs_one_active_org_level`, `jobs_idempotency` — and *not* by the advisory lock. The advisory lock `pg::claim` takes serves the per-org concurrency **count** cap, which is not index-enforceable because a `COUNT` is not a uniqueness constraint. The distinction is not pedantic: as written, the guarantee appeared to depend on a lock that can be absent while the guarantee still holds, which is precisely backwards for anyone reasoning about whether a second dispatcher is safe. `architecture.md` carried the same error, crediting an advisory lock inherited from the deleted Python `tenant_lock`, and was corrected in the same change. Containment is therefore by **process, catalog and index**; ephemerality and the per-tenant catalog database are unchanged.
+
+**Date.** 2026-10-03; amended 2026-11-07.
 
 ---
 
@@ -273,7 +296,14 @@ The reason memory stays flat is that DuckDB **spills**, and spill is why §5.3 e
 
 **Two honest limits.** The thread-scaling measurement stops at 6 threads, so the knee above 6 is unknown — and unlikely to be linear, because the same run showed **reconcile getting 14% *slower*** at 6 threads, being a Python graph step that does not parallelize with DuckDB threads (§18.2). And the `le=32` bound on `duckdb_threads` caps the useful instance at 32 vCPU, which is what makes `c6id.8xlarge` the top of the ladder.
 
-**Date.** 2026-10-03; backend-design.md §7 corrected subsequently (§18.9).
+**Amended 2026-11-07 (#645) — the class is per TASK, not per run.** The measurements and the vCPU-over-memory conclusion are untouched; what changed is the granularity they are applied at. `jobs.resource_class` sized a whole run to its largest stage, which meant `ingest` and `assemble` were provisioned for `match`. With a Job per task attempt (**D-TASKJOB**) the class rides `task_instances.resource_class`, resolved at planning from the record count, and the stage that is the memory-and-thread consumer is the only one that pays for being one.
+
+Two consequences this decision now owns:
+
+- **An OOM escalates the class rather than failing the run.** A task killed with exit 137 / `OOMKilled` that never committed inserts its successor at the next class up — S → M → L — recording `escalated_from`, and that successor's fusion segment is invalidated because a class change breaks the contiguous-same-class grouping **D-FUSION** depends on. The escalation is bounded by the ladder, not by the retry budget: at L there is nowhere up to go and the failure is terminal.
+- **Per-task sizing makes the D-SPILL numbers per task too.** The 141 GiB spill figure was measured for `match` at a 4 GB DuckDB limit, and `match` is now the only task provisioned for it, so the ephemeral-storage request stops being charged to the five stages that never spill.
+
+**Date.** 2026-10-03; backend-design.md §7 corrected subsequently (§18.9); amended 2026-11-07.
 
 ---
 
@@ -285,7 +315,9 @@ The reason memory stays flat is that DuckDB **spills**, and spill is why §5.3 e
 
 **Rejected alternative.** The Karpenter defaults / `WhenEmptyOrUnderutilized` on the runner pools.
 
-**Date.** 2026-10-03.
+**Unchanged 2026-11-07 (#645), and now load-bearing for a second reason.** Every clause still applies, to task pods instead of run pods — `karpenter.sh/do-not-disrupt: "true"` is on the task pod template, because an hour of DuckDB work in `match` is just as expensive to discard as an hour of a run was. What is new is that the `consolidateAfter` linger is what makes **D-TASKJOB** affordable at all: the second pod of a run lands on the node the first one warmed and starts in ~1 s with no image pull. A shorter linger would quietly re-price per-task granularity, so this setting is now coupled to that decision and should not be tuned for cost in isolation.
+
+**Date.** 2026-10-03; re-affirmed 2026-11-07.
 
 ---
 
@@ -302,7 +334,9 @@ The explicit request is also what lets the scheduler avoid stacking two spill-he
 
 **Rejected alternative.** An `emptyDir` on NVMe with no explicit ephemeral-storage request/limit (the first draft).
 
-**Date.** 2026-10-03.
+**Unchanged 2026-11-07 (#645), now applied per task.** The eviction trap and both failure modes are identical; the request and `emptyDir.sizeLimit` ride the task pod. One clause of the reasoning above is superseded in the operator's favour: an eviction no longer "yields exit code `None`, requeues with `--resume` and evicts again at the same point" for the whole run. It is a storage eviction of one task attempt, classified as such and retried on its own budget, with the stages before it still `succeeded`. The sizing argument for making it explicit is unaffected — that is about not evicting other tenants' pods off a node.
+
+**Date.** 2026-10-03; re-affirmed 2026-11-07.
 
 ---
 
@@ -319,7 +353,13 @@ Option 2 wins: it survives dispatcher restarts, removes N long-lived streams, an
 
 **Rejected alternative.** Dispatcher streams pod logs (option 1).
 
-**Date.** 2026-10-03.
+**Amended 2026-11-07 (#645) — option 2 stands, but "to the control-plane database" does not.** The reasoning that chose it survives intact: a direct write survives dispatcher restarts, removes N long-lived streams, and keeps the dispatcher a scheduler rather than a log relay. What is no longer true is the sentence justifying it — "the runner already holds a DSN".
+
+**It must not.** A task pod is where tenant data is processed, and a DSN in its environment is a control-plane database credential sitting in the blast radius of every stage body. So the pod originates its progress and posts it to `er-server` over HTTP — the attempt channel (**D-CHANNEL**) — which writes the ledger on its behalf with the control plane's own credential. The pod reads its work order the same way.
+
+This is strictly stronger than the original decision rather than a retreat from it: progress still comes from the process doing the work, still survives a dispatcher restart, and is now also durable against a pod that is killed mid-stage, because the channel's reports are per task attempt and guarded by launch identity — a report from a stale launch is a no-op rather than a corruption. The one thing lost is the ability to write progress when the control plane is unreachable, and that is correct: a pod that cannot reach the control plane cannot have its work recorded, so it is requeued on the infrastructure budget without spending a try.
+
+**Date.** 2026-10-03; amended 2026-11-07.
 
 ---
 
@@ -331,7 +371,93 @@ Option 2 wins: it survives dispatcher restarts, removes N long-lived streams, an
 
 **Rejected alternative.** The Kubernetes default `backoffLimit: 6`; and the second revision's Job spec with no EFS mount.
 
-**Date.** 2026-10-03.
+**Amended 2026-11-07 (#645).** Both clauses hold and both got more important, because there are now many more Jobs per run (**D-TASKJOB**). The spec is `configmap-task-template.yaml`, rendered per attempt.
+
+`backoffLimit: 0` is unchanged and is annotated in the template as an invariant — "Postgres owns retry". The reason is the same one, sharpened: the budget it would be competing with is now per attempt, class-escalating and split across two counters (`try_number` for the task's own failures, `launches` for infrastructure failures that ran no user code), so a cluster-side retry would not merely be ignorant of the taxonomy — it would insert a second attempt the ledger has no row for. `podFailurePolicy` is rejected for exactly that reason and recorded as such.
+
+**The EFS mount is unchanged and still mandatory**, for the reason the original gives: configs, drops and models are opened by path, and its absence fails late. It is now mounted on the task pod rather than on the dispatcher, which no longer opens a lake at all.
+
+What is new in the spec:
+
+- **`ttlSecondsAfterFinished: 300`**, where the earlier §6.2 sketch said 3600. A finished Job is only wanted long enough for the watch to classify its terminal pod; the ledger holds everything after that, so an hour of finished Jobs is an hour of `count/jobs.batch` quota held against nothing. At a Job per attempt that arithmetic stops being academic.
+- **`activeDeadlineSeconds` per attempt**, substituted with the summed timeouts of the fusion segment the Job runs (**D-FUSION**) — not a per-class constant, because the Job's work is now a known list of tasks rather than "a run".
+- **`terminationGracePeriodSeconds: 120` on the task pod**, which is where the long grace moved. It must exceed the longest write-back, because SIGTERM makes the task roll back and exit 3. The dispatcher's own grace came DOWN to 60s in the same change for the mirror-image reason: it no longer runs the pipeline.
+- **`terminationMessagePolicy: File`** with the default path, which is how the pod's terminal verdict reaches the watch without a log stream — the mechanism that replaces `pods/log` (**D-CHANNEL**).
+- **`automountServiceAccountToken: false`** with an audience-bound projected token mounted instead, and `restartPolicy: Never` retained.
+
+**Date.** 2026-10-03; amended 2026-11-07.
+
+---
+
+## D-TASKJOB — A Job per task attempt, not per run
+
+**Decision.** One `batch/v1` Job per **task attempt**. The unit of scheduling is a stage try, not a run; the run is a compiled DAG whose nodes are those tries, recorded in `task_instances`.
+
+**Context.** D-ARGO chose "a native Kubernetes Job per run" when a run was one process executing a library DAG. Three things were wrong with per-run granularity once the engine's stage boundaries were durable:
+
+- **Retry discarded completed work.** A transient failure in `golden` re-ran `match`, the quadratic stage, because the retry unit was the run. Every stage boundary is already a committed DuckLake snapshot — "a durable, addressable output at every edge" — so the information needed to resume at a stage existed and was being thrown away.
+- **Sizing was charged to the largest stage.** See **D-SIZING**: one class per run means `ingest` is provisioned for `match`.
+- **A failure's blast radius was the whole run**, so the operator's only tool was resume-from-scratch, which re-executes every append-only ledger write under the same run id.
+
+Stage granularity is the level where those three stop being true and below which they gain nothing: sub-stage splitting would force the temp catalog's intermediates through the lake for no retry benefit.
+
+**What makes it affordable** is the measured cold start: NodeClaim → Ready 14–18 s, but a second pod on an already-warm node scheduled → started in **~1 s with no image pull**, against a `consolidateAfter: 10m` linger (**D-DISRUPT**, unchanged, and this is what its linger is now buying). A per-task pod costs ~3 s on a warm node. Seven of those is a cost worth paying for per-stage retry and per-stage sizing; seventy would not be, which is what **D-FUSION** bounds.
+
+**Rejected alternative.** A Job per run (the original D-ARGO shape), and per-delivery or sub-stage tasks at the other extreme. Also rejected: keeping a per-kind allowlist so some kinds stayed in-process — that is the state this change ended, and it had already produced silent divergence, because three things the in-process arm did at settle (the run report, the entity aggregate, `entity.write_back`) were simply not happening on the path every deployed kind actually took.
+
+**Revisit when.** The per-pod overhead stops being ~3 s — a change in base image size or node warm-up would move the arithmetic that justifies this granularity.
+
+**Date.** 2026-11-07.
+
+---
+
+## D-CHANNEL — The pod reaches the control plane over HTTP, never with a DSN
+
+**Decision.** A task pod holds **no database credential**. It fetches its work order and reports its progress, output and terminal verdict to `er-server` over HTTP, authenticated by an audience-bound ServiceAccount token projected into the pod; `er-server` writes the ledger on its behalf. `pods/log` is out of the dispatcher's RBAC; `events: list` is in.
+
+**Context.** The pod is where tenant data is processed and where a stage body runs engine code. A DSN in that environment is a control-plane database credential inside the blast radius of every stage — and it was the premise of **D-PROGRESS**'s original wording. Everything the pod needs therefore arrives in the order: the tenant env, the delivery root, the resolved model registry, the training labels, the drained staged actions. `er-server/src/dags/control/mod.rs` enforces the converse for control tasks — the module may not name `er_cli`, `dedupe_core` or `open_lake`, so a control task structurally cannot run a stage, just as a pod task structurally cannot reach Postgres.
+
+The token is minted by Kubernetes for that specific pod and verified offline by `er-api` against the cluster key set, which binds the attempt to the pod name — so a report has to come from the pod that is supposed to be making it. Reports are additionally guarded by launch identity, which is what makes a late report from a superseded attempt a no-op instead of a corruption.
+
+**Why `events: list` replaces `pods/log`.** The dispatcher needs to know *why* a pod is not running — an unschedulable pod, an image pull failure, an eviction — and that is in the pod's events, not its log. Log-reading rights would also have let the control plane read tenant data out of a stage's stderr, which is the thing the credential boundary above is for. The terminal verdict rides `terminationMessagePolicy: File` (**D-JOBSPEC**) rather than a log scrape.
+
+**Rejected alternative.** A DSN in the task pod's environment (the simplest thing, and what the pre-Phase-3 runner did); and the dispatcher streaming pod logs, already rejected once as **D-PROGRESS** option 1 and now also unavailable by RBAC.
+
+**Date.** 2026-11-07.
+
+---
+
+## D-FUSION — Contiguous same-class tasks share one pod
+
+**Decision.** Contiguous tasks of the **same resource class** are grouped at planning into a segment and run by one pod, which executes the chain in one process and one DuckDB session and reports each task boundary through the channel. Every task keeps its own ledger row, snapshot range and verdict. Default: an S or M run is one segment; an L run splits at the class boundary.
+
+**Context.** This is the counterweight to **D-TASKJOB**. A per-task pod costs ~3 s on a warm node and pays a cold DuckDB open each time, so the naive shape spends the §8 latency argument that justified per-task granularity in the first place. Fusion keeps today's wall clock for the common run while retaining per-stage retry: if task *k* fails, the tasks before it stay `succeeded` and the retry launches the segment from *k*.
+
+The hand-off is what makes it safe, and it is one Postgres transaction: the pod's `finish` for member *k* carries `next = k+1`, and the handler runs `finish.sql` for *k* and `advance_segment.sql` for *k+1* together, finish first. So there is never an instant with *k* terminal and *k+1* unclaimed, and the one-pod-per-org partial index and the in-flight cap each see exactly one live pod row per segment at every statement boundary.
+
+Fusion is in the **policy** hash rather than the structural fingerprint, so changing it never refuses a resume. A class change invalidates a segment — an OOM escalation inserts its successor with `segment = NULL` (**D-SIZING**) — and the launcher recomputes the affected job's segments before the next launch.
+
+**Rejected alternative.** Dynamic lane pull, where the pod claims the next ready task through a `/next` route: it races the launcher and needs a "skip if the lane pod finished less than 10 s ago" heuristic, where a plan-time segment is deterministic and legible in the row. Pre-claiming every member to `queued` under one Job name: it collides with the one-pod-per-org index, counts a six-task segment six times against the cap, and orphans the siblings when the head fails. Dropping fusion entirely remains the fallback if the finish-and-advance transaction ever proves unable to be atomic on a per-request connection.
+
+**Date.** 2026-11-07.
+
+---
+
+## D-KUEUE — Kueue not now, with a recorded revisit trigger
+
+**Decision.** No Kueue. Admission is the executor's in-flight cap plus `PriorityClass` and `ResourceQuota`.
+
+**Context.** Kueue's value is fair share across tenants under contention, cohort borrowing and gang admission — none of which is a problem this footprint has yet. It would cost a second queue with its own state (`Workload` objects) and its own priority opinions, which is **D-ARGO's two-sources-of-truth objection** in a different package.
+
+The decisive detail is that it **cannot express one active job per org** without one `ClusterQueue` per tenant: quota and fair sharing are properties of ClusterQueues in a cohort, while `LocalQueue`s are namespaced pointers that carry no quota at all — so the intuitive "a LocalQueue per org" yields no per-tenant limit whatsoever. That is hundreds of cluster-scoped objects to express a rule one partial unique index already enforces (**D-TENANCY**).
+
+With a single dispatcher, an 8-vCPU account quota and tens of tenants, the in-flight cap covers the need. Honest status: **there is no contention data yet.** The in-flight cap has never been reached, because a `run_all` chain runs one stage at a time, so there is no quota-wait or pending-age series to argue from in either direction.
+
+**Rejected alternative.** Kueue now. Also considered and rejected as admission mechanisms: `spec.suspend` as a general tool (a pre-staged Job holds a `count/jobs.batch` slot for nothing, and the write-ahead row plus a pure-function Job name already close the create-then-record gap through adoption) and `schedulingGates` (an external admission controller's tool).
+
+**Revisit when** all three hold: the account's vCPU quotas are raised, more than one resource class runs concurrently, and fair share *between* tenants becomes a product requirement. Adoption then is `suspend: true` at create plus a `kueue.x-k8s.io/queue-name` label, with no data-model change — `suspend` is retained in the design as that adoption seam and for nothing else.
+
+**Date.** 2026-11-07.
 
 ---
 

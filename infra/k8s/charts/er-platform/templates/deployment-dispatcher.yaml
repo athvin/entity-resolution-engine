@@ -34,24 +34,24 @@ spec:
         {{- include "er-platform.labels" . | nindent 8 }}
     spec:
       serviceAccountName: er-dispatcher
-      # `dispatcher_bin.rs` installs a SIGTERM drain — finish the in-flight job,
-      # then exit at the next loop top — and it was being given the 30s default,
-      # which a legacy in-process run (a whole DuckDB pipeline, not a
-      # write-back) blows through. The SIGKILL that follows strands the job's
-      # row in `dispatching`/`running`, where it holds the dataset's partial
-      # unique index and blocks every later job for that dataset. There is no
-      # startup reclaim for the legacy arm: `pg::resume_job` is an OPERATOR
-      # action that 409s on anything else, so recovery is a human. That is the
-      # symptom values.yaml already warns about under `dispatcher`.
+      # `dispatcher_bin.rs` installs a SIGTERM drain — finish the pass in
+      # flight, then exit at the next loop top.
       #
-      # Paid only when a job is actually in flight — an idle dispatcher sees the
-      # flag and exits within one poll — so this is a ceiling, not a cost.
+      # This was 300s for the legacy in-process arm, where a SIGKILL mid-run
+      # stranded the job's row in `running` holding the dataset's partial
+      # unique index, with `pg::resume_job` (an OPERATOR action) the only way
+      # out. #645 deleted the arm, so what a kill can now interrupt is a
+      # planning transaction that rolls back to `queued`, or a pass whose rows
+      # the next dispatcher adopts by epoch. The pipeline itself is in Jobs
+      # that outlive this pod.
       #
-      # The ceiling is bounded by the DEPLOY, not by how long a pipeline can
-      # run. `Recreate` means the new pod waits for this one to go, and the CI
-      # deploy runs `helm upgrade --wait --timeout 10m`; a grace period near
-      # that would turn a long run into a FAILED deploy. Hence half of it, and
-      # the two numbers have to move together.
+      # Paid only when a pass is actually in flight — an idle dispatcher sees
+      # the flag and exits within one poll — so this is a ceiling, not a cost.
+      #
+      # The ceiling is still bounded by the DEPLOY: `Recreate` means the new
+      # pod waits for this one to go, and the CI deploy runs
+      # `helm upgrade --wait --timeout 10m`. 60s is nowhere near that now, but
+      # the two numbers still have to move together if this is ever raised.
       terminationGracePeriodSeconds: {{ .Values.dispatcher.terminationGracePeriodSeconds }}
       securityContext:
         {{- include "er-platform.podSecurityContext" . | nindent 8 }}
