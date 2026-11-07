@@ -75,7 +75,8 @@ git commit --allow-empty -m "wip: claim #<n> — <short title>"
 git push -u origin "$(git branch --show-current)"   # never push -q
 
 { printf 'Closes #%s\n\n' "<n>"
-  printf '> 🚧 **Claimed by an agent session** — %s.\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  printf '> 🚧 **Claimed by an agent session** — %s, session `%s` on `%s`.\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$CLAUDE_CODE_SESSION_ID" "$(hostname -s)"
   printf '> The claim is this open draft PR: closing it releases the ticket.\n'
   tail -n +2 .github/pull_request_template.md
 } > /tmp/claim-<n>-body.md
@@ -84,6 +85,15 @@ gh pr create --draft \
   --title "<type>(<area>): <imperative summary> (#<n>)" \
   --body-file /tmp/claim-<n>-body.md
 ```
+
+**The session id and host in that banner are the durable link back to the
+work.** CLAUDE.md's worktree audit cannot reliably tell which session owns a
+worktree — `lsof` misses the dominant pattern, a session whose cwd is the
+primary checkout driving the tree with `git -C` — and a claim PR naming its
+session and machine answers that from GitHub instead of from the process table.
+`CLAUDE_CODE_SESSION_ID` is the authoritative id; `claude --resume <id>` reopens
+it on that host, and `claude --from-pr <n>` is the shortcut while the link
+survives.
 
 Capture the URL `gh pr create` prints — **never predict a PR number.** Then
 the other two marks:

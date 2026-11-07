@@ -50,6 +50,17 @@ block at the bottom, where a reader opens it only if they want it.
 
 **Closed by:** _unclosed_
 
+<!-- Replace that with who closed it, WHICH SESSION, on WHICH MACHINE, and when:
+       printf 'agent · session `%s` on `%s` · %s\n' \
+         "$CLAUDE_CODE_SESSION_ID" "$(hostname -s)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+     The machine is not decoration. A transcript lives at
+     `~/.claude/projects/<slug>/<session-id>.jsonl` on the host that ran it, so
+     an id with no host is unresolvable once more than one machine is in play.
+     `claude --resume <id>` reopens it there; `claude --from-pr <n>` is the
+     shortcut when the link still exists, and this line is the fallback for when
+     it does not. -->
+
+
 - [ ] **`main` is green with this change on it** — the merge SHA, and the run
       that proves it. A later head SHA with this commit as an ancestor counts;
       a cancelled run with zero jobs does not:

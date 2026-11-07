@@ -302,7 +302,23 @@ Four rules, and the third is the one that keeps the record worth having:
    ticked if they were done here and left open if they are owed. That is how a
    one-off backfill or a required-check promotion stops living in chat.
 
-Then set the **Closed by** line to the UTC time the watch ended.
+Then set the **Closed by** line to the session that did the work, the machine it
+ran on, and the UTC time:
+
+```bash
+printf 'agent · session `%s` on `%s` · %s\n' \
+  "$CLAUDE_CODE_SESSION_ID" "$(hostname -s)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+```
+
+**Record the host, not just the id.** A transcript is a local file —
+`~/.claude/projects/<slug>/<session-id>.jsonl` on the machine that ran it — so
+an id with no host cannot be resolved once more than one machine is in play.
+With both, `claude --resume <id>` reopens the reasoning behind a tick months
+later; `claude --from-pr <n>` is the shortcut while that link survives, and this
+line is what remains when it does not. `CLAUDE_CODE_SESSION_ID` is the
+authoritative id and it is in the environment — do not infer one from a
+scratchpad path, which may carry the parent's id when
+`CLAUDE_CODE_CHILD_SESSION=1`.
 
 **Exit** when the ledger has no empty box that is not annotated `blocked`. A
 body edit fires `pull_request edited`, so `pull request contract` re-runs on the

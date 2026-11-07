@@ -73,6 +73,14 @@ scripts-home-check:
 workflow-shell-check:
 	bash scripts/ci/workflow-shell-check-test.sh && bash scripts/ci/workflow-shell-check.sh
 
+# The classifier behind the `pull request contract` check (a ticket link and a
+# post-merge ledger). It is in `make check` because the COMMITTED TEMPLATE is
+# one of its fixtures: an edit to .github/pull_request_template.md that drops a
+# ledger marker would otherwise surface only as a red check on every pull
+# request opened afterwards, with nothing in the diff that mentions CI.
+pr-contract-check:
+	bash scripts/ci/pr-contract-test.sh
+
 # #549's acceptance check, kept as a gate instead of a closed issue: exactly one
 # `aws_iam_access_key` in the Terraform tree (`builder`), and no static
 # ER_S3_* credential assignment. Self-test first, same reasoning as its two
@@ -84,7 +92,7 @@ tf-static-credentials-check:
 # The fast PR-equivalent backend gate (mirrors rust.yml's lint + test tiers),
 # plus the skill gate — a stale generated reference is the same class of defect
 # as a stale generated entity artifact.
-check: fmt lint doc entities-check skills-check scripts-home-check workflow-shell-check tf-static-credentials-check test
+check: fmt lint doc entities-check skills-check scripts-home-check workflow-shell-check pr-contract-check tf-static-credentials-check test
 
 # The gated e2e tiers: the DuckLake + extension pipeline and the Postgres
 # control-plane queue/dispatch. Needs the DuckDB extensions and a local

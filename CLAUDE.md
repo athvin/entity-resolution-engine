@@ -7,7 +7,8 @@ the PR-equivalent gate and mirrors `.github/workflows/rust.yml`:
 
 ```
 make check   # = fmt + lint + doc + entities-check + skills-check
-             #   + scripts-home-check + workflow-shell-check + test
+             #   + scripts-home-check + workflow-shell-check + pr-contract-check
+             #   + tf-static-credentials-check + test
 ```
 
 `cargo fmt` / `cargo clippy` / `cargo test` on their own are **not** sufficient —
