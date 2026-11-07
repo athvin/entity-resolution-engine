@@ -5,10 +5,10 @@
 # (`make frontend-dev-reset` tears everything down, volumes included).
 #
 # TWO host processes: er-server and er-dispatcher. That is the topology the Helm
-# chart ships — a separate dispatcher Deployment beside the API — and the only
-# one that survives Phase 4 of the batch-orchestration design, which deletes
-# `ER_DISPATCH_IN_PROCESS` along with the legacy in-process arm. Local dev
-# should not be the last place a retired topology lives on.
+# chart ships — a separate dispatcher Deployment beside the API — and now the
+# only one there is: the in-process arm and its `ER_DISPATCH_IN_PROCESS` flag
+# are both gone (#645). Local dev should not be the last place a retired
+# topology lives on.
 #
 # Two consequences worth knowing:
 #

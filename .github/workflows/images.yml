@@ -8,8 +8,9 @@
 # BFF). er-web used to be nobody's job — the comment here said "built by the
 # frontend pipeline" and frontend.yml had no image job at all, so the ECR repo
 # and frontend/Dockerfile existed while nothing ever pushed a tag, and
-# `make dev-up TAG=<sha>` could not roll the BFF out. er-pipeline is gone (the
-# in-process dispatcher runs the pipeline itself). main is branch-protected, so
+# `make dev-up TAG=<sha>` could not roll the BFF out. er-pipeline is gone: the
+# pipeline runs as per-attempt Jobs from the er-api image. main is
+# branch-protected, so
 # a push here is already a green state.
 #
 # Each image builds only when its own tree moved, via the `detect` job — the

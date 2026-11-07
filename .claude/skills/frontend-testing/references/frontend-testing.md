@@ -476,8 +476,8 @@ covers them.
 
 `up.sh` starts **two** host processes, `er-server` and `er-dispatcher`, which is
 the topology the Helm chart runs. It used to be one process with the dispatcher
-in-process under `ER_DISPATCH_IN_PROCESS=1`; that variable is now assigned
-nowhere in the tree. So the half-up state the old `run.sh` had to detect — a
+in-process under `ER_DISPATCH_IN_PROCESS=1`; that variable was assigned nowhere
+in the tree for some time and is now deleted along with the arm (#645). So the half-up state the old `run.sh` had to detect — a
 live API with nothing draining the queue — is reachable again, and `up.sh`
 checks for it (it fails the boot if `er-dispatcher` exits).
 
