@@ -39,18 +39,20 @@ describing the line as bin-versus-lib are imprecise:
 
 ### Roles
 
-What each entry point passes to `er_obs::init`, and the
-`service.name` and `er.role` it therefore reports as:
+What each entry point passes to `er_obs::init`, the `service.name` and
+`er.role` it therefore reports as, and whether the Helm charts ship it
+as a workload. The last column is why "unattended" is not "deployed":
+a local tool can still be unattended.
 
-| `Role` | `service.name` |
-|---|---|
-| `Api` | `er-api` |
-| `Dispatcher` | `er-dispatcher` |
-| `Task` | `er-task` |
-| `Cli` | `er-cli` |
-| `EntityCli` | `er-entity` |
-| `Dedupe` | `dedupe` |
-| `Mcp` | `er-mcp` |
+| `Role` | `service.name` | Ships as a workload |
+|---|---|---|
+| `Api` | `er-api` | yes |
+| `Dispatcher` | `er-dispatcher` | yes |
+| `Task` | `er-task` | yes |
+| `Cli` | `er-cli` | **no** — local tool |
+| `EntityCli` | `er-entity` | **no** — local tool |
+| `Dedupe` | `dedupe` | **no** — local tool |
+| `Mcp` | `er-mcp` | **no** — local tool |
 
 ### The gates
 

@@ -248,8 +248,14 @@ lie, and why a clean run cannot find the defects that matter.
   The predicate is **not** "does it run in the cluster". `Mcp` is unattended
   without being deployed at all — `er-mcp` is in no Dockerfile and no chart, and
   an MCP client spawns it over stdio — which is the arm that forced the rename
-  from `is_deployed`. `references/surface.md` derives the split, so it cannot
-  drift from the arms.
+  from `is_deployed`. `references/surface.md` derives both the split and which
+  roles ship, so neither can drift from the source.
+
+  That `er-mcp` ships nowhere is a **decision, not a gap**: stdio has nothing
+  attached to its stdin in a pod, and its API key is one org's, so a shared
+  deployment would be a tenant-isolation bug. Do not "fix" its telemetry by
+  giving it a workload — point `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` at a
+  collector locally instead. The reasoning is on `Role::Mcp` itself.
 - **`er_obs::logging::stage_record_line` has no callers on purpose.** Its key
   set is validated exactly against the promoted counters, and calling it with
   those defaulted to zero would fill `run_stages` with zeros that every

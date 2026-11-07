@@ -2269,18 +2269,32 @@ gen_obs_surface() {
 	echo
 	echo "### Roles"
 	echo
-	echo "What each entry point passes to \`er_obs::init\`, and the"
-	echo "\`service.name\` and \`er.role\` it therefore reports as:"
+	echo "What each entry point passes to \`er_obs::init\`, the \`service.name\` and"
+	echo "\`er.role\` it therefore reports as, and whether the Helm charts ship it"
+	echo "as a workload. The last column is why \"unattended\" is not \"deployed\":"
+	echo "a local tool can still be unattended."
 	echo
-	echo "| \`Role\` | \`service.name\` |"
-	echo "|---|---|"
+	echo "| \`Role\` | \`service.name\` | Ships as a workload |"
+	echo "|---|---|---|"
 	if [[ -n ${roles//[[:space:]]/} ]]; then
 		printf '%s\n' "$roles" | while IFS='|' read -r variant service; do
 			[[ -n $variant ]] || continue
-			printf '| `%s` | `%s` |\n' "$variant" "$service"
+			# Does anything in the Helm charts name this service? A role that
+			# ships has a workload; one that does not is a local tool. Derived
+			# rather than stated, because "no deployment" is an ABSENCE, and an
+			# absence nobody records reads as an oversight — which is how
+			# `Mcp` nearly acquired a Deployment it must never have (stdio
+			# transport, and a single-org credential).
+			local ships
+			if grep -rqlF "$service" infra/k8s/charts 2>/dev/null; then
+				ships="yes"
+			else
+				ships="**no** — local tool"
+			fi
+			printf '| `%s` | `%s` | %s |\n' "$variant" "$service" "$ships"
 		done
 	else
-		echo "| — | the \`service_name\` match could not be read; the impl has moved |"
+		echo "| — | the \`service_name\` match could not be read; the impl has moved | — |"
 	fi
 	echo
 	echo "### The gates"
