@@ -59,6 +59,7 @@ the same fix.
 | `frontend-data-ui` | the charting policy that every chart is hand-rolled DOM/CSS rather than a library or canvas |
 | `frontend-design-system` | the Tailwind v4 CSS-first tokens in `globals.css` and the two deliberate WCAG deviations from stock shadcn |
 | `frontend-testing` | which tier a change belongs in (unit, component, Playwright functional, the Docker-backed full-stack tier that is a release gate, not a PR gate) |
+| `health-sweep` | reads the CloudWatch alarms and whether their SNS subscriptions are confirmed (user-invoked only) |
 | `infra-platform` | the Terraform env/module layout and shared S3 state with lockfile locking |
 | `land-pr` | the PR loop, the main loop for the push-only workflows a PR can never run (user-invoked only) |
 | `landing-page` | the `(marketing)` route group that prerenders statically inside the same app that serves the BFF |
@@ -144,41 +145,44 @@ can still accept a routing clause.
 
 | Headroom | Skill | Length |
 |---:|---|---:|
-|   31 | `aws-account-operations` | 993 |
+|   26 | `er-engine-ops` | 998 |
+|   33 | `project-board` | 991 |
 |   36 | `security` | 988 |
 |   40 | `frontend-bff` | 984 |
+|   41 | `aws-account-operations` | 983 |
 |   41 | `er-server-control-plane` | 983 |
 |   60 | `skill-audit` | 964 |
 |   62 | `rust-conventions` | 962 |
+|   63 | `observability` | 961 |
 |   66 | `entity-framework` | 958 |
 |   72 | `infra-platform` | 952 |
 |   75 | `land-pr` | 949 |
+|   76 | `health-sweep` | 948 |
 |   76 | `sql-analysis` | 948 |
 |   77 | `frontend-design-system` | 947 |
 |   80 | `ducklake-lakehouse` | 944 |
 |   88 | `frontend-data-ui` | 936 |
 |   89 | `frontend-testing` | 935 |
-|   90 | `er-engine-ops` | 934 |
 |   90 | `landing-page` | 934 |
 |   96 | `er-matching` | 928 |
 |   99 | `ci-and-supply-chain` | 925 |
 |  102 | `claim-ticket` | 922 |
 |  104 | `ducklake-performance` | 920 |
-|  111 | `project-board` | 913 |
 |  127 | `skill-writer` | 897 |
 |  129 | `pr-review` | 895 |
-|  130 | `observability` | 894 |
 |  177 | `api-contract` | 847 |
 |  342 | `pentest` | 682 |
 |  412 | `stageshow` | 612 |
 
-The median routing clause here is **55 characters**. Skills with less
+The median routing clause here is **56 characters**. Skills with less
 headroom than that cannot take another one — adding routing to any of them
 means trimming its **what** clause first, which is the documented fix:
 
-- `aws-account-operations` — 31 characters free
+- `er-engine-ops` — 26 characters free
+- `project-board` — 33 characters free
 - `security` — 36 characters free
 - `frontend-bff` — 40 characters free
+- `aws-account-operations` — 41 characters free
 - `er-server-control-plane` — 41 characters free
 <!-- END GENERATED: description-budget -->
 - No `allowed-tools`: it only *pre-approves* tools, it cannot restrict them, and
