@@ -55,8 +55,9 @@ What each entry point passes to `er_obs::init`, and the
 ### The gates
 
 Every test enforcing a rule in the skill body, with the first line of
-its own module doc. All of them run under `make check` and none under
-the bare cargo trio:
+its own module doc. Each is a **module of its crate's single test
+binary**, not a target of its own, so run one with
+`cargo test -p <crate> --test main <module>`:
 
 - `er-obs/tests/adopts_parent_context.rs` — A job span inherits the trace id of the request that enqueued it.
 - `er-obs/tests/cardinality.rs` — No metric may carry a dimension that costs money without anyone choosing to.

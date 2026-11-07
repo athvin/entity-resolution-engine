@@ -2183,8 +2183,9 @@ gen_obs_surface() {
 	echo "### The gates"
 	echo
 	echo "Every test enforcing a rule in the skill body, with the first line of"
-	echo "its own module doc. All of them run under \`make check\` and none under"
-	echo "the bare cargo trio:"
+	echo "its own module doc. Each is a **module of its crate's single test"
+	echo "binary**, not a target of its own, so run one with"
+	echo "\`cargo test -p <crate> --test main <module>\`:"
 	echo
 	if [[ -n ${gates//[[:space:]]/} ]]; then
 		printf '%s\n' "$gates" | while IFS='|' read -r path summary; do
