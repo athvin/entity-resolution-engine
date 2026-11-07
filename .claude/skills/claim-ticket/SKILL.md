@@ -2,7 +2,7 @@
 name: claim-ticket
 description: Claims a ticket and starts the work in the open — selects the most important unclaimed card in the board's In progress queue (or takes a given issue number), marks the claim where other agents and humans look (assignee, a claim comment, and an early draft pull request pushed from an empty commit so the work is visible on GitHub before any code exists), cuts a worktree from a freshly pulled origin/main, reads the issue and everything it names, and writes the plan into the draft PR body before implementation begins. The claim is the open draft PR — closing it releases the ticket. Use when asked to pick up, claim, grab or start work on a ticket, to take the next most important item, or when asked what to work on next and the answer should become active work. For board field mechanics, ids and the automations see `project-board`; for driving the finished PR from ready to merged and `main` green see `land-pr`.
 argument-hint: [issue-number]
-disable-model-invocation: true
+disable-model-invocation: false
 ---
 
 # Claiming a ticket
