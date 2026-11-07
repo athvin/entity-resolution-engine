@@ -69,6 +69,39 @@ impl Role {
         }
     }
 
+    /// Whether this role runs as a **deployed process** rather than at the
+    /// terminal of the person who started it.
+    ///
+    /// This decides where a diagnostic belongs, and it is the one question
+    /// `eprintln!` versus `tracing::warn!` actually turns on:
+    ///
+    /// - **Deployed.** Nobody is watching the terminal. stderr is read later by
+    ///   an operator, through Fluent Bit and CloudWatch, so a diagnostic has to
+    ///   be a structured event — it needs span ancestry to be attributable to a
+    ///   run or a tenant, and a target so the default filter can hold its
+    ///   volume down. A bare `eprintln!` here is a line nobody can group,
+    ///   filter or join to a trace.
+    /// - **Interactive.** stderr **is the product**. `er-entity check`'s output
+    ///   is asserted by tests, `er-entity lint` prints diagnostics a human acts
+    ///   on, and `dedupe`'s "wrote N rows to …" is read by whoever typed the
+    ///   command. Routing those through the subscriber would wrap them in JSON
+    ///   and put them behind `RUST_LOG`, where a narrow filter makes them
+    ///   vanish. `eprintln!` is correct, and converting it is a regression.
+    ///
+    /// Stated as a value rather than left to this module's prose because
+    /// `.claude/skills/observability` derives its structured-logging gap from
+    /// these arms. The first version of that gap counted every file with an
+    /// `eprintln!` and no `tracing` event, which named six files of correct
+    /// interactive output as if they were defects — a measurement that would
+    /// have driven exactly the wrong change.
+    #[must_use]
+    pub const fn is_deployed(self) -> bool {
+        match self {
+            Self::Api | Self::Dispatcher | Self::Task | Self::Mcp => true,
+            Self::Cli | Self::EntityCli | Self::Dedupe => false,
+        }
+    }
+
     /// The short `er.role` dimension.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
@@ -127,11 +160,18 @@ pub const DEFAULT_FILTER: &str = concat!(
 /// §10.4's rule is that telemetry carries identifiers and counts and never
 /// values, and this is a deduplication engine, so that string IS the payload.
 ///
-/// Auditing the call sites would not hold. There are ~118 `eprintln!`s still to
-/// become `tracing` events, and the next person to add one cannot be expected
-/// to know that an `error` field reaches an exportable store. So the guarantee
-/// is structural, the same way `er_span::sql_span` has no parameter argument:
-/// events are not exported at all, and no field of one can leak.
+/// Auditing the call sites would not hold: the workspace keeps adding events,
+/// and the next person to write one cannot be expected to know that an `error`
+/// field reaches an exportable store. So the guarantee is structural, the same
+/// way `er_span::sql_span` has no parameter argument: events are not exported at
+/// all, and no field of one can leak.
+///
+/// This sentence used to say "~118 `eprintln!`s still to become `tracing`
+/// events", which was wrong twice over and is worth not restoring. The count was
+/// stale, and the premise was false: most of those are an **interactive** role's
+/// output, where stderr is the product and converting it is a regression — see
+/// [`Role::is_deployed`], which is where that distinction is a value rather than
+/// a claim in prose.
 ///
 /// Nothing is lost in-account. Every event still reaches stderr through the
 /// structured JSON layer and Fluent Bit still ships it to CloudWatch, which is
@@ -402,6 +442,32 @@ mod tests {
             assert!(
                 DEFAULT_FILTER.contains(dep),
                 "{dep} must stay pinned in the default filter"
+            );
+        }
+    }
+
+    #[test]
+    fn the_deployed_roles_are_the_ones_nobody_is_watching() {
+        // The pod verb is the arm worth pinning. `Role::Cli` is the `er`
+        // pipeline CLI a human invokes (`er_cli::cli::run()` parses argv),
+        // while the pod runs `exec-task` as `Role::Task` — so "is this the
+        // engine?" is NOT the question, and classifying by crate instead of by
+        // role would put `Task` on the wrong side.
+        for deployed in [Role::Api, Role::Dispatcher, Role::Task, Role::Mcp] {
+            assert!(
+                deployed.is_deployed(),
+                "{} is deployed: its stderr is read by an operator, not by the \
+                 person who started it, so its diagnostics must be structured",
+                deployed.service_name()
+            );
+        }
+        for interactive in [Role::Cli, Role::EntityCli, Role::Dedupe] {
+            assert!(
+                !interactive.is_deployed(),
+                "{} is interactive: its stderr IS its product, so `eprintln!` \
+                 is correct there and routing it through the subscriber would \
+                 put it behind RUST_LOG",
+                interactive.service_name()
             );
         }
     }

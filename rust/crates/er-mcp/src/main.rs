@@ -40,21 +40,22 @@ async fn main() -> std::process::ExitCode {
     // one stray line here corrupts the protocol for the whole session.
     let _telemetry = er_obs::init(er_obs::Role::Mcp);
     let Ok(base) = std::env::var("ER_MCP_BASE_URL") else {
-        eprintln!("er-mcp: ER_MCP_BASE_URL is required (where er-server listens)");
+        tracing::error!("ER_MCP_BASE_URL is required (where er-server listens)");
         return std::process::ExitCode::FAILURE;
     };
     let Ok(key) = std::env::var("ER_MCP_API_KEY") else {
-        eprintln!("er-mcp: ER_MCP_API_KEY is required (an ORG-scoped key, never an operator one)");
+        tracing::error!("ER_MCP_API_KEY is required (an ORG-scoped key, never an operator one)");
         return std::process::ExitCode::FAILURE;
     };
     let base = base.trim_end_matches('/').to_string();
 
     let tools = manifest::offered();
-    eprintln!(
-        "er-mcp: {} tools ({} read, {} mutating) against {base}",
-        tools.len(),
-        tools.iter().filter(|t| manifest::is_read_only(t)).count(),
-        tools.iter().filter(|t| !manifest::is_read_only(t)).count(),
+    tracing::info!(
+        tools = tools.len(),
+        read_only = tools.iter().filter(|t| manifest::is_read_only(t)).count(),
+        mutating = tools.iter().filter(|t| !manifest::is_read_only(t)).count(),
+        upstream = %base,
+        "serving MCP tools"
     );
 
     let http = match reqwest::Client::builder()
@@ -63,7 +64,7 @@ async fn main() -> std::process::ExitCode {
     {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("er-mcp: building the HTTP client: {e}");
+            tracing::error!(error = %e, "building the HTTP client");
             return std::process::ExitCode::FAILURE;
         }
     };
@@ -77,10 +78,17 @@ async fn main() -> std::process::ExitCode {
         }
         let Ok(request) = serde_json::from_str::<serde_json::Value>(&line) else {
             // A parse failure has no id to answer against, so there is nothing
-            // well-formed to reply with. Logged to stderr, which stdio clients
-            // surface, rather than written to stdout where it would corrupt the
-            // stream.
-            eprintln!("er-mcp: ignoring a line that is not JSON");
+            // well-formed to reply with. It goes to the subscriber — which
+            // writes to stderr, where stdio clients surface it — rather than to
+            // stdout, where it would corrupt the protocol for the session.
+            //
+            // The line's CONTENT is deliberately not recorded. This is the one
+            // site here that fires on untrusted input at runtime, and an MCP
+            // client's malformed line can carry whatever it was about to ask
+            // for — a record key, a search term, an address. §10.4's rule is
+            // identifiers and counts, never values, so the length is logged and
+            // the bytes are not.
+            tracing::warn!(bytes = line.len(), "ignoring a line that is not JSON");
             continue;
         };
 

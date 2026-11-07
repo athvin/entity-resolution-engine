@@ -2150,6 +2150,95 @@ gen_obs_surface() {
 	both=$(comm -12 <(printf '%s\n' "$bare") <(printf '%s\n' "$structured") || true)
 	onlybare=$(comm -23 <(printf '%s\n' "$bare") <(printf '%s\n' "$structured") || true)
 
+	# Split the bare-stderr set by whether anyone is WATCHING the terminal,
+	# which is the only question `eprintln!` versus `tracing::warn!` turns on.
+	#
+	# The first version of this block reported `onlybare` flat, and that was a
+	# measurement pointing the wrong way: six of its seven entries were
+	# `er-entity`'s lint report, `dedupe`'s "wrote N rows", and a usage message
+	# — all correct, one of them asserted by tests — so "close the gap" would
+	# have meant breaking them. A metric that makes correct code look like debt
+	# is worse than no metric.
+	#
+	# Classification comes from `Role::is_deployed`, a value in `er-obs` with
+	# its own test, NOT from the role's doc comment. Every claim this skill
+	# borrowed from a module doc has so far been wrong, so the arms are read
+	# from the match and a crate with no `er_obs::init` call at all is dropped:
+	# it has no subscriber, so it physically cannot emit an event and listing it
+	# is noise.
+	local deployed_roles undeployed_roles deployed_gap interactive_gap nosub
+	deployed_roles=$(
+		sed -n '/const fn is_deployed/,/^    }/p' "$crates/er-obs/src/init.rs" 2>/dev/null |
+			grep -E '=> true' | grep -oE 'Self::[A-Za-z]+' | sed 's/Self:://' | sort -u || true
+	)
+	undeployed_roles=$(
+		sed -n '/const fn is_deployed/,/^    }/p' "$crates/er-obs/src/init.rs" 2>/dev/null |
+			grep -E '=> false' | grep -oE 'Self::[A-Za-z]+' | sed 's/Self:://' | sort -u || true
+	)
+	# file -> the Role(s) whose process it runs in.
+	#
+	# Resolved per BINARY, not per crate, and that distinction is the whole
+	# correctness of this split. `er-server/src/bin/er-openapi-check.rs` is its
+	# own binary that installs no subscriber, but a crate-wide grep finds every
+	# role `er-server` installs anywhere and so filed a build tool under
+	# `Role::Api/Dispatcher/Task` — i.e. told the reader to convert the one file
+	# in the set where a `tracing` event would go nowhere at all.
+	#
+	# So: a `src/bin/<name>.rs` or a `src/main.rs` IS an entry point, and only
+	# its own text counts. Anything else is library code shared by whatever
+	# binaries the crate ships, where the crate-wide answer is the right one.
+	file_roles() {
+		local f=$1 crate=${1%%/*} path="$crates/$1"
+		case $f in
+		*/src/bin/*.rs | */src/main.rs)
+			grep -oE 'er_obs::Role::[A-Za-z]+' "$path" 2>/dev/null |
+				sed 's/er_obs::Role:://' | sort -u || true
+			;;
+		*)
+			grep -rhoE 'er_obs::Role::[A-Za-z]+' "$crates/$crate/src" 2>/dev/null |
+				sed 's/er_obs::Role:://' | sort -u || true
+			;;
+		esac
+	}
+	deployed_gap=""
+	interactive_gap=""
+	nosub=""
+	if [[ -n ${onlybare//[[:space:]]/} ]]; then
+		while read -r f; do
+			[[ -n $f ]] || continue
+			local rs verdict label
+			rs=$(file_roles "$f")
+			if [[ -z ${rs//[[:space:]]/} ]]; then
+				nosub+="- \`$f\` — installs no subscriber"$'\n'
+				continue
+			fi
+			# Pre-rendered with its own markup, because `bullets` wraps its
+			# payload in backticks and a second pair nests into literal ones.
+			label=$(printf '%s' "$rs" | sort -u | tr '\n' '/' | sed 's#/$##')
+			# Membership by pure-bash substring match on a newline-delimited
+			# set, rather than by piping the set into a quiet grep. That form
+			# exits on its first match, SIGPIPEs the writer, and makes the
+			# pipeline return 141 — so a role that IS deployed can report as
+			# interactive. `scripts/ci/skills-check-test.sh` detects the pattern
+			# by name and caught it here, which is also why this comment
+			# describes it in words: the detector is textual, so spelling the
+			# construct out in a comment trips it just as the real thing does.
+			verdict=interactive
+			while read -r r; do
+				[[ -n $r ]] || continue
+				[[ $'\n'$deployed_roles$'\n' == *$'\n'"$r"$'\n'* ]] && verdict=deployed
+			done <<<"$rs"
+			if [[ $verdict == deployed ]]; then
+				deployed_gap+="- \`$f\` — \`Role::$label\`"$'\n'
+			else
+				interactive_gap+="- \`$f\` — \`Role::$label\`"$'\n'
+			fi
+		done <<<"$onlybare"
+	fi
+	deployed_gap=${deployed_gap%$'\n'}
+	interactive_gap=${interactive_gap%$'\n'}
+	nosub=${nosub%$'\n'}
+
 	echo "### Which side of the split each crate is on"
 	echo
 	echo "**Depend on \`er-span\` — they emit and collect nothing.** Instrumenting"
@@ -2208,15 +2297,51 @@ gen_obs_surface() {
 	echo
 	bullets "$structured" "**None**, which would mean the subscriber has nothing to collect."
 	echo
-	echo "**Product files still writing \`eprintln!\` and no structured event.**"
-	echo "This is the gap worth reading, and it is not all defect: a CLI's"
-	echo "user-facing error output is correctly an \`eprintln!\`, while a diagnostic"
-	echo "a dashboard should see is not. Judge each by whether anything downstream"
-	echo "needs to group it:"
+	echo "The set below is split by \`er_obs::init::Role::is_deployed\`, because"
+	echo "whether a bare \`eprintln!\` is a defect depends entirely on whether"
+	echo "anyone is watching the terminal. Deployed roles are"
+	echo "\`$(printf '%s' "$deployed_roles" | tr '\n' ' ' | sed 's/ $//')\`;"
+	echo "interactive ones are"
+	echo "\`$(printf '%s' "$undeployed_roles" | tr '\n' ' ' | sed 's/ $//')\`."
 	echo
-	bullets "$onlybare" "**None** — every file that writes to stderr also emits structured events."
+	echo "#### The actual gap — a deployed process writing unstructured stderr"
 	echo
-	echo "**Mid-conversion — both idioms in one file:**"
+	echo "Nobody reads these terminals. Each line here reaches an operator only"
+	echo "through Fluent Bit, with no span ancestry to attribute it and no target"
+	echo "to filter it by. **These are worth converting:**"
+	echo
+	if [[ -n ${deployed_gap//[[:space:]]/} ]]; then
+		printf '%s\n' "$deployed_gap"
+	else
+		echo "**None.** Every deployed role emits structured events."
+	fi
+	echo
+	echo "#### Correct as-is — interactive output"
+	echo
+	echo "Here stderr **is the product**: \`er-entity check\`'s output is asserted"
+	echo "by tests, \`er-entity lint\` prints diagnostics a human acts on, and"
+	echo "\`dedupe\`'s \"wrote N rows\" is read by whoever typed the command."
+	echo "Routing these through the subscriber would wrap them in JSON and put"
+	echo "them behind \`RUST_LOG\`. **Do not convert them:**"
+	echo
+	if [[ -n ${interactive_gap//[[:space:]]/} ]]; then
+		printf '%s\n' "$interactive_gap"
+	else
+		echo "**None.**"
+	fi
+	echo
+	if [[ -n ${nosub//[[:space:]]/} ]]; then
+		echo "#### Cannot emit — no subscriber installed"
+		echo
+		echo "These binaries never call \`er_obs::init\`, so a \`tracing\` event"
+		echo "would go nowhere. \`eprintln!\` is the only channel they have:"
+		echo
+		printf '%s\n' "$nosub"
+		echo
+	fi
+	echo "**Mid-conversion — both idioms in one file.** Expected and not a"
+	echo "defect: a deployed role's operational diagnostics become events while"
+	echo "its genuine user-facing output stays an \`eprintln!\`."
 	echo
 	bullets "$both" "**None.**"
 }
