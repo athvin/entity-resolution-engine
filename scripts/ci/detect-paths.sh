@@ -68,8 +68,16 @@
 # regex does not cover, so a change to one pays the full backend gate. That is
 # the fail-safe direction and is left alone.
 
+# `.agents/` is the discovery path Codex and Kimi Code read project skills
+# from. Every entry under it is a symlink into `.claude/skills/` — the skills
+# are authored once and bridged across, which `scripts/ci/skills-bridge-check.sh`
+# enforces — so nothing in `make check` reads it, for the same reason
+# `.claude/` doesn't. What keeps the exemption honest is the same mechanism as
+# `.devcontainer/` two paragraphs up: the gate that DOES read it runs ungated
+# in rust.yml's `skills` job.
+#
 # Everything the Rust gate never reads.
-DETECT_EXEMPT='^(\.claude/|\.devcontainer/|CLAUDE\.md$|infra/terraform/|scripts/ci/tf-|scripts/hooks/|\.github/aw/|\.github/workflows/((infra|drift|devcontainer)\.yml$|shared/|agentics-maintenance\.yml$|[A-Za-z0-9._-]+\.md$|[A-Za-z0-9._-]+\.lock\.yml$))'
+DETECT_EXEMPT='^(\.claude/|\.agents/|\.devcontainer/|CLAUDE\.md$|infra/terraform/|scripts/ci/tf-|scripts/hooks/|\.github/aw/|\.github/workflows/((infra|drift|devcontainer)\.yml$|shared/|agentics-maintenance\.yml$|[A-Za-z0-9._-]+\.md$|[A-Za-z0-9._-]+\.lock\.yml$))'
 
 # A generated artifact `er-entity verify` re-renders and byte-compares.
 DETECT_ERD='^\.claude/skills/entity-framework/references/erd\.md$'

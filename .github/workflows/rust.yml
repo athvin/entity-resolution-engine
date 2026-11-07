@@ -312,6 +312,10 @@ jobs:
   # skill gate placed in any of them would never run when it matters. This one
   # needs no toolchain (pure shell, no cargo, no node, no network), so running
   # it unconditionally costs seconds.
+  #
+  # The same reasoning keeps the `.agents/skills` bridge gate in this job:
+  # `detect` exempts `.claude/**` and `.agents/**`, so a skills-only PR reaches
+  # only this job — which is exactly the PR that can orphan a symlink.
   skills:
     name: agent skills (lint + drift)
     runs-on: ubuntu-latest
@@ -371,6 +375,24 @@ jobs:
         # Same bare-checkout budget as the step above: pure bash, no toolchain.
         working-directory: ${{ github.workspace }}
         run: bash scripts/ci/skills-check-test.sh
+
+      - name: agent-skill bridge symlinks (Codex/Kimi Code discovery)
+        # Claude Code discovers project skills at .claude/skills; Codex and
+        # Kimi Code discover them at .agents/skills. Skills are authored once,
+        # under .claude/skills, and bridged across by symlinks — a PR that
+        # adds a skill without its bridge, or forks the bridge into a real
+        # copy, fails here. Runs in THIS job rather than behind `detect`
+        # because a skills-only PR is exactly the shape `detect` skips; see
+        # the job header. Same bare-checkout budget as the steps above.
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/ci/skills-bridge-check.sh
+
+      - name: skills-bridge regression tests
+        # Same contract as the skills-check suite two steps up: a detector
+        # breaks by noticing nothing, and this gate's rename-detection exits
+        # are precisely what must never start passing silently.
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/ci/skills-bridge-check-test.sh
 
   # S9 — every `uses:` pinned to a commit SHA with its `# vTAG` comment.
   #
@@ -501,8 +523,11 @@ jobs:
   lint:
     name: fmt + clippy + docs
     needs: detect
-    # `drift` too: this job carries the only generated-reference drift check that
-    # can BLOCK a merge, because the `skills` job is not a required status check.
+    # `drift` too: this job carries a generated-reference drift check as a
+    # backstop for code PRs. The ungated `skills` job is the primary copy and
+    # is itself a required status check (probed on `main`) — this duplicate
+    # exists so a `detect` regression could not let a code PR through with
+    # drift unexamined; see the `skills` job header.
     if: needs.detect.outputs.code == 'true' || needs.detect.outputs.drift == 'true'
     runs-on: ubuntu-latest
     # 45, not 30: on a cold cache this job has to build the bundled duckdb C++

@@ -121,7 +121,9 @@ its exempt set. **That set lives in `scripts/ci/detect-paths.sh` as
 `DETECT_EXEMPT`, not in the workflow** — the `filter` step and the
 content-addressed `key` step both source it, which is what stops the two
 regexes from drifting apart. Read it there rather than from a copy: besides
-`infra/terraform/**`, `scripts/ci/tf-*`, `.claude/**` and the two terraform
+`infra/terraform/**`, `scripts/ci/tf-*`, `.claude/**`, `.agents/**` (the
+Codex/Kimi skills bridge — symlinks into `.claude/skills`, enforced ungated by
+`skills-bridge-check.sh`) and the two terraform
 workflows (`infra.yml`, `drift.yml`), it exempts the whole agentic set —
 `.github/aw/`, `.github/workflows/shared/`, `agentics-maintenance.yml`, and
 every `*.md` and `*.lock.yml` under `.github/workflows/`.
@@ -149,7 +151,11 @@ coupling is that `skills-check.sh` derives generated skill references *from*
 `infra/terraform/**` — `aws_*` resource counts, IAM users, Pod Identity
 associations, pinned provider versions — so a terraform-only PR can make a
 reference stale. That is covered by the ungated `skills` job rather than by the
-compile jobs, which is precisely why that job exists separately.
+compile jobs, which is precisely why that job exists separately. The same job
+also runs `skills-bridge-check.sh`, which fails a PR that adds a skill under
+`.claude/skills/` without its `.agents/skills/` symlink — or lets the bridge
+fork into a real copy — the breakage only a skills-only PR can introduce, on
+exactly the PR `detect` skips.
 
 The workflows are named **file by file**, not as `^\.github/workflows/`, and the
 distinction is load-bearing: `rust.yml`, `frontend.yml` and `images.yml` must
@@ -287,8 +293,8 @@ a SHA pin.
 in `rust.yml` runs it. **It is ungated, deliberately** — `detect` exempts
 `.claude/**`, `infra.yml`, `drift.yml` and every `*.lock.yml`, so a gated pin
 check would skip on exactly the PRs most likely to introduce an unpinned
-action. It is **not yet a required check**; promote it once it has reported
-green on `main` and been observed failing, in that order.
+action. It **is a required check** — promoted to one only after it had
+reported green on `main` and been observed failing, in that order.
 
 Two things it gets right, both learned the hard way:
 
