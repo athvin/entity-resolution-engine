@@ -94,20 +94,8 @@ impl Harness {
         let (api, frames) = FakePodApi::new(format!("http://{addr}"), data_root);
         let api = Arc::new(api);
         let cfg = ExecutorConfig {
-<<<<<<< HEAD
             profile,
-            // Every kind: this harness is generic, and a test's job must not
-            // fail to route because the harness forgot to list its kind. The
-            // field goes away with the allowlist in #645.
-            dag_kinds: er_server::dags::JobKind::ALL
-                .iter()
-                .map(|k| k.as_str().to_string())
-                .collect(),
-=======
-            // No `dag_kinds`: the per-kind allowlist is gone, so the executor
-            // owns every kind and the harness has nothing to opt its test's
-            // kind into.
->>>>>>> 598428be (fix(test): the harness stops opting kinds in, now that there is no allowlist)
+            // No per-kind allowlist to opt into: the executor owns every kind.
             in_flight_cap: 2,
             template: er_k8s::manifest::REFERENCE_TEMPLATE.to_string(),
             image_digest: None,
@@ -133,9 +121,15 @@ impl Harness {
         let mut state = String::new();
         for _ in 0..MAX_PUMPS {
             // Claim on every iteration, which is what `dispatcher::run_loop`
-            // does. `pg::claim` takes the oldest queued row for an org with no
-            // active job, so claiming once would pump someone else's job while
-            // the one under test sat `queued`.
+            // does. Claiming ONCE was wrong whenever the queue held more than
+            // the job under test: `pg::claim` takes the oldest queued row for
+            // an org with no active job, so a test whose earlier phase left an
+            // `apply_corrections` behind had that claimed instead, and its own
+            // job sat `queued` while the pumps ran. The legacy arm's tests
+            // asserted only that SOMETHING was claimed, so they never saw it.
+            //
+            // A claim failure is not fatal: once every job is terminal there
+            // is nothing to claim and `dispatch_once` returns false.
             let _ = er_server::dispatcher::dispatch_once(client, None, Some(&mut self.executor))
                 .await
                 .expect("dispatch_once");
@@ -170,6 +164,21 @@ impl Harness {
         let _ = self
             .run_kind(client, org_id, dataset_id, "apply_corrections")
             .await;
+    }
+
+    /// Claim and run an ALREADY-enqueued job to settlement, returning the
+    /// state it settled in.
+    ///
+    /// The stand-in for a `dispatcher::dispatch_once_with` call where the test
+    /// enqueued the job itself and wants to assert on the settled row rather
+    /// than have the harness assert for it.
+    pub async fn run_queued(
+        &mut self,
+        client: &tokio_postgres::Client,
+        org_id: &str,
+        job_id: &str,
+    ) -> String {
+        self.run_to_settlement(client, org_id, job_id).await
     }
 
     /// Enqueue a job of `kind` for the dataset, run it to settlement

@@ -25,6 +25,7 @@ use er_server::{AppState, app, pg};
 use tower::ServiceExt;
 
 use crate::common;
+use crate::executor_harness;
 
 const DEFAULT_YAML: &str = include_str!("../../er-config/tests/fixtures/default.yaml");
 
@@ -175,12 +176,18 @@ async fn only_approved_reviews_are_staged_and_only_while_the_tag_lives() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 
+    // Each phase enqueues an `apply_approved` job and runs it through the
+    // executor, where this used to call the legacy in-process arm. The closure
+    // returns the state the job SETTLED in rather than whether it was claimed:
+    // on the task path "claimed" only means planned, and an `apply_approved`
+    // whose control task failed would have been claimed just the same.
     let run = || {
         let app = app.clone();
         let admin_key = admin_key.clone();
         // Cloned per call like the two above, so the closure stays `Fn`: the
         // phases below call it repeatedly.
         let dsn = dsn.clone();
+        let dir = dir.clone();
         async move {
             let resp = app
                 .clone()
@@ -197,23 +204,29 @@ async fn only_approved_reviews_are_staged_and_only_while_the_tag_lives() {
                 StatusCode::ACCEPTED,
                 "the kind is schedulable"
             );
-            er_server::dispatcher::dispatch_once_with(
-                // `dsn`, not the env var: that names the admin database, while
-                // this test owns its own. A dispatcher pointed at the wrong
-                // database finds no job and the assertion below fails for a
-                // reason that has nothing to do with approvals.
-                &pg::connect(&dsn).await.unwrap(),
-                &Ok(None),
-                &er_server::mail::Mailer::off(),
-                None,
-            )
-            .await
-            .unwrap()
+            let job_id = json_body(resp).await["id"]
+                .as_str()
+                .expect("the enqueue response names the job")
+                .to_string();
+            // `dsn`, not the env var: that names the admin database, while
+            // this test owns its own. A dispatcher pointed at the wrong
+            // database finds no job and the assertion below fails for a
+            // reason that has nothing to do with approvals.
+            let client = pg::connect(&dsn).await.unwrap();
+            let org_id = pg::org_id_by_name(&client, "acme")
+                .await
+                .unwrap()
+                .expect("org exists");
+            // A harness per call, matching the clone-per-call shape above. Each
+            // phase's job settles before the next begins, so a fresh executor
+            // epoch adopting the previous rows is harmless.
+            let mut harness = executor_harness::Harness::start(&dsn, dir.clone()).await;
+            harness.run_queued(&client, &org_id, &job_id).await
         }
     };
 
     // ---- phase 1: no gate configured, so nothing is staged -------------------
-    assert!(run().await, "the job should have been claimed");
+    assert_eq!(run().await, "succeeded", "the job should have settled");
     let (staged, queued) = staged_and_queued(&client, &org_id).await;
     assert_eq!(
         (staged, queued),
@@ -244,7 +257,7 @@ async fn only_approved_reviews_are_staged_and_only_while_the_tag_lives() {
             .unwrap();
     }
 
-    assert!(run().await);
+    assert_eq!(run().await, "succeeded");
     let (staged, queued) = staged_and_queued(&client, &org_id).await;
     assert_eq!(staged, 2, "both approved REVIEWS staged, and only those");
     assert_eq!(queued, 1, "one apply enqueued to work through them");
@@ -281,7 +294,7 @@ async fn only_approved_reviews_are_staged_and_only_while_the_tag_lives() {
         "an approved review is untagged as it is staged"
     );
 
-    assert!(run().await);
+    assert_eq!(run().await, "succeeded");
     let (staged_again, _) = staged_and_queued(&client, &org_id).await;
     assert_eq!(
         staged_again, 2,
@@ -318,7 +331,7 @@ async fn only_approved_reviews_are_staged_and_only_while_the_tag_lives() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 
-    assert!(run().await);
+    assert_eq!(run().await, "succeeded");
     let (after_retire, _) = staged_and_queued(&client, &org_id).await;
     assert_eq!(
         after_retire, 2,
