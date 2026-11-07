@@ -464,9 +464,31 @@ catalog will not be caught here; neither local gate caught those before either
 (`make check-e2e`'s lake tests are also local), and the real AWS environment
 covers them.
 
-`er-server` runs the dispatcher **in-process** (`ER_DISPATCH_IN_PROCESS=1`), so
-the half-up state the old `run.sh` had to detect — a live API with nothing
-draining the queue — is unreachable.
+`up.sh` starts **two** host processes, `er-server` and `er-dispatcher`, which is
+the topology the Helm chart runs. It used to be one process with the dispatcher
+in-process under `ER_DISPATCH_IN_PROCESS=1`; that variable is now assigned
+nowhere in the tree. So the half-up state the old `run.sh` had to detect — a
+live API with nothing draining the queue — is reachable again, and `up.sh`
+checks for it (it fails the boot if `er-dispatcher` exits).
+
+**What Phase 4 of the batch-orchestration plan costs this tier.** Deleting the
+legacy in-process arm leaves a host dispatcher able to claim a job and execute
+nothing, because the executor's only route to a `PodApi` is an in-cluster
+Kubernetes identity (decided in #638, recorded beside Phase 4 in
+[batch-orchestration-design.md](batch-orchestration-design.md)). Four of the five
+specs here survive that, because they read rows or assert a refusal:
+
+| Spec | What it needs |
+|---|---|
+| `login-dashboard` | a `succeeded` row in `last-run-strip` |
+| `see-your-data` | `runs-table` contains `succeeded` |
+| `fix-your-data` | `GET …/jobs?limit=10` returns rows |
+| `run-the-business` | `jobs/submit` **refused** with 409 while suspended |
+| **`grow-your-data`** | **three jobs actually executed** — it creates a source at runtime, then asserts `["run_all_incremental", "run_all_full", "train"]` are all `succeeded` |
+
+That last one has no row-seeding equivalent: the source does not exist until the
+spec creates it. After Phase 4 it needs a cluster, which is tracked separately
+rather than folded into the Phase 4 deletion.
 
 ### The seeding order is forced, not chosen
 
