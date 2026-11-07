@@ -94,20 +94,20 @@ so they are worth separating explicitly:
 
 | Path | Reached by | Identity |
 |---|---|---|
-| **lake** reads and writes | DuckDB's own S3 support, via ATTACH | the static `ER_S3_*` key |
+| **lake** reads and writes | nothing — DuckDB has no S3 path here | none; a lake is a filesystem path |
 | **dropped-object ingestion** — the poller that downloads a delivered object into the tenant's `drop_root` | `aws-sdk-s3` | EKS Pod Identity |
 
-The lake path takes literal `ER_S3_ACCESS_KEY_ID`, `ER_S3_SECRET_ACCESS_KEY` and
-a non-empty scheme-less `ER_S3_ENDPOINT` — there is no credential-chain path and
-the endpoint cannot be omitted. An empty secret would attach a lake that
-authenticates as nobody, so empty values are rejected rather than defaulted.
+**Only the second row runs.** The lake row used to read "the static `ER_S3_*`
+key"; that key was retired because nothing consumed it — the Rust engine has no
+`httpfs`/`aws` load, no `CREATE SECRET` and no `ER_S3_*` reader, so an `s3://`
+lake cannot be opened from Rust at all and the data path in-cluster is EFS at
+`/srv/er`. The ATTACH options and that gap's status belong to the
+ducklake-lakehouse skill.
 
-The ATTACH options and lake semantics belong to the ducklake-lakehouse skill.
-What matters here is the operational consequence: **the lake's S3 identity is a
-static key, not Pod Identity**, so it is invisible to the Pod Identity reasoning
-that covers every other workload, and it does not expire. The ingestion poller
-is the opposite — ordinary Pod Identity, so a failure there *is* an association
-question.
+The operational consequence is now the simple one: **every S3 identity in this
+account is Pod Identity**, with no static-key exception to reason around and
+nothing lake-shaped that fails to expire. So an S3 failure *is* an association
+question — if it is reaching S3 at all, it is the ingestion poller.
 
 The ingestion path keeps the engine reading the local filesystem, which is why
 `delivery_preconditions` / `finish_delivery` stay the single landing path rather
@@ -115,17 +115,23 @@ than the engine gaining a second way in.
 
 ## The one long-lived access key
 
-No IAM users exist for humans. Exactly one long-lived access key exists as a
-service identity — the S3 lake key above — and it carries a scheduled
-retirement for when the credential-chain work lands.
+No IAM users exist for humans, and **no service identity holds a long-lived key
+any more.** This section has counted down from two to zero, which is worth
+keeping because each one went for a different reason:
 
-This said *two* until recently. SES was going to need its own key, because its
-SMTP interface does not accept credentials derived from temporary ones; the Rust
-mailer calls the SES **API** instead and signs with Pod Identity, so that second
-key was never created.
+- **SES** was going to need its own key, because its SMTP interface does not
+  accept credentials derived from temporary ones. The Rust mailer calls the SES
+  **API** instead and signs with Pod Identity, so that key was never created.
+- **The S3 lake key** was deleted outright. Not migrated — it had no consumer,
+  as the section above explains, and the grants it carried already sat on the
+  `er-dev-runner-pod` Pod Identity role.
 
-Separately, and more dangerous operationally: the `er-builder` profile is backed
-by a never-expiring `AdministratorAccess` static key created for the build loop.
-It is a documented, deliberate exception with a scheduled deletion before the
-production gate, and it is the one identity that none of the three guardrail
-layers constrains. See `mcp-and-guardrails.md`.
+What remains is **one** key, and it is not a service identity: the `er-builder`
+profile is backed by a never-expiring `AdministratorAccess` static key created
+for the build loop. Read its posture from `builder.tf` rather than from memory —
+it is **kept indefinitely by owner decision**, not scheduled for deletion, and
+the earlier claim here of "a scheduled deletion before the production gate" was
+wrong. It coexists with prod because explicit `DenyProd*` statements override
+its Allow, so it cannot mutate `er-prod-*`; the deliberate hole is that
+`iam:CreateAccessKey` is not denied. It is still the one identity none of the
+three guardrail layers constrains. See `mcp-and-guardrails.md`.

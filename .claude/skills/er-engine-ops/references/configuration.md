@@ -120,15 +120,17 @@ selected config and delivery directories where the process can read them.
 | `ER_CONFIG` | Absolute config path inside the runtime |
 | `ER_CATALOG_DSN` | PostgreSQL connection URI |
 | `ER_LAKE_METADATA_SCHEMA` | Unique catalog schema for the lake |
-| `ER_LAKE_DATA_PATH` | S3 data prefix, consistent with the configured storage path |
+| `ER_LAKE_DATA_PATH` | Filesystem data path, consistent with the configured storage path |
 | `ER_LAKE_ALIAS` | `lake` |
-| `ER_S3_ENDPOINT` | Host and port, without `http://` or `https://` |
-| `ER_S3_ACCESS_KEY_ID`, `ER_S3_SECRET_ACCESS_KEY` | Object-store credentials |
-| `ER_S3_REGION` | Object-store region |
-| `ER_S3_URL_STYLE` | `path` or `vhost` |
-| `ER_S3_USE_SSL` | `true` or `false` |
 | `ER_DUCKDB_THREADS` | Integer worker count |
 | `ER_DUCKDB_MEMORY_LIMIT` | DuckDB buffer limit, below the container memory limit |
+
+**There are no `ER_S3_*` variables.** This table used to list an endpoint, a
+key pair, a region and two style flags. Nothing in the engine ever read them in
+the Rust implementation — there is no `httpfs`/`aws` load and no `CREATE SECRET`
+— so an `s3://` data path does not open and `ER_LAKE_DATA_PATH` is a filesystem
+path. The ducklake-lakehouse skill owns that status; setting an invented
+`ER_S3_*` will not change it.
 
 `ER_CPU_LIMIT` and `ER_MEM_LIMIT` configure Compose's container limits;
 Compose derives DuckDB's thread count from the CPU limit. The image includes the

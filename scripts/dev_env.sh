@@ -12,8 +12,11 @@
 # absent") and every value is generated or read from the caller's environment —
 # no committed dev credential from scripts/frontend-dev/env.sh ever reaches the cloud
 # (§8.5). Optional inputs, each parked as an empty/placeholder value otherwise:
-#   ER_DEV_S3_KEY / ER_DEV_S3_SECRET   the §9.2 per-environment lake IAM user's
-#                                      static key pair (placeholder CHANGEME)
+#   (no lake credential: 4.1 retired the §9.2 static key pair. The lake grants
+#    live on the er-dev-runner-pod Pod Identity role (pod_identity.tf) and are
+#    reached through the default credential chain. Nothing consumed the old
+#    ER_DEV_S3_KEY/ER_DEV_S3_SECRET pair — the `secret://` indirection that was
+#    to resolve it belonged to the deleted Python server.)
 #   (no SMTP credential: §7.5 email is the SES API, signed by the pod's EKS
 #    Pod Identity credentials. Set the chart's erserver.email.backend to `log`
 #    for a dev namespace and the links land in the pod log.)
@@ -136,8 +139,6 @@ PY
     fi
 
     if ! secret_exists "${SECRET_BASE}/erserver"; then
-        [[ -n "${ER_DEV_S3_KEY:-}" ]] \
-            || log "WARNING: ER_DEV_S3_KEY/ER_DEV_S3_SECRET unset — writing CHANGEME; runs cannot reach the lake until the ${SECRET_BASE}/erserver entry is updated (§9.2)"
         PG_JSON_FILE="${SCRATCH}/postgres.json" AURORA_HOST="$AURORA_HOST" \
         DEV_DB="erctl_${DEV_ID}" DEV_ROLE="er_${DEV_ID}" \
         python3 - > "${SCRATCH}/erserver.json" <<'PY'
@@ -148,17 +149,13 @@ role_pw = pg["ER_ROLE_PASSWORD"]
 host, db, role = os.environ["AURORA_HOST"], os.environ["DEV_DB"], os.environ["DEV_ROLE"]
 dsn = f"postgresql://{role}:{role_pw}@{host}:5432/{db}?sslmode=require"
 
-# The cloud tenant env (§9.2 Phase 1: static keys against real S3, vhost,
-# TLS). The S3 pair rides as secret:// references resolved by erserver's
-# secrets.py from ERSERVER_SECRET_* in its own environment — a key never
-# rides in a job row.
+# The cloud tenant env. No object-store keys: 4.1 retired the §9.2 static
+# pair, and there is nothing to replace them with here — the engine has no
+# ER_S3_* reader at all (see the ducklake-lakehouse skill), so a lake is a
+# filesystem path and in-cluster that is EFS at /srv/er. When the engine
+# learns to open an s3:// lake it will do so through the pod's own identity,
+# which is a credential that never rides in a job row by construction.
 tenant_env = {
-    "ER_S3_ENDPOINT": "s3.us-east-2.amazonaws.com",
-    "ER_S3_ACCESS_KEY_ID": "secret://S3_KEY",
-    "ER_S3_SECRET_ACCESS_KEY": "secret://S3_SECRET",
-    "ER_S3_REGION": "us-east-2",
-    "ER_S3_URL_STYLE": "vhost",
-    "ER_S3_USE_SSL": "true",
     "ER_LAKE_ALIAS": "lake",
     "ER_DUCKDB_THREADS": "2",
     "ER_DUCKDB_MEMORY_LIMIT": "2GB",
@@ -170,8 +167,6 @@ print(json.dumps({
     # MAINT_DSN / TENANT_DSN_TEMPLATE are gone.
     "ERSERVER_DSN": dsn,
     "ERSERVER_OPERATOR_TOKEN": secrets.token_hex(32),
-    "ERSERVER_SECRET_S3_KEY": os.environ.get("ER_DEV_S3_KEY", "CHANGEME"),
-    "ERSERVER_SECRET_S3_SECRET": os.environ.get("ER_DEV_S3_SECRET", "CHANGEME"),
     "ERSERVER_TENANT_ENV_JSON": json.dumps(tenant_env),
 }))
 PY

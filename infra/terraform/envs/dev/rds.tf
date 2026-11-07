@@ -78,8 +78,10 @@ resource "aws_rds_cluster_instance" "dev" {
   engine_version     = aws_rds_cluster.dev.engine_version
 }
 
-# Connection info for scripts/dev_env.sh + the chart's ERSERVER_DSN. Mirrors the
-# er/dev/shared/s3 pattern (one shared entry the per-dev secrets build on).
+# Connection info for scripts/dev_env.sh + the chart's ERSERVER_DSN. One shared
+# entry the per-dev secrets build on — the `er/dev/shared/s3` entry this used to
+# cite as the sibling example retired with the static lake key (lake.tf), so
+# this is now the only shared entry.
 resource "aws_secretsmanager_secret" "db" {
   name        = "er/dev/shared/postgres"
   description = "The dev Aurora Serverless v2 endpoint + master credentials; consumed by scripts/dev_env.sh to build each developer's ERSERVER_DSN."
