@@ -32,7 +32,7 @@ written, and nothing failed while the prose said otherwise.
 | `workflow-shell-check` | `bash scripts/ci/workflow-shell-check-test.sh && bash scripts/ci/workflow-shell-check.sh` |
 | `test` | `cd rust && cargo test --workspace` |
 
-**52 test files read `ER_TEST_PG_DSN`** and self-skip without it.
+**53 test files read `ER_TEST_PG_DSN`** and self-skip without it.
 <!-- END GENERATED: rust-gates -->
 
 ## What it does not cover

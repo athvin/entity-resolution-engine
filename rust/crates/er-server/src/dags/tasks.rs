@@ -630,19 +630,35 @@ pub struct ApplyStaged;
 impl Task<Session> for ApplyStaged {
     const NAME: &'static str = "apply_staged";
     const VERSION: u32 = 1;
-    type Input = (Plan<RunPlan>,);
+    type Input = (Plan<RunPlan>, Plan<super::plans::DrainedActions>);
     type Output = Plan<super::plans::StagedApplied>;
     const WRITES_LAKE: bool = true;
 
     fn run(
         &mut self,
         ctx: &mut TaskCtx<'_, Session>,
-        (plan,): Self::Input,
+        (plan, drained): Self::Input,
     ) -> Result<Outcome<Self::Output>, TaskError> {
-        // The actions themselves ride in the order's params: `drain_actions`
-        // snapshotted the ids, and the control plane put the payloads where a
-        // pod can read them without a database credential.
-        let pending = staged_actions(ctx)?;
+        // The actions arrive on `drain_actions`'s edge. A pod holds no
+        // control-plane credential (§6.4), so it cannot read
+        // `staged_steward_actions` itself and whatever it applies has to be
+        // handed to it.
+        //
+        // This used to read `order.params["staged_actions"]`, a key nothing in
+        // the tree ever wrote — so every correction pass applied nothing and
+        // settled `succeeded` (#760). A typed pin cannot fail that way: the
+        // edge is declared in `Input`, the DAG wires it, and
+        // `dag_assembly.rs` checks the wiring.
+        let pending: Vec<StagedAction> = drained
+            .0
+            .actions
+            .into_iter()
+            .map(|a| StagedAction {
+                id: a.id,
+                action: a.action,
+                created_by: Some(a.created_by),
+            })
+            .collect();
         let now = &plan.0.run_at;
         let mut applied = Vec::new();
         let mut labels = Vec::new();
@@ -702,44 +718,6 @@ struct StagedAction {
     id: String,
     action: serde_json::Value,
     created_by: Option<String>,
-}
-
-/// The staged actions this pass must apply, from the order's params.
-///
-/// A pod cannot read `staged_steward_actions` (§6.4), so the control plane
-/// puts the drained payloads in the params when it plans the job. An absent
-/// list is an empty pass, not a failure.
-fn staged_actions(ctx: &TaskCtx<'_, Session>) -> Result<Vec<StagedAction>, TaskError> {
-    let Some(items) = ctx
-        .order
-        .params
-        .get("staged_actions")
-        .and_then(serde_json::Value::as_array)
-    else {
-        return Ok(Vec::new());
-    };
-    items
-        .iter()
-        .map(|v| {
-            let id = v
-                .get("id")
-                .and_then(serde_json::Value::as_str)
-                .ok_or_else(|| {
-                    TaskError::Failed(er_errors::ErError::precondition(
-                        "a staged action in the work order has no id".to_string(),
-                    ))
-                })?
-                .to_string();
-            Ok(StagedAction {
-                id,
-                action: v.get("action").cloned().unwrap_or(serde_json::Value::Null),
-                created_by: v
-                    .get("created_by")
-                    .and_then(serde_json::Value::as_str)
-                    .map(str::to_string),
-            })
-        })
-        .collect()
 }
 
 /// `apply_corrections`' reconcile: consumes the freshly-applied actions.

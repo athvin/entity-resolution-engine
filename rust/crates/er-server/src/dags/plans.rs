@@ -33,6 +33,30 @@ impl PlanDoc for RunPlan {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DrainedActions {
     pub action_ids: Vec<String>,
+    /// The drained actions themselves, which `apply_staged` applies.
+    ///
+    /// The payloads travel along this edge because a pod holds no
+    /// control-plane credential (§6.4) and so cannot read
+    /// `staged_steward_actions` for itself. They used to be described as
+    /// riding in the order's `params`, and nothing ever put them there — so
+    /// `apply_staged` applied nothing and the pass settled `succeeded`
+    /// regardless (#760).
+    ///
+    /// `#[serde(default)]` so a row planned before this field existed still
+    /// rehydrates; such a job is refused by `plan.sql`'s fingerprint guard
+    /// anyway, and a rehydrate panic would be a worse way to say so.
+    #[serde(default)]
+    pub actions: Vec<DrainedAction>,
+}
+
+/// One staged steward action, as handed to the pod that applies it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DrainedAction {
+    pub id: String,
+    pub action: serde_json::Value,
+    /// Who staged it. Not optional: `staged_steward_actions.created_by` is
+    /// `NOT NULL`, so the edge mirrors the row rather than widening it.
+    pub created_by: String,
 }
 impl PlanDoc for DrainedActions {
     const STABLE_NAME: &'static str = "drained_actions";
