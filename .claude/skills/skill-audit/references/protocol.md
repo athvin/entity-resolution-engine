@@ -38,7 +38,7 @@ In full, not in excerpts:
 3. Every file under the target's `references/`.
 4. The `description` frontmatter of **every other skill** under `.claude/skills/*/SKILL.md`.
    Required — the `routing` lens cannot be run from inside the target.
-5. `docs/agent-skills.md`, the standard being enforced.
+5. `.claude/skills/skill-writer/references/agent-skills.md`, the standard being enforced.
 6. The override table in `CLAUDE.md`, to learn whether the target is in it.
 
 Do not read the rest of another skill's body. The audit is of one skill; a neighbour's

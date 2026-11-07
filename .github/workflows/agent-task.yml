@@ -3,7 +3,7 @@
 #   gh workflow run agent-task.yml -f prompt="…"     (or `agent "…"`, scripts/agent.sh)
 #
 # Design and the reasoning behind every departure from a stock
-# claude-code-action workflow: docs/agent-fleet.md. The three properties that
+# claude-code-action workflow: .claude/skills/ci-and-supply-chain/references/agent-fleet.md. The three properties that
 # matter, each enforced by the job split rather than by the prompt:
 #
 #   1. The model's job holds no GitHub App credential and no write scope beyond
@@ -63,7 +63,7 @@ concurrency:
 jobs:
   agent:
     name: agent
-    runs-on: ubuntu-latest # Phase 3: the ARC scale set (docs/agent-fleet.md §5)
+    runs-on: ubuntu-latest # Phase 3: the ARC scale set (.claude/skills/ci-and-supply-chain/references/agent-fleet.md §5)
     timeout-minutes: 100
     # Restricted to `main` in repository settings; holds CLAUDE_CODE_OAUTH_TOKEN.
     environment: agent

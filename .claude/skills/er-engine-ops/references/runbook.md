@@ -2,8 +2,8 @@
 
 *Engine layer — operating one tenant's lake via the `er` CLI. The multi-tenant
 control plane that runs these same operations as jobs is
-[backend-design.md](backend-design.md); the
-[README](../README.md#architecture-at-a-glance) has the whole platform.*
+[backend-design.md](../../er-server-control-plane/references/backend-design.md); the
+[README](../../../../README.md#architecture-at-a-glance) has the whole platform.*
 
 Commands below run from the repository root — but **cargo does not**: the
 workspace root is `rust/` and there is no manifest at the repository root, so
@@ -18,6 +18,17 @@ er() { rust/target/debug/er \
   --catalog "$ER_LAKE/meta.ducklake" --data-path "$ER_LAKE/data" \
   --config configs/test.yaml "$@"; }
 ```
+
+## Contents
+
+- [Development lake](#development-lake)
+- [First load](#first-load)
+- [Training](#training)
+- [Incremental deliveries and corrections](#incremental-deliveries-and-corrections)
+- [Maintenance](#maintenance)
+- [Inspecting the lake](#inspecting-the-lake)
+- [The dev cloud stack](#the-dev-cloud-stack)
+- [Querying the cost report](#querying-the-cost-report)
 
 ## Development lake
 
@@ -150,7 +161,7 @@ The engine-in-a-directory flow above is for local work. The full stack — API,
 dispatcher, UI, per-developer namespace on the dev EKS cluster with Aurora
 control plane and S3 lakes — is `make dev-up DEV=<name> TAG=<git sha>` (and
 `dev-suspend` / `dev-resume` / `dev-down`); see
-[infrastructure.md](infrastructure.md).
+[infrastructure.md](../../infra-platform/references/infrastructure.md).
 
 ## Querying the cost report
 
@@ -186,7 +197,7 @@ query needs to run from a job rather than a laptop.
 
 ### The three probes — and their answers as of 2026-11-02
 
-The design in [infrastructure.md](infrastructure.md) §16.2 assumes things about
+The design in [infrastructure.md](../../infra-platform/references/infrastructure.md) §16.2 assumes things about
 the CUR's shape that only a real billing month can confirm. These were run
 against the delivered October and November partitions; **one of the three came
 back badly and is why the per-pod cost model cannot be built yet.**

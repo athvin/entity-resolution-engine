@@ -13,7 +13,7 @@ import type { Tag } from "@/lib/entities/bindings/Tag";
  * which controls exist at all, and the three different empty states.
  *
  * The **grayscale rule is the reason the filled/outlined distinction is worth
- * testing** (`docs/frontend-design.md` §3.3). A tag system is the most tempting
+ * testing** (`.claude/skills/frontend-design-system/references/frontend-design.md` §3.3). A tag system is the most tempting
  * place in the product to reach for colour, and with no palette available the
  * only thing separating "applied" from "available" is fill versus border. If
  * that inverted, every chip would still render and the screen would look

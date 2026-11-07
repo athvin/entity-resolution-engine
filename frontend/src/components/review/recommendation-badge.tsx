@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 /**
  * The glyph per verdict.
  *
- * Shape, not hue — the palette is unavailable (`docs/frontend-design.md` §3.3)
+ * Shape, not hue — the palette is unavailable (`.claude/skills/frontend-design-system/references/frontend-design.md` §3.3)
  * and these three states are exactly the kind a product would otherwise colour
  * green/red/grey. The same three glyphs the decision buttons use, so the
  * model's answer reads as "this button" rather than as a separate vocabulary.

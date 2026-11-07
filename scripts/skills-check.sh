@@ -157,7 +157,7 @@ lint_one_skill() {
 	slug=$(basename "$dir")
 	local skill_md="$dir/SKILL.md"
 
-	# A vendored third-party skill (docs/agent-skills.md, "Vendored skills") is
+	# A vendored third-party skill (the agent-skills standard, "Vendored skills") is
 	# kept byte-identical to its pinned upstream commit so a refresh is a plain
 	# re-copy. The house authoring rules (evals.md, linked references, TOCs) are
 	# not applied to it; its provenance record is checked instead.

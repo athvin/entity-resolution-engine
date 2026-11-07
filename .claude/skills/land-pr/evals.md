@@ -43,7 +43,7 @@ the PR title afterwards.
 
 ## 3. Merged, and then the main loop has nothing to wait for
 
-> `/land-pr 714` — (the PR touches only `docs/` and `.claude/`; it merges green
+> `/land-pr 714` — (the PR touches only `.claude/`; it merges green
 > and no `deploy` run ever appears)
 
 **Must:** recognise that `images` is paths-filtered so nothing was built and

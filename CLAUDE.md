@@ -43,7 +43,7 @@ backend-only PR forever. The required set itself is branch-protection
 configuration rather than a file in the tree, so no count of it anywhere here
 can be gated; read it from the repository settings.
 
-`docs/frontend-testing.md` is the frontend standard — which test tier a change
+`.claude/skills/frontend-testing/references/frontend-testing.md` is the frontend standard — which test tier a change
 belongs in, what each gate is for, and the rule that every gate must be observed
 *failing* before it is trusted.
 
@@ -185,7 +185,17 @@ Makefile targets all `cd rust` first.
 - `entities/` — one YAML per table; the source of truth for schema
 - `frontend/` — standalone pnpm project with its own gate
 - `infra/` — terraform + helm charts
-- `docs/` — design docs; `docs/architecture.md` is the entry point
+- `.claude/skills/` — the agent skills, and the design records behind them
+
+There is no `docs/` directory. Every design document now lives in the
+`references/` of the skill that owns its subject — the engine architecture and
+runbook under `er-engine-ops`, the platform under `infra-platform`, the control
+plane under `er-server-control-plane`, and so on — so a document is loaded with
+the skill that would send you to it rather than sitting where nothing points at
+it. `.claude/skills/er-engine-ops/references/architecture.md` is still the entry
+point for the engine layer, and `DesignDoc.md` at the root remains the normative
+specification. Superseded roadmaps and competitor research were deleted rather
+than moved; they are in git history.
 
 ## Conventions worth knowing
 
@@ -197,7 +207,7 @@ catalog is compiled into `er-server` and every live store is reconciled to it
 (additive changes applied and ledgered in `schema_migrations`, breaking ones
 refused) at boot, at the start of every lake job, at provisioning and by the
 deploy's per-tenant sweep. See the `entity-framework` skill and
-`docs/entity-framework-design.md`.
+`.claude/skills/entity-framework/references/entity-framework-design.md`.
 
 **The entity conventions are a lint registry, not prose.** Every rule an
 `entity.yaml` must hold lives in `rust/crates/er-entity-lint` as a value carrying
@@ -209,7 +219,7 @@ er-entity lint --list          # the registry as a table
 er-entity lint --explain V4    # one rule, with why it exists
 ```
 
-`docs/entity-lint-rules.md` is **generated** from that registry and byte-compared
+`.claude/skills/entity-framework/references/entity-lint-rules.md` is **generated** from that registry and byte-compared
 by `er-entity verify`, so the reference cannot drift from what is enforced. Adding
 a rule is one file in `er-entity-lint/src/rules/`, one line in the registry, and
 one fixture directory under `tests/fixtures/` — nothing else changes. Codes are
@@ -241,7 +251,7 @@ this for job-failure text and HTTP bodies — walk the chain at that point:
 - a `thiserror` type → `er_server::errfmt::chain(&e)`
 
 **The UI is strictly black and white.** Both themes are grayscale — no brand
-accent, no colored chips or badges, no palette (`docs/frontend-design.md` §3.3).
+accent, no colored chips or badges, no palette (`.claude/skills/frontend-design-system/references/frontend-design.md` §3.3).
 
 This is enforced, not just documented: a `no-restricted-syntax` rule in
 `frontend/eslint.config.mjs` rejects Tailwind palette utilities
@@ -252,7 +262,7 @@ scale, spacing or motion rather than hue. The `frontend-design-system` skill is
 the standard: the token system, the channel to reach for instead of each hue,
 and the one known exception (`--destructive` is still red). The techniques that
 replaced the 47 colour utilities this rule originally found are also tabulated
-in `docs/frontend-testing.md`.
+in `.claude/skills/frontend-testing/references/frontend-testing.md`.
 
 **All infrastructure is Terraform. Never generate CDK, CloudFormation or SAM.**
 Terraform under `infra/terraform/` is the only infrastructure language here:
@@ -315,7 +325,7 @@ bridging hook that actually runs.
 ### Repo skills
 
 First-party skills in `.claude/skills/`, organised by what you are doing rather
-than by crate. **[`docs/agent-skills.md`](docs/agent-skills.md) is the
+than by crate. **[`.claude/skills/skill-writer/references/agent-skills.md`](.claude/skills/skill-writer/references/agent-skills.md) is the
 standard** — the authoring rules, why everything sits at the root, which
 third-party skills and MCP servers are vetted in, and how the gate works.
 
@@ -382,4 +392,4 @@ two of the three skills below were not naming their counterpart at all.
 
 Which third-party plugins and MCP servers are vetted in, which are deliberately
 out, and why, is recorded in
-[`docs/agent-skills.md`](docs/agent-skills.md).
+[`.claude/skills/skill-writer/references/agent-skills.md`](.claude/skills/skill-writer/references/agent-skills.md).

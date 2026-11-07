@@ -1,8 +1,8 @@
 # Infrastructure design: AWS and Terraform for the ER platform
 
-*The current-state AWS footprint that runs the platform specified in [backend-design.md](backend-design.md): a single AWS account in `us-east-2`, one EKS cluster per environment, a namespace-per-developer dev environment, and a security model where prod is readable by the team but writable only from an explicitly assumed role. Revision 4, 2026-10-11, single account (`us-east-2`). Product overview: [../README.md](../README.md). Revision history, the full rationale, and every rejected alternative live in [infrastructure-decisions.md](infrastructure-decisions.md).*
+*The current-state AWS footprint that runs the platform specified in [backend-design.md](../../er-server-control-plane/references/backend-design.md): a single AWS account in `us-east-2`, one EKS cluster per environment, a namespace-per-developer dev environment, and a security model where prod is readable by the team but writable only from an explicitly assumed role. Revision 4, 2026-10-11, single account (`us-east-2`). Product overview: [../README.md](../../../../README.md). Revision history, the full rationale, and every rejected alternative live in `infrastructure-decisions.md`.*
 
-> This document is the current-state design; live build status is tracked in [plan-to-aws.md](plan-to-aws.md).
+> This document is the current-state design; live build status is tracked in plan-to-aws.md.
 
 > **Its code references predate the Rust rewrite.** The AWS and Kubernetes design
 > here is current, but 56 links pointed at `server/src/erserver/*.py`,
@@ -17,19 +17,40 @@
 
 ---
 
+## Contents
+
+- [1. Context and goals](#1-context-and-goals)
+- [2. Constraints the application imposes](#2-constraints-the-application-imposes)
+- [3. Account and organization topology](#3-account-and-organization-topology)
+- [4. Network, per environment](#4-network-per-environment)
+- [5. Compute: EKS](#5-compute-eks)
+- [6. Job execution: the runner as a Kubernetes Job](#6-job-execution-the-runner-as-a-kubernetes-job)
+- [7. Data plane, per environment](#7-data-plane-per-environment)
+- [8. Security model](#8-security-model)
+- [9. Secrets](#9-secrets)
+- [10. Observability](#10-observability)
+- [11. Container registries](#11-container-registries)
+- [12. Per-developer environments](#12-per-developer-environments)
+- [13. Moving production data to lower environments](#13-moving-production-data-to-lower-environments)
+- [14. Repository layout](#14-repository-layout)
+- [15. Build order](#15-build-order)
+- [16. Cost](#16-cost)
+- [17. Verification](#17-verification)
+- [18. Open items](#18-open-items)
+
 ## 1. Context and goals
 
-The platform today runs as host processes against a Docker Compose substrate: `uvicorn` for the API, `python -m erserver.dispatcher` for the dispatcher, `next dev` for the UI, with Postgres and MinIO in containers ([frontend/dev/compose.yaml](../frontend/dev/compose.yaml), `make run`). That is a correct development stack and a dead end for anything else — there is no deployable environment, no registry, and no notion of dev versus prod anywhere in the repository.
+The platform today runs as host processes against a Docker Compose substrate: `uvicorn` for the API, `python -m erserver.dispatcher` for the dispatcher, `next dev` for the UI, with Postgres and MinIO in containers ([frontend/dev/compose.yaml](../../../../frontend/dev/compose.yaml), `make run`). That is a correct development stack and a dead end for anything else — there is no deployable environment, no registry, and no notion of dev versus prod anywhere in the repository.
 
 This design adds that substrate, with five goals:
 
-- **Run the four deployables on EKS.** `er-api`, `er-dispatcher`, `er-runner` ([backend-design.md](backend-design.md) §4) plus the Next.js BFF ([frontend-design.md](frontend-design.md) §4.3).
+- **Run the four deployables on EKS.** `er-api`, `er-dispatcher`, `er-runner` ([backend-design.md](../../er-server-control-plane/references/backend-design.md) §4) plus the Next.js BFF ([frontend-design.md](../../frontend-design-system/references/frontend-design.md) §4.3).
 - **Give every developer a complete, isolated environment** in their own namespace, with its own S3 lake prefix, DuckLake catalog databases, and transactional control-plane database — created, suspended, and destroyed in seconds.
 - **Hold real production data in lower environments**, protected by IAM, encryption, and audit rather than by scrubbing or synthesis.
 - **Make prod readable by the whole team and writable only from an explicitly assumed role**, enforced structurally rather than by policy correctness.
 - **Resolve every secret from AWS Secrets Manager** through the `secret://` indirection that already exists in `server/src/erserver/secrets.py`.
 
-**Decisions taken** (each developed in its own section; rationale and rejected alternatives in [infrastructure-decisions.md](infrastructure-decisions.md)): a single account in `us-east-2` (§3); IAM Identity Center with permission sets; one EKS cluster per environment, dev-first with prod deferred (§5.4, §15), on **EKS Auto Mode** (§5.5) with `c6id`-family runners; in-namespace Postgres in dev, Aurora in prod (§7.1); idle cost handled by **suspending the namespace** (§5.2); a native Kubernetes Job per run (§6.1) sized vCPU/spill-tiered per record count (§6.5); OpenTelemetry to a swappable collector (§10); cost attributed by tags + CUR + EKS split allocation (§16.1); SOC 2 by building only what cannot be retrofitted (§8.6); **dev behind an internal ALB over Tailscale, prod behind WAF, `er-api` on no load balancer** (§4.1); SES email (§7.5, §9.3); Terraform/Helm applied from CI on `main` (§14.2); and direct-OIDC product SSO in the BFF ([frontend-design.md](frontend-design.md) §2.4).
+**Decisions taken** (each developed in its own section; rationale and rejected alternatives in `infrastructure-decisions.md`): a single account in `us-east-2` (§3); IAM Identity Center with permission sets; one EKS cluster per environment, dev-first with prod deferred (§5.4, §15), on **EKS Auto Mode** (§5.5) with `c6id`-family runners; in-namespace Postgres in dev, Aurora in prod (§7.1); idle cost handled by **suspending the namespace** (§5.2); a native Kubernetes Job per run (§6.1) sized vCPU/spill-tiered per record count (§6.5); OpenTelemetry to a swappable collector (§10); cost attributed by tags + CUR + EKS split allocation (§16.1); SOC 2 by building only what cannot be retrofitted (§8.6); **dev behind an internal ALB over Tailscale, prod behind WAF, `er-api` on no load balancer** (§4.1); SES email (§7.5, §9.3); Terraform/Helm applied from CI on `main` (§14.2); and direct-OIDC product SSO in the BFF ([frontend-design.md](../../frontend-design-system/references/frontend-design.md) §2.4).
 
 **Deliberately deferred:** the prod cluster and prod Aurora (no prod traffic yet — §15); the staging environment (no users yet); `arm64`/Graviton images (CI runs on x86, and multi-arch buildx via QEMU hurts the inner loop); multi-region anything, and with it any real DR posture (§18.6).
 
@@ -39,21 +60,21 @@ These are not preferences. Each comes from the existing implementation, and the 
 
 | Constraint | Source | Consequence for infrastructure |
 |---|---|---|
-| `max_locks_per_transaction = 1024` | `docker/compose.yaml:47`, [frontend/dev/compose.yaml:40](../frontend/dev/compose.yaml) — DuckLake's maintenance sweep drops every expired inlined-data table in one transaction, and the default of 64 fails it with "out of shared memory", poisoning the catalog connection | A cluster parameter group in prod; a `-c` flag on the pod in dev, exactly as both compose files already do |
+| `max_locks_per_transaction = 1024` | `docker/compose.yaml:47`, [frontend/dev/compose.yaml:40](../../../../frontend/dev/compose.yaml) — DuckLake's maintenance sweep drops every expired inlined-data table in one transaction, and the default of 64 fails it with "out of shared memory", poisoning the catalog connection | A cluster parameter group in prod; a `-c` flag on the pod in dev, exactly as both compose files already do |
 | `ERSERVER_MAINT_DSN` needs `CREATEDB`; one `CREATE DATABASE` per tenant | `tenant_db_name` at `server/src/erserver/provision.py:79` | Rules out Aurora Serverless v1 and DSQL. Serverless **v2** is fine. A dedicated `er_provisioner` role, never superuser |
 | Advisory locks are session-scoped and held for a run's lifetime | `tenant_lock` in `src/er/lake/catalog.py` | No RDS Proxy or transaction-mode pooler between runner and catalog. A dying pod releasing its lock is designed behaviour, not an accident |
-| The job queue and the tenant advisory lock are described as needing one Postgres cluster | [backend-design.md](backend-design.md) §5, `src/er/lake/catalog.py` | One Postgres *instance* per environment holding the control-plane DB and every tenant catalog DB. **Worth verifying** — PostgreSQL advisory locks are scoped per database, not per cluster, so this may be over-stated (§18.1). The design satisfies it either way |
+| The job queue and the tenant advisory lock are described as needing one Postgres cluster | [backend-design.md](../../er-server-control-plane/references/backend-design.md) §5, `src/er/lake/catalog.py` | One Postgres *instance* per environment holding the control-plane DB and every tenant catalog DB. **Worth verifying** — PostgreSQL advisory locks are scoped per database, not per cluster, so this may be over-stated (§18.1). The design satisfies it either way |
 | `ERSERVER_CONFIG_ROOT` and `ERSERVER_DROP_ROOT` are written by the API and read by the runner — and the dispatcher — *by path* | `server/src/erserver/api.py` import endpoint, `configsvc.py`; `drain_staged` re-loads an org's config each idle pass at `server/src/erserver/dispatcher.py:352` | A shared writable filesystem — EFS with the CSI driver — mounted by the API, the dispatcher, *and every runner Job* (§6.2). Pod-local storage cannot work, and this is what blocks a stateless multi-replica API today |
 | DuckDB's temp directory is CWD-relative (`/app/.tmp`, `/app/dbt/.tmp`) and no environment variable relocates it | `benchmarks/storage_sampler.py:29` | Ephemeral volumes mounted at exactly those two paths (§5.3) |
-| 141.48 GiB of *live* spill sampled on the 10M-record full reload, at a **4 GB** DuckDB memory limit in a 10 GiB container | [performance.md](performance.md) | NVMe instance store, not EBS. Ten million records fitting in 10 GiB is also why sizing is CPU-tiered rather than memory-tiered (§6.5) |
-| 2 → 6 DuckDB threads cut a comparable 10M reload **40%** with peak memory flat (9.14 vs 9.37 GiB) — a work-in-progress single-pass measurement (§6.5) | [performance.md](performance.md) | vCPU is the time lever and memory is nearly constant in corpus size. Compute-optimized `c6id` nodes, not memory-optimized `r6id` (§5, §6.5) |
+| 141.48 GiB of *live* spill sampled on the 10M-record full reload, at a **4 GB** DuckDB memory limit in a 10 GiB container | [performance.md](../../ducklake-performance/references/performance.md) | NVMe instance store, not EBS. Ten million records fitting in 10 GiB is also why sizing is CPU-tiered rather than memory-tiered (§6.5) |
+| 2 → 6 DuckDB threads cut a comparable 10M reload **40%** with peak memory flat (9.14 vs 9.37 GiB) — a work-in-progress single-pass measurement (§6.5) | [performance.md](../../ducklake-performance/references/performance.md) | vCPU is the time lever and memory is nearly constant in corpus size. Compute-optimized `c6id` nodes, not memory-optimized `r6id` (§5, §6.5) |
 | The dispatcher's startup reaper assumes it is alone | `queue.reap_stale(leader)` at `server/src/erserver/dispatcher.py:379` | `replicas: 1` with `strategy: Recreate` — never RollingUpdate |
 | One active job per org, enforced by the `jobs_one_active_per_org` partial unique index | `server/src/erserver/db.py` | A tenant scales *up*, never *out*. Size one runner to the largest tenant; scale `ERSERVER_CONCURRENCY` only for cross-tenant throughput |
 | Exit code `None` — killed, OOM, evicted — requeues with `--resume`, bounded by `max_attempts` (default 3) with exponential backoff | `dispose()` in `server/src/erserver/policy.py` | Spot interruption is survivable by design, which is what makes spot safe for runners. It is also why eviction is *expensive but bounded* rather than fatal — see §5.3 |
 | The dispatcher holds a permanent leader connection and polls every `ERSERVER_POLL_SECONDS` (default 2s) | `server/src/erserver/dispatcher.py`, `settings.py` | **No database that bills by connection-idleness will ever idle.** This killed Aurora auto-pause as a dev cost strategy (§7.1) |
 | DuckDB reads neither cgroup limits nor host core count | `src/er/lake/ducklake.py` | Every pod limit must be paired with an explicit `ER_DUCKDB_THREADS` / `ER_DUCKDB_MEMORY_LIMIT`. A pod limit alone does nothing |
-| API read-path attaches inherit the *tenant's* DuckDB env | `server/src/erserver/readapi.py` via `resolve_env`, `_POOL_CAPACITY = 8` warm attaches per process | Setting a tenant to 40 GB / 12 threads also sizes the API pods' DuckDB. [backend-design.md](backend-design.md) §8 says API pods *should* pin ~2 GiB / 2 threads; that split is not implemented, so API pod limits must be set defensively |
-| The boot order API-then-dispatcher is load-bearing | [scripts/frontend-dev/up.sh](../scripts/frontend-dev/up.sh) — the dispatcher's leader connection blocks the API's `ensure_schema` DDL indefinitely when they start together | An init container on the dispatcher gating on the API's `/healthz` |
+| API read-path attaches inherit the *tenant's* DuckDB env | `server/src/erserver/readapi.py` via `resolve_env`, `_POOL_CAPACITY = 8` warm attaches per process | Setting a tenant to 40 GB / 12 threads also sizes the API pods' DuckDB. [backend-design.md](../../er-server-control-plane/references/backend-design.md) §8 says API pods *should* pin ~2 GiB / 2 threads; that split is not implemented, so API pod limits must be set defensively |
+| The boot order API-then-dispatcher is load-bearing | [scripts/frontend-dev/up.sh](../../../../scripts/frontend-dev/up.sh) — the dispatcher's leader connection blocks the API's `ensure_schema` DDL indefinitely when they start together | An init container on the dispatcher gating on the API's `/healthz` |
 
 ## 3. Account and organization topology
 
@@ -66,7 +87,7 @@ Organization root (kept — Identity Center requires it; otherwise inert)
 
 Environment separation is by **name and by role**: resources carry an `er-dev-*` / `er-prod-*` prefix (buckets, roles, clusters, secrets), and the Identity Center permission sets scope who may touch which prefix (§8.1, §8.2).
 
-**What the single account trades away** — recorded deliberately, accepted by the operator (full argument: [infrastructure-decisions.md](infrastructure-decisions.md) D-ACCT):
+**What the single account trades away** — recorded deliberately, accepted by the operator (full argument: `infrastructure-decisions.md` D-ACCT):
 
 - **SCPs no longer apply to anything** — every §8.2 guardrail is an IAM-layer deny carried by the permission sets, enforceable but one policy edit from absent.
 - **Blast radius is shared** — dev mutation is unrestricted by design (§8.1) and now shares an account, and its service quotas, with prod data.
@@ -82,7 +103,7 @@ One VPC per environment, `/16`, three availability zones, public and private sub
 - **An S3 Gateway Endpoint is mandatory, not an optimization.** A large run moves hundreds of gigabytes between the runner and the lake; routing that through a NAT Gateway at $0.045/GB would dominate the bill. The gateway endpoint is free and keeps the traffic on the AWS backbone.
 - **One NAT Gateway in dev**, three in prod for AZ independence once prod carries traffic. The single dev NAT means cross-AZ traffic from the other two subnets at $0.01/GB each way — real but small next to a per-AZ NAT.
 
-**VPC interface endpoints are deliberately not used** — non-S3 traffic goes through the NAT. The reasoning (they cost ~$110/mo per environment against the $33 NAT, and ECR layer blobs ride the free gateway endpoint anyway) is in [infrastructure-decisions.md](infrastructure-decisions.md) D-ENDPOINTS. Revisit when per-GB NAT processing exceeds the fixed endpoint cost, or a compliance requirement forbids the NAT path.
+**VPC interface endpoints are deliberately not used** — non-S3 traffic goes through the NAT. The reasoning (they cost ~$110/mo per environment against the $33 NAT, and ECR layer blobs ride the free gateway endpoint anyway) is in `infrastructure-decisions.md` D-ENDPOINTS. Revisit when per-GB NAT processing exceeds the fixed endpoint cost, or a compliance requirement forbids the NAT path.
 
 ### 4.1 Edge access: who can reach these environments at all
 
@@ -90,7 +111,7 @@ One VPC per environment, `/16`, three availability zones, public and private sub
 
 **Dev: an internal ALB, reached over Tailscale.** A subnet router on a `t4g.nano` advertises the VPC CIDR and resolves the private zone via the VPC resolver — roughly $4/mo, and Tailscale's free tier covers three users. (Managed VPN alternatives and ALB OIDC were considered and rejected — D-EDGE.)
 
-**Prod, when it exists: internet-facing, behind WAF.** Customers arrive from the internet, so the boundary moves from network to WAF plus application auth. The non-negotiable rules are rate-based: the frontend exposes five unauthenticated paths — six once SSO lands, with [frontend-design.md](frontend-design.md) §2.4 adding `/api/auth/sso` — and three of them — `/api/auth/login`, `/api/auth/password-reset` (which also sends email), and `/api/invites` — accept unauthenticated writes with no in-app rate limiting anywhere today; the SSO start and callback routes join the rate-ruled set the day they exist. WAF rate rules scope to URI paths with thresholds down to 10 requests per window, at roughly $8/mo all-in.
+**Prod, when it exists: internet-facing, behind WAF.** Customers arrive from the internet, so the boundary moves from network to WAF plus application auth. The non-negotiable rules are rate-based: the frontend exposes five unauthenticated paths — six once SSO lands, with [frontend-design.md](../../frontend-design-system/references/frontend-design.md) §2.4 adding `/api/auth/sso` — and three of them — `/api/auth/login`, `/api/auth/password-reset` (which also sends email), and `/api/invites` — accept unauthenticated writes with no in-app rate limiting anywhere today; the SSO start and callback routes join the rate-ruled set the day they exist. WAF rate rules scope to URI paths with thresholds down to 10 requests per window, at roughly $8/mo all-in.
 
 **`er-api` is on no load balancer in any environment.** Already true by construction, and it needs only to be kept true: the frontend defines zero `NEXT_PUBLIC_*` variables by stated policy, every browser call is same-origin to the BFF, and `ERSERVER_BASE_URL` lives in server-only modules. Only `er-web` gets an Ingress; erserver stays a ClusterIP service. One loose end to close while here: FastAPI serves `/docs`, `/redoc`, and `/openapi.json` unauthenticated by default and nothing disables them (§14.1) — harmless in-cluster, pointless to leave on.
 
@@ -144,7 +165,7 @@ make dev-suspend DEV=alice     # scale all Deployments + the Postgres StatefulSe
 make dev-resume  DEV=alice     # scale them back; PVC and S3 prefix untouched
 ```
 
-This cascades: the `app` node empties and is reclaimed, the dispatcher's permanent leader connection goes away, and the Postgres pod stops billing compute while its EBS volume persists. A `CronJob` suspends idle namespaces. There is no request log in the system, so the predicate is built on `erweb.sessions.last_seen_at`, slid on activity but throttled to at most hourly ([frontend/src/lib/auth/session.ts:13](../frontend/src/lib/auth/session.ts)): **suspend when `max(last_seen_at)` is older than four hours *and* no job is queued or running** — the second clause keeps the CronJob from burning a `--resume` attempt under a live run. Resume is a single `helm upgrade`, under a minute.
+This cascades: the `app` node empties and is reclaimed, the dispatcher's permanent leader connection goes away, and the Postgres pod stops billing compute while its EBS volume persists. A `CronJob` suspends idle namespaces. There is no request log in the system, so the predicate is built on `erweb.sessions.last_seen_at`, slid on activity but throttled to at most hourly ([frontend/src/lib/auth/session.ts:13](../../../../frontend/src/lib/auth/session.ts)): **suspend when `max(last_seen_at)` is older than four hours *and* no job is queued or running** — the second clause keeps the CronJob from burning a `--resume` attempt under a live run. Resume is a single `helm upgrade`, under a minute.
 
 ### 5.3 Spill, ephemeral storage, and the eviction trap
 
@@ -158,11 +179,11 @@ Crucially, the 141 GiB figure is measured at a **4 GB** DuckDB memory limit, and
 
 ### 5.4 One cluster per environment
 
-One EKS cluster per environment, for cluster-scoped blast-radius containment, a staging-shaped upgrade path, and — the decisive argument — secret separation. Two clusters are kept in the design but **only dev is built now**: there is no prod traffic, so deferring the prod cluster costs nothing and preserves the boundary (§15 sequences it). The rejected single-cluster-total option and the full secret-separation argument are in [infrastructure-decisions.md](infrastructure-decisions.md) D-CLUSTER.
+One EKS cluster per environment, for cluster-scoped blast-radius containment, a staging-shaped upgrade path, and — the decisive argument — secret separation. Two clusters are kept in the design but **only dev is built now**: there is no prod traffic, so deferring the prod cluster costs nothing and preserves the boundary (§15 sequences it). The rejected single-cluster-total option and the full secret-separation argument are in `infrastructure-decisions.md` D-CLUSTER.
 
 ### 5.5 EKS Auto Mode — chosen (D1, 2026-10-10)
 
-Auto Mode manages Karpenter and the core addons, removing the system node group and the burden of upgrading them. It honours `karpenter.sh/do-not-disrupt` across every consolidation policy and exposes `disruption.consolidationPolicy: WhenEmpty` with `consolidateAfter`, so the §5.1 runner controls survive verbatim; it formats instance-store NVMe RAID0 automatically (§5.3) and enforces IMDSv2 hop-limit-1 unconditionally (§5.6). It does **not** give these pools SOCI parallel pull: that is scoped to G/P/Trn instances with local NVMe, not `c6id` (§11.1 rung 1 corrects the earlier claim here). Cost is ~12% of the on-demand rate per instance-hour (charged even on Spot) — roughly $9/mo for the always-on app node and cents per runner-hour. **It costs two things this design otherwise wanted:** no custom AMIs or `blockDeviceMappings`, so §11.1's snapshot-prebake rung is off the table; and since April 2026 its managed instances are hidden from `DescribeInstances`. **Revisit trigger:** if the Auto Mode fee line in the CUR exceeds ~$50/mo, re-run against self-managed Karpenter. Full history (declined rev 2, reopened rev 3, chosen D1): [infrastructure-decisions.md](infrastructure-decisions.md) D-AUTOMODE.
+Auto Mode manages Karpenter and the core addons, removing the system node group and the burden of upgrading them. It honours `karpenter.sh/do-not-disrupt` across every consolidation policy and exposes `disruption.consolidationPolicy: WhenEmpty` with `consolidateAfter`, so the §5.1 runner controls survive verbatim; it formats instance-store NVMe RAID0 automatically (§5.3) and enforces IMDSv2 hop-limit-1 unconditionally (§5.6). It does **not** give these pools SOCI parallel pull: that is scoped to G/P/Trn instances with local NVMe, not `c6id` (§11.1 rung 1 corrects the earlier claim here). Cost is ~12% of the on-demand rate per instance-hour (charged even on Spot) — roughly $9/mo for the always-on app node and cents per runner-hour. **It costs two things this design otherwise wanted:** no custom AMIs or `blockDeviceMappings`, so §11.1's snapshot-prebake rung is off the table; and since April 2026 its managed instances are hidden from `DescribeInstances`. **Revisit trigger:** if the Auto Mode fee line in the CUR exceeds ~$50/mo, re-run against self-managed Karpenter. Full history (declined rev 2, reopened rev 3, chosen D1): `infrastructure-decisions.md` D-AUTOMODE.
 
 ### 5.6 Node and pod hardening
 
@@ -174,7 +195,7 @@ Account-level counterparts — S3 Block Public Access on the account, MFA on the
 
 ## 6. Job execution: the runner as a Kubernetes Job
 
-A pipeline run is one ephemeral pod, scoped to one tenant, that exits when the run finishes. That is what [backend-design.md](backend-design.md) §4 already specifies, and `server/README.md` records the k8s Job launcher as deliberately unbuilt behind an existing seam:
+A pipeline run is one ephemeral pod, scoped to one tenant, that exits when the run finishes. That is what [backend-design.md](../../er-server-control-plane/references/backend-design.md) §4 already specifies, and `server/README.md` records the k8s Job launcher as deliberately unbuilt behind an existing seam:
 
 ```python
 dispatcher.launch_runner(payload, env, on_stage=, should_cancel=)
@@ -184,7 +205,7 @@ Today that seam calls `subprocess.Popen([sys.executable, "-m", "erserver.runner"
 
 ### 6.1 Argo Workflows — not chosen
 
-A native Kubernetes Job per run, not Argo: the DAG is inside the process (`run_all_full` runs the stages as library calls in one pod), and the engine already owns a complete, tested retry/state/scheduler machine that Argo would duplicate and contradict — including the `jobs_one_active_per_org` guarantee no second scheduler can honour. Full argument and revisit triggers: [infrastructure-decisions.md](infrastructure-decisions.md) D-ARGO. (Argo **CD** for deploying the platform itself is a separate, out-of-scope question.)
+A native Kubernetes Job per run, not Argo: the DAG is inside the process (`run_all_full` runs the stages as library calls in one pod), and the engine already owns a complete, tested retry/state/scheduler machine that Argo would duplicate and contradict — including the `jobs_one_active_per_org` guarantee no second scheduler can honour. Full argument and revisit triggers: `infrastructure-decisions.md` D-ARGO. (Argo **CD** for deploying the platform itself is a separate, out-of-scope question.)
 
 ### 6.2 The Job spec, and what it has to get right
 
@@ -218,18 +239,18 @@ Today `launch_runner` reads the subprocess's stderr pipe directly, parsing one J
 
 ### 6.4 "Contained to that tenant" — what the containment actually is
 
-[backend-design.md](backend-design.md) §7 makes a tenant a **database, a schema, and an S3 prefix** — not a namespace. In prod every tenant's runs execute as Jobs in one platform namespace; the per-namespace split in §12 is per *developer*, not per tenant. A run's isolation comes from four things, none of them a namespace boundary:
+[backend-design.md](../../er-server-control-plane/references/backend-design.md) §7 makes a tenant a **database, a schema, and an S3 prefix** — not a namespace. In prod every tenant's runs execute as Jobs in one platform namespace; the per-namespace split in §12 is per *developer*, not per tenant. A run's isolation comes from four things, none of them a namespace boundary:
 
 - **Process-scoped env.** `ER_CATALOG_DSN`, `ER_LAKE_DATA_PATH`, `ER_LAKE_METADATA_SCHEMA` injected per run; the pod can address exactly one tenant's catalog and prefix for its whole life.
 - **Ephemerality.** The pod exits with the run, so no long-lived process ever holds two tenants' credentials.
 - **A dedicated catalog database** per tenant, so no tenant's tables share a database with another's.
 - **The advisory writer lock**, which the pod holds for its session and releases by dying.
 
-Namespace-per-tenant was rejected (D-TENANCY) — it is the right shape for the enterprise tier [backend-design.md](backend-design.md) §7 earmarks for dedicated buckets and STS-scoped credentials, and not before. Forward-looking: once §9.2's IRSA work lands, the per-run pod can carry a **per-tenant ServiceAccount** scoped to that tenant's prefix alone (the "per-tenant STS credentials" item in [backend-design.md](backend-design.md) §15 phase 4), so the Job spec should anticipate a ServiceAccount parameter even while every run shares one.
+Namespace-per-tenant was rejected (D-TENANCY) — it is the right shape for the enterprise tier [backend-design.md](../../er-server-control-plane/references/backend-design.md) §7 earmarks for dedicated buckets and STS-scoped credentials, and not before. Forward-looking: once §9.2's IRSA work lands, the per-run pod can carry a **per-tenant ServiceAccount** scoped to that tenant's prefix alone (the "per-tenant STS credentials" item in [backend-design.md](../../er-server-control-plane/references/backend-design.md) §15 phase 4), so the Job spec should anticipate a ServiceAccount parameter even while every run shares one.
 
 ### 6.5 Sizing the Job: CPU is the lever, memory is nearly flat
 
-Because the dispatcher knows the tenant's record count before it launches anything, the Job is sized per run rather than drawn from a fixed class. The resource classes are **vCPU/spill-tiered with a near-constant memory floor** (per `server/src/erserver/sizing.py`), and [backend-design.md](backend-design.md) §7 has been corrected to match. The measurements behind the inversion from the original memory-tiered classes, and why memory stays flat (DuckDB spills), are in [infrastructure-decisions.md](infrastructure-decisions.md) D-SIZING.
+Because the dispatcher knows the tenant's record count before it launches anything, the Job is sized per run rather than drawn from a fixed class. The resource classes are **vCPU/spill-tiered with a near-constant memory floor** (per `server/src/erserver/sizing.py`), and [backend-design.md](../../er-server-control-plane/references/backend-design.md) §7 has been corrected to match. The measurements behind the inversion from the original memory-tiered classes, and why memory stays flat (DuckDB spills), are in `infrastructure-decisions.md` D-SIZING.
 
 **Class shape — tiered on vCPU, with a near-constant memory floor:**
 
@@ -246,7 +267,7 @@ Pod memory grows a little because peak container usage was 9.37 GiB against a 4 
 
 **The plumbing is half-wired.** `PATCH /v1/orgs/{org}/resources` (`server/src/erserver/api.py:451`) accepts `duckdb_threads` (bounded `ge=1, le=32`) and `duckdb_memory_limit`, merges them into `orgs.env`, resolved at **claim** time. What is missing: deriving the values from record count (`benchmarks/scales.yaml` maps counts to envelopes, though its generous memory figures should not transfer) and translating them into pod `resources`. The `le=32` bound caps the useful instance at 32 vCPU — `c6id.8xlarge` is the top of the ladder.
 
-**Two honest limits.** The thread-scaling measurement stops at 6 threads, so the knee above 6 is unknown — and unlikely to be linear, because the same run showed **reconcile 14% *slower*** at 6 threads, a Python graph step that does not parallelize with DuckDB threads (§18.2). And dynamic sizing makes the §2 API-pod inheritance problem worse: per-run sizing is therefore carried on the **job row**, not merged into `orgs.env`, until the [backend-design.md](backend-design.md) §8 split between tenant and API-pod settings is implemented (§18.10).
+**Two honest limits.** The thread-scaling measurement stops at 6 threads, so the knee above 6 is unknown — and unlikely to be linear, because the same run showed **reconcile 14% *slower*** at 6 threads, a Python graph step that does not parallelize with DuckDB threads (§18.2). And dynamic sizing makes the §2 API-pod inheritance problem worse: per-run sizing is therefore carried on the **job row**, not merged into `orgs.env`, until the [backend-design.md](../../er-server-control-plane/references/backend-design.md) §8 split between tenant and API-pod settings is implemented (§18.10).
 
 ## 7. Data plane, per environment
 
@@ -307,7 +328,7 @@ One filesystem per environment with an access point per namespace, mounted at `E
 
 ### 7.5 Email: SES
 
-Email is live in the Rust control plane as [`er_server::mail`](../rust/crates/er-server/src/mail.rs) behind `POST /v1/email`, which is the BFF's only mail path ([`relayEmail`](../frontend/src/lib/bff/relay.ts)) and therefore the platform's one transport and one template set. Three templates: `invite`, `password_reset`, `signup_verify`. Bodies are `format!`, not a template engine — each required parameter is declared in exactly one place and a missing one is a 422 the caller sees, rather than a blank in a message someone already received.
+Email is live in the Rust control plane as [`er_server::mail`](../../../../rust/crates/er-server/src/mail.rs) behind `POST /v1/email`, which is the BFF's only mail path ([`relayEmail`](../../../../frontend/src/lib/bff/relay.ts)) and therefore the platform's one transport and one template set. Three templates: `invite`, `password_reset`, `signup_verify`. Bodies are `format!`, not a template engine — each required parameter is declared in exactly one place and a missing one is a 422 the caller sees, rather than a blank in a message someone already received.
 
 The Python-era design this replaces had a durable `email_outbox` table drained by the dispatcher's leader tick. That is **not** what shipped: `POST /v1/email` sends synchronously and the caller treats failure as data. Every caller already has a usable fallback — an invite link to copy, an enumeration-safe 202 — so a durable outbox would add a table, a drain loop and a retry policy to make reliable something no flow actually blocks on. If a flow ever does, the outbox is the right answer then.
 
@@ -315,7 +336,7 @@ The Python-era design this replaces had a durable `email_outbox` table drained b
 
 **Transport is the SES API, not SES's SMTP interface.** That inverts the old §9.3 decision, and deliberately: the SMTP endpoint cannot accept credentials derived from temporary ones, which was the *entire* reason §9.3 budgeted a second long-lived IAM access key and then scheduled its retirement for Phase 4. Since the Rust mailer was written fresh rather than ported, signing `SendEmail` with the pod's EKS Pod Identity credentials takes that exit before the credential ever existed. The SDK is configured `default-features = false` to keep two things out of the build: aws-lc-rs, whose `-sys` crate needs cmake the build image lacks, and the SSO credential providers, which require Rust 1.88 and would quietly raise the workspace's declared 1.85.
 
-The [`ses/` module](../infra/terraform/modules/ses/main.tf) provides the domain identity with Easy DKIM (three CNAMEs), a custom MAIL FROM (MX + SPF) with `behavior_on_mx_failure = REJECT_MESSAGE`, and a configuration set with TLS required on delivery, reputation metrics, and account-level suppression for bounces and complaints. It emits a `ses:SendEmail` policy document scoped to the identity and to a From address at the domain; [`envs/dev/ses.tf`](../infra/terraform/envs/dev/ses.tf) attaches it to a role and binds it by Pod Identity association. No IAM user, no Secrets Manager entry.
+The [`ses/` module](../../../../infra/terraform/modules/ses/main.tf) provides the domain identity with Easy DKIM (three CNAMEs), a custom MAIL FROM (MX + SPF) with `behavior_on_mx_failure = REJECT_MESSAGE`, and a configuration set with TLS required on delivery, reputation metrics, and account-level suppression for bounces and complaints. It emits a `ses:SendEmail` policy document scoped to the identity and to a From address at the domain; [`envs/dev/ses.tf`](../../../../infra/terraform/envs/dev/ses.tf) attaches it to a role and binds it by Pod Identity association. No IAM user, no Secrets Manager entry.
 
 DNS is not managed by the *module* — the zone is Cloudflare's (§18.8) and the module's provider is AWS — so it emits the records as outputs and the calling environment writes them with the Terraform `cloudflare` provider, which is what §18.8 specified. `envs/dev/ses.tf` holds those three `cloudflare_dns_record` resources, so an apply leaves nothing to paste by hand; the module stays single-provider, which is what lets a caller whose zone lives elsewhere use it unchanged. Two facts land this in Phase 1: production access (sandbox exit) is a human-reviewed request with a ~24-hour first response, so file it early; and the sandbox limits (200 messages/day, verified recipients only) are *fine for dev indefinitely* if the developers' own addresses are verified.
 
@@ -382,7 +403,7 @@ The export role's trust policy names the refresh IRSA role ARN specifically. It 
 
 Lower environments hold real production records by design, protected by IAM and encryption rather than scrubbing. Three things follow.
 
-**Committed dev credentials stop being harmless.** [scripts/frontend-dev/env.sh](../scripts/frontend-dev/env.sh) hardcodes `ERWEB_SESSION_SECRET`, `ERWEB_CREDENTIAL_KEY`, `ERSERVER_OPERATOR_TOKEN`, and the MinIO and Postgres passwords; `admin@dupezone.com / asdfasdf` is seeded by [frontend/dev/create-users.mjs](../frontend/dev/create-users.mjs). Appropriate for a MinIO-backed laptop stack; not for a cluster namespace holding real records. **The rule:** that set stays exclusively in the local Compose path, and every cloud environment — including each developer's namespace — draws all of them from Secrets Manager.
+**Committed dev credentials stop being harmless.** [scripts/frontend-dev/env.sh](../../../../scripts/frontend-dev/env.sh) hardcodes `ERWEB_SESSION_SECRET`, `ERWEB_CREDENTIAL_KEY`, `ERSERVER_OPERATOR_TOKEN`, and the MinIO and Postgres passwords; `admin@dupezone.com / asdfasdf` is seeded by [frontend/dev/create-users.mjs](../../../../frontend/dev/create-users.mjs). Appropriate for a MinIO-backed laptop stack; not for a cluster namespace holding real records. **The rule:** that set stays exclusively in the local Compose path, and every cloud environment — including each developer's namespace — draws all of them from Secrets Manager.
 
 **NetworkPolicy must be explicitly enabled to do anything.** The per-namespace NetworkPolicy in §12 is inert under the Amazon VPC CNI unless the network policy agent is turned on in the addon configuration. Without it you get objects that look like isolation and enforce nothing — between namespaces that now hold real records. This is a one-line addon setting and a silent failure if missed, which is why §17 verifies it behaviourally.
 
@@ -390,7 +411,7 @@ Lower environments hold real production records by design, protected by IAM and 
 
 ### 8.6 SOC 2 readiness
 
-A first SOC 2 is expected ([backend-design.md](backend-design.md) §15 phase 4 names "SOC2 groundwork"), so the question is what to do *now* that cannot be done later. **SOC 2 Type 2 rarely fails on architecture; it fails on evidence** — controls must be shown to have *operated* across an observation window of three to six months. Almost everything can be added the week before an audit. Three things cannot, because they have a time component.
+A first SOC 2 is expected ([backend-design.md](../../er-server-control-plane/references/backend-design.md) §15 phase 4 names "SOC2 groundwork"), so the question is what to do *now* that cannot be done later. **SOC 2 Type 2 rarely fails on architecture; it fails on evidence** — controls must be shown to have *operated* across an observation window of three to six months. Almost everything can be added the week before an audit. Three things cannot, because they have a time component.
 
 #### Cannot be retrofitted — build in Phase 0
 
@@ -414,7 +435,7 @@ A first SOC 2 is expected ([backend-design.md](backend-design.md) §15 phase 4 n
 #### Findings today
 
 - **Committed development credentials** (§8.5) — the first thing an auditor greps for; the §8.5 rule (local Compose only) is what makes it defensible, and it must be true in fact.
-- **The AI assistant is an undocumented subprocessor.** [frontend/src/lib/assistant/tools.ts](../frontend/src/lib/assistant/tools.ts) gives the model `search_golden_records` and `get_entity`, so a shipped feature sends real customer personal data to the Anthropic API via `ANTHROPIC_API_KEY`. It needs inventorying, a DPA, a configured vendor-side retention posture, and customer disclosure (§18.14).
+- **The AI assistant is an undocumented subprocessor.** [frontend/src/lib/assistant/tools.ts](../../../../frontend/src/lib/assistant/tools.ts) gives the model `search_golden_records` and `get_entity`, so a shipped feature sends real customer personal data to the Anthropic API via `ANTHROPIC_API_KEY`. It needs inventorying, a DPA, a configured vendor-side retention posture, and customer disclosure (§18.14).
 - **Standing production read access.** §8.1 grants every developer `rds-db:connect` as `er_readonly` plus prod-lake read — defensible under SOC 2 only with a documented business justification and CloudTrail data events attributing every read (§7.3). `ProdAdmin` on one person is weak segregation of duties, so **alert on `ProdAdmin` role assumption** plus a documented break-glass procedure (§15, Phase 4).
 
 **Evidence generators worth enabling:** AWS Config (narrow scope, a few $/mo — has a time component, so Phase 0), GuardDuty prod-only (~$5–30/mo), Security Hub with the AICPA SOC 2 standard (~$10/mo, premature now).
@@ -439,7 +460,7 @@ er/{env}/{namespace}/erweb
 
 A process environment is fixed at exec time, so on rotation ESO updates the Kubernetes Secret while the running pods keep the stale DSN and connections fail (why managed rotation alone breaks: D-ROTATION). Two parts to the fix. A **reloader** — annotate the Deployments so a change to the projected Secret triggers a rolling restart. And for the dispatcher, which is `replicas: 1` / `strategy: Recreate` (§2), rotation is scheduled rather than arbitrary, since a restart is a brief gap in dispatch.
 
-**`ERWEB_CREDENTIAL_KEY` must not be rotated automatically at all.** It unseals every org's stored erserver API key in `erweb.org_credentials` (AES-256-GCM with AAD `"<org>\0<role>"`, per [frontend/src/lib/db/crypto.ts](../frontend/src/lib/db/crypto.ts)); rotating it without a re-encrypt pass bricks the vault. Documented as manual-with-migration, deliberately not wired to a schedule.
+**`ERWEB_CREDENTIAL_KEY` must not be rotated automatically at all.** It unseals every org's stored erserver API key in `erweb.org_credentials` (AES-256-GCM with AAD `"<org>\0<role>"`, per [frontend/src/lib/db/crypto.ts](../../../../frontend/src/lib/db/crypto.ts)); rotating it without a re-encrypt pass bricks the vault. Documented as manual-with-migration, deliberately not wired to a schedule.
 
 ### 9.2 S3 credentials: static keys now, IRSA later
 
@@ -471,9 +492,9 @@ Container stdout reaches CloudWatch (a Fluent Bit DaemonSet, task 1.8), every Ru
 
 The single histogram is the decision, not a staging post. `statement_name` as a dimension would be 247 statements x 2 outcomes = **494 billable series, roughly $148/month for one histogram** in one developer's dev namespace, growing with every new `.sql` file — D-OTEL's stated failure mode for `tenant`, reached by another route. So statement identity is span-only, where it is free and groupable, and `er-obs/tests/cardinality.rs` refuses any metric carrying an unbounded or tenant-scoped dimension. If a per-statement aggregate is ever wanted it is a `spanmetrics` connector in the collector's values file — YAML, revertible, no Rust change.
 
-Every metric is declared as a value in `er-obs/src/registry.rs`, which renders a byte-compared [telemetry-reference.md](telemetry-reference.md). A hand-written metrics table is how a metric ends up documented and never emitted, which reads as coverage rather than as a gap: its dashboard panel renders an honest-looking empty chart.
+Every metric is declared as a value in `er-obs/src/registry.rs`, which renders a byte-compared [telemetry-reference.md](../../observability/references/telemetry-reference.md). A hand-written metrics table is how a metric ends up documented and never emitted, which reads as coverage rather than as a gap: its dashboard panel renders an honest-looking empty chart.
 
-[backend-design.md](backend-design.md) §14's API RED metrics, queue depth, dispatch latency and per-class concurrency are the remaining half — each now an entry in that registry plus a call site, not new machinery.
+[backend-design.md](../../er-server-control-plane/references/backend-design.md) §14's API RED metrics, queue depth, dispatch latency and per-class concurrency are the remaining half — each now an entry in that registry plus a call site, not new machinery.
 
 **OpenTelemetry to one collector** is the foundation, exporter swappable — the four system-specific reasons, and the one-collector-but-not-one-backend split, are in D-OTEL.
 
@@ -481,10 +502,10 @@ Every metric is declared as a value in `er-obs/src/registry.rs`, which renders a
 
 | Exists | Where | Role |
 |---|---|---|
-| `runs` with typed counters and snapshot ranges | [entities/run](../entities/run), written by the dispatcher's reporter | **Durable business telemetry, in Postgres** |
-| One JSON record per stage on stderr | `observed()` in [er-cli/src/lib.rs](../rust/crates/er-cli/src/lib.rs), formatted by [er-obs/src/init.rs](../rust/crates/er-obs/src/init.rs) | Live progress, consumed into `jobs.progress` |
-| A span per stage and per SQL statement | [er-span](../rust/crates/er-span), called from the 245 generated statement functions and the six `Session` seams | Per-statement attribution; 96.9% of a measured run's wall time |
-| One row per SQL execution | `statement_executions`, buffered by [er-obs/src/executions.rs](../rust/crates/er-obs/src/executions.rs) and drained per stage | The durable, unsampled copy the spans are not |
+| `runs` with typed counters and snapshot ranges | [entities/run](../../../../entities/run), written by the dispatcher's reporter | **Durable business telemetry, in Postgres** |
+| One JSON record per stage on stderr | `observed()` in [er-cli/src/lib.rs](../../../../rust/crates/er-cli/src/lib.rs), formatted by [er-obs/src/init.rs](../../../../rust/crates/er-obs/src/init.rs) | Live progress, consumed into `jobs.progress` |
+| A span per stage and per SQL statement | [er-span](../../../../rust/crates/er-span), called from the 245 generated statement functions and the six `Session` seams | Per-statement attribution; 96.9% of a measured run's wall time |
+| One row per SQL execution | `statement_executions`, buffered by [er-obs/src/executions.rs](../../../../rust/crates/er-obs/src/executions.rs) and drained per stage | The durable, unsampled copy the spans are not |
 | Statement text on a span, opt in | `ER_TRACE_SQL_TEXT=1` | Off by default: declared statements bind their values, but the default should not be "ship the SQL" |
 
 **`run_stages` is declared and still has NO writer.** Its generated
@@ -519,7 +540,7 @@ Sampling: **always sample pipeline runs** (hundreds per day, each high-value); h
 
 ### 10.3 Metrics — and the cardinality trap
 
-[backend-design.md](backend-design.md) §14's list maps cleanly: API RED, queue depth, dispatch latency, per-class concurrency. Worth adding, because they validate claims this document cannot currently check: **spill bytes per stage** (§18.2 needs this anyway), **pod eviction and OOM-kill counts** (how §5.3's sizing proves correct), **spot interruption rate and Karpenter node count** (how §5.2's suspend and §16's spot pricing get verified). **Do not put `tenant` on metric series** — every distinct label value is a separate time series, tenant count is unbounded by design, and the bill scales with tenants × metrics × resolution. Use `resource_class` as the metric dimension and get per-tenant detail from traces and the `runs` table; the engine's own `tenant` tagging is correct for logs and spans and wrong for counters.
+[backend-design.md](../../er-server-control-plane/references/backend-design.md) §14's list maps cleanly: API RED, queue depth, dispatch latency, per-class concurrency. Worth adding, because they validate claims this document cannot currently check: **spill bytes per stage** (§18.2 needs this anyway), **pod eviction and OOM-kill counts** (how §5.3's sizing proves correct), **spot interruption rate and Karpenter node count** (how §5.2's suspend and §16's spot pricing get verified). **Do not put `tenant` on metric series** — every distinct label value is a separate time series, tenant count is unbounded by design, and the bill scales with tenants × metrics × resolution. Use `resource_class` as the metric dimension and get per-tenant detail from traces and the `runs` table; the engine's own `tenant` tagging is correct for logs and spans and wrong for counters.
 
 ### 10.4 Logs, and the PII rule
 
@@ -584,7 +605,7 @@ Secrets come from `er/dev/alice/{erserver,erweb}`, created by the same target if
 
 Three details carry over from the local stack. The dispatcher gets `replicas: 1`, `strategy: Recreate`, and an init container gating on the API's `/healthz`, because its leader connection otherwise blocks `ensure_schema` indefinitely. The Postgres pod runs with `-c max_locks_per_transaction=1024`, matching both compose files. And `ResourceQuota` is what stops one developer's 10M-row run from starving the cluster — `requests.memory: 80Gi`, `limits.cpu: 24`, `count/jobs.batch: 4`, and **`requests.ephemeral-storage`**, without which §5.3's spill sizing is unenforced.
 
-Two details are cloud-only. The per-developer Ingresses share **one internal ALB** via the controller's `group.name` (§4.1) — the controller's documented warning that anyone with Ingress RBAC in the group can override its rules describes, in dev, people who already hold `PlatformAdmin`, which is why prod never joins a dev group. external-dns publishes `alice.dev.<domain>` against the wildcard certificate, scoped with `--domain-filter=dev.<domain>` and a per-cluster `--txt-owner-id`. Step 3's drizzle migrations run as a Helm pre-upgrade hook Job (`node scripts/db-migrate.mjs`, reading `ERWEB_DATABASE_URL`); the Rust control-plane schema reconciles in the web-api pod's init container (`er-server migrate`: the baseline plus the catalog reconciler, ledgered in `public.schema_migrations`) and again, idempotently, at the API's boot; and every active tenant's lake is reconciled by the post-upgrade hook (`er-server migrate-tenants`, one line per tenant) with a daily CronJob repeating it as drift detection. See [entity-framework-design.md](entity-framework-design.md), "Upgrades and API versions".
+Two details are cloud-only. The per-developer Ingresses share **one internal ALB** via the controller's `group.name` (§4.1) — the controller's documented warning that anyone with Ingress RBAC in the group can override its rules describes, in dev, people who already hold `PlatformAdmin`, which is why prod never joins a dev group. external-dns publishes `alice.dev.<domain>` against the wildcard certificate, scoped with `--domain-filter=dev.<domain>` and a per-cluster `--txt-owner-id`. Step 3's drizzle migrations run as a Helm pre-upgrade hook Job (`node scripts/db-migrate.mjs`, reading `ERWEB_DATABASE_URL`); the Rust control-plane schema reconciles in the web-api pod's init container (`er-server migrate`: the baseline plus the catalog reconciler, ledgered in `public.schema_migrations`) and again, idempotently, at the API's boot; and every active tenant's lake is reconciled by the post-upgrade hook (`er-server migrate-tenants`, one line per tenant) with a daily CronJob repeating it as drift detection. See [entity-framework-design.md](../../entity-framework/references/entity-framework-design.md), "Upgrades and API versions".
 
 Lifecycle:
 
@@ -595,7 +616,7 @@ make dev-down    DEV=alice   # + delete PVC, DROP DATABASE ... WITH (FORCE),
                              #   delete the S3 prefix, delete the secrets
 ```
 
-Suspend is the cost control (§5.2) and `dev-down` is the purge path [backend-design.md](backend-design.md) §7 designed for. The distinction matters: suspend keeps the catalog, so resuming does not mean another refresh.
+Suspend is the cost control (§5.2) and `dev-down` is the purge path [backend-design.md](../../er-server-control-plane/references/backend-design.md) §7 designed for. The distinction matters: suspend keeps the catalog, so resuming does not mean another refresh.
 
 ## 13. Moving production data to lower environments
 
@@ -611,7 +632,7 @@ make refresh-dev DEV=alice ORG=acme
   4. er ingest in Alice's namespace, then run_all_full
 ```
 
-Full raw fidelity on the records, using only supported engine paths. It loses prod's snapshot history and costs a pipeline run — roughly 90s at 1M records, or about 1h04m at 10M with 6 threads ([performance.md](performance.md)). Because dev Postgres is a pod rather than Aurora (§7.1), the catalog side of a refresh is `pg_dump`/`pg_restore` rather than a snapshot share.
+Full raw fidelity on the records, using only supported engine paths. It loses prod's snapshot history and costs a pipeline run — roughly 90s at 1M records, or about 1h04m at 10M with 6 threads ([performance.md](../../ducklake-performance/references/performance.md)). Because dev Postgres is a pod rather than Aurora (§7.1), the catalog side of a refresh is `pg_dump`/`pg_restore` rather than a snapshot share.
 
 **Path B — `er lake rehome`.** A new engine command that updates the recorded `DATA_PATH` and rewrites catalog file references, reducing refresh to an `aws s3 sync` plus a catalog restore: minutes instead of an hour, with snapshot history preserved. Raised as its own issue, because the work depends on whether DuckLake stores absolute or relative paths in the catalog — worth determining early, since it decides whether Path A is permanent (§18.7). Cross-account Aurora snapshot plumbing is still built for staging refresh and prod DR, just not for the per-developer path.
 
@@ -648,16 +669,16 @@ Bootstrap is two stacks, not one, because the state bucket must live in an accou
 
 | Change | Files | Why |
 |---|---|---|
-| `er-api` image | new `docker/Dockerfile.api` | Slim, no dbt or MinIO; [backend-design.md](backend-design.md) §4 specifies it |
+| `er-api` image | new `docker/Dockerfile.api` | Slim, no dbt or MinIO; [backend-design.md](../../er-server-control-plane/references/backend-design.md) §4 specifies it |
 | `er-web` image | new `frontend/Dockerfile` | None exists; the BFF runs as a host process today |
 | `ERSERVER_TENANT_DB_PREFIX` | `server/src/erserver/provision.py`, `settings.py` | Shared-cluster tenant isolation (§7.2) |
 | CI push job | `.github/workflows/ci.yaml` | OIDC + `push: true`, adding `id-token: write` |
-| Normalize the lake prefix | [configs/default.yaml](../configs/default.yaml), [scripts/frontend-dev/env.sh](../scripts/frontend-dev/env.sh) | Three inconsistent layouts today (§7.3) |
+| Normalize the lake prefix | [configs/default.yaml](../../../../configs/default.yaml), [scripts/frontend-dev/env.sh](../../../../scripts/frontend-dev/env.sh) | Three inconsistent layouts today (§7.3) |
 | **k8s Job launcher** behind the existing seam | `launch_runner` in `server/src/erserver/dispatcher.py` | Replaces `subprocess.Popen` with a Job + watch (§6.2) |
 | **Runner writes its own progress** | `server/src/erserver/runner.py`, `queue.py` | A Job pod has no stderr pipe to the dispatcher (§6.3) |
 | **Per-run resource sizing** from record count | `server/src/erserver/queue.py`, `policy.py`, derived from `benchmarks/scales.yaml` | CPU-tiered classes on the job row, not `orgs.env` (§6.5) |
 | **`jobs.trace_context`** column | `server/src/erserver/db.py` | W3C traceparent across the enqueue→pod hop; one trace end to end (§10.2) |
-| **OTel instrumentation + `force_flush()` on exit** | DONE for the backend: [er-obs](../rust/crates/er-obs), with the flush at `main.rs`'s `exec-task` arm because `process::exit` runs no destructors. The browser half (clicks, beacon) is outstanding. | Spans per stage; an exiting Job otherwise drops its last batch (§10.2) |
+| **OTel instrumentation + `force_flush()` on exit** | DONE for the backend: [er-obs](../../../../rust/crates/er-obs), with the flush at `main.rs`'s `exec-task` arm because `process::exit` runs no destructors. The browser half (clicks, beacon) is outstanding. | Spans per stage; an exiting Job otherwise drops its last batch (§10.2) |
 | **Per-run cost on the run row** | BLOCKED, not unbuilt: Split Cost Allocation Data is off, so all ten `split_line_item_*` CUR columns are present and entirely NULL (re-probed 2026-11-05, 0 of 9,341 rows). Console-only to enable, and it does not backfill. | vCPU-hours × node rate, recorded next to the existing counters (§16.2) |
 | Non-root `USER` in all three images | `docker/Dockerfile` (none today), both new Dockerfiles | Pod Security `restricted` requires it (§5.6) |
 | Disable FastAPI docs routes outside dev | `server/src/erserver/api.py` | `/docs`, `/redoc`, `/openapi.json` are the only unauthenticated routes besides `/healthz` (§4.1) |
@@ -686,11 +707,11 @@ The second is **the prod hop**, now built. `envs/prod` applies under `er-ci-tf-a
 
 Retirement is `kubectl scale`, and deliberately **not** coupled to the cutover's `--atomic`: it runs only after the cutover has been verified, so a failure there leaves traffic correctly on the new colour with one surplus pod, which is the harmless direction. The Deployment is kept rather than deleted so the next release scales it up with its image already cached. That this is safe depends on a Helm property worth stating, because a `kubectl`-modified replica count that Helm declined to restore would leave the next release's target colour at zero — where `--atomic --wait` and `rollout status` both pass trivially and only the smoke test would fail: Helm 3 patches the live object against the rendered manifest, not against the previous one, so the next release restores the count even though its manifest never changed. Measured on a kind cluster — install at 1, `kubectl scale` to 0, `helm upgrade` with an unchanged value, back to 1.
 
-The schema step moved out of the pod. A `pre-upgrade` hook at weight `-5` runs `er-server migrate --expect-additive`, which plans first and **refuses, writing nothing**, unless every statement is one the reconciler would auto-apply — `CREATE TABLE` for an absent relation, `ADD COLUMN` for an absent nullable one. That is what makes it safe to migrate while the old colour is still serving: lint rule E011 forbids `SELECT *` anywhere, so the live colour reads the widened store correctly, which is also why an `--atomic` rollback is safe after DDL has been applied. A release whose schema change is not additive fails the hook and deploys nothing. Breaking changes are therefore two releases — expand, then contract — and the contracting step is refused until the ledger shows the expanding one verified. Full argument, the measurements and the deferred ALB canary: [infrastructure-decisions.md](infrastructure-decisions.md) D-BLUEGREEN.
+The schema step moved out of the pod. A `pre-upgrade` hook at weight `-5` runs `er-server migrate --expect-additive`, which plans first and **refuses, writing nothing**, unless every statement is one the reconciler would auto-apply — `CREATE TABLE` for an absent relation, `ADD COLUMN` for an absent nullable one. That is what makes it safe to migrate while the old colour is still serving: lint rule E011 forbids `SELECT *` anywhere, so the live colour reads the widened store correctly, which is also why an `--atomic` rollback is safe after DDL has been applied. A release whose schema change is not additive fails the hook and deploys nothing. Breaking changes are therefore two releases — expand, then contract — and the contracting step is refused until the ledger shows the expanding one verified. Full argument, the measurements and the deferred ALB canary: `infrastructure-decisions.md` D-BLUEGREEN.
 
 ## 15. Build order
 
-The live tracker with acceptance criteria is [plan-to-aws.md](plan-to-aws.md); this is the phase skeleton.
+The live tracker with acceptance criteria is plan-to-aws.md; this is the phase skeleton.
 
 **Phase 0 — Foundations, and everything that cannot be retrofitted.** The account baseline (root MFA, S3 BPA, billing access), Identity Center permission sets and groups (including the §8.2 guard denies), the two bootstrap stacks, GitHub OIDC, ECR repositories, budget alarms. Plus the time-component controls, the only reason they are this early: cost attribution (§16.1 — tags activated, EKS split cost allocation, CUR delivery; none backfills); audit trails (§8.6 — CloudTrail with log file validation to the compliance-mode Object-Locked bucket at 400 days, AWS Config narrow scope); branch protection on `main`; and the account floors (S3 BPA on the account, MFA on the root user, no root access keys). All verifiable with no cluster running.
 
@@ -700,10 +721,10 @@ The live tracker with acceptance criteria is [plan-to-aws.md](plan-to-aws.md); t
 
 **Phase 3 — Prod, when there is prod traffic.** Network, EKS prod, Aurora prod multi-AZ, the prod lake with CMK and scoped CloudTrail, the prefix-scoped export role (§8.4), `make refresh-dev` Path A, and the internet-facing prod ALB behind WAF with rate rules on the three unauthenticated write paths (§4.1).
 
-**Phase 4 — Hardening and the audit run-up.** The IRSA credential chain (§9.2) — the SES API port that was to retire the SMTP key is **done**, and the key was never created (§9.3) — per-tenant scoped ServiceAccounts (§6.4), dashboards for the [backend-design.md](backend-design.md) §14 metric list, alerting, automated snapshot sharing, GuardDuty in prod, and the point-in-time SOC 2 artifacts (policies, risk assessment, subprocessor inventory including the Anthropic flow, vendor assessments, break-glass procedure, a restore test with its record — §8.6).
+**Phase 4 — Hardening and the audit run-up.** The IRSA credential chain (§9.2) — the SES API port that was to retire the SMTP key is **done**, and the key was never created (§9.3) — per-tenant scoped ServiceAccounts (§6.4), dashboards for the [backend-design.md](../../er-server-control-plane/references/backend-design.md) §14 metric list, alerting, automated snapshot sharing, GuardDuty in prod, and the point-in-time SOC 2 artifacts (policies, risk assessment, subprocessor inventory including the Anthropic flow, vendor assessments, break-glass procedure, a restore test with its record — §8.6).
 
 *A follow-up worth noting:* an EKS cluster unlocks the GitHub Actions Runner Controller, which resolves a recorded blocker — `benchmarks/scales.yaml` asks for `ubuntu-latest-8-cores` and `ubuntu-latest-16-cores` at the `100k` and `1m` scales, neither available today. A `runner-l` node serves them natively. The
-dispatched coding agent's Phase 3 ([agent-fleet.md](agent-fleet.md) §5) is the
+dispatched coding agent's Phase 3 ([agent-fleet.md](../../ci-and-supply-chain/references/agent-fleet.md) §5) is the
 other consumer, and it carries the same vCPU-quota prerequisite.
 
 ## 16. Cost
@@ -822,24 +843,24 @@ kubectl -n alice exec deploy/er-api -- df -h /app/.tmp   # NVMe, not the root fi
 
 ## 18. Open items
 
-Measurements and decisions this design is still waiting on. (Resolved items — Auto Mode, the domain, the backend-design.md §7 class correction — have moved to [infrastructure-decisions.md](infrastructure-decisions.md).)
+Measurements and decisions this design is still waiting on. (Resolved items — Auto Mode, the domain, the backend-design.md §7 class correction — have moved to `infrastructure-decisions.md`.)
 
-1. **Is the one-Postgres-instance constraint real?** §2 cites [backend-design.md](backend-design.md) §5 for the queue and the tenant advisory lock needing one cluster. PostgreSQL advisory locks are scoped per *database*, and the lock is taken on the tenant catalog DB while the queue lives in the control-plane DB — so they are in different databases regardless, and the serialization guarantee appears to come from the `jobs_one_active_per_org` unique index instead. If over-stated it removes a design option; §7.1 satisfies it either way, so this is not blocking.
+1. **Is the one-Postgres-instance constraint real?** §2 cites [backend-design.md](../../er-server-control-plane/references/backend-design.md) §5 for the queue and the tenant advisory lock needing one cluster. PostgreSQL advisory locks are scoped per *database*, and the lock is taken on the tenant catalog DB while the queue lives in the control-plane DB — so they are in different databases regardless, and the serialization guarantee appears to come from the `jobs_one_active_per_org` unique index instead. If over-stated it removes a design option; §7.1 satisfies it either way, so this is not blocking.
 2. **Where the thread-scaling curve flattens.** §6.5 makes vCPU the sizing lever on a 2→6 thread measurement that cut 10M-row runtime 40%. The measurement stops at 6, and is unlikely to stay linear: the same run showed **reconcile 14% *slower*** at 6 threads, a Python graph step that does not parallelize with DuckDB threads. A 10M run at 6 / 12 / 16 / 24 threads sets the top of the class ladder, and the same run with `ER_PROFILE_STORAGE` confirms spill at the 8 GB limit the L class actually uses.
-3. ~~**Does EKS Auto Mode support the §5.1/§5.3 node controls?**~~ **Resolved 2026-10-10 — yes, Auto Mode chosen (D1).** Moved to [infrastructure-decisions.md](infrastructure-decisions.md) D-AUTOMODE / §5.5.
+3. ~~**Does EKS Auto Mode support the §5.1/§5.3 node controls?**~~ **Resolved 2026-10-10 — yes, Auto Mode chosen (D1).** Moved to `infrastructure-decisions.md` D-AUTOMODE / §5.5.
 4. **Telemetry volume per pipeline run** — CloudTrail data events, and separately OTel log/span volume. Decides whether §7.3's scoped trail is affordable, whether §10.4's log levels are aggressive enough, and whether traces need tail sampling. Both are answerable from one instrumented 10M run, and both are §16 line items currently carrying a range instead of a number.
 5. **Whether the dispatcher should watch pod logs or the runner should write its own progress** (§6.3). The recommendation is the latter, but it is a behavioural change to a path the frontend's job-detail view depends on, so it wants a decision before the Job launcher is written.
 6. **DR posture.** Single region, no cross-region replication, no stated RPO/RTO for customer CRM data. Aurora PITR and S3 versioning cover deletion and corruption, not regional loss. Fine for now; it should be a stated accepted risk rather than an omission.
 7. **DuckLake path storage** — absolute or relative in the catalog. Determines the size of `er lake rehome` (§13) and therefore whether Path A is permanent.
-8. ~~**Hosted zone and domain.**~~ **Resolved 2026-10-10: `dupezero.com` at Cloudflare.** Moved to [infrastructure-decisions.md](infrastructure-decisions.md) (resolved open items); Cloudflare is the DNS plane, external-dns runs its Cloudflare provider with DNS-only records, ACM stays the certificate authority.
-9. ~~**Resource classes need revising in [backend-design.md](backend-design.md) §7.**~~ **Resolved — `backend-design.md` §7 now specifies the vCPU/spill-tiered classes** (authority `server/src/erserver/sizing.py`). Rationale in [infrastructure-decisions.md](infrastructure-decisions.md) D-SIZING.
-10. **API pod DuckDB sizing** — until the [backend-design.md](backend-design.md) §8 split is implemented, a tenant configured for a large runner also sizes the API pods' attaches (§2). The `app` NodePool is sized defensively as a result.
+8. ~~**Hosted zone and domain.**~~ **Resolved 2026-10-10: `dupezero.com` at Cloudflare.** Moved to `infrastructure-decisions.md` (resolved open items); Cloudflare is the DNS plane, external-dns runs its Cloudflare provider with DNS-only records, ACM stays the certificate authority.
+9. ~~**Resource classes need revising in [backend-design.md](../../er-server-control-plane/references/backend-design.md) §7.**~~ **Resolved — `backend-design.md` §7 now specifies the vCPU/spill-tiered classes** (authority `server/src/erserver/sizing.py`). Rationale in `infrastructure-decisions.md` D-SIZING.
+10. **API pod DuckDB sizing** — until the [backend-design.md](../../er-server-control-plane/references/backend-design.md) §8 split is implemented, a tenant configured for a large runner also sizes the API pods' attaches (§2). The `app` NodePool is sized defensively as a result.
 11. **What granularity Split Cost Allocation Data actually exposes.** §16.1 and §16.2 assume per-pod CUR rows carrying namespace and workload. Whether arbitrary pod *labels* surface as CUR columns decides whether per-tenant grouping is a direct query or needs joining through the `jobs` table on workload name. Either works; the second is more code. Worth confirming against one real CUR.
 12. **Whether the internal cost model and the CUR reconcile.** §16.2 keeps two numbers — allocated at a blended rate in Postgres, billed in the CUR — and claims they should agree within ~10%. That tolerance is a guess until a month of both exists. If the gap is much wider the likely causes are spot price variance and pods that request far more than they use.
 13. **Which Trust Services Criteria the first audit is scoped to.** Security is mandatory. **Confidentiality** is the natural second given the data, largely covered by §8.3 and §8.1. **Availability** is the expensive one, because it brings a documented RPO/RTO and *evidence of a restore test* — so §18.6's deferred DR posture becomes required work the moment Availability is in scope. Scoping to Security + Confidentiality first is the lighter path.
 14. **The Anthropic data flow needs a documented position**, not just an inventory entry (§8.6). The assistant sends names, emails, and full golden records to a third party. Minimum: a DPA, a configured retention posture on the vendor side, customer disclosure, and a decision on whether tenants can opt out. Product work with a compliance deadline attached. **One of the four is now built**: the opt-out exists as a per-tenant toggle (`erweb.org_ai_settings`, V5), and a tenant that switches AI off makes no outbound call from either the assistant or enrichment. A tenant may also supply its **own** API key, in which case the data still leaves but under that tenant's own vendor agreement rather than ours — which is a different disclosure, not an absent one. The DPA, the retention posture and the disclosure text remain open, and they are the three that need a lawyer rather than a commit.
 15. **Does `sslmode=verify-full` work with the Aurora CA bundle as the images are built?** Partially answered by inspection: the Dockerfile installs no `ca-certificates` or RDS bundle, so the runtime has only what `python:3.12-slim` ships. Expect an image change (install `ca-certificates` plus the RDS global bundle), not a secret change; what stays open is verifying the bundle path wiring in each DSN.
-16. ~~**Cold-node image pull time** for the current `er-pipeline`.~~ **Resolved 2026-10-24, and the answer is "climb no further".** Measured with `scripts/measure_runner_startup.sh` on `er-dev`; the record is [`measurements/runner-startup-20261024.json`](measurements/runner-startup-20261024.json) and is the authority for every figure here.
+16. ~~**Cold-node image pull time** for the current `er-pipeline`.~~ **Resolved 2026-10-24, and the answer is "climb no further".** Measured with `scripts/measure_runner_startup.sh` on `er-dev`; the record is `measurements/runner-startup-20261024.json` and is the authority for every figure here.
 
     The whole cold start — job submitted to container running — is about **30 seconds**, and the image pull is **1.6–3.4 s** of it. The §11.1 ladder exists to shave that: the runtime/CI image split is worth a fraction of a couple of seconds, and snapshot prebake costs Auto Mode (D-AUTOMODE) to chase the same fraction. Neither is justified. The ladder is closed, not climbed.
 

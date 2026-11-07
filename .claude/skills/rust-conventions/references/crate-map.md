@@ -38,7 +38,7 @@ table, so it does not appear in the generated pin block at all.
 | `er-cli` | `er-cli` — orchestrate the ER pipeline stages over a real DuckLake lake (P2) |
 | `er-compile` | Compile a tenant's declared `comparisons:` / `blocking:` into the settings document the engine loads |
 | `er-config` | The S6 configuration document and its `config_hash` (port of `src/er/config/{schema,hashing,loader}.py`, DesignDoc.md S6/S6.1/S5.2) |
-| `er-dag` | The compiled-DAG library of `docs/batch-orchestration-design.md` |
+| `er-dag` | The compiled-DAG library of the batch-orchestration design, carried by the `er-engine-ops` skill as `references/batch-orchestration-design.md` |
 | `er-entities` | The generated entity crate: one module per entity, each with its struct, `arrow_schema()` and (in later phases) its typed query functions |
 | `er-entity-cli` | `er-entity` — the entity-framework CLI |
 | `er-entity-diff` | `er-entity-diff` — does the live store match the entity catalog? |
@@ -52,7 +52,7 @@ table, so it does not appear in the generated pin block at all.
 | `er-hash` | `content_hash` — the normative S4.1 digest (Rust port of `src/er/ingest/hashing.py`) |
 | `er-ids` | Identity primitives — record keys, pair canonicalisation, ULID minting, redirect resolution (Rust port of `src/er/entities/ids.py`) |
 | `er-ingest` | The ingest stage (port of `src/er/ingest/*`, DesignDoc.md S4.1) |
-| `er-k8s` | The Kubernetes half of `docs/batch-orchestration-design.md` §6: the [`PodApi`] seam the dispatcher launches and watches through (one production implementation over `kube`, one scripted test double in er-server's tests), the per-attempt Job manifest rendering, the watch discipline, and the pure |
+| `er-k8s` | The Kubernetes half of the batch-orchestration design (§6, carried by the `er-engine-ops` skill): the [`PodApi`] seam the dispatcher launches and watches through (one production implementation over `kube`, one scripted test double in er-server's tests), |
 | `er-match` | The matching stage (port of `src/er/matching/*`, DesignDoc.md S4.3) |
 | `er-mcp` | `er-mcp` — an MCP server over the control API, for one tenant (O10) |
 | `er-obs` | Observability: installing the subscriber, plus the S5.2 counter vocabulary and structured stage log line (ports of `src/er/obs/counters.py` and `src/er/obs/logging.py`) |

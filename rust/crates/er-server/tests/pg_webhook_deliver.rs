@@ -284,7 +284,8 @@ async fn webhook_delivery_fires_signed_and_the_guard_refuses_a_blocked_address()
     // This is the lock for the `169.254.169.254` case the repo's security notes
     // call the headline SSRF. It proves the APPLICATION layer only: whether a
     // pod can reach instance metadata at all is a NetworkPolicy question
-    // answered by the manual `docs/infrastructure.md` §17 probe, and nothing
+    // answered by the manual §17 probe in the `infra-platform` skill's
+    // `references/infrastructure.md`, and nothing
     // here speaks to it.
     let guarded_log = er_entities::webhook_delivery::read::page(&client, &org_id, None, None, 50)
         .await

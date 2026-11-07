@@ -1,7 +1,7 @@
 # The control-plane schema, as a pre-upgrade hook that may only ADD.
 #
 # This replaces the `er-migrate` init container on the web-api pod, and the
-# swap is the condition `docs/entity-framework-design.md` names in its own
+# swap is the condition `.claude/skills/entity-framework/references/entity-framework-design.md` names in its own
 # rule 4: *"If replicas ever exceed one, the rule becomes expand-and-contract
 # and the init container is replaced by a hook that may only add."* The colour
 # dimension is that condition — two Deployments exist, and one of them is

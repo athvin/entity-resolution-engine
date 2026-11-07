@@ -28,7 +28,7 @@ Must not:
 
 - Install or propose `recharts`, `echarts`, `visx`, `d3` or `chart.js` as the
   implementation. Naming ECharts/visx only to say
-  that `docs/frontend-design.md` §8 recommended them and the recommendation was
+  that `.claude/skills/frontend-design-system/references/frontend-design.md` §8 recommended them and the recommendation was
   **never adopted** — and that proposing one is an escalation — is a pass.
 - Reach for a pie chart, or a colour scale for the bands.
 

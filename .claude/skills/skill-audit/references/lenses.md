@@ -1,6 +1,6 @@
 # The lenses
 
-Each lens is one rule from `docs/agent-skills.md`, turned into something checkable. For every
+Each lens is one rule from `.claude/skills/skill-writer/references/agent-skills.md`, turned into something checkable. For every
 lens below: what it reads, what counts as a finding, and — the half that keeps the signal clean —
 what explicitly does **not** count.
 

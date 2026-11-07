@@ -20,7 +20,7 @@ import "server-only";
  * would silently erase a human's verdict and remove it from the training set.
  * A suggestion is not a verdict, and that index encodes the distinction
  * correctly. Recommendations live in `erweb`, which also keeps the arrow to
- * er-server pointing one way. See the V6 entry in `docs/parity-roadmap.md`.
+ * er-server pointing one way.
  */
 
 /**

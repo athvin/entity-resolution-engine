@@ -4,12 +4,19 @@
 > its Compose-based harness (`docker/compose.yaml`, `scripts/ci/*.sh`), which no
 > longer exist in the tree. It is preserved for its measurements and findings;
 > the live engine is the Rust workspace under `rust/` (see the
-> [README](../README.md#performance)).
+> [README](../../../../README.md#performance)).
 
 *Engine layer — single-tenant pipeline profiling.*
 
 For a controlled baseline/candidate performance comparison, see
-[performance.md](performance.md).
+`performance.md`.
+## Contents
+
+- [Primary workload: 1M reload followed by 100K new record keys](#primary-workload-1m-reload-followed-by-100k-new-record-keys)
+- [Reading the artifacts](#reading-the-artifacts)
+- [Measurement semantics](#measurement-semantics)
+- [Profiling an existing CLI invocation](#profiling-an-existing-cli-invocation)
+
 ## Primary workload: 1M reload followed by 100K new record keys
 
 ```sh
@@ -77,8 +84,8 @@ uv run python benchmarks/workload_report.py artifacts/bench/<campaign>
 For a small harness check, use `benchmarks/full_pipeline.py --scale smoke --local
 --with-incremental --incremental-records 100 --incremental-scenario mixed-v1 --profile
 --with-profile-control` with `uv run python`. See the
-[performance record](performance.md) and the repository
-[analysis skill](../.claude/skills/ducklake-performance/SKILL.md), which retain both
+performance record (`performance.md`) and the repository
+[analysis skill](../../ducklake-performance/SKILL.md), which retain both
 workloads' measured results and the evidence-linked backlog. Ordered writes and
 partitioning are future measured experiments; this campaign changes no production
 layout, clustering or scoring algorithm.
@@ -213,5 +220,5 @@ and subprocess logs should be handled with the same access controls as source da
 
 The `benchmarks/report.py --run` entry point uses the same runner with fresh state
 and per-phase memory while preserving its six-phase JSON shape. See
-[benchmark baselines](performance.md#benchmark-baselines) for reviewing a measured
-run, and [CONTRIBUTING.md](../CONTRIBUTING.md) for local checks and CI shards.
+benchmark baselines (`performance.md`) for reviewing a measured
+run, and [CONTRIBUTING.md](../../../../CONTRIBUTING.md) for local checks and CI shards.

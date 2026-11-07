@@ -1,11 +1,20 @@
 # Configuration
 
 *Engine-layer configuration (one tenant's lake). Under the multi-tenant control
-plane, config is versioned and published per tenant — [backend-design.md](backend-design.md) §6.*
+plane, config is versioned and published per tenant — [backend-design.md](../../er-server-control-plane/references/backend-design.md) §6.*
 
-Start with [configs/default.yaml](../configs/default.yaml). The checked-in
-[test configuration](../configs/test.yaml) supplies the fixture and Compose defaults.
+Start with [configs/default.yaml](../../../../configs/default.yaml). The checked-in
+[test configuration](../../../../configs/test.yaml) supplies the fixture and Compose defaults.
 Pass `--config PATH` after a command or set `ER_CONFIG` to select a file.
+## Contents
+
+- [Source data](#source-data)
+- [Configuration blocks](#configuration-blocks)
+- [Extra source fields](#extra-source-fields)
+- [Runtime environment](#runtime-environment)
+- [Training large corpora](#training-large-corpora)
+- [Changing rules](#changing-rules)
+
 ## Source data
 
 Deliver CSV or Parquet files in `<drop-root>/<source-name>/`. For example,
@@ -54,7 +63,7 @@ delivery is the complete key set for that source: absent keys become tombstones.
 | `correction_pass` | Cron cadence. Under the control plane it is synced into a schedule on config publish (backend-design §5); standalone, an external scheduler invokes it |
 
 Configuration is validated by Pydantic and cross-field rules before processing.
-All blocks and their exact constraints are in [S6](../DesignDoc.md#s6).
+All blocks and their exact constraints are in [S6](../../../../DesignDoc.md#s6).
 
 ## Extra source fields
 
@@ -188,4 +197,4 @@ rebuild; use `--reason std_version_bump` or `--reason survivorship_version_bump`
 to record the intent. Address-parser changes also require a standardization version
 bump. Retraining activates a new model and requires a full rescore before reconciliation.
 
-Use [the runbook](runbook.md#full-rebuilds-and-correction) for the command sequence.
+Use the runbook (`runbook.md`) for the command sequence.

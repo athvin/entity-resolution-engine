@@ -29,6 +29,16 @@ laptop ── agent "fix X" ──► gh workflow run agent-task.yml (on main)
                                                                      human review + merge
 ```
 
+## Contents
+
+- [1. What the workflow does, and why it is two jobs](#1-what-the-workflow-does-and-why-it-is-two-jobs)
+- [2. One-time setup (Phase 0)](#2-one-time-setup-phase-0)
+- [3. Where this departs from the plan it came from](#3-where-this-departs-from-the-plan-it-came-from)
+- [4. Phase 2: one image for the laptop and the agent](#4-phase-2-one-image-for-the-laptop-and-the-agent)
+- [5. Phase 3: Actions Runner Controller on `er-dev`](#5-phase-3-actions-runner-controller-on-er-dev)
+- [6. Phase 4: hardening](#6-phase-4-hardening)
+- [7. Open items](#7-open-items)
+
 ## 1. What the workflow does, and why it is two jobs
 
 **`agent`** runs `anthropics/claude-code-action` in agent mode: a `prompt` input
@@ -190,7 +200,7 @@ Requests* (`L-34B43A08`) and *Running On-Demand Standard instances*
 (`L-1216C47A`) both read 8 vCPU applied. The 2026-10-11 increase requests closed
 without being granted. The `app` and `system` nodes take 4, which leaves less
 than one 8-vCPU node. An ARC runner pod would sit `Pending` with no scheduling
-event, forever (aws-account-operations skill, `docs/infrastructure.md` §5). The
+event, forever (aws-account-operations skill, `.claude/skills/infra-platform/references/infrastructure.md` §5). The
 quota is shared with prod, since there is one account. Size the request as
 `maxRunners × node vCPU` plus the pipeline runner pools plus 4. At 8-vCPU nodes,
 a cap of 5 agents needs about 48 for agents alone. Ask for 64 and confirm the
@@ -215,7 +225,7 @@ Then:
   0` and a `maxRunners` the quota can actually honour. The runner container
   image is `er-agent:<sha>`. Mount an `emptyDir` with an explicit `sizeLimit` at
   `/home/runner/_work`, and set `requests.ephemeral-storage`. These are the same
-  two load-bearing limits `docs/infrastructure.md` §5.3 sets on pipeline runners.
+  two load-bearing limits `.claude/skills/infra-platform/references/infrastructure.md` §5.3 sets on pipeline runners.
 - **ARC's own GitHub App**, separate from the publish App, with *Administration*
   read/write on this repository. Its key lives in Secrets Manager
   (`envs/dev/secrets.tf`), projected by External Secrets through the existing

@@ -55,7 +55,7 @@ every rule must carry title, reasoning and both examples. Codes are append-only.
 Four checks in one:
 0. **Entity lint** — the V-rules above, run first and short-circuiting.
 1. **Staleness** — regenerates the whole tree in memory and byte-compares every
-   generated file (incl. `docs/erd.md` and `docs/entity-lint-rules.md`). Failure:
+   generated file (incl. `references/erd.md` and `references/entity-lint-rules.md`). Failure:
    `er-entity check: N generated file(s) are stale or missing` → run gen and
    commit the diff.
 2. **Orphans** — any file in a generated directory that gen did not emit.

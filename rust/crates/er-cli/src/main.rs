@@ -7,7 +7,8 @@
 //! `rust/Dockerfile`.
 //!
 //! Building `er` on its own stays supported and is what local work uses
-//! (`cargo build -p er-cli --bin er`, per docs/runbook.md).
+//! (`cargo build -p er-cli --bin er`, per the `er-engine-ops` skill's
+//! `references/runbook.md`).
 
 fn main() -> anyhow::Result<()> {
     // First statement: the CLI's earliest diagnostics happen during argument

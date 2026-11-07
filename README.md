@@ -5,7 +5,7 @@ sources, and maintains a golden record for each resolved person. One shared web
 application and control plane serve every tenant (a tenant is a client); each
 tenant's data is resolved and stored in isolation. The long-term moat is a
 source-agnostic resolution engine; the first market is Salesforce deduplication,
-where it competes directly with [Cloudingo](docs/research-cloudingo.md).
+where it competes directly with Cloudingo.
 
 The engine resolves:
 
@@ -30,7 +30,7 @@ flowchart TB
     API["FastAPI control plane<br/>orgs · jobs · config · read path"]
     CPDB[("Multi-tenant Postgres<br/>orgs · users · jobs · config · audit")]
   end
-  subgraph conn["Connector seam — ingress/egress, CRM-agnostic (docs/connectors.md)"]
+  subgraph conn["Connector seam — ingress/egress, CRM-agnostic (.claude/skills/er-server-control-plane/references/connectors.md)"]
     C["drop-dir ingress · webhooks egress · Salesforce (planned)"]
   end
   subgraph engine["Resolution engine — single-tenant per lake (src/er/)"]
@@ -67,7 +67,7 @@ flowchart TB
    tenant** maps table snapshots to **parquet files in S3** under the tenant's own
    prefix. DuckDB executes the engine's generated SQL; snapshot/MVCC reads
    let the API serve point-in-time results without ever blocking the writer.
-4. **Connectors** (`docs/connectors.md`) — a CRM-agnostic ingress/egress seam. The
+4. **Connectors** (`.claude/skills/er-server-control-plane/references/connectors.md`) — a CRM-agnostic ingress/egress seam. The
    engine never learns about any specific source: connectors land deliveries as
    files and apply merge-backs through a small verb set. Drop-dir ingress and signed
    webhooks exist today; the Salesforce data connector (sync + writeback) is the
@@ -86,12 +86,12 @@ is structurally impossible rather than a per-query concern.
   queue with per-tenant serialization, API-key auth + roles, versioned config with
   tiered publish, schedules, the snapshot-pinned read path, steward writes, drop-dir
   imports, signed webhooks, merge-plan export); and the web UI foundations in
-  `frontend/`. See [backend design](docs/backend-design.md) and
-  [frontend design](docs/frontend-design.md) for what each layer does.
+  `frontend/`. See [backend design](.claude/skills/er-server-control-plane/references/backend-design.md) and
+  [frontend design](.claude/skills/frontend-design-system/references/frontend-design.md) for what each layer does.
 - **In progress:** the Salesforce data connector (ingress + writeback,
-  [connectors](docs/connectors.md)); human SSO (direct OIDC in the BFF); and the
-  production AWS environment ([infrastructure](docs/infrastructure.md), tracked in
-  [plan-to-aws](docs/plan-to-aws.md)). The dev cloud environment is built and
+  [connectors](.claude/skills/er-server-control-plane/references/connectors.md)); human SSO (direct OIDC in the BFF); and the
+  production AWS environment ([infrastructure](.claude/skills/infra-platform/references/infrastructure.md), tracked in
+  [plan-to-aws](.claude/skills/infra-platform/references/plan-to-aws.md)). The dev cloud environment is built and
   live-probed; production is gated deliberately.
 
 ## Try the complete pipeline
@@ -117,7 +117,7 @@ This ingests the committed three-source fixture delivery, standardizes, scores
 with the committed frozen model, reconciles entities and assembles golden
 records — then `… doctor` prints the health report (latest run, per-relation
 row counts). The lake is just the `artifacts/demo` directory; delete it to
-start over. The [runbook](docs/runbook.md) covers training, incremental
+start over. The [runbook](.claude/skills/er-engine-ops/references/runbook.md) covers training, incremental
 deliveries, corrections and maintenance; `make dev-up` stands up the full dev
 cloud stack (control plane + UI + per-developer lakes).
 
@@ -131,27 +131,25 @@ bit-identically and runs the 1M-record workload faster on a flat memory
 profile (~53% less at 8 threads than the Splink 5 baseline); DuckDB's thread
 count is the main scaling lever. The retired Python stack's tuning record —
 its 1M/10M medians, evidence-linked backlog and rejected experiments — is
-preserved as history in the [performance record](docs/performance.md) and the
-[profiling guide](docs/profiling.md), with the DuckLake analysis methodology in
+preserved as history in the [performance record](.claude/skills/ducklake-performance/references/performance.md) and the
+[profiling guide](.claude/skills/ducklake-performance/references/profiling.md), with the DuckLake analysis methodology in
 the [analysis skill](.claude/skills/ducklake-performance/SKILL.md).
 
 ## Documentation
 
 | Layer | Guide | Use it for |
 |---|---|---|
-| Product | [Backend design](docs/backend-design.md) | The multi-tenant control plane: orgs, jobs, config service, read path, isolation |
-| Product | [Frontend design](docs/frontend-design.md) | Cloud UI: personas, access model, screens, BFF, phased plan |
-| Product | [Connectors](docs/connectors.md) | The agnostic ingress/egress seam and the Salesforce connector |
-| Product | [Cloudingo research](docs/research-cloudingo.md) | Competitor and market analysis driving the parity roadmap |
-| Product | [DataGroomr teardown](docs/research-datagroomr.md) | Stack-ranked, Salesforce-free capability matrix of the second competitor, with the gaps a warehouse-native ER service can win on |
-| Engine | [Architecture](docs/architecture.md) | Pipeline stages, data ownership and entity lifecycle |
-| Engine | [Entity framework design](docs/entity-framework-design.md) | One YAML per table generating every store, language and wire; how live stores reconcile to it at boot, per tenant lake, and on deploy; why not Atlas or Alembic |
-| Engine | [ERD](docs/erd.md) | Generated entity-relationship diagram of every store (control plane, erweb, lake); regenerate with `er-entity gen` |
+| Product | [Backend design](.claude/skills/er-server-control-plane/references/backend-design.md) | The multi-tenant control plane: orgs, jobs, config service, read path, isolation |
+| Product | [Frontend design](.claude/skills/frontend-design-system/references/frontend-design.md) | Cloud UI: personas, access model, screens, BFF, phased plan |
+| Product | [Connectors](.claude/skills/er-server-control-plane/references/connectors.md) | The agnostic ingress/egress seam and the Salesforce connector |
+| Engine | [Architecture](.claude/skills/er-engine-ops/references/architecture.md) | Pipeline stages, data ownership and entity lifecycle |
+| Engine | [Entity framework design](.claude/skills/entity-framework/references/entity-framework-design.md) | One YAML per table generating every store, language and wire; how live stores reconcile to it at boot, per tenant lake, and on deploy; why not Atlas or Alembic |
+| Engine | [ERD](.claude/skills/entity-framework/references/erd.md) | Generated entity-relationship diagram of every store (control plane, erweb, lake); regenerate with `er-entity gen` |
 | Engine | [Technical specification](DesignDoc.md) | Numbered schemas, algorithms and invariants referenced by tests |
-| Engine | [Configuration](docs/configuration.md) | Source mappings, matching rules, survivorship and runtime settings |
-| Ops | [Runbook](docs/runbook.md) | Running the engine: initial load, deliveries, reviews, recovery, maintenance |
-| Ops | [Performance](docs/performance.md) / [Profiling](docs/profiling.md) | Benchmark results, measured findings, traces and artifacts |
-| Ops | [Infrastructure](docs/infrastructure.md) / [AWS plan](docs/plan-to-aws.md) | AWS/EKS design and the ordered build-out tracker |
+| Engine | [Configuration](.claude/skills/er-engine-ops/references/configuration.md) | Source mappings, matching rules, survivorship and runtime settings |
+| Ops | [Runbook](.claude/skills/er-engine-ops/references/runbook.md) | Running the engine: initial load, deliveries, reviews, recovery, maintenance |
+| Ops | [Performance](.claude/skills/ducklake-performance/references/performance.md) / [Profiling](.claude/skills/ducklake-performance/references/profiling.md) | Benchmark results, measured findings, traces and artifacts |
+| Ops | [Infrastructure](.claude/skills/infra-platform/references/infrastructure.md) / [AWS plan](.claude/skills/infra-platform/references/plan-to-aws.md) | AWS/EKS design and the ordered build-out tracker |
 | Contributing | [Contributing](CONTRIBUTING.md) | Local setup, tests and CI |
 
 ## Repository
@@ -162,8 +160,9 @@ entity framework's table shapes (one YAML per table; `er-entity gen` renders the
 committed Rust/DDL/TypeScript artifacts). `configs/` contains reference
 configurations; `fixtures/` defines correctness checks; `frontend/` is the web
 UI/BFF, a standalone pnpm project with its own lockfile (see
-`frontend/README.md`). `docs/` holds the design docs and `infra/` the
-Terraform/Helm build-out. Generated outputs belong in the ignored `artifacts/`
+`frontend/README.md`). `infra/` holds the Terraform/Helm build-out, and each
+design document lives in the `references/` of the `.claude/skills/` skill that
+owns its subject. Generated outputs belong in the ignored `artifacts/`
 directory.
 
 Licensed under [MIT](LICENSE).

@@ -1,8 +1,8 @@
 # Architecture
 
 *Engine layer — one lake, one corpus. The platform that runs many such lakes
-is in the [README](../README.md#architecture-at-a-glance) and
-[backend-design.md](backend-design.md).*
+is in the [README](../../../../README.md#architecture-at-a-glance) and
+[backend-design.md](../../er-server-control-plane/references/backend-design.md).*
 
 A lake belongs to a **dataset**, not to a tenant: an org can hold several
 datasets — Contacts and Accounts, say — and each is an independent resolution
@@ -27,6 +27,13 @@ flowchart LR
     Q --> R
 ```
 
+## Contents
+
+- [Pipeline and storage](#pipeline-and-storage)
+- [Identity and golden records](#identity-and-golden-records)
+- [Incremental processing and review](#incremental-processing-and-review)
+- [Execution boundaries](#execution-boundaries)
+
 ## Pipeline and storage
 
 | Stage | Work | Main outputs |
@@ -47,11 +54,11 @@ hashing (`er-hash`) and graph clustering (`er-reconcile`) run in Rust.
 Logical keys are enforced by writers and tests because DuckLake does not enforce
 primary-key or unique constraints.
 
-The [specification's data model](../DesignDoc.md#s5) is the normative table
+The [specification's data model](../../../../DesignDoc.md#s5) is the normative table
 inventory; in code, the registry in
-[rust/crates/er-schema/src/model.rs](../rust/crates/er-schema/src/model.rs) and
-the entity catalog under [entities/](../entities/) are the authorities (the
-generated [ERD](erd.md) draws all of it).
+[rust/crates/er-schema/src/model.rs](../../../../rust/crates/er-schema/src/model.rs) and
+the entity catalog under [entities/](../../../../entities/) are the authorities (the
+generated [ERD](../../entity-framework/references/erd.md) draws all of it).
 
 ## Identity and golden records
 
@@ -77,7 +84,7 @@ Scores depend on the chosen model and frozen term-frequency snapshot. Configurat
 or model drift can require a full run. Incremental/full equivalence has explicit
 preconditions; `er correct` refreshes term frequencies and performs a full rescore,
 reconciliation and assembly without retraining. See
-[INV-EQ](../DesignDoc.md#s4-5) for the precise guarantee.
+[INV-EQ](../../../../DesignDoc.md#s4-5) for the precise guarantee.
 
 Review decisions become persistent `always` or `never` assertions. Contradictory
 assertions fail explicitly. The reconciliation policy enforces `never` constraints
@@ -95,9 +102,9 @@ through the control plane (`resume` re-queues it); runs are deterministic over
 their pinned inputs, so a resumed run reproduces, never approximates.
 
 The engine itself has no serving API or built-in scheduler; the control plane in
-[server/](backend-design.md) provides both, driving the engine per run —
+[`er-server`](../../er-server-control-plane/references/backend-design.md) provides both, driving the engine per run —
 including periodic correction and maintenance. Coherence scoring currently
 uses `NoopScorer`; the interface exists for a future implementation.
 
-See the [runbook](runbook.md) for commands and the
-[specification](../DesignDoc.md) for algorithms and schemas.
+See `runbook.md` alongside this file for commands, and the
+[specification](../../../../DesignDoc.md) for algorithms and schemas.

@@ -15,7 +15,7 @@ import { WaterfallChart } from "@/components/review/waterfall-chart";
  * empty state that is easy to regress.
  *
  * Deliberately NO assertions on colour. These bars are currently emerald/red,
- * which violates the standing monochrome rule (docs/frontend-design.md §3.3);
+ * which violates the standing monochrome rule (.claude/skills/frontend-design-system/references/frontend-design.md §3.3);
  * that is being addressed separately. Polarity is asserted through the structure
  * that will survive it — which side of the centre axis the bar sits on, and the
  * sign on the weight.

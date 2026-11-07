@@ -7,7 +7,7 @@ rules that decide its command name.
 > (<https://code.claude.com/docs/en/skills>, <https://code.claude.com/docs/en/best-practices>),
 > summarised rather than copied. It is the one file here that is *not* repo-specific, and it is
 > kept because the field semantics are checkable facts that are expensive to get wrong and that
-> `docs/agent-skills.md` deliberately does not restate. Refresh by re-reading those two pages
+> `references/agent-skills.md` deliberately does not restate. Refresh by re-reading those two pages
 > when a field behaves differently from what is written below; trust the product over this file.
 
 ## Contents

@@ -39,7 +39,7 @@ regression into agreeableness.
 
 **Query:** `/skill-writer add a skill for our webhook retry semantics`
 
-- MUST read `docs/agent-skills.md` before drafting.
+- MUST read `.claude/skills/skill-writer/references/agent-skills.md` before drafting.
 - MUST put any count, version or threshold in a generated block with a generator added to
   `scripts/skills-check.sh`, never in prose.
 - MUST edit the neighbouring descriptions so routing goes both ways — a new skill that names its

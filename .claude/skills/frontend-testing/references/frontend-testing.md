@@ -1,16 +1,26 @@
 # Frontend quality & testing (living standard)
 
 What gates the frontend, what belongs in which test tier, and the rules that keep
-the bar from drifting. The companion to [frontend-design.md](frontend-design.md),
+the bar from drifting. The companion to [frontend-design.md](../../frontend-design-system/references/frontend-design.md),
 which holds the product design — if this file and that one disagree about intent,
 **the design doc wins and this one is stale.**
 
 Written 2026-10-20, alongside the program in PRs #187–#201. Engineering-level
 setup (how to run things, the dev substrate) stays in
-[frontend/README.md](../frontend/README.md); this is the *why* and the
+[frontend/README.md](../../../../frontend/README.md); this is the *why* and the
 *definition of done*.
 
 ---
+
+## Contents
+
+- [Scope decisions (locked 2026-10-20)](#scope-decisions-locked-2026-10-20)
+- [The five tiers](#the-five-tiers)
+- [Gates, and what each one is for](#gates-and-what-each-one-is-for)
+- [The full-stack tier](#the-full-stack-tier)
+- [Visual baselines](#visual-baselines)
+- [Proving a gate works](#proving-a-gate-works)
+- [Change log](#change-log)
 
 ## Scope decisions (locked 2026-10-20)
 
@@ -337,7 +347,7 @@ arriving unnoticed in a transitive bump.
 
 ### The monochrome rule
 
-`docs/frontend-design.md` §3.3: *"Black and white, period… no brand accent, no
+`.claude/skills/frontend-design-system/references/frontend-design.md` §3.3: *"Black and white, period… no brand accent, no
 colored chips or badges, no palette. This is a standing constraint on every
 surface and component, not a launch-phase simplification."*
 
@@ -475,7 +485,7 @@ checks for it (it fails the boot if `er-dispatcher` exits).
 legacy in-process arm leaves a host dispatcher able to claim a job and execute
 nothing, because the executor's only route to a `PodApi` is an in-cluster
 Kubernetes identity (decided in #638, recorded beside Phase 4 in
-[batch-orchestration-design.md](batch-orchestration-design.md)). Four of the five
+[batch-orchestration-design.md](../../er-engine-ops/references/batch-orchestration-design.md)). Four of the five
 specs here survive that, because they read rows or assert a refusal:
 
 | Spec | What it needs |

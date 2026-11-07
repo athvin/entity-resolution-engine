@@ -217,8 +217,8 @@ if images succeeded)`. These consequences decide what "done" means, and
 [`references/post-merge.md`](references/post-merge.md) carries them with the
 generated list of what runs only after a merge:
 
-- **No deploy run is often correct.** A merge touching only `docs/`, `.claude/`
-  or Terraform builds no image, so nothing deploys. Waiting for a run that will
+- **No deploy run is often correct.** A merge touching only `.claude/` or
+  Terraform builds no image, so nothing deploys. Waiting for a run that will
   never exist is the common way this loop hangs.
 - **A cancelled `images` run produces no deploy and is not a failure**, so
   nothing reports it. Merged does not mean deployed.

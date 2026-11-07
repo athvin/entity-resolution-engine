@@ -20,7 +20,8 @@ Stageshow builds faux product UI, such as hero and feature-card demos for the
 marketing surface. Where it conflicts with this repo, the house skills win:
 
 - **Colour.** The product UI is strictly grayscale (`frontend-design-system`,
-  `docs/frontend-design.md` §3.3). Ignore Stageshow's guidance on colour,
+  `.claude/skills/frontend-design-system/references/frontend-design.md` §3.3).
+  Ignore Stageshow's guidance on colour,
   "looks" and tinted backgrounds for anything placed under `frontend/`; the
   ESLint palette rule rejects Tailwind palette utilities there.
 - **Placement.** Marketing demos follow `landing-page`, and their tests follow

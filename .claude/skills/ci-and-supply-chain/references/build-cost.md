@@ -724,7 +724,7 @@ and dropping it would free the budget outright. But the two caches fail in
 different ways, and sccache covers the case rust-cache cannot: rust-cache keys on
 `Cargo.lock`, so **any** dependency change misses it wholesale, while sccache is
 content-addressed per compilation unit and still hits for every crate the bump did
-not touch. `docs/frontend-testing.md:382-388` records what that is worth — five
+not touch. `.claude/skills/frontend-testing/references/frontend-testing.md:382-388` records what that is worth — five
 concurrent dependabot PRs, each with a different `Cargo.lock`, compiling
 "near-cold" and timing out a 30-minute `fmt + clippy + docs`. *Near*-cold, not
 cold, is sccache working.

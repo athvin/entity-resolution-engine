@@ -2,7 +2,7 @@
   "name": "er-frontend",
   "version": "0.1.0",
   "private": true,
-  "description": "Standalone cloud UI for the entity-resolution engine (see docs/frontend-design.md)",
+  "description": "Standalone cloud UI for the entity-resolution engine (see .claude/skills/frontend-design-system/references/frontend-design.md)",
   "packageManager": "pnpm@10.34.5",
   "engines": {
     "node": ">=22"

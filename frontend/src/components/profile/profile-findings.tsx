@@ -73,7 +73,7 @@ export function ProfileFindings({ findings }: { findings: ProfileFindingRow[] })
               >
                 <Glyph className="mt-0.5 size-3.5 shrink-0" aria-hidden />
                 <span className={severity === "error" ? "font-medium" : undefined}>
-                  {/* The code is shown because `docs/profile-findings.md`
+                  {/* The code is shown because `.claude/skills/er-engine-ops/references/profile-findings.md`
                       documents each one with its reasoning, so a reader who
                       wants the "why" has something to search for. */}
                   <span className="text-muted-foreground font-mono text-[10px]">

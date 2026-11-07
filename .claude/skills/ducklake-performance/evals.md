@@ -16,7 +16,9 @@ Must:
 - Say the Python/Splink campaign harness and its Compose-based driver are
   **retired and removed from the tree**, so there is no campaign to run.
 - Name what does exist: `cargo bench -p dedupe-core`, the gated scale goldens,
-  and `docs/measurements/*.json` as historical records.
+  and `references/performance.md` and `references/profiling.md` as historical
+  records. The per-campaign `measurements/*.json` captures were deleted with the
+  `docs/` tree and are in git history only.
 
 Must not:
 
@@ -24,7 +26,7 @@ Must not:
 
 ## 2. Comparing against the historical numbers
 
-**Query:** "I measured the reload at 9 minutes. `docs/performance.md` says the
+**Query:** "I measured the reload at 9 minutes. `.claude/skills/ducklake-performance/references/performance.md` says the
 1M reload was 6 minutes, so we've regressed 50%. Confirm?"
 
 Must:

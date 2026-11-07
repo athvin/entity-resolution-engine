@@ -284,11 +284,11 @@ carrying one **class** label:
 | Class | What it is | Also carries |
 |---|---|---|
 | `epic` | a DataGroomr parity epic, titled `E<n> — <name>` | `mvp` or `post-appexchange` |
-| `docs-backlog` | open work found in `docs/` and verified against the code | `mvp` or `post-appexchange` |
+| `docs-backlog` | open work found in a design record (now under `.claude/skills/*/references/`) and verified against the code | `mvp` or `post-appexchange` |
 | `ci-backlog` | CI, runner and merge-bus work | — |
 | `obs-backlog` | observability work | — |
-| `followup` | a small operational follow-up an investigation surfaced; not an epic and not a `docs/` finding | a release flag only when it gates one |
-| `shipped` | a built capability documented in `docs/`, recorded so the board shows the product and not only its gaps | nothing — closed, so the release question is moot |
+| `followup` | a small operational follow-up an investigation surfaced; not an epic and not a design-record finding | a release flag only when it gates one |
+| `shipped` | a built capability the design records describe, recorded so the board shows the product and not only its gaps | nothing — closed, so the release question is moot |
 
 **This table is a snapshot and will go stale, because the board has several
 writers.** Concurrent sessions file cards here: `ci-backlog` and `obs-backlog`
@@ -315,11 +315,13 @@ gh project item-list 2 --owner athvin --limit 400 --format json --jq '
   | "estimated \([$m[]|select(.estimate)]|length) of \($m|length)"'
 ```
 
-**`docs/` understates what is built, consistently.** The checkboxes, the
-`frontend-design.md` §6.1 status column and its §7 gap list have all been
+**The design records understate what is built, consistently.** The checkboxes,
+`frontend-design.md` §6.1's status column and its §7 gap list have all been
 observed stale in the same direction: features marked `Roadmap` or `Gap` that
-already have routes. A `docs/` item is a hypothesis until grepped against
-`rust/crates/er-server/src` or the entity catalog. One stale row reached a
+already have routes. A design-record item is a hypothesis until grepped against
+`rust/crates/er-server/src` or the entity catalog. Those documents now live in
+`.claude/skills/*/references/`, which changed where to look and nothing about
+how far to trust them. One stale row reached a
 board card before this was caught.
 
 The conventions below are practice rather than a property of the board, so

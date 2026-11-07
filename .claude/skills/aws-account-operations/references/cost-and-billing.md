@@ -63,7 +63,7 @@ Two attributions fall out of design choices made for other reasons:
   single-tenant pod.
 
 That second one is the load-bearing consequence. It is also why the metric
-guidance in `docs/infrastructure.md` §10 forbids a `tenant` label on CloudWatch
+guidance in `.claude/skills/infra-platform/references/infrastructure.md` §10 forbids a `tenant` label on CloudWatch
 metric series: tenant count is unbounded by design and every distinct label
 value is a separate time series, so the bill would scale with
 tenants × metrics × resolution. **Per-tenant cost comes from the CUR and the

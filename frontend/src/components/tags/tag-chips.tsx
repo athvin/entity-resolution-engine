@@ -26,7 +26,7 @@ import { useDatasetSlug } from "@/lib/use-dataset-slug";
  * Reusable across both subjects because a chip is a chip: the only difference is
  * the `subject` pair, which is also the whole of the server's addressing.
  *
- * **Grayscale, like everything else** (`docs/frontend-design.md` §3.3). A tag
+ * **Grayscale, like everything else** (`.claude/skills/frontend-design-system/references/frontend-design.md` §3.3). A tag
  * system is the single most tempting place to reach for colour, and the design
  * rule forbids a palette — so an applied tag is a FILLED chip and an offered one
  * is OUTLINED, the same opposites-not-better-worse channel the always/never
@@ -118,7 +118,7 @@ export function TagChips({
  * The chips, as a function of data alone.
  *
  * Split out from the container so the branchy render logic is testable in the
- * component tier (`docs/frontend-testing.md`: "branchy RENDER logic... a
+ * component tier (`.claude/skills/frontend-testing/references/frontend-testing.md`: "branchy RENDER logic... a
  * component whose output derives from data") without a QueryClient or a
  * backend. The container below is the data wiring, which Playwright already
  * drives end to end.

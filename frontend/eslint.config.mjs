@@ -38,9 +38,9 @@ export default defineConfig([
         {
           selector: "Identifier[name='pending_until_next_reconcile']",
           message:
-            "Do not read pending_until_next_reconcile — derive staged/applied/reconciled chips from the resolve response `status` (see docs/frontend-design.md §4.2).",
+            "Do not read pending_until_next_reconcile — derive staged/applied/reconciled chips from the resolve response `status` (see .claude/skills/frontend-design-system/references/frontend-design.md §4.2).",
         },
-        // "Black and white, period." — docs/frontend-design.md §3.3, repeated in
+        // "Black and white, period." — .claude/skills/frontend-design-system/references/frontend-design.md §3.3, repeated in
         // CLAUDE.md, and until now enforced by nothing: 12 component files had
         // drifted into emerald/red/amber to encode meaning. The design doc calls
         // this "a standing constraint on every surface and component, not a
@@ -58,12 +58,12 @@ export default defineConfig([
         {
           selector: `Literal[value=/\\b(bg|text|border|ring|from|via|to|fill|stroke|outline|decoration|shadow|accent|caret|divide|placeholder)-(red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose|slate|gray|zinc|neutral|stone)-[0-9]{2,3}\\b/]`,
           message:
-            "The UI is strictly black and white (docs/frontend-design.md §3.3): no Tailwind palette colour. Use a semantic token (foreground/muted/border/primary/secondary/accent) — they are grayscale in both themes — and signal state with weight, scale, spacing or motion instead of hue.",
+            "The UI is strictly black and white (.claude/skills/frontend-design-system/references/frontend-design.md §3.3): no Tailwind palette colour. Use a semantic token (foreground/muted/border/primary/secondary/accent) — they are grayscale in both themes — and signal state with weight, scale, spacing or motion instead of hue.",
         },
         {
           selector: `TemplateElement[value.raw=/\\b(bg|text|border|ring|from|via|to|fill|stroke|outline|decoration|shadow|accent|caret|divide|placeholder)-(red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose|slate|gray|zinc|neutral|stone)-[0-9]{2,3}\\b/]`,
           message:
-            "The UI is strictly black and white (docs/frontend-design.md §3.3): no Tailwind palette colour. Use a semantic token (foreground/muted/border/primary/secondary/accent) — they are grayscale in both themes — and signal state with weight, scale, spacing or motion instead of hue.",
+            "The UI is strictly black and white (.claude/skills/frontend-design-system/references/frontend-design.md §3.3): no Tailwind palette colour. Use a semantic token (foreground/muted/border/primary/secondary/accent) — they are grayscale in both themes — and signal state with weight, scale, spacing or motion instead of hue.",
         },
       ],
       // Route handlers legitimately return `Response | NextResponse`.

@@ -1,5 +1,5 @@
 //! Master-record election policies (port of `er.golden.master`,
-//! docs/backend-design.md §10).
+//! the `er-server-control-plane` skill's `references/backend-design.md` §10).
 //!
 //! Survivorship elects field *values*; an external merge needs a master
 //! *record* — the one member of an entity that survives when the others fold

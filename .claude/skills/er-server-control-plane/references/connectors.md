@@ -2,14 +2,24 @@
 
 *How client systems get data into the resolution engine and merge decisions back
 out — without the engine ever learning about any specific system. This is the
-design for the connector seam named in [backend-design.md §10](backend-design.md)
+design for the connector seam named in backend-design.md §10 (`backend-design.md`)
 and the plan for the first concrete connector, Salesforce.*
 
 ---
 
+## Contents
+
+- [1. Principle: producers and appliers at the edges of an unchanged engine](#1-principle-producers-and-appliers-at-the-edges-of-an-unchanged-engine)
+- [2. The connector contract](#2-the-connector-contract)
+- [3. The seams that already exist](#3-the-seams-that-already-exist)
+- [4. The Salesforce connector (v1)](#4-the-salesforce-connector-v1)
+- [5. Baseline connectors](#5-baseline-connectors)
+- [6. Roadmap](#6-roadmap)
+- [References](#references)
+
 ## 1. Principle: producers and appliers at the edges of an unchanged engine
 
-The engine ([architecture.md](architecture.md)) is source-agnostic by construction:
+The engine (architecture.md) is source-agnostic by construction:
 it ingests tabular deliveries from a drop directory, change-detects them by content
 hash, and emits golden records, lineage and `entity_events`. A connector lives
 entirely at the two edges of that pipeline and the engine core is never modified to
@@ -35,7 +45,7 @@ generic file/S3, and future systems implement the same way.
 ## 2. The connector contract
 
 A connector is defined against the control-plane **connection** resource
-(`/v1/orgs/{org}/connections`, [backend-design.md §6](backend-design.md)). A
+(`/v1/orgs/{org}/connections`, backend-design.md §6 (`backend-design.md`)). A
 connection is `{type, credential ref, object→source mapping}`, and the contract the
 control plane promises a connector is exactly four things — nothing else:
 
@@ -99,7 +109,7 @@ reason the Salesforce connector is the first real build on this seam.
 ## 4. The Salesforce connector (v1)
 
 Salesforce is the first concrete connector because it is the first market
-([research-cloudingo.md](research-cloudingo.md)). v1 proves the whole contract end
+(research-cloudingo.md). v1 proves the whole contract end
 to end.
 
 > **Salesforce as a login provider is a separate thing.** Human SSO via Salesforce
@@ -188,12 +198,12 @@ connector.
 
 ## References
 
-- [backend-design.md §6](backend-design.md) — the `connections` resource and the
+- backend-design.md §6 (`backend-design.md`) — the `connections` resource and the
   four-part connector contract.
-- [backend-design.md §10](backend-design.md) — connector abstraction and the apply
+- backend-design.md §10 (`backend-design.md`) — connector abstraction and the apply
   service (the normative source for this doc).
-- [backend-design.md §13](backend-design.md) — the object-model generalization that
+- backend-design.md §13 (`backend-design.md`) — the object-model generalization that
   gates Account/custom objects.
 - `er-server` `upload_import` — the `POST .../imports` drop-dir ingress seam.
 - `er-server` `create_webhook` / `webhook_deliveries` — the signed-webhook egress seam.
-- [research-cloudingo.md](research-cloudingo.md) — why Salesforce is first.
+- research-cloudingo.md — why Salesforce is first.

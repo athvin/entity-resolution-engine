@@ -57,7 +57,7 @@ analyser refuses statements against unknown relations. New control-plane tables
 enter through an `entities/*/entity.yaml` (never hand DDL — er-server boots only
 the generated `POSTGRES_BASELINE`); new lake relations enter through the
 registry or an entity; the frontend's `erweb` schema changes only through
-drizzle migrations. `docs/erd.md` is generated from the same authorities and CI
+drizzle migrations. `.claude/skills/entity-framework/references/erd.md` is generated from the same authorities and CI
 fails when it is stale.
 
 **And no free-form SQL.** Every persistent statement — read or write, both
@@ -96,12 +96,12 @@ names (`record_key`, `run_id`, `entity_id`-as-FK, …). Control-plane entities m
 opt into `history: true` (a generated `<relation>_history` jsonb row-image
 companion), and every DDL statement lands in the `ddl_log` ledger via event
 triggers. The full conventions: the "Identity conventions" section of
-[docs/entity-framework-design.md](docs/entity-framework-design.md).
+[.claude/skills/entity-framework/references/entity-framework-design.md](.claude/skills/entity-framework/references/entity-framework-design.md).
 
 The fixture format is documented in
 [fixtures/static/FORMAT.md](fixtures/static/FORMAT.md). Benchmark and profiling
-changes should follow [performance.md](docs/performance.md) and
-[profiling.md](docs/profiling.md).
+changes should follow [performance.md](.claude/skills/ducklake-performance/references/performance.md) and
+[profiling.md](.claude/skills/ducklake-performance/references/profiling.md).
 
 ## Keeping the checkout small
 

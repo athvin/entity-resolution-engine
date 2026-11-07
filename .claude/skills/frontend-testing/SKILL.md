@@ -5,7 +5,8 @@ description: Explains this repo's frontend test tiers and quality gates — whic
 
 # Frontend testing
 
-`docs/frontend-testing.md` is the living standard; this skill is the working
+[references/frontend-testing.md](references/frontend-testing.md) is the living
+standard; this skill is the working
 summary. The frontend gate **blocks merges**: several of its jobs are required
 checks on `main`, and because branch protection is repository configuration
 rather than a file in the tree, no count of them here could stay true — the

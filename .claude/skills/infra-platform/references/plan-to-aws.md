@@ -1,6 +1,6 @@
 # Plan to AWS — the ordered build plan, with acceptance criteria
 
-*The execution companion to [infrastructure.md](infrastructure.md) (revision 4). That
+*The execution companion to `infrastructure.md` (revision 4). That
 document holds every design decision and its rationale; this one holds only **order** and
 **definition of done**. Each task cites the section that designed it — if a task and the
 design disagree, the design doc wins and this file is stale. Written 2026-10-03; executed
@@ -11,6 +11,19 @@ acceptance criterion is observed — not when the Terraform applies. That rule i
 from infrastructure.md §17: a green apply proves nothing this plan cares about.
 
 ---
+
+## Contents
+
+- [Where we start, where we end](#where-we-start-where-we-end)
+- [Decision gates](#decision-gates)
+- [Phase 0 — Foundations (start here)](#phase-0--foundations-start-here)
+- [Track A — application changes — CLOSED](#track-a--application-changes--closed)
+- [Phase 1 — Cluster and substrate (needs: Phase 0, D1, D2)](#phase-1--cluster-and-substrate-needs-phase-0-d1-d2)
+- [Phase 2 — Developer environments and the Job launcher (needs: Phase 1, Track A, D3)](#phase-2--developer-environments-and-the-job-launcher-needs-phase-1-track-a-d3)
+- [Track S — SSO (registrations after D2; implementation after 2.1)](#track-s--sso-registrations-after-d2-implementation-after-21)
+- [Phase 3 — Prod (needs: the prod gate, Phase 2)](#phase-3--prod-needs-the-prod-gate-phase-2)
+- [Phase 4 — Hardening and the audit run-up (end state)](#phase-4--hardening-and-the-audit-run-up-end-state)
+- [Standing rules while executing](#standing-rules-while-executing)
 
 ## Where we start, where we end
 
@@ -172,7 +185,7 @@ All from §14.1. These merged into Phase 1 at 1.8.
 **Track A exit:** satisfied. The integration-tier run it named (`make check-e2e`
 plus a 2h08m single-session pass) described the Python test suite; the equivalent
 gate today is `make check` plus `make check-e2e`, and the frontend tiers in
-[frontend-testing.md](frontend-testing.md).
+[frontend-testing.md](../../frontend-testing/references/frontend-testing.md).
 
 ---
 
@@ -183,7 +196,7 @@ gate today is `make check` plus `make check-e2e`, and the frontend tiers in
 - [x] **1.2 EKS cluster** (§5; Auto Mode per D1) — *er-dev ACTIVE 2026-10-10, v1.36 pinned in Terraform, API access entries (PlatformAdmin cluster-admin). Auto Mode supplies compute/storage/LB/CNI controllers, so the addon list reduces to EFS CSI + the Helm-installed pair (external-dns, ESO) in 1.4/1.6.*
   - [x] `kubectl` works via Identity Center.
   - [ ] The `view`-only group cannot read Secrets — deferred until the view mapping exists (prod era).
-- [x] **1.3 Nodes + hardening** (§5, §5.1, §5.6; Auto Mode per D1) — *app/runner-sm/runner-l NodePools applied with the §5.1 disruption settings; a probe pod provisioned a node in ~90s.* **The ~90 s is stale (2026-10-24):** measured on a `c6id` probe node, NodeClaim created to Ready is now ~14 s and the whole submit-to-container-running path is ~30 s — see [measurements/runner-startup-20261024.json](measurements/runner-startup-20261024.json) and §18.16. Auto Mode's June 2026 boot improvements are the likely cause. The original figure was a hand observation with no artifact, which is exactly why it went unchallenged for two weeks.
+- [x] **1.3 Nodes + hardening** (§5, §5.1, §5.6; Auto Mode per D1) — *app/runner-sm/runner-l NodePools applied with the §5.1 disruption settings; a probe pod provisioned a node in ~90s.* **The ~90 s is stale (2026-10-24):** measured on a `c6id` probe node, NodeClaim created to Ready is now ~14 s and the whole submit-to-container-running path is ~30 s — see measurements/runner-startup-20261024.json and §18.16. Auto Mode's June 2026 boot improvements are the likely cause. The original figure was a hand observation with no artifact, which is exactly why it went unchallenged for two weeks.
   - [x] `app` NodePool provisions; system pods scheduled.
   - [x] IMDS probe (2026-10-10), refined: a tokenless GET returns 401 (IMDSv1 disabled) and the IMDSv2 token PUT **times out** (hop limit 1) — the credential path is dead, which is the property the probe exists for.
   - [x] A privileged test pod is rejected in a namespace labeled `baseline` (PSS enforcing).
@@ -286,7 +299,7 @@ nothing by `make dev-up`.
 
 ## Track S — SSO (registrations after D2; implementation after 2.1)
 
-Design: [frontend-design.md](frontend-design.md) §2.4. Zero erserver changes.
+Design: [frontend-design.md](../../frontend-design-system/references/frontend-design.md) §2.4. Zero erserver changes.
 
 - [ ] **S.1 Provider registrations** (start early — all three have human lead time)
   - Google: client created, consent-screen/branding verification **submitted**; Entra: single registration, `AzureADandPersonalMicrosoftAccount`, v2 tokens; Salesforce: one Connected App registering `openid email profile api refresh_token`.
