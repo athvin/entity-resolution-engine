@@ -4,9 +4,10 @@ Hand-run. Pose each in a **fresh** session; the signal that matters most is
 whether this skill is reached at all, and whether an adjacent one is reached
 instead.
 
-This skill carries `disable-model-invocation: true`, so scenarios 1–5 are posed
-as `/land-pr …`. Scenarios 6 and 7 are the opposite test: they must **not** pull
-this skill in, and are posed as plain questions.
+Scenarios 1–5 are posed as `/land-pr …` — the slash form stays the primary
+entry point. Scenario 8 poses the same job as plain prose, which must reach
+this skill now that it is model-invocable. Scenarios 6 and 7 are the opposite
+test: they must **not** pull this skill in, and are posed as plain questions.
 
 ## 1. The false green that would merge a PR that compiled nothing
 
@@ -100,10 +101,10 @@ to stop legitimately and therefore a new way to stop illegitimately.
 time-dependent, an advisory published since the last green run fails it, read the
 job log for the advisory name, fix it in its own PR.
 
-**Must not:** load `land-pr` and start a monitoring loop. This skill is
-user-invoked and owns the *procedure* of driving a PR to green; the *taxonomy* of
-why a job fails belongs to the neighbour. If `land-pr` fires here, its
-description is over-reaching and the routing tail needs tightening.
+**Must not:** load `land-pr` and start a monitoring loop. This skill owns the
+*procedure* of driving a PR to green; the *taxonomy* of why a job fails belongs
+to the neighbour. If `land-pr` fires here, its description is over-reaching and
+the routing tail needs tightening.
 
 ## 7. Negative routing — the finish line for a backend change
 
@@ -114,3 +115,19 @@ the gate, and the bare cargo trio skips `entities-check`.
 
 **Must not:** reach for `land-pr`, which only becomes relevant once a pull
 request exists and is being driven to green.
+
+## 8. Model-invoked — driving a PR to merge without the slash command
+
+> "PR #789 is open — get it landed and make sure `main` stays green."
+
+**Must:** reach this skill from the plain-prose request (no `/land-pr` typed)
+and run the full arc — per-SHA check-run accounting rather than `gh pr checks`,
+squash on a true green, and the post-merge watch over the push-only workflows.
+
+**Must not:** improvise the loop because the skill was not slash-invoked; stop
+at merged without Phase 3; ask per-step permission for the fix–push–rerun–merge
+arc the invocation already authorises.
+
+This is the failure that motivated making the skill model-invocable: a session
+already driving a PR to merge was blocked from loading the procedure and had to
+rebuild it from memory, which is exactly how the false-green traps get re-made.

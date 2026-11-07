@@ -61,7 +61,7 @@ the same fix.
 | `frontend-testing` | which tier a change belongs in (unit, component, Playwright functional, the Docker-backed full-stack tier that is a release gate, not a PR gate) |
 | `health-sweep` | reads the CloudWatch alarms and whether their SNS subscriptions are confirmed (user-invoked only) |
 | `infra-platform` | the Terraform env/module layout and shared S3 state with lockfile locking |
-| `land-pr` | the PR loop, the main loop for the push-only workflows a PR can never run (user-invoked only) |
+| `land-pr` | the PR loop, the main loop for the push-only workflows a PR can never run |
 | `landing-page` | the `(marketing)` route group that prerenders statically inside the same app that serves the BFF |
 | `observability` | the `er-span`/`er-obs` split where library crates carry only `tracing` while a binary installs the subscriber |
 | `pentest` | a Strix-style run that does recon over the attack surface, fans out a tester subagent per vulnerability category (user-invoked only) |
@@ -154,9 +154,9 @@ can still accept a routing clause.
 |   60 | `skill-audit` | 964 |
 |   62 | `rust-conventions` | 962 |
 |   63 | `observability` | 961 |
+|   65 | `land-pr` | 959 |
 |   66 | `entity-framework` | 958 |
 |   72 | `infra-platform` | 952 |
-|   75 | `land-pr` | 949 |
 |   76 | `health-sweep` | 948 |
 |   76 | `sql-analysis` | 948 |
 |   77 | `frontend-design-system` | 947 |
