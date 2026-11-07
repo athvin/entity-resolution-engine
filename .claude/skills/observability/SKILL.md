@@ -208,12 +208,19 @@ The click is the root of the trace, and the vocabulary of clicks is **closed**.
 ## The gate
 
 ```
-make check       # backend: the obs posterity gates run here, not in bare cargo
+make check       # backend finish line; the obs gates run in its test phase
 make frontend    # the action vocabulary gate and the rest of the frontend tier
 ```
 
-`make check` is the finish line for anything in `rust/` — the bare cargo trio
-skips `entities-check` and these gates. See `rust-conventions`.
+The telemetry gates are **ordinary Rust tests**, so `cargo test` does run them —
+which is worth stating plainly, because the house rule that the cargo trio is
+insufficient is about `entities-check` and `skills-check`, not about these. What
+the trio actually misses here is the **generated reference**: `skills-check`
+catches a stale `references/surface.md`, and `er-entity verify` is unrelated to
+any of it. See `rust-conventions` for why `make check` is still the finish line.
+
+To run one gate rather than the suite, note each is a module of its crate's
+single test binary — `cargo test -p er-obs --test main cardinality`.
 
 [`references/surface.md`](references/surface.md) — generated: the roles and the
 `service.name` each reports as, the gates that enforce the rules above, and the
