@@ -214,7 +214,8 @@ actually requires.
   from the chart's task-template ConfigMap; everything else still runs
   in-process inside the dispatcher pod — the legacy arm, which Phase 4 of the
   batch-orchestration plan retires.
-  `ER_DISPATCH_IN_PROCESS=1` survives only in local dev (`make run`).
+  `ER_DISPATCH_IN_PROCESS` is assigned **nowhere** in the tree — local dev runs
+  `er-dispatcher` as its own host process too (`scripts/frontend-dev/up.sh`).
 - Only the web service is exposed; the API service has no load balancer in any
   environment. The browser reaches the BFF, and only the BFF reaches the API —
   the same boundary the frontend-bff skill describes, enforced here by topology.
