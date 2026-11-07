@@ -15,11 +15,17 @@ always one of the silent failures below, never a compile error.
 - **`er-span`** is the leaf. It carries `tracing` and nothing else, and it only
   **emits**. Library crates depend on this.
 - **`er-obs`** **collects**: the subscriber, the OTLP exporter, the metric
-  instruments, the layers. **Only binaries may depend on it.**
+  instruments, the layers. **Only a crate that owns an entry point may depend on
+  it.**
 
-So when instrumenting a library crate, reach for `er-span`. Pulling `er-obs`
-into one inflates the dependency graph of `er`, `dedupe`, `er-entity` and every
-test binary in the workspace — which is the cost the split exists to avoid.
+So when instrumenting the engine, reach for `er-span`. Pulling `er-obs` in
+inflates the dependency graph of `er`, `dedupe`, `er-entity` and every test
+binary in the workspace — which is the cost the split exists to avoid.
+
+Read that boundary off the manifests rather than from either crate's module doc,
+which states it as "only binaries": `er-cli` and `er-server` both have a
+`lib.rs` and both take `er-obs`, so the line is entry point versus engine, not
+bin versus lib. `references/surface.md` names what sits on each side.
 
 An entry point calls `er_obs::init(Role)` as the **first statement of `main`**
 and binds the guard for the life of the process. It writes to **stderr, never

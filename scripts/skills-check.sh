@@ -2080,7 +2080,22 @@ splice() {
 # difference fixes.
 gen_obs_surface() {
 	local crates=rust/crates
-	local roles gates structured bare both onlybare
+	local roles gates structured bare both onlybare emitters collectors
+
+	# Which side of the split each crate sits on, read off the manifests. Both
+	# crates' module docs say `er-obs` is for "binaries", and that is not the
+	# line: `er-cli` and `er-server` each have a `lib.rs` and each take it. The
+	# real rule is entry point versus engine, and a manifest cannot describe it
+	# wrongly the way a doc comment can.
+	emitters=$(
+		grep -l 'er-span' "$crates"/*/Cargo.toml 2>/dev/null |
+			xargs -n1 dirname | xargs -n1 basename |
+			grep -vxE 'er-span|er-obs' | sort -u || true
+	)
+	collectors=$(
+		grep -lE '^er-obs' "$crates"/*/Cargo.toml 2>/dev/null |
+			xargs -n1 dirname | xargs -n1 basename | sort -u || true
+	)
 
 	# `Role::service_name`'s match arms: `Self::Api => "er-api",`. Read from the
 	# impl rather than from a hand-kept list, because a new entry point is
@@ -2135,6 +2150,20 @@ gen_obs_surface() {
 	both=$(comm -12 <(printf '%s\n' "$bare") <(printf '%s\n' "$structured") || true)
 	onlybare=$(comm -23 <(printf '%s\n' "$bare") <(printf '%s\n' "$structured") || true)
 
+	echo "### Which side of the split each crate is on"
+	echo
+	echo "**Depend on \`er-span\` — they emit and collect nothing.** Instrumenting"
+	echo "one of these must not reach for \`er-obs\`:"
+	echo
+	bullets "$emitters" "**None**, which would mean nothing in the engine is instrumented."
+	echo
+	echo "**Depend on \`er-obs\` — they own an entry point and install the"
+	echo "subscriber.** Note this is not the same as \"binary crates\": some of"
+	echo "these have a \`lib.rs\` too, which is why both crates' module docs"
+	echo "describing the line as bin-versus-lib are imprecise:"
+	echo
+	bullets "$collectors" "**None**, which would mean no process installs a subscriber."
+	echo
 	echo "### Roles"
 	echo
 	echo "What each entry point passes to \`er_obs::init\`, and the"

@@ -10,12 +10,33 @@ cannot drift from what is emitted. It is reached from the skill body.
 
 ## Contents
 
+- [Which side of the split each crate is on](#which-side-of-the-split-each-crate-is-on) —
+  who emits, who collects
 - [Roles](#roles) — what each entry point reports as
 - [The gates](#the-gates) — what enforces the rules, and where
 - [Structured events versus bare stderr](#structured-events-versus-bare-stderr) —
   the derived adoption gap
 
 <!-- BEGIN GENERATED: obs-surface -->
+### Which side of the split each crate is on
+
+**Depend on `er-span` — they emit and collect nothing.** Instrumenting
+one of these must not reach for `er-obs`:
+
+- `dedupe-core`
+- `er-entities`
+
+**Depend on `er-obs` — they own an entry point and install the
+subscriber.** Note this is not the same as "binary crates": some of
+these have a `lib.rs` too, which is why both crates' module docs
+describing the line as bin-versus-lib are imprecise:
+
+- `dedupe-cli`
+- `er-cli`
+- `er-entity-cli`
+- `er-mcp`
+- `er-server`
+
 ### Roles
 
 What each entry point passes to `er_obs::init`, and the
