@@ -5,7 +5,7 @@
 # running, so a rollback is the same field moving back — the summary this
 # writes prints the command while that is still true.
 #
-# Inputs (env): CI_NAMESPACE, LIVE, TARGET, LIVE_API, LIVE_WEB, DAG_KINDS,
+# Inputs (env): CI_NAMESPACE, LIVE, TARGET, LIVE_API, LIVE_WEB,
 # NEW_API, NEW_WEB, FS, AP.
 set -euo pipefail
 
@@ -13,7 +13,6 @@ helm upgrade er-platform infra/k8s/charts/er-platform \
 	--namespace "$CI_NAMESPACE" --set "developer=$CI_NAMESPACE" \
 	--set "images.api.digest=$NEW_API" --set "images.web.digest=$NEW_WEB" \
 	--set "efs.fileSystemId=$FS" --set "efs.accessPointId=$AP" \
-	--set "executor.dagKinds=$DAG_KINDS" \
 	--set "color.active=$TARGET" \
 	--set "color.$TARGET.replicas=1" \
 	--set "color.$TARGET.api.digest=$NEW_API" \

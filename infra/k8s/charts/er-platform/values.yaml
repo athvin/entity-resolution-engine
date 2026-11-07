@@ -132,12 +132,10 @@ dispatcher:
   # NOT values: the single-dispatcher model needs exactly one, so the template
   # hard-codes replicas 1 / Recreate.
   #
-  # Legacy kinds still run IN this pod's process (the in-process arms of
-  # dispatcher.rs); kinds listed in executor.dagKinds run as per-attempt
-  # Kubernetes Jobs instead. A stuck legacy run therefore shows nothing in pod
-  # events — read the `er-dispatcher` pod log and look for a stale
-  # `dispatching`/`running` row holding the org's partial unique index; an
-  # executor-kind run shows up as `er-t-…` Jobs and task_instances rows.
+  # Every kind runs as per-attempt Kubernetes Jobs; there is no in-process arm
+  # and no per-kind allowlist (#645). A run shows up as `er-t-…` Jobs and
+  # task_instances rows, so a stuck one is read from pod events and the task
+  # ledger rather than from this pod's log.
   pollSeconds: "" # ERSERVER_POLL_SECONDS; empty keeps the erserver default (2s)
   # How long the SIGTERM drain gets to finish the in-flight job before the
   # kubelet SIGKILLs it (deployment-dispatcher.yaml has the full reasoning). A
@@ -160,11 +158,6 @@ dispatcher:
 # The Kubernetes executor (batch-orchestration-design §6): one Job per task
 # attempt, rendered by the dispatcher from the mounted task template.
 executor:
-  # The rollout allowlist (§11): job kinds the executor runs as Kubernetes
-  # Jobs; everything else stays on the in-process arms. Comma-separated,
-  # EMPTY BY DEFAULT — the executor is inert until a kind is listed here.
-  # Deleted in Phase 4 when the legacy arm goes.
-  dagKinds: ""
   # Launch gate (§7.2): queued|running pod rows across orgs. Three since the
   # Standard vCPU quotas were granted at 64 (both On-Demand L-1216C47A and Spot
   # L-34B43A08, verified against the account rather than assumed — an earlier
