@@ -92,11 +92,20 @@ across transitive connections, not just the directly scored pair.
 
 ## Execution boundaries
 
-A PostgreSQL advisory lock permits one writer per **dataset**, with a
-per-org cap on how many of an org's datasets may run at once
+One writer per **dataset** is enforced by three partial unique indexes on
+`jobs`, not by an advisory lock: `jobs_one_active_per_dataset` for the lake
+each dataset owns, `jobs_one_active_org_level` for the kinds that carry no
+dataset (`provision`, the migrate sweep), and `jobs_idempotency` so a retried
+submit is not a second run. The advisory lock `pg::claim` does take serves the
+per-org *cap* on how many of an org's datasets may run at once
 (`orgs.max_concurrent_jobs`, default 1 — the single-writer profile this
-started as). Native DuckDB connections
-are reused within a command and closed between stages. `runs` records each run's
+started as), because a COUNT is not index-enforceable; the uniques remain the
+database's own backstop.
+
+This paragraph credited the advisory lock with the whole guarantee, which put
+the load-bearing constraint in the wrong place: the lock can be absent and the
+invariant still holds. Native DuckDB connections are reused within a command
+and closed between stages. `runs` records each run's
 configuration fingerprints, status and snapshot range. A failed job is resumed
 through the control plane (`resume` re-queues it); runs are deterministic over
 their pinned inputs, so a resumed run reproduces, never approximates.
