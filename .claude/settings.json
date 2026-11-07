@@ -41,6 +41,8 @@
   },
   "permissions": {
     "deny": [
+      "Bash(pkill *)",
+      "Bash(killall *)",
       "Bash(aws organizations *)",
       "Bash(aws iam delete-* *)",
       "Bash(aws kms schedule-key-deletion *)",

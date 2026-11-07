@@ -17,3 +17,4 @@ mod model_registry;
 mod span_boundaries;
 mod sql_span_pii;
 mod structured_logging;
+mod telemetry_layering;

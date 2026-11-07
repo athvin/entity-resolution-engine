@@ -32,6 +32,7 @@ review finding is a build failure the author has not reached yet.
 | `er-schema/tests/span_boundaries.rs` | The posterity gate for blocking hops: no bare `spawn_blocking` in the control plane. | `make check` |
 | `er-schema/tests/sql_span_pii.rs` | The PII boundary on spans, enforced rather than documented. | `make check` |
 | `er-schema/tests/structured_logging.rs` | `er-server` logs through `tracing`, not `eprintln!`. | `make check` |
+| `er-schema/tests/telemetry_layering.rs` | The telemetry layering rule: only a crate that owns an entry point may depend on `er-obs`. | `make check` |
 | `er-server/tests/control_tasks_no_engine.rs` | A control task runs inside the dispatcher with the control plane's own credentials, so it must be STRUCTURALLY unable to run a stage: no file under `src/dags/control/` may name `er_cli::`, `dedupe_cor… | `make check` |
 | `er-server/tests/egress_guard.rs` | The posterity gate for the outbound-URL guard. | `make check` |
 | `er-server/tests/no_second_executor.rs` | The posterity gate for the one-executor rule (§11): the Kubernetes test double lives in `tests/`, and this scan is what keeps it there. | `make check` |
