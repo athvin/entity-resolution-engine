@@ -26,6 +26,7 @@ mod common;
 mod acct_read;
 mod control_tasks_no_engine;
 mod dag_assembly;
+mod dag_task_coverage;
 mod db_per_test;
 mod dispatch;
 mod dispatch_coverage;
