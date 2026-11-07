@@ -126,10 +126,6 @@ pub struct AppState {
     /// from `None` on purpose: an operator who opted in and made a typo should
     /// see which variable is wrong, not a 503 that says provisioning is off.
     provision_error: Option<String>,
-    /// Kinds the Kubernetes executor owns (`ER_EXECUTOR_DAG_KINDS`): cancel
-    /// routes through `job/update/cancel.sql`'s `canceling` for these, because
-    /// the org slot must stay held until every pod is provably gone (§5.6).
-    executor_kinds: std::collections::BTreeSet<String>,
     /// The projected-ServiceAccount-token verifier (§6.4), present only when
     /// this process runs as a pod. `None` leaves the attempt channel
     /// fallback-token-only, exactly as before.
@@ -148,7 +144,6 @@ impl AppState {
             max_import_bytes: DEFAULT_MAX_IMPORT_BYTES,
             provision: None,
             provision_error: None,
-            executor_kinds: std::collections::BTreeSet::new(),
             sa_verifier: None,
         }
     }
@@ -166,16 +161,8 @@ impl AppState {
             max_import_bytes: DEFAULT_MAX_IMPORT_BYTES,
             provision: None,
             provision_error: None,
-            executor_kinds: std::collections::BTreeSet::new(),
             sa_verifier: None,
         }
-    }
-
-    /// Name the kinds the Kubernetes executor owns, for the cancel route.
-    #[must_use]
-    pub fn with_executor_kinds(mut self, kinds: std::collections::BTreeSet<String>) -> Self {
-        self.executor_kinds = kinds;
-        self
     }
 
     /// Attach the projected-ServiceAccount-token verifier (§6.4). Absent, the
@@ -3971,7 +3958,12 @@ async fn cancel_job(
             return *r;
         }
         return match pg::get_job(&client, &org_row.id, &job_id).await {
-            Ok(Some(job)) if state.executor_kinds.contains(&job.kind) => {
+            // Every kind the DAG registry parses is the executor's now that the
+            // `ER_EXECUTOR_DAG_KINDS` allowlist is gone (#645), so this is the
+            // path essentially every cancel takes. The direct-`mark` arm below
+            // survives only for a kind that does not parse, which cannot have
+            // been planned and so has no pods to revoke.
+            Ok(Some(job)) if dags::JobKind::parse(&job.kind).is_some() => {
                 // The executor path (§5.6): a queued job dies directly; a
                 // dispatching or running one becomes `canceling` — still
                 // inside the one-active-per-org predicate — and the cancel
@@ -9990,14 +9982,6 @@ pub async fn state_from_env() -> AppState {
         Ok(dsn) if !dsn.is_empty() => AppState::with_pg(operator, dsn),
         _ => AppState::new(operator),
     };
-    let executor_kinds: std::collections::BTreeSet<String> = std::env::var("ER_EXECUTOR_DAG_KINDS")
-        .unwrap_or_default()
-        .split(',')
-        .map(str::trim)
-        .filter(|k| !k.is_empty())
-        .map(str::to_string)
-        .collect();
-    let state = state.with_executor_kinds(executor_kinds);
     // Present only when this process runs as a pod; locally the attempt
     // channel stays fallback-token-only.
     let state = state.with_sa_verifier(satoken::Verifier::in_cluster());

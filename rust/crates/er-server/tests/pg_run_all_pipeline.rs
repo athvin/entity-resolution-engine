@@ -115,9 +115,6 @@ async fn run_all_full_runs_as_seven_pods_and_reproduces_base_10() {
     let (api, mut frames) = FakePodApi::new(format!("http://{addr}"), tmp.clone());
     let api = Arc::new(api);
     let cfg = ExecutorConfig {
-        dag_kinds: ["run_all_full".to_string(), "train".to_string()]
-            .into_iter()
-            .collect(),
         in_flight_cap: 2,
         template: er_k8s::manifest::REFERENCE_TEMPLATE.to_string(),
         image_digest: None,

@@ -47,12 +47,12 @@ dispatcher:
     requests: { cpu: 100m, memory: 512Mi }
 
 executor:
-  # The whole point: these kinds run as per-attempt Kubernetes Jobs, on the one
-  # kind node, with no nodepool pinning. `run_all_full` is here because the
-  # single-task kinds cannot show the thing most likely to break across a pod
-  # boundary — a stage reading what the previous stage's PROCESS wrote. Phase 5
-  # drives it; see scripts/check_kind.sh.
-  dagKinds: "lake_maintain,lake_migrate,run_all_full"
+  # Every kind runs as per-attempt Kubernetes Jobs here, on the one kind node,
+  # with no nodepool pinning — the allowlist that used to name three of them is
+  # gone with the legacy arm (#645). What `check_kind.sh` exercises is still
+  # chosen by the phases it runs, and `run_all_full` is the one that matters
+  # most: the single-task kinds cannot show a stage reading what the previous
+  # stage's PROCESS wrote.
   # Three — the same as the chart default, stated explicitly because the reason
   # differs. `run_all` is a strict chain, so the cap never gates the pipeline
   # regardless of its value; what it bounds here is how many DuckDB pods one
