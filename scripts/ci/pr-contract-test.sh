@@ -79,7 +79,10 @@ expect_field 'the template ledger scans ok' ledger ok <"$TEMPLATE"
 
 # Every box in a fresh template is open, and no number is hard-coded here: a
 # count in a test is a count that goes stale when a ledger item is added.
-read -r _bl _el boxes open <<<"$(pr_ledger_scan <"$TEMPLATE")"
+# Five fields, not four: a short `read` silently folds the trailing ones into
+# the last variable, which is how adding `loose` to the scan broke this
+# assertion rather than the code it guards.
+read -r _bl _el boxes open _loose <<<"$(pr_ledger_scan <"$TEMPLATE")"
 if [ "$boxes" -gt 0 ] && [ "$open" -eq "$boxes" ]; then
 	ok "a fresh template ledger is entirely unticked ($open/$boxes)"
 else
@@ -165,6 +168,77 @@ got=$(pr_ledger_unticked <<<"$half")
 got=$(pr_ledger_unticked <<<'no ledger here')
 [ "$got" = 0 ] && ok 'a body with no ledger counts 0 (absence is the gate'"'"'s job)' ||
 	bad 'a body with no ledger counts 0' 0 "$got"
+
+# --- deferrals, where the annotation must name a ticket --------------------
+# `deferred` TICKS the box, so without the ticket requirement it would be the
+# way to retire an item without doing it or tracking it anywhere.
+loose() { pr_ledger_loose_deferrals; }
+
+got=$(loose <<EOF
+$PR_LEDGER_BEGIN
+- [x] **follow-ups** — deferred — #810 owns the sweep
+$PR_LEDGER_END
+EOF
+)
+[ "$got" = 0 ] && ok 'a deferral naming a ticket is tracked, not loose' ||
+	bad 'a deferral naming a ticket is tracked' 0 "$got"
+
+got=$(loose <<EOF
+$PR_LEDGER_BEGIN
+- [x] **follow-ups** — deferred, will get to it
+$PR_LEDGER_END
+EOF
+)
+[ "$got" = 1 ] && ok 'a deferral with no ticket is LOOSE' ||
+	bad 'a deferral with no ticket is LOOSE' 1 "$got"
+
+# The annotation usually lands on a WRAPPED line, which a per-line test would
+# judge separately from the tick. This is the case the grouping exists for.
+got=$(loose <<EOF
+$PR_LEDGER_BEGIN
+- [x] **follow-ups** — everything deferred here is owned by
+      ticket #810, filed before the merge
+$PR_LEDGER_END
+EOF
+)
+[ "$got" = 0 ] && ok 'a ticket on a continuation line still counts' ||
+	bad 'a ticket on a continuation line still counts' 0 "$got"
+
+got=$(loose <<EOF
+$PR_LEDGER_BEGIN
+- [x] **follow-ups** — deferred because the cluster is
+      unreachable from this session
+$PR_LEDGER_END
+EOF
+)
+[ "$got" = 1 ] && ok 'a wrapped deferral with no ticket anywhere is LOOSE' ||
+	bad 'a wrapped deferral with no ticket anywhere is LOOSE' 1 "$got"
+
+# An UNTICKED box saying `blocked` is already counted as open; it must not be
+# double-reported as a loose deferral just because the word appears.
+got=$(loose <<EOF
+$PR_LEDGER_BEGIN
+- [ ] **deploy** — blocked, no cluster access; deferred judgement
+$PR_LEDGER_END
+EOF
+)
+[ "$got" = 0 ] && ok 'an unticked box is open, never a loose deferral' ||
+	bad 'an unticked box is open, never a loose deferral' 0 "$got"
+
+# Grouping must not disturb the counts the audit already relied on.
+mixed=$(printf '%s\n- [x] one — n/a\n- [ ] two\n- [x] three — deferred — #1\n- [ ] four\n%s\n' \
+	"$PR_LEDGER_BEGIN" "$PR_LEDGER_END")
+read -r _b _e boxes open loose5 <<<"$(pr_ledger_scan <<<"$mixed")"
+if [ "$boxes" = 4 ] && [ "$open" = 2 ] && [ "$loose5" = 0 ]; then
+	ok 'grouping preserves boxes/unticked while adding the fifth field'
+else
+	bad 'grouping preserves boxes/unticked' 'boxes=4 open=2 loose=0' "boxes=$boxes open=$open loose=$loose5"
+fi
+
+# The committed template must not ship a loose deferral of its own.
+got=$(loose <"$TEMPLATE")
+[ "$got" = 0 ] && ok 'the committed template has no loose deferral' ||
+	bad 'the committed template has no loose deferral' 0 "$got"
 
 # --- the exemptions, where a false FAILURE is the expensive direction ------
 # Each is asserted with NEITHER clause satisfied, because that is the state the
