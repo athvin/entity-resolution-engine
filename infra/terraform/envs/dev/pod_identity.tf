@@ -100,13 +100,13 @@ resource "aws_iam_role" "er_runner_pod" {
   }
 }
 
-# The same lake grants the 9.2 interim service user carries (lake.tf) — when
-# that user retires, this role is where the engine's credential-chain access
-# already lives.
+# The lake grants (lake.tf). The §9.2 interim service user that used to hold the
+# same document has retired, so this role is now the only thing carrying them —
+# the engine's credential-chain access lives here and nowhere else.
 resource "aws_iam_role_policy" "er_runner_lake" {
   name   = "er-dev-runner-lake"
   role   = aws_iam_role.er_runner_pod.id
-  policy = data.aws_iam_policy_document.s3_user.json
+  policy = data.aws_iam_policy_document.lake_access.json
 }
 
 resource "aws_eks_pod_identity_association" "er_runner" {

@@ -442,15 +442,16 @@ A first SOC 2 is expected ([backend-design.md](../../er-server-control-plane/ref
 
 ## 9. Secrets
 
-`server/src/erserver/secrets.py` already resolves an org env value written `secret://NAME` from `ERSERVER_SECRET_<NAME>` in the server's own process environment (`_ENV_PREFIX = "ERSERVER_SECRET_"`), storing only the reference in the control-plane database so a DSN never rides in a job row. That is the seam, and it means secrets *delivery* needs no application change.
+**The `secret://` seam no longer exists.** `server/src/erserver/secrets.py` resolved an org env value written `secret://NAME` from `ERSERVER_SECRET_<NAME>` in the server's own process environment (`_ENV_PREFIX = "ERSERVER_SECRET_"`), storing only the reference in the control-plane database so a DSN never rode in a job row. It was deleted with the rest of the Python server and the Rust one has no equivalent, so there is currently no indirection — an org env value is the literal value. The principle it enforced is still the one to hold to when a credential next needs to reach a tenant env, and `attach-and-tenancy.md` lists a credential filter on org rows as outstanding for exactly this reason.
 
 External Secrets Operator, authenticated by IRSA, projects Secrets Manager entries into Kubernetes Secrets consumed via `envFrom`:
 
 ```
 er/{env}/{namespace}/erserver
-  ERSERVER_DSN, ERSERVER_MAINT_DSN, ERSERVER_TENANT_DSN_TEMPLATE,
-  ERSERVER_OPERATOR_TOKEN, ERSERVER_SECRET_S3_KEY, ERSERVER_SECRET_S3_SECRET,
-  ERSERVER_SMTP_URL, ERSERVER_TENANT_ENV_JSON
+  ERSERVER_DSN, ERSERVER_OPERATOR_TOKEN, ERSERVER_TENANT_ENV_JSON
+  (no ERSERVER_SECRET_S3_* — 4.1 retired the static lake key; no
+   ERSERVER_SMTP_URL — §9.3 retired the SMTP path for the SES API; no
+   MAINT_DSN/TENANT_DSN_TEMPLATE — the Rust plane uses one DSN)
 er/{env}/{namespace}/erweb
   ERWEB_DATABASE_URL, ERWEB_SESSION_SECRET, ERWEB_CREDENTIAL_KEY, ANTHROPIC_API_KEY,
   ERWEB_OIDC_{GOOGLE,MICROSOFT,SALESFORCE}_{CLIENT_ID,CLIENT_SECRET}   ← frontend-design §2.4
@@ -462,13 +463,17 @@ A process environment is fixed at exec time, so on rotation ESO updates the Kube
 
 **`ERWEB_CREDENTIAL_KEY` must not be rotated automatically at all.** It unseals every org's stored erserver API key in `erweb.org_credentials` (AES-256-GCM with AAD `"<org>\0<role>"`, per [frontend/src/lib/db/crypto.ts](../../../../frontend/src/lib/db/crypto.ts)); rotating it without a re-encrypt pass bricks the vault. Documented as manual-with-migration, deliberately not wired to a schedule.
 
-### 9.2 S3 credentials: static keys now, IRSA later
+### 9.2 S3 credentials: the static key is gone, and nothing replaced it
 
-`ObjectStore.from_env()` in `src/er/lake/objectstore.py` and `attach_statements()` in `src/er/lake/ducklake.py` both require a literal `ER_S3_ACCESS_KEY_ID` / `ER_S3_SECRET_ACCESS_KEY` and a non-empty scheme-less `ER_S3_ENDPOINT`; there is no credential-chain path and no way to omit the endpoint (`require_env` rejects empty values, since an empty secret attaches a lake that authenticates as nobody).
+**This section used to describe a live static lake key and a phased migration to the credential chain. The key has been deleted; the migration turned out to have nothing to migrate.**
 
-**Phase 1 (no code change).** One IAM user per environment with a lake-scoped policy, keys in Secrets Manager, with `ER_S3_ENDPOINT=s3.us-east-2.amazonaws.com`, `ER_S3_URL_STYLE=vhost`, `ER_S3_USE_SSL=true`. This works against real S3 today; rotation has the §9.1 restart requirement.
+What this section said was true of the Python implementation: `ObjectStore.from_env()` in `src/er/lake/objectstore.py` and `attach_statements()` in `src/er/lake/ducklake.py` required a literal `ER_S3_ACCESS_KEY_ID` / `ER_S3_SECRET_ACCESS_KEY` and a non-empty scheme-less `ER_S3_ENDPOINT`, so Phase 1 was one IAM user per environment with its keys in Secrets Manager. Both files were deleted with the Python tree, along with the `dbt/profiles/profiles.yml` and `tests/unit/test_dbt_profiles.py` that made Phase 4 a three-file change.
 
-**Phase 4 (the right answer).** A credential-provider mode so DuckDB uses `CREATE SECRET (TYPE s3, PROVIDER credential_chain)` and boto3 uses its default chain, both picking up the IRSA web-identity token, after which no static S3 key exists anywhere. Scheduled separately because it touches `src/er/lake/ducklake.py`, `src/er/lake/objectstore.py`, and `dbt/profiles/profiles.yml` together, and `tests/unit/test_dbt_profiles.py` contract-tests those three as field-for-field identical.
+**The Rust engine has no object-store path at all** — no `httpfs`/`aws` load, no `CREATE SECRET`, no `ER_S3_*` reader. So the static key had no consumer: it was minted, written to `er/dev/shared/s3`, and read by nothing. Retiring it was therefore a deletion rather than a cutover, and the grants it carried now sit only on the `er-dev-runner-pod` Pod Identity role (`pod_identity.tf`).
+
+The one real S3 client in the tree, `er-server`'s `s3_ingest::Watcher`, has always built from the default credential chain — in-cluster, the container-credentials provider Pod Identity populates.
+
+**What is actually still owed** is the feature the old Phase 4 was mis-describing: an object-store config whose fields are all optional, producing a `CREATE OR REPLACE SECRET` in which the *absence* of an explicit key selects the credential chain rather than a mode flag choosing it, an explicit key remaining for MinIO and CI which have no chain to consult, plus a credential filter so nothing credential-shaped is persisted into an org row. Until that lands an `s3://` lake cannot be opened from Rust and a lake is a filesystem path — in-cluster, EFS at `/srv/er`. The ducklake-lakehouse skill's [attach-and-tenancy.md](../../ducklake-lakehouse/references/attach-and-tenancy.md) is the owner of that status.
 
 ### 9.3 SES: the second static credential, retired before it was created
 

@@ -1,7 +1,18 @@
-# §7.3 + §9.2: the dev lake and the Phase 1 interim credential — one IAM
-# service user with a lake-scoped policy, keys kept in Secrets Manager
-# (er/dev/shared/s3) and consumed by scripts/dev_env.sh at dev-up. Retired at
-# 4.1 when DuckDB/boto3 move to the credential chain under IRSA.
+# §7.3: the dev lake bucket, and the IAM policy document describing access to
+# it.
+#
+# §9.2's interim credential — one IAM service user, a never-expiring access key
+# and an `er/dev/shared/s3` Secrets Manager entry carrying it — is gone, which
+# is 4.1's S3 half. It could go because nothing consumed it: the Rust engine has
+# no `ER_S3_*` reader, `er-server`'s `secret://` resolver was Python's and was
+# deleted with the rest, and the one real S3 client in the tree
+# (`er-server`'s `s3_ingest::Watcher`) builds from the default credential chain.
+#
+# The grants below survive the user, attached to the `er-dev-runner-pod` Pod
+# Identity role in pod_identity.tf. That role is how the engine reaches the lake
+# once it can open an `s3://` one at all — which it cannot yet; the
+# ducklake-lakehouse skill records that gap, and closing it is a feature, not a
+# config change.
 
 module "lake" {
   source = "../../modules/lake"
@@ -9,11 +20,9 @@ module "lake" {
   name = "er-dev-lake-797781631727"
 }
 
-resource "aws_iam_user" "s3" {
-  name = "er-dev-s3"
-}
-
-data "aws_iam_policy_document" "s3_user" {
+# The lake-object grants. Attached to a role rather than a user — the name says
+# what they allow, not who holds them, because the holder is now Pod Identity.
+data "aws_iam_policy_document" "lake_access" {
   statement {
     sid     = "LakeObjects"
     effect  = "Allow"
@@ -35,35 +44,6 @@ data "aws_iam_policy_document" "s3_user" {
     actions   = ["kms:Decrypt", "kms:GenerateDataKey*"]
     resources = [module.lake.kms_key_arn]
   }
-}
-
-resource "aws_iam_user_policy" "s3" {
-  name   = "er-dev-lake"
-  user   = aws_iam_user.s3.name
-  policy = data.aws_iam_policy_document.s3_user.json
-}
-
-resource "aws_iam_access_key" "s3" {
-  user = aws_iam_user.s3.name
-}
-
-resource "aws_secretsmanager_secret" "s3" {
-  name        = "er/dev/shared/s3"
-  description = "The 9.2 interim lake credential; consumed by scripts/dev_env.sh. Phase 4 retires it."
-}
-
-resource "aws_secretsmanager_secret_version" "s3" {
-  secret_id = aws_secretsmanager_secret.s3.id
-
-  secret_string = jsonencode({
-    ER_S3_ACCESS_KEY_ID     = aws_iam_access_key.s3.id
-    ER_S3_SECRET_ACCESS_KEY = aws_iam_access_key.s3.secret
-    ER_S3_ENDPOINT          = "s3.us-east-2.amazonaws.com"
-    ER_S3_REGION            = "us-east-2"
-    ER_S3_URL_STYLE         = "vhost"
-    ER_S3_USE_SSL           = "true"
-    LAKE_BUCKET             = module.lake.bucket
-  })
 }
 
 output "lake_bucket" {
