@@ -51,6 +51,22 @@ pub enum Role {
     /// `dedupe` — the engine's own CLI.
     Dedupe,
     /// `er-mcp`, whose **stdout is JSON-RPC framing**. Nothing may write there.
+    ///
+    /// **Local-only, by decision rather than by omission.** This role ships as
+    /// no workload — no chart, no image target, no Dockerfile — and it must
+    /// stay that way. Two independent reasons:
+    ///
+    /// - It speaks JSON-RPC over **stdio**, which is what a local MCP client
+    ///   expects. Deployed to the cluster there is nothing attached to its
+    ///   stdin, so it would serve no one.
+    /// - `ER_MCP_API_KEY` is **one org's** key and there is no operator mode,
+    ///   deliberately. A shared deployment of a single-tenant credential is a
+    ///   tenant-isolation bug, not a feature.
+    ///
+    /// Recorded here because the absence is otherwise indistinguishable from an
+    /// oversight, and the obvious "fix" — give it a Deployment — is the wrong
+    /// one. The generated roles table in `.claude/skills/observability` derives
+    /// which roles ship, so this cell cannot quietly flip.
     Mcp,
 }
 
