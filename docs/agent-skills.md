@@ -51,6 +51,7 @@ the same fix.
 | `infra-platform` | the Terraform env/module layout and shared S3 state with lockfile locking |
 | `land-pr` | the PR loop, the main loop for the push-only workflows a PR can never run (user-invoked only) |
 | `landing-page` | the `(marketing)` route group that prerenders statically inside the same app that serves the BFF |
+| `observability` | the `er-span`/`er-obs` split where library crates carry only `tracing` while a binary installs the subscriber |
 | `pentest` | a Strix-style run that does recon over the attack surface, fans out a tester subagent per vulnerability category (user-invoked only) |
 | `project-board` | the `gh project` surface for user-owned project #2 "Product Roadmap" and the `project` scope it needs |
 | `rust-conventions` | that `make check` (not the bare cargo trio) is the finish line |
@@ -130,16 +131,17 @@ can still accept a routing clause.
 
 | Headroom | Skill | Length |
 |---:|---|---:|
+|   31 | `aws-account-operations` | 993 |
+|   40 | `frontend-bff` | 984 |
+|   41 | `er-server-control-plane` | 983 |
 |   66 | `entity-framework` | 958 |
 |   67 | `security` | 957 |
 |   68 | `skill-audit` | 956 |
-|   73 | `aws-account-operations` | 951 |
-|   74 | `frontend-bff` | 950 |
+|   72 | `infra-platform` | 952 |
 |   76 | `sql-analysis` | 948 |
 |   77 | `frontend-design-system` | 947 |
 |   80 | `ducklake-lakehouse` | 944 |
 |   85 | `rust-conventions` | 939 |
-|   88 | `er-server-control-plane` | 936 |
 |   88 | `frontend-data-ui` | 936 |
 |   89 | `frontend-testing` | 935 |
 |   90 | `er-engine-ops` | 934 |
@@ -147,19 +149,21 @@ can still accept a routing clause.
 |   96 | `er-matching` | 928 |
 |   99 | `ci-and-supply-chain` | 925 |
 |  102 | `claim-ticket` | 922 |
+|  104 | `ducklake-performance` | 920 |
 |  111 | `project-board` | 913 |
-|  123 | `infra-platform` | 901 |
+|  130 | `observability` | 894 |
 |  133 | `land-pr` | 891 |
 |  138 | `skill-writer` | 886 |
 |  177 | `api-contract` | 847 |
-|  179 | `ducklake-performance` | 845 |
 |  342 | `pentest` | 682 |
 
 The median routing clause here is **55 characters**. Skills with less
 headroom than that cannot take another one — adding routing to any of them
 means trimming its **what** clause first, which is the documented fix:
 
-- none; every skill can take another clause
+- `aws-account-operations` — 31 characters free
+- `frontend-bff` — 40 characters free
+- `er-server-control-plane` — 41 characters free
 <!-- END GENERATED: description-budget -->
 - No `allowed-tools`: it only *pre-approves* tools, it cannot restrict them, and
   nothing here needs pre-approval.
@@ -230,6 +234,7 @@ So: counts, version numbers, job names, rule codes and thresholds live in
 | `ci-and-supply-chain/references/required-checks.md` | the workflow files and `rust/deny.toml` |
 | `frontend-testing/references/tiers-and-thresholds.md` | `vitest.config.ts`, `package.json`, `frontend.yml` |
 | `infra-platform/references/coverage.md` | `infra.yml`'s three stack enumerations, `infra/k8s/`, and the `kubectl apply` sites |
+| `observability/references/surface.md` | `er-obs`'s roles and gates, and `tracing` sites vs. remaining `eprintln!` |
 
 Each has a `<!-- BEGIN GENERATED: id -->` / `<!-- END GENERATED: id -->` pair.
 Prose outside the markers survives regeneration; **do not hand-edit inside
@@ -376,6 +381,7 @@ skill, so it gets the same fix.
 | `er-command-surface` | `er-engine-ops/references/stages-and-flags.md` | `er-cli`'s clap `Cli` globals and `Command` variants, each flag's declared default resolved through `er-versions`' mode constants |
 | `infra-coverage` | `infra-platform/references/coverage.md` | the three stack enumerations in `infra.yml` set-differenced against the stacks in the tree, every `infra/k8s` path against the sites that reference it, and the NodePool manifests against the non-recursive `kubectl apply` |
 | `post-merge-surface` | `land-pr/references/post-merge.md` | each non-gh-aw workflow's `on:` block, narrowed to those that run after a merge, set-differenced against the ones carrying a `pull_request` trigger — what is left is the surface no pull request can pre-test |
+| `obs-surface` | `observability/references/surface.md` | `er-obs`'s `Role::service_name` match arms, the telemetry gates found by their own module docs, and `tracing` event sites set-differenced against the files still writing only `eprintln!` |
 | `description-budget` | this document | every `SKILL.md`'s `description` length against the 1,024-character cap, sorted by headroom, plus the median length of the `for … see …` routing clauses it would have to make room for |
 | `skill-inventory` | this document **and** `CLAUDE.md` | every `SKILL.md`'s `name`, `description` and `disable-model-invocation` |
 The **set difference** is the shape worth copying — `diagnostics`,
