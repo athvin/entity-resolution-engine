@@ -157,6 +157,20 @@ lint_one_skill() {
 	slug=$(basename "$dir")
 	local skill_md="$dir/SKILL.md"
 
+	# A vendored third-party skill (docs/agent-skills.md, "Vendored skills") is
+	# kept byte-identical to its pinned upstream commit so a refresh is a plain
+	# re-copy. The house authoring rules (evals.md, linked references, TOCs) are
+	# not applied to it; its provenance record is checked instead.
+	if [[ -f $dir/VENDORED.md ]]; then
+		local field
+		[[ -f $skill_md ]] || err "$slug: vendored skill has no SKILL.md"
+		for field in Source Commit License Refresh; do
+			grep -qE "^\*\*$field:\*\*" "$dir/VENDORED.md" ||
+				err "$slug: VENDORED.md has no '**$field:**' line"
+		done
+		return
+	fi
+
 	if [[ ! -f $skill_md ]]; then
 		err "$slug: no SKILL.md"
 		return

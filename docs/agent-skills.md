@@ -60,6 +60,7 @@ the same fix.
 | `skill-audit` | the judgment half of the skill standard the gate cannot mechanise: whether a sentence survives the economy test |
 | `skill-writer` | triages whether the brief should become a skill at all rather than a CLAUDE.md line or a path-scoped rule or a hook (user-invoked only) |
 | `sql-analysis` | the E0xx diagnostics and their remedies, the rewrite step that strips what the planner cannot parse |
+| `stageshow` | Build faux product UI that looks like a real product, as a still illustration or an animated demo with a cursor |
 <!-- END GENERATED: skill-inventory -->
 
 A consequence worth knowing when writing a `description`: its first em-dash
@@ -158,6 +159,7 @@ can still accept a routing clause.
 |  138 | `skill-writer` | 886 |
 |  177 | `api-contract` | 847 |
 |  342 | `pentest` | 682 |
+|  412 | `stageshow` | 612 |
 
 The median routing clause here is **55 characters**. Skills with less
 headroom than that cannot take another one — adding routing to any of them
@@ -504,6 +506,7 @@ failure looks like the server simply not appearing.
 | `vercel` plugin | out | a large always-on cost for one rule set we vendor instead |
 | `impeccable` | out | executes Node scripts and installs hooks; high churn. The hook objection is not vendor-specific — it is why `aws-core` is out too |
 | `ui-ux-pro-max` | out | a style catalogue that produces generic recommendations, against a repo whose design is a fixed constraint |
+| `stageshow` (benjitaylor/skills) | **vendored skill**, whole folder at a pinned commit | wanted in-repo for marketing demos; kept byte-identical to upstream under `.claude/skills/stageshow/` with a `VENDORED.md` provenance record, which `skills-check` reads instead of applying the house authoring rules. Its colour guidance is overridden by `frontend-design-system`, and its Node scripts run only on demand, never from a gate or hook |
 | `marketingskills`, `claude-seo` | deferred | reasonable once a marketing surface exists and copy/SEO work begins |
 | `rust-analyzer-lsp` | **installed** | code intelligence over a large Rust workspace: jump to a definition instead of reading files to find it. Official marketplace, no always-on skill cost |
 | `frontend-design` | **installed, then overridden** | the unusual row. It is enabled here *deliberately* so that the supersession below has a subject — its quality floor and writing guidance are wanted, only its palette and aesthetic-risk guidance conflict. It was previously enabled in a developer's own `~/.claude/settings.json`, which made the override's premise invisible to this repo and untrue for anyone else cloning it |

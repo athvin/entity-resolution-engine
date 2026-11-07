@@ -351,6 +351,7 @@ The table below is **generated** from each skill's frontmatter by
 | reviewing a skill before or after a change | `skill-audit` |
 | adding a skill, when deciding whether a rule belongs in a skill or a hook (user-invoked only) | `skill-writer` |
 | an E0xx diagnostic fails, when a statement will not plan | `sql-analysis` |
+| Build faux product UI that looks like a real product | `stageshow` |
 <!-- END GENERATED: skill-inventory -->
 
 Each carries an `evals.md` of hand-run scenarios. `make skills-check` enforces
