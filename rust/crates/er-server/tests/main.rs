@@ -31,6 +31,7 @@ mod db_per_test;
 mod dispatch;
 mod dispatch_coverage;
 mod egress_guard;
+mod executor_harness;
 mod fake_pod_api;
 mod http;
 mod mcp_manifest;

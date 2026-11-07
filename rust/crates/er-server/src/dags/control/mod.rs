@@ -204,7 +204,13 @@ impl ControlTask<PgClient> for RegisterModel {
         // the same training pass. The label is derived from the run id, so the
         // probe is exact — `list` rather than a by-label statement because the
         // registry of one org is small and this read happens once per train.
-        let existing = er_entities::matching_model::read::list(ctx.client, &ctx.order.org_id)
+        // The DATASET is the scope these rows live in; the org id is the
+        // fallback for a pre-dataset row, which is the idiom the legacy arm
+        // used throughout (`dataset_id.unwrap_or(org_id)`). Passing the org id
+        // here compiles cleanly and silently matches nothing, because every
+        // callee below takes its scope as a bare `&str` named `dataset_id`.
+        let scope = ctx.order.dataset_id.as_deref().unwrap_or(&ctx.order.org_id);
+        let existing = er_entities::matching_model::read::list(ctx.client, scope)
             .await
             .map_err(|e| {
                 TaskError::Failed(
@@ -294,7 +300,13 @@ impl ControlTask<PgClient> for DrainActions {
         ctx: &mut ControlCtx<'_, PgClient>,
         (): Self::Input,
     ) -> Result<Outcome<Self::Output>, TaskError> {
-        let pending = crate::pg::pending_actions(ctx.client, &ctx.order.org_id)
+        // The DATASET is the scope these rows live in; the org id is the
+        // fallback for a pre-dataset row, which is the idiom the legacy arm
+        // used throughout (`dataset_id.unwrap_or(org_id)`). Passing the org id
+        // here compiles cleanly and silently matches nothing, because every
+        // callee below takes its scope as a bare `&str` named `dataset_id`.
+        let scope = ctx.order.dataset_id.as_deref().unwrap_or(&ctx.order.org_id);
+        let pending = crate::pg::pending_actions(ctx.client, scope)
             .await
             .map_err(|e| {
                 TaskError::Failed(
@@ -459,9 +471,17 @@ impl ControlTask<PgClient> for StageApproved {
                 enqueued: false,
             })));
         };
+        // The DATASET is the scope these rows live in; the org id is the
+        // fallback for a pre-dataset row, which is the idiom the legacy arm
+        // used throughout (`dataset_id.unwrap_or(org_id)`). Passing the org id
+        // here compiles cleanly and silently matches nothing, because every
+        // callee below takes its scope as a bare `&str` named `dataset_id`.
+        // `tag_by_name` above is correctly org-scoped — the tag VOCABULARY
+        // belongs to the org — while tag APPLICATION is dataset-scoped.
+        let scope = ctx.order.dataset_id.as_deref().unwrap_or(&ctx.order.org_id);
         let approved = crate::pg::subjects_for_tag(
             ctx.client,
-            &ctx.order.org_id,
+            scope,
             &tag.id,
             Some("review"),
             crate::dispatcher::MAX_APPROVED,
@@ -499,14 +519,9 @@ impl ControlTask<PgClient> for StageApproved {
                 );
                 continue;
             }
-            if let Err(e) = crate::pg::unapply_tag(
-                ctx.client,
-                &ctx.order.org_id,
-                &tag.id,
-                "review",
-                &tagging.subject_id,
-            )
-            .await
+            if let Err(e) =
+                crate::pg::unapply_tag(ctx.client, scope, &tag.id, "review", &tagging.subject_id)
+                    .await
             {
                 // Staged but still tagged: the next tick would stage it again.
                 // Said out loud rather than swallowed — a duplicate staged

@@ -21,6 +21,7 @@ use er_server::executor::{Executor, ExecutorConfig};
 use er_server::{AppState, dispatcher, pg};
 
 use crate::common;
+use crate::executor_harness::pump;
 use crate::fake_pod_api::FakePodApi;
 
 const TEST_YAML: &str = include_str!("../../er-cli/tests/fixtures/test.yaml");
@@ -30,16 +31,6 @@ fn repo_fixture(rel: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../../fixtures/static")
         .join(rel)
-}
-
-async fn pump(
-    executor: &mut Executor,
-    frames: &mut tokio::sync::mpsc::UnboundedReceiver<er_k8s::WatchFrame>,
-) {
-    executor.passes().await;
-    while let Ok(frame) = frames.try_recv() {
-        executor.apply_frame(frame).await;
-    }
 }
 
 #[tokio::test]
