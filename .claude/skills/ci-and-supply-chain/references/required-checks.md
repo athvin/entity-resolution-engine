@@ -123,6 +123,12 @@ job instead — `terraform plan` is the worked example.
 |---|---|---|---|
 | `bus` | merge bus | 75 | `always` |
 
+### `pr-contract.yml`
+
+| Job | Status-check context | Timeout | Condition |
+|---|---|---|---|
+| `contract` | pull request contract | 5 | `always` |
+
 ### `rust.yml`
 
 | Job | Status-check context | Timeout | Condition |

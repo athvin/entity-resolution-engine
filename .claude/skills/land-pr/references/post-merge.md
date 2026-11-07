@@ -9,6 +9,7 @@ deploy actually took, and the revert path. Reached from
 - [The chain, and where it stops](#the-chain-and-where-it-stops)
 - [Workflows that run after a merge](#workflows-that-run-after-a-merge-to-main) (generated)
 - [Verifying the deploy rather than the workflow](#verifying-the-deploy-rather-than-the-workflow)
+- [Closing the ledger](#closing-the-ledger)
 - [Attribution](#attribution)
 - [Reverting](#reverting)
 
@@ -140,6 +141,58 @@ swap as the part of this chain most likely to surprise. Without cluster access,
 say so in the report rather than inferring convergence from the workflow
 conclusion.
 
+## Closing the ledger
+
+Everything above is an observation, and an observation that stays in a session
+transcript is lost. The ledger is where it lands: a checkbox block between
+`<!-- BEGIN POST-MERGE -->` and `<!-- END POST-MERGE -->` in the pull request
+body, put there by
+[`.github/pull_request_template.md`](../../../../.github/pull_request_template.md)
+and required by the `pull request contract` check.
+
+**A merged pull request's body is still writable.** Probed 2026-11-07: a `PATCH`
+to `/repos/{owner}/{repo}/pulls/806` on a pull request that was already
+`merged: true` returned 200. That one fact is what makes the body — rather than
+a comment, a transcript, or a report — the right place for the record.
+
+```bash
+gh pr view <n> --json body --jq .body > /tmp/pr-<n>-body.md
+#   tick each box, evidence inline; `n/a — <why>` where it does not apply;
+#   leave a box EMPTY and annotate it `blocked — <why>` if it could not be
+#   established, because an unverified tick is worse than an open box
+gh pr edit <n> --body-file /tmp/pr-<n>-body.md
+```
+
+Read before writing, every time: `--body-file` replaces the whole body, and a
+concurrent session or a human may have edited it since the merge.
+
+Each generic item resolves against something earlier in this file:
+
+| Ledger item | What settles it | Where |
+|---|---|---|
+| `main` green with this change on it | a concluded run on `MERGE_SHA`, or a later head SHA with it as an ancestor — **not** a cancelled run with zero jobs | [the cancellation measurement](#the-chain-and-where-it-stops) |
+| `images` built or correctly never ran | the paths filter: a `.claude/`- or Terraform-only merge builds nothing | same |
+| `deploy` converged | a log line the running process emitted | [verifying the deploy](#verifying-the-deploy-rather-than-the-workflow) |
+| the push-only surface | the generated table of what no pull request pre-tests | [the generated list](#workflows-that-run-after-a-merge-to-main) |
+| the board card reached `Done` | the automation, confirmed from the issue's own timeline (`closer.__typename == "PullRequest"`) | the `project-board` skill |
+| follow-ups opened | the numbers, or `n/a` | — |
+| what was learned is written down | the skill, reference or memory file it went into | — |
+
+The board row is the one worth not shortcutting. `Status` → `Done` set by hand
+**closes the underlying issue**, so moving the card yourself both duplicates the
+automation and races it; the ledger asks you to confirm the automation acted,
+not to act for it.
+
+To find ledgers an interrupted session left open:
+
+```bash
+bash scripts/ci/pr-ledger-audit.sh         # LIMIT=100 for a deeper sweep
+```
+
+It distinguishes `closed` from `—` (no ledger at all — a pull request merged
+before the contract existed, or an exempt one), because both count zero open
+boxes and mean opposite things.
+
 ## Attribution
 
 ```bash
@@ -154,8 +207,11 @@ ours. Ambiguous counts as ours.
 Two main-only tiers fail for their own reasons and are worth recognising before
 attributing anything to the diff: `drift` compares the account against its state
 file, so a red run there is information about AWS rather than about a commit;
-and the `kind` probe has never passed, with four separate causes all presenting
-as a job timeout because a Pending pod waits out the budget.
+and the `kind` probe's nightly leg spent months failing for five separate causes
+that all presented as a job timeout, because a Pending pod waits out the budget.
+Its first green scheduled run on `main` was 2026-11-07 — so a red one is now
+worth attributing rather than discounting, but check the failure mode against
+those causes before blaming a diff.
 
 ## Reverting
 

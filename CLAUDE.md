@@ -7,7 +7,8 @@ the PR-equivalent gate and mirrors `.github/workflows/rust.yml`:
 
 ```
 make check   # = fmt + lint + doc + entities-check + skills-check
-             #   + scripts-home-check + workflow-shell-check + test
+             #   + scripts-home-check + workflow-shell-check + pr-contract-check
+             #   + tf-static-credentials-check + test
 ```
 
 `cargo fmt` / `cargo clippy` / `cargo test` on their own are **not** sufficient —
@@ -60,12 +61,30 @@ is why it is a workflow here. The
 `merge bus` must never become a required check.
 
 **A pull request is not done at green — it is done when `main` is green with the
-change on it.** `/land-pr <n>` is the procedure for getting there: the polling
-that does not accept a false green, the merge rules (there is no auto-merge here,
-and a single-commit PR squashes to the *commit* subject rather than the PR
-title), and the post-merge watch over the workflows no pull request can run.
-Use it for any PR being driven to merge rather than improvising the loop —
+change on it and its post-merge ledger is closed.** `/land-pr <n>` is the
+procedure for getting there: the polling that does not accept a false green, the
+merge rules (there is no auto-merge here, and a single-commit PR squashes to the
+*commit* subject rather than the PR title), the post-merge watch over the
+workflows no pull request can run, and the ledger that records what that watch
+found. Use it for any PR being driven to merge rather than improvising the loop —
 `gh pr checks` alone will report a PR green that compiled nothing.
+
+**Every pull request closes a board ticket and carries a post-merge ledger.**
+`.github/pull_request_template.md` is brief in every section except that ledger:
+a checkbox block, inside stable `<!-- BEGIN POST-MERGE -->` markers, whose boxes
+are ticked **after** the merge — in the merged body, evidence inline, `n/a —
+<why>` where an item does not apply, and an empty box meaning the follow-up did
+not happen. A merged PR's body stays writable, which is what lets the record
+outlive the session that did the work; the descriptive material (plan,
+discoveries, measurements) goes in the template's collapsed Context block so the
+top of a body stays readable. `pull request contract` (`pr-contract.yml`)
+enforces both clauses and reads GitHub's own parsed closing references rather
+than the body text, so a `Closes #<n>` that would not actually close anything
+does not pass. `merge-bus/*` branches, Dependabot, reverts and the `no-ticket`
+label are exempt. It is **not a required check yet**: promoting it is a
+branch-protection change, and the `ci-and-supply-chain` skill carries the order
+that has to be followed. `scripts/ci/pr-ledger-audit.sh` sweeps merged PRs for
+ledgers an interrupted session left open.
 
 ## Work in a worktree, cut from a fresh `main`
 

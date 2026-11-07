@@ -65,22 +65,35 @@ wanting something to do.
 **Worktree first**, by the CLAUDE.md ritual: run the audit, refresh `main`,
 cut from `origin/main`. Branch `issue/<n>-<slug>`.
 
+The body is built **from the pull request template**, not hand-written, so the
+claim satisfies the `pull request contract` check from birth — a ticket link and
+a post-merge ledger. Line 1 of the template is the ticket link and nothing else,
+which is what makes `tail -n +2` the whole substitution:
+
 ```sh
 git commit --allow-empty -m "wip: claim #<n> — <short title>"
 git push -u origin "$(git branch --show-current)"   # never push -q
+
+{ printf 'Closes #%s\n\n' "<n>"
+  printf '> 🚧 **Claimed by an agent session** — %s, session `%s` on `%s`.\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$CLAUDE_CODE_SESSION_ID" "$(hostname -s)"
+  printf '> The claim is this open draft PR: closing it releases the ticket.\n'
+  tail -n +2 .github/pull_request_template.md
+} > /tmp/claim-<n>-body.md
+
 gh pr create --draft \
   --title "<type>(<area>): <imperative summary> (#<n>)" \
-  --body-file /dev/stdin <<EOF
-Closes #<n>
-
-> 🚧 **Claimed by an agent session** — $(date -u +%Y-%m-%dT%H:%M:%SZ).
-> The claim is this open draft PR: closing it releases the ticket.
-
-## Plan
-
-_pending — being drafted from the issue and the tree_
-EOF
+  --body-file /tmp/claim-<n>-body.md
 ```
+
+**The session id and host in that banner are the durable link back to the
+work.** CLAUDE.md's worktree audit cannot reliably tell which session owns a
+worktree — `lsof` misses the dominant pattern, a session whose cwd is the
+primary checkout driving the tree with `git -C` — and a claim PR naming its
+session and machine answers that from GitHub instead of from the process table.
+`CLAUDE_CODE_SESSION_ID` is the authoritative id; `claude --resume <id>` reopens
+it on that host, and `claude --from-pr <n>` is the shortcut while the link
+survives.
 
 Capture the URL `gh pr create` prints — **never predict a PR number.** Then
 the other two marks:
@@ -103,9 +116,11 @@ claim working as designed: it says "claimed, nothing built yet", and a draft is
 unmergeable anyway. The first real push flips `empty` to false and the actual
 gate takes over.
 
-**So do not try to fix it, and do not read it as the gate failing.** The one
-check that must still be green is `agent skills (lint + drift)`, which is
-ungated and runs on everything.
+**So do not try to fix it, and do not read it as the gate failing.** Two checks
+must still be green, because neither is gated on the diff: `agent skills (lint +
+drift)`, which runs on everything, and `pull request contract`, which reads the
+body — and the body was built from the template precisely so that one passes on
+an empty commit.
 
 Before 2026-11-07 this was the opposite advice — the run was the FULL backend
 gate and the instruction was to ignore it as green noise, because `rust.yml`'s
@@ -124,11 +139,20 @@ No code yet. In order:
 3. **The routed skills** — CLAUDE.md's Doing → Skill table says which to load
    for the area being touched.
 
-Then write the plan **into the PR body** (`gh pr edit <pr> --body-file …`),
-keeping the `Closes` line and the claim banner: ordered steps, the files to
-be touched, the gates that prove it (`make check`, `make frontend`, or the
-tier the diff belongs to). The PR body is the living document other agents
-and humans read — the session transcript is not.
+Then write the plan **into the PR body** (`gh pr edit <pr> --body-file …`):
+ordered steps, the files to be touched, the gates that prove it (`make check`,
+`make frontend`, or the tier the diff belongs to). The plan goes in the
+template's collapsed **Context** block, under `### Plan` — that block exists so
+the descriptive material is one click away instead of burying the top of the
+body. The PR body is the living document other agents and humans read; the
+session transcript is not.
+
+**Read the body and edit it, never regenerate it.** `--body-file` replaces the
+whole thing, and three parts of it must survive every rewrite: the `Closes`
+line, the claim banner, and the `<!-- BEGIN POST-MERGE -->` ledger. Dropping
+either of the first and third turns `pull request contract` red — which is the
+gate noticing, correctly, that the claim no longer links its ticket or has
+anywhere to record what happens after the merge.
 
 Only then start implementing.
 
