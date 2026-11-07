@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := check
-.PHONY: build fmt lint doc test check check-e2e entities-check skills-check scripts-home-check workflow-shell-check frontend frontend-audit frontend-coverage run frontend-dev frontend-e2e frontend-baselines frontend-dev-reset image-api cluster-objects nodepools kind-up kind-down check-kind measure-runner-startup dev-up dev-suspend dev-resume dev-down obs-up clean symposium
+.PHONY: build fmt lint doc test check check-e2e entities-check skills-check scripts-home-check workflow-shell-check tf-static-credentials-check frontend frontend-audit frontend-coverage run frontend-dev frontend-e2e frontend-baselines frontend-dev-reset image-api cluster-objects nodepools kind-up kind-down check-kind measure-runner-startup dev-up dev-suspend dev-resume dev-down obs-up clean symposium
 
 # --- Rust backend: the application (engine, CLI, control plane) lives in rust/ ---
 #
@@ -73,10 +73,18 @@ scripts-home-check:
 workflow-shell-check:
 	bash scripts/ci/workflow-shell-check-test.sh && bash scripts/ci/workflow-shell-check.sh
 
+# #549's acceptance check, kept as a gate instead of a closed issue: exactly one
+# `aws_iam_access_key` in the Terraform tree (`builder`), and no static
+# ER_S3_* credential assignment. Self-test first, same reasoning as its two
+# neighbours — a detector breaks by noticing nothing, which reads as a clean
+# tree. `&&`, not two recipe lines, so the fail-fast is explicit in gates.md.
+tf-static-credentials-check:
+	bash scripts/ci/tf-static-credentials-check-test.sh && bash scripts/ci/tf-static-credentials-check.sh
+
 # The fast PR-equivalent backend gate (mirrors rust.yml's lint + test tiers),
 # plus the skill gate — a stale generated reference is the same class of defect
 # as a stale generated entity artifact.
-check: fmt lint doc entities-check skills-check scripts-home-check workflow-shell-check test
+check: fmt lint doc entities-check skills-check scripts-home-check workflow-shell-check tf-static-credentials-check test
 
 # The gated e2e tiers: the DuckLake + extension pipeline and the Postgres
 # control-plane queue/dispatch. Needs the DuckDB extensions and a local

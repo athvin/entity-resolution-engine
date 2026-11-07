@@ -66,12 +66,12 @@ Distinct `resource "aws_*"` blocks across `infra/terraform/`, by count:
    6  aws_eks_pod_identity_association
    6  aws_s3_bucket_server_side_encryption_configuration
    5  aws_s3_bucket_policy
-   5  aws_secretsmanager_secret
-   5  aws_secretsmanager_secret_version
    4  aws_eks_addon
    4  aws_kms_alias
    4  aws_kms_key
    4  aws_s3_bucket_lifecycle_configuration
+   4  aws_secretsmanager_secret
+   4  aws_secretsmanager_secret_version
    4  aws_ssoadmin_account_assignment
    4  aws_ssoadmin_permission_set
    3  aws_cloudwatch_metric_alarm
@@ -83,9 +83,6 @@ Distinct `resource "aws_*"` blocks across `infra/terraform/`, by count:
    2  aws_db_subnet_group
    2  aws_ecr_lifecycle_policy
    2  aws_ecr_repository
-   2  aws_iam_access_key
-   2  aws_iam_user
-   2  aws_iam_user_policy
    2  aws_identitystore_group
    2  aws_identitystore_group_membership
    2  aws_rds_cluster
@@ -112,8 +109,11 @@ Distinct `resource "aws_*"` blocks across `infra/terraform/`, by count:
    1  aws_eks_cluster
    1  aws_glue_catalog_database
    1  aws_glue_catalog_table
+   1  aws_iam_access_key
    1  aws_iam_openid_connect_provider
    1  aws_iam_service_linked_role
+   1  aws_iam_user
+   1  aws_iam_user_policy
    1  aws_iam_user_policy_attachment
    1  aws_internet_gateway
    1  aws_nat_gateway
@@ -215,6 +215,6 @@ cannot reach AWS:
 | Mechanism | Count |
 |---|---|
 | `aws_eks_pod_identity_association` blocks | 6 |
-| `aws_iam_user` blocks (should be the lake key and the builder key only) | 2 |
+| `aws_iam_user` blocks (should be the lake key and the builder key only) | 1 |
 | `aws_iam_openid_connect_provider` blocks (GitHub Actions only; never for workloads) | 1 |
 <!-- END GENERATED: aws-footprint -->

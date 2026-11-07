@@ -446,6 +446,17 @@ jobs:
         # would skip.
         working-directory: ${{ github.workspace }}
         run: bash scripts/ci/scripts-home-check.sh
+      - name: no static AWS credentials in the Terraform tree
+        # Ungated like its neighbours, and for a sharper version of the same
+        # reason: a new `aws_iam_access_key` arrives on an infra-only PR, which
+        # is precisely what a Rust path filter skips. It is also cheap enough
+        # to be unconditional — two greps, no toolchain, no credentials.
+        #
+        # This is #549's acceptance check (one access key, named `builder`)
+        # kept executable, plus a bar on re-plumbing the retired ER_S3_* pair.
+        # Self-test first: the gate's failure mode is noticing nothing.
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/ci/tf-static-credentials-check-test.sh && bash scripts/ci/tf-static-credentials-check.sh
       - name: the agent-task scripts still validate their inputs
         # Ungated like its neighbours, and a TEST rather than a run on
         # purpose: `agent-task.yml` is `workflow_dispatch` only and needs two
