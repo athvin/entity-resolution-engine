@@ -3769,8 +3769,9 @@ pub fn dispatch_next(
 /// # Errors
 /// Propagates a queue (claim/mark) error. A `runner` failure is NOT an error —
 /// it is classified and recorded on the row, with its message in
-/// `error_detail`, which means a retryable class lands in `retrying` rather
-/// than `failed` just as it does in the production loop.
+/// `error_detail`, so a test can observe WHY a job failed and not merely that
+/// it did. Every class lands in `failed`: retry is per task attempt now (#645),
+/// and this helper has no tasks because it has no executor.
 pub async fn dispatch_pg<F>(
     client: &tokio_postgres::Client,
     runner: F,
@@ -3791,16 +3792,18 @@ where
                 ..job
             }
         }
-        // Route a failure through the same classify-and-record path the
-        // production loop uses, so the REASON is persisted.
+        // Classify and record, so the REASON is persisted.
         //
         // This used to `mark(…, "failed")` and DROP the runner's string, which
         // meant a job failed through this helper carried no explanation at all:
         // a test could observe that a bad request failed but never why, and a
         // failed job with no reason is a bug class this repo has already
-        // shipped once. Classification also means a `TransientIo` failure
-        // lands in `retrying` here exactly as it does in production, rather
-        // than this helper disagreeing with the loop it stands in for.
+        // shipped once.
+        //
+        // The class no longer changes where the row lands — `fail_or_retry`
+        // became terminal with the legacy arm (#645). It is recorded because
+        // `error_class` is what the UI renders and what `pg_profile.rs` asserts
+        // a refused request leaves behind.
         Err(detail) => {
             let class = pg::FailureClass::classify(&detail);
             pg::fail_or_retry(client, &job.id, class, &detail).await?

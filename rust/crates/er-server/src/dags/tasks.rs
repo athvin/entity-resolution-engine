@@ -1096,7 +1096,7 @@ mod engine_error_tests {
 
     /// The literal strings this codebase produces, and the class each must get.
     ///
-    /// This table came from `pg_job_retry.rs`, which pinned the same cases
+    /// This table came from `pg_job_failure.rs`, which pinned the same cases
     /// against `pg::FailureClass`. It moved here with the rules rather than
     /// being deleted with them: the message shapes are what the assertion is
     /// really about, and they outlive whichever type does the classifying.

@@ -58,7 +58,7 @@ mod pg_golden_read;
 mod pg_history;
 mod pg_http;
 mod pg_imports;
-mod pg_job_retry;
+mod pg_job_failure;
 mod pg_labels;
 mod pg_lake_catalog_schema;
 mod pg_lexicon;

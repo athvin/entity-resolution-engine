@@ -327,7 +327,7 @@ export interface components {
             kind: string;
             /**
              * Format: int64
-             * @description Maximum attempts before the job fails.
+             * @description Vestigial: no statement consults it. It bounded the job-level retry that went with the legacy in-process arm (#645); the live budget is task_instances.max_tries, per attempt.
              */
             max_attempts: number;
             /**

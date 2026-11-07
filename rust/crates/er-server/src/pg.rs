@@ -363,24 +363,29 @@ pub async fn claim(client: &Client, default_cap: i64) -> Result<Option<Job>, PgE
     }
 }
 
-/// How a job failure should be treated. The classes are the ones the UI already
-/// renders — `job-detail.tsx` shows an error panel keyed on `error_class`, the
-/// dashboard counts `precondition` failures, and the runs table has a column for
-/// it — none of which could ever display anything, because the column did not
-/// exist.
+/// What a job failure WAS, for the row a steward reads. The classes are the ones
+/// the UI renders — `job-detail.tsx` shows an error panel keyed on `error_class`,
+/// the dashboard counts `precondition` failures, and the runs table has a column
+/// for it — none of which could ever display anything, because the column did
+/// not exist.
+///
+/// It no longer decides anything. This type once carried the retry verdict as
+/// well (`retryable()`, read by `fail_or_retry.sql`'s requeue branch), and both
+/// went with the legacy in-process arm in #645: retry is per task attempt now,
+/// and the verdict belongs to [`er_errors::ErrorClass`] at the executor
+/// boundary, which `dags::tasks::engine_error_class` derives. So the arms below
+/// describe what a steward is being told, not what happens next — the retry
+/// consequences they used to assert are documented on that function instead.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FailureClass {
     /// An input the job needs is not there yet: no model, no deliveries, no
     /// prior run. Expected during onboarding, which is why the dashboard
-    /// reframes it rather than alarming about it. Retrying cannot help — the
-    /// input appears when a human provides it.
+    /// reframes it rather than alarming about it.
     Precondition,
     /// A lake open, an object-store read, a connection: the kind of failure that
-    /// is usually gone a few seconds later. The ONLY class that retries, which
-    /// is what makes the UI's "transient failures retry automatically" true.
+    /// is usually gone a few seconds later.
     TransientIo,
-    /// The tenant's config does not load or does not validate. Retrying would
-    /// just fail identically.
+    /// The tenant's config does not load or does not validate.
     Config,
     /// Anything else — a bug until proven otherwise.
     Internal,
@@ -397,20 +402,21 @@ impl FailureClass {
         }
     }
 
-    /// Whether a job in this class should be retried.
-    #[must_use]
-    pub fn retryable(self) -> bool {
-        self == FailureClass::TransientIo
-    }
-
     /// Classify a dispatcher failure string.
     ///
     /// Matched on the messages this codebase actually produces rather than on a
     /// generic taxonomy: "org env missing …" and "no prior run to correct" are
     /// preconditions by construction, `open lake` / `read model` are IO, and
     /// `config:` is the config loader's own prefix. Anything unrecognised is
-    /// deliberately `Internal` and NOT retried — silently retrying an unknown
-    /// failure three times turns one confusing log line into three.
+    /// deliberately `Internal`, which means "a bug until proven otherwise" and
+    /// is alarmed on rather than reframed.
+    ///
+    /// `dags::tasks::engine_error_class` carries the same substring rules
+    /// against [`er_errors::ErrorClass`], and that is the copy the product
+    /// runs — this one survives only because `dispatch_pg` does. The two are
+    /// pinned separately (here by `pg_job_failure.rs`, there by its own module
+    /// tests) because they are two implementations, and a shared fixture would
+    /// hide the day one of them stops agreeing with the other.
     #[must_use]
     pub fn classify(message: &str) -> Self {
         let m = message.to_ascii_lowercase();
@@ -449,11 +455,24 @@ impl FailureClass {
     }
 }
 
-/// Record a job failure and let Postgres decide whether it retries.
+/// Record a job failure terminally, with its class and detail.
 ///
-/// Returns the job in its resulting state, so the caller can tell a retry from
-/// a terminal failure — the dispatcher only emits `job.failed` for the latter,
-/// because a webhook per attempt would turn one incident into three.
+/// It used to decide retry in the same statement — a retryable class with
+/// attempts left went back to `queued` behind an exponential backoff — which
+/// was the LEGACY in-process arm's retry, and the only caller of
+/// `FailureClass::retryable`. Retry is per task attempt now
+/// (`taskpg::fail_or_retry_task`, with the Airflow budget arithmetic), and a
+/// job reaches a terminal state through `job::update::settle`, so that branch
+/// had no production caller left (#645).
+///
+/// The class is still recorded, so `FailureClass` stays: `error_class` is what
+/// the UI renders and what `pg_profile.rs` asserts a refused request leaves
+/// behind.
+///
+/// **The name now overstates what this does** — it fails, and never retries.
+/// It is kept anyway, because renaming the statement renames the generated
+/// `job::update::fail_or_retry` with it and this is the narrower change; the
+/// `or_retry` half is contradicted here rather than in the identifier.
 ///
 /// # Errors
 /// Propagates the update error.
@@ -468,7 +487,6 @@ pub async fn fail_or_retry(
     let truncated: String = detail.chars().take(2000).collect();
     let jobs = er_entities::job::update::fail_or_retry(
         client,
-        class.retryable(),
         Some(class.as_str()),
         Some(truncated.as_str()),
         job_id,

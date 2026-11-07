@@ -23,7 +23,7 @@ export interface Job {
   run_id: string | null;
   /** Attempts made so far. */
   attempt: number;
-  /** Maximum attempts before the job fails. */
+  /** Vestigial: no statement consults it. It bounded the job-level retry that went with the legacy in-process arm (#645); the live budget is task_instances.max_tries, per attempt. */
   max_attempts: number;
   /** Why the job failed, as a class the UI can act on: precondition (an input is missing — expected during onboarding), transient_io (worth retrying), config (the tenant config is wrong), internal (a bug). Null until a failure. */
   error_class: string | null;

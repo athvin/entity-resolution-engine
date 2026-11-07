@@ -16,8 +16,8 @@
 //! arm, so they move to this path rather than being deleted with it.
 //!
 //! The ticket named two test files for this (`pg_attempt_reporter.rs` to
-//! delete, `pg_job_retry.rs` to rewrite). The real surface is those two plus
-//! the eight that call the arm directly.
+//! delete, `pg_job_retry.rs` — now `pg_job_failure.rs` — to rewrite). The real
+//! surface is those two plus the eight that call the arm directly.
 //!
 //! `pg_drain_dispatcher.rs` is the first ported test, and porting it is what
 //! found #760 — `apply_staged` read its payloads from a params key nothing
