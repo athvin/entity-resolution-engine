@@ -249,5 +249,75 @@ else
     ok "no infra/terraform here — aws-footprint absence checks skipped"
 fi
 
+# --- the verdict must name what it covered -------------------------------
+#
+# `regen` asserts nothing, and used to end with the same unconditional
+# `skills-check: ok` every checking arm printed. On #812 that read as a pass
+# over a SKILL.md eight lines past the body cap — a `lint` error `regen` never
+# looks for — and the red landed in CI instead.
+#
+# THE SLOW HALF IS STUBBED, NOT SKIPPED. `regen` runs 18 generators and was
+# measured at 113s on this repo; putting that in a self-test that `make
+# skills-check` runs before every gate would be a minute added to every
+# invocation. So the real script is copied with ONLY `run_regen` replaced,
+# which leaves the dispatcher and the verdict — the logic under test —
+# untouched.
+#
+# The insertion is asserted. Without that, an anchor that stops matching would
+# silently run the REAL regen, and the test would pass 113 seconds later having
+# proved nothing about the stub it believed it had applied.
+stubbed="$tmp/skills-check-stubbed.sh"
+awk '
+    /^case "\$\{1:-all\}" in$/ { print "run_regen() { note \"regen stubbed by skills-check-test\"; }" }
+    { print }
+' "$SCRIPT" >"$stubbed"
+
+stub_count=$(grep -cF 'run_regen() { note "regen stubbed by skills-check-test"; }' "$stubbed" || true)
+if [ "${stub_count:-0}" -eq 1 ]; then
+    ok "the regen stub was inserted exactly once (the anchor still matches)"
+else
+    no "the regen stub was not inserted — the dispatcher anchor moved" \
+        "expected 1 occurrence, found ${stub_count:-0}; the verdict tests below would run the real 113s regen"
+fi
+
+if [ "${stub_count:-0}" -eq 1 ]; then
+    regen_out=$(bash "$stubbed" regen 2>&1) || true
+
+    # The load-bearing assertion: no bare `ok` verdict from a run that checked
+    # nothing. `-Fx` so `ok (overrides)` from a checking arm cannot satisfy it
+    # in either direction.
+    #
+    # Counted into a variable with `|| true` and compared numerically, which is
+    # this file's idiom for a reason. The first draft was
+    # `… | grep -cFx '…' | grep -qx 0`, and it FAILED against correct output:
+    # `grep -c` exits 1 when it counts zero, `pipefail` promotes that to the
+    # pipeline's status, and the `if` read it as the bad case — on top of
+    # putting `grep -q` behind a pipe, which is the SIGPIPE trap this very file
+    # exists to document.
+    bare=$(printf '%s\n' "$regen_out" | grep -cFx 'skills-check: ok' || true)
+    if [ "${bare:-0}" -eq 0 ]; then
+        ok "regen does NOT print a bare 'skills-check: ok'"
+    else
+        no "regen printed a bare 'skills-check: ok' — a verdict it did not earn" \
+            "$(printf '%s' "$regen_out" | tail -3)"
+    fi
+
+    if [ "$(printf '%s\n' "$regen_out" | grep -c "make skills-check" || true)" -gt 0 ]; then
+        ok "regen names the real gate in its own output"
+    else
+        no "regen does not name the real gate" "$(printf '%s' "$regen_out" | tail -3)"
+    fi
+
+    # And the other direction: an arm that DOES check must still say so, naming
+    # itself. `overrides` is the cheapest such arm — no generators, no cargo.
+    ovr_out=$(bash "$SCRIPT" overrides 2>&1) || true
+    if [ "$(printf '%s\n' "$ovr_out" | grep -c 'skills-check: ok (overrides)' || true)" -gt 0 ]; then
+        ok "a checking arm still passes, and the verdict names the stage"
+    else
+        no "the 'overrides' arm no longer reports 'ok (overrides)'" \
+            "$(printf '%s' "$ovr_out" | tail -3)"
+    fi
+fi
+
 printf '\nskills-check-test: %s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ] || exit 1

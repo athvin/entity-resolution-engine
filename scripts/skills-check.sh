@@ -2654,18 +2654,41 @@ run_drift_check() {
 
 # ---------------------------------------------------------------------------
 
+# WHICH STAGES ACTUALLY ASSERTED SOMETHING, so the verdict cannot over-claim.
+#
+# `regen` rewrites the generated blocks and checks NOTHING — yet every arm used
+# to fall through to one unconditional `skills-check: ok`. That is a verdict the
+# run had not earned, and it is read by more than one caller: a person reaching
+# for the gate, and `generated-artifact-healer`, whose allow-list includes
+# `skills-check.sh regen`.
+#
+# Measured cost of that line: a red `agent skills (lint + drift)` on #812. The
+# author ran `regen`, saw `skills-check: ok`, and pushed a SKILL.md eight lines
+# past the 500-line body cap — a `lint` error that `regen` never looks for. The
+# gate is `make skills-check`, and the output now says so rather than implying
+# the opposite.
+checked=()
+
 case "${1:-all}" in
 lint)
 	run_lint
 	run_override_check
 	run_generator_check
+	checked=(lint overrides generators)
 	;;
 regen) run_regen ;;
-overrides) run_override_check ;;
-generators) run_generator_check ;;
+overrides)
+	run_override_check
+	checked=(overrides)
+	;;
+generators)
+	run_generator_check
+	checked=(generators)
+	;;
 check)
 	run_regen
 	run_drift_check
+	checked=(drift)
 	;;
 all)
 	run_regen
@@ -2673,6 +2696,7 @@ all)
 	run_lint
 	run_override_check
 	run_generator_check
+	checked=(drift lint overrides generators)
 	;;
 *)
 	echo "usage: $0 [lint|regen|overrides|generators|check|all]" >&2
@@ -2683,4 +2707,13 @@ esac
 if ((fail)); then
 	exit 1
 fi
-echo "skills-check: ok"
+
+# `${#checked[@]}` is safe on an empty array under `set -u`; `${checked[@]}` is
+# NOT on bash 3.2, which is what macOS ships — hence the guard rather than a
+# default expansion.
+if ((${#checked[@]} == 0)); then
+	echo "skills-check: regen done — NOTHING WAS CHECKED. The gate is 'make skills-check'."
+else
+	joined=$(printf '%s, ' "${checked[@]}")
+	echo "skills-check: ok (${joined%, })"
+fi

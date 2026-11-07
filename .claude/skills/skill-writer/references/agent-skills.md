@@ -196,7 +196,12 @@ means trimming its **what** clause first, which is the documented fix:
 
 **Body**
 
-- **Under 500 lines** **(gated)**. In practice ours land near 150.
+- **Under 500 lines** **(gated)**. In practice ours land near 150. The gate is
+  `make skills-check`, and it is worth being precise about that while editing a
+  body: `skills-check.sh regen` does **not** lint, so a body past the cap sails
+  through it. Regen now says so in its own output rather than printing a
+  verdict — it used to end with `skills-check: ok`, and #812 pushed a body
+  eight lines over on the strength of that line.
 - **References exactly one level deep** — both halves **(gated)**: every
   `references/*.md` links from `SKILL.md`, and a reference must not link to a
   sibling reference. Claude partially reads files reached through another
