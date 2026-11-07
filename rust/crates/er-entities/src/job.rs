@@ -26,7 +26,7 @@ pub struct Job {
     pub run_id: Option<String>,
     /// Attempts made so far.
     pub attempt: i64,
-    /// Maximum attempts before the job fails.
+    /// Vestigial: no statement consults it. It bounded the job-level retry that went with the legacy in-process arm (#645); the live budget is task_instances.max_tries, per attempt.
     pub max_attempts: i64,
     /// Why the job failed, as a class the UI can act on: precondition (an input is missing — expected during onboarding), transient_io (worth retrying), config (the tenant config is wrong), internal (a bug). Null until a failure.
     pub error_class: Option<String>,
@@ -960,30 +960,20 @@ RETURNING
             .collect())
     }
 
-    /// Record a job failure and decide, in one statement, whether it retries: a retryable class with attempts left goes back to queued behind an exponential backoff, anything else fails terminally. One statement rather than a read-then-write so two dispatchers cannot both conclude they are the last attempt.
+    /// Record a job failure terminally, with its class and detail. It used to decide retry in the same statement — a retryable class with attempts left went back to queued behind an exponential backoff — which was the LEGACY in-process arm's retry. Retry is per task attempt now (task_instance/update/fail_or_retry, with the Airflow budget arithmetic), and a job reaches a terminal state through job/update/settle, so the branch had no production caller left.
     pub async fn fail_or_retry(
         client: &impl ::tokio_postgres::GenericClient,
-        retryable: bool,
         error_class: Option<&str>,
         error_detail: Option<&str>,
         job_id: &str,
     ) -> ::std::result::Result<Vec<super::Job>, ::tokio_postgres::Error> {
         const SQL: &str = "UPDATE public.jobs
-SET state = CASE WHEN $1 AND attempt < max_attempts THEN 'queued' ELSE 'failed' END,
-    -- Exponential backoff from the attempt already made, capped so a job cannot
-    -- drift hours into the future: 5s, 10s, 20s, … 300s.
-    not_before = CASE WHEN $1 AND attempt < max_attempts
-                      THEN now() + make_interval(
-                             secs => least(300, 5 * power(2, greatest(attempt - 1, 0)))::int)
-                      ELSE not_before END,
-    -- A retry is a fresh attempt, so the previous attempt's stamps are cleared;
-    -- a terminal failure keeps them for the audit trail.
-    started_at = CASE WHEN $1 AND attempt < max_attempts THEN NULL ELSE started_at END,
-    finished_at = CASE WHEN $1 AND attempt < max_attempts THEN NULL ELSE now() END,
-    error_class = $2,
-    error_detail = $3,
+SET state = 'failed',
+    finished_at = now(),
+    error_class = $1,
+    error_detail = $2,
     updated_at = now()
-WHERE id = $4
+WHERE id = $3
 RETURNING
   id,
   org_id,
@@ -1023,7 +1013,7 @@ RETURNING
         );
         let __result = ::er_span::instrument(
             &__span,
-            client.query(SQL, &[&retryable, &error_class, &error_detail, &job_id]),
+            client.query(SQL, &[&error_class, &error_detail, &job_id]),
         )
         .await;
         let __entered = __span.enter();

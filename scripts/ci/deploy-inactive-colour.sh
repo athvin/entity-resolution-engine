@@ -13,7 +13,7 @@
 # upgrade is about".
 #
 # Inputs (env): CI_NAMESPACE, LIVE, TARGET, FIRST, LIVE_API, LIVE_WEB,
-# DAG_KINDS, NEW_API, NEW_WEB, FS, AP.
+# NEW_API, NEW_WEB, FS, AP.
 set -euo pipefail
 
 args=(
@@ -22,7 +22,6 @@ args=(
 	--set "images.web.digest=$NEW_WEB"
 	--set "efs.fileSystemId=$FS"
 	--set "efs.accessPointId=$AP"
-	--set "executor.dagKinds=$DAG_KINDS"
 	--set "color.active=$LIVE"
 	--set "color.$TARGET.replicas=1"
 	--set "color.$TARGET.api.digest=$NEW_API"

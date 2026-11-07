@@ -195,6 +195,10 @@ Account-level counterparts — S3 Block Public Access on the account, MFA on the
 
 ## 6. Job execution: the runner as a Kubernetes Job
 
+> **A run is many pods now, not one.** Since #645 the dispatcher has no in-process arm, and a run is a compiled DAG whose every **task attempt** is its own Job — see `infrastructure-decisions.md` **D-TASKJOB**, and [batch-orchestration-design.md](../../er-engine-ops/references/batch-orchestration-design.md) for the ledger, the readiness pass and the fingerprints. The amendments are inline below, per subsection.
+>
+> Separately, and not by this change: the `server/src/erserver/*.py` and `src/er/*.py` call-outs in this section name a Python implementation that was rewritten in Rust and removed. The *reasoning* they support is still the reasoning; the file paths are historical. They are left as-is rather than half-corrected, because re-deriving every one of them is its own pass and a partly-updated map is worse than a clearly dated one.
+
 A pipeline run is one ephemeral pod, scoped to one tenant, that exits when the run finishes. That is what [backend-design.md](../../er-server-control-plane/references/backend-design.md) §4 already specifies, and `server/README.md` records the k8s Job launcher as deliberately unbuilt behind an existing seam:
 
 ```python
@@ -203,39 +207,65 @@ dispatcher.launch_runner(payload, env, on_stage=, should_cancel=)
 
 Today that seam calls `subprocess.Popen([sys.executable, "-m", "erserver.runner", ...])` with the tenant's `ER_*` env merged in. Substituting a Kubernetes Job is a change to one function, which is the whole reason the seam exists. Pod-per-run (rather than long-lived workers) is forced by three facts: the tenant seam is process-scoped env (`src/er/lake/env.py` is the sole reader of `ER_*`); the Postgres advisory writer lock is session-scoped, so a dying pod releases it with no cleanup path; and memory bin-packing against an 8–64 GiB per-run envelope only works if the allocation is per-run.
 
+Two of those three still argue for an ephemeral pod, now per task. The middle one does **not**: one writer per dataset is enforced by partial unique indexes on `jobs`, never by the advisory lock, so the session-scoped-release property was never what guaranteed it — see §6.4 as amended.
+
 ### 6.1 Argo Workflows — not chosen
 
 A native Kubernetes Job per run, not Argo: the DAG is inside the process (`run_all_full` runs the stages as library calls in one pod), and the engine already owns a complete, tested retry/state/scheduler machine that Argo would duplicate and contradict — including the `jobs_one_active_per_org` guarantee no second scheduler can honour. Full argument and revisit triggers: `infrastructure-decisions.md` D-ARGO. (Argo **CD** for deploying the platform itself is a separate, out-of-scope question.)
 
+**Amended (#645): the first clause is spent; the second is what holds.** "The DAG is inside the process" was D-ARGO's strongest argument and is no longer true — the run is a multi-pod DAG with references on its edges, which was D-ARGO's own recorded revisit trigger. Argo is still rejected, on the surviving ground: a `Workflow` object would be a second source of truth for run state alongside `task_instances`, and the retry policy it would have to express is now *richer* than it was (per-attempt budget, deterministic jitter, per-kind backoff, OOM class escalation, a separate infrastructure-failure counter). D-ARGO carries the full amendment and a restated revisit trigger.
+
 ### 6.2 The Job spec, and what it has to get right
 
+The live spec is `configmap-task-template.yaml`, rendered per attempt:
+
 ```
-Job (one per run, in the platform namespace)
-  backoffLimit: 0                      ← the engine owns retries, not Kubernetes
+Job (one per TASK ATTEMPT, in the platform namespace)
+  backoffLimit: 0                      ← Postgres owns retry, not Kubernetes
   restartPolicy: Never
-  activeDeadlineSeconds: per class     ← S 2h / M 6h / L 24h
-  ttlSecondsAfterFinished: 3600        ← long enough for the dispatcher to read final status
+  activeDeadlineSeconds: ${ER_ACTIVE_DEADLINE_SECONDS}
+                                       ← the summed timeouts of this attempt's
+                                         fusion segment, not a per-class constant
+  ttlSecondsAfterFinished: 300         ← long enough for the watch to classify the
+                                         terminal pod; the ledger holds the rest
+  labels:
+    er.dupezero.com/managed: task      ← the watch/list selector
+    .../job, .../task, .../try, .../class, .../owner
   annotations:
     karpenter.sh/do-not-disrupt: true  ← §5.1
-  nodeSelector: er/pool=runner-{sm,l}
-  resources:
-    requests.memory: per class (8/24/64Gi)
-    requests.ephemeral-storage: per class   ← §5.3
+  nodeSelector: karpenter.sh/nodepool=runner-{sm,l}   (+ taint toleration)
+  serviceAccountName: er-runner        ← D-TENANCY's anticipated parameter, now real
+  automountServiceAccountToken: false  ← an audience-bound projected token instead
+  terminationGracePeriodSeconds: 120   ← SIGTERM → rollback → exit 3; must exceed
+                                         the longest write-back
+  terminationMessagePolicy: File       ← how the terminal verdict reaches the watch
+  resources: per class, per TASK       ← §5.3, §6.5, D-SIZING
   volumes:
-    emptyDir → /app/.tmp, /app/dbt/.tmp     ← §5.3
-    EFS access point → ERSERVER_CONFIG_ROOT, ERSERVER_DROP_ROOT   ← §7.4, the Job cannot run without it
-  envFrom: per-run Secret (the tenant's ER_* overlay)
+    emptyDir → /app/.tmp                    ← §5.3, DuckDB's CWD-relative spill
+    EFS access point → config + drop roots   ← §7.4, the Job cannot run without it
+    projected token → /var/run/er            ← §6.4, the pod's only credential
 ```
+
+**TTL 300, not 3600, and the arithmetic is the reason.** A finished Job is wanted only until the watch has classified its terminal pod; everything after that is in `task_instances`. At one Job per run an hour of retained Jobs was free. At one per attempt it is not: finished Jobs hold `count/jobs.batch` quota against no work, and a seven-task run retains seven of them — so the retention window is now sized to the consumer rather than to comfort.
 
 **`backoffLimit: 0` is the single most important field.** The default of 6 would have Kubernetes retry a failed run with no knowledge of the exit-code taxonomy — re-running a config error six times, and worse, re-running a partially-completed pipeline *without* `--resume`. **The EFS mount is the second most important line, because its absence fails late:** the runner's first act is opening the config file by path (`server/src/erserver/runner.py:31`), an incremental import lists its CSV drops from `drop_root` at ingest time (`src/er/ingest/sources.py:146`), and the dispatcher re-loads an org's config on every idle pass (§2). Config content could in principle travel inline, but drops cannot leave the filesystem (`storage.drop_dir` must be an absolute local path, `src/er/config/schema.py:285`); inline config is a later optimization, not a way out of the mount (D-JOBSPEC).
 
 Cancellation keeps today's semantics: the dispatcher deletes the Job, Kubernetes sends `SIGTERM`, and the engine stops at the next stage boundary. `terminationGracePeriodSeconds` must exceed the engine's stage-boundary check interval and the dispatcher's existing `TERMINATE_GRACE_SECONDS = 10.0`.
 
-The dispatcher's ServiceAccount gets a namespace-scoped **Role**, not a ClusterRole: `create`/`get`/`list`/`watch`/`delete` on `batch/jobs`, `get`/`list` on `pods`, and `get` on `pods/log` — the last for exactly one tail fetch *after* a Job reaches a terminal state, to recover the runner's terminal result line (the S4.7 `error_class` the §2 retry matrix branches on). That read is not the §6.3 progress stream and must never become one. Namespace-scoped matters — a dispatcher able to create pods cluster-wide would undercut §5.4's argument for separate clusters.
+The dispatcher's ServiceAccount gets a namespace-scoped **Role**, not a ClusterRole (`rbac-dispatcher.yaml`): `create`/`get`/`list`/`watch`/`patch`/`delete` on `batch/jobs`, `get`/`list`/`watch`/`patch` on `pods`, and `list` on `events` — the pod `patch` being labels-only merge patches for the tombstone, owner and revoked markers. Namespace-scoped matters — a dispatcher able to create pods cluster-wide would undercut §5.4's argument for separate clusters. The identity is `er-dispatcher`, its own ServiceAccount on its own Deployment, because the Role that creates Jobs must not sit on the pod serving the API behind the BFF. The Role's own header comment enumerates what is deliberately absent and why, which is the list to read before widening it.
+
+**`pods/log` is out, and `events: list` replaced it.** The log read existed for one tail fetch after a Job went terminal, to recover the runner's terminal result line. Two things made it the wrong grant:
+
+- The verdict no longer travels in the log. It arrives through the attempt channel, or — when the pod died without reporting — through `terminationMessagePolicy: File` and the watch's classification of the terminal pod. So the fetch has no remaining purpose.
+- What the dispatcher *does* still need to know is why a pod is **not running** — unschedulable, image pull failure, eviction — and that is in the pod's events, not its log.
+
+Dropping it is also a containment win rather than just tidiness: `pods/log` let the control plane read whatever a stage wrote to stderr, which is tenant data, and that cuts directly against §6.4's credential boundary. The old paragraph warned that the log read "must never become" a progress stream; removing the grant is the version of that warning the API server enforces.
 
 ### 6.3 Progress reporting
 
-Today `launch_runner` reads the subprocess's stderr pipe directly, parsing one JSON record per stage into `jobs.progress`. A Job pod has no such pipe, so **the runner writes its own progress** to the control-plane database — it already holds a DSN and already emits exactly these records, so the write becomes direct instead of relayed. This survives dispatcher restarts, removes N long-lived log streams, and sits on the same seam §10 needs for trace context, so the two are designed together. (The rejected dispatcher-log-streaming option is in D-PROGRESS.) It is a small change to `server/src/erserver/runner.py`.
+Today `launch_runner` reads the subprocess's stderr pipe directly, parsing one JSON record per stage into `jobs.progress`. A Job pod has no such pipe, so **the runner writes its own progress** rather than the dispatcher relaying it. This survives dispatcher restarts, removes N long-lived log streams, and sits on the same seam §10 needs for trace context, so the two are designed together. (The rejected dispatcher-log-streaming option is in D-PROGRESS.)
+
+**Amended (#645): it writes through the control plane, not to the database.** The original sentence justified the direct write with "it already holds a DSN" — and a task pod must not. It posts progress, output and its terminal verdict to `er-server` over HTTP on the **attempt channel**, authenticated by the audience-bound projected token in §6.4, and `er-server` writes the ledger with its own credential. Reports are per task attempt and guarded by launch identity, so a late report from a superseded attempt is a no-op rather than a corruption. Full reasoning: D-PROGRESS as amended, and D-CHANNEL.
 
 ### 6.4 "Contained to that tenant" — what the containment actually is
 
@@ -246,11 +276,19 @@ Today `launch_runner` reads the subprocess's stderr pipe directly, parsing one J
 - **A dedicated catalog database** per tenant, so no tenant's tables share a database with another's.
 - **The advisory writer lock**, which the pod holds for its session and releases by dying.
 
-Namespace-per-tenant was rejected (D-TENANCY) — it is the right shape for the enterprise tier [backend-design.md](../../er-server-control-plane/references/backend-design.md) §7 earmarks for dedicated buckets and STS-scoped credentials, and not before. Forward-looking: once §9.2's IRSA work lands, the per-run pod can carry a **per-tenant ServiceAccount** scoped to that tenant's prefix alone (the "per-tenant STS credentials" item in [backend-design.md](../../er-server-control-plane/references/backend-design.md) §15 phase 4), so the Job spec should anticipate a ServiceAccount parameter even while every run shares one.
+**Amended (#645) — the fourth bullet is wrong, and the pod's credential changed.**
+
+One writer per dataset is three partial unique indexes on `jobs` (`jobs_one_active_per_dataset`, `jobs_one_active_org_level`, `jobs_idempotency`), not the advisory lock. The lock `pg::claim` takes serves the per-org concurrency **count** cap, which no index can express. As the bullet is written the guarantee appears to depend on a lock a pod holds and releases by dying — so it would seem to weaken the moment a pod leaks a session, when in fact it does not depend on the pod at all. The same error sat in `architecture.md`, inherited from the deleted Python `tenant_lock`, and was corrected with this.
+
+**The pod holds no database credential at all now** (D-CHANNEL), which strengthens the first bullet rather than replacing it: the process-scoped env still addresses exactly one tenant's lake, but `ER_CATALOG_DSN` is not in it. The pod's only credential is the projected, audience-bound ServiceAccount token at `/var/run/er`, which Kubernetes mints for that specific pod and `er-api` verifies offline against the cluster key set, binding the attempt by pod name.
+
+Namespace-per-tenant was rejected (D-TENANCY) — it is the right shape for the enterprise tier [backend-design.md](../../er-server-control-plane/references/backend-design.md) §7 earmarks for dedicated buckets and STS-scoped credentials, and not before. **The anticipated ServiceAccount parameter is real:** task pods run as `er-runner`, distinct from `er-dispatcher` and from the API's identity. It is still scoped per *role* rather than per *tenant*, so the "per-tenant STS credentials" item in [backend-design.md](../../er-server-control-plane/references/backend-design.md) §15 phase 4 is unchanged work — but it is now a parameter to narrow, not one to add.
 
 ### 6.5 Sizing the Job: CPU is the lever, memory is nearly flat
 
 Because the dispatcher knows the tenant's record count before it launches anything, the Job is sized per run rather than drawn from a fixed class. The resource classes are **vCPU/spill-tiered with a near-constant memory floor** (per `server/src/erserver/sizing.py`), and [backend-design.md](../../er-server-control-plane/references/backend-design.md) §7 has been corrected to match. The measurements behind the inversion from the original memory-tiered classes, and why memory stays flat (DuckDB spills), are in `infrastructure-decisions.md` D-SIZING.
+
+**Amended (#645): the class is per TASK, on `task_instances.resource_class`.** The measurements and the CPU-over-memory conclusion are untouched — what changed is that a run no longer pays its largest stage's class for all seven stages. `match` is the memory-and-thread consumer; `ingest` and `assemble` are not, and now only `match` is provisioned as though it were. A task OOM-killed before it committed retries at the next class up (S → M → L) rather than failing the run, recording `escalated_from` and invalidating its fusion segment, because D-FUSION groups only contiguous *same-class* tasks.
 
 **Class shape — tiered on vCPU, with a near-constant memory floor:**
 

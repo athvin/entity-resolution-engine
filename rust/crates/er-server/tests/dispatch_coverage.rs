@@ -10,16 +10,13 @@
 //! A list of kinds the scheduler will enqueue is a PROMISE that something
 //! handles them. This checks the promise, because nothing else did.
 //!
-//! ## There are two destinations, and the promise is about both
+//! ## One destination now
 //!
-//! A kind routes to a **compiled DAG** when it is listed in
-//! `executor.dagKinds`, and to the legacy in-process arm in `dispatcher.rs`
-//! when it is not (batch-orchestration-design §11). So "somewhere to go" means
-//! a DAG for every kind, plus a legacy arm for every kind not yet on the
-//! allowlist — and the two are checked separately below because they retire at
-//! different times.
+//! Every kind routes to a **compiled DAG**. The `executor.dagKinds` allowlist
+//! that used to decide this is gone (#645), so there is no second destination
+//! and "somewhere to go" means a DAG for every kind.
 //!
-//! The DAG half is the permanent one and is **registry-backed**: it asks
+//! The DAG half is **registry-backed**: it asks
 //! `JobKind::parse` and `dags::dag_for`, so a missing kind is a `None` rather
 //! than a missing line of text. Phase 1 of the design said this file would
 //! scan `dag_for`; it did not, and the textual scan it kept is what made the
@@ -27,11 +24,14 @@
 //! this file's own self-check, which hard-asserted that `lake_maintain` had a
 //! `match` arm in `dispatcher.rs`.
 //!
-//! The legacy half stays textual by necessity — the arms are
-//! `match job.kind.as_str()` literals and two of them are async pre-branches in
-//! `dispatch_once` rather than arms of that match — and it **retires itself**:
-//! it covers exactly `LEGACY_ARM_KINDS`, and when Phase 4 empties that list the
-//! test stands down instead of failing. That is the intended exit, not a hole.
+//! The legacy half has now stood itself down: `LEGACY_ARM_KINDS` is empty, so
+//! `kinds_off_the_allowlist_still_have_a_legacy_arm` returns immediately. That
+//! is the exit the file was built to take, not a hole — and the list it reads
+//! had in any case gone stale, naming five kinds as legacy while the deploy
+//! had been routing all eleven to the executor.
+//!
+//! What checks the level below this one — that each DAG's every TASK has a
+//! body — is `dag_task_coverage.rs`.
 //!
 //! Beside `egress_guard.rs` and `mock_contract.rs`, which make the same kind of
 //! structural claim the same way.
@@ -44,20 +44,12 @@ const DISPATCHER: &str = include_str!("../src/dispatcher.rs");
 /// `SCHEDULABLE_KINDS` and still need a destination.
 const UNSCHEDULED_KINDS: [&str; 1] = ["apply_corrections"];
 
-/// Kinds that still reach the legacy in-process arm because they are absent
-/// from `executor.dagKinds` in the deploy (`.github/workflows/deploy.yml`).
+/// Kinds that still reach the legacy in-process arm.
 ///
-/// **Phase 4 empties this list and deletes the test that reads it**, along with
-/// the arms themselves. Keep it in step with the deploy's `--set`: a kind on
-/// the allowlist no longer needs an arm, and one removed from the allowlist
-/// does.
-const LEGACY_ARM_KINDS: [&str; 5] = [
-    "correct",
-    "train",
-    "profile",
-    "apply_approved",
-    "apply_corrections",
-];
+/// **Empty**: there is no allowlist left to be absent from, so no kind routes
+/// anywhere but the executor. The test that reads this stands down on an empty
+/// list and is deleted with the arms themselves.
+const LEGACY_ARM_KINDS: [&str; 0] = [];
 
 /// Every kind the product can enqueue, from both lists.
 fn enqueueable() -> Vec<&'static str> {

@@ -46,7 +46,6 @@ pub mod pg;
 pub mod profile_params;
 pub mod provision;
 pub mod read;
-pub mod reporter;
 pub mod runctx;
 pub mod s3_ingest;
 pub mod satoken;
@@ -126,10 +125,6 @@ pub struct AppState {
     /// from `None` on purpose: an operator who opted in and made a typo should
     /// see which variable is wrong, not a 503 that says provisioning is off.
     provision_error: Option<String>,
-    /// Kinds the Kubernetes executor owns (`ER_EXECUTOR_DAG_KINDS`): cancel
-    /// routes through `job/update/cancel.sql`'s `canceling` for these, because
-    /// the org slot must stay held until every pod is provably gone (§5.6).
-    executor_kinds: std::collections::BTreeSet<String>,
     /// The projected-ServiceAccount-token verifier (§6.4), present only when
     /// this process runs as a pod. `None` leaves the attempt channel
     /// fallback-token-only, exactly as before.
@@ -148,7 +143,6 @@ impl AppState {
             max_import_bytes: DEFAULT_MAX_IMPORT_BYTES,
             provision: None,
             provision_error: None,
-            executor_kinds: std::collections::BTreeSet::new(),
             sa_verifier: None,
         }
     }
@@ -166,16 +160,8 @@ impl AppState {
             max_import_bytes: DEFAULT_MAX_IMPORT_BYTES,
             provision: None,
             provision_error: None,
-            executor_kinds: std::collections::BTreeSet::new(),
             sa_verifier: None,
         }
-    }
-
-    /// Name the kinds the Kubernetes executor owns, for the cancel route.
-    #[must_use]
-    pub fn with_executor_kinds(mut self, kinds: std::collections::BTreeSet<String>) -> Self {
-        self.executor_kinds = kinds;
-        self
     }
 
     /// Attach the projected-ServiceAccount-token verifier (§6.4). Absent, the
@@ -3783,8 +3769,9 @@ pub fn dispatch_next(
 /// # Errors
 /// Propagates a queue (claim/mark) error. A `runner` failure is NOT an error —
 /// it is classified and recorded on the row, with its message in
-/// `error_detail`, which means a retryable class lands in `retrying` rather
-/// than `failed` just as it does in the production loop.
+/// `error_detail`, so a test can observe WHY a job failed and not merely that
+/// it did. Every class lands in `failed`: retry is per task attempt now (#645),
+/// and this helper has no tasks because it has no executor.
 pub async fn dispatch_pg<F>(
     client: &tokio_postgres::Client,
     runner: F,
@@ -3805,16 +3792,18 @@ where
                 ..job
             }
         }
-        // Route a failure through the same classify-and-record path the
-        // production loop uses, so the REASON is persisted.
+        // Classify and record, so the REASON is persisted.
         //
         // This used to `mark(…, "failed")` and DROP the runner's string, which
         // meant a job failed through this helper carried no explanation at all:
         // a test could observe that a bad request failed but never why, and a
         // failed job with no reason is a bug class this repo has already
-        // shipped once. Classification also means a `TransientIo` failure
-        // lands in `retrying` here exactly as it does in production, rather
-        // than this helper disagreeing with the loop it stands in for.
+        // shipped once.
+        //
+        // The class no longer changes where the row lands — `fail_or_retry`
+        // became terminal with the legacy arm (#645). It is recorded because
+        // `error_class` is what the UI renders and what `pg_profile.rs` asserts
+        // a refused request leaves behind.
         Err(detail) => {
             let class = pg::FailureClass::classify(&detail);
             pg::fail_or_retry(client, &job.id, class, &detail).await?
@@ -3971,7 +3960,12 @@ async fn cancel_job(
             return *r;
         }
         return match pg::get_job(&client, &org_row.id, &job_id).await {
-            Ok(Some(job)) if state.executor_kinds.contains(&job.kind) => {
+            // Every kind the DAG registry parses is the executor's now that the
+            // `ER_EXECUTOR_DAG_KINDS` allowlist is gone (#645), so this is the
+            // path essentially every cancel takes. The direct-`mark` arm below
+            // survives only for a kind that does not parse, which cannot have
+            // been planned and so has no pods to revoke.
+            Ok(Some(job)) if dags::JobKind::parse(&job.kind).is_some() => {
                 // The executor path (§5.6): a queued job dies directly; a
                 // dispatching or running one becomes `canceling` — still
                 // inside the one-active-per-org predicate — and the cancel
@@ -4353,12 +4347,16 @@ async fn attempt_authorized(
         };
         // Bind the attempt: the Job name is a pure function of the attempt key
         // (§4.2), a Job's pods are named `<job>-<suffix>`, and the trailing
-        // dash keeps `…-l1` from matching an `…-l10` pod. The reporter's
-        // synthetic 'inproc' rows can never bind — no Job this dispatcher
-        // creates yields a pod named `inproc-…`.
-        let bound = lineage[0].k8s_job_name.as_deref().is_some_and(|job| {
-            job != crate::reporter::INPROC && claims.pod_name.starts_with(&format!("{job}-"))
-        });
+        // dash keeps `…-l1` from matching an `…-l10` pod.
+        //
+        // This also excluded the literal `inproc`, the legacy arm's synthetic
+        // launch identity. Nothing writes that name now (#645), and the prefix
+        // match would have refused it anyway — no Job yields a pod called
+        // `inproc-…`.
+        let bound = lineage[0]
+            .k8s_job_name
+            .as_deref()
+            .is_some_and(|job| claims.pod_name.starts_with(&format!("{job}-")));
         if !bound {
             return Err(Box::new(
                 unauthorized("the token's pod is not this attempt's launch").into_response(),
@@ -4453,7 +4451,14 @@ async fn attempt_work_order(
     // A read failure degrades to EM-only rather than failing the attempt —
     // which is exactly what the in-process arm does.
     let labels: Vec<(String, String)> = if job.kind == "train" {
-        match er_entities::pair_label::read::all(&client, &current.org_id).await {
+        // The DATASET's labels. `read::all` takes its scope as a bare `&str`
+        // named `dataset_id`, so passing the org id compiled and matched
+        // nothing — and "no rows" is indistinguishable here from "this tenant
+        // has no labels", which is why the m estimate silently fell back to
+        // EM-only on every train. Same idiom as everywhere else: the dataset
+        // when the job names one, the org id for a pre-dataset row.
+        let scope = job.dataset_id.as_deref().unwrap_or(&current.org_id);
+        match er_entities::pair_label::read::all(&client, scope).await {
             Ok(rows) => rows
                 .into_iter()
                 .filter(|l| l.verdict == "match" && l.origin != "llm")
@@ -4765,6 +4770,46 @@ async fn attempt_finish(
                 k8s_job_name: current.k8s_job_name.as_deref(),
                 backoff,
             };
+            // A FAILED schema reconcile still has a tenant position to record.
+            //
+            // The success branch above writes `tenant_schema_states` from the
+            // task's output doc, and a failing task publishes no output — so a
+            // breaking lake left the tenant's recorded position at whatever the
+            // last good sweep said, which is `current`. The deploy report and
+            // the drift check read that table precisely so they do not have to
+            // open a lake, and they were being told a breaking tenant was fine.
+            //
+            // The legacy arm recorded this outcome "whatever it was", in as many
+            // words; the task path recorded it only on success. `status` comes
+            // from the failure text the same way `schema::tenant_state` derives
+            // it, so ERR_SCHEMA_BREAKING reads `breaking` and anything else
+            // `errored`.
+            if matches!(current.task_id.as_str(), "reconcile_schema" | "lake_init")
+                && let Some(dsn) = state.dsn.clone()
+            {
+                let detail = body.error_detail.clone().unwrap_or_default();
+                let status = if detail.contains("ERR_SCHEMA_BREAKING") {
+                    "breaking"
+                } else {
+                    "errored"
+                };
+                let org_id = current.org_id.clone();
+                let dataset_id = current.dataset_id.clone();
+                tokio::spawn(async move {
+                    let Ok(client) = pg::connect(&dsn).await else {
+                        return;
+                    };
+                    let _ = crate::schema::record_tenant_state(
+                        &client,
+                        &org_id,
+                        dataset_id.as_deref(),
+                        status,
+                        "",
+                        Some(&detail),
+                    )
+                    .await;
+                });
+            }
             match taskpg::fail_or_retry_task(&mut client, &attempt_id, &failure).await {
                 Ok((Some(archived), successor)) => (
                     StatusCode::OK,
@@ -9998,14 +10043,6 @@ pub async fn state_from_env() -> AppState {
         Ok(dsn) if !dsn.is_empty() => AppState::with_pg(operator, dsn),
         _ => AppState::new(operator),
     };
-    let executor_kinds: std::collections::BTreeSet<String> = std::env::var("ER_EXECUTOR_DAG_KINDS")
-        .unwrap_or_default()
-        .split(',')
-        .map(str::trim)
-        .filter(|k| !k.is_empty())
-        .map(str::to_string)
-        .collect();
-    let state = state.with_executor_kinds(executor_kinds);
     // Present only when this process runs as a pod; locally the attempt
     // channel stays fallback-token-only.
     let state = state.with_sa_verifier(satoken::Verifier::in_cluster());

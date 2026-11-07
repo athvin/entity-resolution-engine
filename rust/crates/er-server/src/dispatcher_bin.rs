@@ -39,25 +39,15 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     pg::set_actor(&client, "er-dispatcher").await?;
     let http = crate::webhook::client();
 
-    // The attempt ledger's reporter (batch-orchestration-design §11 Phase 1),
-    // on its own connection so stage events apply while a run's blocking half
-    // is live. Best-effort from birth: no reporter just means no ledger rows.
-    let reporter = match crate::reporter::AttemptReporter::connect(&dsn).await {
-        Ok(r) => Some(r),
-        Err(e) => {
-            tracing::warn!(error = %e, "the attempt reporter is disabled: connecting failed");
-            None
-        }
-    };
-
-    // SIGTERM -> drain: finish the in-flight job, then exit at the next loop top.
-    // Shared with the API's in-process arm (`main.rs`) rather than duplicated —
-    // that copy was the one that had no drain, because its flag was never set.
+    // SIGTERM -> drain: finish the in-flight job, then exit at the next loop
+    // top. There is no second copy of this to keep in step any more: the API's
+    // in-process arm, whose copy was the one with no drain, is gone (#645).
     let term = crate::shutdown::sigterm_flag();
 
-    // The Kubernetes executor (§6): inert unless the chart lists kinds in
-    // ER_EXECUTOR_DAG_KINDS and the pod carries an in-cluster identity.
+    // The Kubernetes executor (§6): present when the pod has a namespace and
+    // an in-cluster identity. Absent, this dispatcher does not claim — there
+    // is nothing left to execute a job with (#645).
     let (executor, watch_frames) = crate::executor::from_env(&dsn).await;
-    dispatcher::run_loop(&client, &http, &term, reporter, executor, watch_frames).await?;
+    dispatcher::run_loop(&client, &http, &term, executor, watch_frames).await?;
     Ok(())
 }

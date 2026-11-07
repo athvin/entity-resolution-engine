@@ -37,8 +37,7 @@ use tracing_subscriber::util::SubscriberInitExt;
 /// executable name alone.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Role {
-    /// The control-plane API (and, under `ER_DISPATCH_IN_PROCESS`, a dispatcher
-    /// beside it).
+    /// The control-plane API.
     Api,
     /// The standalone dispatcher daemon.
     Dispatcher,

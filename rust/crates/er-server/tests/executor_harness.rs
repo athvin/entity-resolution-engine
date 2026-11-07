@@ -16,8 +16,8 @@
 //! arm, so they move to this path rather than being deleted with it.
 //!
 //! The ticket named two test files for this (`pg_attempt_reporter.rs` to
-//! delete, `pg_job_retry.rs` to rewrite). The real surface is those two plus
-//! the eight that call the arm directly.
+//! delete, `pg_job_retry.rs` — now `pg_job_failure.rs` — to rewrite). The real
+//! surface is those two plus the eight that call the arm directly.
 //!
 //! `pg_drain_dispatcher.rs` is the first ported test, and porting it is what
 //! found #760 — `apply_staged` read its payloads from a params key nothing
@@ -95,13 +95,7 @@ impl Harness {
         let api = Arc::new(api);
         let cfg = ExecutorConfig {
             profile,
-            // Every kind: this harness is generic, and a test's job must not
-            // fail to route because the harness forgot to list its kind. The
-            // field goes away with the allowlist in #645.
-            dag_kinds: er_server::dags::JobKind::ALL
-                .iter()
-                .map(|k| k.as_str().to_string())
-                .collect(),
+            // No per-kind allowlist to opt into: the executor owns every kind.
             in_flight_cap: 2,
             template: er_k8s::manifest::REFERENCE_TEMPLATE.to_string(),
             image_digest: None,
@@ -127,10 +121,16 @@ impl Harness {
         let mut state = String::new();
         for _ in 0..MAX_PUMPS {
             // Claim on every iteration, which is what `dispatcher::run_loop`
-            // does. `pg::claim` takes the oldest queued row for an org with no
-            // active job, so claiming once would pump someone else's job while
-            // the one under test sat `queued`.
-            let _ = er_server::dispatcher::dispatch_once(client, None, Some(&mut self.executor))
+            // does. Claiming ONCE was wrong whenever the queue held more than
+            // the job under test: `pg::claim` takes the oldest queued row for
+            // an org with no active job, so a test whose earlier phase left an
+            // `apply_corrections` behind had that claimed instead, and its own
+            // job sat `queued` while the pumps ran. The legacy arm's tests
+            // asserted only that SOMETHING was claimed, so they never saw it.
+            //
+            // A claim failure is not fatal: once every job is terminal there
+            // is nothing to claim and `dispatch_once` returns false.
+            let _ = er_server::dispatcher::dispatch_once(client, Some(&mut self.executor))
                 .await
                 .expect("dispatch_once");
             pump(&mut self.executor, &mut self.frames).await;
@@ -145,5 +145,86 @@ impl Harness {
             tokio::time::sleep(PUMP_EVERY).await;
         }
         state
+    }
+
+    /// Enqueue an `apply_corrections` job for the dataset and run it to
+    /// settlement, asserting it succeeded.
+    ///
+    /// This is the one-line stand-in for a `dispatcher::drain_and_correct`
+    /// call: a correction pass as the product actually runs one, through the
+    /// executor. The panic names every task row, because a pass that settles
+    /// without doing its work is the failure mode this path has already had
+    /// once (#760) and "succeeded" alone never explains it.
+    pub async fn apply_corrections(
+        &mut self,
+        client: &tokio_postgres::Client,
+        org_id: &str,
+        dataset_id: &str,
+    ) {
+        let _ = self
+            .run_kind(client, org_id, dataset_id, "apply_corrections")
+            .await;
+    }
+
+    /// Claim and run an ALREADY-enqueued job to settlement, returning the
+    /// state it settled in.
+    ///
+    /// The stand-in for a `dispatcher::dispatch_once_with` call where the test
+    /// enqueued the job itself and wants to assert on the settled row rather
+    /// than have the harness assert for it.
+    pub async fn run_queued(
+        &mut self,
+        client: &tokio_postgres::Client,
+        org_id: &str,
+        job_id: &str,
+    ) -> String {
+        self.run_to_settlement(client, org_id, job_id).await
+    }
+
+    /// Enqueue a job of `kind` for the dataset, run it to settlement
+    /// asserting it succeeded, and return its JOB ID.
+    ///
+    /// The id matters to callers: on this path the run id IS the job id, so
+    /// anything a kind stamps with its run — a model version label, a
+    /// provenance field — is named after a value only `enqueue` knows. The
+    /// legacy arm let a test choose that string, which is why some of them
+    /// assert against a hard-coded one.
+    pub async fn run_kind(
+        &mut self,
+        client: &tokio_postgres::Client,
+        org_id: &str,
+        dataset_id: &str,
+        kind: &str,
+    ) -> String {
+        let queued = pg::enqueue(
+            client,
+            org_id,
+            Some(dataset_id),
+            kind,
+            0,
+            None,
+            None,
+            pg::Provenance::default(),
+        )
+        .await
+        .unwrap_or_else(|e| panic!("enqueue {kind}: {e}"));
+        assert!(
+            er_server::dispatcher::dispatch_once(client, Some(&mut self.executor))
+                .await
+                .expect("dispatch_once"),
+            "the executor claims and plans the {kind} job"
+        );
+        let settled = self.run_to_settlement(client, org_id, &queued.id).await;
+        if settled != "succeeded" {
+            let rows = er_entities::task_instance::read::by_job(client, org_id, &queued.id)
+                .await
+                .expect("task rows");
+            let shape: Vec<(String, String, Option<String>)> = rows
+                .iter()
+                .map(|r| (r.task_id.clone(), r.state.clone(), r.error_detail.clone()))
+                .collect();
+            panic!("the {kind} job settled {settled:?}: {shape:?}");
+        }
+        queued.id
     }
 }

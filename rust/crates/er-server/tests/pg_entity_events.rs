@@ -30,6 +30,7 @@ use er_server::{AppState, app, pg};
 use tower::ServiceExt;
 
 use crate::common;
+use crate::executor_harness;
 
 const TEST_YAML: &str = include_str!("../../er-cli/tests/fixtures/test.yaml");
 
@@ -236,15 +237,10 @@ async fn entity_events_are_aggregated_per_kind_and_expand_through_the_detail_end
     )
     .await
     .unwrap();
-    let ran = er_server::dispatcher::dispatch_once_with(
-        &client,
-        &Ok(None),
-        &er_server::mail::Mailer::off(),
-        None,
-    )
-    .await
-    .unwrap();
-    assert!(ran, "the queued run should have been claimed");
+    // A real run through the executor — seven task pods — where this used to
+    // call the legacy in-process arm.
+    let mut harness = executor_harness::Harness::start(&dsn, tmp.clone()).await;
+    harness.run_queued(&client, &org_id, &queued.id).await;
     let job = pg::get_job(&client, &org_id, &queued.id)
         .await
         .unwrap()
@@ -369,16 +365,7 @@ async fn entity_events_are_aggregated_per_kind_and_expand_through_the_detail_end
     )
     .await
     .unwrap();
-    assert!(
-        er_server::dispatcher::dispatch_once_with(
-            &client,
-            &Ok(None),
-            &er_server::mail::Mailer::off(),
-            None,
-        )
-        .await
-        .unwrap()
-    );
+    harness.run_queued(&client, &org_id, &second.id).await;
     let second_job = pg::get_job(&client, &org_id, &second.id)
         .await
         .unwrap()

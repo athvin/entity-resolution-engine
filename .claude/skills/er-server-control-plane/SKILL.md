@@ -152,22 +152,30 @@ job with the master DSN. Do not "fix" this into a hard failure.
 
 ## The dispatcher
 
-`dispatcher::run_loop` polls; `dispatch_once` does claim → mark running →
-**reconcile the dataset's lake** (`schema::reconcile_lake_env`, recorded in
-`public.tenant_schema_states` whatever the outcome; a breaking lake fails the
-job with `ERR_SCHEMA_BREAKING` before any stage runs) → open the dataset's lake →
-run the matching `er-cli` operation **in-process** → mark the outcome → emit
-the `job.<state>` webhook. `provision` is the one kind that skips the
-pre-step and reconciles the lake it creates instead; `lake_migrate` is the
-kind whose whole work is the pre-step. There are no per-run Kubernetes jobs.
-`dispatch_once_with` takes the provisioning profile explicitly for the
-Postgres-tier tests.
+`dispatcher::run_loop` polls; `dispatch_once` claims a job and **plans** it —
+its task rows are written in one transaction with the claim — and the work then
+runs as **one Kubernetes Job per task attempt**, driven by the executor's
+passes and watch. The dispatcher itself executes no pipeline stage.
 
+**There is no per-kind allowlist and no in-process arm.** Both are gone: a kind
+the DAG registry cannot parse is refused terminally at planning, with that
+reason on the row. A dispatcher with no executor — no namespace, no in-cluster
+identity, which is every host — therefore has nothing to execute with.
+
+Settling emits, in order: one `job.<state>` webhook per outcome, at most one
+`entity.*` aggregate per kind, the run report, and the `entity.write_back`
+events a correction pass produced. All four live on the executor's settle; three
+of them were once only on the in-process arm, and each was silently not
+happening for as long as that was true.
+
+- The provisioning profile comes from `ExecutorConfig`, not the environment. A
+  Postgres-tier test cannot set an environment variable (`set_var` is `unsafe`
+  under edition 2024 and the workspace denies `unsafe_code`), so a control task
+  reading the environment itself is a control task nothing can test.
 - Idle backoff doubles from `IDLE_MIN` to the `IDLE_MAX` ceiling (500ms → 5s as
   the constants stand; read them rather than trusting this parenthesis).
-- A Postgres failure returns `Err` and is fatal to the caller: the standalone
-  binary exits non-zero so Kubernetes restarts it; in in-process mode the
-  spawned task logs and the API keeps serving.
+- A Postgres failure returns `Err` and is fatal to the caller: the dispatcher
+  binary exits non-zero so Kubernetes restarts it.
 - Termination requests a drain of the in-flight job, then a clean exit.
 
 **A job whose required inputs are absent is FAILED with a clear reason, never

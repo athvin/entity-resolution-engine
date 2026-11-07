@@ -132,39 +132,52 @@ dispatcher:
   # NOT values: the single-dispatcher model needs exactly one, so the template
   # hard-codes replicas 1 / Recreate.
   #
-  # Legacy kinds still run IN this pod's process (the in-process arms of
-  # dispatcher.rs); kinds listed in executor.dagKinds run as per-attempt
-  # Kubernetes Jobs instead. A stuck legacy run therefore shows nothing in pod
-  # events — read the `er-dispatcher` pod log and look for a stale
-  # `dispatching`/`running` row holding the org's partial unique index; an
-  # executor-kind run shows up as `er-t-…` Jobs and task_instances rows.
+  # Every kind runs as per-attempt Kubernetes Jobs; there is no in-process arm
+  # and no per-kind allowlist (#645). A run shows up as `er-t-…` Jobs and
+  # task_instances rows, so a stuck one is read from pod events and the task
+  # ledger rather than from this pod's log.
   pollSeconds: "" # ERSERVER_POLL_SECONDS; empty keeps the erserver default (2s)
-  # How long the SIGTERM drain gets to finish the in-flight job before the
-  # kubelet SIGKILLs it (deployment-dispatcher.yaml has the full reasoning). A
-  # killed legacy run strands its row holding the dataset's writer lock, and
-  # only an operator can clear that — so 30s, the Kubernetes default this was
-  # silently using, is far too short for a whole pipeline.
+  # How long the SIGTERM drain gets to finish the pass in flight before the
+  # kubelet SIGKILLs it (deployment-dispatcher.yaml has the full reasoning).
   #
-  # It is NOT sized to the longest possible run, because `Recreate` makes the
-  # deploy wait for it: the CI deploy's `helm upgrade --wait --timeout 10m`
-  # would fail outright if this approached it. Raise both together, or not at
-  # all.
-  terminationGracePeriodSeconds: 300
+  # This was 300s, and the whole justification was the legacy arm: a killed
+  # in-process run stranded its row in `running`, holding the dataset's partial
+  # unique index, and `pg::resume_job` is an operator action — so recovery was a
+  # human. #645 deleted that arm, and with it the hazard:
+  #
+  #   * planning is ONE transaction, so a kill mid-plan rolls back to `queued`
+  #     with `attempt` unchanged and zero task rows;
+  #   * the work itself is in per-attempt Jobs that outlive this pod entirely;
+  #   * `Executor::adopt` re-stamps `owner_epoch` on both the job and the
+  #     task_instance rows at startup, so the next dispatcher takes over what
+  #     this one was driving rather than leaving it for an operator.
+  #
+  # What is left to drain is one pass of Postgres writes plus, at worst, one
+  # SES send and a webhook drain — seconds, not a pipeline. 60s is margin over
+  # that, not a pipeline ceiling, and it stays well under the CI deploy's
+  # `helm upgrade --wait --timeout 10m` that `Recreate` makes it block.
+  terminationGracePeriodSeconds: 60
   resources:
-    # The dispatcher runs whole legacy pipelines in-process (DuckDB included),
-    # so it keeps the API container's defensive memory ceiling until Phase 4
-    # deletes the legacy arm.
-    requests: { cpu: 250m, memory: 512Mi }
-    limits: { cpu: "1", memory: 3Gi }
+    # The dispatcher claims, plans, runs the executor's passes and the watch,
+    # and runs control tasks — all Postgres writes. It opens no lake: the
+    # schema reconcile moved into `reconcile_schema`/`init` on the task path,
+    # and a control task is structurally forbidden from linking engine code at
+    # all (the rule is stated at the top of `dags/control/mod.rs`). So the 3Gi
+    # ceiling it inherited from the API container — justified by "runs whole
+    # legacy pipelines in-process (DuckDB included)" — is gone with the arm
+    # (#645). DuckDB is still LINKED into the shared multicall image; nothing
+    # on this arm calls it.
+    #
+    # Keep engine CRATE NAMES out of this file. `skills-check` derives which
+    # er-obs roles ship as workloads by fixed-string grep for each role's
+    # service name across infra/k8s/charts, so naming one here makes a local
+    # tool read as deployed in the generated observability surface.
+    requests: { cpu: 250m, memory: 256Mi }
+    limits: { cpu: "1", memory: 768Mi }
 
 # The Kubernetes executor (batch-orchestration-design §6): one Job per task
 # attempt, rendered by the dispatcher from the mounted task template.
 executor:
-  # The rollout allowlist (§11): job kinds the executor runs as Kubernetes
-  # Jobs; everything else stays on the in-process arms. Comma-separated,
-  # EMPTY BY DEFAULT — the executor is inert until a kind is listed here.
-  # Deleted in Phase 4 when the legacy arm goes.
-  dagKinds: ""
   # Launch gate (§7.2): queued|running pod rows across orgs. Three since the
   # Standard vCPU quotas were granted at 64 (both On-Demand L-1216C47A and Spot
   # L-34B43A08, verified against the account rather than assumed — an earlier

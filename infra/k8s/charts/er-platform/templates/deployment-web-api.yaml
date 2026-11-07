@@ -2,8 +2,8 @@
 #   - er-server (Rust): the control-plane API on :8000. Internal only — the
 #     dispatcher is its own Deployment now (deployment-dispatcher.yaml,
 #     batch-orchestration-design §6.7): the identity that creates Jobs must
-#     not sit on the pod serving the API behind the BFF, so
-#     ER_DISPATCH_IN_PROCESS is gone from this pod.
+#     not sit on the pod serving the API behind the BFF. This pod has never
+#     run a dispatcher, and the flag that once could is gone (#645).
 #   - er-web (Next.js BFF): the browser-facing tier on :3000, talking to the
 #     API over localhost. The only container exposed via the Ingress.
 # Postgres stays its own StatefulSet. Recreate: the init container migrates the
@@ -101,14 +101,6 @@ spec:
               containerPort: 8000
           env:
             {{- include "er-platform.erserverEnv" $ | nindent 12 }}
-            # The cancel route needs to know which kinds the EXECUTOR runs
-            # (cancel-through-canceling vs the legacy arm); this populates
-            # AppState.executor_kinds only — the API process never builds an
-            # executor, that is the dispatcher Deployment's job.
-            {{- with $.Values.executor.dagKinds }}
-            - name: ER_EXECUTOR_DAG_KINDS
-              value: {{ . | quote }}
-            {{- end }}
           envFrom:
             - secretRef:
                 name: er-erserver-env

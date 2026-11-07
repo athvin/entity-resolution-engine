@@ -12,9 +12,10 @@
 
 use std::time::Duration;
 
-use er_server::{dispatcher, pg, schema};
+use er_server::{pg, schema};
 
 use crate::common;
+use crate::executor_harness;
 
 async fn oid(client: &tokio_postgres::Client, name: &str) -> String {
     pg::org_id_by_name(client, name)
@@ -61,16 +62,21 @@ async fn the_sweep_reconciles_every_active_tenant_and_reports_it() {
         .await
         .unwrap();
 
+    // The sweep's jobs run through the executor, like every other kind. This
+    // test used to pass `None` for the executor and let the job fall through to
+    // the legacy in-process arm; with that arm deleted (#645) a dispatcher
+    // without an executor claims nothing at all, deliberately, so the sweep
+    // needs a real one.
+    let mut harness = executor_harness::Harness::start(&dsn, tmp.clone()).await;
+
     // ---- phase 1: a fresh lake is migrated ---------------------------------
     let jobs = schema::enqueue_tenant_migrations(&client).await.unwrap();
     assert_eq!(jobs.len(), 1, "only the active org is swept: {jobs:?}");
     assert_eq!(jobs[0].0, "acme/default");
     assert_eq!(jobs[0].1.kind, schema::LAKE_MIGRATE_KIND);
-    assert!(
-        dispatcher::dispatch_once(&client, None, None)
-            .await
-            .unwrap()
-    );
+    let _ = harness
+        .run_to_settlement(&client, &jobs[0].1.org_id, &jobs[0].1.id)
+        .await;
     let report = schema::wait_for_tenant_migrations(&client, &jobs, Duration::from_secs(30))
         .await
         .unwrap();
@@ -91,11 +97,9 @@ async fn the_sweep_reconciles_every_active_tenant_and_reports_it() {
 
     // ---- phase 2: a current lake reports current, and no second ledger row -
     let jobs = schema::enqueue_tenant_migrations(&client).await.unwrap();
-    assert!(
-        dispatcher::dispatch_once(&client, None, None)
-            .await
-            .unwrap()
-    );
+    let _ = harness
+        .run_to_settlement(&client, &jobs[0].1.org_id, &jobs[0].1.id)
+        .await;
     let report = schema::wait_for_tenant_migrations(&client, &jobs, Duration::from_secs(30))
         .await
         .unwrap();
@@ -124,13 +128,19 @@ async fn the_sweep_reconciles_every_active_tenant_and_reports_it() {
         .connection()
         .execute_batch("ALTER TABLE lake.main.runs ALTER COLUMN snapshot_start TYPE DOUBLE;")
         .unwrap();
+    // Force the retype to DISK, by DETACHING the lake rather than checkpointing.
+    //
+    // The reconcile now runs in a task pod — its own process — so it reads the
+    // catalog from the file, where the legacy in-process arm inherited this
+    // process's cached view of it. A bare `CHECKPOINT` is not enough: it
+    // checkpoints the in-memory database this session is rooted in, not the
+    // attached DuckLake metadata file the retype actually lands in.
+    session.connection().execute_batch("DETACH lake;").unwrap();
     drop(session);
     let jobs = schema::enqueue_tenant_migrations(&client).await.unwrap();
-    assert!(
-        dispatcher::dispatch_once(&client, None, None)
-            .await
-            .unwrap()
-    );
+    let _ = harness
+        .run_to_settlement(&client, &jobs[0].1.org_id, &jobs[0].1.id)
+        .await;
     let report = schema::wait_for_tenant_migrations(&client, &jobs, Duration::from_secs(30))
         .await
         .unwrap();
@@ -149,7 +159,13 @@ async fn the_sweep_reconciles_every_active_tenant_and_reports_it() {
         job.state, "failed",
         "a breaking schema is terminal, not retried"
     );
-    assert_eq!(job.error_class.as_deref(), Some("internal"));
+    // `data`, where the legacy arm said `internal`. The class changed with the
+    // classifier, not with the behaviour: `internal` was `pg::FailureClass`'s
+    // UNCLASSIFIED DEFAULT, and the rules that moved to the executor boundary
+    // call a schema mismatch what it is. Terminality — which is what the
+    // assertion above is actually about — is unchanged: `data` maps to
+    // `StageFailure` and is not in the retryable set.
+    assert_eq!(job.error_class.as_deref(), Some("data"));
 
     let run = pg::enqueue(
         &client,
@@ -163,11 +179,7 @@ async fn the_sweep_reconciles_every_active_tenant_and_reports_it() {
     )
     .await
     .unwrap();
-    assert!(
-        dispatcher::dispatch_once(&client, None, None)
-            .await
-            .unwrap()
-    );
+    let _ = harness.run_to_settlement(&client, &acme, &run.id).await;
     let run = pg::get_job(&client, &acme, &run.id).await.unwrap().unwrap();
     assert_eq!(run.state, "failed", "every lake job reconciles first");
     assert!(

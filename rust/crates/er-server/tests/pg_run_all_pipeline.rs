@@ -108,9 +108,6 @@ async fn run_all_full_runs_as_seven_pods_and_reproduces_base_10() {
     let cfg = ExecutorConfig {
         // Neither kind here provisions, so no profile is needed.
         profile: Ok(None),
-        dag_kinds: ["run_all_full".to_string(), "train".to_string()]
-            .into_iter()
-            .collect(),
         in_flight_cap: 2,
         template: er_k8s::manifest::REFERENCE_TEMPLATE.to_string(),
         image_digest: None,
@@ -139,7 +136,7 @@ async fn run_all_full_runs_as_seven_pods_and_reproduces_base_10() {
     .await
     .unwrap();
     assert!(
-        dispatcher::dispatch_once(&client, None, Some(&mut executor))
+        dispatcher::dispatch_once(&client, Some(&mut executor))
             .await
             .unwrap(),
         "the executor claims and plans a run_all_full"
@@ -308,7 +305,7 @@ async fn run_all_full_runs_as_seven_pods_and_reproduces_base_10() {
     .await
     .unwrap();
     assert!(
-        dispatcher::dispatch_once(&client, None, Some(&mut executor))
+        dispatcher::dispatch_once(&client, Some(&mut executor))
             .await
             .unwrap(),
         "the executor claims and plans a train"

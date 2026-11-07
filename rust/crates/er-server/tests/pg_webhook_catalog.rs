@@ -33,6 +33,14 @@ use crate::common;
 /// emits rather than against a comment about it.
 const SERVER_SRC: &str = include_str!("../src/lib.rs");
 const DISPATCHER_SRC: &str = include_str!("../src/dispatcher.rs");
+/// The executor's settle and the control tasks, which is where the emit sites
+/// MOVED to. Scanning only `lib.rs` and `dispatcher.rs` was right while the
+/// legacy in-process arm emitted everything; with that arm deleted (#645) the
+/// `job.*` webhook, the `entity.*` aggregate, `entity.write_back` and
+/// `review.resolved` all fire from here, and a gate that cannot see them would
+/// have failed for the opposite of the real reason.
+const EXECUTOR_SRC: &str = include_str!("../src/executor.rs");
+const CONTROL_SRC: &str = include_str!("../src/dags/control/mod.rs");
 
 fn req(method: &str, uri: &str, bearer: &str, body: Body) -> Request<Body> {
     Request::builder()
@@ -58,7 +66,7 @@ fn every_catalogued_event_has_a_state_that_reaches_the_emitter() {
     // keeps the catalog honest: listing an event nothing fires is the bug this
     // catalog exists to prevent, and a comment claiming otherwise would not
     // fail anything.
-    let emitting_sources = format!("{SERVER_SRC}{DISPATCHER_SRC}");
+    let emitting_sources = format!("{SERVER_SRC}{DISPATCHER_SRC}{EXECUTOR_SRC}{CONTROL_SRC}");
     for (event, _) in webhook::EVENT_CATALOG {
         let Some(state) = event.strip_prefix("job.") else {
             // A non-job event brings its OWN evidence: its literal type string

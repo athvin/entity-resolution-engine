@@ -97,7 +97,6 @@ be grouped, filtered by target, or joined to a trace.
 - `er-server/src/mail.rs`
 - `er-server/src/main.rs`
 - `er-server/src/pg.rs`
-- `er-server/src/reporter.rs`
 - `er-server/src/satoken.rs`
 - `er-server/src/shutdown.rs`
 - `er-server/src/telemetry.rs`

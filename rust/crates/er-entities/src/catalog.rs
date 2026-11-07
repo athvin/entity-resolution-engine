@@ -1432,7 +1432,7 @@ columns:
     type: bigint
     nullable: false
     default: "3"
-    description: "Maximum attempts before the job fails."
+    description: "Vestigial: no statement consults it. It bounded the job-level retry that went with the legacy in-process arm (#645); the live budget is task_instances.max_tries, per attempt."
   - name: error_class
     type: varchar
     description: "Why the job failed, as a class the UI can act on: precondition (an input is missing — expected during onboarding), transient_io (worth retrying), config (the tenant config is wrong), internal (a bug). Null until a failure."
