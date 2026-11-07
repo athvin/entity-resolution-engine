@@ -174,6 +174,21 @@ Still check `git branch --show-current` and `git rev-parse HEAD` in the same too
 call as any commit, and stage by explicit path. A worktree makes the shared-clone
 collision unlikely, not impossible.
 
+**`pkill` and `killall` are denied in `.claude/settings.json`, and the reason is
+other sessions.** Every session runs the identical `make check`, so the command
+line cannot tell yours from theirs — only the PID can, and the worktree path
+never appears in a process's arguments at all (it is just the cwd, so
+`pgrep -f '<worktree>.*make check'` matches nothing even while the run is live).
+A `pkill -f 'make check'` therefore kills whatever the rest of the fleet is
+doing: it happened, and it cost a peer session a full cold build. Capture the
+PID when you start anything long and `kill` that.
+
+And **never rebase, switch or stash while that session's own gate is running.**
+The branch-switch case above makes the gate report artifacts; a rebase that
+pulls in a dependency bump is worse, because the in-flight compile is then
+running against a lockfile that no longer exists and its result means nothing
+either way.
+
 ## Layout
 
 The backend is the Rust workspace under `rust/`; the Python/dbt

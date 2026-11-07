@@ -69,6 +69,7 @@ binary**, not a target of its own, so run one with
 - `er-schema/tests/collector_allowlist.rs` — The collector's attribute allowlist still covers what the code emits.
 - `er-schema/tests/span_boundaries.rs` — The posterity gate for blocking hops: no bare `spawn_blocking` in the control plane.
 - `er-schema/tests/sql_span_pii.rs` — The PII boundary on spans, enforced rather than documented.
+- `er-schema/tests/telemetry_layering.rs` — The telemetry layering rule: only a crate that owns an entry point may depend on `er-obs`.
 
 ### Structured events versus bare stderr
 
