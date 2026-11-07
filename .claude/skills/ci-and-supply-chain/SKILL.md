@@ -331,72 +331,24 @@ order that made it safe to add.
 
 `pr-contract.yml` asserts two things about a PR's **body** rather than its tree:
 that it closes an issue in this repository, and that it carries the
-`<!-- BEGIN POST-MERGE -->` ledger from
-[`.github/pull_request_template.md`](../../../.github/pull_request_template.md).
-The first exists because the board's `Pull request merged` automation acts on
-the *linked issue* — a PR that closes nothing moves no card, so the work lands
-and the board silently does not show it. The second gives `/land-pr` somewhere
-durable to record the post-merge follow-ups.
+`<!-- BEGIN POST-MERGE -->` ledger from the pull-request template. The first
+exists because the board's `Pull request merged` automation acts on the *linked
+issue* — a PR that closes nothing moves no card, so work lands and the board
+silently does not show it. The second gives `/land-pr` somewhere durable to
+record the post-merge follow-ups.
 
-It is its own workflow because it needs `types: [… edited …]`: adding
-`Closes #<n>` to a description must turn the check green without a push, and
-putting `edited` on `rust.yml` would re-run the backend gate on every typo fix.
-It carries no `paths:` filter, so it stays promotable.
+It is **required** as of 2026-11-07. It reads GitHub's own
+`closingIssuesReferences` rather than regexing the body, so a `Closes #<n>` that
+would not actually close anything does not pass; `merge-bus/*`, Dependabot,
+reverts and the `no-ticket` label are exempt, the first load-bearing because
+`merge-bus-verdict.sh` reads the bus PR's own rollup.
 
-The ticket clause reads GitHub's own `closingIssuesReferences` — the same parse
-that actually closes the issue — rather than regexing the body. A regex would
-pass `Closes #<n>` written inside a code fence, or a keyword GitHub does not
-honour, and the card would then not move for exactly the reason the check
-exists.
-
-Four exemptions, and the first is load-bearing rather than a convenience:
-
-| Exempt | Why |
-|---|---|
-| a `merge-bus/*` head branch | a bus PR closes no issue by design, and `merge-bus-verdict.sh` reads its `statusCheckRollup` — a failing context there would stop **every** batch from landing |
-| Dependabot | a bump has no ticket |
-| a title starting `Revert` | `/land-pr` reverts to get `main` green; bookkeeping must not stand in front of that |
-| the `no-ticket` label | the human override, whole-name match (`no-ticket-yet` is a different label) |
-
-The decision logic is pure and lives in `scripts/ci/pr-contract.sh`, so
-`bash scripts/ci/pr-contract-test.sh` exercises it over fixtures with no
-network — including the case that the committed template passes its own gate,
-which is how a marker dropped from the template gets caught before it fails
-every PR opened afterwards. The job runs that self-test **before** the check,
-for the usual reason: a classifier that has stopped noticing anything passes
-everything, which is indistinguishable from a clean tree.
-
-**It was promoted in a separate act from shipping it, and the order is the
-reusable part.** Branch protection is repository configuration rather than a
-file here, so adding a context is never part of a pull request. The sequence
-that made it safe, worth repeating for the next gate: let the check report on
-real PRs first → observe it **failing** on one → confirm no open PR would be
-blocked (ask the classifier per PR, do not assume) → then append the context.
-A context made required before that sweep blocks every open pull request at
-once, and the two it would have blocked here had bodies predating the template.
-
-Two mechanics of the promotion itself cost care. The
-`required_status_checks` endpoint **replaces** the list rather than appending,
-so the existing contexts have to be read, kept with their `app_id`, and
-re-sent — dropping one silently removes a gate. And after the PATCH, verify by
-**what blocks each open PR** rather than by its `mergeStateStatus`: both read
-`BLOCKED` immediately afterwards, and neither was blocked by the new context —
-each was waiting on its own Rust jobs. The
-[`polling.md`](../land-pr/references/polling.md) recipe is what answers that,
-because it diffs the satisfied set against the required set.
-
-**It is also the first check here that can report more than once per head SHA**,
-because a body edit re-triggers it without a push — and that exposes something
-about the rollup. Measured on #809: three body edits left **four** check-runs
-named `pull request contract` on one SHA, and `statusCheckRollup` returns *all
-of them*, including a `FAILURE` that a later run had already healed. Branch
-protection reads the latest, so the merge was never at risk; `gh pr checks` and
-anything summing the rollup will show a red that no longer exists.
-`polling.md`'s recipe is already immune — it does
-`group_by(.name) | map(max_by(.started_at))`, and that line is load-bearing
-rather than tidy. `merge-bus-verdict.sh` does **not** take the latest, but is
-not exposed: the bus PR is exempt, so its contract check reports success and a
-healed failure cannot arise there.
+Three things it is worth not re-deriving: the order that makes promoting **any**
+check to required safe, the two mechanics of that `PATCH` that bite (the
+endpoint *replaces* the context list, and `mergeStateStatus` cannot tell you
+what blocks a PR), and the fact that a body edit means one SHA can carry several
+check-runs of one name — `statusCheckRollup` returns all of them, healed
+failures included. All three: [references/pr-contract.md](references/pr-contract.md).
 
 ## The merge bus
 
