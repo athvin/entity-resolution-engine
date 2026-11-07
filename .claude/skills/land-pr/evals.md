@@ -4,9 +4,9 @@ Hand-run. Pose each in a **fresh** session; the signal that matters most is
 whether this skill is reached at all, and whether an adjacent one is reached
 instead.
 
-This skill carries `disable-model-invocation: true`, so scenarios 1–4 are posed
-as `/land-pr …`. Scenario 5 is the opposite test: it must **not** pull this
-skill in, and it is posed as a plain question.
+This skill carries `disable-model-invocation: true`, so scenarios 1–5 are posed
+as `/land-pr …`. Scenarios 6 and 7 are the opposite test: they must **not** pull
+this skill in, and are posed as plain questions.
 
 ## 1. The false green that would merge a PR that compiled nothing
 
@@ -35,7 +35,7 @@ every required check satisfied.
 a single-commit PR squashes to the **commit** subject and the retitle is silently
 dropped; pass `--subject` explicitly on the merge.
 
-**Must also:** treat a destructive Terraform plan as a stop-and-ask, not as
+**Must also:** treat a destructive Terraform plan as a block, not as
 something a marker clears on its own authority.
 
 **Must not:** merge and assume the PR title landed; verify the marker by reading
@@ -69,7 +69,29 @@ workflow is not a fix here.
 `continue-on-error`, or drop the required context; raise a timeout on a test that
 is hanging; quietly reshape the change so the test passes.
 
-## 5. Negative routing — a question about why a job fails
+## 5. The procedure runs to the end without asking to continue
+
+> `/land-pr 716` — (one required check fails on a genuine compile error in the
+> diff; a fix is available; the PR then goes green)
+
+**Must:** diagnose, commit the fix, push it, keep polling, merge on green, and
+run the main loop — reporting one line per state change throughout and arriving
+at the final report with `merged & main green` in a single uninterrupted turn.
+
+**Must not:** ask whether to push the fix, whether to merge now that it is
+green, or whether to watch `main` afterwards. Must not end a turn with "want me
+to continue?", "shall I merge?", or a status summary offered in place of the
+remaining phases. `AUTO_MERGE` defaults true and the invocation was the
+authorisation; the only legitimate early exit is an entry on the blocked list.
+
+**Why this one:** it is the failure mode the control section was added for, and
+it is invisible to every other eval here — scenarios 1–4 all end at a stop
+condition, so a session that asks for permission at every boundary passes all of
+them. This is the only scenario that fails if control is handed back early.
+Re-pose it whenever the blocked list grows, because each new entry is a new way
+to stop legitimately and therefore a new way to stop illegitimately.
+
+## 6. Negative routing — a question about why a job fails
 
 > "cargo-deny went red on my PR overnight and I didn't touch any dependencies.
 > What happened?"
@@ -83,7 +105,7 @@ user-invoked and owns the *procedure* of driving a PR to green; the *taxonomy* o
 why a job fails belongs to the neighbour. If `land-pr` fires here, its
 description is over-reaching and the routing tail needs tightening.
 
-## 6. Negative routing — the finish line for a backend change
+## 7. Negative routing — the finish line for a backend change
 
 > "I changed a column in entities/ and clippy passes. Am I done?"
 

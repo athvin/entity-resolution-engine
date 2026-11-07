@@ -9,9 +9,33 @@ disable-model-invocation: true
 
 Arguments: `$ARGUMENTS` — a PR number or URL, then any overrides.
 
-Defaults: `AUTO_MERGE=true` (there is a standing authorisation to push, open and
-merge on green here, so stopping at green to ask is the behaviour that needs
-requesting, not the merge), `WATCH_WINDOW=30m`.
+Defaults: `AUTO_MERGE=true`, `WATCH_WINDOW=30m`.
+
+## Invoking this skill is the authorisation
+
+**Being handed a PR here means taking it to green on `main`, not reporting on
+its progress.** The whole arc is pre-authorised — commit a fix, push it,
+`--force-with-lease` over your own commits after a rebase, rerun a flaky job,
+squash-merge on green, open a follow-up PR, revert if the depth cap is hit — and
+none of it needs a per-step yes. Phase boundaries are not checkpoints: merging
+and then asking whether to watch `main` is the same as not having run Phase 3.
+
+The failure this prevents is subtle, because it looks diligent. A procedure that
+reports at every boundary and waits is slower than no procedure at all — the
+user is now polling the assistant that was asked to do the polling, and the
+false green this skill exists to defeat is exactly what they will accept while
+doing it.
+
+So the asking is inverted. **Stopping needs a reason**, and
+[the list below](#blocked--stop-and-say-why) is that list; it is short and every
+entry is either irreversible, environmental, or a judgment that is genuinely the
+user's. Everything not on it is yours to do. If the user is unreachable at a
+real block, do the preparatory work — branch, diagnosis, draft PR — and stop
+there with it done.
+
+Progress still gets reported, one line per state change (check failed →
+diagnosing, pushed fix, merged, main green). That is narration of work in
+flight, not a request to continue.
 
 Budgets: 5 fix iterations per PR, 2 reruns per distinct flaky failure, 2
 follow-up PRs before reverting. Do **not** budget wall-clock per CI pass from a
@@ -25,9 +49,6 @@ on `main` **with this change on it**. The second exists because `main`'s
 protection is `strict: false`, so a PR merges on a green it won against a base
 that may since have moved, and because `images`, `deploy`, `kind` and `drift`
 never run on a pull request at all.
-
-Report state changes in one line each — check failed → diagnosing, pushed fix,
-merged, main green. Not every poll.
 
 ## The six house rules that override the generic procedure
 
@@ -43,7 +64,9 @@ merged, main green. Not every poll.
    "No checks reported" is never green.
 4. **There is no auto-merge.** `allow_auto_merge` is false on this repository, so
    `gh pr merge --auto` cannot arm anything; the poll-then-merge loop below is
-   the only mechanism.
+   the only mechanism. Not to be confused with this skill's own `AUTO_MERGE`,
+   which is about whether *you* pause before merging, not about a GitHub feature
+   — the names collide and the facts are unrelated.
 5. **`make check` is the local gate, not the cargo trio.** `cargo fmt` +
    `clippy` + `test` skip `entities-check` and `skills-check`, which is where a
    change that looks clean actually fails. See `rust-conventions`.
@@ -156,8 +179,11 @@ not a draft.
 
 ## Phase 2 — merge
 
-Only with `AUTO_MERGE=true` or an explicit yes. Squash, which is the house
-method.
+Squash, which is the house method. No confirmation step: `AUTO_MERGE` defaults
+true and the invocation was the authorisation. Pausing here to ask is the
+behaviour that needs requesting — `AUTO_MERGE=false` is how a user asks for it,
+and then the exit is "green, awaiting merge" with the merge command written out
+ready to run.
 
 **The squash subject trap.** `squash_merge_commit_title` is
 `COMMIT_OR_PR_TITLE`: a **single-commit** PR squashes to the *commit* subject
@@ -232,12 +258,14 @@ obvious fix, or when the user has said they are away.
 nothing new on `main` has failed for `WATCH_WINDOW`, and any deploy has
 converged on a log line the process emitted.
 
-## Stop and ask instead of looping
+## Blocked — stop and say why
 
-- A merge without `AUTO_MERGE` or an explicit yes
+This is the **whole** list. Nothing outside it is a reason to hand control back
+mid-procedure.
+
 - An environmental failure — Actions billing, a missing secret, a quota
 - A fix that would require weakening a test, a lint or a workflow
-- A budget exhausted
+- A budget exhausted — the three stated above
 - The PR's own change looks wrong, in that the fix the gate demands contradicts
   what the PR set out to do. Say so; do not quietly reshape a feature to satisfy
   a test
@@ -245,9 +273,16 @@ converged on a log line the process emitted.
   a PVC, a bucket. A fix-forward must never slide a destructive plan through
 - A deployment environment waiting on a human approver. Report it; never try to
   approve a deployment
+- `AUTO_MERGE=false` was passed, which is a user asking for the pause
 
-Ask once, framed so that yes or no answers it. If the user is unreachable, do
-the preparatory work — branch, diagnosis, draft PR — and stop there.
+Ask once, framed so that yes or no answers it.
+
+**Not blocks, and not worth a question:** a red check (diagnose it), a flaky
+check (rerun it, twice at most), a conflicted branch (rebase it), a merge on
+green, a `main` that went red after the merge (attribute it, then fix forward),
+a long CI pass (keep polling — the user asked for the polling), or reaching a
+phase boundary. A question about any of these spends a turn to learn something
+the skill already answers.
 
 ## Final report
 
