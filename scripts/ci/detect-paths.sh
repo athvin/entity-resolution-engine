@@ -1,9 +1,14 @@
 # Path classification for `rust.yml`'s `detect` job. Sourced, not executed.
 #
-# `detect` answers three questions about a PR's changed paths, and both the
+# `detect` answers four questions about a PR's changed paths, and both the
 # `filter` step and the content-addressed `key` step need the same answers. They
 # used to carry two copies of one regex with a comment asking future editors to
 # keep them identical; this file is that comment made mechanical.
+#
+# Three of the four are "which jobs must run"; the fourth, `empty`, is "are
+# there any changed paths at all" — see `detect_classify`, where the denylist
+# direction read a zero-file PR as a code change for as long as this file has
+# existed.
 #
 # DETECT_EXEMPT is a DENYLIST of paths the backend gate provably never reads.
 # Adding an entry is removing something from the gate's sight, so only add a
@@ -79,7 +84,7 @@ DETECT_DRIFT='^(\.claude/skills/entity-framework/references/entity-framework-des
 # ride a stale pass marker.
 DETECT_COUPLED='^(\.claude/skills/entity-framework/references/erd\.md|\.claude/skills/entity-framework/references/entity-framework-design\.md|\.claude/skills/skill-writer/references/agent-skills\.md|CLAUDE\.md)$'
 
-# Classify a newline-separated list of changed paths on stdin. Emits the three
+# Classify a newline-separated list of changed paths on stdin. Emits the four
 # `key=value` lines `detect` writes to $GITHUB_OUTPUT, in that order.
 #
 # The workflow calls this and so does `detect-paths-test.sh`, which is the point:
@@ -95,6 +100,39 @@ detect_classify() {
 	local changed noncode erd_n drift_n
 	changed="$(cat)"
 
+	# A PULL REQUEST THAT INTRODUCES NO FILES AT ALL. `base...head` empty means
+	# head's tree equals the merge base, so there is provably nothing to
+	# compile — but the DENYLIST direction could not see that on its own, and
+	# ran the whole backend gate instead. The blank line below is why: the
+	# counting pipelines re-expand `$changed` with `printf '%s\n'`, which for an
+	# empty string emits ONE BLANK LINE, a blank line matches no exemption, and
+	# so `grep -cv` reported one non-exempt path. Measured before this guard
+	# existed: an empty diff classified `code=true erd=true drift=true`.
+	#
+	# It is the four ALLOWLIST detects — frontend, infra, images, devcontainer —
+	# that never had the bug, because zero paths is zero matches there. Only
+	# this one inverts.
+	#
+	# Not a rare accident, either: `claim-ticket` opens exactly this shape on
+	# purpose — a draft PR pushed from an empty commit, so the claim is visible
+	# on GitHub before any code exists — and every one of those paid ~10m across
+	# the whole compile matrix plus its ~0.6 GB of sccache S3 egress to prove a
+	# tree identical to `main`.
+	#
+	# The test is a plain `-z` rather than whitespace-stripping because
+	# `changed="$(cat)"` has already dropped the trailing newline: an empty
+	# stdin and a single-newline stdin both arrive here as the empty string.
+	# `detect-paths-test.sh` reaches the case by passing no paths at all.
+	#
+	# `empty` is a SEPARATE output rather than folded into `code` because two
+	# different jobs need the two answers: the compile tier skips (which branch
+	# protection accepts), while `empty pull request` fails — so a claim PR
+	# reads red rather than green with nothing proved.
+	if [ -z "$changed" ]; then
+		printf 'code=false\nerd=false\ndrift=false\nempty=true\n'
+		return
+	fi
+
 	noncode="$(printf '%s\n' "$changed" | grep -cvE "$DETECT_EXEMPT" || true)"
 	erd_n="$(printf '%s\n' "$changed" | grep -cE "$DETECT_ERD" || true)"
 	drift_n="$(printf '%s\n' "$changed" | grep -cE "$DETECT_DRIFT" || true)"
@@ -103,11 +141,13 @@ detect_classify() {
 		# Real code changed, so every job runs anyway. Forcing the two narrow
 		# outputs true keeps downstream `if:` expressions from having to know
 		# that `code` subsumes them.
-		printf 'code=true\nerd=true\ndrift=true\n'
+		printf 'code=true\nerd=true\ndrift=true\nempty=false\n'
 		return
 	fi
 
 	printf 'code=false\n'
 	[ "${erd_n:-0}" -gt 0 ] && printf 'erd=true\n' || printf 'erd=false\n'
 	[ "${drift_n:-0}" -gt 0 ] && printf 'drift=true\n' || printf 'drift=false\n'
+	# Reached only with at least one changed path, so never empty here.
+	printf 'empty=false\n'
 }

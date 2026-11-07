@@ -21,7 +21,7 @@
 # which is the fail-safe direction.
 #
 # Inputs (env): EVENT, BASE_SHA, HEAD_SHA. Outputs ($GITHUB_OUTPUT): code,
-# erd, drift.
+# erd, drift, empty.
 # Run: EVENT=.. BASE_SHA=.. HEAD_SHA=.. bash scripts/ci/rust-detect.sh
 set -euo pipefail
 
@@ -32,6 +32,11 @@ if [ "${EVENT:-}" != "pull_request" ] && [ "${EVENT:-}" != "merge_group" ]; then
 		echo "code=true"
 		echo "erd=true"
 		echo "drift=true"
+		# `empty` is about a PULL REQUEST introducing no files. A push, a
+		# schedule or a dispatch has no base...head to be empty of, and the
+		# `empty pull request` job is gated on the event as well, so false is
+		# the only answer that means anything here.
+		echo "empty=false"
 	} >> "$GITHUB_OUTPUT"
 	exit 0
 fi

@@ -48,7 +48,7 @@ the same fix.
 | `api-contract` | the utoipa `ApiDoc` whose component schemas come from the generated entity structs |
 | `aws-account-operations` | the single-account model where environments are separated by name prefix and permission set |
 | `ci-and-supply-chain` | the `detect`-job pattern that lets a required check skip without blocking a PR |
-| `claim-ticket` | selects the most important unclaimed card in the board's In progress queue (or takes a given issue number) (user-invoked only) |
+| `claim-ticket` | selects the most important unclaimed card in the board's In progress queue (or takes a given issue number) |
 | `ducklake-lakehouse` | the ATTACH options, the native-temp-catalog rule for intermediates |
 | `ducklake-performance` | how to read span and resource evidence without over-claiming |
 | `entity-framework` | the YAML-driven schema and SQL governance where every table is an entity.yaml |

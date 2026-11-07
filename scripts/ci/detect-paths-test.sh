@@ -32,8 +32,11 @@ expect() {
 	fi
 }
 
-ALL='code=true erd=true drift=true'
-NONE='code=false erd=false drift=false'
+ALL='code=true erd=true drift=true empty=false'
+NONE='code=false erd=false drift=false empty=false'
+# A PR that changes nothing: no compile job, and `empty pull request` fails so
+# the PR is not green. Distinct from NONE, which is a real (exempt) change.
+EMPTY='code=false erd=false drift=false empty=true'
 
 # --- the gate MUST run -----------------------------------------------------
 expect 'a rust source change' "$ALL" 'rust/crates/er-match/src/lib.rs'
@@ -56,6 +59,18 @@ expect 'a prose skill ref AND a rust file' "$ALL" \
 	'.claude/skills/er-matching/references/invariants.md' 'rust/crates/er-match/src/lib.rs'
 expect 'a skill AND a rust file' "$ALL" '.claude/skills/er-matching/SKILL.md' 'rust/Cargo.lock'
 expect 'a hook AND a rust file' "$ALL" 'scripts/hooks/aws-write-guard.sh' 'rust/crates/er-match/src/lib.rs'
+
+# --- a pull request that changes nothing -----------------------------------
+# The shape `claim-ticket` opens deliberately: a draft PR pushed from an empty
+# commit. `base...head` is empty, so no job has anything to compile — but this
+# is the DENYLIST detect, and before the guard in `detect_classify` the single
+# blank line that `printf '%s\n' ""` emits matched no exemption and classified
+# as real code, so every one of those PRs paid the full backend gate.
+#
+# No path arguments at all is exactly what the workflow passes: `expect` runs
+# `printf '%s\n' "$@"`, which with zero args emits one newline, and
+# `changed="$(cat)"` strips it — byte-identical to `git diff` finding nothing.
+expect 'a pull request that changes nothing' "$EMPTY"
 
 # --- no compile job at all -------------------------------------------------
 expect 'a skill body only' "$NONE" '.claude/skills/er-matching/references/invariants.md'
@@ -86,20 +101,20 @@ expect 'the whole devcontainer change' "$NONE" \
 # `.claude/**` exemption. Both targets now live under `.claude/`, so the
 # re-admission in DETECT_DRIFT is the only thing keeping this case true.
 expect 'a skill + its regenerated tables' \
-	'code=false erd=false drift=true' \
+	'code=false erd=false drift=true empty=false' \
 	'.claude/skills/skill-audit/SKILL.md' 'CLAUDE.md' '.claude/skills/skill-writer/references/agent-skills.md'
-expect 'CLAUDE.md alone' 'code=false erd=false drift=true' 'CLAUDE.md'
-expect 'the agent-skills standard' 'code=false erd=false drift=true' \
+expect 'CLAUDE.md alone' 'code=false erd=false drift=true empty=false' 'CLAUDE.md'
+expect 'the agent-skills standard' 'code=false erd=false drift=true empty=false' \
 	'.claude/skills/skill-writer/references/agent-skills.md'
 expect 'the diagnostics generator source' \
-	'code=false erd=false drift=true' '.claude/skills/entity-framework/references/entity-framework-design.md'
+	'code=false erd=false drift=true empty=false' '.claude/skills/entity-framework/references/entity-framework-design.md'
 
 # --- `entities` only, for the generated ERD --------------------------------
-expect 'the generated ERD' 'code=false erd=true drift=false' '.claude/skills/entity-framework/references/erd.md'
-expect 'the ERD plus prose' 'code=false erd=true drift=false' \
+expect 'the generated ERD' 'code=false erd=true drift=false empty=false' '.claude/skills/entity-framework/references/erd.md'
+expect 'the ERD plus prose' 'code=false erd=true drift=false empty=false' \
 	'.claude/skills/entity-framework/references/erd.md' '.claude/skills/er-matching/references/invariants.md'
 expect 'the ERD plus a drift target' \
-	'code=false erd=true drift=true' '.claude/skills/entity-framework/references/erd.md' 'CLAUDE.md'
+	'code=false erd=true drift=true empty=false' '.claude/skills/entity-framework/references/erd.md' 'CLAUDE.md'
 
 echo "---"
 echo "pass=$pass fail=$fail"

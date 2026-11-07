@@ -128,6 +128,7 @@ job instead — `terraform plan` is the worked example.
 | Job | Status-check context | Timeout | Condition |
 |---|---|---|---|
 | `detect` | detect changes | 5 | `always` |
+| `empty` | empty pull request | 5 | `github.event_name == 'pull_request' && needs.detect.outputs.empty == 'true'` |
 | `skills` | agent skills (lint + drift) | 5 | `always` |
 | `workflow-pins` | workflow pins (S9) | 5 | `always` |
 | `lint` | fmt + clippy + docs | 45 | `needs.detect.outputs.code == 'true' \|\| needs.detect.outputs.drift == 'true'` |

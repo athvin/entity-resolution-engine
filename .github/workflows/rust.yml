@@ -11,6 +11,21 @@
 # `if:` reports a "skipped" conclusion, which branch protection accepts as
 # satisfied — so the PR stays mergeable with zero compute.
 #
+# A FOURTH exception, and it is a different kind: a PR that changes NO FILES AT
+# ALL. `detect` reports `code=false` for it too, but that case needed a guard of
+# its own, because this is the one detect in the repo built as a DENYLIST and an
+# empty path list inverts through it — the blank line a shell `printf` emits for
+# an empty string matches no exemption, so it counted as real code and ran the
+# whole gate. The four allowlist detects (frontend, infra, images, devcontainer)
+# never had it: zero paths is zero matches there. See `detect_classify` in
+# scripts/ci/detect-paths.sh.
+#
+# Unlike the other three, an empty PR must not come out GREEN — a skip alone
+# would satisfy every required context having proved nothing — so the `empty`
+# job below fails on purpose. `claim-ticket` opens exactly this shape (a draft
+# PR from an empty commit, claiming a ticket before any code exists), which is
+# why the case is worth a guard rather than a shrug.
+#
 # Why `infra/terraform/**` is safe to skip, which is not obvious: nothing in the
 # Rust gate reads it. No crate or manifest references it (the two mentions under
 # `rust/` are prose in comments), and `make check` touches `infra/` nowhere.
@@ -200,6 +215,10 @@ jobs:
       # A generated-skill-reference input or target changed: `lint` must run the
       # drift check, which is the only copy of it that can block a merge.
       drift: ${{ steps.filter.outputs.drift }}
+      # The PR introduces NO files at all. Read by `empty` below, and reported
+      # separately from `code` because the two answers go to opposite places:
+      # the compile tier skips, and `empty` fails.
+      empty: ${{ steps.filter.outputs.empty }}
       pass_key: ${{ steps.key.outputs.key }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -252,6 +271,41 @@ jobs:
           HIT: ${{ steps.lookup.outputs.cache-hit }}
           KEY: ${{ steps.key.outputs.key }}
         run: bash scripts/ci/pass-decide.sh
+
+  # THE RED X ON A PULL REQUEST THAT CHANGES NOTHING, and the cheapest thing
+  # that can produce one. `detect` now classifies an empty `base...head` as
+  # `code=false`, so every compile job above skips — which is correct (there is
+  # nothing to compile) but would otherwise leave the PR reading GREEN, with
+  # every required context satisfied and not one line of code proved. This job
+  # is the other half: the skip makes it cheap, this makes it honest.
+  #
+  # Why that shape exists on purpose: `claim-ticket` opens a draft PR from an
+  # EMPTY COMMIT so the claim on a ticket is visible on GitHub before any code
+  # does. Before the `detect` guard those PRs each ran the full compile matrix
+  # — ~10m wall and ~0.6 GB of sccache S3 egress — to prove a tree identical to
+  # `main`.
+  #
+  # DELIBERATELY NOT A REQUIRED STATUS CHECK, and it should stay that way. A
+  # draft is already unmergeable, so there is nothing for it to block; and
+  # adding a required context is a branch-protection change that is only safe
+  # AFTER the job has reported on `main` (see the header's note on `entities`).
+  # Non-required is also what lets the red clear itself: the first real commit
+  # flips `empty` to false, this job skips, and the gate takes over.
+  #
+  # `working-directory` is overridden because the workflow default is `rust`,
+  # which does not exist in a job that never checks out.
+  empty:
+    name: empty pull request
+    needs: detect
+    if: github.event_name == 'pull_request' && needs.detect.outputs.empty == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: fail — this pull request introduces no files
+        working-directory: ${{ github.workspace }}
+        run: |
+          echo "::error::this pull request changes no files; push a commit or close it"
+          exit 1
 
   # Deliberately NOT gated on `detect`. The jobs below skip for a PR that only
   # touches `.claude/**` — which is exactly the PR that changes a skill, so a
