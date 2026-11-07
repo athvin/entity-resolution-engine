@@ -130,7 +130,7 @@ impl Harness {
             //
             // A claim failure is not fatal: once every job is terminal there
             // is nothing to claim and `dispatch_once` returns false.
-            let _ = er_server::dispatcher::dispatch_once(client, None, Some(&mut self.executor))
+            let _ = er_server::dispatcher::dispatch_once(client, Some(&mut self.executor))
                 .await
                 .expect("dispatch_once");
             pump(&mut self.executor, &mut self.frames).await;
@@ -209,7 +209,7 @@ impl Harness {
         .await
         .unwrap_or_else(|e| panic!("enqueue {kind}: {e}"));
         assert!(
-            er_server::dispatcher::dispatch_once(client, None, Some(&mut self.executor))
+            er_server::dispatcher::dispatch_once(client, Some(&mut self.executor))
                 .await
                 .expect("dispatch_once"),
             "the executor claims and plans the {kind} job"

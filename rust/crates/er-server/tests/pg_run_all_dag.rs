@@ -104,7 +104,7 @@ async fn lake_maintain_runs_end_to_end_through_the_executor() {
     )
     .await
     .unwrap();
-    let ran = dispatcher::dispatch_once(&client, None, Some(&mut executor))
+    let ran = dispatcher::dispatch_once(&client, Some(&mut executor))
         .await
         .unwrap();
     assert!(ran, "the executor claimed and planned the job");
@@ -182,7 +182,7 @@ async fn lake_maintain_runs_end_to_end_through_the_executor() {
     .await
     .unwrap();
     assert!(
-        dispatcher::dispatch_once(&client, None, Some(&mut executor))
+        dispatcher::dispatch_once(&client, Some(&mut executor))
             .await
             .unwrap()
     );
@@ -262,7 +262,7 @@ async fn lake_maintain_runs_end_to_end_through_the_executor() {
     .await
     .unwrap();
     assert!(
-        dispatcher::dispatch_once(&client, None, Some(&mut executor))
+        dispatcher::dispatch_once(&client, Some(&mut executor))
             .await
             .unwrap()
     );
@@ -305,7 +305,7 @@ async fn lake_maintain_runs_end_to_end_through_the_executor() {
     .await
     .unwrap();
     assert!(
-        dispatcher::dispatch_once(&client, None, Some(&mut executor))
+        dispatcher::dispatch_once(&client, Some(&mut executor))
             .await
             .unwrap()
     );

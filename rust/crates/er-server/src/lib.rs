@@ -46,7 +46,6 @@ pub mod pg;
 pub mod profile_params;
 pub mod provision;
 pub mod read;
-pub mod reporter;
 pub mod runctx;
 pub mod s3_ingest;
 pub mod satoken;
@@ -4345,12 +4344,16 @@ async fn attempt_authorized(
         };
         // Bind the attempt: the Job name is a pure function of the attempt key
         // (§4.2), a Job's pods are named `<job>-<suffix>`, and the trailing
-        // dash keeps `…-l1` from matching an `…-l10` pod. The reporter's
-        // synthetic 'inproc' rows can never bind — no Job this dispatcher
-        // creates yields a pod named `inproc-…`.
-        let bound = lineage[0].k8s_job_name.as_deref().is_some_and(|job| {
-            job != crate::reporter::INPROC && claims.pod_name.starts_with(&format!("{job}-"))
-        });
+        // dash keeps `…-l1` from matching an `…-l10` pod.
+        //
+        // This also excluded the literal `inproc`, the legacy arm's synthetic
+        // launch identity. Nothing writes that name now (#645), and the prefix
+        // match would have refused it anyway — no Job yields a pod called
+        // `inproc-…`.
+        let bound = lineage[0]
+            .k8s_job_name
+            .as_deref()
+            .is_some_and(|job| claims.pod_name.starts_with(&format!("{job}-")));
         if !bound {
             return Err(Box::new(
                 unauthorized("the token's pod is not this attempt's launch").into_response(),

@@ -756,9 +756,10 @@ impl Executor {
                     .await?;
             let _ = pending;
             for row in live {
-                if row.kind == "control"
-                    || row.k8s_job_name.as_deref() == Some(crate::reporter::INPROC)
-                {
+                // Control rows only. The `inproc` exemption beside this one
+                // existed for the legacy arm's synthetic launch identity;
+                // nothing writes that name now (#645).
+                if row.kind == "control" {
                     // No pod to wait for: settle at once.
                     let _ = er_entities::task_instance::update::settle_canceled(
                         &self.client,

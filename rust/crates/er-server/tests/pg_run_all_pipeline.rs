@@ -136,7 +136,7 @@ async fn run_all_full_runs_as_seven_pods_and_reproduces_base_10() {
     .await
     .unwrap();
     assert!(
-        dispatcher::dispatch_once(&client, None, Some(&mut executor))
+        dispatcher::dispatch_once(&client, Some(&mut executor))
             .await
             .unwrap(),
         "the executor claims and plans a run_all_full"
@@ -305,7 +305,7 @@ async fn run_all_full_runs_as_seven_pods_and_reproduces_base_10() {
     .await
     .unwrap();
     assert!(
-        dispatcher::dispatch_once(&client, None, Some(&mut executor))
+        dispatcher::dispatch_once(&client, Some(&mut executor))
             .await
             .unwrap(),
         "the executor claims and plans a train"

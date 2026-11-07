@@ -232,7 +232,7 @@ async fn apply_corrections_applies_its_staged_actions_through_the_executor() {
     .await
     .unwrap();
     assert!(
-        dispatcher::dispatch_once(&client, None, Some(&mut harness.executor))
+        dispatcher::dispatch_once(&client, Some(&mut harness.executor))
             .await
             .unwrap(),
         "the executor claims and plans the apply_corrections job"
