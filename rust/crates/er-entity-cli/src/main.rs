@@ -92,7 +92,7 @@ enum Command {
         #[arg(long)]
         lake_data_path: Option<String>,
     },
-    /// Print the entity-relationship diagram (`docs/erd.md`) to stdout. `gen`
+    /// Print the entity-relationship diagram to stdout. `gen`
     /// writes the same document into the tree; `verify` fails when it is stale.
     Erd {
         /// The repository root (holds `entities/`). Defaults to the current dir.
@@ -114,7 +114,8 @@ enum Command {
         /// Explain one rule by code (`--explain V4`), case-insensitive.
         #[arg(long, value_name = "CODE", conflicts_with = "docs")]
         explain: Option<String>,
-        /// Print the generated rule reference (`docs/entity-lint-rules.md`),
+        /// Print the generated rule reference (the `entity-framework` skill's
+        /// `references/entity-lint-rules.md`),
         /// which `gen` writes and `verify` byte-compares.
         #[arg(long)]
         docs: bool,
@@ -196,20 +197,20 @@ fn load_tree(root: &Path) -> Result<GeneratedTree> {
     let mut tree = generate(&catalog).context("generating artifacts")?;
     append_query_modules(&entities_dir, &catalog, &mut tree)?;
     tree.files.push(er_entity_gen::GeneratedFile {
-        path: PathBuf::from("docs/erd.md"),
+        path: PathBuf::from(".claude/skills/entity-framework/references/erd.md"),
         contents: render_erd(root, &catalog)?,
     });
     // The rule reference is generated from the registry and byte-compared by
     // `check`, so the documented rule set cannot drift from the enforced one —
     // which is how three E-codes came to be documented but never implemented.
     tree.files.push(er_entity_gen::GeneratedFile {
-        path: PathBuf::from("docs/entity-lint-rules.md"),
+        path: PathBuf::from(".claude/skills/entity-framework/references/entity-lint-rules.md"),
         contents: er_entity_lint::rules_markdown(),
     });
     Ok(tree)
 }
 
-/// Render `docs/erd.md` from the catalog, the er-schema registry and (when the
+/// Render the ERD from the catalog, the er-schema registry and (when the
 /// frontend tree is present) the latest drizzle snapshot of the `erweb` schema.
 fn render_erd(root: &Path, catalog: &Catalog) -> Result<String> {
     let snapshot = load_erweb_snapshot(root)?;

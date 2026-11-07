@@ -9,6 +9,12 @@ drizzle snapshot (`frontend/drizzle/meta/`) for the frontend's `erweb` schema, a
 the `er-schema` S5 registry for the DuckLake lake. Attribute markers: `PK` the
 primary/logical key, `FK` a declared foreign key, `UK` a unique index.
 
+## Contents
+
+- [Control plane — Postgres `public`](#control-plane--postgres-public)
+- [Frontend BFF — Postgres `erweb`](#frontend-bff--postgres-erweb)
+- [Data plane — DuckLake `lake.main`](#data-plane--ducklake-lakemain)
+
 ## Control plane — Postgres `public`
 
 The erserver control database, provisioned at boot from the generated

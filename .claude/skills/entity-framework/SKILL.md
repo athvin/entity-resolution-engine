@@ -39,13 +39,13 @@ Everything else is gated — see [references/gates.md](references/gates.md).
 | Generated Rust (structs + query fns + `batch.rs` + `schema.rs` + `catalog.rs`) | `rust/crates/er-entities/src/` |
 | Generated DDL | `rust/crates/er-entities/ddl/{lake,postgres}/` |
 | Generated TypeScript | `frontend/src/lib/entities/{bindings,readers}/` |
-| Generated ERD (never hand-edit) | `docs/erd.md` |
+| Generated ERD (never hand-edit) | [references/erd.md](references/erd.md) |
 | Engine-internal lake relations (non-entity) | `rust/crates/er-schema/src/model.rs` (the S5 registry) |
 | The analyser + emitter + E0xx rules | `rust/crates/er-sql-check/` |
 | The generator + emitters | `rust/crates/er-entity-gen/` |
 | The CLI (`er-entity gen/check/verify/diff/migrate/erd`) | `rust/crates/er-entity-cli/` |
 | The reconciler (differ + planner + ledger, both stores) | `rust/crates/er-entity-diff/` |
-| Full design rationale | `docs/entity-framework-design.md` |
+| Full design rationale | [references/entity-framework-design.md](references/entity-framework-design.md) |
 
 Everything under the generated directories is owned by `er-entity gen` —
 hand-edits are overwritten, and files gen did not emit fail `check` as orphans.
@@ -247,7 +247,7 @@ er-entity lint --explain V4    # why the rule exists, plus worked examples
 er-entity lint --list          # the whole registry
 ```
 
-[`docs/entity-lint-rules.md`](../../../docs/entity-lint-rules.md) is the same
+[`references/entity-lint-rules.md`](references/entity-lint-rules.md) is the same
 content, generated from the registry and byte-compared by `verify` so it cannot
 drift. Adding a rule: [references/gates.md](references/gates.md).
 

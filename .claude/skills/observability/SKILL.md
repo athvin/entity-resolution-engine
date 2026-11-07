@@ -138,7 +138,7 @@ cd rust && UPDATE_EXPECT=1 cargo test -p er-obs reference
   `spanmetrics` connector in the collector's values file — a YAML edit,
   revertible, with no Rust change.
 
-[`docs/telemetry-reference.md`](../../../docs/telemetry-reference.md) is
+[`references/telemetry-reference.md`](references/telemetry-reference.md) is
 **generated** from the registry by `cargo test -p er-obs reference` and
 byte-compared, so read the declared metrics and the forbidden list there rather
 than from any prose. A metrics table written by hand is how a metric ends up

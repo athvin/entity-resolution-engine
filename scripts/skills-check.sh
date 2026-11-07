@@ -29,7 +29,7 @@
 #
 #   generators
 #          Asserts every generator wired into `run_regen` appears in the
-#          generator table in docs/agent-skills.md, and nothing appears there
+#          generator table in the agent-skills standard, and nothing appears there
 #          that is not wired. Pure shell, for the `lint` reason. See the section
 #          comment above `generator_table_ids`.
 #
@@ -387,13 +387,13 @@ skill_body() {
 #      contains `frontend-design`, so a bare search matches the house skill's
 #      own name on its every self-reference.
 #   2. A FILENAME containing it. `frontend-design-system`'s body cites
-#      `docs/frontend-design.md` — a document, not the skill — and that alone
+#      `frontend-design` as a bare word in a path or sentence — not the skill — and that alone
 #      made the assertion pass while the override went unstated. This is the
 #      more dangerous of the two, because stripping the skill's own name (the
 #      obvious fix for 1) does nothing about it.
 #
-# Requiring the delimiters rules out both: `docs/frontend-design.md` has no
-# backtick between `design` and `.md`, and `frontend-design-system` has none
+# Requiring the delimiters rules out both: a path like `frontend-design.md` has
+# no backtick between `design` and `.md`, and `frontend-design-system` has none
 # between `design` and `-system`.
 names_skill_in_backticks() {
 	local file=$1 skill=$2 body needle
@@ -508,7 +508,7 @@ run_override_check() {
 # ---------------------------------------------------------------------------
 # the generator registry, asserted against the standard's table
 #
-# The table in docs/agent-skills.md cannot be generated — its "Derived from"
+# The table in the agent-skills standard cannot be generated — its "Derived from"
 # column is prose explaining a design choice, which is the column worth reading.
 # But the SET of generator ids in it is derivable from `run_regen`, and that set
 # drifted: `post-merge-surface` was wired with the `land-pr` skill and never
@@ -526,7 +526,7 @@ run_override_check() {
 # order — not deduplicated, because a duplicate row is its own defect and
 # `sort -u` is what hides it.
 generator_table_ids_raw() {
-	sed -n '/^| Generator | Target | Derived from |/,/^$/p' docs/agent-skills.md |
+	sed -n '/^| Generator | Target | Derived from |/,/^$/p' "$skills_dir/skill-writer/references/agent-skills.md" |
 		sed -E -n 's/^\| `([a-z0-9-]+)` \|.*/\1/p'
 }
 
@@ -554,7 +554,7 @@ run_generator_check() {
 		return
 	fi
 	if [[ -z $table ]]; then
-		err "generators: docs/agent-skills.md has no generator table (or its header changed) — there is nothing for the wired set to agree with"
+		err "generators: $skills_dir/skill-writer/references/agent-skills.md has no generator table (or its header changed) — there is nothing for the wired set to agree with"
 		return
 	fi
 
@@ -563,10 +563,10 @@ run_generator_check() {
 
 	local id
 	for id in $missing; do
-		err "generators: \`$id\` is wired into run_regen but absent from the generator table in docs/agent-skills.md — add a row with its target and what it derives from"
+		err "generators: \`$id\` is wired into run_regen but absent from the generator table in the agent-skills standard — add a row with its target and what it derives from"
 	done
 	for id in $extra; do
-		err "generators: the generator table in docs/agent-skills.md lists \`$id\`, which no splice call wires — remove the row, or wire the generator"
+		err "generators: the generator table in the agent-skills standard lists \`$id\`, which no splice call wires — remove the row, or wire the generator"
 	done
 
 	# A duplicate row satisfies the set comparison above and still leaves the
@@ -576,7 +576,7 @@ run_generator_check() {
 	local dup
 	dup=$(generator_table_ids_raw | sort | uniq -d || true)
 	for id in $dup; do
-		err "generators: the generator table in docs/agent-skills.md lists \`$id\` more than once — keep one row"
+		err "generators: the generator table in the agent-skills standard lists \`$id\` more than once — keep one row"
 	done
 
 	n=$(printf '%s\n' "$wired" | grep -c . || true)
@@ -755,7 +755,7 @@ gen_rust_gates() {
 # Long entries are clipped at a word boundary — these are signposts to the full
 # rule, not a replacement for it.
 rule_desc() {
-	grep -E "^\| $1 \|" docs/entity-framework-design.md |
+	grep -E "^\| $1 \|" "$skills_dir/entity-framework/references/entity-framework-design.md" |
 		awk -F'|' '{print $4}' |
 		sed -e 's/^ *//' -e 's/ *$//' |
 		awk '{
@@ -770,7 +770,7 @@ rule_desc() {
 gen_diagnostics() {
 	local implemented documented missing
 	implemented=$(grep -oE '"E0[0-9]{2}"' rust/crates/er-sql-check/src/analyze.rs | tr -d '"' | sort -u)
-	documented=$(grep -oE '^\| E0[0-9]{2}' docs/entity-framework-design.md | sed 's/^| //' | sort -u)
+	documented=$(grep -oE '^\| E0[0-9]{2}' "$skills_dir/entity-framework/references/entity-framework-design.md" | sed 's/^| //' | sort -u)
 	echo "The statement-level diagnostics, emitted by \`er-sql-check\`. These are a"
 	echo "separate family from the entity-level \`V\` rules in \`er-entity-lint\`."
 	echo
@@ -790,7 +790,7 @@ gen_diagnostics() {
 			printf '%s\n' "- \`$c\` — $(rule_desc "$c")"
 		done
 		echo
-		echo "This gap is the stated reason \`docs/entity-lint-rules.md\` is generated"
+		echo "This gap is the stated reason \`references/entity-lint-rules.md\` is generated"
 		echo "and byte-compared: a documented-only rule is exactly the drift that"
 		echo "produced it."
 	else
@@ -1378,7 +1378,7 @@ gen_aws_footprint() {
 	# negative is only caught by a reader who already knew better. So the candidate
 	# list is the input and the absences are DERIVED: a service adopted later drops
 	# off this list on the next regeneration with nobody editing anything, which is
-	# the `screens-coverage` shape docs/agent-skills.md recommends.
+	# the `screens-coverage` shape the agent-skills standard recommends.
 	#
 	# Output order is the array's, not `sort`'s, so this block cannot shift under a
 	# different LC_ALL the way the count table above once did.
@@ -1768,7 +1768,7 @@ gen_post_merge_surface() {
 	fi
 }
 
-# The inventory table that docs/agent-skills.md and CLAUDE.md each carry.
+# The inventory table that the agent-skills standard and CLAUDE.md each carry.
 # Derived from the frontmatter so adding a skill cannot leave either one stale —
 # the defect that produced the "no skill states a count" rule in the first
 # place. The two documents want different columns, so this takes a mode:
@@ -2080,7 +2080,7 @@ splice() {
 # The observability surface: the roles, the gates, and the derived gap between
 # what emits structured events and what still only reaches bare stderr.
 #
-# The metrics themselves are deliberately NOT here. `docs/telemetry-reference.md`
+# The metrics themselves are deliberately NOT here. `references/telemetry-reference.md`
 # is generated from `er-obs/src/registry.rs` by that crate's own test and
 # byte-compared by it, so a second generator over the same source would be a
 # second thing to keep in step for no gain — the skill links to that file
@@ -2440,7 +2440,7 @@ gen_review_gates() {
 # staleness, which is exactly the moment the message would be most confusing.
 #
 # Two of these live OUTSIDE the skills tree. `gen_skill_inventory` owns the
-# inventory table in docs/agent-skills.md and the "Doing → Skill" table in
+# inventory table in the agent-skills standard and the "Doing → Skill" table in
 # CLAUDE.md, because those were the two places a human had to remember to edit
 # when adding a skill — and both said "Fifteen" while the tree held more.
 generated_files=(
@@ -2460,7 +2460,7 @@ generated_files=(
 	"$skills_dir/er-engine-ops/references/stages-and-flags.md"
 	"$skills_dir/observability/references/surface.md"
 	"$skills_dir/pr-review/references/not-a-finding.md"
-	"docs/agent-skills.md"
+	"$skills_dir/skill-writer/references/agent-skills.md"
 	"CLAUDE.md"
 )
 
@@ -2520,10 +2520,10 @@ run_regen() {
 	# Two projections of one field, so the two documents cannot disagree about
 	# which skills exist even though they show different columns.
 	gen_skill_inventory covers >"$tmp"
-	splice "docs/agent-skills.md" skill-inventory "$tmp"
+	splice "$skills_dir/skill-writer/references/agent-skills.md" skill-inventory "$tmp"
 
 	gen_description_budget >"$tmp"
-	splice "docs/agent-skills.md" description-budget "$tmp"
+	splice "$skills_dir/skill-writer/references/agent-skills.md" description-budget "$tmp"
 
 	gen_skill_inventory doing >"$tmp"
 	splice "CLAUDE.md" skill-inventory "$tmp"
@@ -2548,7 +2548,7 @@ run_drift_check() {
 	#
 	# This used to be `git diff --quiet HEAD -- "${generated_files[@]}"`, which
 	# was right while every target was a generated-only reference. It stopped
-	# being right when `CLAUDE.md` and `docs/agent-skills.md` joined the array:
+	# being right when `CLAUDE.md` and the agent-skills standard joined the array:
 	# they are mostly hand-written prose, so ANY in-progress edit to either —
 	# a sentence in the authoring rules, a line in the gate table — failed the
 	# check with "generated skill references are stale" while every generated

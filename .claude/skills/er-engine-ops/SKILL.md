@@ -204,7 +204,10 @@ a script must read the JSON rather than branch on the status.
 `er profile` is the other read: per-column shape, frequent values and coded
 findings for the raw, standardized or golden stage, persisted to the lake.
 Re-profiling an unchanged snapshot rewrites its rows instead of appending, so
-asking twice costs one run.
+asking twice costs one run. The `P` codes it reports — what each one means, what
+it is quiet on and what fires it — are generated from the rule registry into
+[references/profile-findings.md](references/profile-findings.md). Nothing there
+gates a dataset: every rule reports and none blocks.
 
 For browsing actual data, the read API and the UI are the supported surfaces.
 A `duckdb` shell works for ad-hoc inspection but bypasses snapshot pinning and

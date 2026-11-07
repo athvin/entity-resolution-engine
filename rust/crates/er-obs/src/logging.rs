@@ -20,7 +20,7 @@
 //! Calling this with the counters defaulted to null or zero would be worse than
 //! not calling it. `run_stages` would fill, the `cli_e2e` tripwire asserting
 //! that table stays empty would flip, and every dashboard over it would read
-//! zeros as measurements. The same reason `docs/telemetry-reference.md` is
+//! zeros as measurements. The same reason `telemetry-reference.md` is
 //! generated rather than hand-written: a thing that looks like coverage is
 //! worse than a visible gap.
 //!

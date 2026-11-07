@@ -56,12 +56,12 @@ rust)
 	# Every path EXCEPT the set the filter proves the gate never reads.
 	# Keying the whole remaining tree (rather than an allowlist of rust/ and
 	# friends) is the fail-safe direction: `make check` also reads frontend/,
-	# docs/, entities/ and scripts/, and a path nobody remembered to list
-	# would otherwise be a silent false skip.
+	# entities/, .claude/skills/ and scripts/, and a path nobody remembered to
+	# list would otherwise be a silent false skip.
 	#
 	# Keep a path if the gate reads it: not exempt, OR exempt by prefix but
-	# individually coupled to a gate (the four docs/CLAUDE.md files).
-	# Dropping the coupled ones would let a change to `docs/erd.md` ride a
+	# individually coupled to a gate (the four `.claude/`+CLAUDE.md files).
+	# Dropping the coupled ones would let a change to the generated ERD ride a
 	# pass marker earned before it changed.
 	# shellcheck source=scripts/ci/detect-paths.sh
 	. scripts/ci/detect-paths.sh

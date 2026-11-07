@@ -52,15 +52,18 @@ expect 'frontend.yml itself' "$ALL" '.github/workflows/frontend.yml'
 # would stop running the gate.
 expect 'a devcontainer lifecycle script' "$ALL" 'scripts/devcontainer-postcreate.sh'
 expect 'the devcontainer detect helper' "$ALL" 'scripts/ci/devcontainer-detect.sh'
-expect 'a doc AND a rust file' "$ALL" 'docs/architecture.md' 'rust/crates/er-match/src/lib.rs'
+expect 'a prose skill ref AND a rust file' "$ALL" \
+	'.claude/skills/er-matching/references/invariants.md' 'rust/crates/er-match/src/lib.rs'
 expect 'a skill AND a rust file' "$ALL" '.claude/skills/er-matching/SKILL.md' 'rust/Cargo.lock'
 expect 'a hook AND a rust file' "$ALL" 'scripts/hooks/aws-write-guard.sh' 'rust/crates/er-match/src/lib.rs'
 
 # --- no compile job at all -------------------------------------------------
 expect 'a skill body only' "$NONE" '.claude/skills/er-matching/references/invariants.md'
 expect 'a skill eval only' "$NONE" '.claude/skills/security/evals.md'
-expect 'pure prose docs' "$NONE" 'docs/architecture.md'
-expect 'several prose docs' "$NONE" 'docs/architecture.md' 'docs/frontend-testing.md'
+expect 'a prose skill reference' "$NONE" '.claude/skills/er-matching/references/invariants.md'
+expect 'several prose skill references' "$NONE" \
+	'.claude/skills/er-matching/references/invariants.md' \
+	'.claude/skills/frontend-testing/references/tiers-and-thresholds.md'
 expect 'terraform only' "$NONE" 'infra/terraform/envs/dev/main.tf'
 expect 'a tf ci helper' "$NONE" 'scripts/ci/tf-helpers.sh'
 expect 'the aws write-guard hook' "$NONE" 'scripts/hooks/aws-write-guard.sh'
@@ -79,21 +82,24 @@ expect 'the whole devcontainer change' "$NONE" \
 
 # --- `lint` only, for the drift check -------------------------------------
 # This is the shape of a real skill PR: the inventory rows regenerate into
-# CLAUDE.md and docs/agent-skills.md, which is what defeated the old
-# `.claude/**` exemption.
+# CLAUDE.md and the agent-skills standard, which is what defeated the old
+# `.claude/**` exemption. Both targets now live under `.claude/`, so the
+# re-admission in DETECT_DRIFT is the only thing keeping this case true.
 expect 'a skill + its regenerated tables' \
 	'code=false erd=false drift=true' \
-	'.claude/skills/skill-audit/SKILL.md' 'CLAUDE.md' 'docs/agent-skills.md'
+	'.claude/skills/skill-audit/SKILL.md' 'CLAUDE.md' '.claude/skills/skill-writer/references/agent-skills.md'
 expect 'CLAUDE.md alone' 'code=false erd=false drift=true' 'CLAUDE.md'
-expect 'the agent-skills standard' 'code=false erd=false drift=true' 'docs/agent-skills.md'
+expect 'the agent-skills standard' 'code=false erd=false drift=true' \
+	'.claude/skills/skill-writer/references/agent-skills.md'
 expect 'the diagnostics generator source' \
-	'code=false erd=false drift=true' 'docs/entity-framework-design.md'
+	'code=false erd=false drift=true' '.claude/skills/entity-framework/references/entity-framework-design.md'
 
 # --- `entities` only, for the generated ERD --------------------------------
-expect 'the generated ERD' 'code=false erd=true drift=false' 'docs/erd.md'
-expect 'the ERD plus prose' 'code=false erd=true drift=false' 'docs/erd.md' 'docs/architecture.md'
+expect 'the generated ERD' 'code=false erd=true drift=false' '.claude/skills/entity-framework/references/erd.md'
+expect 'the ERD plus prose' 'code=false erd=true drift=false' \
+	'.claude/skills/entity-framework/references/erd.md' '.claude/skills/er-matching/references/invariants.md'
 expect 'the ERD plus a drift target' \
-	'code=false erd=true drift=true' 'docs/erd.md' 'CLAUDE.md'
+	'code=false erd=true drift=true' '.claude/skills/entity-framework/references/erd.md' 'CLAUDE.md'
 
 echo "---"
 echo "pass=$pass fail=$fail"

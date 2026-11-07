@@ -6,6 +6,17 @@ the gate keeps them from rotting.
 The skills themselves live in `.claude/skills/`. This document is the standard
 they are held to; `scripts/skills-check.sh` enforces the mechanical half of it.
 
+## Contents
+
+- [Why skills at all](#why-skills-at-all)
+- [The inventory](#the-inventory)
+- [Layout: why everything is at the root](#layout-why-everything-is-at-the-root)
+- [Authoring rules](#authoring-rules)
+- [No skill states a count](#no-skill-states-a-count)
+- [The gate](#the-gate)
+- [Third-party skills, plugins and MCP servers](#third-party-skills-plugins-and-mcp-servers)
+- [Adding a skill](#adding-a-skill)
+
 ## Why skills at all
 
 A skill carries what a competent agent **cannot** know: this repo's

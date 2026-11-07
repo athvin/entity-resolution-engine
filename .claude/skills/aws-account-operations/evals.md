@@ -5,7 +5,7 @@ behaviours. Record a pass only if every "must" holds.
 
 Scenario 1 was written to prove this skill could beat the `aws-core` plugin's own
 CDK and CloudFormation skills. That plugin is **no longer installed** — see the
-decision record in [`docs/agent-skills.md`](../../../docs/agent-skills.md) — so
+decision record in [the agent-skills standard](../skill-writer/references/agent-skills.md) — so
 the scenario no longer tests a contest between skills. It still earns its place:
 the request names CDK itself, so the skill has to refuse the language the asker
 offered, with or without a rival skill present.

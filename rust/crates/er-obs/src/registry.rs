@@ -10,8 +10,9 @@
 //! dashboard panel renders an honest-looking empty chart rather than an error,
 //! and the gap is invisible precisely to the person relying on it.
 //!
-//! So the declarations here are the source of truth, `docs/telemetry-reference.md`
-//! is generated from them and byte-compared, and `tests/cardinality.rs` checks
+//! So the declarations here are the source of truth, the observability skill's
+//! `references/telemetry-reference.md` is generated from them and byte-compared,
+//! and `tests/cardinality.rs` checks
 //! the one property that costs money if it slips.
 //!
 //! ## The cardinality rule, with the arithmetic that motivates it
@@ -148,7 +149,7 @@ pub const METRICS: &[Metric] = &[Metric {
 ///
 /// Byte-compared by `tests/reference.rs`, so this function's output IS the
 /// committed doc. Formatting is pinned here rather than left to a formatter,
-/// for the reason `docs/entity-lint-rules.md` already learned: a generator whose
+/// for the reason the generated entity-lint reference already learned: a generator whose
 /// output depends on an external tool's version fails the comparison for a
 /// reason that has nothing to do with the content.
 #[must_use]

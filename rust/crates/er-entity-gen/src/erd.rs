@@ -1,4 +1,5 @@
-//! The ERD emitter: `docs/erd.md`, the entity-relationship diagram of every store.
+//! The ERD emitter: the entity-relationship diagram of every store, committed as
+//! `.claude/skills/entity-framework/references/erd.md`.
 //!
 //! One Mermaid `erDiagram` per store, from the same authorities the rest of the
 //! generator reads: the entity catalog for the Postgres control plane (whose
@@ -25,7 +26,7 @@ pub enum ErdError {
     Snapshot(#[from] serde_json::Error),
 }
 
-/// Render `docs/erd.md`. `erweb_snapshot` is the latest drizzle snapshot's JSON
+/// Render the ERD. `erweb_snapshot` is the latest drizzle snapshot's JSON
 /// (the frontend's `erweb` schema); `None` omits that section.
 pub fn emit_erd(catalog: &Catalog, erweb_snapshot: Option<&str>) -> Result<String, ErdError> {
     let mut out = String::from(
@@ -38,6 +39,18 @@ pub fn emit_erd(catalog: &Catalog, erweb_snapshot: Option<&str>) -> Result<Strin
          the `er-schema` S5 registry for the DuckLake lake. Attribute markers: `PK` the\n\
          primary/logical key, `FK` a declared foreign key, `UK` a unique index.\n",
     );
+
+    // `## Contents` is required of any skill reference over 100 lines by
+    // `scripts/skills-check.sh`, and this diagram is always far longer. The
+    // `erweb` row is conditional for the same reason its section is: a contents
+    // list promising a section that was not emitted is the drift this whole
+    // generator exists to prevent.
+    out.push_str("\n## Contents\n\n");
+    out.push_str("- [Control plane — Postgres `public`](#control-plane--postgres-public)\n");
+    if erweb_snapshot.is_some() {
+        out.push_str("- [Frontend BFF — Postgres `erweb`](#frontend-bff--postgres-erweb)\n");
+    }
+    out.push_str("- [Data plane — DuckLake `lake.main`](#data-plane--ducklake-lakemain)\n");
 
     control_plane_section(catalog, &mut out);
     if let Some(snapshot) = erweb_snapshot {

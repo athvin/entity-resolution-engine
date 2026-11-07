@@ -9,9 +9,9 @@ description: Reviews a skill in this repo against `docs/agent-skills.md` — the
 > (<https://github.com/Terryc21/skill-reviewer>), Apache-2.0. Kept: cited
 > findings, the severity/effort/quick-win card, strengths carrying equal weight,
 > and the optional challenger pass. Replaced: its generic rubric, with the lenses
-> below derived from `docs/agent-skills.md`.
+> below derived from the agent-skills standard.
 
-The standard is [`docs/agent-skills.md`](../../../docs/agent-skills.md). **Read it before
+The standard is [`skill-writer/references/agent-skills.md`](../skill-writer/references/agent-skills.md). **Read it before
 auditing** — this skill is how that document gets applied, not a second copy of it.
 
 ## The boundary that makes this useful

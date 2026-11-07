@@ -1,4 +1,5 @@
-//! `docs/telemetry-reference.md` is generated from the registry, byte for byte.
+//! The observability skill's `references/telemetry-reference.md` is generated
+//! from the registry, byte for byte.
 //!
 //! ## Why a byte-compare and not a hand-written doc
 //!
@@ -29,7 +30,7 @@ use std::path::PathBuf;
 fn doc_path() -> PathBuf {
     PathBuf::from(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../../docs/telemetry-reference.md"
+        "/../../../.claude/skills/observability/references/telemetry-reference.md"
     ))
 }
 
@@ -39,7 +40,7 @@ fn the_reference_doc_matches_the_registry() {
     let path = doc_path();
 
     if std::env::var_os("UPDATE_EXPECT").is_some() {
-        fs::write(&path, &rendered).expect("writable docs/telemetry-reference.md");
+        fs::write(&path, &rendered).expect("writable telemetry-reference.md");
         return;
     }
 
@@ -53,7 +54,7 @@ fn the_reference_doc_matches_the_registry() {
 
     assert_eq!(
         committed, rendered,
-        "docs/telemetry-reference.md is stale. Regenerate it with \
+        "the committed telemetry-reference.md is stale. Regenerate it with \
          `UPDATE_EXPECT=1 cargo test -p er-obs --test main reference` and commit \
          the diff — the registry in `er-obs/src/registry.rs` is the source of \
          truth, and this file is its output."

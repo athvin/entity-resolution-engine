@@ -4,6 +4,12 @@ Status: design, 2026-10-16. Companion to `docs/backend-design.md` and `docs/fron
 
 **Part 1** is the design: what the framework is and how it works. **Part 2** is the background and the research that led to it. **Part 3** is the build plan, the risks and the open questions.
 
+## Contents
+
+- [Part 1: Design](#part-1-design) — what the framework is, the flow, how a change is made, the stores, statements and reconciliation
+- [Part 2: Background and research](#part-2-background-and-research) — why this shape, and what was rejected
+- [Part 3: Build plan and risks](#part-3-build-plan-and-risks) — the phases, the risks and the open questions
+
 ## Part 1: Design
 
 ### What it is
@@ -108,7 +114,7 @@ Every entity has the same identity shape, validated at catalog load (the V rules
 **The V rules are no longer listed here.** They live in `er-entity-lint` as a
 registry of rule values, each carrying its own code, title, reasoning and a
 worked conforming/violating example pair, and
-**[`docs/entity-lint-rules.md`](entity-lint-rules.md) is generated from that
+**The generated `references/entity-lint-rules.md` is rendered from that
 registry** by `er-entity lint --docs`. `er-entity verify` byte-compares the
 committed file against the registry, so the reference cannot drift from what is
 enforced — which is exactly how `E007`/`E008`/`E013` below came to be documented

@@ -300,8 +300,9 @@ pub fn load_linted(entities_dir: &Path) -> Result<Catalog, LintError> {
 /// Render the rule reference as markdown, for `er-entity lint --docs`.
 ///
 /// `er-entity verify` byte-compares this against the committed
-/// `docs/entity-lint-rules.md`, the same way it does the generated ERD — which is
-/// what keeps the documented rule set and the enforced one identical.
+/// `.claude/skills/entity-framework/references/entity-lint-rules.md`, the same
+/// way it does the generated ERD — which is what keeps the documented rule set
+/// and the enforced one identical.
 #[must_use]
 pub fn rules_markdown() -> String {
     let mut out = String::new();
@@ -314,6 +315,12 @@ pub fn rules_markdown() -> String {
          query planner, are a separate family\nin `er-sql-check`.\n\n",
     );
 
+    // `## Contents` is not decoration: this file is a skill reference, and
+    // `scripts/skills-check.sh` requires a table of contents on any reference
+    // over 100 lines. Emitting it from the registry rather than hand-writing it
+    // is the same argument as the rest of this function — an index that can
+    // disagree with the sections it indexes is worse than none.
+    out.push_str("## Contents\n\n");
     out.push_str("| Code | Severity | Invariant |\n|---|---|---|\n");
     for info in rules() {
         let anchor = info.code.0.to_lowercase();

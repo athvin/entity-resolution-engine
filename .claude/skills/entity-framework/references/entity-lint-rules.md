@@ -7,6 +7,8 @@ These are the **entity** conventions, checked against `entities/*/entity.yaml`. 
 **statement** diagnostics (`E0xx`), which need a query planner, are a separate family
 in `er-sql-check`.
 
+## Contents
+
 | Code | Severity | Invariant |
 |---|---|---|
 | [V1](#v1) | error | an entity declares a NOT NULL `id` column, either varchar or bigint+serial |

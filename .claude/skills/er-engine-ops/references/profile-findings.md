@@ -5,6 +5,8 @@
 
 A profile describes a corpus; a finding says what about it is worth acting on. Nothing here refuses or gates a dataset — whether a 70%-empty column is a defect or simply how that source works is the data owner's call, so every rule reports and none blocks.
 
+## Contents
+
 | Code | Severity | Invariant |
 |---|---|---|
 | P001 | warning | a profiled column holds at least one value |

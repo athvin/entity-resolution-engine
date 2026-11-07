@@ -4,7 +4,8 @@
 //! it, and the first at `Severity::Warning`. It reports findings the committed
 //! tree has not fixed yet, which the previous fail-fast design could not
 //! express at all: a rule was either absent or it blocked every command in the
-//! repo. See `docs/entity-lint-rules.md` for the current count. V17 is its
+//! repo. See the generated `references/entity-lint-rules.md` in the
+//! `entity-framework` skill for the current count. V17 is its
 //! dataset analogue, written with the datasets program so every table that
 //! gains a `dataset_id` arrives well-formed rather than being ratcheted later.
 
