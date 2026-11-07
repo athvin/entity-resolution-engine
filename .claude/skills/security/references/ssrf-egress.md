@@ -33,7 +33,7 @@ High-value targets an attacker webhook URL could reach from inside the cluster:
 `frontend/src/app/api/orgs/[org]/assistant/route.ts` + `frontend/src/lib/assistant/tools.ts` run up to
 8 tool-call rounds with 8 read tools, using the *viewer* credential. Two concerns:
 - **Data egress to a subprocessor** — tenant record data (names, emails, metadata) is sent to the
-  Anthropic API. This is noted in `docs/infrastructure.md` §8.6 as needing a DPA + disclosure. It is a
+  Anthropic API. This is noted in `.claude/skills/infra-platform/references/infrastructure.md` §8.6 as needing a DPA + disclosure. It is a
   governance finding, not a code bug, but name it.
 - **Prompt injection** — tenant-controlled record text can try to steer later tool calls. The
   defences to lock: the toolbox is a *closed read-only allowlist*; every tool forwards to
@@ -49,7 +49,7 @@ on a dev box, and the NetworkPolicy isn't exercised. So split the finding, and s
 - **Application-layer URL guard** — fully testable, and IS the lockable PoC. A unit test proving the
   guard rejects loopback/private/link-local/non-https URLs is the regression lock.
 - **Network egress (NetworkPolicy)** — defence-in-depth. Its only proof is the manual
-  `docs/infrastructure.md` §17 behavioral probe ("IMDS unreachable from a pod"). Do not claim the unit
+  `.claude/skills/infra-platform/references/infrastructure.md` §17 behavioral probe ("IMDS unreachable from a pod"). Do not claim the unit
   test covers this leg.
 
 Never fire a real request at `169.254.169.254` except in `/pentest live` against a confirmed-local

@@ -1,7 +1,9 @@
-//! Regenerate `docs/profile-findings.md` from the findings registry:
+//! Regenerate the `er-engine-ops` skill's `references/profile-findings.md` from
+//! the findings registry:
 //!
 //! ```sh
-//! cargo run -q -p er-profile --example dump_findings_doc > ../docs/profile-findings.md
+//! cargo run -q -p er-profile --example dump_findings_doc \
+//!   > .claude/skills/er-engine-ops/references/profile-findings.md
 //! ```
 //!
 //! The reference stays a committed, reviewed artifact — this tool exists so a

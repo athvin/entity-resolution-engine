@@ -175,15 +175,15 @@ differs 'key: a new frontend/ file moves the frontend key' \
 
 # An exempt path the Rust gate provably never reads must leave the rust key
 # alone — that is the whole point of the skip.
-c_docs="$(probed 'docs/zz_probe.md')"
-check 'key: an exempt docs/ file does NOT move the rust key' \
-	"$rk" "$(keyat rust "$c_docs")"
+c_prose="$(probed '.claude/skills/er-matching/references/zz_probe.md')"
+check 'key: an exempt .claude/ file does NOT move the rust key' \
+	"$rk" "$(keyat rust "$c_prose")"
 
 # But a COUPLED exempt path must still move it, or a change to the generated
 # ERD could ride a marker earned before it changed. This is the assertion that
 # catches dropping `|| $2 ~ co` from the rust filter.
-c_erd="$(probed 'docs/erd.md')"
-differs 'key: a coupled docs/erd.md DOES move the rust key' \
+c_erd="$(probed '.claude/skills/entity-framework/references/erd.md')"
+differs 'key: the coupled generated ERD DOES move the rust key' \
 	"$rk" "$(keyat rust "$c_erd")"
 c_claude="$(probed 'CLAUDE.md')"
 differs 'key: coupled CLAUDE.md DOES move the rust key' \

@@ -6,6 +6,17 @@ the gate keeps them from rotting.
 The skills themselves live in `.claude/skills/`. This document is the standard
 they are held to; `scripts/skills-check.sh` enforces the mechanical half of it.
 
+## Contents
+
+- [Why skills at all](#why-skills-at-all)
+- [The inventory](#the-inventory)
+- [Layout: why everything is at the root](#layout-why-everything-is-at-the-root)
+- [Authoring rules](#authoring-rules)
+- [No skill states a count](#no-skill-states-a-count)
+- [The gate](#the-gate)
+- [Third-party skills, plugins and MCP servers](#third-party-skills-plugins-and-mcp-servers)
+- [Adding a skill](#adding-a-skill)
+
 ## Why skills at all
 
 A skill carries what a competent agent **cannot** know: this repo's
@@ -137,9 +148,9 @@ can still accept a routing clause.
 |   36 | `security` | 988 |
 |   40 | `frontend-bff` | 984 |
 |   41 | `er-server-control-plane` | 983 |
+|   60 | `skill-audit` | 964 |
 |   62 | `rust-conventions` | 962 |
 |   66 | `entity-framework` | 958 |
-|   68 | `skill-audit` | 956 |
 |   72 | `infra-platform` | 952 |
 |   75 | `land-pr` | 949 |
 |   76 | `sql-analysis` | 948 |
@@ -154,9 +165,9 @@ can still accept a routing clause.
 |  102 | `claim-ticket` | 922 |
 |  104 | `ducklake-performance` | 920 |
 |  111 | `project-board` | 913 |
+|  127 | `skill-writer` | 897 |
 |  129 | `pr-review` | 895 |
 |  130 | `observability` | 894 |
-|  138 | `skill-writer` | 886 |
 |  177 | `api-contract` | 847 |
 |  342 | `pentest` | 682 |
 |  412 | `stageshow` | 612 |
@@ -345,7 +356,7 @@ Testing it with a hand-edited block will show you a passing gate and prove
 nothing.
 
 The `skills` job became a required status check once
-`docs/frontend-testing.md`'s rule was satisfied — a gate is trusted only after
+`frontend-testing`'s rule was satisfied — a gate is trusted only after
 it has been **observed failing**, and this one was: a throwaway PR (#699) edited
 a projected `description` clause without regenerating, on a `.claude`-only diff
 where the cargo `lint` job does not run, and the job concluded `failure` on the
@@ -546,7 +557,7 @@ with nothing going red. When this gate was first run it found exactly that:
 neither `frontend-data-ui` nor `frontend-design-system` named its counterpart.
 `frontend-data-ui` said "any generic data-visualization skill" and never wrote
 `dataviz`; `frontend-design-system` matched a naive search only through the
-unrelated filename `docs/frontend-design.md`. Hence the backticks — they are what
+unrelated filename `frontend-design.md`. Hence the backticks — they are what
 separates a skill name from a document path and from a longer name that contains
 it.
 

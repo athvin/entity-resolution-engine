@@ -1,6 +1,6 @@
 ---
 name: skill-writer
-description: Authors and repairs this repo's skills from a free-form brief — triages whether the brief should become a skill at all rather than a CLAUDE.md line or a path-scoped rule or a hook, then writes the description that controls selection, keeps the body inside the progressive-disclosure budget and ends on a check that can fail. Carries the frontmatter and argument-substitution reference that docs/agent-skills.md does not, plus worked templates for each skill shape and the anti-patterns with their observable symptoms. Invoke manually as /skill-writer <brief>. Use when adding a skill, when deciding whether a rule belongs in a skill or a hook, when a description will not trigger, or when applying findings an audit produced. For judging an existing skill rather than changing one see skill-audit; for the standard it is held to and its add-a-skill checklist see docs/agent-skills.md.
+description: Authors and repairs this repo's skills from a free-form brief — triages whether the brief should become a skill at all rather than a CLAUDE.md line or a path-scoped rule or a hook, then writes the description that controls selection, keeps the body inside the progressive-disclosure budget and ends on a check that can fail. Carries the frontmatter and argument-substitution reference that the agent-skills standard does not, plus worked templates for each skill shape and the anti-patterns with their observable symptoms. Invoke manually as /skill-writer <brief>. Use when adding a skill, when deciding whether a rule belongs in a skill or a hook, when a description will not trigger, or when applying findings an audit produced. For judging an existing skill rather than changing one see skill-audit; for the standard it is held to and its add-a-skill checklist see references/agent-skills.md.
 disable-model-invocation: true
 argument-hint: <what the skill should do, or findings to apply>
 ---
@@ -29,7 +29,7 @@ The list matters because step 2 has to route the new skill against every name in
 
 ## Step 0 — the standard wins
 
-[`docs/agent-skills.md`](../../../docs/agent-skills.md) is the standard, and it supersedes
+[`references/agent-skills.md`](references/agent-skills.md) is the standard, and it supersedes
 everything below on any point of conflict. **Read it before writing anything** — this skill is
 the authoring workflow, not a second copy of the rules.
 

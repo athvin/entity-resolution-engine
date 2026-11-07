@@ -3,7 +3,7 @@
 **Version:** 1.1
 
 Start with the [README](README.md) for the product overview and the
-[runbook](docs/runbook.md) for operating instructions. This reference preserves the
+[runbook](.claude/skills/er-engine-ops/references/runbook.md) for operating instructions. This reference preserves the
 numbered contracts and invariants used by the test suite. The implementation
 milestones in S12 record the original build sequence, not current project status.
 
@@ -39,11 +39,11 @@ Build the entity resolution and golden record pipeline as a testable, benchmarka
 - **G3 — Incremental processing proven, with stated preconditions.** CI includes a test that processes a base corpus, then an incremental batch, and asserts (a) that under the **INV-EQ** preconditions (S4.5) the incremental run yields the *same set-partition of current members* as a from-scratch full run — entity IDs may differ between the two universes and are compared as set-partitions — and (b) that the incremental run touched only the affected subgraph. G3 is **not** an unqualified equivalence claim: where an INV-EQ precondition is violated, the divergence MUST be exhibited by a test, bounded, and repaired by the periodic correction pass (S4.3) rather than asserted away.
 - **G4 — Benchmarkable.** A benchmark harness measures per-stage throughput and match quality at multiple corpus scales. Runnable locally, on demand via CI (`workflow_dispatch`) and on a weekly schedule (S9.2), never on the PR path.
 
-**Tenancy.** v1 is **single-tenant per lake**. `tenant` names the lake namespace — the DuckLake catalog metadata schema and the S3 prefix — and is **not** a row-level discriminator. No table has a `tenant` column. Two tenants means two lakes, two catalog schemas and two prefixes; cross-tenant matching is impossible by construction rather than by predicate. The multi-tenant product runs many such lakes behind one shared control plane — one lake per tenant; see [backend-design.md](docs/backend-design.md) §7.
+**Tenancy.** v1 is **single-tenant per lake**. `tenant` names the lake namespace — the DuckLake catalog metadata schema and the S3 prefix — and is **not** a row-level discriminator. No table has a `tenant` column. Two tenants means two lakes, two catalog schemas and two prefixes; cross-tenant matching is impossible by construction rather than by predicate. The multi-tenant product runs many such lakes behind one shared control plane — one lake per tenant; see [backend-design.md](.claude/skills/er-server-control-plane/references/backend-design.md) §7.
 
 **In scope for v1 and new since 1.0:** record deletion, retraction and supersession (`raw_records.is_deleted`/`deleted_at`, `er ingest --full-refresh-keys` tombstone derivation, edge invalidation, `member_removed` / `split` / `retired` emission, and resurrection of a re-appearing key). The `entity_events` and `entities` status domains are therefore fully reachable.
 
-**Out of scope for this specification:** the embedding coherence *implementation* (S11 ships the interface and a `NoopScorer` only) and LLM-assisted review triage. Two layers wrap this engine and are specified — and built — elsewhere: the multi-tenant serving API and control plane in [backend-design.md](docs/backend-design.md), and the AWS/Kubernetes deployment in [infrastructure.md](docs/infrastructure.md) (Compose remains the test/dev substrate here). Concurrent writers against one lake namespace are an explicit non-guarantee: v1 is a single-writer batch model, and the advisory lock that enforces it is defined in S4.0b.
+**Out of scope for this specification:** the embedding coherence *implementation* (S11 ships the interface and a `NoopScorer` only) and LLM-assisted review triage. Two layers wrap this engine and are specified — and built — elsewhere: the multi-tenant serving API and control plane in [backend-design.md](.claude/skills/er-server-control-plane/references/backend-design.md), and the AWS/Kubernetes deployment in [infrastructure.md](.claude/skills/infra-platform/references/infrastructure.md) (Compose remains the test/dev substrate here). Concurrent writers against one lake namespace are an explicit non-guarantee: v1 is a single-writer batch model, and the advisory lock that enforces it is defined in S4.0b.
 
 ---
 
@@ -148,7 +148,7 @@ entity-resolution-engine/
 ├── benchmarks/                       # measurements, comparisons and profiling
 │   └── baselines/                    # reviewed measurements only
 ├── scripts/                          # validation and CI entry points
-├── docs/                             # architecture, configuration, runbook and performance
+├── .claude/skills/                   # agent skills, each carrying the design records for its area
 └── .github/                          # CI, benchmark workflow and dependency updates
 ```
 
@@ -1872,7 +1872,7 @@ on Monday at 06:00 UTC and on demand. It never runs on the PR path.
 - Results upload after comparison even on failure, and teardown always runs.
   Baselines are replaced only through a reviewed measurement change.
 
-See [performance.md](docs/performance.md) for measurement and baseline operations.
+See [performance.md](.claude/skills/ducklake-performance/references/performance.md) for measurement and baseline operations.
 
 ---
 
@@ -1942,7 +1942,7 @@ tuning proposals. DuckLake tables have no ordinary indexes. Ordered writes,
 partitioning, compaction, native scratch indexes and Python-to-SQL pushdown are
 evaluated against the actual access paths and pinned capabilities. Proposed layout
 changes include sort/build/rewrite/maintenance costs and effects on BOTH workloads.
-See [the performance record](docs/performance.md).
+See [the performance record](.claude/skills/ducklake-performance/references/performance.md).
 
 **Profile-guided implementation experiments.** Preserve candidate generation,
 model/TF parameters, exact event bytes and hashes, deterministic partitions and
@@ -1957,7 +1957,7 @@ including null ordering and the terminal record-key tie break. Ordered writes an
 partition experiments require measured gains including their write costs. Publish
 baseline/candidate timings and correctness for both workloads before retaining a
 candidate; no model, threshold or blocking change is implied by these experiments.
-The [measured follow-up](docs/performance.md) records retained
+The [measured follow-up](.claude/skills/ducklake-performance/references/performance.md) records retained
 event-encoding reuse, 8,192-row staging pages and temporary current-score reuse,
 along with rejected survivorship and raw-record layout alternatives.
 

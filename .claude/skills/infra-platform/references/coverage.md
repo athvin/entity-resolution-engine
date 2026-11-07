@@ -17,7 +17,7 @@ because a stack nobody plans and a manifest nobody applies both fail silently.
 `infra-platform` twice stated an inventory in prose and twice got it wrong: the
 NodePool count said three while four `karpenter.sh/v1` manifests sat in the
 tree, and the non-chart manifest table omitted `priorityclasses/` after it was
-added. Both are the defect `docs/agent-skills.md` forbids — a hand-written
+added. Both are the defect `.claude/skills/skill-writer/references/agent-skills.md` forbids — a hand-written
 count in this repo goes stale within weeks.
 
 Every row below is read out of the tree by `scripts/skills-check.sh regen`, so

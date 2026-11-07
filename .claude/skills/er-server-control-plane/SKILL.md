@@ -215,3 +215,15 @@ the golden merge-plan generator.
 So if a control-plane feature needs lake data, the work is to declare a
 statement in `entities/`, not to assemble SQL in a handler. This is the rule
 most likely to block an otherwise-finished change — check it before you start.
+
+## The design records
+
+- [references/backend-design.md](references/backend-design.md) — the
+  multi-tenant serving API and control plane as designed, including the
+  one-lake-per-tenant model its §7 sets out and the survivorship rules in §10.
+- [references/connectors.md](references/connectors.md) — the CRM-agnostic
+  ingress/egress seam: what a connector owes, and what stays out of it.
+- [references/research-cloudingo.md](references/research-cloudingo.md) — the
+  competitor feature bar the parity matrix in those two documents is measured
+  against. Kept because they cite it for their own meaning, not as market
+  research in its own right.

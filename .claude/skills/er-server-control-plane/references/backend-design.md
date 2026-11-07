@@ -2,7 +2,7 @@
 
 *A high-level design for a control-plane backend with background job execution that
 turns the existing entity-resolution engine into the backend of a direct
-[Cloudingo](research-cloudingo.md) competitor. This is a design document — no code, no
+Cloudingo competitor. This is a design document — no code, no
 API payload schemas. Written 2026-09-25 against a FastAPI implementation that has
 since been rewritten in Rust; the design held, the paths did not.*
 
@@ -22,7 +22,7 @@ since been rewritten in Rust; the design held, the paths did not.*
 > `rust/crates/er-k8s`, and tenant provisioning is `provision.rs`.
 >
 > **Still not built** (external systems, or §15 phase 4–5): the Salesforce connector
-> and writeback ([connectors.md](connectors.md)), OIDC/SSO, per-tenant STS
+> and writeback (`connectors.md`), OIDC/SSO, per-tenant STS
 > credentials, FTS search, Marketo, and non-person entity types. Those are now
 > tracked card-by-card on the project board under the `epic` and `docs-backlog`
 > labels rather than prose here, because prose is what drifted.
@@ -34,11 +34,31 @@ since been rewritten in Rust; the design held, the paths did not.*
 
 ---
 
+## Contents
+
+- [1. Context and product thesis](#1-context-and-product-thesis)
+- [2. What the engine gives us vs what's missing](#2-what-the-engine-gives-us-vs-whats-missing)
+- [3. Feature-parity matrix](#3-feature-parity-matrix)
+- [4. System architecture](#4-system-architecture)
+- [5. Job orchestration](#5-job-orchestration)
+- [6. API resource model](#6-api-resource-model)
+- [7. Multi-tenant isolation](#7-multi-tenant-isolation)
+- [8. Read path](#8-read-path)
+- [9. AuthN/AuthZ](#9-authnauthz)
+- [10. Connector abstraction and Salesforce v1](#10-connector-abstraction-and-salesforce-v1)
+- [11. Product features on the engine](#11-product-features-on-the-engine)
+- [12. Engine changes workstream (deliberately small)](#12-engine-changes-workstream-deliberately-small)
+- [13. Object-model generalization — the biggest engine-side gap](#13-object-model-generalization--the-biggest-engine-side-gap)
+- [14. Observability and ops](#14-observability-and-ops)
+- [15. Roadmap](#15-roadmap)
+- [16. Hardest problems and risks](#16-hardest-problems-and-risks)
+- [Appendix: engine seams this design builds on](#appendix-engine-seams-this-design-builds-on)
+
 ## 1. Context and product thesis
 
-Cloudingo is a Salesforce dedupe SaaS ($2,500–$10,000/yr per org) whose feature bar is documented in [research-cloudingo.md](research-cloudingo.md): filter-based duplicate detection, a merge grid (manual/mass/auto merge), survivorship rules, scheduled + real-time automation, undo/restore, dedupe-aware import, search and field analysis, dashboards, and team permissions.
+Cloudingo is a Salesforce dedupe SaaS ($2,500–$10,000/yr per org) whose feature bar is documented in research-cloudingo.md: filter-based duplicate detection, a merge grid (manual/mass/auto merge), survivorship rules, scheduled + real-time automation, undo/restore, dedupe-aware import, search and field analysis, dashboards, and team permissions.
 
-We already have the hard part — a proven, incremental entity-resolution engine (this repo). What we don't have is any serving layer: the engine is a batch CLI with, by explicit design, "no serving API or built-in scheduler" ([architecture.md](architecture.md)). This document designs that missing layer.
+We already have the hard part — a proven, incremental entity-resolution engine (this repo). What we don't have is any serving layer: the engine is a batch CLI with, by explicit design, "no serving API or built-in scheduler" (architecture.md). This document designs that missing layer.
 
 **Decisions taken:**
 
@@ -234,7 +254,7 @@ catalog lever is `ER_LAKE_CATALOG_SCHEMA`.
 
 ## 10. Connector abstraction and Salesforce v1
 
-*This section is the normative summary; [connectors.md](connectors.md) is the standalone connector design and build plan.*
+*This section is the normative summary; `connectors.md` is the standalone connector design and build plan.*
 
 **Principle: connectors are producers and appliers at the edges of an unchanged engine.** Extraction lands Parquet files in the tenant's drop dir — the engine's existing ingest adapters, content-hash change detection, and tombstones do the rest. Writeback consumes engine outputs. The engine never learns about Salesforce.
 
@@ -367,4 +387,4 @@ quietly repointed.
 | Review queue + always/never assertions | `src/er/review/queue.py`, `src/er/review/assertions.py` | the `review`, `pair_label` and `assertion` entities, served by `.../reviews`, `/reviews/{id}/resolve`, `/reviews/bulk-resolve`, `.../assertions` and `/assertions/contradictions` | merge grid, undo (§11) |
 | Per-source column mapping (`sources` block) | `configs/default.yaml`, `src/er/config/schema.py` | `configs/default.yaml` still, plus `er-config` | connector mapping compilation (§10) |
 | Run ledger, resume, drift guard, exit codes | `src/er/obs/runctx.py`, `src/er/resume.py`, `src/er/versions.py`, `src/er/errors.py` | the `run`, `run_stage` and `task_instance` entities, plus `er-versions` and `er-errors` (`ExitCode::{Success,Config,Precondition,StageFailure,NothingToDo}`) | job orchestration (§5) |
-| Cloudingo feature bar | `docs/research-cloudingo.md` | unchanged | parity matrix (§3) |
+| Cloudingo feature bar | `research-cloudingo.md` | unchanged | parity matrix (§3) |

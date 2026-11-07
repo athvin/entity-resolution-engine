@@ -3,7 +3,7 @@
 # per-env artifacts the plan matrix uploaded.
 #
 # WHY A SCRIPT AND NOT INLINE YAML. Two reasons, both learned here. A gate is
-# not trusted until it has been observed failing (docs/frontend-testing.md), and
+# not trusted until it has been observed failing (.claude/skills/frontend-testing/references/frontend-testing.md), and
 # a heredoc inside a matrix job can only be exercised by pushing a commit; this
 # runs against fixture plan files in a second. And the character budget below is
 # real arithmetic — GitHub rejects a comment body over 65536 characters outright,

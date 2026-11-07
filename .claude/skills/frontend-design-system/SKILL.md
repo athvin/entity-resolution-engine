@@ -10,7 +10,7 @@ that claim rather than on decoration. Its defining property:
 
 > **Both themes are strictly grayscale.** No brand accent, no coloured chips or
 > badges, no palette. Hierarchy comes from type scale, weight, spacing and
-> motion. (`docs/frontend-design.md` §3.3)
+> motion. ([references/frontend-design.md](references/frontend-design.md) §3.3)
 
 This is a standing constraint on every surface and component, not a launch-phase
 simplification — and it is **ESLint-enforced**, because for a while it was

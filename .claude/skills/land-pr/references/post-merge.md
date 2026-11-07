@@ -26,7 +26,7 @@ from its length).
 
 **`images` is paths-filtered, and that is safe here.** It is not a required
 check, so the rule against `paths:` on a required workflow does not apply. The
-consequence for this loop is that a merge touching only `docs/`, `.claude/` or
+consequence for this loop is that a merge touching only `.claude/` or
 `infra/terraform/` builds nothing and deploys nothing — correctly. Waiting for a
 deploy run that will never be created is the ordinary way the main loop hangs.
 

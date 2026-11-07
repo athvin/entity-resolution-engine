@@ -12,10 +12,18 @@
 # later runs the gate until someone argues it should not, instead of skipping it
 # until someone notices.
 #
-# `docs/` and `CLAUDE.md` are exempt as prefixes, but four files beneath them
+# `.claude/` and `CLAUDE.md` are exempt as prefixes, but four files beneath them
 # ARE gate inputs. They are re-admitted by DETECT_ERD and DETECT_DRIFT rather
 # than by punching holes in DETECT_EXEMPT, because they do not all belong to the
 # same job — see rust.yml's header.
+#
+# There is no `docs/` entry any more: the directory is gone. The four gate
+# inputs that used to live there are now skill references under `.claude/`,
+# which this regex already exempts by prefix, so the re-admission mechanism is
+# unchanged and only the paths moved. `docs/` is NOT left in the denylist as a
+# courtesy to a future re-introduction — an exemption for a directory that does
+# not exist is a hole nobody is watching, and the fail-safe direction is that a
+# reintroduced `docs/` file runs the gate until someone argues it should not.
 #
 # Note what is NOT exempt and must not become so: this file. A change to the
 # classifier itself has to run the gate it classifies for.
@@ -56,20 +64,20 @@
 # the fail-safe direction and is left alone.
 
 # Everything the Rust gate never reads.
-DETECT_EXEMPT='^(\.claude/|\.devcontainer/|docs/|CLAUDE\.md$|infra/terraform/|scripts/ci/tf-|scripts/hooks/|\.github/aw/|\.github/workflows/((infra|drift|devcontainer)\.yml$|shared/|agentics-maintenance\.yml$|[A-Za-z0-9._-]+\.md$|[A-Za-z0-9._-]+\.lock\.yml$))'
+DETECT_EXEMPT='^(\.claude/|\.devcontainer/|CLAUDE\.md$|infra/terraform/|scripts/ci/tf-|scripts/hooks/|\.github/aw/|\.github/workflows/((infra|drift|devcontainer)\.yml$|shared/|agentics-maintenance\.yml$|[A-Za-z0-9._-]+\.md$|[A-Za-z0-9._-]+\.lock\.yml$))'
 
 # A generated artifact `er-entity verify` re-renders and byte-compares.
-DETECT_ERD='^docs/erd\.md$'
+DETECT_ERD='^\.claude/skills/entity-framework/references/erd\.md$'
 
 # Inputs to, and targets of, skills-check's generated references. A change here
 # can make a committed generated block wrong, and the drift check that catches
 # it rides the required `lint` job.
-DETECT_DRIFT='^(docs/entity-framework-design\.md|docs/agent-skills\.md|CLAUDE\.md)$'
+DETECT_DRIFT='^(\.claude/skills/entity-framework/references/entity-framework-design\.md|\.claude/skills/skill-writer/references/agent-skills\.md|CLAUDE\.md)$'
 
 # The union: exempt by prefix, but still read by some gate, so the
 # content-addressed pass key must keep hashing them or a change to one could
 # ride a stale pass marker.
-DETECT_COUPLED='^(docs/erd\.md|docs/entity-framework-design\.md|docs/agent-skills\.md|CLAUDE\.md)$'
+DETECT_COUPLED='^(\.claude/skills/entity-framework/references/erd\.md|\.claude/skills/entity-framework/references/entity-framework-design\.md|\.claude/skills/skill-writer/references/agent-skills\.md|CLAUDE\.md)$'
 
 # Classify a newline-separated list of changed paths on stdin. Emits the three
 # `key=value` lines `detect` writes to $GITHUB_OUTPUT, in that order.

@@ -9,7 +9,7 @@ import { dataBoundary } from "../../eslint-rules/data-boundary.mjs";
  * around er-server: no DuckDB / DuckLake / S3 / foreign-database client anywhere
  * in src/, the Postgres connection only from src/lib/db/, and browser code only
  * same-origin. Every invalid case below plants a violation the rule must
- * report — a gate nobody has watched fail is not a gate (docs/frontend-testing.md).
+ * report — a gate nobody has watched fail is not a gate (.claude/skills/frontend-testing/references/frontend-testing.md).
  */
 
 RuleTester.describe = describe;

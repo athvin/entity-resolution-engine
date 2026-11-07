@@ -22,7 +22,7 @@ not hand-edit below the marker.**
 
 Everything here is a count, a name or a version, which is the category that goes
 stale fastest. The reasoning that explains *why* the account looks like this
-lives in the skill body and in `docs/infrastructure.md`; this file is the
+lives in the skill body and in `.claude/skills/infra-platform/references/infrastructure.md`; this file is the
 inventory.
 
 ## How to read it

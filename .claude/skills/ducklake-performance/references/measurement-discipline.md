@@ -78,9 +78,9 @@ inferred zeroes.
 
 ## The historical records, and what they license
 
-`docs/performance.md` and `docs/profiling.md` are **both banner-marked
+`references/performance.md` and `references/profiling.md` are **both banner-marked
 historical records** of the retired Python/Splink pipeline and its Compose-based
-harness. `docs/measurements/*.json` are that era's committed measurement
+harness. The per-campaign `measurements/*.json` captures were that era's committed measurement
 records.
 
 They remain genuinely useful for:

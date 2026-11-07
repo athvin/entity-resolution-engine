@@ -126,16 +126,22 @@ workflows (`infra.yml`, `drift.yml`), it exempts the whole agentic set —
 `.github/aw/`, `.github/workflows/shared/`, `agentics-maintenance.yml`, and
 every `*.md` and `*.lock.yml` under `.github/workflows/`.
 
-**`docs/` and `CLAUDE.md` are exempt as prefixes too, so a documentation change
-does _not_ run the gate.** Four files beneath them are gate inputs and are
-re-admitted **by name**: `docs/erd.md` through `DETECT_ERD`, and
-`docs/entity-framework-design.md`, `docs/agent-skills.md` and `CLAUDE.md`
-through `DETECT_DRIFT`. Those set `erd`/`drift`, never `code`, so they wake
-`entities` and `lint` alone rather than the compile tier. Re-admitting by name
-instead of punching holes in the exempt pattern is deliberate, because the four
-do not all belong to the same job. The consequence to plan around: **a new
-generated artifact placed under `docs/` is unchecked until it is named in one of
-those two patterns.**
+**`.claude/` and `CLAUDE.md` are exempt as prefixes too, so a documentation
+change does _not_ run the gate.** Four files beneath them are gate inputs and
+are re-admitted **by name**:
+
+- `entity-framework/references/erd.md` through `DETECT_ERD`;
+- `entity-framework/references/entity-framework-design.md`,
+  `skill-writer/references/agent-skills.md` and `CLAUDE.md` through
+  `DETECT_DRIFT`.
+
+Those set `erd`/`drift`, never `code`, so they wake `entities` and `lint` alone
+rather than the compile tier. Re-admitting by name instead of punching holes in
+the exempt pattern is deliberate, because the four do not all belong to the same
+job. The consequence to plan around: **a new generated artifact placed under
+`.claude/` is unchecked until it is named in one of those two patterns** — and
+since the design documents moved there from the deleted `docs/`, that prefix now
+covers far more files than it used to.
 
 Each entry is there because nothing in the Rust gate reads it: no crate or
 manifest references `infra/`, and `make check` touches it nowhere. The one real
@@ -420,3 +426,13 @@ each member says only that the combination failed — it does not accuse that PR
 Read the bus PR's own checks to see which context failed, and note that a
 combination can fail when every member passes alone, which is the whole reason
 the bus exists. Re-run the bus with `max_batch=1` to attribute it.
+
+## Two environments this skill does not otherwise cover
+
+- [references/devcontainer.md](references/devcontainer.md) — the development
+  image, and why a run under `devcontainers/ci` behaves differently from the
+  same image locally.
+- [references/agent-fleet.md](references/agent-fleet.md) — the dispatched
+  coding-agent design behind `agent-task.yml`. Phase 1 is in the tree; the
+  later phases, including the ARC scale set its §5 describes, are design only,
+  so read it as a plan rather than as the account of a running system.

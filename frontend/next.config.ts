@@ -15,7 +15,7 @@ import type { NextConfig } from "next";
  * bootstrap means the reports we get are about genuinely unexpected origins
  * (an injected script, an unplanned external connect) instead of drowning in
  * our own inline tags. Tightening script-src via nonces is the follow-up; see
- * docs/frontend-testing.md.
+ * .claude/skills/frontend-testing/references/frontend-testing.md.
  *
  * The scope of that follow-up GREW when the marketing surface landed. The set
  * of pages a nonce policy would force dynamic is no longer two auth forms — it

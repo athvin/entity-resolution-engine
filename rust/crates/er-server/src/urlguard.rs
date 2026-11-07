@@ -26,7 +26,8 @@
 //!
 //! The honest limit, which this module cannot fix: the network leg. Whether a
 //! pod can reach IMDS at all is a NetworkPolicy question, verified by the manual
-//! probe in `docs/infrastructure.md` §17. This is the application layer, and the
+//! §17 probe in the `infra-platform` skill's `references/infrastructure.md`.
+//! This is the application layer, and the
 //! unit tests below prove only the application layer.
 
 use std::net::IpAddr;

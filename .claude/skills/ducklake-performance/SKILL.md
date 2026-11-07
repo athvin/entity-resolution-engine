@@ -20,8 +20,8 @@ Read this before planning any measurement, because the answer changed:
 | Surface | State |
 |---|---|
 | The Python/Splink campaign harness and its Compose-based driver | **retired** — removed from the tree |
-| `docs/performance.md`, `docs/profiling.md` | **historical records**, both banner-marked as such. Preserved for their measurements and findings |
-| `docs/measurements/*.json` | the committed measurement records from those campaigns |
+| [references/performance.md](references/performance.md), [references/profiling.md](references/profiling.md) | **historical records**, both banner-marked as such. Preserved for their measurements and findings |
+| the per-campaign `measurements/*.json` captures | **removed from the tree** — they were raw captures nothing read, and they are in git history if a number needs checking |
 | `cargo bench -p dedupe-core` (`benches/pipeline.rs`) | the live benchmark surface |
 | the 50k scale goldens | gated, and never a per-PR gate — which jobs run them, and when, is in the ci-and-supply-chain skill's generated required-checks reference |
 
@@ -132,6 +132,7 @@ control/diagnostic pair locates a bottleneck, but claiming a gain needs
 repeated unprofiled baseline-versus-candidate trials.
 
 Artifacts may contain tenant data: keep analysis local, and do not send their
-SQL or values to an external service. Save durable findings in `docs/`, and do
+SQL or values to an external service. Save durable findings in this skill's
+`references/`, and do
 not change production schema or config, or launch an expensive run, when the
 request was analysis.

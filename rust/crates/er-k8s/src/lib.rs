@@ -1,4 +1,5 @@
-//! The Kubernetes half of `docs/batch-orchestration-design.md` §6: the
+//! The Kubernetes half of the batch-orchestration design (§6, carried by the
+//! `er-engine-ops` skill): the
 //! [`PodApi`] seam the dispatcher launches and watches through (one production
 //! implementation over `kube`, one scripted test double in er-server's tests),
 //! the per-attempt Job manifest rendering, the watch discipline, and the pure

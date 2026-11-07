@@ -4,7 +4,7 @@ Derived from the workspace. Prose outside the GENERATED markers survives
 regeneration; do not hand-edit inside them.
 
 For the declared **metrics** and the dimensions a metric may never carry, read
-`docs/telemetry-reference.md` instead — it is generated from
+`references/telemetry-reference.md` instead — it is generated from
 `er-obs/src/registry.rs` by that crate's own test and byte-compared, so it
 cannot drift from what is emitted. It is reached from the skill body.
 
@@ -65,7 +65,7 @@ binary**, not a target of its own, so run one with
 - `er-obs/tests/cardinality.rs` — No metric may carry a dimension that costs money without anyone choosing to.
 - `er-obs/tests/no_pii_in_exported_spans.rs` — A record value must not reach an exported span, asserted on the bytes.
 - `er-obs/tests/otlp_export.rs` — A span, over a real socket, in both of this workspace's runtime shapes.
-- `er-obs/tests/reference.rs` — `docs/telemetry-reference.md` is generated from the registry, byte for byte.
+- `er-obs/tests/reference.rs` — The observability skill's `references/telemetry-reference.md` is generated from the registry, byte for byte.
 - `er-schema/tests/collector_allowlist.rs` — The collector's attribute allowlist still covers what the code emits.
 - `er-schema/tests/span_boundaries.rs` — The posterity gate for blocking hops: no bare `spawn_blocking` in the control plane.
 - `er-schema/tests/sql_span_pii.rs` — The PII boundary on spans, enforced rather than documented.

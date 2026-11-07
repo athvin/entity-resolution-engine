@@ -10,7 +10,7 @@
 - The property and curve rules
 - The one existing worked example
 
-Motion on this product has a narrow job, set by `docs/frontend-design.md` §3.3:
+Motion on this product has a narrow job, set by `references/frontend-design.md` §3.3:
 it **explains a state change** — "a merged pair visually collapsing into one
 entity" — rather than decorating. A fade-and-slide-up on every section and a
 hover transition on every card are the generic default and read as generated.

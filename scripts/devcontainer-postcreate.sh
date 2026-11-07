@@ -62,6 +62,6 @@ devcontainer-postcreate: ready.
                     cluster is already running; ER_TEST_PG_DSN is preset)
   make frontend     the frontend PR gate, Playwright tier included
 
-See docs/devcontainer.md. Visual baselines compare on Linux only, so this
+See .claude/skills/ci-and-supply-chain/references/devcontainer.md. Visual baselines compare on Linux only, so this
 container is the right place to regenerate them (`make frontend-baselines`).
 EOF

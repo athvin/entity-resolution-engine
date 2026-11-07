@@ -9,7 +9,7 @@ repository.workspace = true
 # The dataset profiler's findings pass: the P-rules as a registry rather than a
 # hand-rolled list of `if` statements, on the same pattern as er-entity-lint's
 # V-rules. Each rule is a value carrying its code, title, explain prose and a
-# worked conforming/violating pair, so the rule reference (docs/profile-findings.md)
+# worked conforming/violating pair, so the rule reference (.claude/skills/er-engine-ops/references/profile-findings.md)
 # is generated from the same source the profiler enforces and cannot drift.
 #
 # Depends only on dedupe-core, for the `ColumnShape` a rule judges. A rule sees

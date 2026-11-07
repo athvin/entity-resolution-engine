@@ -1,8 +1,14 @@
 # Entity Framework Design
 
-Status: design, 2026-10-16. Companion to `docs/backend-design.md` and `docs/frontend-design.md`. The living copy with diagrams and comments is the "Entity Framework Design" document in Claude Docs; this file is its export, kept in the repo so the design travels with the code.
+Status: design, 2026-10-16. Companion to `.claude/skills/er-server-control-plane/references/backend-design.md` and `.claude/skills/frontend-design-system/references/frontend-design.md`. The living copy with diagrams and comments is the "Entity Framework Design" document in Claude Docs; this file is its export, kept in the repo so the design travels with the code.
 
 **Part 1** is the design: what the framework is and how it works. **Part 2** is the background and the research that led to it. **Part 3** is the build plan, the risks and the open questions.
+
+## Contents
+
+- [Part 1: Design](#part-1-design) — what the framework is, the flow, how a change is made, the stores, statements and reconciliation
+- [Part 2: Background and research](#part-2-background-and-research) — why this shape, and what was rejected
+- [Part 3: Build plan and risks](#part-3-build-plan-and-risks) — the phases, the risks and the open questions
 
 ## Part 1: Design
 
@@ -108,7 +114,7 @@ Every entity has the same identity shape, validated at catalog load (the V rules
 **The V rules are no longer listed here.** They live in `er-entity-lint` as a
 registry of rule values, each carrying its own code, title, reasoning and a
 worked conforming/violating example pair, and
-**[`docs/entity-lint-rules.md`](entity-lint-rules.md) is generated from that
+**The generated `references/entity-lint-rules.md` is rendered from that
 registry** by `er-entity lint --docs`. `er-entity verify` byte-compares the
 committed file against the registry, so the reference cannot drift from what is
 enforced — which is exactly how `E007`/`E008`/`E013` below came to be documented
@@ -369,7 +375,7 @@ One command, `er-entity verify`, runs in the existing `rust.yml` test job, which
 |---|---|---|
 | entity lint error (V0xx) | an `entity.yaml` breaks one of the conventions | `er-entity lint --explain <code>` says why the rule exists; fix the YAML. The pass runs first and short-circuits, because the later passes all assume a conforming catalog |
 | generated file differs | an entity or a statement changed and `er-entity gen` was not run, or was run with a different tool version | run `er-entity gen`, commit the diff |
-| `docs/entity-lint-rules.md` differs | a lint rule was added or its prose edited without regenerating the reference | run `er-entity gen` (or `er-entity lint --docs`), commit the diff |
+| `references/entity-lint-rules.md` differs | a lint rule was added or its prose edited without regenerating the reference | run `er-entity gen` (or `er-entity lint --docs`), commit the diff |
 | statement diagnostic (E0xx or A0xx) | a `.sql` file references a column or type the catalog does not have, or breaks an entity rule | fix the statement or the entity, in the same PR |
 | oracle mismatch | DataFusion's planned schema differs from what DuckDB or Postgres returned for a statement | fix the built-in stub or the type map; never the query |
 | `registry_matches_entities` failure | an `entity.yaml` lake column was added, retyped or reordered without the matching change to `er_schema::model` | update **both**. There are two schema sources and the one that runs at runtime is the registry: `er_cli::create_ddl_table` builds every lake table from `all_specs()`, not from the generated DDL, so an entity-only change is invisible to any table a run creates. `er-entity-diff` cannot see this — it compares the catalog against a **live** store, so with no live column there is nothing to diff |

@@ -110,7 +110,7 @@ Claude subscription token. It copies gh-aw's split instead. The `agent` job
 holds only the workflow token, with `contents: write`, and checkpoints to
 `agent-wip/<task>`. A separate `publish` job, on a fresh runner that never
 checks out the agent's tree, mints a GitHub App token and opens the PR. Design
-and rationale: `docs/agent-fleet.md`.
+and rationale: `references/agent-fleet.md`.
 
 It expects two secrets beyond the gh-aw agents' `ANTHROPIC_API_KEY`, and unlike
 that one they are to be **environment-scoped**: `CLAUDE_CODE_OAUTH_TOKEN` in an

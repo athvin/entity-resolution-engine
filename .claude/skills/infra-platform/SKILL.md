@@ -58,12 +58,23 @@ otherwise:
 **Karpenter CRDs are nevertheless how you shape capacity here, because Auto Mode
 runs its own Karpenter.** The manifests in `infra/k8s/nodepools/` are literally
 `apiVersion: karpenter.sh/v1`, `kind: NodePool`, and
-`docs/infrastructure.md` §5.1 is titled "Karpenter disruption settings". So:
+[references/infrastructure.md](references/infrastructure.md) §5.1 is titled
+"Karpenter disruption settings". So:
 
 - Writing a `karpenter.sh/v1` `NodePool` is **correct** and is the supported way
   to declare instance families, capacity type and disruption policy.
 - Installing Karpenter, or managing its controller or a custom `NodeClass`, is
   **wrong** — Auto Mode owns that.
+
+The two design records behind this platform, kept with the skill that applies
+them: [references/infrastructure.md](references/infrastructure.md) is the
+as-built account — the environments, what is alarmed, the probes and their
+numbered sections — and
+[references/infrastructure-decisions.md](references/infrastructure-decisions.md)
+records which option was chosen at each fork and what was rejected.
+[references/plan-to-aws.md](references/plan-to-aws.md) is the ordered build-out
+tracker the other two defer to for live status — read status there, design in
+them. None is a substitute for reading the Terraform.
 - A new pool goes **beside the deployed ones**, not under
   `infra/k8s/nodepools/measure/`. `make cluster-objects` — still callable by its
   old name `make nodepools` — applies that directory **non-recursively**, which

@@ -18,7 +18,7 @@ import type { ReviewRecommendation } from "@/lib/query/adjudicate";
  * explicit confidence and the model's name are the whole defence, so they are
  * asserted rather than assumed.
  *
- * The second is the **grayscale rule** (`docs/frontend-design.md` §3.3). Three
+ * The second is the **grayscale rule** (`.claude/skills/frontend-design-system/references/frontend-design.md` §3.3). Three
  * verdicts is the most tempting place in the product to reach for
  * green/red/grey, and with no palette the only channel is the glyph — so the
  * glyph must differ per verdict and must match the button the steward will

@@ -1,6 +1,6 @@
 ---
 name: skill-audit
-description: Reviews a skill in this repo against `docs/agent-skills.md` — the judgment half of the skill standard the gate cannot mechanise: whether a sentence survives the economy test, whether a stated count belongs in a generated block, whether a claim about the tree has gone stale, whether two descriptions collide with no routing tail to close it, whether each eval scenario targets a real failure, whether an override states and scopes its supersession, and whether entity/record/row/tenant carry their codebase meanings. Use when reviewing a skill before or after a change, when asked whether a skill is any good, when skill selection misfires at runtime, or when a skill has grown and may now restate what the model already knows. Read-only: it reports findings and never edits the skill. For authoring a skill or applying findings see skill-writer; for the mechanical rules see docs/agent-skills.md; for the gate that enforces them see ci-and-supply-chain.
+description: Reviews a skill in this repo against the agent-skills standard — the judgment half of the skill standard the gate cannot mechanise: whether a sentence survives the economy test, whether a stated count belongs in a generated block, whether a claim about the tree has gone stale, whether two descriptions collide with no routing tail to close it, whether each eval scenario targets a real failure, whether an override states and scopes its supersession, and whether entity/record/row/tenant carry their codebase meanings. Use when reviewing a skill before or after a change, when asked whether a skill is any good, when skill selection misfires at runtime, or when a skill has grown and may now restate what the model already knows. Read-only: it reports findings and never edits the skill. For authoring a skill or applying findings see skill-writer; for the mechanical rules see the agent-skills standard; for the gate that enforces them see ci-and-supply-chain.
 ---
 
 # Auditing a skill
@@ -9,9 +9,9 @@ description: Reviews a skill in this repo against `docs/agent-skills.md` — the
 > (<https://github.com/Terryc21/skill-reviewer>), Apache-2.0. Kept: cited
 > findings, the severity/effort/quick-win card, strengths carrying equal weight,
 > and the optional challenger pass. Replaced: its generic rubric, with the lenses
-> below derived from `docs/agent-skills.md`.
+> below derived from the agent-skills standard.
 
-The standard is [`docs/agent-skills.md`](../../../docs/agent-skills.md). **Read it before
+The standard is [`skill-writer/references/agent-skills.md`](../skill-writer/references/agent-skills.md). **Read it before
 auditing** — this skill is how that document gets applied, not a second copy of it.
 
 ## The boundary that makes this useful

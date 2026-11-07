@@ -30,7 +30,7 @@ screen's whole job is explaining evidence. And a library that renders through
 canvas or animates on mount produces a different image run to run, which breaks
 the Linux pixel baselines the frontend gate depends on.
 
-`docs/frontend-design.md` §8 recommends ECharts and visx. **That
+`.claude/skills/frontend-design-system/references/frontend-design.md` §8 recommends ECharts and visx. **That
 recommendation was never adopted.** Proposing a chart library is therefore a
 decision to escalate to a human, not an implementation detail to settle inside a
 task — and a generic data-visualization skill will reach for one by default.
@@ -112,7 +112,7 @@ and discovering they wrap is the usual way this goes wrong.
 ## Scores must explain themselves
 
 A bare probability is a defect on this product. The rule from
-`docs/frontend-design.md` §3.3, stated as a requirement:
+`.claude/skills/frontend-design-system/references/frontend-design.md` §3.3, stated as a requirement:
 
 > "0.93 — just below your auto-merge threshold of 0.95; that's why it's asking
 > you."

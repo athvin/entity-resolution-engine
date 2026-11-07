@@ -1,4 +1,5 @@
-//! The compiled-DAG library of `docs/batch-orchestration-design.md`.
+//! The compiled-DAG library of the batch-orchestration design, carried by the
+//! `er-engine-ops` skill as `references/batch-orchestration-design.md`.
 //!
 //! A **task is a pipeline stage**; a **DAG is a job kind**, written in Rust in
 //! the one multicall binary, with typed durable edges so that wiring, arity,

@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
 # Measure how long a pipeline run takes to *start*, on the live cluster.
 #
-# This is the harness behind docs/infrastructure.md §18.16 — "cold-node image
+# This is the harness behind .claude/skills/infra-platform/references/infrastructure.md §18.16 — "cold-node image
 # pull time for the current image", the deciding measurement that
 # infrastructure-decisions.md D-PULL and plan-to-aws.md 2.3 both wait on and
 # that nothing in this repo has ever produced. The two numbers in circulation
 # (~90 s for a probe pod, 77 s pod-to-complete) are prose in a plan checkbox
 # with no artifact and no method behind them; this script is the method.
 #
-# It runs one or more arms, each 1..N trials, and emits a record following the
-# docs/measurements/*.json convention. Run it twice over the SAME image — once
-# per arm — and the two become a before/after comparison:
+# It runs one or more arms, each 1..N trials, and emits a JSON record. That
+# record is no longer committed: the old `docs/measurements/` captures were
+# deleted with the rest of that directory, so the default output is the ignored
+# `artifacts/` tree and keeping a result is a deliberate act. Run it twice over
+# the SAME image — once per arm — and the two become a before/after comparison:
 #
 #   scripts/measure_runner_startup.sh --image <registry>/er-api:<sha> --arm before
 #   scripts/measure_runner_startup.sh --image <registry>/er-api:<sha> --arm after
@@ -85,7 +87,7 @@ Usage: scripts/measure_runner_startup.sh --image REF --arm before|after
                  high-variance and the spread is part of the result.
   --arms LIST    Comma-separated subset of x1,x2,n1,n2 (default all).
   --out FILE     JSON to write/update (default
-                 docs/measurements/runner-startup-<UTC date>.json).
+                 artifacts/measurements/runner-startup-<UTC date>.json).
   --keep         Leave the probe NodePool and Jobs in place (for debugging).
 EOF
 }
@@ -117,7 +119,8 @@ PROBE_POOL="infra/k8s/nodepools/measure/runner-probe.yaml"
 [ -f "$PROBE_POOL" ] || die "$PROBE_POOL not found"
 
 TODAY="$(date -u +%Y%m%d)"
-OUT="${OUT:-docs/measurements/runner-startup-$TODAY.json}"
+OUT="${OUT:-artifacts/measurements/runner-startup-$TODAY.json}"
+mkdir -p "$(dirname "$OUT")"
 K=(kubectl --context "$CONTEXT")
 RUNTAG="$(date -u +%H%M%S)$$"
 WORK="$(mktemp -d)"
@@ -175,7 +178,7 @@ ensure_config() {
 }
 
 # The probe itself. It opens a brand-new local DuckLake (a dev lake "is just a
-# directory", per docs/runbook.md) and runs the read-only `er doctor` report,
+# directory", per .claude/skills/er-engine-ops/references/runbook.md) and runs the read-only `er doctor` report,
 # which is enough to force the whole session path: open the DuckDB connection,
 # apply the session options, load the extensions, ATTACH the catalog, reconcile
 # the lake schema and query every relation. The marks are the process's own

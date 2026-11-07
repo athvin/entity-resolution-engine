@@ -8,7 +8,8 @@
 //!
 //! The rules are a **registry**, not prose and not a chain of `if`s. Each is a
 //! value carrying its own code, title, reasoning and a worked
-//! conforming/violating pair, so `docs/profile-findings.md` is generated from
+//! conforming/violating pair, so the generated reference
+//! (`.claude/skills/er-engine-ops/references/profile-findings.md`) comes from
 //! the same source the profiler runs and the reference cannot drift from the
 //! behaviour. That is the pattern `er-entity-lint` established for the V-rules;
 //! this is the same shape applied to data rather than to schema.
@@ -290,8 +291,9 @@ pub fn rule_infos() -> Vec<RuleInfo> {
     infos
 }
 
-/// The generated rule reference (`docs/profile-findings.md`), rendered from the
-/// registry so it cannot drift from what the profiler actually reports.
+/// The generated rule reference
+/// (`.claude/skills/er-engine-ops/references/profile-findings.md`), rendered
+/// from the registry so it cannot drift from what the profiler actually reports.
 #[must_use]
 pub fn reference_markdown() -> String {
     use std::fmt::Write as _;
@@ -307,6 +309,11 @@ pub fn reference_markdown() -> String {
          or simply how that source works is the data owner's call, so every rule reports \
          and none blocks.\n\n",
     );
+    // Required of any skill reference over 100 lines by
+    // `scripts/skills-check.sh`, and emitted from the registry for the same
+    // reason the rest of this file is: an index that can disagree with the
+    // sections it indexes is worse than no index.
+    out.push_str("## Contents\n\n");
     out.push_str("| Code | Severity | Invariant |\n|---|---|---|\n");
     for info in rule_infos() {
         let _ = writeln!(

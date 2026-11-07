@@ -26,9 +26,9 @@ reasonable on its face.
 
 **Must not:**
 
-- Add the dimension and regenerate `docs/telemetry-reference.md` to match.
+- Add the dimension and regenerate `.claude/skills/observability/references/telemetry-reference.md` to match.
 - Treat it as a style preference, or present the cost as hypothetical.
-- Hand-edit `docs/telemetry-reference.md` rather than the registry.
+- Hand-edit `.claude/skills/observability/references/telemetry-reference.md` rather than the registry.
 
 ## 2. A field that never arrives
 

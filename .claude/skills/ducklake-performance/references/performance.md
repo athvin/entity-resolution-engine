@@ -4,7 +4,7 @@
 > its Compose-based harness (`docker/compose.yaml`, `scripts/ci/*.sh`), which no
 > longer exist in the tree. It is preserved for its measurements and findings;
 > the live engine is the Rust workspace under `rust/` (see the
-> [README](../README.md#performance)).
+> [README](../../../../README.md#performance)).
 
 *Engine layer — single-tenant engine measurements (one lake, one node).*
 
@@ -12,10 +12,22 @@
 that cost, how it got here, what was tried and rejected, and what the evidence says
 to do next. Consolidated 2026-10-03 from nine measurement reports; the full
 per-stage tables and campaign methodology live in git history, each committed
-campaign's machine-readable record is under [measurements/](measurements/) (the
+campaign's machine-readable record is under measurements/ (the
 work-in-progress thread-scaling campaign has none — see
 [Measurement records](#measurement-records)), and raw artifacts
 are git-ignored under `artifacts/`.*
+## Contents
+
+- [The numbers that matter](#the-numbers-that-matter)
+- [Four findings that drive everything](#four-findings-that-drive-everything)
+- [How it got here](#how-it-got-here)
+- [Quality status](#quality-status)
+- [Tried and rejected](#tried-and-rejected)
+- [Open backlog, evidence-linked](#open-backlog-evidence-linked)
+- [Measuring](#measuring)
+- [Benchmark baselines](#benchmark-baselines)
+- [Measurement records](#measurement-records)
+
 ## The numbers that matter
 
 The standard workload is **1M synthetic records (400k people), seed 42,
@@ -35,7 +47,7 @@ generation, setup, validation and teardown are excluded.
 Resource shape at 10M, same envelope: peak container memory **9.37 GiB**, peak
 *live* DuckDB spill **141.48 GiB**. Ten million records fit in a 10 GiB container
 because DuckDB spills instead of growing its working set — scale costs fast
-scratch disk, not RAM. ([infrastructure.md](infrastructure.md) §6.5 sizes the
+scratch disk, not RAM. ([infrastructure.md](../../infra-platform/references/infrastructure.md) §6.5 sizes the
 cloud runner classes on exactly these two numbers.)
 
 ## Four findings that drive everything
@@ -181,10 +193,10 @@ namespace that flows into storage paths — while `semantic_config_sha256` hashe
 the namespace-independent configuration and is the comparability key.
 Python-side work that
 deliberately stays out of SQL is inventoried in
-[python-processing-exceptions.md](python-processing-exceptions.md); trace
-semantics are in [profiling.md](profiling.md); migrating an existing lake across
+the retired Python processing-exceptions note (removed from the tree; in git history); trace
+semantics are in `profiling.md`; migrating an existing lake across
 the Splink 4→5 boundary is in the
-[runbook](runbook.md#migrating-an-existing-lake-to-splink-5).
+[runbook](../../er-engine-ops/references/runbook.md#migrating-an-existing-lake-to-splink-5).
 
 ## Benchmark baselines
 
@@ -216,13 +228,13 @@ baselines.
 
 | Campaign | Machine-readable record |
 |---|---|
-| Splink 5 migration (2026-09-22) | [measurements/splink5-20260922.json](measurements/splink5-20260922.json) |
-| 1M/100K profiling baseline (2026-09-23) | [measurements/workload-profiling-20260923.json](measurements/workload-profiling-20260923.json) |
-| Profile-guided tuning (2026-09-23) | [measurements/workload-tuning-20260923.json](measurements/workload-tuning-20260923.json) |
-| 10M/100K scale test (2026-09-23) | [measurements/workload-10m-100k-20260923.json](measurements/workload-10m-100k-20260923.json) |
-| Training/blocking quality screen (2026-09-23) | [measurements/performance-screening-20260923.json](measurements/performance-screening-20260923.json) |
-| EM-cap full-load confirmation (2026-09-23) | [measurements/training-full-load-20260923.json](measurements/training-full-load-20260923.json) |
-| Runner startup, cold node + extension bake (2026-10-24) | [measurements/runner-startup-20261024.json](measurements/runner-startup-20261024.json) |
+| Splink 5 migration (2026-09-22) | measurements/splink5-20260922.json |
+| 1M/100K profiling baseline (2026-09-23) | measurements/workload-profiling-20260923.json |
+| Profile-guided tuning (2026-09-23) | measurements/workload-tuning-20260923.json |
+| 10M/100K scale test (2026-09-23) | measurements/workload-10m-100k-20260923.json |
+| Training/blocking quality screen (2026-09-23) | measurements/performance-screening-20260923.json |
+| EM-cap full-load confirmation (2026-09-23) | measurements/training-full-load-20260923.json |
+| Runner startup, cold node + extension bake (2026-10-24) | measurements/runner-startup-20261024.json |
 
 Unlike the rows above it, the runner-startup record's harness still exists and
 still runs: `scripts/measure_runner_startup.sh` against the dev cluster, or
@@ -235,4 +247,4 @@ record — its raw outputs were git-ignored under `artifacts/bench/threads6-*` o
 one developer machine. Its report survives in git history as
 `docs/performance-thread-scaling.md` at `9090b33^`; the 2-thread 10M reference it
 compared against (6,458s) is the Splink-5 campaign's run in
-[measurements/splink5-20260922.json](measurements/splink5-20260922.json).
+measurements/splink5-20260922.json.

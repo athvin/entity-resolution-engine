@@ -125,7 +125,7 @@ the `server-only` marker and the gates that enforce the boundary.
 Neither client imports `schema.d.ts`. `bffFetch<T>` takes its type from the
 caller, and where that is a generated type at all it comes from `er-entity
 gen`'s `src/lib/entities/bindings/`.
-`docs/entity-framework-design.md` has the control lane typed through
+`.claude/skills/entity-framework/references/entity-framework-design.md` has the control lane typed through
 `schema.d.ts` and `openapi-fetch`; until that is wired, regenerating the types
 cannot break the frontend build, so the compiler will **not** list the call
 sites a backend change affects. Find them by hand.

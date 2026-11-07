@@ -35,7 +35,7 @@
 #
 # WORKFLOW_DIR and MAX_LINES exist for scripts/ci/workflow-shell-check-test.sh,
 # which points the gate at fixture workflows so it can be observed FAILING on
-# each rule before it is trusted on the real tree — `docs/frontend-testing.md`'s
+# each rule before it is trusted on the real tree — `.claude/skills/frontend-testing/references/frontend-testing.md`'s
 # rule, applied to a shell gate. No call site sets either.
 set -uo pipefail
 

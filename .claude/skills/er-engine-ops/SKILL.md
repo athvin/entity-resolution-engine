@@ -204,8 +204,26 @@ a script must read the JSON rather than branch on the status.
 `er profile` is the other read: per-column shape, frequent values and coded
 findings for the raw, standardized or golden stage, persisted to the lake.
 Re-profiling an unchanged snapshot rewrites its rows instead of appending, so
-asking twice costs one run.
+asking twice costs one run. The `P` codes it reports — what each one means, what
+it is quiet on and what fires it — are generated from the rule registry into
+[references/profile-findings.md](references/profile-findings.md). Nothing there
+gates a dataset: every rule reports and none blocks.
 
 For browsing actual data, the read API and the UI are the supported surfaces.
 A `duckdb` shell works for ad-hoc inspection but bypasses snapshot pinning and
 role checks.
+
+## The longer records
+
+Four documents sit behind this skill rather than inside it, because each is
+longer than a working summary should be:
+
+- [references/architecture.md](references/architecture.md) — the engine layer
+  end to end for **one** lake: the stage table and its outputs, how entity
+  identity survives a merge or split, what incremental scoring guarantees, and
+  the advisory lock that bounds concurrent writers. A lake belongs to a
+  dataset, not a tenant, which is the distinction most worth having straight
+  before reading anything else here.
+- [references/runbook.md](references/runbook.md) — operating procedures: training, incremental runs, the correction pass and recovery.
+- [references/configuration.md](references/configuration.md) — the configuration surface and what each knob actually reaches. Check a knob is wired into the path under test before concluding anything from it.
+- [references/batch-orchestration-design.md](references/batch-orchestration-design.md) — the compiled-DAG and Kubernetes batch design that `er-dag` and `er-k8s` implement, including the phases that are built and the one that is not.

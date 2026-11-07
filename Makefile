@@ -43,7 +43,7 @@ entities-check:
 # authoring rules and needs no toolchain, while `regen` rebuilds the GENERATED
 # blocks inside skill references from entities/, the crate tree, analyze.rs, the
 # workflows and the frontend config, then fails on drift. See
-# docs/agent-skills.md.
+# .claude/skills/skill-writer/references/agent-skills.md.
 #
 # The self-test runs here too, and it is the one `scripts/ci/*-test.sh` that
 # belongs in a make target: it tests the very script this target runs, and it is
@@ -233,7 +233,7 @@ kind-down:
 check-kind:
 	bash scripts/check_kind.sh
 
-# Measure runner startup on the live cluster (docs/infrastructure.md §18.16).
+# Measure runner startup on the live cluster (.claude/skills/infra-platform/references/infrastructure.md §18.16).
 # Run once per image to build a before/after record:
 #   make measure-runner-startup IMAGE=<ecr>/er-api:<sha> ARM=before
 measure-runner-startup:

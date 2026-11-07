@@ -1,4 +1,5 @@
-//! The generated-reference gate: `docs/profile-findings.md` must be exactly
+//! The generated-reference gate: the `er-engine-ops` skill's
+//! `references/profile-findings.md` must be exactly
 //! what the registry renders.
 //!
 //! The point of generating it is that a rule reference which can disagree with
@@ -11,7 +12,7 @@ use std::path::PathBuf;
 fn doc_path() -> PathBuf {
     PathBuf::from(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../../docs/profile-findings.md"
+        "/../../../.claude/skills/er-engine-ops/references/profile-findings.md"
     ))
 }
 
@@ -23,8 +24,9 @@ fn the_committed_reference_matches_the_registry() {
     let rendered = er_profile::reference_markdown();
     assert_eq!(
         committed, rendered,
-        "docs/profile-findings.md is stale — regenerate it:\n  \
-         cargo run -q -p er-profile --example dump_findings_doc > docs/profile-findings.md"
+        "the committed profile-findings.md is stale — regenerate it:\n  \
+         cargo run -q -p er-profile --example dump_findings_doc \
+         > .claude/skills/er-engine-ops/references/profile-findings.md"
     );
 }
 

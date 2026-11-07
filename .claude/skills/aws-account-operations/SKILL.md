@@ -39,7 +39,7 @@ apply to. The `SERVICE_CONTROL_POLICY` type stays enabled with no custom SCP,
 and prod is protected instead by **Deny statements on the permission set a
 developer actually assumes**.
 
-The consequences, which `docs/infrastructure.md` §3 records as deliberate
+The consequences, which `.claude/skills/infra-platform/references/infrastructure.md` §3 records as deliberate
 trade-aways rather than oversights:
 
 - A guardrail is one policy edit from gone, and nothing above the account can

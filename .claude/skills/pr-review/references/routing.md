@@ -21,7 +21,7 @@ the one the code actually needs.**
 | **Control task** | the dispatcher process | Postgres only, on the control plane's own credentials | async | no — and never counts toward `executor.inFlightCap` |
 | **Pod task** | a per-attempt Kubernetes Job | the lake, through a `dedupe_core::Session` | synchronous | yes — at most one live pod per tenant |
 
-The authority is `docs/batch-orchestration-design.md` §3.5 and §3.6. The
+The authority is `.claude/skills/er-engine-ops/references/batch-orchestration-design.md` §3.5 and §3.6. The
 one-line rule it states, and the one a reviewer can apply from a diff alone:
 
 > **A body that needs a lake open is a pod task.**
@@ -109,7 +109,7 @@ A tier finding needs an order of magnitude, and §8 has measured ones: a task on
 a warm node costs roughly three seconds of fixed overhead, and the first task of
 a cold run adds about thirty. Quote the section rather than restating its
 numbers — they were measured on a dated artifact under
-`docs/measurements/` and will be re-measured.
+the deleted `docs/measurements/` captures and will be re-measured.
 
 The consequence that stops most "this should be a pod" findings: because
 contiguous same-class tasks fuse into one pod, **a chain of stages does not pay

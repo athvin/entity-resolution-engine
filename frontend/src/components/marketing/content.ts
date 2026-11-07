@@ -6,7 +6,7 @@
  * unit test imports reports 0% and spends the budget for nothing. See
  * `src/lib/site/routes.ts` for the same note from the other side.
  *
- * Copy follows the house voice (docs/frontend-design.md §3.3 and the
+ * Copy follows the house voice (.claude/skills/frontend-design-system/references/frontend-design.md §3.3 and the
  * frontend-design-system skill): name the thing in the user's language, never
  * sell with adjectives where a number will do, and no sentence that would be
  * equally true of any other product.

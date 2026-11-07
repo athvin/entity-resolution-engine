@@ -24,7 +24,7 @@
 #   - semgrep: static analysis for the BFF's own risk classes.
 #
 # The heavy full-stack e2e tier (playwright.e2e.config.ts, real backend) stays
-# out of CI, and is dormant besides — see docs/frontend-testing.md. Action refs
+# out of CI, and is dormant besides — see .claude/skills/frontend-testing/references/frontend-testing.md. Action refs
 # are SHA-pinned with a `# vTAG` comment, per repo policy.
 name: frontend
 
@@ -391,7 +391,7 @@ jobs:
   #
   # Registry packs are fetched over the network, so until this has proven stable
   # it is deliberately NOT in the required-contexts set; the local ruleset is the
-  # part that cannot flake. See docs/frontend-testing.md.
+  # part that cannot flake. See .claude/skills/frontend-testing/references/frontend-testing.md.
   semgrep:
     name: semgrep (static analysis)
     needs: detect

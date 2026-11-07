@@ -1,7 +1,7 @@
 # frontend — the standalone cloud UI
 
 The web application over the erserver control plane, implementing
-[docs/frontend-design.md](../docs/frontend-design.md). A **standalone pnpm
+[.claude/skills/frontend-design-system/references/frontend-design.md](../.claude/skills/frontend-design-system/references/frontend-design.md). A **standalone pnpm
 project**, mirroring how `server/` is a standalone uv project: own lockfile,
 own CI job, nothing at the repo root references this directory at runtime.
 
@@ -45,7 +45,7 @@ also seeds a basic convenience login for manual poking — `admin@dupezone.com` 
 ## Tests
 
 Which tier a change belongs in, and what each gate is for, is
-[docs/frontend-testing.md](../docs/frontend-testing.md).
+[.claude/skills/frontend-testing/references/frontend-testing.md](../.claude/skills/frontend-testing/references/frontend-testing.md).
 
 ```sh
 # bare (seconds, no services): lib logic, components, BFF handlers.
@@ -72,7 +72,7 @@ needs Docker and a seeded tenant: `make frontend-dev`, `make frontend-seed`,
 all-Rust cutover until W0.5b restored the substrate — `frontend/dev/seed.py` was
 deleted then and `frontend/dev/seed.mjs` replaced it — so treat any older note
 calling it unavailable as stale. See
-[docs/frontend-testing.md](../docs/frontend-testing.md#the-full-stack-tier).
+[.claude/skills/frontend-testing/references/frontend-testing.md](../.claude/skills/frontend-testing/references/frontend-testing.md#the-full-stack-tier).
 
 The gate runs on every PR and **blocks the merge**: `lint + types + unit`,
 `playwright functional tier`, `pnpm audit + licenses` and

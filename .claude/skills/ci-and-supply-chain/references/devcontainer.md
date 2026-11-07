@@ -8,6 +8,15 @@ code bugs rather than environment bugs.
 
 `.devcontainer/` makes it one **Reopen in Container**.
 
+## Contents
+
+- [Opening it](#opening-it)
+- [The disk, which is the thing that actually goes wrong](#the-disk-which-is-the-thing-that-actually-goes-wrong)
+- [What is inside, and two things that are not](#what-is-inside-and-two-things-that-are-not)
+- [The gates](#the-gates)
+- [Troubleshooting](#troubleshooting)
+- [Changing the image](#changing-the-image)
+
 ## Opening it
 
 You need [Docker Desktop](https://www.docker.com/products/docker-desktop/) with

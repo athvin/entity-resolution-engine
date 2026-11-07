@@ -68,7 +68,7 @@ touch does not get a reviewer — this is where most of the cost is saved:
 | `rust/crates/er-server/src/dags/**` | tier (always), instrumentation |
 | `frontend/src/**` | instrumentation (the action vocabulary), reuse |
 | `infra/**`, `.github/workflows/**` | reuse (the shell-extraction budget) |
-| `docs/**`, `*.md`, `.claude/**` | none of the four — review as prose, briefly |
+| `*.md`, `.claude/**` | none of the four — review as prose, briefly |
 
 ## 2. Fan out
 

@@ -82,7 +82,7 @@ suffix, picked up by `pnpm check`/`pnpm test`.
 
 - **k8s-egress SSRF to IMDS** — not locally reproducible. The app-layer URL guard unit test IS the
   lockable PoC; the egress NetworkPolicy is defence-in-depth whose proof is the manual
-  `docs/infrastructure.md` §17 behavioral probe. State this in the finding; don't claim the unit test
+  `.claude/skills/infra-platform/references/infrastructure.md` §17 behavioral probe. State this in the finding; don't claim the unit test
   covers the network leg. See `ssrf-egress.md`, beside this one and reached from the skill body.
 - **Webhook *delivery*, brute-force, request-lane DoS, `match-preview`** — need a running stack.
   Express the PoC AS an env-gated integration / Playwright test on the existing tiers

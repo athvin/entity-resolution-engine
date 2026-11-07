@@ -1,4 +1,4 @@
-// The development container for this repo — see docs/devcontainer.md, and
+// The development container for this repo — see .claude/skills/ci-and-supply-chain/references/devcontainer.md, and
 // .devcontainer/Dockerfile for why mold is mandatory and cmake is absent.
 //
 // `cacheFrom` is what makes "Reopen in Container" a pull rather than a
@@ -70,7 +70,7 @@
   // there too, with the right one of those two treatments.
   //
   // The cost is that `docker volume rm` is how you reclaim the space, not
-  // deleting a folder — docs/devcontainer.md says so.
+  // deleting a folder — .claude/skills/ci-and-supply-chain/references/devcontainer.md says so.
   "mounts": [
     // The downloaded crate registry. CARGO_HOME is /usr/local/cargo and cannot
     // be moved (see containerEnv above), so this one lives outside $HOME and is

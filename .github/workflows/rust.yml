@@ -28,28 +28,32 @@
 # caught by the ungated `skills` job. Note those are matched per FILE rather than
 # as a directory, because this file and its three siblings live there too.
 #
-# `docs/**` and `CLAUDE.md` are exempt too, but NOT wholesale — and the reason
+# `.claude/**` and `CLAUDE.md` are exempt too, but NOT wholesale — and the reason
 # the earlier blanket "docs must run the gate" rule existed is worth keeping in
 # view, because it was correct about the risk and only wrong about the scope.
 # Exactly four files under those prefixes are coupled to a gate, and they split
-# across two different jobs, which is why one `code` output could not express it:
+# across two different jobs, which is why one `code` output could not express it.
+# All four used to live under `docs/`; that directory is gone and each now sits
+# in the `references/` of the skill that owns it, which changed their paths and
+# nothing else about this mechanism:
 #
-#   docs/erd.md                       a GENERATED artifact; `er-entity verify`
-#                                     fails on staleness      -> `entities`
-#   docs/entity-framework-design.md   the set-difference source for
-#                                     skills-check's `diagnostics` generator
+#   entity-framework/references/erd.md
+#       a GENERATED artifact; `er-entity verify` fails on staleness
+#                                                             -> `entities`
+#   entity-framework/references/entity-framework-design.md
+#       the set-difference source for skills-check's `diagnostics` generator
 #                                                             -> drift (`lint`)
-#   docs/agent-skills.md, CLAUDE.md   skill-inventory generator TARGETS; a
-#                                     hand-edit inside a generated block is
-#                                     drift                   -> drift (`lint`)
+#   skill-writer/references/agent-skills.md, and CLAUDE.md
+#       skill-inventory generator TARGETS; a hand-edit inside a generated
+#       block is drift                                        -> drift (`lint`)
 #
 # So `detect` emits two more outputs, `erd` and `drift`, and those two jobs gate
 # on `code OR <their own>`. Everything else still gates on `code` alone. A PR of
-# nothing but skills and docs therefore runs `lint` and nothing else, and a PR of
-# pure prose under `docs/` runs no compile job at all.
+# nothing but skills therefore runs `lint` and nothing else, and a PR of pure
+# prose under `.claude/` runs no compile job at all.
 #
 # Why this mattered: the `.claude/**` exemption was close to dead letter. Any
-# skill whose DESCRIPTION changes regenerates rows in `docs/agent-skills.md` and
+# skill whose DESCRIPTION changes regenerates rows in `.claude/skills/skill-writer/references/agent-skills.md` and
 # `CLAUDE.md` — so the commit that exempted skills was immediately defeated by
 # the regeneration those same skills require, and the full ~40-minute backend
 # gate ran on prose anyway. The exemption only ever worked for a skill-body edit
@@ -191,7 +195,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       code: ${{ steps.decide.outputs.code }}
-      # `docs/erd.md` changed: `entities` must run `er-entity verify`.
+      # `.claude/skills/entity-framework/references/erd.md` changed: `entities` must run `er-entity verify`.
       erd: ${{ steps.filter.outputs.erd }}
       # A generated-skill-reference input or target changed: `lint` must run the
       # drift check, which is the only copy of it that can block a merge.
@@ -275,7 +279,7 @@ jobs:
         #   always ran the full gate. It stopped being sound when
         #   `gen_skill_inventory` landed: it derives from SKILL.md descriptions,
         #   so a one-line description edit makes the inventory tables in
-        #   docs/agent-skills.md and CLAUDE.md stale — a .claude-only PR that
+        #   .claude/skills/skill-writer/references/agent-skills.md and CLAUDE.md stale — a .claude-only PR that
         #   goes green and turns main red on the push-to-main run.
         #
         # Running it needs no toolchain: every generator is grep/awk/sed over
@@ -515,7 +519,7 @@ jobs:
   entities:
     name: entities
     needs: detect
-    # `erd` too: `docs/erd.md` is a generated artifact this job byte-compares.
+    # `erd` too: `.claude/skills/entity-framework/references/erd.md` is a generated artifact this job byte-compares.
     if: needs.detect.outputs.code == 'true' || needs.detect.outputs.erd == 'true'
     runs-on: ubuntu-latest
     # 45 for the same reason as `lint`: on a cold cache this builds the bundled

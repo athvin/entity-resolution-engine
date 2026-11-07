@@ -2,7 +2,7 @@
 
 Generated from source by `scripts/skills-check.sh regen` — the implemented set
 is read out of `er-sql-check/src/analyze.rs` and the documented set out of
-`docs/entity-framework-design.md`, so the "documented but not implemented" list
+`.claude/skills/entity-framework/references/entity-framework-design.md`, so the "documented but not implemented" list
 below is **derived, not maintained**. Do not hand-edit below the marker.
 
 Invariant texts are clipped to a signpost. The design doc's table is the full
@@ -37,7 +37,7 @@ separate family from the entity-level `V` rules in `er-entity-lint`.
 - `E008` — the source query plans and the target format is parquet or csv
 - `E013` — every function the statement calls has a yaml under `functions/`, ours with a body or a built-in stub, with a signature the arguments satisfy
 
-This gap is the stated reason `docs/entity-lint-rules.md` is generated
+This gap is the stated reason `references/entity-lint-rules.md` is generated
 and byte-compared: a documented-only rule is exactly the drift that
 produced it.
 <!-- END GENERATED: diagnostics -->

@@ -19,7 +19,7 @@ CI in this build.
 `AdministratorAccess`** for an autonomous build loop. Its own `builder_prod_guard` mirrors
 PlatformAdmin's denies **with one deliberate omission the file flags itself**: `iam:CreateAccessKey`
 is *not* denied — so the key can mint further access keys, defeating the guard. Key material lands in
-Secrets Manager `er/dev/shared/builder`. This contradicts `docs/infrastructure.md` §8.1 ("no
+Secrets Manager `er/dev/shared/builder`. This contradicts `.claude/skills/infra-platform/references/infrastructure.md` §8.1 ("no
 long-lived access keys exist anywhere except two service identities"); a third, most-powerful one now
 exists, tagged `Retire = "when-build-loop-done"`.
 
@@ -32,7 +32,7 @@ exists, tagged `Retire = "when-build-loop-done"`.
 
 ## Dev-credential confinement (§8.5) and settings.local.json
 
-`docs/infrastructure.md` §8.5 states the rule: the dev token set
+`.claude/skills/infra-platform/references/infrastructure.md` §8.5 states the rule: the dev token set
 (`ERWEB_SESSION_SECRET`, `ERWEB_CREDENTIAL_KEY`, `ERSERVER_OPERATOR_TOKEN`, MinIO/Postgres passwords,
 `admin@dupezone.com`) "stays exclusively in the local Compose path," and every cloud environment draws
 its secrets from Secrets Manager. **Nothing mechanically enforces this today.**

@@ -42,7 +42,7 @@ reads and writes `task_instances` rows through `er_entities::`.
 **Must:**
 - Report it: a pod task for Postgres-only work pays the pod overhead and a
   tenant's one-pod slot for milliseconds of SQL. The fix is a control task.
-- Give an order of magnitude, from `docs/batch-orchestration-design.md` §8
+- Give an order of magnitude, from `.claude/skills/er-engine-ops/references/batch-orchestration-design.md` §8
   rather than invented.
 - Survive verification with a named consequence, not "this seems heavy".
 

@@ -75,7 +75,7 @@ from the skill body.
 | `stores: [duckdb]` | `rust/crates/er-entities/ddl/lake/<relation>.sql` |
 | `stores: [postgres]` | `rust/crates/er-entities/ddl/postgres/<relation>.sql` |
 | `languages: [typescript]` + wire | `frontend/src/lib/entities/bindings/<Pascal>.ts`; `readers/<Pascal>.ts` additionally when `wire: [arrow]` |
-| (always) | `docs/erd.md` |
+| (always) | `references/erd.md` |
 
 These five directories are `er_entity_gen::GENERATED_DIRS`: gen owns every file
 in them. `er-entity check` fails on byte-stale files AND on orphans (files gen
@@ -113,7 +113,7 @@ nothing else ships (`gates.md`, beside this one, carries the detail).
 
 ## The ERD
 
-`docs/erd.md` is generated (Mermaid, all three stores: `public` from the
+`references/erd.md` is generated (Mermaid, all three stores: `public` from the
 catalog, `erweb` from the latest drizzle snapshot, `lake.main` from the
 registry). Never hand-edit it; it is part of the staleness gate, so any
 schema change must re-run gen.

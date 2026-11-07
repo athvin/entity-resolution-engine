@@ -45,7 +45,7 @@ must read the cited lines itself; the draft's quotes are not evidence to it.
 Prompt shape:
 
 ```
-You are auditing an audit. A skill at <path> was reviewed against docs/agent-skills.md and
+You are auditing an audit. A skill at <path> was reviewed against .claude/skills/skill-writer/references/agent-skills.md and
 the draft report is below. Do NOT redo the review.
 
 Your job is to REFUTE the three conclusions listed as highest-leverage. For each:

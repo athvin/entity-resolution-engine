@@ -1,17 +1,29 @@
 # Frontend Design — the standalone cloud UI
 
-Status: research + product design, pre-implementation. Companion to `docs/backend-design.md`
+Status: research + product design, pre-implementation. Companion to `.claude/skills/er-server-control-plane/references/backend-design.md`
 (the control plane and engine it sits on); this document does not repeat that design, it
 references it. No code here — this is the "what we build and why" document, and the bar for
 "ready to go to market" is defined at the end (§9).
 
 ---
 
+## Contents
+
+- [1. Positioning & thesis](#1-positioning--thesis)
+- [2. Personas & access model](#2-personas--access-model)
+- [3. Information architecture & navigation](#3-information-architecture--navigation)
+- [4. The two-plane data rule](#4-the-two-plane-data-rule)
+- [5. Core screens & flows](#5-core-screens--flows)
+- [6. Cloudingo parity & differentiation matrix](#6-cloudingo-parity--differentiation-matrix)
+- [7. Backend gaps the UI requires (the next backend milestone, prioritized)](#7-backend-gaps-the-ui-requires-the-next-backend-milestone-prioritized)
+- [8. Stack recommendation](#8-stack-recommendation)
+- [9. Phased build plan & go-to-market readiness](#9-phased-build-plan--go-to-market-readiness)
+
 ## 1. Positioning & thesis
 
 We are attacking **Cloudingo** (Symphonic Source): a Salesforce-only dedupe SaaS. Its
 pricing tiers, feature depth and limitations are documented in
-[research-cloudingo.md](research-cloudingo.md) — the short version is that it is genuinely
+research-cloudingo.md — the short version is that it is genuinely
 deep (see §6) but structurally weak in five places its own reviewers name:
 
 1. **Salesforce-jailed** — one org per subscription; Marketo (leads only) is the sole other connector.
@@ -292,7 +304,7 @@ per-developer hostname.
 
 **Not yet reachable from the internet.** The ALB is `scheme: internal` and the Cloudflare
 records are DNS-only, so the surface is complete and fully tested but unpublished until the
-production edge topology is decided (§4.1 and `docs/infrastructure.md`). Whether marketing
+production edge topology is decided (§4.1 and `.claude/skills/infra-platform/references/infrastructure.md`). Whether marketing
 lives at the apex with the portal at `app.` — which would need host-based routing in
 `src/proxy.ts` — or both share one hostname is the open question.
 
@@ -594,7 +606,7 @@ The platform-operator cockpit, in the same app behind the `is_super_admin` flag:
 
 ## 6. Cloudingo parity & differentiation matrix
 
-*Competitor feature/pricing detail lives in [research-cloudingo.md](research-cloudingo.md); this matrix is our product's parity and differentiation stance, not a restatement of their product.*
+*Competitor feature/pricing detail lives in research-cloudingo.md; this matrix is our product's parity and differentiation stance, not a restatement of their product.*
 
 Legend: **Have** = engine/API supports it today, UI just renders it · **Partial** = core
 exists, missing a listed gap · **Gap** = needs backend work (§7) · **Roadmap** = consciously

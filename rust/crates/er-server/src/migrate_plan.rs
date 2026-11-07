@@ -9,7 +9,8 @@
 //! has not touched.
 //!
 //! So this plans and writes nothing. It is the gate
-//! `docs/entity-framework-design.md` names as the next step in its own rule 9:
+//! the `entity-framework` skill's `references/entity-framework-design.md` names
+//! as the next step in its own rule 9:
 //!
 //! > A rollback across a breaking change is not protected by machinery yet: the
 //! > image carries no `additive`/`breaking` label and CD does not refuse it,
