@@ -287,18 +287,29 @@ gh pr view <n> --json body --jq .body > /tmp/pr-<n>-body.md
 gh pr edit <n> --body-file /tmp/pr-<n>-body.md
 ```
 
-Four rules, and the third is the one that keeps the record worth having:
+Five rules. Three of them are the annotations, and the asymmetry between which
+ones tick is the whole mechanism:
 
 1. **Evidence inline, not a bare tick.** `- [x] main is green — 2860240d, run
    19284756 (22 success / 0 failure)`. A tick with nothing after it is
    indistinguishable from a tick applied to make the list go away.
-2. **`n/a — <why>` counts as done.** Most ledgers have several: a `.claude/`-only
-   change builds no image and deploys nothing, and saying so *is* the finding.
-3. **An item you could not establish leaves its box EMPTY**, annotated
-   `blocked — <why>`, and is named in the final report. Ticking something
-   unverified is the one failure that makes the whole mechanism worthless —
-   every future reader would have to re-derive what the ledger claims to settle.
-4. **Items discovered during the watch go under "Specific to this change"**,
+2. **`n/a — <why>` ticks.** Most ledgers have several: a `.claude/`-only change
+   builds no image and deploys nothing, and saying so *is* the finding.
+3. **`deferred — #<ticket>` ticks, and the number is not optional.** For work
+   that is real, was not done here, and is owned by a filed ticket — tracked
+   work rather than missing work, so the audit should stay quiet about it. A
+   deferral naming no ticket has retired an item into nothing, which is why
+   `pr-ledger-audit.sh` reports it as `LOOSE-DEFER` and the classifier counts
+   it. Do not reach for this to clear a box you simply did not get to: file the
+   ticket first, then the annotation is true.
+4. **An item you could not establish leaves its box EMPTY**, annotated
+   `blocked — <why>`, and is named in the final report. This is the one that
+   keeps the record worth having: an empty box means exactly one thing, and it
+   only keeps meaning that while every other outcome has somewhere else to go.
+   Ticking something unverified is the failure that makes the whole mechanism
+   worthless — every future reader would have to re-derive what the ledger
+   claims to settle.
+5. **Items discovered during the watch go under "Specific to this change"**,
    ticked if they were done here and left open if they are owed. That is how a
    one-off backfill or a required-check promotion stops living in chat.
 

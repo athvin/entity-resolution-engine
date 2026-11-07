@@ -15,8 +15,13 @@ the deliverable's other half:
   * Work it after the merge, and tick each box IN THIS BODY with the evidence
     written inline. A merged pull request's body stays editable — that is why
     the record lives here and not in a session transcript nobody re-reads.
-  * `n/a — <why>` counts as done. An EMPTY box means the follow-up did not
-    happen, and that is the only thing an empty box means.
+  * Three annotations, and only one of them leaves the box empty:
+      - `n/a — <why>`              ticks; the item does not apply here
+      - `deferred — #<ticket>`     ticks; real work, owned by a filed ticket
+      - `blocked — <why>`          stays EMPTY, and goes in the report
+    So an EMPTY box means the follow-up did not happen, and that is the only
+    thing an empty box means. A `deferred` with no ticket number is reported as
+    a loose deferral — file the ticket, then the annotation is true.
   * Add items to "Specific to this change" as you discover them, rather than
     leaving them in chat.
 

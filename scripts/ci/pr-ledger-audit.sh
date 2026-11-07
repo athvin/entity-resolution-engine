@@ -12,6 +12,12 @@
 # `/land-pr` closes the ledger of the pull request it lands; this is how you
 # find the ones an interrupted session left open.
 #
+# Two things count as owed, and they are printed separately because the remedy
+# differs: an `OPEN (k)` ledger has k empty boxes (do the work, or annotate it),
+# while `LOOSE-DEFER (k)` has k boxes that say `deferred` and name no ticket
+# (file the ticket). The second exists because `deferred` TICKS its box, so
+# without it the annotation would be a way to retire an item into nothing.
+#
 # Inputs (env): LIMIT (default 30) — how many merged pull requests to read,
 # newest first. Exits 1 if any has an open ledger, so it can be wired later.
 #
@@ -48,9 +54,16 @@ while IFS=$'\t' read -r n merged title; do
 	case "$status" in
 	ok)
 		owed=$(printf '%s\n' "$body" | pr_ledger_unticked)
-		if [ "$owed" -gt 0 ]; then
+		# A LOOSE DEFERRAL IS OWED WORK WEARING A TICK. `deferred` ticks the
+		# box, so a deferral naming no ticket has retired an item into nothing;
+		# reported beside the unticked count rather than folded into it,
+		# because the remedy differs — file the ticket, do not do the work.
+		loose=$(printf '%s\n' "$body" | pr_ledger_loose_deferrals)
+		if [ "$owed" -gt 0 ] || [ "$loose" -gt 0 ]; then
 			open_total=$((open_total + 1))
-			printf '#%s\t%s\tOPEN (%s)\t%s\n' "$n" "${merged%T*}" "$owed" "$title"
+			label="OPEN ($owed)"
+			[ "$loose" -gt 0 ] && label="$label LOOSE-DEFER ($loose)"
+			printf '#%s\t%s\t%s\t%s\n' "$n" "${merged%T*}" "$label" "$title"
 		else
 			printf '#%s\t%s\tclosed\t%s\n' "$n" "${merged%T*}" "$title"
 		fi

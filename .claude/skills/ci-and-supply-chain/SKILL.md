@@ -324,8 +324,8 @@ fails to parse**, indistinguishable from clean.
 The nightly and main-only jobs (coverage, benchmark compile, scale goldens) are
 not required either, by construction.
 
-`pull request contract` is **not required yet either**, deliberately — see
-below.
+`pull request contract` **is** required, as of 2026-11-07 — see below for the
+order that made it safe to add.
 
 ## The pull request contract
 
@@ -366,10 +366,24 @@ every PR opened afterwards. The job runs that self-test **before** the check,
 for the usual reason: a classifier that has stopped noticing anything passes
 everything, which is indistinguishable from a clean tree.
 
-**Promoting it to required is a branch-protection change**, so it is a separate
-act from shipping it. Order matters: let it report on real PRs first, including
-one it legitimately fails, and sweep the open PRs whose bodies predate the
-template — a context made required too early blocks every one of them.
+**It was promoted in a separate act from shipping it, and the order is the
+reusable part.** Branch protection is repository configuration rather than a
+file here, so adding a context is never part of a pull request. The sequence
+that made it safe, worth repeating for the next gate: let the check report on
+real PRs first → observe it **failing** on one → confirm no open PR would be
+blocked (ask the classifier per PR, do not assume) → then append the context.
+A context made required before that sweep blocks every open pull request at
+once, and the two it would have blocked here had bodies predating the template.
+
+Two mechanics of the promotion itself cost care. The
+`required_status_checks` endpoint **replaces** the list rather than appending,
+so the existing contexts have to be read, kept with their `app_id`, and
+re-sent — dropping one silently removes a gate. And after the PATCH, verify by
+**what blocks each open PR** rather than by its `mergeStateStatus`: both read
+`BLOCKED` immediately afterwards, and neither was blocked by the new context —
+each was waiting on its own Rust jobs. The
+[`polling.md`](../land-pr/references/polling.md) recipe is what answers that,
+because it diffs the satisfied set against the required set.
 
 **It is also the first check here that can report more than once per head SHA**,
 because a body edit re-triggers it without a push — and that exposes something

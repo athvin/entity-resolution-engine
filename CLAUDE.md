@@ -72,19 +72,25 @@ found. Use it for any PR being driven to merge rather than improvising the loop 
 **Every pull request closes a board ticket and carries a post-merge ledger.**
 `.github/pull_request_template.md` is brief in every section except that ledger:
 a checkbox block, inside stable `<!-- BEGIN POST-MERGE -->` markers, whose boxes
-are ticked **after** the merge — in the merged body, evidence inline, `n/a —
-<why>` where an item does not apply, and an empty box meaning the follow-up did
-not happen. A merged PR's body stays writable, which is what lets the record
-outlive the session that did the work; the descriptive material (plan,
-discoveries, measurements) goes in the template's collapsed Context block so the
-top of a body stays readable. `pull request contract` (`pr-contract.yml`)
-enforces both clauses and reads GitHub's own parsed closing references rather
-than the body text, so a `Closes #<n>` that would not actually close anything
-does not pass. `merge-bus/*` branches, Dependabot, reverts and the `no-ticket`
-label are exempt. It is **not a required check yet**: promoting it is a
-branch-protection change, and the `ci-and-supply-chain` skill carries the order
-that has to be followed. `scripts/ci/pr-ledger-audit.sh` sweeps merged PRs for
-ledgers an interrupted session left open.
+are ticked **after** the merge — in the merged body, with the evidence inline.
+Three annotations, and the asymmetry is load-bearing: `n/a — <why>` and
+`deferred — #<ticket>` tick the box, `blocked — <why>` leaves it empty, so **an
+empty box means exactly one thing** — the follow-up did not happen. A merged
+PR's body stays writable, which is what lets the record outlive the session that
+did the work; the descriptive material (plan, discoveries, measurements) goes in
+the template's collapsed Context block so the top of a body stays readable.
+`pull request contract` (`pr-contract.yml`) enforces both clauses and reads
+GitHub's own parsed closing references rather than the body text, so a
+`Closes #<n>` that would not actually close anything does not pass.
+`merge-bus/*` branches, Dependabot, reverts and the `no-ticket` label are
+exempt — the first of those load-bearing, since the merge bus reads its own
+PR's check rollup. The check is a **required context** as of 2026-11-07, added
+only after it had been seen failing and after no open PR would be blocked by
+it; the `ci-and-supply-chain` skill carries that order, which is the reusable
+part. `scripts/ci/pr-ledger-audit.sh` sweeps merged PRs for ledgers an
+interrupted session left open, and for deferrals that name no ticket — the one
+annotation with a syntactic requirement, because otherwise it would be the way
+to retire an item into nothing.
 
 ## Work in a worktree, cut from a fresh `main`
 

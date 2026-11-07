@@ -22,6 +22,14 @@
 # the gate to any more of the template's wording would make a prose edit a
 # merge blocker.
 #
+# THE ANNOTATIONS, AND WHICH OF THEM TICK. `n/a — <why>` and
+# `deferred — #<ticket>` tick the box; `blocked — <why>` leaves it empty and is
+# reported. The asymmetry is the point: an empty box means exactly one thing
+# (the follow-up did not happen), which is only true while every other outcome
+# has somewhere else to go. `deferred` is the only one with a syntactic
+# requirement, enforced in `pr_ledger_scan` — a deferral that names no ticket
+# would otherwise be the way to retire an item without doing or tracking it.
+#
 # THE CLASSIFIER IS PURE so pr-contract-test.sh can feed it fixtures: facts in
 # through the environment, body on stdin, a verdict on stdout, no network. The
 # wrapper (pr-contract-check.sh) is the only part that talks to GitHub.
@@ -80,30 +88,60 @@ pr_contract_exemption() {
 	return 1
 }
 
-# pr_ledger_scan — body on stdin, prints `<begin> <end> <boxes> <unticked>`.
+# pr_ledger_scan — body on stdin, prints
+# `<begin> <end> <boxes> <unticked> <loose-deferrals>`.
 #
 # Line numbers of the first marker of each kind (0 if absent), the number of
-# checkboxes between them, and how many of those are still empty. One awk pass
-# with NO early `exit`: an awk that stops reading SIGPIPEs the writer feeding
-# it, which is the same intermittent-false-negative trap as `grep -q`.
+# checkboxes between them, how many of those are still empty, and how many
+# TICKED ones defer without naming a ticket. One awk pass with NO early `exit`:
+# an awk that stops reading SIGPIPEs the writer feeding it, which is the same
+# intermittent-false-negative trap as `grep -q`.
+#
+# Every caller must `read` all five fields. A short `read` folds the trailing
+# ones into the last variable silently — which is exactly how adding the fifth
+# field broke an assertion in the self-test rather than any code.
+# Each box is accumulated WITH ITS CONTINUATION LINES before being judged,
+# because the annotation that matters is usually on a wrapped line:
+#
+#   - [x] **follow-ups** — everything deferred here is owned by
+#         `deferred — #810`
+#
+# A per-line test would see the tick and the annotation separately and could not
+# tell whether the deferral names a ticket.
 pr_ledger_scan() {
 	awk -v b="$PR_LEDGER_BEGIN" -v e="$PR_LEDGER_END" '
+		function flush() {
+			if (item == "") return
+			# A DEFERRAL WITHOUT A TICKET IS JUST AN UNTICKED BOX WITH EXTRA
+			# WORDS. `deferred` ticks the box, so without this the annotation
+			# would be a hole in the one mechanism the ledger has: work that
+			# is neither done, nor inapplicable, nor tracked anywhere.
+			if (ticked && item ~ /[Dd]eferred/ && item !~ /#[0-9]+/) loose++
+			item = ""
+		}
 		index($0, b) && !bl { bl = NR; inblock = 1; next }
 		# The end marker is recorded wherever it appears, INCLUDING before the
 		# begin marker. Requiring `bl` first made `inverted` unreachable —
 		# scrambled markers reported as a ledger that was simply missing, and
 		# the self-test caught it.
-		index($0, e) && !el { el = NR; inblock = 0; next }
-		inblock && /^[[:space:]]*[-*] \[[ xX]\]/ { boxes++ }
-		inblock && /^[[:space:]]*[-*] \[ \]/ { open++ }
-		END { printf "%d %d %d %d\n", bl+0, el+0, boxes+0, open+0 }
+		index($0, e) && !el { flush(); el = NR; inblock = 0; next }
+		inblock && /^[[:space:]]*[-*] \[[ xX]\]/ {
+			flush()
+			item = $0
+			ticked = ($0 ~ /\[[xX]\]/)
+			boxes++
+			if (!ticked) open++
+			next
+		}
+		inblock && item != "" { item = item " " $0; next }
+		END { flush(); printf "%d %d %d %d %d\n", bl+0, el+0, boxes+0, open+0, loose+0 }
 	'
 }
 
 # pr_ledger_status — body on stdin, prints ok | missing | inverted | empty.
 pr_ledger_status() {
-	local bl el boxes open
-	read -r bl el boxes open <<<"$(pr_ledger_scan)"
+	local bl el boxes open loose
+	read -r bl el boxes open loose <<<"$(pr_ledger_scan)"
 	if [ "$bl" -eq 0 ] || [ "$el" -eq 0 ]; then
 		echo missing
 	elif [ "$bl" -ge "$el" ]; then
@@ -119,9 +157,19 @@ pr_ledger_status() {
 # A closed ledger is 0. Used by pr-ledger-audit.sh over merged pull requests;
 # never by the gate, which runs before the work it records.
 pr_ledger_unticked() {
-	local bl el boxes open
-	read -r bl el boxes open <<<"$(pr_ledger_scan)"
+	local bl el boxes open loose
+	read -r bl el boxes open loose <<<"$(pr_ledger_scan)"
 	echo "$open"
+}
+
+# pr_ledger_loose_deferrals — body on stdin, prints how many TICKED boxes defer
+# without naming a ticket. Read by the audit beside the unticked count: an
+# untracked deferral is owed work wearing a tick, so it has to surface
+# somewhere or `deferred` becomes the way to make an item disappear.
+pr_ledger_loose_deferrals() {
+	local bl el boxes open loose
+	read -r bl el boxes open loose <<<"$(pr_ledger_scan)"
+	echo "$loose"
 }
 
 # pr_contract_ticket_status — prints ok | none | foreign | unknown-repo.

@@ -11,11 +11,13 @@
 # every pull request forever. There is nothing to filter on anyway — the
 # subject is the body, not the tree.
 #
-# NOT A REQUIRED CHECK YET. Branch protection is repository configuration
-# rather than a file here, so promoting it is a separate, deliberate act — and
-# the order matters: let it report on real pull requests first, including a
-# failing one, then add the context. Promoted too early it would block every
-# open pull request whose body predates the template.
+# A REQUIRED CHECK SINCE 2026-11-07, added after it had reported on real pull
+# requests — including one it legitimately failed — and after the open pull
+# requests predating the template carried a ledger. That order is the whole
+# precaution: promoted before the sweep, this context blocks every open pull
+# request at once. The required set lives in branch protection rather than in
+# this tree, so read it from the repository settings and treat this comment as
+# intent rather than as the authority.
 on:
   pull_request:
     # `synchronize` alone would miss the two edits that fix a failure: filling
