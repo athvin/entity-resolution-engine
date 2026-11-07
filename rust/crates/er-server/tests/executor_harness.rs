@@ -152,4 +152,49 @@ impl Harness {
         }
         state
     }
+
+    /// Enqueue an `apply_corrections` job for the dataset and run it to
+    /// settlement, asserting it succeeded.
+    ///
+    /// This is the one-line stand-in for a `dispatcher::drain_and_correct`
+    /// call: a correction pass as the product actually runs one, through the
+    /// executor. The panic names every task row, because a pass that settles
+    /// without doing its work is the failure mode this path has already had
+    /// once (#760) and "succeeded" alone never explains it.
+    pub async fn apply_corrections(
+        &mut self,
+        client: &tokio_postgres::Client,
+        org_id: &str,
+        dataset_id: &str,
+    ) {
+        let queued = pg::enqueue(
+            client,
+            org_id,
+            Some(dataset_id),
+            "apply_corrections",
+            0,
+            None,
+            None,
+            pg::Provenance::default(),
+        )
+        .await
+        .expect("enqueue apply_corrections");
+        assert!(
+            er_server::dispatcher::dispatch_once(client, None, Some(&mut self.executor))
+                .await
+                .expect("dispatch_once"),
+            "the executor claims and plans the apply_corrections job"
+        );
+        let settled = self.run_to_settlement(client, org_id, &queued.id).await;
+        if settled != "succeeded" {
+            let rows = er_entities::task_instance::read::by_job(client, org_id, &queued.id)
+                .await
+                .expect("task rows");
+            let shape: Vec<(String, String, Option<String>)> = rows
+                .iter()
+                .map(|r| (r.task_id.clone(), r.state.clone(), r.error_detail.clone()))
+                .collect();
+            panic!("the apply_corrections job settled {settled:?}: {shape:?}");
+        }
+    }
 }

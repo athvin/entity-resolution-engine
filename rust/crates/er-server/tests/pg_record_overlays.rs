@@ -10,10 +10,11 @@ use std::path::PathBuf;
 use arrow::array::{Array, StringArray};
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
-use er_server::{AppState, app, dispatcher, pg};
+use er_server::{AppState, app, pg};
 use tower::ServiceExt;
 
 use crate::common;
+use crate::executor_harness;
 
 /// The org's id for a test org name (child wrappers key on org_id).
 async fn oid(client: &tokio_postgres::Client, name: &str) -> String {
@@ -172,6 +173,18 @@ async fn suppress_excludes_a_record_and_retract_restores_it() {
     let data_path = tmp.join("data").to_string_lossy().into_owned();
     let config_path = tmp.join("acme.yaml").to_string_lossy().into_owned();
     std::fs::write(&config_path, TEST_YAML).unwrap();
+    // The model artefacts a correction pass resolves through `RunContext`. The
+    // legacy arm's `run_correct` needed only the config, so this fixture was
+    // thinner than any real org; a provisioned one declares all of these
+    // (`scripts/check_kind.sh`, `scripts/frontend-dev/env.sh`).
+    //
+    // A COPY of the TF fixture, never the fixture itself: a snapshot APPENDS to
+    // that file, so pointing a tenant at a committed one has the test mutate
+    // the repo.
+    let lexicon_path = tmp.join("nickname_variants.csv");
+    std::fs::write(&lexicon_path, NICKNAMES).unwrap();
+    let tf_path = tmp.join("model_test_v1.tf.csv");
+    std::fs::copy(repo_fixture("model_test_v1.tf.csv"), &tf_path).unwrap();
     populate_lake(&catalog, &data_path);
 
     let mut client = pg::connect(&dsn).await.unwrap();
@@ -181,6 +194,11 @@ async fn suppress_excludes_a_record_and_retract_restores_it() {
         "ER_LAKE_CATALOG": catalog,
         "ER_LAKE_DATA_PATH": data_path,
         "ER_CONFIG_PATH": config_path,
+        "ER_LEXICON_PATH": lexicon_path.to_string_lossy(),
+        "ER_MODEL_PATH": repo_fixture("model_test_v1.json"),
+        "ER_TF_PATH": tf_path.to_string_lossy(),
+        "ER_MODEL_VERSION": "v0001",
+        "ER_TF_SNAPSHOT_ID": "01JWMDTFSNAP00000000000001",
     });
     let create = serde_json::json!({ "name": "acme", "config_path": config_path, "env": env });
     assert_eq!(
@@ -222,16 +240,15 @@ async fn suppress_excludes_a_record_and_retract_restores_it() {
             .unwrap(),
         1
     );
-    dispatcher::drain_and_correct(
-        &client,
-        &oid(&client, "acme").await,
-        Some(&common::default_dataset(&client, "acme").await),
-        &env,
-        "01OVCORRECT00000000000000001",
-        None,
-    )
-    .await
-    .unwrap();
+    // A correction pass as the product runs one: an `apply_corrections` job
+    // claimed and planned by the executor, then run as its own task pods. This
+    // used to call the legacy in-process arm directly; the assertions are
+    // unchanged, because they were always about outcomes rather than about
+    // which arm produced them.
+    let org_id = oid(&client, "acme").await;
+    let ds = common::default_dataset(&client, "acme").await;
+    let mut harness = executor_harness::Harness::start(&dsn, tmp.clone()).await;
+    harness.apply_corrections(&client, &org_id, &ds).await;
 
     let after = members(&app, &entity_id).await;
     assert!(
@@ -255,16 +272,7 @@ async fn suppress_excludes_a_record_and_retract_restores_it() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::CREATED);
-    dispatcher::drain_and_correct(
-        &client,
-        &oid(&client, "acme").await,
-        Some(&common::default_dataset(&client, "acme").await),
-        &env,
-        "01OVCORRECT00000000000000002",
-        None,
-    )
-    .await
-    .unwrap();
+    harness.apply_corrections(&client, &org_id, &ds).await;
     let restored = members(&app, &entity_id).await;
     assert!(
         restored.contains(&victim),
