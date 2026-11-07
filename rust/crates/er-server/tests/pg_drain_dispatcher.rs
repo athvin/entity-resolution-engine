@@ -17,6 +17,7 @@ use er_server::{AppState, app, dispatcher, pg};
 use tower::ServiceExt;
 
 use crate::common;
+use crate::executor_harness;
 
 /// The org's id for a test org name (child wrappers key on org_id).
 async fn oid(client: &tokio_postgres::Client, name: &str) -> String {
@@ -117,6 +118,16 @@ async fn drain_and_correct_applies_through_dispatcher() {
     // run_correct (which follows the drain) loads the config from ER_CONFIG_PATH.
     let config_path = tmp.join("acme.yaml").to_string_lossy().into_owned();
     std::fs::write(&config_path, TEST_YAML).unwrap();
+    // The artefacts a correction pass resolves through `RunContext`. The legacy
+    // arm's `run_correct` needed only the config, so this fixture was thinner
+    // than any real org; a provisioned one declares all of these.
+    //
+    // A COPY of the TF fixture, never the fixture itself: a snapshot APPENDS to
+    // it, so pointing a tenant at a committed one has the test mutate the repo.
+    let lexicon_path = tmp.join("nickname_variants.csv");
+    std::fs::write(&lexicon_path, NICKNAMES).unwrap();
+    let tf_path = tmp.join("model_test_v1.tf.csv");
+    std::fs::copy(repo_fixture("model_test_v1.tf.csv"), &tf_path).unwrap();
     populate_lake(&catalog, &data_path);
 
     let mut client = pg::connect(&dsn).await.unwrap();
@@ -126,6 +137,11 @@ async fn drain_and_correct_applies_through_dispatcher() {
         "ER_LAKE_CATALOG": catalog,
         "ER_LAKE_DATA_PATH": data_path,
         "ER_CONFIG_PATH": config_path,
+        "ER_LEXICON_PATH": lexicon_path.to_string_lossy(),
+        "ER_MODEL_PATH": repo_fixture("model_test_v1.json"),
+        "ER_TF_PATH": tf_path.to_string_lossy(),
+        "ER_MODEL_VERSION": "v0001",
+        "ER_TF_SNAPSHOT_ID": "01JWMDTFSNAP00000000000001",
     });
     let create = serde_json::json!({
         "name": "acme",
@@ -198,17 +214,49 @@ async fn drain_and_correct_applies_through_dispatcher() {
         2
     );
 
-    // Drive the real drain path (what an `apply_corrections` job runs).
-    dispatcher::drain_and_correct(
+    // Drive the real drain path: an `apply_corrections` job, claimed and
+    // planned by the executor, then run as its own task pods.
+    //
+    // This used to call `dispatcher::drain_and_correct` — the legacy in-process
+    // arm. Every assertion below is unchanged, because they were always about
+    // OUTCOMES rather than about which arm produced them, and the write-back
+    // one is why this file could not be ported until now: the task path emitted
+    // no `entity.write_back` at all (#770).
+    let org_id = oid(&client, "acme").await;
+    let ds = common::default_dataset(&client, "acme").await;
+    let mut harness = executor_harness::Harness::start(&dsn, tmp.clone()).await;
+    let queued = pg::enqueue(
         &client,
-        &oid(&client, "acme").await,
-        Some(&common::default_dataset(&client, "acme").await),
-        &env,
-        "01DISPCORRECT0000000000000001",
+        &org_id,
+        Some(&ds),
+        "apply_corrections",
+        0,
         None,
+        None,
+        pg::Provenance::default(),
     )
     .await
     .unwrap();
+    assert!(
+        dispatcher::dispatch_once(&client, None, Some(&mut harness.executor))
+            .await
+            .unwrap(),
+        "the executor claims and plans the apply_corrections job"
+    );
+    let settled = harness
+        .run_to_settlement(&client, &org_id, &queued.id)
+        .await;
+    assert_eq!(
+        settled,
+        "succeeded",
+        "the apply_corrections job settled {settled:?}: {:?}",
+        er_entities::task_instance::read::by_job(&client, &org_id, &queued.id)
+            .await
+            .unwrap()
+            .iter()
+            .map(|r| (r.task_id.clone(), r.state.clone(), r.error_detail.clone()))
+            .collect::<Vec<_>>()
+    );
 
     // Everything applied + marked.
     assert_eq!(
@@ -322,7 +370,9 @@ async fn drain_and_correct_applies_through_dispatcher() {
     );
     let payload = &write_backs[0].payload;
     assert_eq!(payload["cause"], "review_resolved");
-    assert_eq!(payload["run_id"], "01DISPCORRECT0000000000000001");
+    // The job id, not a string the test chose: on the task path the run id IS
+    // the job id, so only `enqueue` knows it.
+    assert_eq!(payload["run_id"], queued.id);
     // The master is the assembled golden record, read AFTER the correction —
     // the whole reason this fires from the drain and not from the resolve
     // endpoint. A `given_name` present proves it is the record and not an id.
