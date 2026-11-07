@@ -6,6 +6,7 @@ Do not edit it in place; refresh it instead.
 **Source:** https://github.com/benjitaylor/skills/tree/main/stageshow (announced at https://benji.org/stageshow)
 **Commit:** 299140fafd08df55a9c234e610c3f64af3f45531 (skill version 1.1.1)
 **License:** MIT, see `LICENSE`. The app icons in `assets/app-icons.ts` are not MIT; see `NOTICE.md`.
+**Doing:** building a faux product UI demo, a hero or feature-card illustration
 **Refresh:**
 
 ```sh

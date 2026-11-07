@@ -164,7 +164,7 @@ lint_one_skill() {
 	if [[ -f $dir/VENDORED.md ]]; then
 		local field
 		[[ -f $skill_md ]] || err "$slug: vendored skill has no SKILL.md"
-		for field in Source Commit License Refresh; do
+		for field in Source Commit License Refresh Doing; do
 			grep -qE "^\*\*$field:\*\*" "$dir/VENDORED.md" ||
 				err "$slug: VENDORED.md has no '**$field:**' line"
 		done
@@ -2005,6 +2005,13 @@ gen_skill_inventory() {
 			# change" cannot tell the two cases apart — which is how pentest
 			# ended up falling through every branch.
 			local trigger
+			# A vendored skill's description is upstream's and is not edited, so
+			# its routing phrase comes from VENDORED.md's '**Doing:**' line.
+			if [[ -f $dir/VENDORED.md ]] && grep -qE '^\*\*Doing:\*\* ' "$dir/VENDORED.md"; then
+				cell=$(sed -nE 's/^\*\*Doing:\*\* +//p' "$dir/VENDORED.md" | head -1)
+				printf '| %s%s | `%s` |\n' "$cell" "$manual" "$name"
+				continue
+			fi
 			trigger=$(printf '%s\n' "$desc" | sed -E 's/^.*[Uu]se (when|before) //')
 			if [[ $trigger == "$desc" ]]; then
 				trigger=$(printf '%s\n' "$desc" | sed -E 's/^.*[Ii]nvoke manually as /invoking /')
