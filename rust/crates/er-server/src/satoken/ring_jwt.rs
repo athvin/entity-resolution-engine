@@ -58,31 +58,33 @@ fn compute_digest(data: &[u8], hash: ThumbprintHash) -> Result<Vec<u8>> {
     Ok(ring::digest::digest(alg, data).as_ref().to_vec())
 }
 
+#[allow(clippy::trivially_copy_pass_by_ref)] // the signature is jsonwebtoken's `CryptoProvider` fn-pointer type
 fn new_signer(alg: &Algorithm, key: &EncodingKey) -> Result<Box<dyn JwtSigner>> {
     let signer: Box<dyn JwtSigner> = match alg {
-        Algorithm::RS256 => RsaSigner::new(*alg, &sig::RSA_PKCS1_SHA256, key)?,
-        Algorithm::RS384 => RsaSigner::new(*alg, &sig::RSA_PKCS1_SHA384, key)?,
-        Algorithm::RS512 => RsaSigner::new(*alg, &sig::RSA_PKCS1_SHA512, key)?,
-        Algorithm::PS256 => RsaSigner::new(*alg, &sig::RSA_PSS_SHA256, key)?,
-        Algorithm::PS384 => RsaSigner::new(*alg, &sig::RSA_PSS_SHA384, key)?,
-        Algorithm::PS512 => RsaSigner::new(*alg, &sig::RSA_PSS_SHA512, key)?,
-        Algorithm::ES256 => EcSigner::new(*alg, &sig::ECDSA_P256_SHA256_FIXED_SIGNING, key)?,
-        Algorithm::ES384 => EcSigner::new(*alg, &sig::ECDSA_P384_SHA384_FIXED_SIGNING, key)?,
+        Algorithm::RS256 => RsaSigner::boxed(*alg, &sig::RSA_PKCS1_SHA256, key)?,
+        Algorithm::RS384 => RsaSigner::boxed(*alg, &sig::RSA_PKCS1_SHA384, key)?,
+        Algorithm::RS512 => RsaSigner::boxed(*alg, &sig::RSA_PKCS1_SHA512, key)?,
+        Algorithm::PS256 => RsaSigner::boxed(*alg, &sig::RSA_PSS_SHA256, key)?,
+        Algorithm::PS384 => RsaSigner::boxed(*alg, &sig::RSA_PSS_SHA384, key)?,
+        Algorithm::PS512 => RsaSigner::boxed(*alg, &sig::RSA_PSS_SHA512, key)?,
+        Algorithm::ES256 => EcSigner::boxed(*alg, &sig::ECDSA_P256_SHA256_FIXED_SIGNING, key)?,
+        Algorithm::ES384 => EcSigner::boxed(*alg, &sig::ECDSA_P384_SHA384_FIXED_SIGNING, key)?,
         _ => return Err(ErrorKind::UnsupportedAlgorithm.into()),
     };
     Ok(signer)
 }
 
+#[allow(clippy::trivially_copy_pass_by_ref)] // the signature is jsonwebtoken's `CryptoProvider` fn-pointer type
 fn new_verifier(alg: &Algorithm, key: &DecodingKey) -> Result<Box<dyn JwtVerifier>> {
     let verifier = match alg {
-        Algorithm::RS256 => RsaVerifier::new(*alg, &sig::RSA_PKCS1_2048_8192_SHA256, key)?,
-        Algorithm::RS384 => RsaVerifier::new(*alg, &sig::RSA_PKCS1_2048_8192_SHA384, key)?,
-        Algorithm::RS512 => RsaVerifier::new(*alg, &sig::RSA_PKCS1_2048_8192_SHA512, key)?,
-        Algorithm::PS256 => RsaVerifier::new(*alg, &sig::RSA_PSS_2048_8192_SHA256, key)?,
-        Algorithm::PS384 => RsaVerifier::new(*alg, &sig::RSA_PSS_2048_8192_SHA384, key)?,
-        Algorithm::PS512 => RsaVerifier::new(*alg, &sig::RSA_PSS_2048_8192_SHA512, key)?,
-        Algorithm::ES256 => EcVerifier::new(*alg, &sig::ECDSA_P256_SHA256_FIXED, key)?,
-        Algorithm::ES384 => EcVerifier::new(*alg, &sig::ECDSA_P384_SHA384_FIXED, key)?,
+        Algorithm::RS256 => RsaVerifier::boxed(*alg, &sig::RSA_PKCS1_2048_8192_SHA256, key)?,
+        Algorithm::RS384 => RsaVerifier::boxed(*alg, &sig::RSA_PKCS1_2048_8192_SHA384, key)?,
+        Algorithm::RS512 => RsaVerifier::boxed(*alg, &sig::RSA_PKCS1_2048_8192_SHA512, key)?,
+        Algorithm::PS256 => RsaVerifier::boxed(*alg, &sig::RSA_PSS_2048_8192_SHA256, key)?,
+        Algorithm::PS384 => RsaVerifier::boxed(*alg, &sig::RSA_PSS_2048_8192_SHA384, key)?,
+        Algorithm::PS512 => RsaVerifier::boxed(*alg, &sig::RSA_PSS_2048_8192_SHA512, key)?,
+        Algorithm::ES256 => EcVerifier::boxed(*alg, &sig::ECDSA_P256_SHA256_FIXED, key)?,
+        Algorithm::ES384 => EcVerifier::boxed(*alg, &sig::ECDSA_P384_SHA384_FIXED, key)?,
         _ => return Err(ErrorKind::UnsupportedAlgorithm.into()),
     };
     Ok(verifier)
@@ -103,7 +105,7 @@ struct RsaSigner {
 }
 
 impl RsaSigner {
-    fn new(
+    fn boxed(
         alg: Algorithm,
         padding: &'static dyn sig::RsaEncoding,
         key: &EncodingKey,
@@ -137,7 +139,7 @@ struct EcSigner {
 }
 
 impl EcSigner {
-    fn new(
+    fn boxed(
         alg: Algorithm,
         signing: &'static sig::EcdsaSigningAlgorithm,
         key: &EncodingKey,
@@ -172,7 +174,7 @@ struct RsaVerifier {
 }
 
 impl RsaVerifier {
-    fn new(
+    fn boxed(
         alg: Algorithm,
         params: &'static sig::RsaParameters,
         key: &DecodingKey,
@@ -213,7 +215,7 @@ struct EcVerifier {
 }
 
 impl EcVerifier {
-    fn new(
+    fn boxed(
         alg: Algorithm,
         params: &'static sig::EcdsaVerificationAlgorithm,
         key: &DecodingKey,

@@ -4655,8 +4655,10 @@ impl TrainReport {
             return None;
         }
         let ratio = self.full_agreement_bits / assumed;
-        (ratio > SCALE_DIVERGENCE_FACTOR || ratio < 1.0 / SCALE_DIVERGENCE_FACTOR)
-            .then_some(assumed)
+        // A NaN measurement passes the `<= 0.0` guard above and is in no
+        // range; it is "not measured", never "diverged".
+        let in_band = (1.0 / SCALE_DIVERGENCE_FACTOR..=SCALE_DIVERGENCE_FACTOR).contains(&ratio);
+        (!in_band && !ratio.is_nan()).then_some(assumed)
     }
 }
 
