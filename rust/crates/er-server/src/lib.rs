@@ -4767,6 +4767,46 @@ async fn attempt_finish(
                 k8s_job_name: current.k8s_job_name.as_deref(),
                 backoff,
             };
+            // A FAILED schema reconcile still has a tenant position to record.
+            //
+            // The success branch above writes `tenant_schema_states` from the
+            // task's output doc, and a failing task publishes no output — so a
+            // breaking lake left the tenant's recorded position at whatever the
+            // last good sweep said, which is `current`. The deploy report and
+            // the drift check read that table precisely so they do not have to
+            // open a lake, and they were being told a breaking tenant was fine.
+            //
+            // The legacy arm recorded this outcome "whatever it was", in as many
+            // words; the task path recorded it only on success. `status` comes
+            // from the failure text the same way `schema::tenant_state` derives
+            // it, so ERR_SCHEMA_BREAKING reads `breaking` and anything else
+            // `errored`.
+            if matches!(current.task_id.as_str(), "reconcile_schema" | "lake_init")
+                && let Some(dsn) = state.dsn.clone()
+            {
+                let detail = body.error_detail.clone().unwrap_or_default();
+                let status = if detail.contains("ERR_SCHEMA_BREAKING") {
+                    "breaking"
+                } else {
+                    "errored"
+                };
+                let org_id = current.org_id.clone();
+                let dataset_id = current.dataset_id.clone();
+                tokio::spawn(async move {
+                    let Ok(client) = pg::connect(&dsn).await else {
+                        return;
+                    };
+                    let _ = crate::schema::record_tenant_state(
+                        &client,
+                        &org_id,
+                        dataset_id.as_deref(),
+                        status,
+                        "",
+                        Some(&detail),
+                    )
+                    .await;
+                });
+            }
             match taskpg::fail_or_retry_task(&mut client, &attempt_id, &failure).await {
                 Ok((Some(archived), successor)) => (
                     StatusCode::OK,

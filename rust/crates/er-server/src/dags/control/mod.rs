@@ -554,6 +554,51 @@ impl ControlTask<PgClient> for SettleActions {
                 );
             }
         }
+        // `review.resolved` (O3c), for the resolutions that APPLIED.
+        //
+        // Deliberately not emitted by the resolve endpoint: a resolution is
+        // staged and drained later, so an event fired at staging time would
+        // tell a subscriber about an intent the engine has not enforced — they
+        // would read a corpus that disagrees with the event they just got.
+        //
+        // This lived only in the legacy arm, so deleting that arm left the
+        // event catalogued with no emit site anywhere. `pg_webhook_catalog.rs`
+        // is what noticed, which is the gate earning its keep: a webhook that
+        // stops being sent is invisible from the inside.
+        //
+        // Best-effort and after the marks, like the labels above and for the
+        // same reason: the decisions are in the lake and the corpus has been
+        // corrected, so failing here would undo real work to report on it.
+        if !receipt.resolutions.is_empty() {
+            let org_name = match crate::pg::get_org_by_id(ctx.client, &ctx.order.org_id).await {
+                Ok(Some(org)) => org.name,
+                Ok(None) => ctx.order.org_id.clone(),
+                Err(e) => {
+                    tracing::warn!(er.run_id = %ctx.order.run_id, error = %e, "review.resolved was skipped: resolving the org failed");
+                    String::new()
+                }
+            };
+            if !org_name.is_empty() {
+                for (review_id, resolution) in &receipt.resolutions {
+                    if let Err(e) = crate::webhook::emit(
+                        ctx.client,
+                        &ctx.order.org_id,
+                        ctx.order.dataset_id.as_deref(),
+                        &org_name,
+                        "review.resolved",
+                        &serde_json::json!({
+                            "review_id": review_id,
+                            "resolution": resolution,
+                            "run_id": ctx.order.run_id,
+                        }),
+                    )
+                    .await
+                    {
+                        tracing::warn!(er.review_id = %review_id, error = %e, "the review.resolved webhook was not queued");
+                    }
+                }
+            }
+        }
         let applied_count = i64::try_from(receipt.applied.len()).unwrap_or(i64::MAX);
         Ok(Outcome::Done(
             Plan(SettledActions {

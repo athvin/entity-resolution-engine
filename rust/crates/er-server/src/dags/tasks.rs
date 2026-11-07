@@ -887,9 +887,33 @@ impl Task<Session> for ReconcileSchema {
         ctx: &mut TaskCtx<'_, Session>,
         (): Self::Input,
     ) -> Result<Outcome<Self::Output>, TaskError> {
-        // `reconcile_lake_env` opens its own session from the tenant env — the
-        // ctx session stays the probe/ledger handle.
-        let outcome = crate::schema::reconcile_lake_env(&ctx.order.lake_env);
+        // Reconcile through the session this task ALREADY HOLDS — the same
+        // correction #778 made to `lake_init`, which did not go far enough.
+        //
+        // This opened a SECOND session via `reconcile_lake_env` while the ctx
+        // session was attached to the same catalog, and the ctx session — which
+        // lives to the end of `exec_task::run_inner`, so it is dropped last —
+        // wrote its earlier view back over the committed metadata. The reconcile
+        // therefore never persisted, for `lake_migrate`, `lake_maintain`,
+        // `train` and `profile` alike, since every one of them opens with this
+        // task.
+        //
+        // What it looked like: the deploy's tenant sweep reported `migrated`
+        // with the same 22 relations applied on every single run and never
+        // converged to `current`. `pg_migrate_tenants.rs` is what caught it,
+        // but only once it ran through the executor instead of the legacy arm —
+        // the arm did its reconcile in the dispatcher's own process, one
+        // session, so the defect was invisible there.
+        let outcome = er_entity_diff::reconcile_lake(
+            ctx.session.connection(),
+            &er_entities::catalog::catalog(),
+            &crate::schema::applied_by(),
+        )
+        .map_err(|e| match e {
+            // The breaking message already lists every difference.
+            e @ er_entity_diff::ReconcileError::Breaking(_) => e.to_string(),
+            other => format!("lake schema: {}", crate::errfmt::chain(&other)),
+        });
         let (status, hash, detail) = crate::schema::tenant_state(&outcome);
         match outcome {
             Ok(_) => Ok(Outcome::Done(

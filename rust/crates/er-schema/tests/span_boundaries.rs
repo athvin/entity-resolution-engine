@@ -99,8 +99,20 @@ fn the_wrapper_is_actually_used() {
         .map(|t| t.matches("spawn_blocking_in_span(").count())
         .sum::<usize>();
 
+    // Lowered from 9 to 3 when the legacy in-process arm went (#645). Six of
+    // those nine hops were the arm handing pipeline work to a blocking thread,
+    // and they went with it — the dispatcher now claims and plans, and runs no
+    // stage. The three that remain are all in `lib.rs`, and all on the HTTP
+    // read path rather than the job path: `match_preview`, `resolve` and
+    // `blocking_estimate`, each of which opens a lake inside a request.
+    //
+    // This is a deliberate lowering, which is what the message below asks for.
+    // It is NOT a weakened assertion: the floor exists so that the scan above
+    // — proving the BARE `spawn_blocking` is absent — cannot pass vacuously by
+    // there being no hops at all, and three is as load-bearing as nine for
+    // that.
     assert!(
-        used >= 9,
+        used >= 3,
         "expected the span-carrying wrapper at every blocking hop in er-server, \
          found {used} uses — if a hop was removed, lower this floor deliberately"
     );
