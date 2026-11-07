@@ -167,23 +167,43 @@ impl Harness {
         org_id: &str,
         dataset_id: &str,
     ) {
+        let _ = self
+            .run_kind(client, org_id, dataset_id, "apply_corrections")
+            .await;
+    }
+
+    /// Enqueue a job of `kind` for the dataset, run it to settlement
+    /// asserting it succeeded, and return its JOB ID.
+    ///
+    /// The id matters to callers: on this path the run id IS the job id, so
+    /// anything a kind stamps with its run — a model version label, a
+    /// provenance field — is named after a value only `enqueue` knows. The
+    /// legacy arm let a test choose that string, which is why some of them
+    /// assert against a hard-coded one.
+    pub async fn run_kind(
+        &mut self,
+        client: &tokio_postgres::Client,
+        org_id: &str,
+        dataset_id: &str,
+        kind: &str,
+    ) -> String {
         let queued = pg::enqueue(
             client,
             org_id,
             Some(dataset_id),
-            "apply_corrections",
+            kind,
             0,
             None,
             None,
             pg::Provenance::default(),
         )
         .await
-        .expect("enqueue apply_corrections");
+        .unwrap_or_else(|e| panic!("enqueue {kind}: {e}"));
         assert!(
             er_server::dispatcher::dispatch_once(client, None, Some(&mut self.executor))
                 .await
                 .expect("dispatch_once"),
-            "the executor claims and plans the apply_corrections job"
+            "the executor claims and plans the {kind} job"
         );
         let settled = self.run_to_settlement(client, org_id, &queued.id).await;
         if settled != "succeeded" {
@@ -194,7 +214,8 @@ impl Harness {
                 .iter()
                 .map(|r| (r.task_id.clone(), r.state.clone(), r.error_detail.clone()))
                 .collect();
-            panic!("the apply_corrections job settled {settled:?}: {shape:?}");
+            panic!("the {kind} job settled {settled:?}: {shape:?}");
         }
+        queued.id
     }
 }

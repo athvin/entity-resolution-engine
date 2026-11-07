@@ -4445,7 +4445,14 @@ async fn attempt_work_order(
     // A read failure degrades to EM-only rather than failing the attempt —
     // which is exactly what the in-process arm does.
     let labels: Vec<(String, String)> = if job.kind == "train" {
-        match er_entities::pair_label::read::all(&client, &current.org_id).await {
+        // The DATASET's labels. `read::all` takes its scope as a bare `&str`
+        // named `dataset_id`, so passing the org id compiled and matched
+        // nothing — and "no rows" is indistinguishable here from "this tenant
+        // has no labels", which is why the m estimate silently fell back to
+        // EM-only on every train. Same idiom as everywhere else: the dataset
+        // when the job names one, the org id for a pre-dataset row.
+        let scope = job.dataset_id.as_deref().unwrap_or(&current.org_id);
+        match er_entities::pair_label::read::all(&client, scope).await {
             Ok(rows) => rows
                 .into_iter()
                 .filter(|l| l.verdict == "match" && l.origin != "llm")

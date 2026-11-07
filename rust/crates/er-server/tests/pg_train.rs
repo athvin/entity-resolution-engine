@@ -31,9 +31,10 @@
 
 use std::path::PathBuf;
 
-use er_server::{dispatcher, pg};
+use er_server::pg;
 
 use crate::common;
+use crate::executor_harness;
 
 const TEST_YAML: &str = include_str!("../../er-cli/tests/fixtures/test.yaml");
 const NICKNAMES: &str = include_str!("../../er-cli/tests/fixtures/nickname_variants.csv");
@@ -101,6 +102,8 @@ async fn training_registers_a_draft_and_leaves_the_active_model_alone() {
     // order-dependent.
     let tf_path = tmp.join("tf.csv");
     std::fs::copy(repo_fixture("model_test_v1.tf.csv"), &tf_path).unwrap();
+    let lexicon_path = tmp.join("nickname_variants.csv");
+    std::fs::write(&lexicon_path, NICKNAMES).unwrap();
     let tf_before = std::fs::read_to_string(&tf_path).unwrap();
 
     // This used to drop `pair_labels` by hand, because the phase at the bottom
@@ -112,9 +115,36 @@ async fn training_registers_a_draft_and_leaves_the_active_model_alone() {
     // no prior labels in a database this test just created.
     let mut client = pg::connect(&dsn).await.unwrap();
     pg::ensure_schema(&mut client).await.unwrap();
-    pg::ensure_org(&client, "acme", config_path.to_str().unwrap())
-        .await
-        .unwrap();
+    // The env goes ON the org row, not into a function argument. `ensure_org`
+    // left it unset because the legacy arm took the env as a parameter; a job
+    // on the task path reads it from its dataset (`pg::lake_env_for_job`), so
+    // an org with no env resolves nothing and the job fails its first task.
+    // Stored BEFORE `converge_default_datasets`, which is what copies it to
+    // the default dataset.
+    let env = serde_json::json!({
+        "ER_LAKE_CATALOG": catalog,
+        "ER_LAKE_DATA_PATH": data_path,
+        "ER_CONFIG_PATH": config_path.to_string_lossy(),
+        "ER_TF_PATH": tf_path.to_string_lossy(),
+        // The task path resolves the full run context, so the artefacts a
+        // provisioned org declares have to be here too. ER_TF_PATH above stays
+        // the test's own COPY, because training appends its snapshot to it.
+        "ER_MODEL_PATH": repo_fixture("model_test_v1.json"),
+        "ER_LEXICON_PATH": lexicon_path.to_string_lossy(),
+        "ER_MODEL_VERSION": "v0001",
+        "ER_TF_SNAPSHOT_ID": "01JWMDTFSNAP00000000000001",
+    });
+    pg::upsert_org_byo(
+        &client,
+        "acme",
+        config_path.to_str().unwrap(),
+        &env,
+        None,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
     let org_id = pg::org_id_by_name(&client, "acme")
         .await
         .unwrap()
@@ -147,32 +177,21 @@ async fn training_registers_a_draft_and_leaves_the_active_model_alone() {
         .await
         .unwrap();
 
-    let env = serde_json::json!({
-        "ER_LAKE_CATALOG": catalog,
-        "ER_LAKE_DATA_PATH": data_path,
-        "ER_CONFIG_PATH": config_path.to_string_lossy(),
-        "ER_TF_PATH": tf_path.to_string_lossy(),
-    });
-
     // The arm that did not exist. Before this, the job's outcome was
     // "dispatcher does not handle job kind 'train'".
-    dispatcher::train_and_register(
-        &client,
-        &org_id,
-        Some(&ds),
-        &env,
-        "01TRAINJOB00000000000000000",
-        None,
-    )
-    .await
-    .expect("training should succeed");
+    // A real `train` job through the executor, where this used to call the
+    // legacy in-process arm directly. The job id is CAPTURED rather than
+    // chosen: on this path the run id is the job id, so the version label and
+    // the provenance below are named after a value only `enqueue` knows.
+    let mut harness = executor_harness::Harness::start(&dsn, tmp.clone()).await;
+    let job1 = harness.run_kind(&client, &org_id, &ds, "train").await;
 
     // A registry version, not a file nobody reads.
     let versions = pg::list_model_versions(&client, &ds).await.unwrap();
     assert_eq!(versions.len(), 2, "the starter plus the trained one");
     let trained = versions
         .iter()
-        .find(|v| v.model_version_label == "trained-01TRAINJOB00000000000000000")
+        .find(|v| v.model_version_label == format!("trained-{job1}"))
         .expect("the trained version is registered under its job id");
 
     // A DRAFT. Training is not consent to re-cluster a tenant's corpus, so the
@@ -193,7 +212,7 @@ async fn training_registers_a_draft_and_leaves_the_active_model_alone() {
         trained.provenance
     );
     assert_eq!(
-        trained.provenance["job_id"], "01TRAINJOB00000000000000000",
+        trained.provenance["job_id"], job1,
         "a registry row must be traceable to the job that made it"
     );
 
@@ -263,7 +282,7 @@ async fn training_registers_a_draft_and_leaves_the_active_model_alone() {
         "the new snapshot's rows must have been added"
     );
     assert!(
-        tf_after.contains("tf-01TRAINJOB00000000000000000"),
+        tf_after.contains(&format!("tf-{job1}")),
         "the appended rows carry the new snapshot id, so each model reads only \
          its own: {}",
         &tf_after[..tf_after.len().min(200)]
@@ -317,22 +336,13 @@ async fn training_registers_a_draft_and_leaves_the_active_model_alone() {
         .expect("a label is recordable");
     }
 
-    dispatcher::train_and_register(
-        &client,
-        &org_id,
-        Some(&ds),
-        &env,
-        "01TRAINJOB00000000000000001",
-        None,
-    )
-    .await
-    .expect("training with labels should succeed");
+    let job2 = harness.run_kind(&client, &org_id, &ds, "train").await;
 
     let with_labels = pg::list_model_versions(&client, &ds)
         .await
         .unwrap()
         .into_iter()
-        .find(|v| v.model_version_label == "trained-01TRAINJOB00000000000000001")
+        .find(|v| v.model_version_label == format!("trained-{job2}"))
         .expect("the second trained version is registered");
     assert_eq!(
         with_labels.provenance["m_from_labels"], 2,
