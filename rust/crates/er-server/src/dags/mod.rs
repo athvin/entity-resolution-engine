@@ -15,10 +15,14 @@ pub mod tasks;
 
 use er_dag::{Dag, DagBuilder, TriggerRule};
 
-use control::{Activate, CreateCatalog, DrainActions, RegisterModel, SettleActions, StageApproved};
+use control::{
+    Activate, CreateCatalog, DrainActions, EmitWriteBack, RegisterModel, SettleActions,
+    StageApproved,
+};
 use tasks::{
     ApplyStaged, Assemble, CorrectReconcile, CorrectionsInit, CorrectionsReconcile, Finish, Ingest,
     Init, LakeInit, Maintain, Match, ProfileCorpus, Reconcile, ReconcileSchema, Standardize, Train,
+    WriteBackScan,
 };
 
 /// The lake session type every pod task body takes; fixed here so `er-dag`
@@ -223,6 +227,10 @@ pub async fn run_control_task(
         (JobKind::ApplyCorrections, "drain_actions") => {
             completed(control::DrainActions.run(ctx, ()).await?)
         }
+        (JobKind::ApplyCorrections, "emit_write_back") => {
+            let scanned = control_pin::<er_dag::Plan<plans::WriteBackScanned>>(ctx, 0)?;
+            completed(control::EmitWriteBack.run(ctx, (scanned,)).await?)
+        }
         (JobKind::ApplyCorrections, "settle_actions") => {
             let applied = control_pin::<er_dag::Plan<plans::StagedApplied>>(ctx, 0)?;
             let assembled = control_pin::<er_dag::LakeRef<edges::Assembled>>(ctx, 1)?;
@@ -291,6 +299,12 @@ pub fn run_pod_task(
         (JobKind::ApplyCorrections, "init") => {
             let drained = pin::<er_dag::Plan<plans::DrainedActions>>(ctx, 0)?;
             completed(tasks::CorrectionsInit.run(ctx, (drained,))?)
+        }
+        (JobKind::ApplyCorrections, "write_back_scan") => {
+            let plan = pin::<er_dag::Plan<plans::RunPlan>>(ctx, 0)?;
+            let applied = pin::<er_dag::Plan<plans::StagedApplied>>(ctx, 1)?;
+            let assembled = pin::<er_dag::LakeRef<edges::Assembled>>(ctx, 2)?;
+            completed(tasks::WriteBackScan.run(ctx, (plan, applied, assembled))?)
         }
         (JobKind::ApplyCorrections, "apply_staged") => {
             let plan = pin::<er_dag::Plan<plans::RunPlan>>(ctx, 0)?;
@@ -467,7 +481,16 @@ fn apply_corrections() -> Dag {
     // succeeded — a correction marked applied over a failed reconcile would
     // be unrecoverable, since nothing would re-drain it.
     let settled = d.control::<SettleActions>((applied, done));
-    d.epilogue::<Finish>(&[settled.id()], TriggerRule::AllTerminal);
+    // The write-back is its own branch, PARALLEL to `settle_actions` rather
+    // than upstream of it. Putting it in between would make marking the
+    // actions applied depend on a webhook scan, so a reporting problem would
+    // re-apply corrections on the next pass — the opposite of the best-effort
+    // bargain O4 has always had. Both tasks swallow their own failures and
+    // return `Done`, because the job's outcome comes from its non-teardown
+    // leaves and neither of these may fail a pass whose work is committed.
+    let scanned = d.then::<WriteBackScan>((plan, applied, done));
+    let emitted = d.control::<EmitWriteBack>((scanned,));
+    d.epilogue::<Finish>(&[settled.id(), emitted.id()], TriggerRule::AllTerminal);
     d.build().expect("the apply_corrections DAG assembles")
 }
 

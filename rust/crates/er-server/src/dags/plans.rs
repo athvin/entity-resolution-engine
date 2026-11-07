@@ -147,6 +147,44 @@ impl PlanDoc for OrgActivated {
     const STABLE_NAME: &'static str = "org_activated";
 }
 
+/// `write_back_scan`'s output: the entities a correction pass changed, with the
+/// master and members a subscriber needs, read from the CORRECTED corpus.
+///
+/// Scanned in a pod because resolving a record key to an entity and reading its
+/// detail are lake reads, and queued by a control task because `webhook::emit`
+/// is a Postgres write — the two halves §6.4 keeps apart, which is why this
+/// document exists at all rather than one function doing both.
+///
+/// An empty list is the ordinary answer: a dismissal changes no master, and a
+/// pass with no review resolutions writes nothing back.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct WriteBackScanned {
+    #[serde(default)]
+    pub entities: Vec<WriteBackEntity>,
+}
+impl PlanDoc for WriteBackScanned {
+    const STABLE_NAME: &'static str = "write_back_scanned";
+}
+
+/// One entity's write-back payload, as the webhook sends it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WriteBackEntity {
+    pub entity_id: String,
+    /// The golden record. `null` when the entity has none, which is carried
+    /// rather than dropped so the event still names what changed.
+    pub master: serde_json::Value,
+    pub members: serde_json::Value,
+}
+
+/// `emit_write_back`'s receipt.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WriteBackEmitted {
+    pub queued: i64,
+}
+impl PlanDoc for WriteBackEmitted {
+    const STABLE_NAME: &'static str = "write_back_emitted";
+}
+
 /// `settle_actions`' receipt.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SettledActions {

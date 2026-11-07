@@ -761,6 +761,117 @@ impl Task<Session> for CorrectionsReconcile {
 /// The reconcile half of `init` for kinds with no run row (§3.5); for
 /// `lake_migrate` the reconcile IS the work. REAL since Phase 2: the first
 /// body the executor runs.
+/// Scan the CORRECTED corpus for what a correction pass changed, so the
+/// control half can queue one `entity.write_back` per entity (O4).
+///
+/// Driven off the derived LABELS rather than the raw resolutions, which gets
+/// dismissals right for free: a dismissal yields no label because it is not a
+/// verdict about the pair, and it changes no master either, so there is
+/// nothing to write back. The labels also carry the canonical pair keys, which
+/// is what the lookup needs.
+///
+/// Both of a pair's keys are resolved and the entity ids deduplicated: a
+/// `match` collapses them to one entity and a `no_match` leaves two, and a
+/// subscriber wanting to apply the change physically needs whichever it is
+/// without having to work it out.
+///
+/// **Best-effort in the body, deliberately.** The job's outcome comes from its
+/// non-teardown leaves, so a task that FAILED here would fail a pass whose
+/// corrections are already applied and marked — reporting on work would
+/// destroy it. Every skip is logged with its reason, because a write-back that
+/// silently does not happen is indistinguishable from a tenant whose endpoint
+/// is fine. That is the same bargain the legacy arm struck; it is expressed
+/// here by always returning `Done`.
+///
+/// It does NOT check for subscribers first. The legacy half did, to avoid
+/// paying for a lake session nobody wanted, but this task's session is already
+/// open — being a pod task is what buys the lake read — and the subscriber
+/// list is Postgres, which a pod cannot reach (§6.4). `emit_write_back` skips
+/// instead, so the cost of a tenant with no subscriber is this scan rather
+/// than a session.
+#[derive(Default)]
+pub struct WriteBackScan;
+
+impl Task<Session> for WriteBackScan {
+    const NAME: &'static str = "write_back_scan";
+    const VERSION: u32 = 1;
+    type Input = (
+        Plan<RunPlan>,
+        Plan<super::plans::StagedApplied>,
+        LakeRef<Assembled>,
+    );
+    type Output = Plan<super::plans::WriteBackScanned>;
+    const WRITES_LAKE: bool = false;
+
+    fn run(
+        &mut self,
+        ctx: &mut TaskCtx<'_, Session>,
+        (_plan, applied, _assembled): Self::Input,
+    ) -> Result<Outcome<Self::Output>, TaskError> {
+        let labels = &applied.0.labels;
+        if labels.is_empty() {
+            return Ok(Outcome::Done(
+                Plan(super::plans::WriteBackScanned::default()),
+                er_dag::Counters(serde_json::json!({ "write_back": 0 })),
+            ));
+        }
+        let entity_type = crate::entity_type_from_env(&ctx.order.lake_env);
+        let snapshot = match crate::read::latest_snapshot(ctx.session) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!(er.run_id = %ctx.order.run_id, error = %e, "the write-back scan was skipped: no snapshot");
+                return Ok(Outcome::Done(
+                    Plan(super::plans::WriteBackScanned::default()),
+                    er_dag::Counters(serde_json::json!({ "write_back": 0 })),
+                ));
+            }
+        };
+        let mut entity_ids: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        for label in labels {
+            for key in [&label.rec_a_key, &label.rec_b_key] {
+                match crate::read::entity_of_record_key(ctx.session, snapshot, key) {
+                    Ok(Some(id)) => {
+                        entity_ids.insert(id);
+                    }
+                    // A record the corpus no longer has resolves to nothing.
+                    // That is a real outcome — it was deleted between staging
+                    // and the pass — not an error, and the other half of the
+                    // pair may still resolve.
+                    Ok(None) => {}
+                    Err(e) => {
+                        tracing::warn!(er.run_id = %ctx.order.run_id, er.record_key = %key, error = %e, "the write-back lookup failed");
+                    }
+                }
+            }
+        }
+        let mut entities = Vec::new();
+        for entity_id in &entity_ids {
+            match crate::read::entity_detail(ctx.session, entity_type, snapshot, entity_id) {
+                Ok(Some(detail)) => entities.push(super::plans::WriteBackEntity {
+                    entity_id: entity_id.clone(),
+                    master: detail
+                        .get("golden")
+                        .cloned()
+                        .unwrap_or(serde_json::Value::Null),
+                    members: detail
+                        .get("members")
+                        .cloned()
+                        .unwrap_or(serde_json::Value::Null),
+                }),
+                Ok(None) => {}
+                Err(e) => {
+                    tracing::warn!(er.run_id = %ctx.order.run_id, er.entity_id = %entity_id, error = %e, "the write-back detail lookup failed");
+                }
+            }
+        }
+        let count = entities.len();
+        Ok(Outcome::Done(
+            Plan(super::plans::WriteBackScanned { entities }),
+            er_dag::Counters(serde_json::json!({ "write_back": count })),
+        ))
+    }
+}
+
 #[derive(Default)]
 pub struct ReconcileSchema;
 

@@ -26,6 +26,101 @@ use super::plans::{
     StagedApplied, StagedApproved, TrainedModel,
 };
 
+/// Queue one `entity.write_back` per entity the pass changed (O4).
+///
+/// The Postgres half of the write-back: `write_back_scan` read the corrected
+/// corpus in a pod, and `webhook::emit` is a database write a pod cannot make
+/// (§6.4). This existed only inside the legacy in-process arm, which could do
+/// both in one function; on the task path it was absent entirely, so a
+/// subscriber integrated against O4 received nothing (#770).
+///
+/// Best-effort throughout, like the labels and the marks before it: the
+/// corrections are applied and marked, so failing here would undo real work to
+/// report on it. Every skip is logged — a write-back that silently does not
+/// happen is indistinguishable from a tenant whose endpoint is fine.
+///
+/// The subscriber check happens HERE rather than before the scan, because the
+/// list is Postgres. A tenant with no subscriber pays for the scan and nothing
+/// else.
+#[derive(Default)]
+pub struct EmitWriteBack;
+
+impl ControlTask<PgClient> for EmitWriteBack {
+    const NAME: &'static str = "emit_write_back";
+    const VERSION: u32 = 1;
+    type Input = (Plan<crate::dags::plans::WriteBackScanned>,);
+    type Output = Plan<crate::dags::plans::WriteBackEmitted>;
+
+    async fn run(
+        &mut self,
+        ctx: &mut ControlCtx<'_, PgClient>,
+        (scanned,): Self::Input,
+    ) -> Result<Outcome<Self::Output>, TaskError> {
+        let entities = scanned.0.entities;
+        if entities.is_empty() {
+            return Ok(Outcome::NoOp(Plan(crate::dags::plans::WriteBackEmitted {
+                queued: 0,
+            })));
+        }
+        // Nothing to do when no subscriber wants it.
+        match crate::pg::webhooks_for_delivery(ctx.client, &ctx.order.org_id, "entity.write_back")
+            .await
+        {
+            Ok(targets) if targets.is_empty() => {
+                return Ok(Outcome::NoOp(Plan(crate::dags::plans::WriteBackEmitted {
+                    queued: 0,
+                })));
+            }
+            Ok(_) => {}
+            Err(e) => {
+                tracing::warn!(er.run_id = %ctx.order.run_id, error = %e, "the write-back subscriber lookup failed");
+                return Ok(Outcome::NoOp(Plan(crate::dags::plans::WriteBackEmitted {
+                    queued: 0,
+                })));
+            }
+        }
+        let org_name = match crate::pg::get_org_by_id(ctx.client, &ctx.order.org_id).await {
+            Ok(Some(org)) => org.name,
+            Ok(None) => ctx.order.org_id.clone(),
+            Err(e) => {
+                tracing::warn!(er.run_id = %ctx.order.run_id, error = %e, "the write-back was skipped: resolving the org failed");
+                return Ok(Outcome::NoOp(Plan(crate::dags::plans::WriteBackEmitted {
+                    queued: 0,
+                })));
+            }
+        };
+        let mut queued = 0i64;
+        for entity in &entities {
+            let data = serde_json::json!({
+                "entity_id": entity.entity_id,
+                "run_id": ctx.order.run_id,
+                "cause": "review_resolved",
+                "master": entity.master,
+                "members": entity.members,
+            });
+            match crate::webhook::emit(
+                ctx.client,
+                &ctx.order.org_id,
+                ctx.order.dataset_id.as_deref(),
+                &org_name,
+                "entity.write_back",
+                &data,
+            )
+            .await
+            {
+                Ok(_) => queued += 1,
+                Err(e) => {
+                    tracing::warn!(er.run_id = %ctx.order.run_id, er.entity_id = %entity.entity_id, error = %e, "the entity.write_back webhook was not queued");
+                }
+            }
+        }
+        Ok(Outcome::Done(
+            Plan(crate::dags::plans::WriteBackEmitted { queued }),
+            er_dag::Counters(serde_json::json!({ "queued": queued })),
+        ))
+    }
+}
+
 /// Creates the tenant workspace and its catalog — the tenant database on the
 /// maintenance DSN, or the local lake directory. REAL since Phase 3.
 ///
