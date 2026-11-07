@@ -11,11 +11,16 @@ edition = "2024"
 # requires 1.88. Declaring 1.85 is what pinned cargo's resolver to the
 # vulnerable version, so the choice was a real advisory or an honest floor.
 #
+# 1.89 since kube 5.0 (er-k8s): k8s-openapi 0.29 is pinned by kube 5.x only, and
+# every kube release after 4.0 declares 1.89 — so this floor is what lets the
+# Kubernetes API types move at all (batch-orchestration-design §11 Phase 0
+# named this exact raise as the recorded dependency decision).
+#
 # Nothing verifies the floor downward: `rust-toolchain.toml` asks for `stable`,
 # every CI job installs stable, and the image is `rust:1-bookworm`. The field's
 # live effect is on dependency resolution, where a higher floor lets cargo pick
 # newer and safer versions.
-rust-version = "1.88"
+rust-version = "1.89"
 license = "MIT"
 repository = "https://github.com/athvin/dedupe-engine"
 

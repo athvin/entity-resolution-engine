@@ -130,10 +130,15 @@ er-dag = { version = "0.1.0", path = "../er-dag" }
 er-errors = { version = "0.1.0", path = "../er-errors" }
 signal-hook = "0.4.6"
 er-k8s = { version = "0.1.0", path = "../er-k8s" }
-jsonwebtoken = "9"
+# jsonwebtoken >= 10 needs a crypto backend. Neither built-in one fits: `aws_lc_rs` is
+# banned from this image, and `rust_crypto` pulls `rsa`, which carries unfixed
+# timing advisories (RUSTSEC-2023-0071) that fail cargo-deny. `satoken::ring_jwt`
+# supplies a ring-backed provider instead; ring is already linked through rustls.
+jsonwebtoken = { version = "11", default-features = false, features = ["use_pem"] }
 er-obs = { version = "0.1.0", path = "../er-obs" }
 tracing.workspace = true
 tower-http = { version = "0.6", default-features = false, features = ["trace", "request-id"] }
+ring = "0.17"
 
 [lints]
 workspace = true
