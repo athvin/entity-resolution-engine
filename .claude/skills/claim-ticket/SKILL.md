@@ -95,11 +95,23 @@ gh issue comment <n> -R athvin/entity-resolution-engine \
 means two agents claimed at once: the earlier `createdAt` wins. If that is not
 yours, close your PR with a comment saying so and return to selection.
 
-**Expect the draft's first CI run to be the full gate, and ignore it.** An
-empty commit produces an empty diff, which `detect` classifies as `code=true`
-(an empty line is not in the exempt set), so the run proves a tree identical
-to `main`. It is green noise; the first real push cancels it
-(`cancel-in-progress` is true for pull requests).
+**Expect the draft to go RED immediately, and leave it red.** The empty commit
+produces an empty diff, so `detect` reports `code=false`, every compile job
+reports `skipped`, and the `empty pull request` job fails on purpose — measured
+at 19s for the whole `rust` run, against 9m54s for a real one. That red is the
+claim working as designed: it says "claimed, nothing built yet", and a draft is
+unmergeable anyway. The first real push flips `empty` to false and the actual
+gate takes over.
+
+**So do not try to fix it, and do not read it as the gate failing.** The one
+check that must still be green is `agent skills (lint + drift)`, which is
+ungated and runs on everything.
+
+Before 2026-11-07 this was the opposite advice — the run was the FULL backend
+gate and the instruction was to ignore it as green noise, because `rust.yml`'s
+`detect` is a denylist and an empty path list inverted through it. Each claim
+cost ~10m across the compile matrix and ~0.6 GB of sccache S3 egress to prove a
+tree identical to `main`.
 
 ## Phase 2 — read, then plan in the open
 
