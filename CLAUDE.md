@@ -349,6 +349,7 @@ The table below is **generated** from each skill's frontmatter by
 | building or changing a table, list, chart | `frontend-data-ui` |
 | building or restyling a component or page | `frontend-design-system` |
 | adding or fixing a frontend test, when a Playwright or vitest run fails | `frontend-testing` |
+| asked to check dev or prod health, hunt errors in the running system (user-invoked only) | `health-sweep` |
 | editing Terraform or a Helm chart, writing a NodePool | `infra-platform` |
 | asked to monitor, watch, babysit or land a pull request (user-invoked only) | `land-pr` |
 | editing or adding a marketing page or its copy | `landing-page` |
