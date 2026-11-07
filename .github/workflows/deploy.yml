@@ -132,13 +132,6 @@ jobs:
       # commit by design. It changes the stale-digest message below from a
       # warning into a note — see the reasoning there.
       PLATFORM_ONLY: ${{ github.event_name == 'push' }}
-      # The executor allowlist (batch-orchestration-design §11): these kinds
-      # run as per-attempt Kubernetes Jobs in this namespace. Enabled HERE,
-      # not in the chart default, so a developer namespace opts in
-      # deliberately. Job-level so the install and the cut-over read ONE
-      # value — they used to carry two copies that had to agree, or the
-      # cut-over quietly reverted the allowlist the install just widened.
-      DAG_KINDS: 'lake_maintain\,lake_migrate\,run_all_full\,run_all_incremental\,correct\,train\,profile\,provision\,dataset_provision\,apply_corrections\,apply_approved'
     steps:
       - name: Name the commit being deployed
         run: echo "deploying $DEPLOY_SHA"
@@ -208,18 +201,14 @@ jobs:
           WEB_DIGEST: ${{ steps.digests.outputs.er_web }}
         run: bash scripts/ci/deploy-summary.sh
 
-      # The executor allowlist (batch-orchestration-design §11): these kinds
-      # run as per-attempt Kubernetes Jobs in this namespace. Enabled HERE,
-      # not in the chart default, so a developer namespace opts in
-      # deliberately.
+      # Every kind runs as per-attempt Kubernetes Jobs. There is no allowlist
+      # to pass any more (#645): the executor owns every kind the DAG registry
+      # parses, so neither the install nor the cut-over carries a value that
+      # could disagree with the other.
       #
-      # EVERY kind is listed, which completes Phase 3's rollout. The value
-      # lives in the job-level `DAG_KINDS` env, which the install and the
-      # cut-over both read — one value, so the cut-over can no longer revert
-      # an allowlist the install widened.
-      #
-      # This comment used to say the last few kinds would go on one at a time
-      # "as each is observed" on a cluster. That was the wrong unit. What a
+      # The rollout this replaced went kind by kind, and the note here used to
+      # say the last few would go on one at a time "as each is observed" on a
+      # cluster. That was the wrong unit. What a
       # cluster run adds — real scheduling, real projected-token verification,
       # real EFS, a real image — are PLATFORM properties, and they are already
       # proven live by `lake_maintain` (Phase 2) and by `run_all_full` running

@@ -55,8 +55,9 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // that copy was the one that had no drain, because its flag was never set.
     let term = crate::shutdown::sigterm_flag();
 
-    // The Kubernetes executor (§6): inert unless the chart lists kinds in
-    // ER_EXECUTOR_DAG_KINDS and the pod carries an in-cluster identity.
+    // The Kubernetes executor (§6): present when the pod has a namespace and
+    // an in-cluster identity. Absent, this dispatcher does not claim — there
+    // is nothing left to execute a job with (#645).
     let (executor, watch_frames) = crate::executor::from_env(&dsn).await;
     dispatcher::run_loop(&client, &http, &term, reporter, executor, watch_frames).await?;
     Ok(())

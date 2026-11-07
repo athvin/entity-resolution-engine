@@ -21,6 +21,7 @@ use er_server::executor::{Executor, ExecutorConfig};
 use er_server::{AppState, dispatcher, pg};
 
 use crate::common;
+use crate::executor_harness::pump;
 use crate::fake_pod_api::FakePodApi;
 
 const TEST_YAML: &str = include_str!("../../er-cli/tests/fixtures/test.yaml");
@@ -30,16 +31,6 @@ fn repo_fixture(rel: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../../fixtures/static")
         .join(rel)
-}
-
-async fn pump(
-    executor: &mut Executor,
-    frames: &mut tokio::sync::mpsc::UnboundedReceiver<er_k8s::WatchFrame>,
-) {
-    executor.passes().await;
-    while let Ok(frame) = frames.try_recv() {
-        executor.apply_frame(frame).await;
-    }
 }
 
 #[tokio::test]
@@ -115,9 +106,6 @@ async fn run_all_full_runs_as_seven_pods_and_reproduces_base_10() {
     let (api, mut frames) = FakePodApi::new(format!("http://{addr}"), tmp.clone());
     let api = Arc::new(api);
     let cfg = ExecutorConfig {
-        dag_kinds: ["run_all_full".to_string(), "train".to_string()]
-            .into_iter()
-            .collect(),
         in_flight_cap: 2,
         template: er_k8s::manifest::REFERENCE_TEMPLATE.to_string(),
         image_digest: None,

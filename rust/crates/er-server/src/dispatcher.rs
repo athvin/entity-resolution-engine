@@ -460,9 +460,15 @@ pub async fn dispatch_once(
     .await
 }
 
-/// [`dispatch_once_with`] plus the Kubernetes executor's claim routing: a kind
-/// on the allowlist is PLANNED and returned — its tasks ride the executor's
-/// passes and watch, never the in-process arms (§11's one-executor rule).
+/// [`dispatch_once_with`] plus the Kubernetes executor's claim routing: a
+/// claimed job is PLANNED and returned — its tasks ride the executor's passes
+/// and watch, never the in-process arms (§11's one-executor rule).
+///
+/// There is no longer a per-kind allowlist to consult. Every claim goes to the
+/// executor, and a kind the DAG registry cannot parse is refused terminally by
+/// `plan_claimed` with that reason on the row — which is a better answer than
+/// the legacy arm's generic "dispatcher does not handle job kind", and the only
+/// answer available once that arm is gone (#645).
 ///
 /// # Errors
 /// Propagates a Postgres claim/mark/lookup failure.
@@ -474,17 +480,11 @@ pub async fn dispatch_once_with_executor(
     executor: Option<&mut crate::executor::Executor>,
 ) -> Result<bool, tokio_postgres::Error> {
     if let Some(ex) = executor {
-        // Peek-claim through the same SKIP LOCKED statement; an executor kind
-        // leaves here planned, everything else falls through to the legacy
-        // arms exactly as before.
         let Some(job) = pg::claim(client, pg::org_job_cap()).await? else {
             return Ok(false);
         };
-        if ex.handles(&job.kind) {
-            ex.plan_claimed(&job).await;
-            return Ok(true);
-        }
-        return dispatch_claimed(client, profile, mailer, reporter, job).await;
+        ex.plan_claimed(&job).await;
+        return Ok(true);
     }
     dispatch_once_with(client, profile, mailer, reporter).await
 }
@@ -1034,7 +1034,7 @@ const REPORT_TO_KEY: &str = "ER_RUN_REPORT_TO";
 ///
 /// Pure so the whole decision is testable without a mailer, a Postgres or a
 /// job: every branch below is a rule someone will want to change later.
-fn run_report_messages(
+pub(crate) fn run_report_messages(
     org_name: &str,
     env: &Value,
     job: &Job,

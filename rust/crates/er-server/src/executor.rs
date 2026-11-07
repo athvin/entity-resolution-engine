@@ -1,16 +1,16 @@
 //! The Kubernetes executor's dispatcher half (batch-orchestration-design §5.1,
-//! §6.5, §6.6): planning for allowlisted kinds, the readiness pass, the
+//! §6.5, §6.6): planning every claimed job, the readiness pass, the
 //! launcher's write-ahead claim → create, the cancel/zombie/stuck-pending
 //! sweeps, the watch's verdict application, and adoption on start-up and
 //! resync. Kubernetes owns placement, deadlines and cleanup; Postgres stays
 //! the state of record; this module is the translation layer between
 //! `er_k8s`'s pure verdicts and the §4.5 statements.
 //!
-//! Scope note (Phase 2): kinds join through `ER_EXECUTOR_DAG_KINDS` (the
-//! chart's `executor.dagKinds`), default empty — the executor is inert until a
-//! kind is listed. Fused-segment hand-off, the ledger probe for run-row kinds,
-//! and the projected-token credential land with Phases 2b/3; the fallback
-//! per-attempt token (hash at rest, nulled at finish) is the live credential.
+//! Every job kind is the executor's. There is no `ER_EXECUTOR_DAG_KINDS`
+//! allowlist and no in-process arm to fall back to (#645), so a kind the DAG
+//! registry cannot parse is refused terminally at planning rather than routed
+//! elsewhere. The fallback per-attempt token (hash at rest, nulled at finish)
+//! is the live credential.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -39,7 +39,6 @@ const QUOTA_WAIT_SECS: i64 = 30;
 
 /// Configuration, from the chart through the environment.
 pub struct ExecutorConfig {
-    pub dag_kinds: BTreeSet<String>,
     pub in_flight_cap: i64,
     /// The Job template (the chart's ConfigMap, mounted as a file).
     pub template: String,
@@ -47,27 +46,19 @@ pub struct ExecutorConfig {
 }
 
 impl ExecutorConfig {
-    /// `None` unless `ER_EXECUTOR_DAG_KINDS` names at least one kind — the
-    /// executor is opt-in per kind (§11's rollout allowlist).
+    /// `None` only when a configured task template cannot be read.
+    ///
+    /// The executor used to be opt-in per kind through `ER_EXECUTOR_DAG_KINDS`
+    /// (§11's rollout allowlist), returning `None` whenever that variable was
+    /// absent or empty. The allowlist is gone with the legacy in-process arm
+    /// (#645): there is no second path for a kind to fall back to, so every
+    /// kind the DAG registry parses is the executor's, and one it does not
+    /// parse is refused terminally by `plan_claimed` rather than falling
+    /// through. What still disables the executor is the absence of a namespace
+    /// or an in-cluster identity, which is what keeps a host dispatcher out of
+    /// the business of creating Jobs — see [`from_env`].
     #[must_use]
     pub fn from_env() -> Option<Self> {
-        let kinds = std::env::var("ER_EXECUTOR_DAG_KINDS").ok()?;
-        let dag_kinds: BTreeSet<String> = kinds
-            .split(',')
-            .map(str::trim)
-            .filter(|k| !k.is_empty())
-            .filter(|k| {
-                let known = JobKind::parse(k).is_some();
-                if !known {
-                    tracing::warn!(kind = %k, "ignoring an unknown kind in ER_EXECUTOR_DAG_KINDS");
-                }
-                known
-            })
-            .map(str::to_string)
-            .collect();
-        if dag_kinds.is_empty() {
-            return None;
-        }
         let in_flight_cap = std::env::var("ER_EXECUTOR_IN_FLIGHT_CAP")
             .ok()
             .and_then(|v| v.parse().ok())
@@ -83,7 +74,6 @@ impl ExecutorConfig {
             Err(_) => er_k8s::manifest::REFERENCE_TEMPLATE.to_string(),
         };
         Some(ExecutorConfig {
-            dag_kinds,
             in_flight_cap,
             template,
             image_digest: std::env::var("ER_IMAGE_DIGEST")
@@ -94,9 +84,16 @@ impl ExecutorConfig {
 }
 
 /// Build the executor and its watch task from the environment, when
-/// configured: `ER_EXECUTOR_DAG_KINDS` non-empty, a namespace, and an
-/// in-cluster Kubernetes identity. Anything missing disables the executor with
-/// the reason logged — the dispatcher runs legacy-only, exactly as before.
+/// configured: a namespace and an in-cluster Kubernetes identity. Either one
+/// missing disables the executor with the reason logged.
+///
+/// On a host — local development — `KubeApi::in_cluster` is what fails, so the
+/// dispatcher runs without an executor and falls through to the in-process arm
+/// in `dispatcher.rs`. That fallback is what #645 deletes; when it goes, a
+/// dispatcher with no executor must stop claiming rather than mark a row
+/// `running` it cannot advance, and `make run` and `scripts/frontend-dev/up.sh`
+/// keep API-only work. That is the decision recorded against Phase 4 in
+/// `docs/batch-orchestration-design.md` (#638).
 pub async fn from_env(
     dsn: &str,
 ) -> (
@@ -148,6 +145,11 @@ pub struct Executor {
     client: Client,
     api: Arc<dyn PodApi>,
     cfg: ExecutorConfig,
+    /// Outbound mail for the run report the settle sends. Built here rather
+    /// than handed in so `connect`'s signature stays what the integration
+    /// tests already call; with no SES configuration this is the `off` mailer
+    /// and `send` is a no-op.
+    mailer: crate::mail::Mailer,
     epoch: String,
     /// Per-launch pre-start clocks (first observation of the standing
     /// evidence); an executor restart re-arms the bounds, which is safe — a
@@ -169,14 +171,10 @@ impl Executor {
             client,
             api,
             cfg,
+            mailer: crate::mail::Mailer::from_env().await,
             epoch: er_ids::new_v7(),
             pending_since: BTreeMap::new(),
         })
-    }
-
-    #[must_use]
-    pub fn handles(&self, kind: &str) -> bool {
-        self.cfg.dag_kinds.contains(kind)
     }
 
     /// Adoption (§6.6): the new process owns every live row; the watch's first
@@ -190,8 +188,9 @@ impl Executor {
         }
     }
 
-    /// Plan a freshly-claimed job of an allowlisted kind (§4.5's planning
-    /// transaction). Refusals are terminal in the same breath.
+    /// Plan a freshly-claimed job (§4.5's planning transaction). Refusals are
+    /// terminal in the same breath — including a kind the registry cannot
+    /// parse, which is why no allowlist has to be consulted first.
     pub async fn plan_claimed(&mut self, job: &Job) {
         let Some(kind) = JobKind::parse(&job.kind) else {
             let _ = taskpg::refuse_plan(
@@ -260,7 +259,12 @@ impl Executor {
 
     async fn dag_jobs(&self, state: &str) -> Result<Vec<Job>, tokio_postgres::Error> {
         let jobs = er_entities::job::read::list(&self.client, None, Some(state), 200).await?;
-        Ok(jobs.into_iter().filter(|j| self.handles(&j.kind)).collect())
+        // Every kind the registry parses; one it does not cannot have been
+        // planned, so it has no task rows for these passes to act on.
+        Ok(jobs
+            .into_iter()
+            .filter(|j| JobKind::parse(&j.kind).is_some())
+            .collect())
     }
 
     async fn readiness_pass(&mut self) -> Result<bool, tokio_postgres::Error> {
@@ -408,7 +412,7 @@ impl Executor {
             // Absent for every kind with no `finish` task, and that is correct:
             // `lake_maintain`, `train` and `profile` reconcile no entities, so
             // there is nothing to announce.
-            if let Some(counts) = live
+            let pairs: Vec<(String, i64)> = live
                 .get("finish")
                 .and_then(|row| row.output.as_ref())
                 .and_then(|out| out.get("doc"))
@@ -416,14 +420,62 @@ impl Executor {
                 .and_then(|v| {
                     serde_json::from_value::<Vec<crate::dags::plans::EntityCount>>(v.clone()).ok()
                 })
-                .filter(|c| !c.is_empty())
-            {
-                let pairs: Vec<(String, i64)> =
-                    counts.into_iter().map(|c| (c.event_type, c.n)).collect();
+                .unwrap_or_default()
+                .into_iter()
+                .map(|c| (c.event_type, c.n))
+                .collect();
+            if !pairs.is_empty() {
                 crate::dispatcher::emit_entity_aggregates(&self.client, &settled, &pairs).await;
             }
+            self.send_run_report(&settled, &pairs).await;
         }
         Ok(worked)
+    }
+
+    /// The run report for a settled job, one message per configured recipient.
+    ///
+    /// This rides the settle last, after the outcome webhook and the entity
+    /// aggregate, because a subscriber watching all three should see the
+    /// outcome first.
+    ///
+    /// It belongs here rather than only in the legacy arm, and that was a real
+    /// gap: `run_report_messages` had exactly one caller, `dispatch_claimed`,
+    /// while the deploy routed every kind to this executor. So the report had
+    /// already stopped being sent in dev and in production — nothing reported
+    /// it, because a mail that is not sent looks identical to a tenant who
+    /// never configured one. Deleting the arm (#645) would have made that
+    /// permanent and silent.
+    ///
+    /// Best-effort throughout, exactly as it was: the job's outcome is already
+    /// persisted, and reporting an outcome is not part of producing it. A
+    /// tenant with no `ER_RUN_REPORT_TO`, or a kind no steward waits on, sends
+    /// nothing — `run_report_messages` owns those rules and is unit-tested
+    /// without a mailer.
+    async fn send_run_report(&self, settled: &Job, entity_counts: &[(String, i64)]) {
+        // The org is read for its name and `env`; a job whose org has vanished
+        // simply sends nothing.
+        let org = match pg::get_org_by_id(&self.client, &settled.org_id).await {
+            Ok(Some(org)) => org,
+            Ok(None) => return,
+            Err(e) => {
+                tracing::warn!(er.job_id = %settled.id, error = %e, "the run report was skipped: reading the org failed");
+                return;
+            }
+        };
+        for message in
+            crate::dispatcher::run_report_messages(&org.name, &org.env, settled, entity_counts)
+        {
+            if let Err(e) = self.mailer.send(&message).await {
+                tracing::warn!(
+                    er.job_id = %settled.id,
+                    error = %e,
+                    // `message.to` is deliberately NOT a field: it is a
+                    // recipient address, and §10.4 keeps plaintext email off
+                    // anything exportable.
+                    "sending the run report failed"
+                );
+            }
+        }
     }
 
     // ---- control tasks ------------------------------------------------------

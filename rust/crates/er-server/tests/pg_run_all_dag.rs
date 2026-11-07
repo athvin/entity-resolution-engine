@@ -14,19 +14,10 @@ use er_server::executor::{Executor, ExecutorConfig};
 use er_server::{AppState, dispatcher, pg};
 
 use crate::common;
+use crate::executor_harness::pump;
 use crate::fake_pod_api::{FakePodApi, Script};
 
 const TEST_YAML: &str = include_str!("../../er-cli/tests/fixtures/test.yaml");
-
-async fn pump(
-    executor: &mut Executor,
-    frames: &mut tokio::sync::mpsc::UnboundedReceiver<er_k8s::WatchFrame>,
-) {
-    executor.passes().await;
-    while let Ok(frame) = frames.try_recv() {
-        executor.apply_frame(frame).await;
-    }
-}
 
 async fn job_state(client: &tokio_postgres::Client, org: &str, id: &str) -> String {
     pg::get_job(client, org, id)
@@ -89,7 +80,6 @@ async fn lake_maintain_runs_end_to_end_through_the_executor() {
     let (api, mut frames) = FakePodApi::new(format!("http://{addr}"), tmp.clone());
     let api = Arc::new(api);
     let cfg = ExecutorConfig {
-        dag_kinds: ["lake_maintain".to_string()].into_iter().collect(),
         in_flight_cap: 2,
         template: er_k8s::manifest::REFERENCE_TEMPLATE.to_string(),
         image_digest: Some("sha256:test".into()),
