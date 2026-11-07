@@ -1,0 +1,67 @@
+# The pull-request contract: a ticket, and a post-merge ledger.
+#
+# WHY ITS OWN WORKFLOW RATHER THAN A JOB IN rust.yml. This check must re-report
+# when the BODY changes, not only when a commit lands — an author who adds
+# `Closes #<n>` after opening gets a green without pushing. That needs
+# `types: [... edited ...]`, and adding `edited` to rust.yml's trigger would
+# re-run the whole backend gate on every typo fix in a description.
+#
+# NO `paths:` FILTER, ever, for the reason CLAUDE.md gives: a workflow a path
+# filter skips never reports, and a required check that never reports blocks
+# every pull request forever. There is nothing to filter on anyway — the
+# subject is the body, not the tree.
+#
+# NOT A REQUIRED CHECK YET. Branch protection is repository configuration
+# rather than a file here, so promoting it is a separate, deliberate act — and
+# the order matters: let it report on real pull requests first, including a
+# failing one, then add the context. Promoted too early it would block every
+# open pull request whose body predates the template.
+on:
+  pull_request:
+    # `synchronize` alone would miss the two edits that fix a failure: filling
+    # in the ticket line, and restoring the ledger. `labeled`/`unlabeled` are
+    # here because the `no-ticket` override is a label.
+    types:
+      - opened
+      - edited
+      - reopened
+      - synchronize
+      - labeled
+      - unlabeled
+      - ready_for_review
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  contract:
+    name: pull request contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # PINNED TO THE HEAD SHA, NOT THE DEFAULT MERGE REF, and that is measured
+      # rather than stylistic. `actions/checkout` resolves
+      # `refs/pull/<n>/merge` on a `pull_request` event, and that ref is GONE
+      # once the pull request is merged — probed 2026-11-07: a merged #806
+      # exposes only `refs/pull/806/head`, while an open #756 has both. Closing
+      # the post-merge ledger EDITS a merged body, which fires `edited`, so the
+      # default checkout would fail and paint a red `pull request contract` on
+      # every pull request whose follow-up work was properly recorded.
+      #
+      # It also means a pull request that changes the classifier is judged by
+      # its OWN copy, which is the direction scripts/ci/detect-paths.sh argues
+      # for: a change to a gate must run the gate it defines.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      # THE SELF-TEST RUNS FIRST, and that ordering is the point: a classifier
+      # that has stopped noticing anything passes every pull request, which
+      # reads exactly like a tree that has nothing wrong with it.
+      - name: self-test the classifier
+        run: bash scripts/ci/pr-contract-test.sh
+      - name: check this pull request
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/ci/pr-contract-check.sh

@@ -1,6 +1,6 @@
 ---
 name: land-pr
-description: Drives a pull request from opened to green on `main` — the PR loop, the main loop for the push-only workflows a PR can never run, the false greens that make `gh pr checks` report success on a PR that compiled nothing, and the house merge rules (no auto-merge, a single-commit PR squashes to the commit subject, `main` is `strict: false` so only the merge bus judges a combination). Use when asked to monitor, watch, babysit or land a pull request, when driving any open PR to merge, when its checks are red or stuck pending, when deciding whether a failure is the diff or the account, or when a merge turns `main` red. For why a job fails and the CI topology see `ci-and-supply-chain`; for the local gates to reproduce against see `rust-conventions` and `frontend-testing`; for the card of the issue it closes see `project-board`; for claiming the ticket and opening the draft PR see `claim-ticket`; for reviewing the diff before landing it see `pr-review`.
+description: Drives a pull request from opened to green on `main`, then closes its post-merge ledger — the PR loop, the main loop for the push-only workflows no PR can run, the false greens `gh pr checks` reports on a PR that compiled nothing, the house merge rules (no auto-merge; a single-commit PR squashes to the commit subject; only the merge bus judges a combination), and the ledger ticked in the merged body as the record the follow-ups happened. Use when asked to monitor, watch, babysit or land a pull request, when its checks are red or stuck pending, when a failure may be the account rather than the diff, when a merge turns `main` red, or when a merged PR's ledger has open boxes. For why a job fails see `ci-and-supply-chain`; for the local gates see `rust-conventions` and `frontend-testing`; for the card of the issue it closes see `project-board`; for claiming the ticket and the draft PR see `claim-ticket`; for reviewing the diff see `pr-review`.
 argument-hint: [pr-number-or-url] [AUTO_MERGE=true|false] [WATCH_WINDOW=30m]
 ---
 
@@ -12,12 +12,14 @@ Defaults: `AUTO_MERGE=true`, `WATCH_WINDOW=30m`.
 
 ## Invoking this skill is the authorisation
 
-**Being handed a PR here means taking it to green on `main`, not reporting on
-its progress.** The whole arc is pre-authorised — commit a fix, push it,
-`--force-with-lease` over your own commits after a rebase, rerun a flaky job,
-squash-merge on green, open a follow-up PR, revert if the depth cap is hit — and
-none of it needs a per-step yes. Phase boundaries are not checkpoints: merging
-and then asking whether to watch `main` is the same as not having run Phase 3.
+**Being handed a PR here means taking it to green on `main` and closing its
+post-merge ledger, not reporting on its progress.** The whole arc is
+pre-authorised — commit a fix, push it, `--force-with-lease` over your own
+commits after a rebase, rerun a flaky job, squash-merge on green, edit the
+merged PR's body to record the ledger, open a follow-up PR, revert if the depth
+cap is hit — and none of it needs a per-step yes. Phase boundaries are not
+checkpoints: merging and then asking whether to watch `main` is the same as not
+having run Phase 3.
 
 The failure this prevents is subtle, because it looks diligent. A procedure that
 reports at every boundary and waits is slower than no procedure at all — the
@@ -43,11 +45,18 @@ the steady state, and the per-job timeouts are generated into
 [`../ci-and-supply-chain/references/required-checks.md`](../ci-and-supply-chain/references/required-checks.md).
 A job still queued past its own timeout is the account, not the branch.
 
-Two loops. The PR loop ends at green on the branch; the main loop ends at green
-on `main` **with this change on it**. The second exists because `main`'s
-protection is `strict: false`, so a PR merges on a green it won against a base
-that may since have moved, and because `images`, `deploy`, `kind` and `drift`
-never run on a pull request at all.
+Two loops and a ledger. The PR loop ends at green on the branch; the main loop
+ends at green on `main` **with this change on it**. The second exists because
+`main`'s protection is `strict: false`, so a PR merges on a green it won against
+a base that may since have moved, and because `images`, `deploy`, `kind` and
+`drift` never run on a pull request at all.
+
+The ledger is what survives the session. Every PR body carries a
+`<!-- BEGIN POST-MERGE -->` block from
+[`.github/pull_request_template.md`](../../../.github/pull_request_template.md),
+and Phase 4 ticks it **in the merged body** with the evidence inline. Without it
+a merged PR and an abandoned post-merge watch look identical from GitHub — which
+is the state this skill's own observations used to end in.
 
 ## The six house rules that override the generic procedure
 
@@ -109,6 +118,7 @@ with the branch:
 | cargo-deny or pnpm audit red with an innocent diff | an advisory published since the last green | Fix in **its own PR**, never entangled with a feature |
 | `linking with cc failed` | the runner disk filled | Check the disk-reclaim step |
 | `DirectoryNotEmpty` on a DuckDB extension dir | a stripped cache sentinel, not a dirty `OUT_DIR` | A `prefix-key` bump cannot fix it |
+| `pull request contract` red | the body closes no issue, or its ledger block was deleted | Fix the **body**, never the diff: add `Closes #<n>`, or restore the ledger from the template. An `edited` event re-runs it with no push |
 | Same job red on `main`'s latest run | pre-existing | Report it; do not fix unrelated breakage here |
 
 The taxonomy behind that table, and what to do about each, is
@@ -208,6 +218,10 @@ git fetch origin main && git log origin/main --oneline -1 "$MERGE_SHA"
 Then say, explicitly, that it merged **and that the main loop is now running.**
 This is the moment the user would otherwise assume the work was finished.
 
+Record `MERGE_SHA` in the ledger's first box as you go rather than at the end.
+Every later observation attaches to something, and the ledger is the only place
+that outlives the session.
+
 ## Phase 3 — the main loop
 
 The post-merge chain is two hops and paths-filtered at the first:
@@ -257,6 +271,51 @@ obvious fix, or when the user has said they are away.
 nothing new on `main` has failed for `WATCH_WINDOW`, and any deploy has
 converged on a log line the process emitted.
 
+## Phase 4 — close the ledger
+
+Everything Phase 3 observed now goes into the PR body, where the next session
+can read it. **A merged pull request's body stays writable** — probed
+2026-11-07, a `PATCH` on a merged PR returns 200 — so the record belongs there
+and not in a transcript.
+
+Read, modify, write. Never compose a body from memory: a concurrent session or
+a human may have edited it, and `--body-file` replaces the **whole** body.
+
+```bash
+gh pr view <n> --json body --jq .body > /tmp/pr-<n>-body.md
+# tick the boxes in that file, evidence inline, then:
+gh pr edit <n> --body-file /tmp/pr-<n>-body.md
+```
+
+Four rules, and the third is the one that keeps the record worth having:
+
+1. **Evidence inline, not a bare tick.** `- [x] main is green — 2860240d, run
+   19284756 (22 success / 0 failure)`. A tick with nothing after it is
+   indistinguishable from a tick applied to make the list go away.
+2. **`n/a — <why>` counts as done.** Most ledgers have several: a `.claude/`-only
+   change builds no image and deploys nothing, and saying so *is* the finding.
+3. **An item you could not establish leaves its box EMPTY**, annotated
+   `blocked — <why>`, and is named in the final report. Ticking something
+   unverified is the one failure that makes the whole mechanism worthless —
+   every future reader would have to re-derive what the ledger claims to settle.
+4. **Items discovered during the watch go under "Specific to this change"**,
+   ticked if they were done here and left open if they are owed. That is how a
+   one-off backfill or a required-check promotion stops living in chat.
+
+Then set the **Closed by** line to the UTC time the watch ended.
+
+**Exit** when the ledger has no empty box that is not annotated `blocked`. A
+body edit fires `pull_request edited`, so `pull request contract` re-runs on the
+merged PR and passes — `pr-contract.yml` checks out the **head SHA** precisely
+because a merged PR no longer has the `refs/pull/<n>/merge` ref that
+`actions/checkout` otherwise defaults to.
+
+To find the ledgers an interrupted session left open:
+
+```bash
+bash scripts/ci/pr-ledger-audit.sh          # LIMIT=100 for a deeper sweep
+```
+
 ## Blocked — stop and say why
 
 This is the **whole** list. Nothing outside it is a reason to hand control back
@@ -279,15 +338,16 @@ Ask once, framed so that yes or no answers it.
 **Not blocks, and not worth a question:** a red check (diagnose it), a flaky
 check (rerun it, twice at most), a conflicted branch (rebase it), a merge on
 green, a `main` that went red after the merge (attribute it, then fix forward),
-a long CI pass (keep polling — the user asked for the polling), or reaching a
-phase boundary. A question about any of these spends a turn to learn something
+a long CI pass (keep polling — the user asked for the polling), reaching a
+phase boundary, a red `pull request contract` (edit the body), or a ledger item
+that cannot be established (annotate the box `blocked` and report it). A question about any of these spends a turn to learn something
 the skill already answers.
 
 ## Final report
 
 ```
 ## land-pr: #<n> <title>
-**Outcome:** merged & main green | green, awaiting merge | stopped — needs human
+**Outcome:** merged, main green & ledger closed | green, awaiting merge | stopped — needs human
 
 **PR loop:** <k> iterations
 - iter 1: <context> failed (<cause>) → fixed in <sha>
@@ -300,9 +360,13 @@ the skill already answers.
 - deploy: converged | not triggered (no image inputs changed) | <what broke>
 - <workflow>: failed → attributed here → follow-up #<m>, merged <sha>, green
 
+**Ledger:** closed in the PR body — <t> ticked (<k> of them `n/a`), <b> blocked
+- blocked: <item> — <why, and who can unblock it>
+
 **Commits and PRs created:** <every sha and number>
 **Open items:** <or "none">
 ```
 
 List every commit and PR created, so the work can be audited without reading the
-transcript.
+transcript. The ledger line is the pointer to where that audit now lives: the
+body, which outlasts both the transcript and this report.
