@@ -312,6 +312,11 @@ jobs:
   # skill gate placed in any of them would never run when it matters. This one
   # needs no toolchain (pure shell, no cargo, no node, no network), so running
   # it unconditionally costs seconds.
+  #
+  # The same reasoning keeps the Codex config bridge gate (`.agents/skills`
+  # and `AGENTS.md`) in this job: `detect` exempts `.claude/**` and
+  # `.agents/**`, so a skills-only PR reaches only this job — which is exactly
+  # the PR that can orphan a symlink.
   skills:
     name: agent skills (lint + drift)
     runs-on: ubuntu-latest
@@ -371,6 +376,37 @@ jobs:
         # Same bare-checkout budget as the step above: pure bash, no toolchain.
         working-directory: ${{ github.workspace }}
         run: bash scripts/ci/skills-check-test.sh
+
+      - name: agent config bridge symlinks (Codex discovery)
+        # Claude Code discovers project skills at .claude/skills and its
+        # instructions at CLAUDE.md; Codex discovers them at .agents/skills
+        # and AGENTS.md, and reads neither Claude Code name. Both are authored
+        # once in the Claude Code locations and bridged across by symlinks — a
+        # PR that adds a skill without its bridge, or forks a bridge into a
+        # real copy, fails here. Runs in THIS job rather than behind `detect`
+        # because a skills-only PR is exactly the shape `detect` skips; see
+        # the job header. Same bare-checkout budget as the steps above.
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/ci/agent-bridge-check.sh
+
+      - name: agent-bridge regression tests
+        # Same contract as the skills-check suite two steps up: a detector
+        # breaks by noticing nothing, and this gate's rename-detection exits
+        # are precisely what must never start passing silently.
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/ci/agent-bridge-check-test.sh
+
+      - name: codex-mcp-sync derivation tests
+        # The one piece of agent config no symlink can bridge: Codex reads MCP
+        # servers from $CODEX_HOME/config.toml and ignores a project
+        # .codex/config.toml's `mcp_servers`. scripts/codex-mcp-sync.sh derives
+        # `codex mcp add` from .mcp.json instead, and what this asserts is that
+        # it still refuses every shape it does not understand — a sync that
+        # passed over a server quietly would read as "synced" with the tool
+        # missing. Everything runs through --dry-run, so no Codex install and
+        # no $CODEX_HOME write; jq is preinstalled on the runner.
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/ci/codex-mcp-sync-test.sh
 
   # S9 — every `uses:` pinned to a commit SHA with its `# vTAG` comment.
   #
@@ -501,8 +537,11 @@ jobs:
   lint:
     name: fmt + clippy + docs
     needs: detect
-    # `drift` too: this job carries the only generated-reference drift check that
-    # can BLOCK a merge, because the `skills` job is not a required status check.
+    # `drift` too: this job carries a generated-reference drift check as a
+    # backstop for code PRs. The ungated `skills` job is the primary copy and
+    # is itself a required status check (probed on `main`) — this duplicate
+    # exists so a `detect` regression could not let a code PR through with
+    # drift unexamined; see the `skills` job header.
     if: needs.detect.outputs.code == 'true' || needs.detect.outputs.drift == 'true'
     runs-on: ubuntu-latest
     # 45, not 30: on a cold cache this job has to build the bundled duckdb C++

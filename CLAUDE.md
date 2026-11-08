@@ -7,7 +7,8 @@ the PR-equivalent gate and mirrors `.github/workflows/rust.yml`:
 
 ```
 make check   # = fmt + lint + doc + entities-check + skills-check
-             #   + scripts-home-check + workflow-shell-check + pr-contract-check
+             #   + agent-bridge-check + scripts-home-check
+             #   + workflow-shell-check + pr-contract-check
              #   + tf-static-credentials-check + test
 ```
 
@@ -32,6 +33,7 @@ Other gates, each run on its own because they need external services:
 | `make frontend-audit` | the frontend supply chain: HIGH/CRITICAL advisories + the license allowlist | network |
 | `make entities-check` | just the entity-framework gate | — |
 | `make skills-check` | just the agent-skill gate (authoring rules + generated references) | — |
+| `make agent-bridge-check` | just the Codex config bridge (`.agents/skills`, `AGENTS.md`, the `.mcp.json` derivation) | — |
 
 **The frontend gate blocks merges now.** `lint + types + unit`, `playwright
 functional tier`, `pnpm audit + licenses` and `postgres.js driver contract` are
@@ -361,6 +363,43 @@ is written to `~`. Those nested skills load lazily — only once a file under
 `rust/.claude/settings.json` are inert, because Claude Code reads settings only
 from the repository root. The root `.claude/settings.json` carries the one
 bridging hook that actually runs.
+
+### A second agent reads this repo, and it reads different filenames
+
+Codex runs here too — including Kimi K3, which is the same `codex` binary under
+`--profile kimi`, so everything below covers both. It discovers skills at
+`.agents/skills/` and instructions at `AGENTS.md`, and reads **neither**
+`.claude/skills/` nor `CLAUDE.md`. Both are authored once in the Claude Code
+locations and bridged across by symlinks:
+
+```
+.agents/skills/<name> -> ../../.claude/skills/<name>
+AGENTS.md             -> CLAUDE.md
+```
+
+`make agent-bridge-check` enforces that, in both directions, and the gate also
+rides ungated in `rust.yml`'s `skills` job — because a skills-only pull request
+is exactly the shape `detect` skips, and so exactly the one that can orphan a
+symlink. **Add a skill and you add its symlink**, or it works in one tool and
+does not exist in the other.
+
+**The rest of `.claude/settings.json` does not port, and there is no repo file
+that can make it.** The MCP servers, the `aws-write-guard` hook, the
+`permissions.deny` list and the plugin set are all per-developer state in
+`$CODEX_HOME`. For the MCP servers that is one command, derived from
+`.mcp.json` so the two cannot drift:
+
+```sh
+scripts/codex-mcp-sync.sh --dry-run   # see what it would register
+scripts/codex-mcp-sync.sh             # register with codex
+```
+
+The one worth knowing about is the hook: under Codex there is **no**
+`PreToolUse` guard on `aws`, `terraform`, `kubectl` or `helm`, so what is left
+protecting the account is the read-only `er-readonly` profile and the IAM
+denies. [`.claude/skills/skill-writer/references/agent-skills.md`](.claude/skills/skill-writer/references/agent-skills.md)
+has the measurements behind each of those claims and the one command that shows
+what Codex actually loaded.
 
 ### Repo skills
 
