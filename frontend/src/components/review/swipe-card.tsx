@@ -6,7 +6,7 @@ import { motion, useMotionValue, useTransform } from "motion/react";
 import type { Resolution, ReviewRow } from "@/lib/query/reviews";
 import { FieldCompareGrid } from "./field-compare-grid";
 import { WaterfallChart } from "./waterfall-chart";
-import { probabilityLabel, REASON_COPY } from "./decision-panel";
+import { confidenceLabel, REASON_COPY } from "./decision-panel";
 
 const SWIPE_THRESHOLD = 96;
 
@@ -85,7 +85,7 @@ export function SwipeCard({ org, review, onResolve }: SwipeCardProps) {
       </div>
       <div className="flex items-center gap-2">
         <span className="bg-secondary text-secondary-foreground rounded-full px-2 py-0.5 text-xs">
-          {probabilityLabel(review.match_probability)}
+          {confidenceLabel(review.confidence)}
         </span>
         <span className="text-muted-foreground text-xs">
           {REASON_COPY[review.reason] ?? review.reason}

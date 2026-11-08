@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { WaterfallChart } from "@/components/review/waterfall-chart";
-import { probabilityLabel } from "@/components/review/decision-panel";
+import { confidenceLabel, probabilityLabel } from "@/components/review/decision-panel";
 import { useAddAssertion, useMatchScores, type MatchScoreRow } from "@/lib/query/duplicates";
 import { cn } from "@/lib/utils";
 import { useDatasetSlug } from "@/lib/use-dataset-slug";
@@ -131,7 +131,7 @@ export function ScoreBandBrowser({ org, isSteward }: { org: string; isSteward: b
                   </span>
                   <span className="text-muted-foreground text-xs">{row.model_version}</span>
                   <span className="text-xs font-medium tabular-nums">
-                    {probabilityLabel(row.match_probability)}
+                    {confidenceLabel(row.confidence)}
                   </span>
                 </div>
                 {open && (

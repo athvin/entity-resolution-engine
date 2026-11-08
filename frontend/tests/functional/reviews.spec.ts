@@ -21,7 +21,8 @@ test.describe("review inbox — rendering", () => {
       await expect(page.getByTestId("swipe-card")).toContainText("crm:C-1000");
     } else {
       await expect(page.getByTestId("review-list")).toContainText("crm:C-1000");
-      await expect(page.getByTestId("decision-panel")).toContainText("62.0%");
+      // The shipped 1–100 projection, rendered verbatim: floor(0.62 × 100).
+      await expect(page.getByTestId("decision-panel")).toContainText("62%");
     }
     const chart = page.getByTestId("waterfall-chart").first();
     await expect(chart).toContainText("email: agree — supports the match (+4.1)");

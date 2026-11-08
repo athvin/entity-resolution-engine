@@ -9,6 +9,14 @@ export interface DuplicateGroup {
   entity_id: string;
   member_count: number;
   members: string[];
+  /** The group's confidence: the average of every member's attachment to the
+   * group, master included, computed once server-side and displayed verbatim.
+   * Null when the group carries no scored or asserted evidence. */
+  group_confidence?: number | null;
+  /** The strongest-attached member — the data-derived master. */
+  master_record_key?: string | null;
+  /** Per-member attachment confidence, keyed by record key. */
+  member_confidences?: Record<string, number>;
   // Person preview fields (present for person-entity orgs).
   given_name?: string | null;
   family_name?: string | null;
@@ -43,6 +51,8 @@ export interface MatchScoreRow {
   rec_a_key: string;
   rec_b_key: string;
   match_probability: number;
+  /** The server's 1–100 display projection of `match_probability`. */
+  confidence?: number;
   model_version: string;
   evidence: Record<string, unknown> | null;
   scored_at: string | null;
@@ -73,6 +83,8 @@ export interface MatchPreviewPair {
   rec_a_key: string;
   rec_b_key: string;
   match_probability: number;
+  /** The server's 1–100 display projection of `match_probability`. */
+  confidence?: number;
   evidence: Record<string, unknown> | null;
 }
 

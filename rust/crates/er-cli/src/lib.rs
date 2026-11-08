@@ -298,6 +298,10 @@ pub struct ResolveCandidate {
     /// saying `null` is more honest than inventing one.
     pub entity_id: Option<String>,
     pub match_probability: f64,
+    /// The score as the product shows it: the 1–100 projection's display
+    /// integer (`dedupe_core::confidence`), so a caller rendering this never
+    /// maps the probability itself.
+    pub confidence: i64,
     /// Which band the score falls in under the org's thresholds:
     /// `auto_merge` / `review` / `reject`.
     pub band: String,
@@ -490,6 +494,8 @@ pub fn resolve_record(
                 record_key: r[0].clone(),
                 entity_id: Some(r[1].clone()).filter(|v| !v.is_empty()),
                 match_probability: probability,
+                confidence: dedupe_core::confidence::Confidence::from_probability(probability)
+                    .display(),
                 band: band_for(probability, review_low, auto_merge).to_string(),
                 evidence: serde_json::from_str(&r[3]).unwrap_or(serde_json::Value::Null),
             }

@@ -11,6 +11,11 @@ test.describe("duplicates", () => {
     await page.goto(`/${ORG}/${DS}/duplicates`);
     await expect(page.getByTestId("duplicate-groups")).toBeVisible();
 
+    // The group score the server computed — the master-included average of
+    // the members' attachments — rendered verbatim, never re-projected
+    // client-side. The first group's edge is 0.87, so the integer is 87.
+    await expect(page.getByTestId("group-confidence").first()).toHaveText("87%");
+
     await expect(page.getByTestId("groups-sort")).toHaveValue("members");
     await page.getByTestId("groups-sort").selectOption("name");
 

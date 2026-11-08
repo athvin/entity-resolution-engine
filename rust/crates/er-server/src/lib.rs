@@ -6359,6 +6359,7 @@ fn match_preview_blocking(env: &Value, limit: usize) -> Result<Value, String> {
                 "rec_a_key": p.rec_a_key,
                 "rec_b_key": p.rec_b_key,
                 "match_probability": p.match_probability,
+                "confidence": dedupe_core::confidence::Confidence::from_probability(p.match_probability).display(),
                 "evidence": serde_json::from_str::<Value>(&p.evidence).unwrap_or(Value::Null),
             })
         })

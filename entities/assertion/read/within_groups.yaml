@@ -1,0 +1,13 @@
+kind: statement
+operation: read
+description: "The asserted half of a page of duplicate groups' confidence: every active always-assertion whose endpoints are members of the same entity in the page's id range, projected as a 1.0 edge. Assertion-sourced edges are never persisted to match_scores (S4.4) and are score 1.0 by definition, so without this arm a member held only by a steward's word would look evidence-free against its scored siblings. The per-entity join keeps an assertion from scoring across groups. The caller fetches this arm only when the lake has an `assertions` table — a lake no steward has touched legitimately does not — so the statement itself never has to fail on its absence; `match_score.read.within_groups` supplies the other arm. Reads `entity_membership` as well as `assertions`, declared through `reads:` so the impact surface is explicit (E009)."
+reads: [entity_membership]
+params:
+  - { name: snapshot, type: bigint }
+  - { name: first, type: varchar }
+  - { name: last, type: varchar }
+returns:
+  - { name: entity_id, type: varchar, nullable: false }
+  - { name: rec_a_key, type: varchar, nullable: false }
+  - { name: rec_b_key, type: varchar, nullable: false }
+  - { name: match_probability, type: double, nullable: false }

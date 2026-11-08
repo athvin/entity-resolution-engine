@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { displayName } from "@/lib/domain/attributes";
+import { confidenceLabel } from "@/components/review/decision-panel";
 import { useOrgEntityType } from "@/lib/query/config";
 import { effectiveRole, useSession } from "@/lib/query/hooks";
 import { useDuplicates, type DuplicateGroup } from "@/lib/query/duplicates";
@@ -140,6 +141,14 @@ function GroupsTab({ org }: { org: string }) {
                   <span className="bg-secondary text-secondary-foreground ml-auto rounded-full px-2 py-0.5 text-xs">
                     {group.member_count} records
                   </span>
+                  {typeof group.group_confidence === "number" && (
+                    <span
+                      className="text-muted-foreground text-xs tabular-nums"
+                      data-testid="group-confidence"
+                    >
+                      {confidenceLabel(group.group_confidence)}
+                    </span>
+                  )}
                 </div>
                 <div className="text-muted-foreground truncate text-sm">
                   {entityType === "account" ? (group.domain ?? "") : (group.email ?? "")}
@@ -148,6 +157,11 @@ function GroupsTab({ org }: { org: string }) {
                   {group.members.slice(0, 4).map((member) => (
                     <span key={member} className="bg-muted rounded px-1.5 py-0.5 font-mono">
                       {member}
+                      {typeof group.member_confidences?.[member] === "number" && (
+                        <span className="text-muted-foreground ml-1 tabular-nums">
+                          {group.member_confidences[member]}
+                        </span>
+                      )}
                     </span>
                   ))}
                   {group.members.length > 4 && <span>+{group.members.length - 4} more</span>}
