@@ -32,8 +32,9 @@
 //! live ConfigMap (43 `keep_keys` entries, set-identical to the values file;
 //! pod on the pinned `opentelemetry-collector-contrib:0.161.0`, clean startup,
 //! no config rejection) was run in a local Docker container with only the
-//! exporters swapped for `debug` — the processor chain byte-identical to
-//! er-dev's. One OTLP span carrying `er.probe_leak = "alice@example.com"`
+//! exporters swapped for `debug` — the processor chain semantically
+//! identical to er-dev's (the edit re-serializes the YAML; the parsed config
+//! the collector consumes is unchanged). One OTLP span carrying `er.probe_leak = "alice@example.com"`
 //! plus the allowlisted control `er.action` was exported with ONLY the
 //! control: the probe attribute and its value never left the collector.
 //! `scripts/otel-pii-allowlist-probe.sh` is the probe; re-run it after a
