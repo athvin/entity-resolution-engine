@@ -571,11 +571,69 @@ pub async fn converge_default_datasets(client: &mut Client) -> Result<(), Schema
     crate::fixups::ensure_default_datasets(client).await
 }
 
+/// The credential-shaped-key predicate every org/dataset env write runs
+/// first. Returns the matched suffix — the reason — when `key` names
+/// credential material.
+///
+/// An org (or dataset) row is projected into job params and travels further
+/// than process env does, so nothing credential-shaped persists there, ever:
+/// S3 credentials are host-level (`ER_LAKE_S3_*` process env, or the pod's
+/// own identity), never per-org. The suffixes are matched case-insensitively
+/// and cover the AWS pair (`AWS_ACCESS_KEY_ID` via `_KEY_ID`,
+/// `AWS_SECRET_ACCESS_KEY` via `_ACCESS_KEY`) as well as the generic shapes.
+#[must_use]
+pub fn credential_key_shape(key: &str) -> Option<&'static str> {
+    const SHAPES: &[&str] = &[
+        "_SECRET",
+        "_ACCESS_KEY",
+        "_KEY_ID",
+        "_TOKEN",
+        // No underscore: `PGPASSWORD` is a real name an operator would reach
+        // for, and no legitimate `ER_*` key ends this way.
+        "PASSWORD",
+        "_PRIVATE_KEY",
+    ];
+    let upper = key.to_ascii_uppercase();
+    SHAPES.iter().find(|s| upper.ends_with(*s)).copied()
+}
+
+/// An org/dataset env write refused before it reached the database.
+#[derive(Debug, thiserror::Error)]
+pub enum EnvWriteError {
+    /// The env carried a credential-shaped key; the write never reached the
+    /// database. Display names the key and the matched shape — no values.
+    #[error(
+        "env key {0:?} is credential-shaped: org and dataset rows are projected into job \
+         params and travel further than process env, so credentials live in the host \
+         environment (e.g. ER_LAKE_S3_* process env or the pod identity), never here"
+    )]
+    CredentialKey(String),
+    /// The database write itself failed.
+    #[error(transparent)]
+    Pg(#[from] PgError),
+}
+
+/// Refuse a credential-shaped key in an env blob about to be persisted.
+///
+/// # Errors
+/// [`EnvWriteError::CredentialKey`] naming the first offending key.
+fn refuse_credential_keys(env: &serde_json::Value) -> Result<(), EnvWriteError> {
+    if let Some(map) = env.as_object() {
+        for key in map.keys() {
+            if credential_key_shape(key).is_some() {
+                return Err(EnvWriteError::CredentialKey(key.clone()));
+            }
+        }
+    }
+    Ok(())
+}
+
 pub async fn merge_org_env(
     client: &Client,
     org: &str,
     updates: &serde_json::Value,
-) -> Result<(), PgError> {
+) -> Result<(), EnvWriteError> {
+    refuse_credential_keys(updates)?;
     er_entities::org::update::merge_env(client, updates, org).await?;
     Ok(())
 }
@@ -711,7 +769,8 @@ pub async fn upsert_org_byo(
     drop_root: Option<&str>,
     s3_ingest_bucket: Option<&str>,
     s3_ingest_prefix: Option<&str>,
-) -> Result<(), PgError> {
+) -> Result<(), EnvWriteError> {
+    refuse_credential_keys(env)?;
     er_entities::org::create::upsert_byo(
         client,
         &er_ids::new_v7(),
@@ -910,7 +969,8 @@ pub async fn merge_dataset_envs(
     client: &Client,
     org_id: &str,
     patch: &serde_json::Value,
-) -> Result<(), PgError> {
+) -> Result<(), EnvWriteError> {
+    refuse_credential_keys(patch)?;
     er_entities::dataset::update::merge_env(client, patch, org_id).await?;
     Ok(())
 }
@@ -977,7 +1037,8 @@ pub async fn create_dataset_byo(
     drop_root: Option<&str>,
     s3_ingest_bucket: Option<&str>,
     s3_ingest_prefix: Option<&str>,
-) -> Result<bool, PgError> {
+) -> Result<bool, EnvWriteError> {
+    refuse_credential_keys(env)?;
     let n = er_entities::dataset::create::ensure(
         client,
         &er_ids::new_v7(),
@@ -2248,5 +2309,52 @@ mod retention_tests {
             "longer retention is allowed"
         );
         assert_eq!(retention_days_from(Some(-1)), 400);
+    }
+}
+
+#[cfg(test)]
+mod credential_filter_tests {
+    use super::credential_key_shape;
+
+    #[test]
+    fn the_credential_shapes_are_caught_case_insensitively() {
+        for key in [
+            "ER_LAKE_S3_SECRET",
+            "er_lake_s3_secret",
+            "ER_LAKE_S3_KEY_ID",
+            "AWS_ACCESS_KEY_ID",
+            "AWS_SECRET_ACCESS_KEY",
+            "GITHUB_TOKEN",
+            "PGPASSWORD",
+            "SOME_PRIVATE_KEY",
+        ] {
+            assert!(credential_key_shape(key).is_some(), "{key} must be refused");
+        }
+    }
+
+    #[test]
+    fn the_live_lake_and_runtime_keys_are_not_credential_shaped() {
+        // The filter must never eat the keys an org env legitimately carries.
+        for key in [
+            "ER_LAKE_CATALOG",
+            "ER_LAKE_DATA_PATH",
+            "ER_LAKE_METADATA_SCHEMA",
+            "ER_LAKE_CATALOG_SCHEMA",
+            "ER_LAKE_S3_ENDPOINT",
+            "ER_LAKE_S3_REGION",
+            "ER_LAKE_S3_URL_STYLE",
+            "ER_LAKE_S3_USE_SSL",
+            "ER_CONFIG_PATH",
+            "ER_LEXICON_PATH",
+            "ER_IGNORE_WORDS_PATH",
+            "ER_DUCKDB_THREADS",
+            "ER_DUCKDB_MEMORY_LIMIT",
+            "ER_MODEL_PATH",
+        ] {
+            assert!(
+                credential_key_shape(key).is_none(),
+                "{key} must keep working"
+            );
+        }
     }
 }

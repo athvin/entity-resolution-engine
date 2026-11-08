@@ -724,7 +724,7 @@ Bootstrap is two stacks, not one, because the state bucket must live in an accou
 | Non-root `USER` in all three images | `docker/Dockerfile` (none today), both new Dockerfiles | Pod Security `restricted` requires it (§5.6) |
 | Disable FastAPI docs routes outside dev | `server/src/erserver/api.py` | `/docs`, `/redoc`, `/openapi.json` are the only unauthenticated routes besides `/healthz` (§4.1) |
 | *(optional)* `api_keys.last_used_at` | `server/src/erserver/db.py`, `auth.py` | Turns the SOC 2 credential review into a query (§8.6) |
-| *(Phase 4)* S3 credential chain | SUPERSEDED — static keys deleted (#549, PR #791); the credential path is EKS Pod Identity (#894), and the remaining `s3://` lake open is #792. §9.2's own correction (:508) covers the deleted files | Static keys dropped; contract-tested together (§9.2) |
+| *(Phase 4)* S3 credential chain | SUPERSEDED — static keys deleted (#549, PR #791); the engine-side `s3://` credential path landed in #792 (chain via Pod Identity #894; an explicit key for MinIO-class stores and CI). What remains is operational: migrate a lake, delete the lake service user (see iam-and-exceptions.md). §9.2's own correction (:508) covers the deleted files | Static keys dropped; contract-tested together (§9.2) |
 
 Most of the additions come from one source: putting the runner in its own pod removes the stderr pipe the dispatcher currently relies on, which pulls in progress reporting, trace propagation, and flush-on-exit together. They should land as one piece of work (§10.6).
 

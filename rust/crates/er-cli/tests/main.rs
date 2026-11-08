@@ -14,3 +14,4 @@ mod acct_e2e;
 mod cli_e2e;
 mod lake_e2e;
 mod lake_schema_reconcile;
+mod s3_lake;

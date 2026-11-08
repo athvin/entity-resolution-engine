@@ -6,7 +6,7 @@
 - The two schemas people confuse
 - Where a tenant's location comes from
 - Why isolation has no second line of defence
-- Object storage: not wired up on `main`
+- Object storage: the `s3://` credential path
 - In flight
 
 ## `DuckLakeConfig`, field by field
@@ -19,6 +19,7 @@
 | `alias` | the catalog alias, default `lake`. Never `USE`d — all references are fully qualified |
 | `schema` | the schema **your tables** live in, default `main`, so `lake.main.golden_records` |
 | `read_only` | adds `READ_ONLY` to the attach |
+| `object_store` | the S3 configuration, consulted only when `data_path` is `s3://` — empty resolves the `ER_LAKE_S3_*` process env at attach time, an explicit config always wins |
 
 `metadata` being a connection string rather than a path is worth internalising:
 the same field holds a filename locally and a Postgres DSN in deployment, and
@@ -94,36 +95,56 @@ identifier, not from a reusable routing handle like a name. If a name can be
 released and re-registered, a new tenant could land on a purged tenant's
 prefix.
 
-## Object storage: not wired up on `main`
+## Object storage: the `s3://` credential path
 
-The SKILL body carries the state of the tree — the three mechanisms that are
-absent by name — and the consequences that follow, including not documenting S3
-as supported. Two things it leaves out.
+Landed in #792. When `data_path` is an `s3://` URL, `attach_ducklake` `LOAD`s
+the `aws` extension (baked into the image alongside `httpfs`, so this works
+offline in-cluster) and emits one session-scoped secret before the ATTACH:
 
-**Why it is absent.** This is a regression from the retired Python
-implementation, not a deliberate omission: that server resolved a `secret://`
-indirection in its own secrets module, and it was deleted along with the rest
-of the Python tree with nothing put in its place. So there is no design
-decision to respect here, which is what makes the work below a feature rather
-than a reversal.
+```sql
+CREATE OR REPLACE SECRET er_lake_s3 (TYPE S3, PROVIDER CREDENTIAL_CHAIN);
+-- or, with an explicit key pair: (TYPE S3, KEY_ID '…', SECRET '…', …)
+```
 
-**What a working lake looks like instead.** A filesystem path — which is what
-every test uses, and what a development lake is: a directory, with DuckLake
-keeping its catalog in the `.ducklake` file and its Parquet under the data
-path.
+Three design points, and each is load-bearing:
+
+- **The credential's shape is the mode.** No explicit key →
+  `PROVIDER CREDENTIAL_CHAIN`: the pod's own identity in-cluster (the Pod
+  Identity role already carries the lake-bucket grants), an instance profile,
+  `AWS_*` on a developer machine. An explicit `key_id` + `secret` pair → a
+  static secret, for MinIO-class stores and CI, which have no chain to
+  consult. One without the other is an error rather than a silent chain
+  fallback. A mode flag would be a second thing that can disagree with the
+  credential.
+- **S3 configuration is host-level process env, never per-org.** The
+  `ER_LAKE_S3_*` set (`ENDPOINT`, `REGION`, `URL_STYLE`, `USE_SSL`, `KEY_ID`,
+  `SECRET`) resolves inside the attach when `object_store` is empty — one
+  mechanism for every lake-open seam, so no seam can forget it. The
+  credential filter in `er_server::pg` refuses credential-shaped keys on
+  every org/dataset env write (a 422 naming the key): an org row is projected
+  into job params and travels further than process env, so nothing
+  credential-shaped persists there, ever.
+- **The names are NOT the banned pair.** `ER_S3_ACCESS_KEY_ID` /
+  `ER_S3_SECRET_ACCESS_KEY` stay banned by `tf-static-credentials-check.sh`
+  rule 2 (a credential-shaped name nothing should consume in deployed envs),
+  so the gate needed no narrowing.
+
+History: this was a regression from the retired Python implementation — its
+`secret://` indirection was deleted with the Python tree and nothing put in
+its place — which is why it landed as a feature, not a reversal.
+
+The proving test is `rust/crates/er-cli/tests/s3_lake.rs` (rustfs in the
+lake-e2e CI legs; the local recipe is in the file's header): an `s3://` lake
+attaches, writes and reads, through both the explicit key and the process-env
+fallback.
 
 ## In flight
 
-The `METADATA_SCHEMA` half of the earlier in-flight shape has **landed**: the
-attach option, `ER_LAKE_CATALOG_SCHEMA`, and the pinning test are on `main`,
-and the datasets program builds on them (each dataset = one metadata schema in
-the org's `er_t_<org>` database + one data path). Still not on `main`:
+Both halves of the earlier in-flight shape have **landed**: `METADATA_SCHEMA`
+(`ER_LAKE_CATALOG_SCHEMA`, the datasets program's per-dataset lake), and the
+object-store credential path (#792 — the `ObjectStoreConfig` above and the
+credential filter, both described in the section above).
 
-- An object-store config whose fields are all optional, producing a
-  `CREATE OR REPLACE SECRET`, where the **absence of an explicit key selects
-  the credential chain** (the pod's own identity in-cluster) rather than a mode
-  flag choosing it. An explicit key is for MinIO and CI, which have no chain to
-  consult.
-- A credential filter so nothing credential-shaped is ever persisted into an
-  org row, because an org row is projected into job params and travels further
-  than process env does.
+Nothing is currently in flight on the attach surface itself. The follow-on
+work is operational: point a real lake at `s3://` (which retires the lake
+service user — see the infra-platform skill's iam-and-exceptions reference).

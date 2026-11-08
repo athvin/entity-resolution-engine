@@ -1083,6 +1083,39 @@ jobs:
       # No ER_TEST_PG_DSN and no postgres service: er-cli's tests reference
       # neither — the lake catalog is a DuckDB file under a per-test temp dir,
       # which is also what makes nextest's process-per-test safe here.
+      #
+      # The s3:// lake proving tests (er-cli tests/s3_lake.rs) — both var sets
+      # point at the rustfs service below. ER_TEST_S3_* tells the test where
+      # the store is; ER_LAKE_S3_* is what the FEATURE reads, and the
+      # env-fallback test may not see the values pass through a config the
+      # test itself built (std::env::set_var is unsafe and denied
+      # workspace-wide), so they are set job-wide, exactly as the local recipe
+      # in that file's header exports them.
+      ER_TEST_S3_ENDPOINT: "localhost:9000"
+      ER_TEST_S3_KEY_ID: "minio"
+      ER_TEST_S3_SECRET: "minio123"
+      ER_LAKE_S3_ENDPOINT: "localhost:9000"
+      ER_LAKE_S3_KEY_ID: "minio"
+      ER_LAKE_S3_SECRET: "minio123"
+      ER_LAKE_S3_URL_STYLE: "path"
+      ER_LAKE_S3_USE_SSL: "false"
+    services:
+      # A real S3-compatible store for the s3:// lake proving test. RustFS,
+      # not MinIO: MinIO's open-source project was archived (dl.min.io serves
+      # 410 Gone and the Docker Hub org is gone); rustfs is the maintained
+      # drop-in and MinIO-compatible on the wire.
+      rustfs:
+        image: rustfs/rustfs:latest
+        env:
+          RUSTFS_ACCESS_KEY: minio
+          RUSTFS_SECRET_KEY: minio123
+        ports:
+          - 9000:9000
+        options: >-
+          --health-cmd "curl -sf http://localhost:9000/health"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Reclaim runner disk
@@ -1126,6 +1159,12 @@ jobs:
       - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
         with:
           tool: cargo-nextest
+      - name: Create the s3 test bucket
+        # One per shard (each leg has its own rustfs service); idempotent by
+        # the store, not by a shell test. aws CLI is preinstalled on
+        # GitHub-hosted runners.
+        working-directory: ${{ github.workspace }}
+        run: AWS_ACCESS_KEY_ID=minio AWS_SECRET_ACCESS_KEY=minio123 aws --endpoint-url http://localhost:9000 s3 mb s3://er-lake-e2e
       - name: DuckLake e2e (er-cli, hash partition)
         # No `--test main` restriction: er-cli's lib unit tests partition too,
         # so nothing the old combined job ran is dropped. Doctests are a

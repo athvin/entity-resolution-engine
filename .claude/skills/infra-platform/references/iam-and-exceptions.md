@@ -93,20 +93,23 @@ control that makes rule 2 real.
 ## The lake service user
 
 A second, narrower exception: a lake-scoped IAM user with keys in Secrets
-Manager, consumed by the dev env script at bring-up. It exists because the Rust
-engine has no object-store credential path yet (see the ducklake-lakehouse
-skill), so there is nothing for Pod Identity to feed.
+Manager, consumed by the dev env script at bring-up. It existed because the
+Rust engine had no object-store credential path, so there was nothing for Pod
+Identity to feed. That blocker is gone — #792 landed the engine side (no
+explicit key selects the credential chain, which Pod Identity feeds).
 
-It retires when the engine reaches the credential chain — which makes it
-blocked on application work, not on infrastructure work.
+What remains is operational, not application work: point the dev lake at
+`s3://` and drop the key wiring from the bring-up script — then this user has
+no consumer.
 
 ## The retirement checklist
 
 Before the production gate, both exceptions must be gone. In order:
 
 ```
-- [ ] 1. The engine reaches object storage through the credential chain
-         (Pod Identity), so the lake service user has no consumer
+- [ ] 1. Point a lake at `s3://` so the lake service user has no consumer —
+         the engine side landed in #792 (no explicit key selects the chain,
+         which Pod Identity feeds); what is left is the migration itself
 - [ ] 2. Delete the lake service user and its Secrets Manager entry
 - [ ] 3. Confirm nothing automated still needs AdministratorAccess
 - [ ] 4. Delete the er-dev-builder user, its access key and its secret
