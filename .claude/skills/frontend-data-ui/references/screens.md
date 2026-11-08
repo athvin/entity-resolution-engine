@@ -67,14 +67,25 @@ false the moment a screen renders different markup below `lg`.
 - `/[org]/[ds]/records`
 - `/[org]/[ds]/reviews`
 - `/[org]/[ds]/runs`
+- `/[org]/[ds]/runs/schedules`
 - `/[org]/[ds]/settings/config`
 - `/[org]/[ds]/settings/models`
 - `/[org]/[ds]/sources`
+- `/[org]/[ds]/sources/new`
 - `/[org]/settings/ai`
+- `/[org]/settings/audit`
 - `/[org]/settings/members`
+- `/[org]/settings/profile`
 - `/[org]/settings/webhooks`
+- `/admin/audit`
+- `/admin/queue`
+- `/admin/tenants`
+- `/admin/tenants/[org]`
+- `/admin/tenants/new`
 - `/datasets-dev/datasets`
 - `/datasets-dev/datasets/new`
+- `/login`
+- `/reset`
 
 ### Routes NOT in the axe gate
 
@@ -84,24 +95,13 @@ for the three categories that legitimately sit outside the sweep.
 - `/[org]`
 - `/[org]/[ds]/records/[entityId]`
 - `/[org]/[ds]/runs/[jobId]`
-- `/[org]/[ds]/runs/schedules`
 - `/[org]/[ds]/settings`
-- `/[org]/[ds]/sources/new`
 - `/[org]/datasets`
 - `/[org]/datasets/new`
 - `/[org]/settings`
-- `/[org]/settings/audit`
-- `/[org]/settings/profile`
 - `/admin`
-- `/admin/audit`
-- `/admin/queue`
-- `/admin/tenants`
-- `/admin/tenants/[org]`
-- `/admin/tenants/new`
 - `/app`
 - `/invite/[token]`
-- `/login`
-- `/reset`
 - `/reset/[token]`
 - `/widget/[token]`
 <!-- END GENERATED: screens-coverage -->

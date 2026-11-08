@@ -557,6 +557,9 @@ export function NewSourceWizard({ org }: { org: string }) {
             <input
               type="file"
               accept=".csv,text/csv"
+              // The prose above describes the step, but a bare file input has
+              // no programmatic name of its own (the second #767 violation).
+              aria-label="Sample CSV of the new source"
               data-testid="wizard-file"
               onChange={(event) => {
                 const file = event.target.files?.item(0);
