@@ -274,6 +274,8 @@ fn resolve_acct_10(tag: &str, bits: f64, cfg: &str, auto_merge: Option<f64>) -> 
 
 const BASE_CFG: &str = "acct_10/config.yaml";
 const JW_CFG: &str = "acct_10/config_domain_jw.yaml";
+/// The scenario config plus the `variant_match` level (#662).
+const VARIANT_CFG: &str = "acct_10/config_variant.yaml";
 
 /// Hooli and Vandelay are two distinct companies that share a switchboard
 /// number and a coworking address — the `shared_switchboard` trap.
@@ -387,5 +389,50 @@ fn the_account_corpus_resolves_exactly_at_a_measured_scale_and_threshold() {
     assert_ne!(
         loud.clusters, truth,
         "a stricter threshold alone must NOT be able to rescue the shipped scale"
+    );
+}
+
+/// The #662 repro, kept green: an account config declaring `variant_match`
+/// compiles to the `company_variants` column and the pipeline RUNS — before
+/// the fix it died at predict with `Binder Error: ... "name_variants"`.
+///
+/// `company_variants` is the one-element list of `company_name_norm`, so the
+/// level can never fire where `exact` did not already; its value here is that
+/// the declared token is no longer fatal, scored with the weight the model
+/// assigns it. The config is the measured answer (`config_domain_jw.yaml`)
+/// plus the level, and the corpus still resolves exactly at the measured
+/// scale — the level redistributes `company_name_norm`'s bits, so this is
+/// also the guard against that redistribution quietly costing a persona.
+#[test]
+fn variant_match_runs_on_an_account_config() {
+    if !enabled() {
+        eprintln!("skipping Account variant_match (set DEDUPE_E2E_DUCKLAKE=1 to run)");
+        return;
+    }
+
+    // The compiled model carries the level over the ACCOUNT column — the byte
+    // string the hand-authored `acct_model_v1.json` pins (quotes escaped: the
+    // model is serialized JSON text).
+    let cfg = std::fs::read_to_string(repo_fixture(VARIANT_CFG)).unwrap();
+    let config = load_config_str(&cfg).unwrap();
+    let compiled =
+        er_compile::compile(&config).expect("an account config declaring variant_match compiles");
+    assert!(
+        compiled
+            .model_json
+            .contains("list_intersect(\\\"company_variants_l\\\", \\\"company_variants_r\\\")"),
+        "the level resolves to the account variants column"
+    );
+    assert!(
+        !compiled.model_json.contains("name_variants"),
+        "no person column leaks into an account model"
+    );
+
+    // And the run that used to die resolves the corpus exactly.
+    let got = resolve_acct_10("variant", 44.0, VARIANT_CFG, Some(0.99));
+    let truth = truth_partition("acct_10");
+    assert_eq!(
+        got.clusters, truth,
+        "variant_match declared and runnable: acct_10 resolves to truth at the measured scale"
     );
 }
