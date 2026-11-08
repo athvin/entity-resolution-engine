@@ -321,10 +321,7 @@ fn insert_group_confidence(
                 "group_confidence".to_string(),
                 Value::from(score.group.display()),
             );
-            obj.insert(
-                "master_record_key".to_string(),
-                Value::from(score.master),
-            );
+            obj.insert("master_record_key".to_string(), Value::from(score.master));
             obj.insert(
                 "member_confidences".to_string(),
                 Value::Object(
@@ -361,10 +358,11 @@ fn edges_by_entity(
     let mut by_entity: std::collections::BTreeMap<String, Vec<(String, String, f64)>> =
         std::collections::BTreeMap::new();
     for row in rows {
-        by_entity
-            .entry(row.entity_id)
-            .or_default()
-            .push((row.rec_a_key, row.rec_b_key, row.match_probability));
+        by_entity.entry(row.entity_id).or_default().push((
+            row.rec_a_key,
+            row.rec_b_key,
+            row.match_probability,
+        ));
     }
     Ok(by_entity)
 }

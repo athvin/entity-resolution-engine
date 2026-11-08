@@ -46,7 +46,11 @@ impl Confidence {
     /// Wrap an already-projected raw value (e.g. a mean of confidences).
     #[must_use]
     fn from_raw(raw: f64) -> Self {
-        let raw = if raw.is_nan() { 0.0 } else { raw.clamp(0.0, 100.0) };
+        let raw = if raw.is_nan() {
+            0.0
+        } else {
+            raw.clamp(0.0, 100.0)
+        };
         Self(raw)
     }
 
@@ -222,7 +226,7 @@ mod tests {
         ];
         let g = group_score(&members, &edges).unwrap();
         let with_master = (90.0 + 90.0 + 80.0) / 3.0;
-        let without_master = (90.0 + 80.0) / 2.0;
+        let without_master = 85.0;
         assert_eq!(g.group.value(), with_master);
         assert_ne!(g.group.value(), without_master);
     }
