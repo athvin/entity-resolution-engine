@@ -5358,7 +5358,11 @@ async fn org_data_quality(
 }
 
 /// Viewer+: duplicate groups (entities with >=2 members)
-/// (`GET /v1/orgs/{org}/datasets/{ds}/duplicates`). Keyset page; query `cursor`, `limit`.
+/// (`GET /v1/orgs/{org}/datasets/{ds}/duplicates`). Keyset page; query `cursor`,
+/// `limit`, and the filter bar's parameters: `member` (a record key whose group
+/// is returned), `min_members`/`max_members`, `min_confidence`/`max_confidence`
+/// (0–100 display scale), `matched_by` (model version), `matched_on`
+/// (comparison column), `verified` (true/false), `tag`/`exclude_tag`.
 async fn duplicates_list(
     principal: Principal,
     State(state): State<AppState>,
@@ -5383,17 +5387,104 @@ async fn duplicates_list(
             }
         };
     let limit = read::parse_limit(params.get("limit").map(String::as_str));
-    // The clusters an over-merge hides in are the LARGE ones, and a page
-    // ordered by entity id will not surface them on its own.
-    let min_members = params
-        .get("min_members")
-        .and_then(|v| v.trim().parse::<i64>().ok());
+    let number = |key: &str| params.get(key).and_then(|v| v.trim().parse::<i64>().ok());
+    let text = |key: &str| {
+        params
+            .get(key)
+            .map(String::as_str)
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(str::to_string)
+    };
+    let mut filters = read::DuplicateFilters {
+        // The clusters an over-merge hides in are the LARGE ones, and a page
+        // ordered by entity id will not surface them on its own.
+        min_members: number("min_members"),
+        max_members: number("max_members"),
+        min_confidence: number("min_confidence"),
+        max_confidence: number("max_confidence"),
+        model_version: text("matched_by"),
+        matched_on: text("matched_on"),
+        verified: params.get("verified").and_then(|v| match v.trim() {
+            "true" => Some(true),
+            "false" => Some(false),
+            _ => None,
+        }),
+        ..read::DuplicateFilters::default()
+    };
+    // The member-record search: resolve the key to its entity and pin the
+    // list to it, so the group payload is assembled identically on both
+    // paths. An unknown key is an empty result, not an error.
+    if let Some(member) = text("member") {
+        match read::entity_of_record_key(&session, snapshot, &member) {
+            Ok(Some(entity)) => filters.only_entity = Some(entity),
+            Ok(None) => {
+                return Json(json!({
+                    "items": [],
+                    "snapshot": snapshot,
+                    "next_cursor": null,
+                }))
+                .into_response();
+            }
+            Err(e) => {
+                return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}"));
+            }
+        }
+    }
+    // Tag include/exclude: the taggings live in the control-plane Postgres,
+    // so these are the one filter dimension that leaves the lake. Resolved
+    // to entity-id sets here; the read filters by membership.
+    let (tag, exclude_tag) = (text("tag"), text("exclude_tag"));
+    if tag.is_some() || exclude_tag.is_some() {
+        let Some(dsn) = &state.dsn else {
+            return detail_err(StatusCode::NOT_IMPLEMENTED, "tags require Postgres");
+        };
+        let client = match connect_pg(dsn).await {
+            Ok(c) => c,
+            Err(r) => return *r,
+        };
+        let org_row = match org_or_404(&client, &org).await {
+            Ok(r) => r,
+            Err(r) => return *r,
+        };
+        let dataset = match dataset_or_404(&client, &org_row, &ds).await {
+            Ok(d) => d,
+            Err(r) => return *r,
+        };
+        for (name, slot) in [
+            (&tag, &mut filters.tagged),
+            (&exclude_tag, &mut filters.excluded),
+        ] {
+            let Some(name) = name else { continue };
+            let ids = match pg::tag_by_name(&client, &org_row.id, name).await {
+                // An unknown tag names nothing: an include matches no group,
+                // an exclude forbids none — both honest answers.
+                Ok(None) => std::collections::HashSet::new(),
+                Ok(Some(tag)) => {
+                    match pg::subjects_for_tag(
+                        &client,
+                        &dataset.id,
+                        &tag.id,
+                        Some("entity"),
+                        10_000,
+                    )
+                    .await
+                    {
+                        Ok(rows) => rows.into_iter().map(|t| t.subject_id).collect(),
+                        Err(e) => return pg_err(e),
+                    }
+                }
+                Err(e) => return pg_err(e),
+            };
+            *slot = Some(ids);
+        }
+    }
     match read::duplicates(
         &session,
         entity_type,
         snapshot,
         after.as_deref(),
-        min_members,
+        &filters,
         limit,
     ) {
         Ok((items, next_cursor)) => Json(json!({

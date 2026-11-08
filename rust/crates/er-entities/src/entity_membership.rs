@@ -322,7 +322,7 @@ FROM (
         DupGroupStatsRow::from_batches(&batches)
     }
 
-    /// One row of `duplicate_groups_page`: One keyset page of duplicate groups (entities with at least two members) at a pinned snapshot, with their member counts. `min_members` raises the floor — the clusters an over-merge hides in are the large ones, and a page ordered by entity id will not surface them on its own. Floored at 2 regardless of what is asked: a one-member entity is not a duplicate group, so admitting one would change what the endpoint means.
+    /// One row of `duplicate_groups_page`: One keyset page of duplicate groups (entities with at least two members) at a pinned snapshot, with their member counts. `min_members` raises the floor — the clusters an over-merge hides in are the large ones, and a page ordered by entity id will not surface them on its own. Floored at 2 regardless of what is asked: a one-member entity is not a duplicate group, so admitting one would change what the endpoint means. `max_members` caps the size from above (the size filter's 'pairs' bucket), and `only_entity` pins the page to one entity id — the member-record search resolves a record key to its entity, then answers through this same statement so the group payload is assembled identically on both paths.
     #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
     pub struct DuplicateGroupsPageRow {
         pub entity_id: String,
@@ -361,24 +361,28 @@ FROM (
         }
     }
 
-    /// One keyset page of duplicate groups (entities with at least two members) at a pinned snapshot, with their member counts. `min_members` raises the floor — the clusters an over-merge hides in are the large ones, and a page ordered by entity id will not surface them on its own. Floored at 2 regardless of what is asked: a one-member entity is not a duplicate group, so admitting one would change what the endpoint means.
+    /// One keyset page of duplicate groups (entities with at least two members) at a pinned snapshot, with their member counts. `min_members` raises the floor — the clusters an over-merge hides in are the large ones, and a page ordered by entity id will not surface them on its own. Floored at 2 regardless of what is asked: a one-member entity is not a duplicate group, so admitting one would change what the endpoint means. `max_members` caps the size from above (the size filter's 'pairs' bucket), and `only_entity` pins the page to one entity id — the member-record search resolves a record key to its entity, then answers through this same statement so the group payload is assembled identically on both paths.
     pub fn duplicate_groups_page(
         conn: &::duckdb::Connection,
         snapshot: i64,
         after: Option<&str>,
         min_members: Option<i64>,
+        max_members: Option<i64>,
+        only_entity: Option<&str>,
         limit: i64,
     ) -> ::duckdb::Result<Vec<DuplicateGroupsPageRow>> {
         const SQL: &str = "SELECT entity_id, count(*) AS member_count
 FROM lake.main.entity_membership AT (VERSION => {snapshot})
 WHERE ($1 IS NULL OR entity_id > $1)
+  AND ($4 IS NULL OR entity_id = $4)
 GROUP BY entity_id
 HAVING count(*) >= CASE
          WHEN coalesce($2, 2) < 2 THEN 2
          ELSE coalesce($2, 2)
        END
+   AND ($3 IS NULL OR count(*) <= $3)
 ORDER BY entity_id
-LIMIT $3
+LIMIT $5
 ";
         let __span = ::er_span::sql_span(
             ::er_span::Store::Lake,
@@ -393,7 +397,13 @@ LIMIT $3
         let mut stmt = ::er_span::check(&__span, conn.prepare(&sql))?;
         let batches = ::er_span::check(
             &__span,
-            stmt.query_arrow(::duckdb::params![after, min_members, limit]),
+            stmt.query_arrow(::duckdb::params![
+                after,
+                min_members,
+                max_members,
+                only_entity,
+                limit
+            ]),
         )?
         .collect::<Vec<_>>();
         ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());

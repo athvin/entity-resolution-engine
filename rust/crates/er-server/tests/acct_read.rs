@@ -172,8 +172,15 @@ fn account_golden_read_serves_acct_projection() {
     // the ACCOUNT preview (company_name/domain) rather than person name/email.
     // Acme, Globex and Initech each pair a crm row with a vendors row; Umbrella
     // has no vendors twin and so is single-member, not a group.
-    let (groups, _) =
-        read::duplicates(&session, EntityType::Account, snapshot, None, None, 50).unwrap();
+    let (groups, _) = read::duplicates(
+        &session,
+        EntityType::Account,
+        snapshot,
+        None,
+        &read::DuplicateFilters::default(),
+        50,
+    )
+    .unwrap();
     assert_eq!(
         groups.len(),
         3,

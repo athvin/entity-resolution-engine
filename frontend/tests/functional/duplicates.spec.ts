@@ -29,6 +29,56 @@ test.describe("duplicates", () => {
     await expect(chip).toHaveAttribute("aria-pressed", "false");
   });
 
+  test("group search and the filter bar narrow the list server-side", async ({ page }) => {
+    await login(page, USERS.viewer);
+    await page.goto(`/${ORG}/${DS}/duplicates`);
+    await expect(page.getByTestId("duplicate-groups")).toBeVisible();
+
+    // The matched-on column renders the comparison fields the group's evidence
+    // names (the mock alternates two field sets by group).
+    await expect(page.getByTestId("matched-fields").first()).toContainText("matched on");
+
+    // Member-record search returns the whole group and nothing else. The mock's
+    // first group pairs crm:C-5000 with webforms:W-7000.
+    await page.getByTestId("group-member-search").fill("crm:C-5000");
+    await page.getByTestId("group-member-search-go").click();
+    await expect(page.getByTestId("duplicate-groups")).toContainText("crm:C-5000");
+    await expect(page.getByTestId("group-confidence")).toHaveCount(1);
+
+    // An unknown key is an honest empty state, not an error.
+    await page.getByTestId("group-member-search").fill("crm:NO-SUCH-RECORD");
+    await page.getByTestId("group-member-search-go").click();
+    await expect(page.getByTestId("groups-empty-filtered")).toBeVisible();
+    await page.getByTestId("filters-clear").click();
+
+    // Confidence floor: the mock's 77 groups sit at 87/91/95 repeating, so 94
+    // keeps only the top band — 25 of them (groupIndex % 3 == 2).
+    await page.getByTestId("filter-min-confidence").fill("94");
+    await expect(page.getByTestId("group-confidence").first()).toHaveText("95%");
+    await expect(page.getByTestId("group-confidence")).toHaveCount(25);
+    await page.getByTestId("filters-clear").click();
+
+    // Matched-on field: only half the groups carry evidence on `email`.
+    await page.getByTestId("filter-field").selectOption("email");
+    // The list remounts through its pending skeleton on every filter change;
+    // wait for a settled render before counting.
+    await expect(page.getByTestId("matched-fields").first()).toBeVisible();
+    const emailGroups = await page.getByTestId("matched-fields").all();
+    expect(emailGroups.length).toBeGreaterThan(0);
+    for (const entry of emailGroups) {
+      await expect(entry).toContainText("email");
+    }
+    await page.getByTestId("filters-clear").click();
+
+    // Tag include/exclude: the seeded `watchlist` tag sits on the first group.
+    await page.getByTestId("filter-tag").selectOption("watchlist");
+    await expect(page.getByTestId("group-confidence")).toHaveCount(1);
+    await expect(page.getByTestId("duplicate-groups")).toContainText("crm:C-5000");
+    await page.getByTestId("filter-tag").selectOption("");
+    await page.getByTestId("filter-exclude-tag").selectOption("watchlist");
+    await expect(page.getByTestId("duplicate-groups")).not.toContainText("crm:C-5000");
+  });
+
   test("the pre-merge report carries the chosen master-election policy", async ({ page }) => {
     await login(page, USERS.viewer);
     await page.goto(`/${ORG}/${DS}/duplicates`);

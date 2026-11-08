@@ -563,13 +563,15 @@ LIMIT $4
         UncertainPageRow::from_batches(&batches)
     }
 
-    /// One row of `within_groups`: The scored half of a page of duplicate groups' confidence: every active scored edge whose endpoints are members of the same entity in the page's id range. The per-entity join is what keeps a pair score from leaking across groups: two records may be duplicates of each other only inside their own entity. A member held by a transitive or cut path with no direct edge of its own simply appears in no row — the caller averages the members that carry evidence rather than inventing a zero. Edges repeat freely (a pair scored by two ensemble members); the caller's max is indifferent. The caller fetches this arm only when the lake has a `match_scores` table — a lake resolved without a match run legitimately does not — so the statement itself never has to fail on its absence; `assertion.read.within_groups` supplies the other arm. Reads `entity_membership` as well as `match_scores`, declared through `reads:` so the impact surface is explicit (E009).
+    /// One row of `within_groups`: The scored half of a page of duplicate groups' confidence: every active scored edge whose endpoints are members of the same entity in the page's id range. The per-entity join is what keeps a pair score from leaking across groups: two records may be duplicates of each other only inside their own entity. A member held by a transitive or cut path with no direct edge of its own simply appears in no row — the caller averages the members that carry evidence rather than inventing a zero. Edges repeat freely (a pair scored by two ensemble members); the caller's max is indifferent. `model_version` and `evidence` ride along so the duplicates read can answer 'matched by which model' and 'matched on which fields' per group without a second round trip. The caller fetches this arm only when the lake has a `match_scores` table — a lake resolved without a match run legitimately does not — so the statement itself never has to fail on its absence; `assertion.read.within_groups` supplies the other arm. Reads `entity_membership` as well as `match_scores`, declared through `reads:` so the impact surface is explicit (E009).
     #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
     pub struct WithinGroupsRow {
         pub entity_id: String,
         pub rec_a_key: String,
         pub rec_b_key: String,
         pub match_probability: f64,
+        pub model_version: String,
+        pub evidence: ::serde_json::Value,
     }
 
     impl WithinGroupsRow {
@@ -581,6 +583,8 @@ LIMIT $4
                 ("rec_a_key", ::arrow::datatypes::DataType::Utf8),
                 ("rec_b_key", ::arrow::datatypes::DataType::Utf8),
                 ("match_probability", ::arrow::datatypes::DataType::Float64),
+                ("model_version", ::arrow::datatypes::DataType::Utf8),
+                ("evidence", ::arrow::datatypes::DataType::Utf8),
             ]
         }
 
@@ -598,6 +602,9 @@ LIMIT $4
                 let c2: &::arrow::array::StringArray = crate::batch::col(batch, 2, "rec_b_key")?;
                 let c3: &::arrow::array::Float64Array =
                     crate::batch::col(batch, 3, "match_probability")?;
+                let c4: &::arrow::array::StringArray =
+                    crate::batch::col(batch, 4, "model_version")?;
+                let c5: &::arrow::array::StringArray = crate::batch::col(batch, 5, "evidence")?;
                 for i in 0..batch.num_rows() {
                     out.push(Self {
                         entity_id: crate::batch::req(crate::batch::opt_str(c0, i), "entity_id", i)?,
@@ -608,6 +615,16 @@ LIMIT $4
                             "match_probability",
                             i,
                         )?,
+                        model_version: crate::batch::req(
+                            crate::batch::opt_str(c4, i),
+                            "model_version",
+                            i,
+                        )?,
+                        evidence: crate::batch::req(
+                            crate::batch::opt_json(c5, i, "evidence")?,
+                            "evidence",
+                            i,
+                        )?,
                     });
                 }
             }
@@ -615,7 +632,7 @@ LIMIT $4
         }
     }
 
-    /// The scored half of a page of duplicate groups' confidence: every active scored edge whose endpoints are members of the same entity in the page's id range. The per-entity join is what keeps a pair score from leaking across groups: two records may be duplicates of each other only inside their own entity. A member held by a transitive or cut path with no direct edge of its own simply appears in no row — the caller averages the members that carry evidence rather than inventing a zero. Edges repeat freely (a pair scored by two ensemble members); the caller's max is indifferent. The caller fetches this arm only when the lake has a `match_scores` table — a lake resolved without a match run legitimately does not — so the statement itself never has to fail on its absence; `assertion.read.within_groups` supplies the other arm. Reads `entity_membership` as well as `match_scores`, declared through `reads:` so the impact surface is explicit (E009).
+    /// The scored half of a page of duplicate groups' confidence: every active scored edge whose endpoints are members of the same entity in the page's id range. The per-entity join is what keeps a pair score from leaking across groups: two records may be duplicates of each other only inside their own entity. A member held by a transitive or cut path with no direct edge of its own simply appears in no row — the caller averages the members that carry evidence rather than inventing a zero. Edges repeat freely (a pair scored by two ensemble members); the caller's max is indifferent. `model_version` and `evidence` ride along so the duplicates read can answer 'matched by which model' and 'matched on which fields' per group without a second round trip. The caller fetches this arm only when the lake has a `match_scores` table — a lake resolved without a match run legitimately does not — so the statement itself never has to fail on its absence; `assertion.read.within_groups` supplies the other arm. Reads `entity_membership` as well as `match_scores`, declared through `reads:` so the impact surface is explicit (E009).
     pub fn within_groups(
         conn: &::duckdb::Connection,
         snapshot: i64,
@@ -628,11 +645,12 @@ LIMIT $4
   WHERE entity_id >= $1 AND entity_id <= $2
 ),
 scored AS (
-  SELECT rec_a_key, rec_b_key, match_probability
+  SELECT rec_a_key, rec_b_key, match_probability, model_version, evidence
   FROM lake.main.match_scores AT (VERSION => {snapshot})
   WHERE is_active
 )
-SELECT a.entity_id, scored.rec_a_key, scored.rec_b_key, scored.match_probability
+SELECT a.entity_id, scored.rec_a_key, scored.rec_b_key, scored.match_probability,
+       scored.model_version, scored.evidence
 FROM scored
 JOIN members a ON a.record_key = scored.rec_a_key
 JOIN members b ON b.record_key = scored.rec_b_key AND b.entity_id = a.entity_id

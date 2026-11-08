@@ -2730,28 +2730,78 @@ const server = http.createServer((req, res) => {
       // orgs pair crm with webforms and preview name+email — the same entity-switch
       // the real read API makes off the org's `entity_type`.
       const account = isAccountOrg(match[1]);
+      // The filter bar's dimensions, honoured server-side exactly as the real
+      // read does — a mock that ignored them would let a spec pass against a
+      // UI whose filters do nothing.
+      const intParam = (name) => {
+        const raw = url.searchParams.get(name);
+        return raw === null || raw === "" ? null : Number(raw);
+      };
+      const minMembers = intParam("min_members");
+      const maxMembers = intParam("max_members");
+      const minConfidence = intParam("min_confidence");
+      const maxConfidence = intParam("max_confidence");
+      const member = url.searchParams.get("member") ?? "";
+      const matchedBy = url.searchParams.get("matched_by") ?? "";
+      const matchedOn = url.searchParams.get("matched_on") ?? "";
+      const verified = url.searchParams.get("verified");
+      const tag = url.searchParams.get("tag") ?? "";
+      const excludeTag = url.searchParams.get("exclude_tag") ?? "";
+      // Tag names resolve to entity-id sets from the taggings fixture, the
+      // same prequery the real handler runs against Postgres. An unknown name
+      // is an empty set: include matches nothing, exclude forbids nothing.
+      const tagSubjectIds = (name) => {
+        if (name === "") return null;
+        const found = (state.tags[match[1]] ?? []).find((t) => t.name === name && t.active);
+        if (!found) return new Set();
+        return new Set(
+          (state.taggings[match[1]] ?? [])
+            .filter((t) => t.tag_id === found.id && t.subject_type === "entity")
+            .map((t) => t.subject_id),
+        );
+      };
+      const includeIds = tagSubjectIds(tag);
+      const excludeIds = tagSubjectIds(excludeTag);
+      const allGroups = rows.map((row, index) => {
+        const members = account
+          ? [`crm:C-${String(5000 + index * 3)}`, `vendors:V-${String(7000 + index * 3)}`]
+          : [`crm:C-${String(5000 + index * 3)}`, `webforms:W-${String(7000 + index * 3)}`];
+        // One within-group edge, so both members attach at it and the
+        // master-included average IS that edge — the same arithmetic the
+        // server runs, or the UI is being tested against a fiction.
+        const edge = 0.87 + (index % 3) * 0.04;
+        const attachment = Math.floor(edge * 100);
+        return {
+          entity_id: row.id,
+          member_count: 2,
+          members,
+          group_confidence: attachment,
+          master_record_key: members[0],
+          member_confidences: { [members[0]]: attachment, [members[1]]: attachment },
+          // The evidence metadata the filter bar and matched-on column read.
+          model_versions: ["model-v1"],
+          matched_fields: index % 2 === 0 ? ["email", "family_name"] : ["given_name", "phone"],
+          verified: false,
+          ...(account
+            ? { company_name: row.company_name, domain: row.domain }
+            : { given_name: row.given_name, family_name: row.family_name, email: row.email }),
+        };
+      });
+      const filtered = allGroups.filter((group) => {
+        if (member !== "" && !group.members.includes(member)) return false;
+        if (minMembers !== null && group.member_count < Math.max(minMembers, 2)) return false;
+        if (maxMembers !== null && group.member_count > maxMembers) return false;
+        if (minConfidence !== null && group.group_confidence < minConfidence) return false;
+        if (maxConfidence !== null && group.group_confidence > maxConfidence) return false;
+        if (matchedBy !== "" && !group.model_versions.includes(matchedBy)) return false;
+        if (matchedOn !== "" && !group.matched_fields.includes(matchedOn)) return false;
+        if (verified !== null && group.verified !== (verified === "true")) return false;
+        if (includeIds !== null && !includeIds.has(group.entity_id)) return false;
+        if (excludeIds !== null && excludeIds.has(group.entity_id)) return false;
+        return true;
+      });
       return send(res, 200, {
-        items: rows.slice(0, Number(url.searchParams.get("limit") ?? 50)).map((row, index) => {
-          const members = account
-            ? [`crm:C-${String(5000 + index * 3)}`, `vendors:V-${String(7000 + index * 3)}`]
-            : [`crm:C-${String(5000 + index * 3)}`, `webforms:W-${String(7000 + index * 3)}`];
-          // One within-group edge, so both members attach at it and the
-          // master-included average IS that edge — the same arithmetic the
-          // server runs, or the UI is being tested against a fiction.
-          const edge = 0.87 + (index % 3) * 0.04;
-          const attachment = Math.floor(edge * 100);
-          return {
-            entity_id: row.id,
-            member_count: 2,
-            members,
-            group_confidence: attachment,
-            master_record_key: members[0],
-            member_confidences: { [members[0]]: attachment, [members[1]]: attachment },
-            ...(account
-              ? { company_name: row.company_name, domain: row.domain }
-              : { given_name: row.given_name, family_name: row.family_name, email: row.email }),
-          };
-        }),
+        items: filtered.slice(0, Number(url.searchParams.get("limit") ?? 50)),
         snapshot: account ? 12 : 42,
         next_cursor: null,
       });

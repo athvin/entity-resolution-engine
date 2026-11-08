@@ -12,6 +12,13 @@ import { confidenceLabel } from "@/components/review/decision-panel";
 import { useOrgEntityType } from "@/lib/query/config";
 import { effectiveRole, useSession } from "@/lib/query/hooks";
 import { useDuplicates, type DuplicateGroup } from "@/lib/query/duplicates";
+import { useTags } from "@/lib/query/tags";
+import {
+  EMPTY_GROUP_FILTERS,
+  groupFiltersActive,
+  resetGroupFilters,
+  type GroupFilters,
+} from "@/lib/domain/group-filters";
 import { cn } from "@/lib/utils";
 import { MatchPreviewCard } from "./match-preview-card";
 import { PreMergeReport } from "./pre-merge-report";
@@ -27,6 +34,7 @@ const TABS = [
 
 const SORTS = [
   { id: "members", label: "most records first" },
+  { id: "confidence", label: "highest confidence first" },
   { id: "name", label: "by name" },
 ] as const;
 
@@ -36,7 +44,10 @@ function sourceOf(memberKey: string): string {
 
 function GroupsTab({ org }: { org: string }) {
   const ds = useDatasetSlug();
-  const query = useDuplicates(org, ds);
+  const [filters, setFilters] = useState<GroupFilters>({ ...EMPTY_GROUP_FILTERS });
+  const [memberDraft, setMemberDraft] = useState("");
+  const query = useDuplicates(org, ds, filters);
+  const tags = useTags(org);
   const entityType = useOrgEntityType(org, ds);
   const [sort, setSort] = useState<(typeof SORTS)[number]["id"]>("members");
   const [sourceFilter, setSourceFilter] = useState<string | null>(null);
@@ -53,6 +64,18 @@ function GroupsTab({ org }: { org: string }) {
     return [...seen].sort();
   }, [groups]);
 
+  // The model/field option lists come from the loaded groups: the vocabulary
+  // is whatever the evidence carries, and a select that offered values no
+  // group has would only produce empty lists.
+  const modelOptions = useMemo(
+    () => [...new Set(groups.flatMap((g) => g.model_versions ?? []))].sort(),
+    [groups],
+  );
+  const fieldOptions = useMemo(
+    () => [...new Set(groups.flatMap((g) => g.matched_fields ?? []))].sort(),
+    [groups],
+  );
+
   const visible = useMemo(() => {
     const filtered = sourceFilter
       ? groups.filter((group) => group.members.some((m) => sourceOf(m) === sourceFilter))
@@ -60,6 +83,9 @@ function GroupsTab({ org }: { org: string }) {
     const sorted = [...filtered];
     if (sort === "members") {
       sorted.sort((a, b) => b.member_count - a.member_count);
+    } else if (sort === "confidence") {
+      // Null confidence (no evidence) sorts last, not as zero.
+      sorted.sort((a, b) => (b.group_confidence ?? -1) - (a.group_confidence ?? -1));
     } else {
       sorted.sort((a, b) =>
         (displayName(a, entityType) || a.entity_id).localeCompare(
@@ -70,9 +96,13 @@ function GroupsTab({ org }: { org: string }) {
     return sorted;
   }, [groups, sort, sourceFilter]);
 
+  const patch = (part: Partial<GroupFilters>) => {
+    setFilters((current) => ({ ...current, ...part }));
+  };
+
   if (query.isPending) return <Skeleton className="h-48 w-full" />;
 
-  if (groups.length === 0) {
+  if (groups.length === 0 && !groupFiltersActive(filters)) {
     return (
       <Card>
         <CardContent className="text-muted-foreground p-8 text-center text-sm">
@@ -84,6 +114,30 @@ function GroupsTab({ org }: { org: string }) {
 
   return (
     <div className="flex flex-col gap-3">
+      <form
+        className="flex flex-wrap items-center gap-2"
+        onSubmit={(event) => {
+          event.preventDefault();
+          patch({ member: memberDraft.trim() });
+        }}
+      >
+        <input
+          type="search"
+          value={memberDraft}
+          onChange={(event) => {
+            setMemberDraft(event.target.value);
+            if (event.target.value === "") patch({ member: "" });
+          }}
+          placeholder="Find the group containing a record ID…"
+          aria-label="Find group by member record ID"
+          className="border-input bg-background h-9 min-w-64 rounded-md border px-2 text-sm"
+          data-testid="group-member-search"
+        />
+        <Button type="submit" variant="outline" size="sm" data-testid="group-member-search-go">
+          Find group
+        </Button>
+      </form>
+
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <select
           value={sort}
@@ -100,27 +154,153 @@ function GroupsTab({ org }: { org: string }) {
             </option>
           ))}
         </select>
-        {sources.length > 1 && (
-          <div className="flex flex-wrap gap-1" role="group" aria-label="Filter by source">
-            {sources.map((source) => (
-              <button
-                key={source}
-                onClick={() => {
-                  setSourceFilter((current) => (current === source ? null : source));
-                }}
-                aria-pressed={sourceFilter === source}
-                className={cn(
-                  "rounded-full border px-2.5 py-1 text-xs",
-                  sourceFilter === source
-                    ? "border-primary bg-primary/10 text-primary"
-                    : "text-muted-foreground hover:bg-accent",
-                )}
-                data-testid={`source-chip-${source}`}
-              >
-                {source}
-              </button>
+        <select
+          value={filters.size ?? ""}
+          onChange={(event) => {
+            const value = event.target.value;
+            patch({ size: value === "" ? null : (value as GroupFilters["size"]) });
+          }}
+          className="border-input bg-background h-9 rounded-md border px-2 text-sm"
+          aria-label="Filter by group size"
+          data-testid="filter-size"
+        >
+          <option value="">any size</option>
+          <option value="pairs">pairs (2)</option>
+          <option value="small">3–10 records</option>
+          <option value="large">11+ records</option>
+        </select>
+        <span className="flex items-center gap-1 text-xs">
+          <label htmlFor="filter-min-confidence">confidence</label>
+          <input
+            id="filter-min-confidence"
+            type="number"
+            min={0}
+            max={100}
+            value={filters.minConfidence ?? ""}
+            onChange={(event) => {
+              patch({
+                minConfidence: event.target.value === "" ? null : Number(event.target.value),
+              });
+            }}
+            placeholder="min"
+            className="border-input bg-background h-9 w-16 rounded-md border px-2 text-sm"
+            data-testid="filter-min-confidence"
+          />
+          <span aria-hidden="true">–</span>
+          <input
+            type="number"
+            min={0}
+            max={100}
+            value={filters.maxConfidence ?? ""}
+            onChange={(event) => {
+              patch({
+                maxConfidence: event.target.value === "" ? null : Number(event.target.value),
+              });
+            }}
+            placeholder="max"
+            aria-label="Maximum confidence"
+            className="border-input bg-background h-9 w-16 rounded-md border px-2 text-sm"
+            data-testid="filter-max-confidence"
+          />
+        </span>
+        {modelOptions.length > 0 && (
+          <select
+            value={filters.matchedBy}
+            onChange={(event) => {
+              patch({ matchedBy: event.target.value });
+            }}
+            className="border-input bg-background h-9 rounded-md border px-2 text-sm"
+            aria-label="Filter by matching model"
+            data-testid="filter-model"
+          >
+            <option value="">any model</option>
+            {modelOptions.map((model) => (
+              <option key={model} value={model}>
+                {model}
+              </option>
             ))}
-          </div>
+          </select>
+        )}
+        {fieldOptions.length > 0 && (
+          <select
+            value={filters.matchedOn}
+            onChange={(event) => {
+              patch({ matchedOn: event.target.value });
+            }}
+            className="border-input bg-background h-9 rounded-md border px-2 text-sm"
+            aria-label="Filter by matched-on field"
+            data-testid="filter-field"
+          >
+            <option value="">any matched-on field</option>
+            {fieldOptions.map((field) => (
+              <option key={field} value={field}>
+                {field}
+              </option>
+            ))}
+          </select>
+        )}
+        <select
+          value={filters.verified === null ? "" : String(filters.verified)}
+          onChange={(event) => {
+            const value = event.target.value;
+            patch({ verified: value === "" ? null : value === "true" });
+          }}
+          className="border-input bg-background h-9 rounded-md border px-2 text-sm"
+          aria-label="Filter by verification"
+          data-testid="filter-verified"
+        >
+          <option value="">any verification</option>
+          <option value="true">verified</option>
+          <option value="false">not verified</option>
+        </select>
+        {(tags.data ?? []).length > 0 && (
+          <>
+            <select
+              value={filters.tag}
+              onChange={(event) => {
+                patch({ tag: event.target.value });
+              }}
+              className="border-input bg-background h-9 rounded-md border px-2 text-sm"
+              aria-label="Filter to a tag"
+              data-testid="filter-tag"
+            >
+              <option value="">tagged…</option>
+              {(tags.data ?? []).map((tag) => (
+                <option key={tag.id} value={tag.name}>
+                  {tag.name}
+                </option>
+              ))}
+            </select>
+            <select
+              value={filters.excludeTag}
+              onChange={(event) => {
+                patch({ excludeTag: event.target.value });
+              }}
+              className="border-input bg-background h-9 rounded-md border px-2 text-sm"
+              aria-label="Exclude a tag"
+              data-testid="filter-exclude-tag"
+            >
+              <option value="">not tagged…</option>
+              {(tags.data ?? []).map((tag) => (
+                <option key={tag.id} value={tag.name}>
+                  {tag.name}
+                </option>
+              ))}
+            </select>
+          </>
+        )}
+        {groupFiltersActive(filters) && (
+          <button
+            type="button"
+            onClick={() => {
+              setMemberDraft("");
+              setFilters(resetGroupFilters());
+            }}
+            className="text-muted-foreground hover:text-foreground text-xs underline"
+            data-testid="filters-clear"
+          >
+            clear filters
+          </button>
         )}
         <span className="flex-1" />
         {snapshot !== undefined && (
@@ -128,49 +308,104 @@ function GroupsTab({ org }: { org: string }) {
         )}
       </div>
 
-      <div className="grid gap-3 lg:grid-cols-2" data-testid="duplicate-groups">
-        {visible.map((group: DuplicateGroup) => (
-          <Link key={group.entity_id} href={`/${org}/${ds}/records/${group.entity_id}`}>
-            <Card className="hover:border-primary/40 h-full transition-colors">
-              <CardContent className="flex flex-col gap-2 p-4">
-                <div className="flex items-center gap-2">
-                  <GitMerge className="text-muted-foreground size-4" />
-                  <span className="font-medium">
-                    {displayName(group, entityType) || group.entity_id}
-                  </span>
-                  <span className="bg-secondary text-secondary-foreground ml-auto rounded-full px-2 py-0.5 text-xs">
-                    {group.member_count} records
-                  </span>
-                  {typeof group.group_confidence === "number" && (
-                    <span
-                      className="text-muted-foreground text-xs tabular-nums"
-                      data-testid="group-confidence"
+      {sources.length > 1 && (
+        <div className="flex flex-wrap gap-1" role="group" aria-label="Filter by source">
+          {sources.map((source) => (
+            <button
+              key={source}
+              onClick={() => {
+                setSourceFilter((current) => (current === source ? null : source));
+              }}
+              aria-pressed={sourceFilter === source}
+              className={cn(
+                "rounded-full border px-2.5 py-1 text-xs",
+                sourceFilter === source
+                  ? "border-primary bg-primary/10 text-primary"
+                  : "text-muted-foreground hover:bg-accent",
+              )}
+              data-testid={`source-chip-${source}`}
+            >
+              {source}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {visible.length === 0 ? (
+        <Card>
+          <CardContent
+            className="text-muted-foreground p-8 text-center text-sm"
+            data-testid="groups-empty-filtered"
+          >
+            No groups match these filters.
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="grid gap-3 lg:grid-cols-2" data-testid="duplicate-groups">
+          {visible.map((group: DuplicateGroup) => (
+            <Link key={group.entity_id} href={`/${org}/${ds}/records/${group.entity_id}`}>
+              <Card className="hover:border-primary/40 h-full transition-colors">
+                <CardContent className="flex flex-col gap-2 p-4">
+                  <div className="flex items-center gap-2">
+                    <GitMerge className="text-muted-foreground size-4" />
+                    <span className="font-medium">
+                      {displayName(group, entityType) || group.entity_id}
+                    </span>
+                    {group.verified && (
+                      <span
+                        className="text-foreground text-xs font-semibold"
+                        data-testid="group-verified"
+                      >
+                        verified
+                      </span>
+                    )}
+                    <span className="bg-secondary text-secondary-foreground ml-auto rounded-full px-2 py-0.5 text-xs">
+                      {group.member_count} records
+                    </span>
+                    {typeof group.group_confidence === "number" && (
+                      <span
+                        className="text-muted-foreground text-xs tabular-nums"
+                        data-testid="group-confidence"
+                      >
+                        {confidenceLabel(group.group_confidence)}
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-muted-foreground truncate text-sm">
+                    {entityType === "account" ? (group.domain ?? "") : (group.email ?? "")}
+                  </div>
+                  <div className="text-muted-foreground flex flex-wrap gap-1.5 text-[11px]">
+                    {group.members.slice(0, 4).map((member) => (
+                      <span key={member} className="bg-muted rounded px-1.5 py-0.5 font-mono">
+                        {member}
+                        {typeof group.member_confidences?.[member] === "number" && (
+                          <span className="text-muted-foreground ml-1 tabular-nums">
+                            {group.member_confidences[member]}
+                          </span>
+                        )}
+                      </span>
+                    ))}
+                    {group.members.length > 4 && <span>+{group.members.length - 4} more</span>}
+                  </div>
+                  {(group.matched_fields ?? []).length > 0 && (
+                    <div
+                      className="text-muted-foreground flex flex-wrap items-center gap-1.5 text-[11px]"
+                      data-testid="matched-fields"
                     >
-                      {confidenceLabel(group.group_confidence)}
-                    </span>
-                  )}
-                </div>
-                <div className="text-muted-foreground truncate text-sm">
-                  {entityType === "account" ? (group.domain ?? "") : (group.email ?? "")}
-                </div>
-                <div className="text-muted-foreground flex flex-wrap gap-1.5 text-[11px]">
-                  {group.members.slice(0, 4).map((member) => (
-                    <span key={member} className="bg-muted rounded px-1.5 py-0.5 font-mono">
-                      {member}
-                      {typeof group.member_confidences?.[member] === "number" && (
-                        <span className="text-muted-foreground ml-1 tabular-nums">
-                          {group.member_confidences[member]}
+                      <span>matched on</span>
+                      {(group.matched_fields ?? []).map((field) => (
+                        <span key={field} className="rounded border px-1.5 py-0.5 font-mono">
+                          {field}
                         </span>
-                      )}
-                    </span>
-                  ))}
-                  {group.members.length > 4 && <span>+{group.members.length - 4} more</span>}
-                </div>
-              </CardContent>
-            </Card>
-          </Link>
-        ))}
-      </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </Link>
+          ))}
+        </div>
+      )}
 
       {query.hasNextPage && (
         <Button
