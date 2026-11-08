@@ -181,11 +181,24 @@ make frontend-baselines
 `scripts/devcontainer-*.sh`, `scripts/ci/devcontainer-*.sh` or itself, and
 publishes on `main`. Two rules travel with it:
 
-- **It is not a required status check, and must not be added to the required set
-  until it has reported green on `main` once** — a required context for a job
-  that does not yet exist there leaves every PR pending forever. It uses the
-  `detect` pattern rather than a `paths:` filter so that promoting it is a
-  branch-protection edit rather than a workflow rewrite.
+- **It is not a required status check.** Both preconditions for promoting it
+  are now met — it has reported green on `main`, and it has been observed
+  failing (below) — so promoting it is a branch-protection edit and nothing
+  else. It uses the `detect` pattern rather than a `paths:` filter precisely so
+  that is all it takes.
+- **It has been observed failing, on each of its two surfaces** (#764, run by
+  `workflow_dispatch` on a branch, which builds but never publishes because
+  `eventFilterForPush` is `push`):
+
+  | Broken on purpose | Job's red line |
+  |---|---|
+  | a nonexistent apt package in the `Dockerfile` | `E: Unable to locate package …` → `Dev container build failed` |
+  | `CARGO_TARGET_DIR` dropped from `containerEnv` | `devcontainer-smoke: CARGO_TARGET_DIR is unset — the build directory would land on the workspace bind mount` |
+
+  The second fails in `postCreateCommand`, before the workflow's own `runCmd`:
+  `scripts/devcontainer-postcreate.sh` runs the same smoke script, so the
+  assertion that guards a Windows host's disk fires on that host's first open,
+  not only in CI.
 - **The image name lives in two files that cannot read each other** — the
   workflow's `IMAGE`/`IMAGE_TAG` and `devcontainer.json`'s `build.cacheFrom`.
   `scripts/ci/devcontainer-image-check.sh` keeps them equal, because the failure
