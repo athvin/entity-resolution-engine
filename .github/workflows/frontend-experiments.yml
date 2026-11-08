@@ -61,6 +61,13 @@ jobs:
           key: pnpm-store-${{ hashFiles('frontend/pnpm-lock.yaml') }}
           restore-keys: |
             pnpm-store-
+          # Restore-only, both here and below. This is the nightly watchdog, so
+          # it is the one workflow that must never write a shared cache entry:
+          # it runs on a schedule rather than against a tree anyone merged, and
+          # `frontend.yml` owns both keys (`check` writes `pnpm-store`, `e2e`'s
+          # `chromium-1` leg writes `next-build`). Reading them is free and is
+          # most of the install cost.
+          save-if: false
       - name: Cache Next build
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -68,6 +75,7 @@ jobs:
           key: next-build-${{ hashFiles('frontend/pnpm-lock.yaml') }}-${{ hashFiles('frontend/src/**') }}
           restore-keys: |
             next-build-${{ hashFiles('frontend/pnpm-lock.yaml') }}-
+          save-if: false
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm test:e2e --workers=2

@@ -146,6 +146,14 @@ jobs:
           key: pnpm-store-${{ hashFiles('frontend/pnpm-lock.yaml') }}
           restore-keys: |
             pnpm-store-
+          # This job is the SINGLE WRITER of `pnpm-store`, and only from `main` —
+          # the pattern rust.yml states for `shared-key: rust`. Without it every
+          # call site saved from every ref, and `pnpm-store` held FOUR entries
+          # (~1.58 GB) of a 10 GB budget that was measured full at
+          # 10,387,544,511 bytes / 73 entries. PR branches still restore `main`'s
+          # entry through the prefix above, which is where the value is: the
+          # store contents follow the lockfile, not the branch.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
       # frontend/README.md promises "CI fails on drift" for the generated
@@ -227,6 +235,10 @@ jobs:
           key: pnpm-store-${{ hashFiles('frontend/pnpm-lock.yaml') }}
           restore-keys: |
             pnpm-store-
+          # Restore-only: `check` is the single writer of this key. A sharded job
+          # is the worst possible writer — every shard races to save the same
+          # entry, and the loser's upload is wasted work either way.
+          save-if: false
       # Next's build cache. Keyed on sources so an unchanged tree restores a warm
       # cache; the lockfile-only prefix still helps when only sources moved.
       - name: Cache Next build
@@ -236,6 +248,19 @@ jobs:
           key: next-build-${{ hashFiles('frontend/pnpm-lock.yaml') }}-${{ hashFiles('frontend/src/**') }}
           restore-keys: |
             next-build-${{ hashFiles('frontend/pnpm-lock.yaml') }}-
+          # ONE leg, from `main` only. `check` cannot be the writer here the way
+          # it is for `pnpm-store` — it never runs `pnpm build`, so it has no
+          # `.next/cache` to save — which leaves this job, and this job is a
+          # four-leg matrix. Pinning the write to `chromium-1` is what makes
+          # "single writer" true: all four legs build the identical tree, so any
+          # leg's cache is equivalent, and the other three would otherwise race
+          # to save one key and lose the upload to `Cache already exists`.
+          #
+          # This key held four entries (~0.74 GB) because each PR branch minted
+          # its own. A PR that moved `src/**` misses the exact key regardless and
+          # restores through the lockfile prefix above; what it gives up is a
+          # same-tree re-run on the same branch.
+          save-if: ${{ github.ref == 'refs/heads/main' && matrix.slug == 'chromium-1' }}
       - run: pnpm install --frozen-lockfile
       # CI=true (set by Actions) makes playwright.config.ts take the `next start`
       # branch, so we build explicitly first; `next start` then serves `.next/`.
