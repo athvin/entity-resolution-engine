@@ -68,13 +68,25 @@ pub struct TableHandle {
 ///   image needs it even though a local dev lake is a plain `.ducklake` file.
 ///   This one is reasoned rather than bisected: a local lake never exercises it.
 ///
-/// `httpfs` and `aws` are **not** here: the engine has no S3 code path today, so
-/// baking them would be cargo-culting weight into the image. Add them with the
-/// change that adds an `s3://` lake, not before.
+/// `aws` (and its `httpfs` dependency, listed explicitly rather than trusted
+/// to the installer's dependency resolution) are here because the engine now
+/// opens `s3://` lakes: the object-store credential path
+/// ([`ducklake::ObjectStoreConfig`]) `LOAD`s `aws` before emitting its secret,
+/// and in-cluster that must come from the baked directory, offline.
 ///
-/// Cost, for the record: 107 MB on disk, ~33 MB compressed into the image, to
-/// remove ~80 MB of download from every cold process start.
-pub const BAKED_EXTENSIONS: &[&str] = &["ducklake", "parquet", "json", "icu", "postgres_scanner"];
+/// Cost, for the record: the five-entry list measured 107 MB on disk, ~33 MB
+/// compressed into the image, to remove ~80 MB of download from every cold
+/// process start; `aws` + `httpfs` grew that, in exchange for an `s3://` lake
+/// that opens offline.
+pub const BAKED_EXTENSIONS: &[&str] = &[
+    "ducklake",
+    "parquet",
+    "json",
+    "icu",
+    "postgres_scanner",
+    "aws",
+    "httpfs",
+];
 
 /// Tuning knobs applied to a [`Session`]'s DuckDB connection at open time.
 ///
@@ -360,6 +372,29 @@ impl Session {
             self.conn.execute_batch("INSTALL ducklake;")?;
         }
         self.conn.execute_batch("LOAD ducklake;")?;
+        // An `s3://` data path needs the object-store credential path: the
+        // `aws` extension (which pulls `httpfs`) and a session-scoped S3
+        // secret ahead of the ATTACH. An empty `object_store` resolves the
+        // process environment here — one mechanism for every lake-open seam
+        // (er-cli, the dispatcher's write path, the read API, dedupe-cli), so
+        // no seam can forget it; an explicit config always wins. The secret
+        // is `OR REPLACE`, so a re-attach in one session is idempotent.
+        let over_s3 = cfg
+            .data_path
+            .as_deref()
+            .is_some_and(|dp| dp.starts_with("s3://"));
+        if over_s3 {
+            if self.may_install_extensions {
+                self.conn.execute_batch("INSTALL aws;")?;
+            }
+            self.conn.execute_batch("LOAD aws;")?;
+            let object_store = if cfg.object_store.is_empty() {
+                ducklake::ObjectStoreConfig::from_process_env()?
+            } else {
+                cfg.object_store.clone()
+            };
+            self.conn.execute_batch(&object_store.secret_sql()?)?;
+        }
         let mut options = Vec::new();
         if let Some(dp) = &cfg.data_path {
             options.push(format!("DATA_PATH '{}'", dp.replace('\'', "''")));

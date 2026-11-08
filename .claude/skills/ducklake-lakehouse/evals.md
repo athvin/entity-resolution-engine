@@ -26,21 +26,27 @@ Must:
 Credit for noting that layout should follow a measurement, and routing the
 measurement to the ducklake-performance skill rather than guessing.
 
-## 2. The s3:// assumption
+## 2. The s3:// credential shape
 
 **Query:** "Set up a tenant whose lake lives at
 `s3://er-dev-lake/tenants/acme/` and make sure the pod can read it."
 
 Must:
 
-- State that the Rust engine on `main` has **no object-store credential path** —
-  no `httpfs`/`aws` load, no `CREATE SECRET`, no `ER_S3_*` reader — so an
-  `s3://` lake cannot currently be reached.
-- Not invent `ER_S3_*` variables or a `CREATE SECRET` call and present them as
-  existing configuration.
+- State that the path exists (#792) and give its shape correctly: an `s3://`
+  `DATA_PATH` makes the attach emit a session-scoped `CREATE OR REPLACE
+  SECRET`, and **no explicit key selects `PROVIDER CREDENTIAL_CHAIN`** — in
+  the pod that is the Pod Identity role, which already carries the
+  lake-bucket grants, so no secret material is set at all.
+- Keep credentials out of the org row: the `ER_LAKE_S3_*` set is host-level
+  process env, and the credential filter 422s credential-shaped keys in
+  org/dataset env writes.
+- Not invent `ER_S3_*` variables — those names stay banned — and not persist
+  any key into the org's stored env.
 
-Credit for identifying this as a missing feature with a design (credential
-chain vs explicit key) rather than a setting someone forgot.
+Credit for noting what is still true: the catalog metadata is unchanged (a
+Postgres DSN or file), and pointing a real tenant at `s3://` is the
+operational step that retires the lake service user.
 
 ## 3. The metadata-schema naming trap
 

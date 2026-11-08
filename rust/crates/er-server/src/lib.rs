@@ -248,6 +248,18 @@ fn pg_err(e: tokio_postgres::Error) -> axum::response::Response {
         .into_response()
 }
 
+/// An org/dataset env write refusal: a credential-shaped key is the caller's
+/// mistake (422, and the message names the key — never a value); a database
+/// failure is the usual 500.
+fn env_write_err(e: pg::EnvWriteError) -> axum::response::Response {
+    match e {
+        pg::EnvWriteError::CredentialKey(_) => {
+            detail_err(StatusCode::UNPROCESSABLE_ENTITY, e.to_string())
+        }
+        pg::EnvWriteError::Pg(e) => pg_err(e),
+    }
+}
+
 /// A `{ "detail": … }` error body — the FastAPI shape the frontend BFF parses
 /// (`proxy.ts` reads `detail`, and keys its user-facing mapping on the status).
 fn detail_err(code: StatusCode, msg: impl Into<String>) -> axum::response::Response {
@@ -882,7 +894,7 @@ async fn provision_org(
     )
     .await
     {
-        return pg_err(e);
+        return env_write_err(e);
     }
     // `upsert_byo` inserts `active`; a provisioned tenant is not usable until
     // its lake exists, so step it back to `provisioning` and let the job
@@ -1138,7 +1150,7 @@ async fn create_org(
             )
                 .into_response()
         }
-        Err(e) => pg_err(e),
+        Err(e) => env_write_err(e),
     }
 }
 
@@ -1827,7 +1839,7 @@ async fn create_dataset(
             StatusCode::CONFLICT,
             format!("dataset '{}' already exists in org '{org}'", body.name),
         ),
-        Err(e) => pg_err(e),
+        Err(e) => env_write_err(e),
     }
 }
 
@@ -3112,7 +3124,7 @@ async fn put_lexicon(
         // row (the template future datasets copy) and every existing dataset.
         let env_patch = json!({ "ER_LEXICON_PATH": path });
         if let Err(e) = pg::merge_org_env(&client, &org, &env_patch).await {
-            return pg_err(e);
+            return env_write_err(e);
         }
         if let Err(e) = pg::merge_dataset_envs(&client, &org_row.id, &env_patch).await {
             return pg_err(e);
@@ -3363,7 +3375,7 @@ async fn put_ignore_words(
         // row (the template future datasets copy) and every existing dataset.
         let env_patch = json!({ "ER_IGNORE_WORDS_PATH": path });
         if let Err(e) = pg::merge_org_env(&client, &org, &env_patch).await {
-            return pg_err(e);
+            return env_write_err(e);
         }
         if let Err(e) = pg::merge_dataset_envs(&client, &org_row.id, &env_patch).await {
             return pg_err(e);
@@ -5387,7 +5399,7 @@ async fn update_resources(
     };
     let patch = Value::Object(updates);
     if let Err(e) = pg::merge_org_env(&client, &org, &patch).await {
-        return pg_err(e);
+        return env_write_err(e);
     }
     // Resource knobs are org-wide and runs read the DATASET env: fan the patch
     // out to every dataset, exactly as the lexicon path does.

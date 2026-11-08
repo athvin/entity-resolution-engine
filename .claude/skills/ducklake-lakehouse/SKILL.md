@@ -145,13 +145,19 @@ Each metadata schema is an independent DuckLake catalog pinned to its own
 recorded `DATA_PATH` (re-attach under a different one is refused) — which is
 how several datasets share one `er_t_<org>` database as fully disjoint lakes.
 
-**A lake on `main` is a filesystem path.** There is no object-store credential
-path in the Rust engine today — no `httpfs`/`aws` load, no `CREATE SECRET`, no
-`ER_S3_*` reader. A lake at a filesystem path works, which is every test; a
-lake at `s3://` cannot currently be reached from Rust. The Python server's
-`secret://` indirection was deleted with the rest of it and nothing has
-replaced it yet. Do not write code that assumes an `s3://` lake opens, and do
-not document one as working. Status and what is in flight:
+**A lake's data path may be `s3://`.** The object-store credential path
+exists (#792): an attach whose `DATA_PATH` is an `s3://` URL `LOAD`s the `aws`
+extension and emits a session-scoped `CREATE OR REPLACE SECRET` ahead of the
+ATTACH. The secret's shape comes from `ObjectStoreConfig`, and there is no
+mode flag — the credential's shape is the mode: **no explicit key selects
+`PROVIDER CREDENTIAL_CHAIN`** (the pod's own identity in-cluster; the Pod
+Identity role already carries the lake-bucket grants), while an explicit
+`ER_LAKE_S3_KEY_ID`/`ER_LAKE_S3_SECRET` pair is for MinIO-class stores and CI,
+which have no chain to consult. The `ER_LAKE_S3_*` variables are host-level
+process env, never org-row env — the credential filter in `er_server::pg`
+refuses credential-shaped keys (`*_SECRET`, `*_KEY_ID`, `*_TOKEN`, …) there
+with a 422, because an org row is projected into job params and travels
+further than process env. Details:
 [references/attach-and-tenancy.md](references/attach-and-tenancy.md).
 
 ## Common workflows
@@ -170,6 +176,7 @@ and what each profiling artifact means belong to the ducklake-performance
 skill; guessing a partition key from an operator name is the failure mode it
 exists to prevent.
 
-**Needing an `s3://` lake.** It does not work from Rust on `main` yet (see
-above). Use a filesystem path, and treat adding the credential path as the
-feature it is rather than a config tweak.
+**Needing an `s3://` lake.** Point `ER_LAKE_DATA_PATH` at the `s3://` URL
+and give the host its credential shape — nothing at all in-cluster (the pod
+identity is the credential), the `ER_LAKE_S3_*` process env elsewhere. The
+catalog metadata is unchanged: still a Postgres DSN or a local file.
