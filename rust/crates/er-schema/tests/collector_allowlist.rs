@@ -24,6 +24,26 @@
 //! That is recorded in the values file as the thing to re-measure after a
 //! dependency bump, and it is the honest limit of this gate rather than a gap
 //! to paper over.
+//!
+//! ## The drop itself, observed
+//!
+//! Everything above reads the config; the processor applying it is a separate
+//! claim, and it was unverified until **2026-11-08** (#668). On that date the
+//! live ConfigMap (43 `keep_keys` entries, set-identical to the values file;
+//! pod on the pinned `opentelemetry-collector-contrib:0.161.0`, clean startup,
+//! no config rejection) was run in a local Docker container with only the
+//! exporters swapped for `debug` — the processor chain byte-identical to
+//! er-dev's. One OTLP span carrying `er.probe_leak = "alice@example.com"`
+//! plus the allowlisted control `er.action` was exported with ONLY the
+//! control: the probe attribute and its value never left the collector.
+//! `scripts/otel-pii-allowlist-probe.sh` is the probe; re-run it after a
+//! collector-image or `tracing-opentelemetry` bump.
+//!
+//! One honest substitution: the read-back was the `debug` exporter, not the
+//! OpenObserve Parquet, because the laptop→cluster path (port-forward) is not
+//! in the read-only RBAC grant. `transform` runs before export regardless of
+//! exporter, so the drop observed here is what the deployed pipeline does to
+//! every exporter downstream of it.
 
 use std::fs;
 use std::path::{Path, PathBuf};
