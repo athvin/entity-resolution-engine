@@ -485,6 +485,244 @@ async fn golden_records_read_over_ducklake() {
         "min_members=1 must not admit single-record entities"
     );
 
+    // ---- the group filter bar (#801): every dimension server-side ---------
+
+    // The evidence metadata rides on every group: matched-on fields, the
+    // models that scored the group's edges, and the verification flag.
+    for g in groups {
+        assert!(
+            g["matched_fields"]
+                .as_array()
+                .is_some_and(|f| !f.is_empty()),
+            "base_10's groups formed from scored edges, so each names its fields: {g:?}"
+        );
+        assert!(
+            g["model_versions"]
+                .as_array()
+                .is_some_and(|v| v.iter().any(|m| m == "v0001")),
+            "every edge was scored by model v0001: {g:?}"
+        );
+        assert_eq!(
+            g["verified"], false,
+            "nothing is asserted in this fixture, so no group is verified"
+        );
+    }
+
+    // Member-record search: any member key returns its whole group.
+    let first_entity = groups[0]["entity_id"].as_str().unwrap();
+    let first_member = groups[0]["members"][0].as_str().unwrap();
+    let resp = app
+        .clone()
+        .oneshot(op_get(&format!(
+            "/v1/orgs/acme/datasets/default/duplicates?member={first_member}"
+        )))
+        .await
+        .unwrap();
+    let found = json_body(resp).await;
+    let found_items = found["items"].as_array().unwrap();
+    assert_eq!(
+        found_items.len(),
+        1,
+        "a member key resolves to exactly one group"
+    );
+    assert_eq!(found_items[0]["entity_id"], first_entity);
+    // An unknown key is an empty result, not an error.
+    let resp = app
+        .clone()
+        .oneshot(op_get(
+            "/v1/orgs/acme/datasets/default/duplicates?member=crm:NO_SUCH_RECORD",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(json_body(resp).await["items"].as_array().unwrap().len(), 0);
+
+    // Size ceiling: the pairs bucket.
+    let resp = app
+        .clone()
+        .oneshot(op_get(
+            "/v1/orgs/acme/datasets/default/duplicates?max_members=2",
+        ))
+        .await
+        .unwrap();
+    let pairs = json_body(resp).await;
+    assert!(
+        pairs["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|g| g["member_count"].as_i64().unwrap() <= 2),
+        "every group under the ceiling: {pairs:?}"
+    );
+
+    // Confidence range on the display scale. The floored max must keep the top
+    // group; one past it must empty the list.
+    let top_conf = groups
+        .iter()
+        .filter_map(|g| g["group_confidence"].as_i64())
+        .max()
+        .expect("a group with evidence");
+    let resp = app
+        .clone()
+        .oneshot(op_get(&format!(
+            "/v1/orgs/acme/datasets/default/duplicates?min_confidence={top_conf}"
+        )))
+        .await
+        .unwrap();
+    let ranged = json_body(resp).await;
+    let ranged_items = ranged["items"].as_array().unwrap();
+    assert!(
+        !ranged_items.is_empty()
+            && ranged_items
+                .iter()
+                .all(|g| g["group_confidence"].as_i64().unwrap() >= top_conf),
+        "the floor keeps the top group and narrows: {ranged:?}"
+    );
+    let resp = app
+        .clone()
+        .oneshot(op_get(&format!(
+            "/v1/orgs/acme/datasets/default/duplicates?min_confidence={}",
+            top_conf + 1
+        )))
+        .await
+        .unwrap();
+    assert_eq!(
+        json_body(resp).await["items"].as_array().unwrap().len(),
+        0,
+        "one past the floored top matches nothing"
+    );
+
+    // Matched-by model / matched-on field, each with a negative control.
+    let a_field = groups[0]["matched_fields"][0].as_str().unwrap().to_string();
+    for (query, expect_some) in [
+        ("matched_by=v0001", true),
+        ("matched_by=v9999", false),
+        (format!("matched_on={a_field}").as_str(), true),
+        ("matched_on=not_a_comparison", false),
+        ("verified=false", true),
+        ("verified=true", false),
+    ] {
+        let resp = app
+            .clone()
+            .oneshot(op_get(&format!(
+                "/v1/orgs/acme/datasets/default/duplicates?{query}"
+            )))
+            .await
+            .unwrap();
+        let body = json_body(resp).await;
+        let items = body["items"].as_array().unwrap();
+        assert_eq!(
+            !items.is_empty(),
+            expect_some,
+            "{query} should {} groups",
+            if expect_some { "keep" } else { "empty" }
+        );
+    }
+
+    // A filter survives paging: one group per page, following the cursor, and
+    // no group repeats.
+    let mut seen: BTreeSet<String> = BTreeSet::new();
+    let mut cursor = String::new();
+    loop {
+        let sep = if cursor.is_empty() { "" } else { "&" };
+        let resp = app
+            .clone()
+            .oneshot(op_get(&format!(
+                "/v1/orgs/acme/datasets/default/duplicates?limit=1&matched_by=v0001{sep}{cursor}"
+            )))
+            .await
+            .unwrap();
+        let body = json_body(resp).await;
+        for item in body["items"].as_array().unwrap() {
+            let id = item["entity_id"].as_str().unwrap().to_string();
+            assert!(
+                seen.insert(id.clone()),
+                "no group repeats across pages: {id}"
+            );
+        }
+        match body["next_cursor"].as_str() {
+            Some(next) => cursor = format!("cursor={next}"),
+            None => break,
+        }
+    }
+    assert_eq!(seen.len(), groups.len(), "the filter pages the whole list");
+
+    // Tags include/exclude: name a tag, apply it to one group, and the list
+    // narrows to (or past) exactly that group.
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/orgs/acme/tags")
+                .header(header::AUTHORIZATION, "Bearer op-secret")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"name":"follow-up"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let tag_id = json_body(resp).await["id"].as_str().unwrap().to_string();
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!(
+                    "/v1/orgs/acme/datasets/default/tags/{tag_id}/apply"
+                ))
+                .header(header::AUTHORIZATION, "Bearer op-secret")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({"subject_type": "entity", "subject_id": first_entity})
+                        .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    // Applying is idempotent and answers 200 — the unique index makes a second
+    // apply the same row, so there is no 201 semantics to have.
+    assert_eq!(resp.status(), StatusCode::OK);
+    let resp = app
+        .clone()
+        .oneshot(op_get(
+            "/v1/orgs/acme/datasets/default/duplicates?tag=follow-up",
+        ))
+        .await
+        .unwrap();
+    let tagged = json_body(resp).await;
+    let tagged_items = tagged["items"].as_array().unwrap();
+    assert_eq!(tagged_items.len(), 1, "the include filter names one group");
+    assert_eq!(tagged_items[0]["entity_id"], first_entity);
+    let resp = app
+        .clone()
+        .oneshot(op_get(
+            "/v1/orgs/acme/datasets/default/duplicates?exclude_tag=follow-up",
+        ))
+        .await
+        .unwrap();
+    let excluded = json_body(resp).await;
+    let excluded_items = excluded["items"].as_array().unwrap();
+    assert!(
+        excluded_items
+            .iter()
+            .all(|g| g["entity_id"].as_str().unwrap() != first_entity),
+        "the excluded group is gone: {excluded:?}"
+    );
+    assert_eq!(excluded_items.len(), groups.len() - 1, "only it is gone");
+    // An unknown tag name is honest on both sides: include empties, exclude
+    // forbids nothing.
+    let resp = app
+        .clone()
+        .oneshot(op_get(
+            "/v1/orgs/acme/datasets/default/duplicates?tag=no-such-tag",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(json_body(resp).await["items"].as_array().unwrap().len(), 0);
+
     // Match-scores: base_10 has 19 active scored pairs with evidence.
     let resp = app
         .clone()

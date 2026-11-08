@@ -1,6 +1,6 @@
 kind: statement
 operation: read
-description: "The scored half of a page of duplicate groups' confidence: every active scored edge whose endpoints are members of the same entity in the page's id range. The per-entity join is what keeps a pair score from leaking across groups: two records may be duplicates of each other only inside their own entity. A member held by a transitive or cut path with no direct edge of its own simply appears in no row — the caller averages the members that carry evidence rather than inventing a zero. Edges repeat freely (a pair scored by two ensemble members); the caller's max is indifferent. The caller fetches this arm only when the lake has a `match_scores` table — a lake resolved without a match run legitimately does not — so the statement itself never has to fail on its absence; `assertion.read.within_groups` supplies the other arm. Reads `entity_membership` as well as `match_scores`, declared through `reads:` so the impact surface is explicit (E009)."
+description: "The scored half of a page of duplicate groups' confidence: every active scored edge whose endpoints are members of the same entity in the page's id range. The per-entity join is what keeps a pair score from leaking across groups: two records may be duplicates of each other only inside their own entity. A member held by a transitive or cut path with no direct edge of its own simply appears in no row — the caller averages the members that carry evidence rather than inventing a zero. Edges repeat freely (a pair scored by two ensemble members); the caller's max is indifferent. `model_version` and `evidence` ride along so the duplicates read can answer 'matched by which model' and 'matched on which fields' per group without a second round trip. The caller fetches this arm only when the lake has a `match_scores` table — a lake resolved without a match run legitimately does not — so the statement itself never has to fail on its absence; `assertion.read.within_groups` supplies the other arm. Reads `entity_membership` as well as `match_scores`, declared through `reads:` so the impact surface is explicit (E009)."
 reads: [entity_membership]
 params:
   - { name: snapshot, type: bigint }
@@ -11,3 +11,5 @@ returns:
   - { name: rec_a_key, type: varchar, nullable: false }
   - { name: rec_b_key, type: varchar, nullable: false }
   - { name: match_probability, type: double, nullable: false }
+  - { name: model_version, type: varchar, nullable: false }
+  - { name: evidence, type: json, nullable: false }

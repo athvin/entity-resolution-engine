@@ -310,12 +310,13 @@ fn with_confidence(items: &mut [Value]) {
 /// edges: `group_confidence` (the master-included average), the
 /// data-derived `master_record_key`, and per-member `member_confidences`
 /// keyed by record key. Nulls when the group carries no evidence at all.
-fn insert_group_confidence(
+/// Insert the group confidence trio from a precomputed score, so a caller
+/// that filters on the score never computes it twice.
+fn insert_group_score(
     obj: &mut serde_json::Map<String, Value>,
-    members: &[String],
-    edges: &[(String, String, f64)],
+    score: Option<dedupe_core::confidence::GroupScore>,
 ) {
-    if let Some(score) = dedupe_core::confidence::group_score(members, edges) {
+    if let Some(score) = score {
         obj.insert(
             "group_confidence".to_string(),
             Value::from(score.group.display()),
@@ -341,9 +342,51 @@ fn insert_group_confidence(
     }
 }
 
-/// Within-group evidence for a page of entities, bucketed per entity id:
-/// `(rec_a_key, rec_b_key, match_probability)` per edge.
-type GroupEdges = std::collections::BTreeMap<String, Vec<(String, String, f64)>>;
+fn insert_group_confidence(
+    obj: &mut serde_json::Map<String, Value>,
+    members: &[String],
+    edges: &[GroupEdge],
+) {
+    let triples: Vec<(String, String, f64)> = edges
+        .iter()
+        .map(|e| (e.rec_a.clone(), e.rec_b.clone(), e.probability))
+        .collect();
+    insert_group_score(obj, dedupe_core::confidence::group_score(members, &triples));
+}
+
+/// One within-group evidence edge with its provenance. A scored edge carries
+/// the model version and the comparison columns its evidence names — the
+/// matched-by and matched-on filters' raw material; an asserted edge is a
+/// steward's `always`, which is what `verified` means on a group.
+pub struct GroupEdge {
+    pub rec_a: String,
+    pub rec_b: String,
+    pub probability: f64,
+    pub model_version: Option<String>,
+    pub fields: Vec<String>,
+    pub asserted: bool,
+}
+
+/// Within-group evidence for a page of entities, bucketed per entity id so a
+/// pair's score never leaks across groups.
+type GroupEdges = std::collections::BTreeMap<String, Vec<GroupEdge>>;
+
+/// The comparison columns an evidence blob names: the `gamma_*` / `mw_*` keys
+/// with prefixes stripped (`mw_tf_adj_` first — its prefix collides with
+/// `mw_`). The blob's `match_weight` total names no column and drops out.
+fn evidence_fields(evidence: &Value) -> Vec<String> {
+    let Some(map) = evidence.as_object() else {
+        return Vec::new();
+    };
+    map.keys()
+        .filter_map(|k| {
+            k.strip_prefix("mw_tf_adj_")
+                .or_else(|| k.strip_prefix("gamma_"))
+                .or_else(|| k.strip_prefix("mw_"))
+                .map(str::to_string)
+        })
+        .collect()
+}
 
 /// The within-group edges for an entity-id range, bucketed per entity so a
 /// pair's score never leaks across groups.
@@ -368,11 +411,17 @@ fn edges_by_entity(
         let rows = er_entities::match_score::read::within_groups(conn, snapshot, first, last)
             .map_err(|e| e.to_string())?;
         for row in rows {
-            by_entity.entry(row.entity_id).or_default().push((
-                row.rec_a_key,
-                row.rec_b_key,
-                row.match_probability,
-            ));
+            let mut fields = evidence_fields(&row.evidence);
+            fields.sort();
+            fields.dedup();
+            by_entity.entry(row.entity_id).or_default().push(GroupEdge {
+                rec_a: row.rec_a_key,
+                rec_b: row.rec_b_key,
+                probability: row.match_probability,
+                model_version: Some(row.model_version),
+                fields,
+                asserted: false,
+            });
         }
     }
     if session
@@ -382,11 +431,14 @@ fn edges_by_entity(
         let rows = er_entities::assertion::read::within_groups(conn, snapshot, first, last)
             .map_err(|e| e.to_string())?;
         for row in rows {
-            by_entity.entry(row.entity_id).or_default().push((
-                row.rec_a_key,
-                row.rec_b_key,
-                row.match_probability,
-            ));
+            by_entity.entry(row.entity_id).or_default().push(GroupEdge {
+                rec_a: row.rec_a_key,
+                rec_b: row.rec_b_key,
+                probability: row.match_probability,
+                model_version: None,
+                fields: Vec::new(),
+                asserted: true,
+            });
         }
     }
     Ok(by_entity)
@@ -499,11 +551,126 @@ pub fn active_assertions(
     }
 }
 
+/// Server-side filters over the duplicate-group list (`readapi.duplicate_groups`).
+///
+/// Every dimension is applied while paging: a filter that ran only over the
+/// loaded page would report a false empty list for matches sitting on pages
+/// never fetched. Size and the single-entity pin push down into the page
+/// statement; the rest are decided per group after assembly, because the
+/// confidence score and the evidence metadata are computed in Rust and a SQL
+/// copy of either would drift.
+#[derive(Default)]
+pub struct DuplicateFilters {
+    /// Group size floor (the page statement floors at 2 regardless).
+    pub min_members: Option<i64>,
+    /// Group size ceiling — the size filter's "pairs" bucket.
+    pub max_members: Option<i64>,
+    /// Pin the list to one entity: the member-record search resolves the key
+    /// to its entity id and answers through this same assembly.
+    pub only_entity: Option<String>,
+    /// Group confidence floor and ceiling on the 0–100 display scale. A group
+    /// with no evidence (null confidence) matches neither bound.
+    pub min_confidence: Option<i64>,
+    pub max_confidence: Option<i64>,
+    /// Keep groups carrying at least one scored edge from this model version.
+    pub model_version: Option<String>,
+    /// Keep groups whose scored evidence names this comparison column.
+    pub matched_on: Option<String>,
+    /// `true` keeps groups carrying an active always-assertion among their
+    /// members, `false` keeps groups without one.
+    pub verified: Option<bool>,
+    /// Entity-id sets from the Postgres tag prequery: membership required /
+    /// membership forbidden. `None` is no tag filter on that side; an EMPTY
+    /// set is a tag that resolved to nothing, which filters accordingly.
+    pub tagged: Option<std::collections::HashSet<String>>,
+    pub excluded: Option<std::collections::HashSet<String>>,
+}
+
+/// One assembled group before JSON rendering — the filters read this shape.
+struct GroupItem {
+    entity_id: String,
+    member_count: i64,
+    member_keys: Vec<String>,
+    score: Option<dedupe_core::confidence::GroupScore>,
+    model_versions: Vec<String>,
+    matched_fields: Vec<String>,
+    verified: bool,
+    preview: Vec<Value>,
+}
+
+impl GroupItem {
+    /// The JSON shape the endpoint has always emitted, plus the evidence
+    /// metadata the filter bar and the matched-on column render.
+    fn into_json(self, entity_type: EntityType) -> Value {
+        let preview_fields: &[&str] = match entity_type {
+            EntityType::Person => &["given_name", "family_name", "email"],
+            EntityType::Account => &["company_name", "domain"],
+        };
+        let mut obj = serde_json::Map::new();
+        obj.insert("entity_id".to_string(), Value::from(self.entity_id));
+        obj.insert("member_count".to_string(), Value::from(self.member_count));
+        obj.insert(
+            "members".to_string(),
+            Value::Array(
+                self.member_keys
+                    .iter()
+                    .map(|m| Value::from(m.clone()))
+                    .collect(),
+            ),
+        );
+        insert_group_score(&mut obj, self.score);
+        obj.insert(
+            "model_versions".to_string(),
+            Value::Array(self.model_versions.into_iter().map(Value::from).collect()),
+        );
+        obj.insert(
+            "matched_fields".to_string(),
+            Value::Array(self.matched_fields.into_iter().map(Value::from).collect()),
+        );
+        obj.insert("verified".to_string(), Value::from(self.verified));
+        for (field, value) in preview_fields.iter().zip(self.preview) {
+            obj.insert((*field).to_string(), value);
+        }
+        Value::Object(obj)
+    }
+}
+
+/// Whether one assembled group passes every active filter dimension.
+fn keep_group(filters: &DuplicateFilters, group: &GroupItem) -> bool {
+    let confidence = group.score.as_ref().map(|s| s.group.display());
+    filters
+        .min_confidence
+        .is_none_or(|min| confidence.is_some_and(|c| c >= min))
+        && filters
+            .max_confidence
+            .is_none_or(|max| confidence.is_some_and(|c| c <= max))
+        && filters
+            .model_version
+            .as_ref()
+            .is_none_or(|model| group.model_versions.contains(model))
+        && filters
+            .matched_on
+            .as_ref()
+            .is_none_or(|field| group.matched_fields.contains(field))
+        && filters.verified.is_none_or(|v| group.verified == v)
+        && filters
+            .tagged
+            .as_ref()
+            .is_none_or(|tagged| tagged.contains(&group.entity_id))
+        && filters
+            .excluded
+            .as_ref()
+            .is_none_or(|excluded| !excluded.contains(&group.entity_id))
+}
+
 /// A keyset page of duplicate groups: entities with >=2 members, with their
-/// member list and a golden preview (`readapi.duplicate_groups`). Keyset on
-/// `entity_id`. Three declared statements — the group page, the member rows in
-/// the page's id range, and the golden preview in that range — assembled here
-/// (the old single query leaned on DuckDB-only `list(.. ORDER BY ..)`).
+/// member list, evidence metadata and a golden preview
+/// (`readapi.duplicate_groups`). Keyset on `entity_id`.
+///
+/// With filters active the scan keeps going past the first page-sized chunk
+/// until the page fills or the groups run out, bounded by a scan cap; the
+/// cursor always encodes the last SCANNED entity id, so the next request
+/// continues the filter rather than restarting it.
 ///
 /// # Errors
 /// Propagates the lake query error.
@@ -512,60 +679,123 @@ pub fn duplicates(
     entity_type: EntityType,
     snapshot: i64,
     after: Option<&str>,
-    min_members: Option<i64>,
+    filters: &DuplicateFilters,
     limit: i64,
 ) -> Result<(Vec<Value>, Option<String>), String> {
-    use std::collections::BTreeMap;
-
     let limit = limit.clamp(1, MAX_LIMIT);
     let conn = session.connection();
-    let groups = er_entities::entity_membership::read::duplicate_groups_page(
-        conn,
-        snapshot,
-        after,
-        min_members,
-        limit + 1,
-    )
-    .map_err(|e| e.to_string())?;
-    let has_more = groups.len() as i64 > limit;
-    let page = &groups[..groups.len().min(usize::try_from(limit).unwrap_or(0))];
-    let Some((first, last)) = page.first().map(|f| {
+    // Wider than the page: the Rust-side filters drop groups after assembly,
+    // and a chunk exactly the page size would leave a filtered page short on
+    // every request. The cap bounds a filter that matches almost nothing; the
+    // caller continues the scan with the returned cursor.
+    const SCAN_CHUNK: i64 = 200;
+    const SCAN_CAP: i64 = 10_000;
+    let mut items: Vec<Value> = Vec::new();
+    let mut after = after.map(str::to_string);
+    let mut last_scanned: Option<String> = None;
+    let mut scanned: i64 = 0;
+    let mut more = true;
+    while (items.len() as i64) < limit && more && scanned < SCAN_CAP {
+        let groups = er_entities::entity_membership::read::duplicate_groups_page(
+            conn,
+            snapshot,
+            after.as_deref(),
+            filters.min_members,
+            filters.max_members,
+            filters.only_entity.as_deref(),
+            SCAN_CHUNK,
+        )
+        .map_err(|e| e.to_string())?;
+        if groups.is_empty() {
+            more = false;
+            break;
+        }
+        scanned += groups.len() as i64;
+        let chunk_len = groups.len();
+        let chunk_full = chunk_len as i64 == SCAN_CHUNK;
+        let chunk_last = groups.last().map(|g| g.entity_id.clone());
+        let mut filled_at: Option<usize> = None;
+        for (idx, group) in assemble_group_items(session, entity_type, snapshot, &groups)?
+            .into_iter()
+            .enumerate()
+        {
+            if !keep_group(filters, &group) {
+                continue;
+            }
+            let id = group.entity_id.clone();
+            items.push(group.into_json(entity_type));
+            last_scanned = Some(id);
+            if items.len() as i64 == limit {
+                filled_at = Some(idx);
+                break;
+            }
+        }
+        if let Some(idx) = filled_at {
+            // The page filled mid-scan: the cursor is the last EMITTED group,
+            // so rows past the fill point — never scanned by the next request
+            // otherwise — are reached by it.
+            more = idx + 1 < chunk_len || chunk_full;
+        } else {
+            // The whole chunk was scanned without filling the page: continue
+            // from the chunk's end while it came back full.
+            last_scanned = chunk_last;
+            more = chunk_full;
+        }
+        // A pinned entity id yields at most one row; never loop for it.
+        if filters.only_entity.is_some() {
+            more = false;
+        }
+        after.clone_from(&last_scanned);
+    }
+    let next_cursor = if more {
+        last_scanned.map(|last| encode_cursor(snapshot, &last))
+    } else {
+        None
+    };
+    Ok((items, next_cursor))
+}
+
+/// Assemble one scanned chunk of group rows into filterable items: the member
+/// lists, golden previews and within-group evidence for the chunk's id range,
+/// then the per-group confidence score and evidence metadata.
+fn assemble_group_items(
+    session: &Session,
+    entity_type: EntityType,
+    snapshot: i64,
+    groups: &[er_entities::entity_membership::read::DuplicateGroupsPageRow],
+) -> Result<Vec<GroupItem>, String> {
+    use std::collections::BTreeMap;
+
+    let Some((first, last)) = groups.first().map(|f| {
         (
             f.entity_id.as_str(),
-            page[page.len() - 1].entity_id.as_str(),
+            groups[groups.len() - 1].entity_id.as_str(),
         )
     }) else {
-        return Ok((Vec::new(), None));
+        return Ok(Vec::new());
     };
 
-    // The page's within-group evidence, fetched once for the whole id range
+    // The chunk's within-group evidence, fetched once for the whole id range
     // rather than per group: active scored edges plus always-assertions.
     let edges = edges_by_entity(session, snapshot, first, last)?;
 
-    // The members of every entity in the page's id range, already ordered by
-    // (entity_id, record_key) — so each group's list is record_key-ordered, the
-    // way the old `list(.. ORDER BY record_key)` aggregate built it.
+    // The members of every entity in the chunk's id range, already ordered by
+    // (entity_id, record_key) — so each group's list is record_key-ordered.
+    let conn = session.connection();
     let members =
         er_entities::entity_membership::read::members_in_range(conn, snapshot, first, last)
             .map_err(|e| e.to_string())?;
-    let mut member_lists: BTreeMap<&str, Vec<Value>> = BTreeMap::new();
+    let mut member_lists: BTreeMap<&str, Vec<String>> = BTreeMap::new();
     for m in &members {
         member_lists
             .entry(m.entity_id.as_str())
             .or_default()
-            .push(Value::from(format!(
-                "{}:{}",
-                m.source_system, m.source_record_id
-            )));
+            .push(format!("{}:{}", m.source_system, m.source_record_id));
     }
 
     // The golden preview per entity in the range (person: name+email; account:
-    // company+domain), as a ready-to-insert field map. A group whose golden row
-    // is absent previews as nulls, like the old LEFT JOIN.
-    let preview_fields: &[&str] = match entity_type {
-        EntityType::Person => &["given_name", "family_name", "email"],
-        EntityType::Account => &["company_name", "domain"],
-    };
+    // company+domain). A group whose golden row is absent previews as nulls,
+    // like the old LEFT JOIN.
     let mut previews: BTreeMap<String, Vec<Value>> = BTreeMap::new();
     match entity_type {
         EntityType::Person => {
@@ -600,49 +830,59 @@ pub fn duplicates(
         }
     }
 
-    let items: Vec<Value> = page
+    Ok(groups
         .iter()
         .map(|g| {
-            let mut obj = serde_json::Map::new();
-            obj.insert("entity_id".to_string(), Value::from(g.entity_id.clone()));
-            obj.insert(
-                "member_count".to_string(),
-                Value::from(g.member_count.unwrap_or(0)),
-            );
-            let member_keys: Vec<String> = member_lists
-                .get(g.entity_id.as_str())
-                .map(|vs| {
-                    vs.iter()
-                        .filter_map(|v| v.as_str().map(str::to_string))
-                        .collect()
-                })
+            let member_keys = member_lists
+                .remove(g.entity_id.as_str())
                 .unwrap_or_default();
-            insert_group_confidence(
-                &mut obj,
-                &member_keys,
-                edges.get(g.entity_id.as_str()).map_or(&[], Vec::as_slice),
-            );
-            obj.insert(
-                "members".to_string(),
-                Value::Array(
-                    member_lists
-                        .remove(g.entity_id.as_str())
-                        .unwrap_or_default(),
-                ),
-            );
-            let values = previews.remove(&g.entity_id);
-            for (i, field) in preview_fields.iter().enumerate() {
-                let v = values
-                    .as_ref()
-                    .and_then(|vals| vals.get(i).cloned())
-                    .unwrap_or(Value::Null);
-                obj.insert((*field).to_string(), v);
+            let group_edges: &[GroupEdge] =
+                edges.get(g.entity_id.as_str()).map_or(&[], Vec::as_slice);
+            let triples: Vec<(String, String, f64)> = group_edges
+                .iter()
+                .map(|e| (e.rec_a.clone(), e.rec_b.clone(), e.probability))
+                .collect();
+            let score = dedupe_core::confidence::group_score(&member_keys, &triples);
+            let mut model_versions: Vec<String> = group_edges
+                .iter()
+                .filter_map(|e| e.model_version.clone())
+                .collect();
+            model_versions.sort();
+            model_versions.dedup();
+            let mut matched_fields: Vec<String> = group_edges
+                .iter()
+                .flat_map(|e| e.fields.iter().cloned())
+                .collect();
+            matched_fields.sort();
+            matched_fields.dedup();
+            let preview: Vec<Value> = (0..preview_field_count(entity_type))
+                .map(|i| {
+                    previews
+                        .get(&g.entity_id)
+                        .and_then(|vals| vals.get(i).cloned())
+                        .unwrap_or(Value::Null)
+                })
+                .collect();
+            GroupItem {
+                entity_id: g.entity_id.clone(),
+                member_count: g.member_count.unwrap_or(0),
+                member_keys,
+                score,
+                model_versions,
+                matched_fields,
+                verified: group_edges.iter().any(|e| e.asserted),
+                preview,
             }
-            Value::Object(obj)
         })
-        .collect();
-    let next_cursor = has_more.then(|| encode_cursor(snapshot, last));
-    Ok((items, next_cursor))
+        .collect())
+}
+
+/// How many golden preview fields the entity type carries (person 3, account 2).
+fn preview_field_count(entity_type: EntityType) -> usize {
+    match entity_type {
+        EntityType::Person => 3,
+        EntityType::Account => 2,
+    }
 }
 
 /// The composite key separator for `match_scores` cursors (`readapi` joins the

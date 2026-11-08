@@ -3,6 +3,7 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { bffFetch } from "@/lib/api/client";
+import { groupFiltersParams, type GroupFilters } from "@/lib/domain/group-filters";
 import { queryKeys } from "./keys";
 
 export interface DuplicateGroup {
@@ -17,6 +18,12 @@ export interface DuplicateGroup {
   master_record_key?: string | null;
   /** Per-member attachment confidence, keyed by record key. */
   member_confidences?: Record<string, number>;
+  /** Distinct model versions that scored the group's edges. */
+  model_versions?: string[];
+  /** Distinct comparison columns the group's scored evidence names. */
+  matched_fields?: string[];
+  /** The group carries an active steward always-assertion among its members. */
+  verified?: boolean;
   // Person preview fields (present for person-entity orgs).
   given_name?: string | null;
   family_name?: string | null;
@@ -32,11 +39,12 @@ export interface DuplicatesPage {
   next_cursor: string | null;
 }
 
-export function useDuplicates(org: string, ds: string) {
+export function useDuplicates(org: string, ds: string, filters: GroupFilters) {
   return useInfiniteQuery({
-    queryKey: [...queryKeys.org(org), "duplicates"],
+    // The filters are part of the key: two filter states are two lists.
+    queryKey: [...queryKeys.org(org), "duplicates", groupFiltersParams(filters)],
     queryFn: ({ pageParam }) => {
-      const params = new URLSearchParams({ limit: "50" });
+      const params = new URLSearchParams({ limit: "50", ...groupFiltersParams(filters) });
       if (pageParam) params.set("cursor", pageParam);
       return bffFetch<DuplicatesPage>(
         `/api/orgs/${org}/datasets/${ds}/duplicates?${params.toString()}`,

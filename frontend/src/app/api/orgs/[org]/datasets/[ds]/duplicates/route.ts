@@ -2,7 +2,21 @@ import { NextResponse } from "next/server";
 
 import { forward, requireDatasetAccess, respond } from "@/lib/bff/proxy";
 
-const PASSTHROUGH = ["min_members", "cursor", "limit"] as const;
+// The filter bar's parameters ride through verbatim; the server validates them.
+const PASSTHROUGH = [
+  "min_members",
+  "max_members",
+  "min_confidence",
+  "max_confidence",
+  "member",
+  "matched_by",
+  "matched_on",
+  "verified",
+  "tag",
+  "exclude_tag",
+  "cursor",
+  "limit",
+] as const;
 
 export async function GET(
   request: Request,
