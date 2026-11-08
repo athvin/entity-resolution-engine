@@ -6,8 +6,10 @@
 //! implements — so the patterns are shared verbatim.
 //!
 //! - [`address`]: the S4.2 `address_parse` v1 grammar.
+//! - [`ignore_words`]: the ignore-words dictionary's canonicalisation and hash.
 //! - [`lexicon`]: the nickname-lexicon canonicalisation and `lexicon_hash`.
 
 pub mod address;
+pub mod ignore_words;
 pub mod lexicon;
 pub mod sql;

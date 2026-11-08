@@ -87,6 +87,7 @@ fn account_golden_read_serves_acct_projection() {
             rebuild_reason: None,
             segment: None,
             lexicon: &Vec::new(),
+            ignore_words: &[],
             deliveries: &deliveries,
             model: &er_cli::MatchModel {
                 settings_json: &model_json,

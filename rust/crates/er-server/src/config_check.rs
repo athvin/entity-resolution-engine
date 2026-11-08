@@ -676,6 +676,19 @@ pub fn config_reference_problems(config: &Config) -> Vec<String> {
                         "transform on `{attribute}`: dictionary needs at least one mapping"
                     ));
                 }
+                er_config::TransformRule::IgnoreWords { dictionary } => {
+                    // The name lands in a SQL literal at render time and in a
+                    // CSV cell at write time; the empty string would render a
+                    // rule that silently matches nothing.
+                    let bad = dictionary.trim().is_empty()
+                        || dictionary.contains(',')
+                        || dictionary.chars().any(char::is_control);
+                    if bad {
+                        problems.push(format!(
+                            "transform on `{attribute}`: ignore_words needs a non-empty dictionary name without commas or control characters"
+                        ));
+                    }
+                }
                 _ => {}
             }
         }

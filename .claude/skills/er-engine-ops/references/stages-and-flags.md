@@ -54,6 +54,7 @@ S4.2 — build int_std_records. Needs the nickname lexicon seed.
 | Flag | Default |
 |---|---|
 | `--lexicon` | **required** |
+| `--ignore-words` | optional |
 | `--run-at` | `2026-01-01 00:00:00` |
 
 ### `er match`
@@ -94,6 +95,7 @@ The S4.0 run chain: ingest every `<drop>/<source>.csv` → standardize → match
 |---|---|
 | `--drop` | **required** |
 | `--lexicon` | **required** |
+| `--ignore-words` | optional |
 | `--model` | **required** |
 | `--tf` | **required** |
 | `--model-version` | **required** |

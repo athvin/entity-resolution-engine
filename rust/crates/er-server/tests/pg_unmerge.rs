@@ -88,6 +88,7 @@ fn populate_lake(tag: &str) -> (PathBuf, String, String) {
         rebuild_reason: None,
         segment: None,
         lexicon: &lexicon,
+        ignore_words: &[],
         deliveries: &deliveries,
         model: &model,
         run_id: "01UNMERGERUN0000000000000000",

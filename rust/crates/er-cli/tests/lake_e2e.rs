@@ -160,6 +160,7 @@ fn run_all_phase(
             rebuild_reason: None,
             segment: None,
             lexicon: &lexicon_pairs(),
+            ignore_words: &[],
             deliveries: &deliveries,
             model: &er_cli::MatchModel {
                 settings_json: &model_json,
@@ -1654,6 +1655,7 @@ fn run_all_base(tag: &str) -> (Session, Config, PathBuf) {
             rebuild_reason: None,
             segment: None,
             lexicon: &lexicon,
+            ignore_words: &[],
             deliveries: &deliveries,
             model: &er_cli::MatchModel {
                 settings_json: &model_json,
@@ -1738,8 +1740,19 @@ fn resolving_an_unsaved_record_finds_its_entity_and_writes_nothing() {
         "dob": "1985-03-14",
         "last_modified": "2026-01-01 00:00:00",
     });
-    let result =
-        er_cli::resolve_record(&session, &config, &model, "crm", &payload, &lexicon, 10).unwrap();
+    let result = er_cli::resolve_record(
+        &session,
+        &config,
+        &model,
+        "crm",
+        &payload,
+        er_cli::Dictionaries {
+            lexicon: &lexicon,
+            ignore_words: &[],
+        },
+        10,
+    )
+    .unwrap();
 
     assert_ne!(
         result.candidates.len(),
@@ -1834,8 +1847,19 @@ fn resolving_an_unsaved_record_finds_its_entity_and_writes_nothing() {
         "dob": "1943-11-02",
         "last_modified": "2026-01-01 00:00:00",
     });
-    let miss =
-        er_cli::resolve_record(&session, &config, &model, "crm", &stranger, &lexicon, 10).unwrap();
+    let miss = er_cli::resolve_record(
+        &session,
+        &config,
+        &model,
+        "crm",
+        &stranger,
+        er_cli::Dictionaries {
+            lexicon: &lexicon,
+            ignore_words: &[],
+        },
+        10,
+    )
+    .unwrap();
     assert_eq!(
         miss.decision, "reject",
         "a record matching nobody must be rejected, not weakly matched: {:?}",
@@ -1843,8 +1867,19 @@ fn resolving_an_unsaved_record_finds_its_entity_and_writes_nothing() {
     );
 
     // An undeclared source is refused, naming the ones that exist.
-    let err = er_cli::resolve_record(&session, &config, &model, "nosuch", &payload, &lexicon, 10)
-        .expect_err("an undeclared source cannot be resolved");
+    let err = er_cli::resolve_record(
+        &session,
+        &config,
+        &model,
+        "nosuch",
+        &payload,
+        er_cli::Dictionaries {
+            lexicon: &lexicon,
+            ignore_words: &[],
+        },
+        10,
+    )
+    .expect_err("an undeclared source cannot be resolved");
     let message = format!("{err:#}");
     assert!(
         message.contains("crm"),
@@ -2124,6 +2159,7 @@ fn a_declared_veto_keeps_a_pair_out_of_scoring_and_out_of_a_transitive_cluster()
                 rebuild_reason: None,
                 segment: None,
                 lexicon: &lexicon,
+                ignore_words: &[],
                 deliveries: &deliveries,
                 model: &er_cli::MatchModel {
                     settings_json: &compiled.model_json,
@@ -2352,6 +2388,7 @@ fn the_score_scale_constant_sits_inside_its_calibrated_region() {
                 rebuild_reason: None,
                 segment: None,
                 lexicon: &lexicon,
+                ignore_words: &[],
                 deliveries: &deliveries,
                 model: &er_cli::MatchModel {
                     settings_json: &compiled.model_json,
@@ -2465,6 +2502,7 @@ fn a_model_compiled_from_the_config_resolves_base_10_like_the_trained_one() {
                 rebuild_reason: None,
                 segment: None,
                 lexicon: &lexicon,
+                ignore_words: &[],
                 deliveries: &deliveries,
                 model: &er_cli::MatchModel {
                     settings_json,
@@ -2549,7 +2587,7 @@ fn the_run_ledger_records_the_fingerprint_the_drift_guard_reads() {
             (a.to_string(), b.to_string())
         })
         .collect();
-    let current = er_cli::current_fingerprint(&config, "v0001", &lexicon);
+    let current = er_cli::current_fingerprint(&config, "v0001", &lexicon, &[]);
     assert_eq!(
         current.lexicon_hash.as_deref(),
         Some(lexicon_hash.as_str()),
@@ -2583,7 +2621,7 @@ fn the_run_ledger_records_the_fingerprint_the_drift_guard_reads() {
     // run is promoted to full instead of refused.
     let mut moved = lexicon.clone();
     moved.push(("zelda".to_string(), "zel".to_string()));
-    let drifted = er_cli::current_fingerprint(&config, "v0001", &moved);
+    let drifted = er_cli::current_fingerprint(&config, "v0001", &moved, &[]);
     assert_ne!(drifted.lexicon_hash, prior.lexicon_hash);
     let decision = er_versions::check_mode_preconditions(
         Some(&prior),
@@ -3969,6 +4007,7 @@ fn a_one_member_ensemble_is_the_single_model_path() {
             rebuild_reason: None,
             segment: None,
             lexicon: &lexicon_pairs(),
+            ignore_words: &[],
             deliveries: &deliveries,
             model: &member().model,
             run_id: "01INVEQ000000000000PLAIN00",
@@ -4362,6 +4401,7 @@ fn a_cascade_scores_fewer_pairs_for_the_same_edges() {
                 rebuild_reason: None,
                 segment: None,
                 lexicon: &lexicon_pairs(),
+                ignore_words: &[],
                 deliveries: &deliveries,
                 model: &members[0].model,
                 run_id: "01CASCADE00000000000RUN000",
@@ -4510,6 +4550,7 @@ fn run_ensemble_phase(session: &Session, config: &Config, p: &EnsemblePhase) {
             rebuild_reason: None,
             segment: None,
             lexicon: &lexicon_pairs(),
+            ignore_words: &[],
             deliveries: &deliveries,
             model: &members[0].model,
             run_id,
@@ -4826,6 +4867,7 @@ fn an_ensemble_scores_every_member_and_retires_none_of_them() {
             rebuild_reason: None,
             segment: None,
             lexicon: &lexicon_pairs(),
+            ignore_words: &[],
             deliveries: &deliveries,
             model: &members[0].model,
             run_id: "01ENSEMBLE0000000000UNION0",
@@ -5754,6 +5796,7 @@ fn ingesting_a_delivery_profiles_it_automatically() {
             rebuild_reason: None,
             segment: None,
             lexicon: &lexicon_pairs(),
+            ignore_words: &[],
             deliveries: &deliveries,
             model: &er_cli::MatchModel {
                 settings_json: &model_json,
@@ -5821,6 +5864,7 @@ fn ingesting_a_delivery_profiles_it_automatically() {
             rebuild_reason: None,
             segment: None,
             lexicon: &lexicon_pairs(),
+            ignore_words: &[],
             deliveries: &deliveries,
             model: &er_cli::MatchModel {
                 settings_json: &model_json,
@@ -5926,6 +5970,7 @@ fn a_second_delivery_reports_drift_against_the_first() {
                 rebuild_reason: None,
                 segment: None,
                 lexicon: &lexicon_pairs(),
+                ignore_words: &[],
                 deliveries: &deliveries,
                 model: &er_cli::MatchModel {
                     settings_json: &model_json,

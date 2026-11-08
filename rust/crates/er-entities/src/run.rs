@@ -32,6 +32,8 @@ pub struct Run {
     pub survivorship_version: String,
     /// SHA-256 over the active nickname lexicon pairs; NULL before the lexicon joined the fingerprint.
     pub lexicon_hash: Option<String>,
+    /// SHA-256 over the active ignore-words dictionary rows; NULL before the ignore-words dictionary joined the fingerprint.
+    pub ignore_words_hash: Option<String>,
     /// The engine crate version.
     pub code_version: String,
     /// Why a full rebuild ran; NULL otherwise.
@@ -73,6 +75,7 @@ impl Run {
             "std_version",
             "survivorship_version",
             "lexicon_hash",
+            "ignore_words_hash",
             "code_version",
             "rebuild_reason",
             "snapshot_start",
@@ -99,16 +102,16 @@ pub mod create {
         std_version: &str,
         survivorship_version: &str,
         lexicon_hash: Option<&str>,
+        ignore_words_hash: Option<&str>,
         code_version: &str,
         rebuild_reason: Option<&str>,
     ) -> ::duckdb::Result<usize> {
-        const SQL: &str =
-            "INSERT INTO lake.main.runs (id, tenant, mode, status, started_at, config_hash,
-  model_version, tf_snapshot_id, resolved_ensemble, std_version, survivorship_version, lexicon_hash,
+        const SQL: &str = "INSERT INTO lake.main.runs (id, tenant, mode, status, started_at, config_hash,
+  model_version, tf_snapshot_id, resolved_ensemble, std_version, survivorship_version, lexicon_hash, ignore_words_hash,
   code_version, rebuild_reason, created_at, updated_at)
 VALUES ($1, $2, $3, 'running', $4::timestamp, $5,
-  $6, $7, $8::json, $9, $10, $11,
-  $12, $13, $4::timestamp, $4::timestamp)
+  $6, $7, $8::json, $9, $10, $11, $12,
+  $13, $14, $4::timestamp, $4::timestamp)
 ";
         let __span = ::er_span::sql_span(
             ::er_span::Store::Lake,
@@ -135,6 +138,7 @@ VALUES ($1, $2, $3, 'running', $4::timestamp, $5,
                     std_version,
                     survivorship_version,
                     lexicon_hash,
+                    ignore_words_hash,
                     code_version,
                     rebuild_reason
                 ],
@@ -246,6 +250,7 @@ WHERE id = $1
         pub std_version: String,
         pub survivorship_version: String,
         pub lexicon_hash: Option<String>,
+        pub ignore_words_hash: Option<String>,
     }
 
     impl LatestFingerprintRow {
@@ -259,6 +264,7 @@ WHERE id = $1
                 ("std_version", ::arrow::datatypes::DataType::Utf8),
                 ("survivorship_version", ::arrow::datatypes::DataType::Utf8),
                 ("lexicon_hash", ::arrow::datatypes::DataType::Utf8),
+                ("ignore_words_hash", ::arrow::datatypes::DataType::Utf8),
             ]
         }
 
@@ -279,6 +285,8 @@ WHERE id = $1
                 let c4: &::arrow::array::StringArray =
                     crate::batch::col(batch, 4, "survivorship_version")?;
                 let c5: &::arrow::array::StringArray = crate::batch::col(batch, 5, "lexicon_hash")?;
+                let c6: &::arrow::array::StringArray =
+                    crate::batch::col(batch, 6, "ignore_words_hash")?;
                 for i in 0..batch.num_rows() {
                     out.push(Self {
                         id: crate::batch::req(crate::batch::opt_str(c0, i), "id", i)?,
@@ -299,6 +307,7 @@ WHERE id = $1
                             i,
                         )?,
                         lexicon_hash: crate::batch::opt_str(c5, i),
+                        ignore_words_hash: crate::batch::opt_str(c6, i),
                     });
                 }
             }
@@ -310,8 +319,7 @@ WHERE id = $1
     pub fn latest_fingerprint(
         conn: &::duckdb::Connection,
     ) -> ::duckdb::Result<Vec<LatestFingerprintRow>> {
-        const SQL: &str =
-            "SELECT id, config_hash, model_version, std_version, survivorship_version, lexicon_hash
+        const SQL: &str = "SELECT id, config_hash, model_version, std_version, survivorship_version, lexicon_hash, ignore_words_hash
 FROM lake.main.runs
 WHERE status = 'succeeded'
 ORDER BY started_at DESC, id DESC

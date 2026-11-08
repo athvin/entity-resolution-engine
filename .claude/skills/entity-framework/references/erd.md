@@ -809,8 +809,9 @@ erDiagram
         varchar std_version
         varchar survivorship_version
         varchar lexicon_hash
+        varchar ignore_words_hash
         varchar code_version
-        varchar rebuild_reason "in {correction_pass, lexicon_change, operator, std_version_bump, survivorship_version_bump}"
+        varchar rebuild_reason "in {correction_pass, ignore_words_change, lexicon_change, operator, std_version_bump, survivorship_version_bump}"
         bigint snapshot_start
         bigint snapshot_end
         timestamp created_at

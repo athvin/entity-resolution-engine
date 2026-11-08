@@ -20,6 +20,7 @@
   "GET /v1/orgs/{org}/datasets/{ds}/entities/{entity_id}/links": { "envelope": "wrapped", "key": "items" },
   "GET /v1/orgs/{org}/datasets/{ds}/golden-records": { "envelope": "arrow", "cursor_in": "headers" },
   "GET /v1/orgs/{org}/datasets/{ds}/golden-records/{entity_id}": { "envelope": "scalar" },
+  "GET /v1/orgs/{org}/datasets/{ds}/ignore-words": { "envelope": "wrapped", "key": "rows" },
   "GET /v1/orgs/{org}/datasets/{ds}/imports": { "envelope": "page", "key": "items" },
   "GET /v1/orgs/{org}/datasets/{ds}/imports/recent": { "envelope": "bare" },
   "GET /v1/orgs/{org}/datasets/{ds}/insights": { "envelope": "record", "keys": ["snapshot", "series"] },

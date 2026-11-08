@@ -3152,6 +3152,257 @@ async fn put_lexicon(
         .into_response()
 }
 
+// ─── Ignore-words dictionary editing ────────────────────────────────────────
+//
+// The spec's second dictionary type (stop words), the synonym lexicon's
+// sibling and sharing its whole path: a per-org CSV at `ER_IGNORE_WORDS_PATH`
+// (derived from `ER_CONFIG_PATH` when unset), Viewer+ read, Steward+ write,
+// canonicalise + validate on write, and a `run_all_full` (skip_ingest) rebuild
+// enqueued so the edit takes effect. The `ignore_words` transform reads the
+// seeded rows at standardize time.
+
+/// The packaged default returned when an org has no ignore-words file yet —
+/// the legal-suffix set `company_name_norm` has always stripped hard-coded,
+/// as the editor's starting point (the DEFAULT_LEXICON contract).
+const DEFAULT_IGNORE_WORDS: &[(&str, &str)] = &[
+    ("co", "legal_suffixes"),
+    ("company", "legal_suffixes"),
+    ("corp", "legal_suffixes"),
+    ("corporation", "legal_suffixes"),
+    ("gmbh", "legal_suffixes"),
+    ("inc", "legal_suffixes"),
+    ("incorporated", "legal_suffixes"),
+    ("limited", "legal_suffixes"),
+    ("llc", "legal_suffixes"),
+    ("llp", "legal_suffixes"),
+    ("lp", "legal_suffixes"),
+    ("ltd", "legal_suffixes"),
+    ("plc", "legal_suffixes"),
+];
+
+#[derive(serde::Deserialize)]
+struct IgnoreWordRow {
+    word: String,
+    dictionary: String,
+}
+
+#[derive(serde::Deserialize)]
+struct IgnoreWordsPut {
+    rows: Vec<IgnoreWordRow>,
+}
+
+/// Read an ignore-words CSV (`word,dictionary` with a header row) into rows.
+/// Missing file → empty.
+fn read_ignore_words_rows(path: &str) -> Vec<(String, String)> {
+    std::fs::read_to_string(path)
+        .unwrap_or_default()
+        .lines()
+        .skip(1)
+        .filter(|l| !l.trim().is_empty())
+        .filter_map(|l| {
+            l.split_once(',')
+                .map(|(w, d)| (w.trim().to_string(), d.trim().to_string()))
+        })
+        .collect()
+}
+
+fn ignore_words_rows_json(rows: &[(String, String)]) -> Vec<Value> {
+    rows.iter()
+        .map(|(w, d)| json!({ "word": w, "dictionary": d }))
+        .collect()
+}
+
+/// Viewer+: the org's ignore-words dictionary
+/// (`GET /v1/orgs/{org}/datasets/{ds}/ignore-words`). Returns the packaged
+/// default when the org has none yet, so the editor never starts empty.
+async fn get_ignore_words(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, ds)): Path<(String, String)>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let Some(dsn) = &state.dsn else {
+        return config_registry_unavailable();
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let org_row = match pg::get_org(&client, &org).await {
+        Ok(Some(o)) => o,
+        Ok(None) => return detail_err(StatusCode::NOT_FOUND, format!("no org '{org}'")),
+        Err(e) => return pg_err(e),
+    };
+    let d = match dataset_or_404(&client, &org_row, &ds).await {
+        Ok(row) => row,
+        Err(r) => return *r,
+    };
+    let rows: Vec<(String, String)> =
+        match d.env.get("ER_IGNORE_WORDS_PATH").and_then(Value::as_str) {
+            Some(p) if std::path::Path::new(p).exists() => read_ignore_words_rows(p),
+            _ => DEFAULT_IGNORE_WORDS
+                .iter()
+                .map(|(w, d)| ((*w).to_string(), (*d).to_string()))
+                .collect(),
+        };
+    Json(json!({ "rows": ignore_words_rows_json(&rows) })).into_response()
+}
+
+/// Steward+: replace the org's ignore-words dictionary
+/// (`PUT /v1/orgs/{org}/datasets/{ds}/ignore-words`). Canonicalises +
+/// validates each row, atomically writes the org's `ER_IGNORE_WORDS_PATH` CSV
+/// (deriving + persisting one from `ER_CONFIG_PATH` if unset), then enqueues a
+/// `run_all_full` rebuild to apply it — the lexicon's apply path.
+async fn put_ignore_words(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, ds)): Path<(String, String)>,
+    Json(body): Json<IgnoreWordsPut>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Steward) {
+        return e.into_response();
+    }
+    let Some(dsn) = &state.dsn else {
+        return config_registry_unavailable();
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let org_row = match pg::get_org(&client, &org).await {
+        Ok(Some(o)) if o.state == "active" => o,
+        Ok(Some(o)) => {
+            return detail_err(
+                StatusCode::CONFLICT,
+                format!(
+                    "org '{org}' is {}; dictionary edits are accepted only when active",
+                    o.state
+                ),
+            );
+        }
+        Ok(None) => return detail_err(StatusCode::NOT_FOUND, format!("no org '{org}'")),
+        Err(e) => return pg_err(e),
+    };
+    let d = match dataset_or_404(&client, &org_row, &ds).await {
+        Ok(row) => row,
+        Err(r) => return *r,
+    };
+
+    // Validate + canonicalise. Commas/control chars would corrupt the CSV or
+    // the hash separators, and a whitespace-bearing word can never match a
+    // whitespace-split token — it is a mistake, said so at write time.
+    let mut set: std::collections::BTreeSet<(String, String)> = std::collections::BTreeSet::new();
+    for r in &body.rows {
+        for v in [&r.word, &r.dictionary] {
+            if v.contains(',') || v.chars().any(char::is_control) {
+                return detail_err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "words and dictionary names must not contain commas or control characters",
+                );
+            }
+        }
+        if r.word.split_whitespace().count() != 1 {
+            return detail_err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                format!(
+                    "{:?} is not a single token; ignore words match whitespace-split tokens",
+                    r.word
+                ),
+            );
+        }
+        match er_std::ignore_words::canonical_row(&r.word, &r.dictionary) {
+            Ok(row) => {
+                set.insert(row);
+            }
+            Err(e) => return detail_err(StatusCode::UNPROCESSABLE_ENTITY, e.to_string()),
+        }
+    }
+
+    // Resolve the per-org file: the existing ER_IGNORE_WORDS_PATH, else a
+    // sibling of ER_CONFIG_PATH — and persist the derivation so runs see it.
+    let existing = d
+        .env
+        .get("ER_IGNORE_WORDS_PATH")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let path = match &existing {
+        Some(p) => p.clone(),
+        None => match org_row.env.get("ER_CONFIG_PATH").and_then(Value::as_str) {
+            Some(cfg) => sibling_path(cfg, "ignore_words.csv"),
+            None => {
+                return detail_err(
+                    StatusCode::CONFLICT,
+                    "org has no ER_IGNORE_WORDS_PATH, and no ER_CONFIG_PATH to derive one from",
+                );
+            }
+        },
+    };
+
+    let mut csv = String::from(
+        "word,dictionary
+",
+    );
+    for (w, d) in &set {
+        csv.push_str(w);
+        csv.push(',');
+        csv.push_str(d);
+        csv.push('\n');
+    }
+    if let Err(e) = write_config_file(&path, &csv) {
+        return detail_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("ignore-words write: {e}"),
+        );
+    }
+    if existing.is_none() {
+        // Runs read the DATASET env, so the path reaches both stores: the org
+        // row (the template future datasets copy) and every existing dataset.
+        let env_patch = json!({ "ER_IGNORE_WORDS_PATH": path });
+        if let Err(e) = pg::merge_org_env(&client, &org, &env_patch).await {
+            return pg_err(e);
+        }
+        if let Err(e) = pg::merge_dataset_envs(&client, &org_row.id, &env_patch).await {
+            return pg_err(e);
+        }
+    }
+
+    let idem = format!("ignore-words-apply:{}", er_ids::new_v7());
+    let params = json!({ "skip_ingest": true });
+    let apply_job = match pg::enqueue(
+        &client,
+        &org_row.id,
+        Some(d.id.as_str()),
+        "run_all_full",
+        0,
+        Some(&idem),
+        Some(&params),
+        principal.provenance(),
+    )
+    .await
+    {
+        Ok(j) => j.id,
+        Err(e) => return pg_err(e),
+    };
+    let _ = pg::audit(
+        &client,
+        &principal.actor,
+        Some(&org),
+        None,
+        "ignore_words.update",
+        &json!({ "rows": set.len() }),
+    )
+    .await;
+
+    let rows: Vec<(String, String)> = set.into_iter().collect();
+    (
+        StatusCode::OK,
+        Json(json!({ "rows": ignore_words_rows_json(&rows), "apply_job": apply_job })),
+    )
+        .into_response()
+}
+
 /// Change tiers (`configsvc.py` `classify_tier`), biggest-blast-radius first.
 // `comparison_groups` sits with `comparisons`: it changes what a pair scores.
 const TIER_C_BLOCKS: [&str; 4] = [
@@ -6190,6 +6441,9 @@ fn resolve_blocking(
     let lexicon = s("ER_LEXICON_PATH")
         .map(load_lexicon_file)
         .unwrap_or_default();
+    let ignore_words = s("ER_IGNORE_WORDS_PATH")
+        .map(load_lexicon_file)
+        .unwrap_or_default();
     let session = crate::schema::open_lake_env(env)?;
     let model = er_cli::MatchModel {
         settings_json: &settings_json,
@@ -6197,8 +6451,19 @@ fn resolve_blocking(
         model_version: s("ER_MODEL_VERSION").unwrap_or("v0001"),
         tf_snapshot_id: s("ER_TF_SNAPSHOT_ID").unwrap_or("tf"),
     };
-    let result = er_cli::resolve_record(&session, &config, &model, source, record, &lexicon, limit)
-        .map_err(|e| format!("{e:#}"))?;
+    let result = er_cli::resolve_record(
+        &session,
+        &config,
+        &model,
+        source,
+        record,
+        er_cli::Dictionaries {
+            lexicon: &lexicon,
+            ignore_words: &ignore_words,
+        },
+        limit,
+    )
+    .map_err(|e| format!("{e:#}"))?;
     serde_json::to_value(&result).map_err(|e| format!("rendering the result: {e}"))
 }
 
@@ -10003,6 +10268,10 @@ fn build_routes(state: AppState) -> Router {
         .route(
             "/v1/orgs/{org}/datasets/{ds}/lexicon",
             get(get_lexicon).put(put_lexicon),
+        )
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/ignore-words",
+            get(get_ignore_words).put(put_ignore_words),
         )
         .route(
             "/v1/orgs/{org}/datasets/{ds}/golden-records",

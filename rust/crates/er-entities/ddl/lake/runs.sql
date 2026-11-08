@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS lake.main.runs (
   std_version VARCHAR NOT NULL,
   survivorship_version VARCHAR NOT NULL,
   lexicon_hash VARCHAR,
+  ignore_words_hash VARCHAR,
   code_version VARCHAR NOT NULL,
   rebuild_reason VARCHAR,
   snapshot_start BIGINT,
