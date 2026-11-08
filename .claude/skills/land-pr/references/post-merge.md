@@ -85,7 +85,7 @@ were `cancelled` with `jobs=0` and the 3 survivors had 19–22. So:
 
 | Workflow | Triggers |
 |---|---|
-| `deploy` | `push workflow_dispatch workflow_run` |
+| `deploy` | `workflow_dispatch workflow_run` |
 | `devcontainer` | `pull_request push workflow_dispatch` |
 | `drift` | `schedule workflow_dispatch` |
 | `frontend-experiments` | `schedule workflow_dispatch` |
@@ -100,7 +100,7 @@ were `cancelled` with `jobs=0` and the 3 survivors had 19–22. So:
 These carry no `pull_request` trigger, so a green PR says nothing about
 them. **This is the surface the main loop exists for.**
 
-- `deploy` — `push workflow_dispatch workflow_run`
+- `deploy` — `workflow_dispatch workflow_run`
 - `drift` — `schedule workflow_dispatch`
 - `frontend-experiments` — `schedule workflow_dispatch`
 <!-- END GENERATED: post-merge-surface -->
