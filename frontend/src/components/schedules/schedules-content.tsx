@@ -95,6 +95,11 @@ export function SchedulesContent({ org }: { org: string }) {
                             type="button"
                             role="switch"
                             aria-checked={schedule.enabled}
+                            // The switch has no visible text — its state is the
+                            // thumb position — so the name must come from here
+                            // or a screen reader hears an anonymous control
+                            // (the first violation the #767 sweep caught).
+                            aria-label={`${schedule.enabled ? "Disable" : "Enable"} the ${schedule.kind} schedule`}
                             disabled={!isAdmin || system || toggle.isPending}
                             data-testid={`schedule-toggle-${schedule.kind}`}
                             onClick={() => {

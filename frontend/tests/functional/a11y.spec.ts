@@ -19,6 +19,13 @@ const SCREENS: {
    * rather than a bare optional.
    */
   anonymous?: boolean | undefined;
+  /**
+   * Who the sweep logs in as; the steward when unset. The admin surface and
+   * the tenant audit trail render their real content only for their own
+   * roles — sweeping them as the steward would audit a forbidden-state
+   * message and report the actual screen clean without ever seeing it.
+   */
+  user?: string | undefined;
 }[] = [
   {
     // The public landing page. Listed first because it is the only screen a
@@ -181,6 +188,105 @@ const SCREENS: {
       await expect(page.getByTestId("ai-settings")).toBeVisible();
     },
   },
+  {
+    // The two screens an unauthenticated user ever sees, and the highest-value
+    // accessibility targets in the app: label/input association, error
+    // announcement and focus order on a credential form (#767).
+    name: "login",
+    path: "/login",
+    anonymous: true,
+    ready: async (page) => {
+      await expect(page.getByTestId("login-card")).toBeVisible();
+    },
+  },
+  {
+    name: "reset",
+    path: "/reset",
+    anonymous: true,
+    ready: async (page) => {
+      await expect(page.getByTestId("reset-request-card")).toBeVisible();
+    },
+  },
+  {
+    // The admin surface (#767). `/admin` itself is redirect-only (it
+    // `redirect()`s to tenants) and so is `/{org}` (a client-side dispatcher
+    // that `router.replace`s to a dataset) — both legitimately unswept per
+    // screens.md's own rule. These five render real screens, two of them the
+    // dense tables dense-surfaces.md is about.
+    name: "admin-audit",
+    path: "/admin/audit",
+    user: USERS.superAdmin,
+    ready: async (page) => {
+      await expect(page.getByTestId("audit-control-plane")).toBeVisible();
+    },
+  },
+  {
+    name: "admin-queue",
+    path: "/admin/queue",
+    user: USERS.superAdmin,
+    ready: async (page) => {
+      await expect(page.getByTestId("global-queue")).toBeVisible();
+    },
+  },
+  {
+    name: "admin-tenants",
+    path: "/admin/tenants",
+    user: USERS.superAdmin,
+    ready: async (page) => {
+      await expect(page.getByTestId("tenants-list")).toBeVisible();
+    },
+  },
+  {
+    name: "admin-tenant-detail",
+    path: `/admin/tenants/${ORG}`,
+    user: USERS.superAdmin,
+    ready: async (page) => {
+      await expect(page.getByTestId("tenant-detail")).toBeVisible();
+    },
+  },
+  {
+    name: "admin-new-tenant",
+    path: "/admin/tenants/new",
+    user: USERS.superAdmin,
+    ready: async (page) => {
+      await expect(page.getByTestId("new-tenant-form")).toBeVisible();
+    },
+  },
+  {
+    // Admin-gated: the steward sees only the forbidden-state message, which is
+    // not the screen (#767). The export anchor and the table both land here.
+    name: "tenant-audit",
+    path: `/${ORG}/settings/audit`,
+    user: USERS.admin,
+    ready: async (page) => {
+      await expect(page.getByTestId("audit-rows")).toBeVisible();
+    },
+  },
+  {
+    name: "settings-profile",
+    path: `/${ORG}/settings/profile`,
+    ready: async (page) => {
+      await expect(page.getByTestId("profile-page")).toBeVisible();
+    },
+  },
+  {
+    name: "schedules",
+    path: `/${ORG}/${DS}/runs/schedules`,
+    ready: async (page) => {
+      await expect(page.getByTestId("schedules-page")).toBeVisible();
+    },
+  },
+  {
+    // The wizard's first step renders statically, so it sweeps flat — the
+    // decision #767 asked for, recorded here: later steps are exercised by the
+    // grow-your-data functional spec, and auditing step one catches the form
+    // controls a user must get through first.
+    name: "new-source",
+    path: `/${ORG}/${DS}/sources/new`,
+    ready: async (page) => {
+      await expect(page.getByTestId("new-source-wizard")).toBeVisible();
+    },
+  },
 ];
 
 test.describe("accessibility", () => {
@@ -206,7 +312,7 @@ test.describe("accessibility", () => {
       // `anonymous`, which is all a route reachable without a session needs:
       // the flag, not a change here. (This comment described the pre-flag
       // behaviour for long enough that the frontend-testing skill copied it.)
-      if (!screen.anonymous) await login(page, USERS.steward);
+      if (!screen.anonymous) await login(page, screen.user ?? USERS.steward);
       await page.goto(screen.path);
       await screen.ready(page);
       const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"]).analyze();
