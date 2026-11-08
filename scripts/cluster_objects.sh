@@ -57,11 +57,42 @@ dev | prod) ;;
 	;;
 esac
 
+# External Secrets Operator FIRST, and pinned. Two failures shaped this:
+#
+#   * ESO was installed into er-dev by hand in task 1.6 (2026-10-10) and never
+#     captured in any script — the same unowned-cluster-object class this
+#     whole script exists to close. er-prod measured the cost on its first
+#     deploy (#556): the release's pre-install hooks reference ExternalSecret
+#     objects, the CRDs were absent, and helm failed the install with "no
+#     matches for kind ExternalSecret". The Terraform (envs/*/secrets.tf)
+#     covers only the IAM half — the role and the Pod Identity association —
+#     never the controller.
+#   * The version MUST be pinned: an unpinned `upgrade --install` silently
+#     tracks latest, so the two clusters would run different ESO versions
+#     depending on when each last applied. 2.12.0 is what er-dev has run since
+#     the hand install; bump it here and both clusters move together.
+#
+# `--wait`: the ClusterSecretStore below cannot validate against a controller
+# that is not up, and the deploy's hooks cannot build ExternalSecret objects
+# until the CRDs exist.
+ESO_CHART_VERSION=2.12.0
+helm repo add external-secrets https://charts.external-secrets.io >/dev/null 2>&1 || true
+helm --kube-context "$CONTEXT" upgrade --install external-secrets \
+	external-secrets/external-secrets \
+	--version "$ESO_CHART_VERSION" \
+	--namespace external-secrets --create-namespace --wait --timeout 5m
+
 SURFACES=(
 	"infra/k8s/nodepools/"
 	"infra/k8s/nodepools/$ENV/"
 	"infra/k8s/priorityclasses/"
 	"infra/k8s/network-policy-controller.yaml"
+	# The one ClusterSecretStore every namespace's ExternalSecrets reference
+	# (§9). Environment-agnostic: authentication is the controller's Pod
+	# Identity, so one file serves both clusters while the IAM scoping
+	# differs (dev reads er/*, prod er/prod/*). Ordering is the ESO install
+	# above — the store's kind does not exist until the CRDs land.
+	"infra/k8s/secrets/cluster-secret-store.yaml"
 )
 
 for surface in "${SURFACES[@]}"; do

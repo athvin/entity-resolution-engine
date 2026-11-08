@@ -37,6 +37,7 @@ on:
       - "infra/k8s/nodepools/**"
       - "infra/k8s/priorityclasses/**"
       - "infra/k8s/network-policy-controller.yaml"
+      - "infra/k8s/secrets/**"
       - "scripts/cluster_objects.sh"
       - ".github/workflows/cluster-objects.yml"
   workflow_dispatch:
@@ -83,5 +84,8 @@ jobs:
           aws-region: us-east-2
       - name: kubeconfig
         run: aws eks update-kubeconfig --name "${{ matrix.cluster }}" --region "$AWS_REGION"
+      - name: Install helm
+        # The script installs the External Secrets Operator with it.
+        run: bash scripts/ci/install-helm.sh
       - name: Apply the cluster objects, then report
         run: bash scripts/cluster_objects.sh ${{ matrix.env }} ${{ matrix.cluster }}
