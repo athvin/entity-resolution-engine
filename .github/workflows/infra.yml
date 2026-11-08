@@ -24,6 +24,22 @@
 # minted per run, and that job's `pull-requests: write` is the only write scope
 # anywhere in this file.)
 #
+# ONE NON-AWS CREDENTIAL EXISTS, and the distinction that keeps the claim above
+# true is worth stating rather than leaving to be rediscovered.
+# `CLOUDFLARE_API_TOKEN` (#910, the R2 sccache bucket) is an **Environment**
+# secret on `infra-apply-core`, NOT a repository secret. Every objection the
+# paragraph above raises to a repository secret is about reach — "reachable by
+# every workflow in the repository rather than by one job" — and an Environment
+# secret on a `protected_branches: true` environment is reachable by exactly one
+# job on `main`. A pull request cannot read it even by editing this workflow.
+#
+# What does NOT survive the move is the expiry argument: unlike every AWS
+# identity here, a Cloudflare API token is long-lived, so it is rotated by hand
+# or not at all. It is scoped to `Workers R2 Storage: Edit` on one account and
+# nothing else, which bounds that. Cloudflare has no OIDC equivalent, so this is
+# the floor rather than a shortcut — and it is why #909 rebuilds S3's
+# read/write role split out of two scoped bucket tokens rather than federation.
+#
 # WHAT GUARDS THE APPLY. The apply role holds AdministratorAccess, and §8.2's
 # two prod deny statements ride the *permission sets* — so they constrain
 # humans, not this role. That section is explicit that the apply role "walks
@@ -459,6 +475,41 @@ jobs:
     # an Environment gets a `…:environment:<name>` subject claim instead of a
     # ref claim, so these three names are load-bearing, not decoration.
     environment: infra-apply-${{ matrix.key }}
+    # JOB level, not step level, and that placement is the whole fix for the
+    # `apply (core)` failure on be64c41e (#910). These were on the
+    # `terraform plan (to a file)` step only, so the plan succeeded and the
+    # apply died with
+    #
+    #   400 {"code":9106,"message":"Missing X-Auth-Key, X-Auth-Email or
+    #   Authorization headers"}
+    #
+    # The asymmetry is not an oversight in Terraform, it is the point: VARIABLE
+    # values are baked into the saved plan file, but PROVIDER CREDENTIALS are
+    # deliberately not — which is exactly why `versions.tf` has the provider read
+    # `CLOUDFLARE_API_TOKEN` from the environment instead of taking it as a
+    # variable (a variable would land in the plan file and in state). So the
+    # credential has to be present at plan AND at apply, and the only way the
+    # two cannot drift is to set it once for the job.
+    env:
+      # The Cloudflare account that owns the R2 sccache bucket. NOT a secret —
+      # it appears in every dashboard URL and the S3-API endpoint is derived
+      # from it — so it belongs in the tree, exactly as `rust.yml` carries the
+      # AWS account id inside `SCCACHE_BUCKET`.
+      #
+      # Set unconditionally rather than per-leg: only `envs/core` declares this
+      # variable, and Terraform silently ignores a `TF_VAR_` for an undeclared
+      # one (unlike `-var`, which errors). A `matrix.key == 'core' && … || ''`
+      # expression would be worse than useless — it yields the empty STRING on
+      # the other legs, and `"" != null`, so `local.r2_enabled` would flip true
+      # with no account id to use.
+      TF_VAR_cloudflare_account_id: 9eefbe6bc92d11b2bb4e962494765a4c
+      # Resolves only on the core leg, because `CLOUDFLARE_API_TOKEN` is an
+      # Environment secret on `infra-apply-core` and that environment is
+      # `protected_branches: true`. A pull request cannot read it even by
+      # editing this workflow, which is the property replacing the
+      # `er-ci-sccache-read`/`-write` role split S3 had. Empty on dev and prod,
+      # which need no Cloudflare credential — dev's `ses.tf` is opt-in and off.
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
     permissions:
       contents: read
       id-token: write # OIDC exchange for er-ci-tf-apply
@@ -519,26 +570,6 @@ jobs:
       - name: terraform plan (to a file)
         env:
           DIR: ${{ matrix.dir }}
-          # The Cloudflare account that owns the R2 sccache bucket (#910).
-          # NOT a secret — it appears in every dashboard URL and the S3-API
-          # endpoint is derived from it — so it belongs in the tree, exactly as
-          # `rust.yml` carries the AWS account id in `SCCACHE_BUCKET`. The
-          # credential is `secrets.CLOUDFLARE_API_TOKEN` below.
-          #
-          # Set unconditionally rather than per-leg: only `envs/core` declares
-          # this variable, and Terraform silently ignores a `TF_VAR_` for an
-          # undeclared one (unlike `-var`, which errors). A `matrix.key ==
-          # 'core' && … || ''` expression would be worse than useless here — it
-          # yields the empty STRING for the other legs, which is not null, so
-          # `local.r2_enabled` would flip true with no account id to use.
-          TF_VAR_cloudflare_account_id: 9eefbe6bc92d11b2bb4e962494765a4c
-          # Reaches only this job, because `infra-apply-core` is an Environment
-          # secret and that environment is `protected_branches: true`. A pull
-          # request cannot read it even by editing this workflow, which is the
-          # property that replaces the `er-ci-sccache-read`/`-write` role split
-          # S3 had. Empty on the dev and prod legs, which declare no Cloudflare
-          # resources.
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         # Plan to a file and apply THAT file, rather than `apply -auto-approve`
         # letting Terraform re-plan inside the apply. Same work, but what lands
         # becomes a thing that can be shown, counted and refused first.
