@@ -108,7 +108,34 @@ pub enum TransformRule {
     Default { value: String },
     /// Map exact values to replacements; anything unmatched passes through.
     Dictionary { map: BTreeMap<String, String> },
+    /// Remove whole tokens named by a seeded ignore-words dictionary — the
+    /// spec's second dictionary type, the stop-words list. Tokens match
+    /// case-insensitively and leave verbatim otherwise:
+    /// `{op: ignore_words, dictionary: legal_suffixes}` turns "Acme Inc" into
+    /// "Acme" when the org's dictionary carries `inc`. The dictionary rows
+    /// are seeded per run like the nickname lexicon; the rendered SQL reads
+    /// them through the session-local [`IGNORE_WORDS_MACRO`] rather than
+    /// inlining tenant data into the projection.
+    IgnoreWords { dictionary: String },
 }
+
+/// The temp relation `er_cli::seed_ignore_words` fills per run —
+/// `(word, dictionary, active)` rows, the inspectable record of the seeded
+/// dictionaries, exactly as `nickname_variants` is for
+/// `er_cli::seed_lexicon`. The transform's rendered SQL reads the
+/// [`IGNORE_WORDS_MACRO`] view of the same rows, not this relation.
+pub const IGNORE_WORDS_RELATION: &str = "ignore_words";
+
+/// The temp macro an `ignore_words` transform's rendered SQL actually calls,
+/// seeded by `er_cli::seed_ignore_words` from the same rows that fill
+/// [`IGNORE_WORDS_RELATION`]: `er_ignore_words()` returns a flat `varchar[]`
+/// literal of `dictionary ‖ chr(31) ‖ word` entries. The lookup goes through
+/// a literal-bearing macro because DuckDB's binder rejects subqueries inside
+/// lambda expressions, which rules out the lexicon's correlated-subquery
+/// shape. chr(31) is the unit separator the dictionary hash already uses —
+/// the write path refuses control characters in words and dictionary names,
+/// so the encoding cannot collide.
+pub const IGNORE_WORDS_MACRO: &str = "er_ignore_words";
 
 impl TransformRule {
     /// Wrap `expr` in this rule, returning a scalar SQL expression.
@@ -152,6 +179,21 @@ impl TransformRule {
                 // list, not an allowlist, and nulling the unmatched values would
                 // silently delete most of a column.
                 format!("case {expr}{arms} else {expr} end")
+            }
+            Self::IgnoreWords { dictionary } => {
+                // Split on whitespace, drop the tokens the dictionary names
+                // (case-insensitively, so `Inc` matches a stored `inc`), and
+                // rejoin VERBATIM — removal is this rule's whole job; changing
+                // the survivors' case or spelling is `lower`'s or `replace`'s.
+                // Every step propagates NULL, so a missing value stays missing
+                // rather than becoming "" and tripping a later `default` rule.
+                // `lambda w:` is the current DuckDB lambda syntax; the `->`
+                // arrow is deprecated and goes away.
+                format!(
+                    "array_to_string(list_filter(string_split({expr}, ' '), lambda w: \
+                     not list_contains({IGNORE_WORDS_MACRO}(), {} || chr(31) || lower(w))), ' ')",
+                    lit(dictionary)
+                )
             }
         }
     }
@@ -1020,6 +1062,34 @@ mod tests {
     use super::*;
 
     const DEFAULT_YAML: &str = include_str!("../tests/fixtures/default.yaml");
+
+    #[test]
+    fn ignore_words_renders_a_token_filter_against_the_seeded_map() {
+        let rule = TransformRule::IgnoreWords {
+            dictionary: "legal_suffixes".to_string(),
+        };
+        let sql = rule.apply_sql("payload ->> 'company_name'");
+        // Token-wise, case-insensitive, verbatim output, NULL-propagating —
+        // and reading the seeded map macro, never an inlined word list. NOT a
+        // subquery: DuckDB's binder rejects those inside lambdas.
+        assert!(
+            sql.contains("list_filter(string_split(payload ->> 'company_name', ' '), lambda w:")
+        );
+        assert!(
+            sql.contains(
+                "list_contains(er_ignore_words(), 'legal_suffixes' || chr(31) || lower(w))"
+            )
+        );
+        assert!(sql.contains("lower(w)"));
+        assert!(sql.starts_with("array_to_string("));
+        assert!(sql.ends_with(", ' ')"));
+
+        // The dictionary name is a tenant-authored literal — quote-escaped.
+        let evil = TransformRule::IgnoreWords {
+            dictionary: "x' or '1'='1".to_string(),
+        };
+        assert!(evil.apply_sql("v").contains("'x'' or ''1''=''1'"));
+    }
 
     #[test]
     fn blocks_and_constants() {

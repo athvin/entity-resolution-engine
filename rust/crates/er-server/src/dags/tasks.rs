@@ -62,6 +62,8 @@ fn context(
     })?;
     er_cli::seed_lexicon(ctx.session, &run.lexicon)
         .map_err(|e| engine_error(&format!("seeding the lexicon: {e:#}")))?;
+    er_cli::seed_ignore_words(ctx.session, &run.ignore_words)
+        .map_err(|e| engine_error(&format!("seeding the ignore-words dictionary: {e:#}")))?;
     Ok(run)
 }
 
@@ -79,6 +81,7 @@ fn inputs_from_plan<'a>(
 ) -> er_cli::PipelineInputs<'a> {
     er_cli::PipelineInputs {
         lexicon: &run.lexicon,
+        ignore_words: &run.ignore_words,
         deliveries: &run.deliveries,
         model,
         run_id: &ctx.order.run_id,
@@ -164,7 +167,12 @@ impl Task<Session> for Init {
         let asked = mode_asked(&ctx.order.kind);
         let prior =
             er_cli::prior_fingerprint(ctx.session).map_err(|e| engine_error(&format!("{e:#}")))?;
-        let current = er_cli::current_fingerprint(&run.config, model.model_version, &run.lexicon);
+        let current = er_cli::current_fingerprint(
+            &run.config,
+            model.model_version,
+            &run.lexicon,
+            &run.ignore_words,
+        );
         let decision = er_versions::check_mode_preconditions(prior.as_ref(), &current, asked, true)
             .map_err(|e| {
                 TaskError::Failed(er_errors::ErError::precondition(format!("mode guard: {e}")))
@@ -176,6 +184,7 @@ impl Task<Session> for Init {
 
         let inputs = er_cli::PipelineInputs {
             lexicon: &run.lexicon,
+            ignore_words: &run.ignore_words,
             deliveries: &run.deliveries,
             model: &model,
             run_id: &ctx.order.run_id,
@@ -459,6 +468,7 @@ impl Task<Session> for Finish {
             ctx.session,
             &er_cli::PipelineInputs {
                 lexicon: &[],
+                ignore_words: &[],
                 deliveries: &[],
                 model: &er_cli::MatchModel {
                     settings_json: "{}",

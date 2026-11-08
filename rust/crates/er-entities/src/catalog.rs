@@ -2542,6 +2542,9 @@ columns:
   - name: lexicon_hash
     type: varchar
     description: "SHA-256 over the active nickname lexicon pairs; NULL before the lexicon joined the fingerprint."
+  - name: ignore_words_hash
+    type: varchar
+    description: "SHA-256 over the active ignore-words dictionary rows; NULL before the ignore-words dictionary joined the fingerprint."
   - name: code_version
     type: varchar
     nullable: false

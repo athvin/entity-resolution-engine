@@ -44,6 +44,10 @@ enum Command {
     Standardize {
         #[arg(long)]
         lexicon: PathBuf,
+        /// Optional ignore-words CSV (`word,dictionary`); seeded even when
+        /// absent so a config that declares the transform still plans.
+        #[arg(long)]
+        ignore_words: Option<PathBuf>,
         #[arg(long, default_value = "2026-01-01 00:00:00")]
         run_at: String,
     },
@@ -81,6 +85,10 @@ enum Command {
         drop: PathBuf,
         #[arg(long)]
         lexicon: PathBuf,
+        /// Optional ignore-words CSV (`word,dictionary`) — the stop-words
+        /// dictionary the `ignore_words` transform reads.
+        #[arg(long)]
+        ignore_words: Option<PathBuf>,
         #[arg(long)]
         model: PathBuf,
         #[arg(long)]
@@ -207,6 +215,12 @@ fn load_lexicon(path: &PathBuf) -> Result<Vec<(String, String)>> {
         .collect())
 }
 
+/// Read an ignore-words CSV (`word,dictionary` with a header row) the way the
+/// dispatcher's loader does.
+fn load_ignore_words(path: &PathBuf) -> Result<Vec<(String, String)>> {
+    load_lexicon(path)
+}
+
 pub fn run() -> Result<()> {
     let cli = Cli::parse();
     let config = load_config(&cli.config)?;
@@ -239,8 +253,17 @@ pub fn run() -> Result<()> {
             )?;
             println!("ingested {n} rows from {source}");
         }
-        Command::Standardize { lexicon, run_at } => {
+        Command::Standardize {
+            lexicon,
+            ignore_words,
+            run_at,
+        } => {
             crate::seed_lexicon(&session, &load_lexicon(&lexicon)?)?;
+            let ignore_words = match &ignore_words {
+                Some(p) => load_ignore_words(p)?,
+                None => Vec::new(),
+            };
+            crate::seed_ignore_words(&session, &ignore_words)?;
             crate::run_standardize(&session, &config, &run_at)?;
             println!("standardized");
         }
@@ -280,6 +303,7 @@ pub fn run() -> Result<()> {
         Command::RunAll {
             drop,
             lexicon,
+            ignore_words,
             model,
             tf,
             model_version,
@@ -290,6 +314,10 @@ pub fn run() -> Result<()> {
             segment,
         } => {
             let lexicon = load_lexicon(&lexicon)?;
+            let ignore_words = match &ignore_words {
+                Some(p) => load_ignore_words(p)?,
+                None => Vec::new(),
+            };
             let mut deliveries: Vec<(String, String)> = Vec::new();
             for source in config.sources.keys() {
                 let path = drop.join(format!("{source}.csv"));
@@ -305,7 +333,8 @@ pub fn run() -> Result<()> {
             // --mode incremental` cannot extend a corpus that was scored under a
             // different config / model / std / survivorship / lexicon.
             let prior = crate::prior_fingerprint(&session)?;
-            let current = crate::current_fingerprint(&config, &model_version, &lexicon);
+            let current =
+                crate::current_fingerprint(&config, &model_version, &lexicon, &ignore_words);
             let decision = er_versions::check_mode_preconditions(
                 prior.as_ref(),
                 &current,
@@ -351,6 +380,7 @@ pub fn run() -> Result<()> {
                     },
                     segment,
                     lexicon: &lexicon,
+                    ignore_words: &ignore_words,
                     deliveries: &deliveries,
                     model: &crate::MatchModel {
                         settings_json: &settings,

@@ -65,6 +65,9 @@ pub enum ResolveError {
 pub struct RunContext {
     pub config: er_config::Config,
     pub lexicon: Vec<(String, String)>,
+    /// `(word, dictionary)` rows from the org's `ER_IGNORE_WORDS_PATH` CSV —
+    /// empty when unset, exactly as the lexicon tolerates absence.
+    pub ignore_words: Vec<(String, String)>,
     /// `(source, csv)` pairs; empty under `skip_ingest` or for a kind that
     /// does not ingest.
     pub deliveries: Vec<(String, String)>,
@@ -186,6 +189,9 @@ impl RunContext {
         let lexicon = env_str(req.lake_env, "ER_LEXICON_PATH")
             .map(load_lexicon)
             .unwrap_or_default();
+        let ignore_words = env_str(req.lake_env, "ER_IGNORE_WORDS_PATH")
+            .map(load_lexicon)
+            .unwrap_or_default();
 
         let (settings_json, model_version, tf_snapshot_id) =
             Self::sole_model(req.lake_env, req.models, &config)?;
@@ -195,6 +201,7 @@ impl RunContext {
         Ok(RunContext {
             config,
             lexicon,
+            ignore_words,
             deliveries,
             tf_path,
             settings_json,

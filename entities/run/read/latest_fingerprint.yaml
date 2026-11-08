@@ -11,3 +11,4 @@ returns:
   - { name: std_version, type: varchar, nullable: false }
   - { name: survivorship_version, type: varchar, nullable: false }
   - { name: lexicon_hash, type: varchar }
+  - { name: ignore_words_hash, type: varchar }

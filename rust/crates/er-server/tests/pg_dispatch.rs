@@ -105,6 +105,7 @@ async fn dispatcher_runs_run_all_over_a_per_org_ducklake() {
         rebuild_reason: None,
         segment: None,
         lexicon: &lexicon,
+        ignore_words: &[],
         deliveries: &deliveries,
         model: &model,
         run_id: "01DISPATCHRUN00000000000000",

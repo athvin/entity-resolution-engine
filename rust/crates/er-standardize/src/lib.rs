@@ -251,7 +251,12 @@ fn acct_stg_arm(source: &str, spec: &SourceSpec, config: &Config, raw_table: &st
     let region = &config.standardization.phone_default_region;
     let excluded = metadata_excluded(spec);
     let excluded_refs: Vec<&str> = excluded.iter().map(String::as_str).collect();
-    let company = field(&spec.columns["company_name"]);
+    // The same one-extraction-point rule as the person arm's `raw` closure:
+    // every attribute passes through `transformed`, so an account config's
+    // `transforms` block cannot be silently ignored — which it was here until
+    // the ignore-words dictionary (#799) made that gap observable.
+    let raw = |attribute: &str| transformed(config, attribute, field(&spec.columns[attribute]));
+    let company = raw("company_name");
     format!(
         "select\n    source_system,\n    source_record_id,\n    content_hash,\n    '{std_version}' as std_version,\n    \
          {} as company_name,\n    {} as company_name_norm,\n    {} as company_variants,\n    \
@@ -262,13 +267,13 @@ fn acct_stg_arm(source: &str, spec: &SourceSpec, config: &Config, raw_table: &st
         company_name(&company),
         company_name_norm(&company),
         company_variants(&company),
-        domain(&field(&spec.columns["domain"])),
-        domain_norm(&field(&spec.columns["domain"])),
-        phone_e164(&field(&spec.columns["phone"]), region),
-        addr_passthrough(&field(&spec.columns["addr_street"])),
-        addr_passthrough(&field(&spec.columns["addr_city"])),
-        addr_passthrough(&field(&spec.columns["addr_region"])),
-        addr_passthrough(&field(&spec.columns["addr_postal"])),
+        domain(&raw("domain")),
+        domain_norm(&raw("domain")),
+        phone_e164(&raw("phone"), region),
+        addr_passthrough(&raw("addr_street")),
+        addr_passthrough(&raw("addr_city")),
+        addr_passthrough(&raw("addr_region")),
+        addr_passthrough(&raw("addr_postal")),
         source_metadata("payload", &excluded_refs),
         field(&spec.updated_at_column),
         single_quote(source),

@@ -257,12 +257,13 @@ pub const RUN_STAGES: [&str; 11] = [
     "reset",
 ];
 pub const RUN_STATUSES: [&str; 4] = ["running", "succeeded", "failed", "canceled"];
-pub const REBUILD_REASONS: [&str; 5] = [
+pub const REBUILD_REASONS: [&str; 6] = [
     "std_version_bump",
     "survivorship_version_bump",
     "correction_pass",
     "operator",
     "lexicon_change",
+    "ignore_words_change",
 ];
 
 // --------------------------------------------------------------------------- //
@@ -761,6 +762,7 @@ fn ddl_specs() -> Vec<TableSpec> {
                 nn("std_version", VARCHAR),
                 nn("survivorship_version", VARCHAR),
                 col("lexicon_hash", VARCHAR),
+                col("ignore_words_hash", VARCHAR),
                 nn("code_version", VARCHAR),
                 col("rebuild_reason", VARCHAR),
                 col("snapshot_start", BIGINT),
@@ -1264,7 +1266,7 @@ mod tests {
         assert_eq!(RUN_MODES.len(), 8);
         assert_eq!(RUN_STAGES.len(), 11);
         assert_eq!(RUN_STATUSES.len(), 4);
-        assert_eq!(REBUILD_REASONS.len(), 5);
+        assert_eq!(REBUILD_REASONS.len(), 6);
         assert!(EVENT_TYPES.contains(&"edge_cut"));
         assert!(RUN_STAGES.contains(&"reconcile"));
     }

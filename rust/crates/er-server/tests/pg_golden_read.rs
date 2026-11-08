@@ -157,6 +157,7 @@ fn populate_lake(catalog: &str, data_path: &str) {
         rebuild_reason: None,
         segment: None,
         lexicon: &lexicon,
+        ignore_words: &[],
         deliveries: &deliveries,
         model: &model,
         run_id: "01READRUN000000000000000000",

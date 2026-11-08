@@ -1,4 +1,4 @@
-SELECT id, config_hash, model_version, std_version, survivorship_version, lexicon_hash
+SELECT id, config_hash, model_version, std_version, survivorship_version, lexicon_hash, ignore_words_hash
 FROM lake.main.runs
 WHERE status = 'succeeded'
 ORDER BY started_at DESC, id DESC

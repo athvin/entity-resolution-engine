@@ -65,6 +65,7 @@ fn acct_run_all_clusters_accounts_and_assembles_golden() {
             rebuild_reason: None,
             segment: None,
             lexicon: &lexicon,
+            ignore_words: &[],
             deliveries: &deliveries,
             model: &er_cli::MatchModel {
                 settings_json: &model_json,
@@ -231,6 +232,7 @@ fn resolve_acct_10(tag: &str, bits: f64, cfg: &str, auto_merge: Option<f64>) -> 
             rebuild_reason: None,
             segment: None,
             lexicon: &lexicon,
+            ignore_words: &[],
             deliveries: &deliveries,
             model: &er_cli::MatchModel {
                 settings_json: &compiled.model_json,
@@ -434,5 +436,136 @@ fn variant_match_runs_on_an_account_config() {
     assert_eq!(
         got.clusters, truth,
         "variant_match declared and runnable: acct_10 resolves to truth at the measured scale"
+    );
+}
+
+/// Resolve the two-record "Acme Pty" vs "Acme" corpus with `ignore_words`
+/// seeded as given, returning the standardized `(record_key,
+/// company_name_norm)` rows and the entity partition.
+fn resolve_ignore_words_pair(
+    tag: &str,
+    ignore_words: &[(String, String)],
+) -> (Vec<(String, String)>, BTreeSet<BTreeSet<String>>) {
+    let tmp = std::env::temp_dir().join(format!("er_cli_acctiw_{tag}_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(tmp.join("data")).unwrap();
+    let catalog = tmp.join("catalog.ducklake").to_string_lossy().into_owned();
+    let data_path = tmp.join("data").to_string_lossy().into_owned();
+    let session = er_cli::open_lake(&catalog, &data_path).unwrap();
+
+    let mut config =
+        load_config_str(&std::fs::read_to_string(repo_fixture("acct_base/config.yaml")).unwrap())
+            .unwrap();
+    config.transforms.insert(
+        "company_name".to_string(),
+        vec![er_config::TransformRule::IgnoreWords {
+            dictionary: "legal_suffixes".to_string(),
+        }],
+    );
+
+    // Identical but for the one suffix token: `domain_exact` blocks the pair
+    // together either way, and every other compared field agrees, so
+    // `company_name` — the account config's only comparison — decides.
+    let csv = "crm_id,company,website,phone,street,city,state,zip,last_modified\n\
+               a1,Acme Pty,acme.com,+14155550100,1 Main St,Springfield,IL,62701,2026-01-01\n\
+               a2,Acme,acme.com,+14155550100,1 Main St,Springfield,IL,62701,2026-01-01\n";
+    let deliveries = vec![("crm".to_string(), csv.to_string())];
+    let model_json = std::fs::read_to_string(repo_fixture("acct_model_v1.json")).unwrap();
+    let tf_csv = repo_fixture("acct_model_v1.tf.csv");
+    let lexicon: Vec<(String, String)> = Vec::new();
+
+    er_cli::run_all(
+        &session,
+        &config,
+        &er_cli::PipelineInputs {
+            mode: "full",
+            rebuild_reason: None,
+            segment: None,
+            lexicon: &lexicon,
+            ignore_words,
+            deliveries: &deliveries,
+            model: &er_cli::MatchModel {
+                settings_json: &model_json,
+                tf_csv_path: Path::new(&tf_csv),
+                model_version: "acct_v1",
+                tf_snapshot_id: "ACCTTFSNAP0000000000000001",
+            },
+            run_id: "01ACCTIGWL000000000000000A",
+            ingested_at: "2026-03-01 00:00:00",
+            scored_at: "2026-03-02 00:00:00",
+            run_at: "2026-03-03 00:00:00",
+        },
+    )
+    .unwrap();
+
+    let norms: Vec<(String, String)> = session
+        .query_strings(
+            "select record_key, coalesce(company_name_norm, '') \
+             from lake.main.acct_int_std_records order by record_key",
+        )
+        .unwrap()
+        .into_iter()
+        .map(|r| (r[0].clone(), r[1].clone()))
+        .collect();
+    let rows: Vec<(String, String)> = session
+        .query_strings(
+            "select entity_id, record_key from lake.main.entity_membership order by record_key",
+        )
+        .unwrap()
+        .into_iter()
+        .map(|r| (r[0].clone(), r[1].clone()))
+        .collect();
+    let clusters = partition(&rows);
+    drop(session);
+    let _ = std::fs::remove_dir_all(&tmp);
+    (norms, clusters)
+}
+
+/// #799 golden: an ignore-words dictionary reaches Account comparison. The
+/// hard-coded `company_name_norm` suffix list (inc/llc/gmbh/…) already makes
+/// the ticket's literal `Acme Inc` / `Acme LLC` pair agree, so the
+/// dictionary's visible work has to come from a suffix OUTSIDE that list —
+/// here `pty`. "Acme Pty" vs "Acme" standardize to the same
+/// `company_name_norm` only when the seeded dictionary carries the token, and
+/// because the account comparison set is `company_name: [exact, null]` alone,
+/// the transform is the difference between an exact agreement and a
+/// disagreement on the one compared field — the pair co-clusters exactly when
+/// the dictionary is loaded.
+#[test]
+fn ignore_words_dictionary_decides_an_account_pair() {
+    if !enabled() {
+        eprintln!("skipping Account ignore-words e2e (set DEDUPE_E2E_DUCKLAKE=1 to run)");
+        return;
+    }
+    let (norms_with, clusters_with) =
+        resolve_ignore_words_pair("with", &[("pty".to_string(), "legal_suffixes".to_string())]);
+    let (norms_without, clusters_without) = resolve_ignore_words_pair("without", &[]);
+
+    assert_eq!(
+        norms_with,
+        vec![
+            ("crm:a1".to_string(), "acme".to_string()),
+            ("crm:a2".to_string(), "acme".to_string()),
+        ],
+        "with `pty` in legal_suffixes, both records normalize to `acme`"
+    );
+    assert_eq!(
+        norms_without,
+        vec![
+            ("crm:a1".to_string(), "acme pty".to_string()),
+            ("crm:a2".to_string(), "acme".to_string()),
+        ],
+        "without the dictionary `pty` survives — it is outside company_name_norm's \
+         hard-coded suffix list"
+    );
+    assert_eq!(
+        clusters_with.len(),
+        1,
+        "dictionary loaded: the pair agrees and merges into one entity"
+    );
+    assert_eq!(
+        clusters_without.len(),
+        2,
+        "dictionary absent: the sole compared field disagrees and the pair stays split"
     );
 }

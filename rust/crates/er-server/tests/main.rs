@@ -57,6 +57,7 @@ mod pg_entity_links;
 mod pg_golden_read;
 mod pg_history;
 mod pg_http;
+mod pg_ignore_words;
 mod pg_imports;
 mod pg_job_failure;
 mod pg_labels;

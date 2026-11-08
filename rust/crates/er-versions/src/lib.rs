@@ -15,14 +15,16 @@ pub const REBUILD_SURVIVORSHIP_VERSION_BUMP: &str = "survivorship_version_bump";
 pub const REBUILD_CORRECTION_PASS: &str = "correction_pass";
 pub const REBUILD_OPERATOR: &str = "operator";
 pub const REBUILD_LEXICON_CHANGE: &str = "lexicon_change";
+pub const REBUILD_IGNORE_WORDS_CHANGE: &str = "ignore_words_change";
 
-/// The five `runs` columns the guard compares, in S5 DDL order.
-pub const FINGERPRINT_FIELDS: [&str; 5] = [
+/// The six `runs` columns the guard compares, in S5 DDL order.
+pub const FINGERPRINT_FIELDS: [&str; 6] = [
     "config_hash",
     "model_version",
     "std_version",
     "survivorship_version",
     "lexicon_hash",
+    "ignore_words_hash",
 ];
 
 /// How a NULL renders in a refusal.
@@ -39,8 +41,8 @@ pub enum VersionsError {
     UnknownMode(String),
 }
 
-/// The five `runs` columns that decide whether an incremental run may proceed.
-/// `model_version` and `lexicon_hash` are nullable.
+/// The six `runs` columns that decide whether an incremental run may proceed.
+/// `model_version`, `lexicon_hash` and `ignore_words_hash` are nullable.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunFingerprint {
     pub config_hash: String,
@@ -48,6 +50,7 @@ pub struct RunFingerprint {
     pub std_version: String,
     pub survivorship_version: String,
     pub lexicon_hash: Option<String>,
+    pub ignore_words_hash: Option<String>,
 }
 
 impl RunFingerprint {
@@ -61,6 +64,7 @@ impl RunFingerprint {
             "std_version" => Ok(Some(self.std_version.as_str())),
             "survivorship_version" => Ok(Some(self.survivorship_version.as_str())),
             "lexicon_hash" => Ok(self.lexicon_hash.as_deref()),
+            "ignore_words_hash" => Ok(self.ignore_words_hash.as_deref()),
             other => Err(VersionsError::UnknownField(other.to_string())),
         }
     }
@@ -196,7 +200,7 @@ pub fn check_mode_preconditions(
 /// The value `runs.rebuild_reason` takes for this invocation (S5.1, S4.0). `None`
 /// is the ordinary case (the run is inside T-INC-2's accounting). Order of causes
 /// is load-bearing: correction_pass, operator, (no prior), std bump, survivorship
-/// bump, lexicon change.
+/// bump, lexicon change, ignore-words change.
 #[must_use]
 pub fn rebuild_reason_for(
     prior: Option<&RunFingerprint>,
@@ -220,6 +224,9 @@ pub fn rebuild_reason_for(
     if prior.lexicon_hash != current.lexicon_hash {
         return Some(REBUILD_LEXICON_CHANGE.to_string());
     }
+    if prior.ignore_words_hash != current.ignore_words_hash {
+        return Some(REBUILD_IGNORE_WORDS_CHANGE.to_string());
+    }
     None
 }
 
@@ -234,6 +241,7 @@ mod tests {
             std_version: "s1".to_string(),
             survivorship_version: "v1".to_string(),
             lexicon_hash: Some("l1".to_string()),
+            ignore_words_hash: Some("i1".to_string()),
         }
     }
 
@@ -322,6 +330,19 @@ mod tests {
             rebuild_reason_for(Some(&prior), &lex, None, false).as_deref(),
             Some("lexicon_change")
         );
+        let mut words = fp("c0");
+        words.ignore_words_hash = Some("i2".to_string());
+        assert_eq!(
+            rebuild_reason_for(Some(&prior), &words, None, false).as_deref(),
+            Some("ignore_words_change")
+        );
+        // A row predating the column (NULL) drifts against any stamped run —
+        // one promoted full, then the ledger carries the hash. Same shape the
+        // lexicon's introduction had.
+        let mut legacy = fp("c0");
+        legacy.ignore_words_hash = None;
+        let d = check_mode_preconditions(Some(&legacy), &fp("c0"), "incremental", false).unwrap();
+        assert!(d.message.contains("ignore_words_hash last=(unset) now=i1"));
         assert_eq!(
             rebuild_reason_for(Some(&prior), &fp("c0"), None, false),
             None

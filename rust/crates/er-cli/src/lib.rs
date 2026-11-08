@@ -81,6 +81,15 @@ pub const INGEST_BATCHES: &str = "lake.main.ingest_batches";
 /// The nickname lexicon `int_std_records` reads — a temp relation (read
 /// cross-catalog while the lake write runs), seeded per session.
 pub const LEXICON: &str = "nickname_variants";
+/// The ignore-words dictionary an `ignore_words` transform reads — a temp
+/// relation seeded per session, like the lexicon. The name is owned by
+/// `er-config` (the renderer bakes it into the generated SQL); this is the
+/// seeder's alias for it.
+pub const IGNORE_WORDS: &str = er_config::IGNORE_WORDS_RELATION;
+
+/// The temp macro the `ignore_words` transform's rendered SQL calls — same
+/// owner/alias arrangement as [`IGNORE_WORDS`].
+pub const IGNORE_WORDS_MACRO: &str = er_config::IGNORE_WORDS_MACRO;
 
 /// Open a session with a local DuckLake catalog attached as `lake`. `catalog` is
 /// the ATTACH metadata (a `.ducklake`/`sqlite:` path); `data_path` is where
@@ -149,6 +158,56 @@ pub fn seed_lexicon(session: &Session, rows: &[(String, String)]) -> Result<()> 
     session.execute_batch(&format!(
         "create table {LEXICON} as select * from (values {}) as t(variant_a, variant_b, active)",
         values.join(", ")
+    ))?;
+    Ok(())
+}
+
+/// Seed the ignore-words dictionary (word, dictionary, active) as a temp
+/// relation plus the [`IGNORE_WORDS_MACRO`] temp macro the `ignore_words`
+/// transform's rendered SQL actually calls — the stop-words sibling of
+/// [`seed_lexicon`]. The macro carries the same rows as a `map` literal
+/// (dictionary → word list) because DuckDB's binder rejects subqueries inside
+/// the lambda the transform renders; the relation stays for inspection and
+/// fingerprint parity with the lexicon.
+///
+/// # Errors
+/// Propagates the session SQL error.
+pub fn seed_ignore_words(session: &Session, rows: &[(String, String)]) -> Result<()> {
+    // Re-seedable for the same reason seed_lexicon is: a session that runs
+    // the pipeline twice must not die on "table ignore_words already exists".
+    session.execute_batch(&format!("drop table if exists {IGNORE_WORDS}"))?;
+    let lit = |v: &str| format!("'{}'", v.replace('\'', "''"));
+    if rows.is_empty() {
+        // The empty typed table, so a config that declares the transform
+        // still plans and runs — the dictionary simply matches nothing.
+        session.execute_batch(&format!(
+            "create table {IGNORE_WORDS} (word varchar, dictionary varchar, active boolean)"
+        ))?;
+    } else {
+        let values: Vec<String> = rows
+            .iter()
+            .map(|(w, d)| format!("({}, {}, true)", lit(w), lit(d)))
+            .collect();
+        session.execute_batch(&format!(
+            "create table {IGNORE_WORDS} as select * from (values {}) as t(word, dictionary, active)",
+            values.join(", ")
+        ))?;
+    }
+    // The flat `dictionary ‖ chr(31) ‖ word` entry list the transform reads
+    // (chr(31) is the hash's unit separator; the write path refuses control
+    // characters, so the encoding cannot collide). Empty is a well-typed
+    // empty list, so the transform plans identically either way.
+    let body = if rows.is_empty() {
+        "cast([] as varchar[])".to_string()
+    } else {
+        let entries: Vec<String> = rows
+            .iter()
+            .map(|(w, d)| lit(&format!("{d}\u{1f}{w}")))
+            .collect();
+        format!("[{}]", entries.join(", "))
+    };
+    session.execute_batch(&format!(
+        "create or replace temp macro {IGNORE_WORDS_MACRO}() as {body}"
     ))?;
     Ok(())
 }
@@ -322,6 +381,16 @@ pub struct ResolveResult {
     pub snapshot: i64,
 }
 
+/// The two matching dictionaries a corpus is standardized with — the synonym
+/// lexicon and the ignore-words set — carried together because everything that
+/// re-standardizes (a run, a resolve probe) must see the same pair the corpus
+/// saw. Empty slices are the zero state.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Dictionaries<'a> {
+    pub lexicon: &'a [(String, String)],
+    pub ignore_words: &'a [(String, String)],
+}
+
 /// Score an UNSAVED record against the resolved corpus and return its candidate
 /// entities, without writing anything.
 ///
@@ -352,7 +421,7 @@ pub fn resolve_record(
     model: &MatchModel,
     source: &str,
     payload: &serde_json::Value,
-    lexicon: &[(String, String)],
+    dictionaries: Dictionaries<'_>,
     limit: usize,
 ) -> Result<ResolveResult> {
     if !config.sources.contains_key(source) {
@@ -389,7 +458,11 @@ pub fn resolve_record(
     // standardization cannot expand nicknames — which would make the probe
     // incomparable to the corpus it is being scored against.
     session.execute_batch(&format!("drop table if exists {LEXICON}"))?;
-    seed_lexicon(session, lexicon)?;
+    seed_lexicon(session, dictionaries.lexicon)?;
+    // The probe must see the same ignore-words dictionary the corpus was
+    // standardized with, for the same reason it re-seeds the lexicon above.
+    session.execute_batch(&format!("drop table if exists {IGNORE_WORDS}"))?;
+    seed_ignore_words(session, dictionaries.ignore_words)?;
     let probe_id = "__resolve_probe";
     let raw = "__resolve_raw";
     let std = "__resolve_std";
@@ -1910,6 +1983,7 @@ pub fn write_run_start(session: &Session, config: &Config, inputs: &PipelineInpu
         &model_version,
         &tf_snapshot_id,
         Some(&lexicon_fingerprint(inputs.lexicon)),
+        Some(&ignore_words_fingerprint(inputs.ignore_words)),
         inputs.rebuild_reason,
         resolved_json.as_deref(),
     )
@@ -1920,6 +1994,14 @@ pub fn write_run_start(session: &Session, config: &Config, inputs: &PipelineInpu
 /// one lexicon cannot be incrementally extended under another.
 fn lexicon_fingerprint(pairs: &[(String, String)]) -> String {
     er_std::lexicon::lexicon_hash(pairs.iter().map(|(a, b)| (a.as_str(), b.as_str())))
+}
+
+/// The ignore-words dictionary's contribution to the run fingerprint, for the
+/// same reason the lexicon has one: a change here changes what standardized
+/// values the corpus carries, so a corpus standardized under one dictionary
+/// cannot be incrementally extended under another.
+fn ignore_words_fingerprint(rows: &[(String, String)]) -> String {
+    er_std::ignore_words::ignore_words_hash(rows.iter().map(|(w, d)| (w.as_str(), d.as_str())))
 }
 
 /// The five `runs` columns the drift guard compares, read from the last
@@ -1943,6 +2025,7 @@ pub fn prior_fingerprint(session: &Session) -> Result<Option<er_versions::RunFin
             std_version: r.std_version,
             survivorship_version: r.survivorship_version,
             lexicon_hash: r.lexicon_hash,
+            ignore_words_hash: r.ignore_words_hash,
         }))
 }
 
@@ -1953,6 +2036,7 @@ pub fn current_fingerprint(
     config: &Config,
     model_version: &str,
     lexicon: &[(String, String)],
+    ignore_words: &[(String, String)],
 ) -> er_versions::RunFingerprint {
     er_versions::RunFingerprint {
         config_hash: er_config::config_hash(config),
@@ -1960,6 +2044,7 @@ pub fn current_fingerprint(
         std_version: config.versions.std_version.clone(),
         survivorship_version: config.versions.survivorship_version.clone(),
         lexicon_hash: Some(lexicon_fingerprint(lexicon)),
+        ignore_words_hash: Some(ignore_words_fingerprint(ignore_words)),
     }
 }
 
@@ -2045,6 +2130,7 @@ fn write_run_row(
     model_version: &str,
     tf_snapshot_id: &str,
     lexicon_hash: Option<&str>,
+    ignore_words_hash: Option<&str>,
     rebuild_reason: Option<&str>,
     // The ensemble this run scored with, resolved to concrete identities and
     // thresholds (E5b-2c). `None` for a single-model run, which is every run
@@ -2066,6 +2152,7 @@ fn write_run_row(
         &config.versions.std_version,
         &config.versions.survivorship_version,
         lexicon_hash,
+        ignore_words_hash,
         env!("CARGO_PKG_VERSION"),
         rebuild_reason,
     )?;
@@ -3718,6 +3805,9 @@ pub fn run_maintain(session: &Session, expire_older_than: &str) -> Result<serde_
 /// id + volatile stamps.
 pub struct PipelineInputs<'a> {
     pub lexicon: &'a [(String, String)],
+    /// `(word, dictionary)` rows — the ignore-words dictionary, seeded per run
+    /// and fingerprinted into the run ledger exactly like the lexicon.
+    pub ignore_words: &'a [(String, String)],
     pub deliveries: &'a [(String, String)],
     pub model: &'a MatchModel<'a>,
     pub run_id: &'a str,
@@ -3743,6 +3833,7 @@ impl<'a> PipelineInputs<'a> {
     #[must_use]
     pub fn full(
         lexicon: &'a [(String, String)],
+        ignore_words: &'a [(String, String)],
         deliveries: &'a [(String, String)],
         model: &'a MatchModel<'a>,
         run_id: &'a str,
@@ -3750,6 +3841,7 @@ impl<'a> PipelineInputs<'a> {
     ) -> Self {
         PipelineInputs {
             lexicon,
+            ignore_words,
             deliveries,
             model,
             run_id,
@@ -4164,10 +4256,12 @@ pub fn stage_init(
         &model_version,
         &tf_snapshot_id,
         Some(&lexicon_fingerprint(inputs.lexicon)),
+        Some(&ignore_words_fingerprint(inputs.ignore_words)),
         inputs.rebuild_reason,
         resolved_json.as_deref(),
     )?;
     seed_lexicon(session, inputs.lexicon)?;
+    seed_ignore_words(session, inputs.ignore_words)?;
     Ok(())
 }
 
@@ -4501,6 +4595,7 @@ pub fn stage_correct_init(
         er_versions::MODE_CORRECTION_PASS,
         &model_version,
         &tf_snapshot_id,
+        None,
         None,
         Some(er_versions::REBUILD_CORRECTION_PASS),
         resolved.as_deref(),
