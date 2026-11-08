@@ -13,6 +13,12 @@ terraform {
       source  = "hashicorp/random"
       version = "~> 3.6"
     }
+    # The DNS plane (§18.8). Same major as envs/dev — v5, whose record resource
+    # is `cloudflare_dns_record` (v4's was `cloudflare_record`).
+    cloudflare = {
+      source  = "cloudflare/cloudflare"
+      version = "~> 5.0"
+    }
   }
 }
 
@@ -34,3 +40,16 @@ provider "aws" {
     }
   }
 }
+
+# Credentials come from `CLOUDFLARE_API_TOKEN` in the environment, read by the
+# provider natively — the same convention envs/dev/versions.tf uses, and for the
+# reason stated there: a Terraform VARIABLE would put the token in the plan file
+# and in state, and the apply tier plans to `tfplan` and applies that file. This
+# way the token is never written anywhere Terraform persists.
+#
+# Only the apply tier is given it (scripts/ci/tf-cloudflare-token.sh, prod only).
+# The plan tier runs credential-free and stays that way: a `-refresh=false` plan
+# over Cloudflare resources needs no token, which edge.tf's header records as a
+# measured result along with the constraint it implies — no Cloudflare `data`
+# sources in this stack.
+provider "cloudflare" {}

@@ -507,6 +507,15 @@ jobs:
           aws-region: us-east-2
           role-to-assume: arn:aws:iam::797781631727:role/er-ci-tf-apply-prod
           role-chaining: true
+      - name: cloudflare token (prod only)
+        # envs/prod declares a Cloudflare provider — the DNS plane (§18.8) —
+        # and this is the only tier given its credential. It runs AFTER the
+        # prod hop above, because the token is fetched with the prod role's
+        # own permissions rather than from a repository secret, which is what
+        # keeps this workflow's "no repository secrets" property (see the
+        # header) true. The script argues the rest.
+        if: matrix.key == 'prod'
+        run: bash scripts/ci/tf-cloudflare-token.sh
       - name: terraform plan (to a file)
         env:
           DIR: ${{ matrix.dir }}

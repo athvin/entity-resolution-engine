@@ -72,12 +72,13 @@ Distinct `resource "aws_*"` blocks across `infra/terraform/`, by count:
    4  aws_kms_alias
    4  aws_kms_key
    4  aws_s3_bucket_lifecycle_configuration
+   4  aws_security_group
    4  aws_ssoadmin_account_assignment
    4  aws_ssoadmin_permission_set
    3  aws_cloudwatch_metric_alarm
    3  aws_s3_bucket_versioning
-   3  aws_security_group
    3  aws_ssoadmin_managed_policy_attachment
+   3  aws_vpc_security_group_ingress_rule
    2  aws_budgets_budget
    2  aws_cloudwatch_log_group
    2  aws_db_subnet_group
@@ -87,6 +88,7 @@ Distinct `resource "aws_*"` blocks across `infra/terraform/`, by count:
    2  aws_eks_access_policy_association
    2  aws_identitystore_group
    2  aws_identitystore_group_membership
+   2  aws_lb_listener
    2  aws_rds_cluster
    2  aws_rds_cluster_instance
    2  aws_route
@@ -94,6 +96,8 @@ Distinct `resource "aws_*"` blocks across `infra/terraform/`, by count:
    2  aws_route_table_association
    2  aws_ssoadmin_permission_set_inline_policy
    2  aws_subnet
+   1  aws_acm_certificate
+   1  aws_acm_certificate_validation
    1  aws_athena_workgroup
    1  aws_bcmdataexports_export
    1  aws_bedrock_foundation_model_agreement
@@ -116,6 +120,9 @@ Distinct `resource "aws_*"` blocks across `infra/terraform/`, by count:
    1  aws_iam_user_policy
    1  aws_iam_user_policy_attachment
    1  aws_internet_gateway
+   1  aws_lb
+   1  aws_lb_listener_rule
+   1  aws_lb_target_group
    1  aws_nat_gateway
    1  aws_organizations_account
    1  aws_organizations_organization
@@ -128,6 +135,9 @@ Distinct `resource "aws_*"` blocks across `infra/terraform/`, by count:
    1  aws_sns_topic_subscription
    1  aws_vpc
    1  aws_vpc_endpoint
+   1  aws_vpc_security_group_egress_rule
+   1  aws_wafv2_web_acl
+   1  aws_wafv2_web_acl_association
 ```
 
 ### Services and resource types with nothing declared
@@ -135,7 +145,6 @@ Distinct `resource "aws_*"` blocks across `infra/terraform/`, by count:
 Derived by set difference against the types above. A service adopted later
 drops off this list on the next regeneration, so an absence here cannot rot.
 
-- ACM
 - API Gateway
 - AWS Backup
 - CloudFront
@@ -144,7 +153,6 @@ drops off this list on the next regeneration, so an absence here cannot rot.
 - Cost Explorer (aws_ce_*)
 - DynamoDB
 - ElastiCache
-- Elastic Load Balancing
 - EventBridge
 - GuardDuty
 - Lambda
@@ -152,7 +160,6 @@ drops off this list on the next regeneration, so an absence here cannot rot.
 - SQS
 - Security Hub
 - Step Functions
-- WAF
 
 ### The alerting surface
 
