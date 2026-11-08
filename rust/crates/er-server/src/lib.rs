@@ -8456,6 +8456,7 @@ async fn webhooks_index(
 
 /// Admin+: delete a webhook (`DELETE /v1/orgs/{org}/webhooks/{webhook_id}`).
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct TagIn {
     name: String,
     #[serde(default)]
@@ -8862,6 +8863,7 @@ async fn delete_entity_link(
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct TagApplyIn {
     subject_type: String,
     subject_id: String,

@@ -38,6 +38,12 @@ const COLUMNS = [
  * one consistent file — every page carries the first page's snapshot, so a
  * concurrent run cannot shear the export (the §7.19 export job's synchronous
  * little sibling; the scheduled variant arrives with the parameterized job).
+ *
+ * The consistency claim is about ROWS. The tags column is a Postgres
+ * point-in-time read (tags have no snapshot to pin to), taken once before the
+ * first page: an application made mid-export can be stale in either
+ * direction, which the single prequery at least makes uniform within the
+ * column rather than sheared across it.
  */
 export async function POST(
   request: Request,

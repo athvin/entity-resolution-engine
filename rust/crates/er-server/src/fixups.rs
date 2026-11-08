@@ -107,6 +107,18 @@ const FIXUPS: &[(&str, Phase, Kind)] = &[
             after: "bbb067f8f6e59817fc972f51e6aa03379b9632bc268f189a7b0377fb06d00f87",
         },
     ),
+    (
+        "0005_tag_kind",
+        Phase::BeforeReconcile,
+        // `tags.kind` is NOT NULL, and the differ classifies a missing column
+        // on nullability alone — so without this fixup every store that
+        // already has `tags` would refuse to boot (ERR_SCHEMA_BREAKING) on
+        // the release that introduced the column. Safe: it adds a column with
+        // a default, which older releases never read — their INSERTs name
+        // their columns, so the default fills, and their SELECTs enumerate
+        // the columns they know.
+        Kind::Safe,
+    ),
 ];
 
 /// May a contract fixup run, given the catalog versions this store has recorded?
@@ -205,6 +217,7 @@ async fn run_fixup(tx: &tokio_postgres::Transaction<'_>, name: &str) -> Result<(
         "0002_backfill_dataset_ids" => backfill_dataset_ids(tx).await,
         "0003_per_dataset_locks" => per_dataset_locks(tx).await,
         "0004_dataset_id_required" => dataset_id_required(tx).await,
+        "0005_tag_kind" => tag_kind(tx).await,
         // Reaching this is a FIXUPS entry without a body — a bug in this
         // module, not in any database.
         other => unreachable!("fixup {other} is listed but has no body"),
@@ -416,6 +429,7 @@ pub(crate) async fn ensure_default_dataset_by_name(
 /// precise thing the re-key exists to allow. They are matched by COLUMN SET
 /// rather than by name, because Postgres named them and names are the
 /// fragile part.
+
 async fn dataset_id_required(tx: &tokio_postgres::Transaction<'_>) -> Result<(), SchemaError> {
     for (relation, required) in DATASET_SCOPED {
         tx.batch_execute(&format!(
@@ -440,6 +454,27 @@ async fn dataset_id_required(tx: &tokio_postgres::Transaction<'_>) -> Result<(),
     for (relation, columns) in SUPERSEDED_ORG_UNIQUES {
         drop_unique_on(tx, relation, columns).await?;
     }
+    Ok(())
+}
+
+/// 0005: `tags.kind` arrived NOT NULL, and the differ reads a missing NOT NULL
+/// column as breaking regardless of its default — so the column is added here,
+/// before the reconcile that would otherwise refuse it. Postgres fills the
+/// default for existing rows without a rewrite (11+), and `IF NOT EXISTS`
+/// keeps the replay idempotent on stores born after the column shipped.
+///
+/// The `kind IN ('user','system')` CHECK exists only on stores born fresh —
+/// the reconciler's add-column path emits no constraints, and this fixup
+/// matches that deliberately: enforcement is the route's (the create path
+/// hardcodes the value), so old and new stores differ only in where a bug
+/// would be caught, not in what is accepted. `apply_min_role` is nullable and
+/// needs no fixup — the reconcile adds it on its own.
+async fn tag_kind(tx: &tokio_postgres::Transaction<'_>) -> Result<(), SchemaError> {
+    tx.batch_execute(
+        "ALTER TABLE public.tags
+         ADD COLUMN IF NOT EXISTS kind text NOT NULL DEFAULT 'user'",
+    )
+    .await?;
     Ok(())
 }
 
@@ -602,7 +637,9 @@ mod tests {
     fn the_registry_classifies_every_fixup() {
         // The point of `Kind` is that appending to the registry forces a
         // decision. This asserts the decisions that exist are the ones
-        // reviewed: three entries, the last of them the first gated Contract.
+        // reviewed: 0005 adds a NOT NULL column with a default — Safe because
+        // older releases never read it, and its DDL fills the default for
+        // their INSERTs.
         let kinds: Vec<&str> = super::FIXUPS
             .iter()
             .map(|(_, _, k)| match k {
@@ -611,7 +648,7 @@ mod tests {
                 Kind::ContractUngated { .. } => "ungated",
             })
             .collect();
-        assert_eq!(kinds, vec!["safe", "ungated", "contract"]);
+        assert_eq!(kinds, vec!["safe", "ungated", "contract", "safe"]);
     }
 
     #[test]

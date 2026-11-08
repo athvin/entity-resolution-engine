@@ -399,6 +399,19 @@ async fn tags_are_named_applied_and_retired_without_losing_what_they_touched() {
             .status(),
         StatusCode::CREATED
     );
+    // And a caller cannot ASK for a system tag: the DTO denies unknown fields,
+    // so `kind` is a rejected body rather than a silently-ignored one (a
+    // caller who believed they minted a system tag is the failure this
+    // prevents).
+    assert_eq!(
+        make_body(
+            &steward_key,
+            serde_json::json!({ "name": "honest-mistake", "kind": "system" }),
+        )
+        .await
+        .status(),
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
 
     // ---- phase 7: apply_min_role, the per-tag permission ----------------------
     assert_eq!(

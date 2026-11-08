@@ -478,6 +478,7 @@ CREATE INDEX IF NOT EXISTS taggings_org_tag ON public.taggings (org_id, tag_id);
 CREATE INDEX IF NOT EXISTS taggings_org_subject ON public.taggings (org_id, subject_type, subject_id);
 CREATE UNIQUE INDEX IF NOT EXISTS taggings_unique_application ON public.taggings (org_id, tag_id, subject_type, subject_id);
 CREATE INDEX IF NOT EXISTS taggings_dataset ON public.taggings (dataset_id, tag_id);
+CREATE INDEX IF NOT EXISTS taggings_dataset_subject ON public.taggings (dataset_id, subject_type, subject_id);
 CREATE TABLE IF NOT EXISTS public.taggings_history (
   history_id bigserial NOT NULL,
   row_id text NOT NULL,

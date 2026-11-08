@@ -5,11 +5,13 @@ import type { Tagging } from "@/lib/entities/bindings/Tagging";
 
 /**
  * The export's tags column, prequeried once per export rather than per row
- * (#805): entity id -> the names of its LIVE tags, in application order.
+ * (#805): entity id -> the names of its LIVE tags.
  *
  * Joined through the active vocabulary — a taggings row naming a retired tag
  * drops out here exactly as the chip drops off the subject, because a CSV is
- * read by someone who cannot see the retirement, only the label.
+ * read by someone who cannot see the retirement, only the label. Order within
+ * a cell is the read's (subject_id), unspecified for a multi-tag entity —
+ * the cell is a set.
  */
 export function tagsByEntityId(
   vocabulary: readonly Tag[],

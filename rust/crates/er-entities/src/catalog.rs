@@ -3355,6 +3355,11 @@ indexes:
   # V17: the dataset-scoped read path.
   - name: taggings_dataset
     columns: [dataset_id, tag_id]
+  # The export's bulk prequery: one dataset's taggings of one kind, read in
+  # subject_id order (for_dataset). The trailing column serves the ORDER BY,
+  # so the capped read never sorts.
+  - name: taggings_dataset_subject
+    columns: [dataset_id, subject_type, subject_id]
 "#,
     ),
     (
