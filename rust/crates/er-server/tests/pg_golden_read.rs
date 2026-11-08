@@ -401,6 +401,43 @@ async fn golden_records_read_over_ducklake() {
     assert!(!groups.is_empty(), "base_10 has duplicate groups");
     assert!(groups[0]["member_count"].as_i64().unwrap() >= 2);
     assert!(groups[0]["members"].as_array().unwrap().len() >= 2);
+    // Every group carries its confidence: the master-included average of the
+    // members' attachments, the data-derived master, and the per-member map.
+    // base_10's groups formed from scored edges, so none may read null.
+    for g in groups {
+        let members: Vec<&str> = g["members"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| m.as_str().unwrap())
+            .collect();
+        let master = g["master_record_key"]
+            .as_str()
+            .unwrap_or_else(|| panic!("group names its master: {g:?}"));
+        assert!(members.contains(&master), "the master is a member: {g:?}");
+        let confs = g["member_confidences"]
+            .as_object()
+            .unwrap_or_else(|| panic!("group carries per-member confidences: {g:?}"));
+        // The average includes the master: the group's confidence is the
+        // (floored) mean over EVERY member, never the non-master mean.
+        let sum: i64 = members
+            .iter()
+            .map(|m| {
+                confs[*m]
+                    .as_i64()
+                    .unwrap_or_else(|| panic!("every member has an attachment: {g:?}"))
+            })
+            .sum();
+        let mean = sum as f64 / members.len() as f64;
+        let got = g["group_confidence"]
+            .as_i64()
+            .unwrap_or_else(|| panic!("group carries its confidence: {g:?}"))
+            as f64;
+        assert!(
+            (got - mean).abs() <= 1.0,
+            "group_confidence is the floored master-included mean ({mean}), got {got}"
+        );
+    }
 
     // O6: `min_members` raises the floor. The clusters an over-merge hides in
     // are the LARGE ones, and a page ordered by entity id will not surface them.
@@ -460,6 +497,15 @@ async fn golden_records_read_over_ducklake() {
     assert!(pairs[0].get("rec_a_key").is_some());
     assert!(pairs[0].get("match_probability").is_some());
     assert!(pairs[0].get("evidence").is_some());
+    // Every scored pair ships the one projection's display integer beside the
+    // probability: floor(100·p), the rule the UI renders verbatim.
+    assert!(
+        pairs.iter().all(|p| {
+            let prob = p["match_probability"].as_f64().unwrap();
+            p["confidence"].as_i64().unwrap() as f64 == (prob * 100.0).floor()
+        }),
+        "confidence is the floored 1–100 projection of the shipped probability"
+    );
 
     // Probability band: band_low=0.95 keeps only the high-confidence pairs.
     //
@@ -952,6 +998,11 @@ async fn golden_records_read_over_ducklake() {
         .unwrap();
     let csv = String::from_utf8(bytes.to_vec()).unwrap();
     assert!(csv.starts_with("entity_id,master_key,member_count,member_records,"));
+    assert!(
+        csv.lines().next().unwrap().ends_with(",group_confidence"),
+        "the export carries the group score as its last column: {}",
+        csv.lines().next().unwrap()
+    );
     assert!(csv.lines().count() >= 1, "at least the header row");
 
     // A viewer key can read (viewer+).

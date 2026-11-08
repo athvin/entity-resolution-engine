@@ -11,6 +11,7 @@ pub mod blocking;
 pub mod blocking_analysis;
 pub mod clustering;
 pub mod comparison;
+pub mod confidence;
 pub mod error;
 pub mod incremental;
 pub mod linker;

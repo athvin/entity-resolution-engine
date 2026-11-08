@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { WaterfallChart } from "@/components/review/waterfall-chart";
+import { confidenceLabel } from "@/components/review/decision-panel";
 import { useMatchPreview } from "@/lib/query/duplicates";
 import { useDatasetSlug } from "@/lib/use-dataset-slug";
 
@@ -79,7 +80,7 @@ export function MatchPreviewCard({ org }: { org: string }) {
                         <span className="text-muted-foreground">↔</span>
                         <span className="font-mono text-xs">{pair.rec_b_key}</span>
                         <span className="ml-auto tabular-nums">
-                          {(pair.match_probability * 100).toFixed(1)}%
+                          {confidenceLabel(pair.confidence)}
                         </span>
                       </button>
                       {open === key && (

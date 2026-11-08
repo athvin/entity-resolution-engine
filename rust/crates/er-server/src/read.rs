@@ -287,6 +287,88 @@ fn rows_to_values<T: serde::Serialize>(rows: &[T]) -> Vec<Value> {
         .collect()
 }
 
+/// The shipped `confidence` beside every item's `match_probability`: the
+/// display integer of the one projection (`dedupe_core::confidence`), so no
+/// client ever maps a score itself. Items with no score (a structural
+/// escalation is not a scored pair) get no field, matching how their
+/// `match_probability` reads null.
+fn with_confidence(items: &mut [Value]) {
+    for item in items {
+        let Some(p) = item.get("match_probability").and_then(Value::as_f64) else {
+            continue;
+        };
+        if let Some(obj) = item.as_object_mut() {
+            obj.insert(
+                "confidence".to_string(),
+                Value::from(dedupe_core::confidence::Confidence::from_probability(p).display()),
+            );
+        }
+    }
+}
+
+/// One duplicate group's confidence fields, from the page's within-group
+/// edges: `group_confidence` (the master-included average), the
+/// data-derived `master_record_key`, and per-member `member_confidences`
+/// keyed by record key. Nulls when the group carries no evidence at all.
+fn insert_group_confidence(
+    obj: &mut serde_json::Map<String, Value>,
+    members: &[String],
+    edges: &[(String, String, f64)],
+) {
+    match dedupe_core::confidence::group_score(members, edges) {
+        Some(score) => {
+            obj.insert(
+                "group_confidence".to_string(),
+                Value::from(score.group.display()),
+            );
+            obj.insert(
+                "master_record_key".to_string(),
+                Value::from(score.master),
+            );
+            obj.insert(
+                "member_confidences".to_string(),
+                Value::Object(
+                    score
+                        .members
+                        .into_iter()
+                        .map(|(k, c)| (k, Value::from(c.display())))
+                        .collect(),
+                ),
+            );
+        }
+        None => {
+            obj.insert("group_confidence".to_string(), Value::Null);
+            obj.insert("master_record_key".to_string(), Value::Null);
+            obj.insert(
+                "member_confidences".to_string(),
+                Value::Object(serde_json::Map::new()),
+            );
+        }
+    }
+}
+
+/// The within-group edges for an entity-id range, bucketed per entity so a
+/// pair's score never leaks across groups.
+fn edges_by_entity(
+    session: &Session,
+    snapshot: i64,
+    first: &str,
+    last: &str,
+) -> Result<std::collections::BTreeMap<String, Vec<(String, String, f64)>>, String> {
+    let rows =
+        er_entities::match_score::read::within_groups(session.connection(), snapshot, first, last)
+            .map_err(|e| e.to_string())?;
+    let mut by_entity: std::collections::BTreeMap<String, Vec<(String, String, f64)>> =
+        std::collections::BTreeMap::new();
+    for row in rows {
+        by_entity
+            .entry(row.entity_id)
+            .or_default()
+            .push((row.rec_a_key, row.rec_b_key, row.match_probability));
+    }
+    Ok(by_entity)
+}
+
 /// One resolved entity with its members, lineage, and events
 /// (`readapi.entity_detail`), snapshot-pinned. `None` if the entity is absent
 /// at that snapshot (→ 404).
@@ -433,6 +515,10 @@ pub fn duplicates(
         return Ok((Vec::new(), None));
     };
 
+    // The page's within-group evidence, fetched once for the whole id range
+    // rather than per group: active scored edges plus always-assertions.
+    let edges = edges_by_entity(session, snapshot, first, last)?;
+
     // The members of every entity in the page's id range, already ordered by
     // (entity_id, record_key) — so each group's list is record_key-ordered, the
     // way the old `list(.. ORDER BY record_key)` aggregate built it.
@@ -500,6 +586,19 @@ pub fn duplicates(
                 "member_count".to_string(),
                 Value::from(g.member_count.unwrap_or(0)),
             );
+            let member_keys: Vec<String> = member_lists
+                .get(g.entity_id.as_str())
+                .map(|vs| {
+                    vs.iter()
+                        .filter_map(|v| v.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default();
+            insert_group_confidence(
+                &mut obj,
+                &member_keys,
+                edges.get(g.entity_id.as_str()).map_or(&[], Vec::as_slice),
+            );
             obj.insert(
                 "members".to_string(),
                 Value::Array(
@@ -557,7 +656,8 @@ pub fn match_scores_list(
     .map_err(|e| e.to_string())?;
     let has_more = rows.len() as i64 > limit;
     let page = &rows[..rows.len().min(usize::try_from(limit).unwrap_or(0))];
-    let items = rows_to_values(page);
+    let mut items = rows_to_values(page);
+    with_confidence(&mut items);
     let next_cursor = has_more
         .then(|| {
             page.last().map(|r| {
@@ -610,7 +710,9 @@ pub fn uncertain_pairs(
         .filter(|r| !labelled.contains(&(r.rec_a_key.clone(), r.rec_b_key.clone())))
         .take(usize::try_from(limit).unwrap_or(0))
         .collect();
-    Ok(rows_to_values(&unlabelled))
+    let mut items = rows_to_values(&unlabelled);
+    with_confidence(&mut items);
+    Ok(items)
 }
 
 /// The retained metric series, newest first, with the derived rates a caller
@@ -857,7 +959,11 @@ pub fn reviews_list(
         filters.max_probability,
         limit + 1,
     ) {
-        Ok(rows) => Ok(typed_page(&rows, snapshot, limit, |r| &r.id)),
+        Ok(rows) => {
+            let (mut items, next) = typed_page(&rows, snapshot, limit, |r| &r.id);
+            with_confidence(&mut items);
+            Ok((items, next))
+        }
         Err(e) => {
             let s = e.to_string();
             if is_missing_table(&s) {
@@ -879,7 +985,11 @@ pub fn review_get(
     review_id: &str,
 ) -> Result<Option<Value>, String> {
     match er_entities::review::read::by_id(session.connection(), snapshot, review_id) {
-        Ok(rows) => Ok(rows_to_values(&rows).into_iter().next()),
+        Ok(rows) => {
+            let mut items = rows_to_values(&rows);
+            with_confidence(&mut items);
+            Ok(items.into_iter().next())
+        }
         Err(e) => {
             let s = e.to_string();
             if is_missing_table(&s) {
@@ -1201,6 +1311,47 @@ pub fn merge_plans(
         obj.insert("member_records".to_string(), Value::Array(members));
         items.push(Value::Object(obj));
     }
+
+    // The same group confidence the duplicates view shows, so the export and
+    // the screen agree by construction. The edges pin at the latest snapshot,
+    // matching this read's own unpinned current-state view of the lake.
+    if let (Some(first), Some(last)) = (
+        items
+            .first()
+            .and_then(|i| i.get("entity_id"))
+            .and_then(Value::as_str),
+        items
+            .last()
+            .and_then(|i| i.get("entity_id"))
+            .and_then(Value::as_str),
+    ) {
+        let snapshot = latest_snapshot(session)?;
+        let edges = edges_by_entity(session, snapshot, first, last)?;
+        for item in &mut items {
+            let Some(obj) = item.as_object_mut() else {
+                continue;
+            };
+            let entity_id = obj
+                .get("entity_id")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            let members: Vec<String> = obj
+                .get("member_records")
+                .and_then(Value::as_array)
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default();
+            insert_group_confidence(
+                obj,
+                &members,
+                edges.get(&entity_id).map_or(&[], Vec::as_slice),
+            );
+        }
+    }
     Ok(items)
 }
 
@@ -1210,7 +1361,7 @@ pub fn merge_plans(
 pub fn merge_plans_csv(items: &[Value]) -> String {
     let mut out = String::from(
         "entity_id,master_key,member_count,member_records,golden_given_name,\
-         golden_family_name,golden_email,golden_phone_e164\n",
+         golden_family_name,golden_email,golden_phone_e164,group_confidence\n",
     );
     let field = |v: &Value, k: &str| -> String {
         match v.get(k) {
@@ -1246,6 +1397,7 @@ pub fn merge_plans_csv(items: &[Value]) -> String {
             field(item, "family_name"),
             field(item, "email"),
             field(item, "phone_e164"),
+            field(item, "group_confidence"),
         ]
         .iter()
         .map(|c| csv_cell(c))

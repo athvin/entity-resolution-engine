@@ -1,0 +1,13 @@
+kind: statement
+operation: read
+description: "The within-group evidence behind a page of duplicate groups' confidence: every active scored edge whose endpoints are members of the same entity in the page's id range, plus every active always-assertion as a 1.0 edge (assertion-sourced edges are never persisted to match_scores, S4.4, and are score 1.0 by definition). The per-entity join is what keeps a pair score from leaking across groups: two records may be duplicates of each other only inside their own entity. A member held by a transitive or cut path with no direct edge of its own simply appears in no row — the caller averages the members that carry evidence rather than inventing a zero. Edges repeat freely (a pair scored by two ensemble members, or scored and asserted); the caller's max is indifferent. Reads `assertions` and `entity_membership` as well as `match_scores`, declared through `reads:` so the impact surface is explicit (E009)."
+reads: [assertion, entity_membership]
+params:
+  - { name: snapshot, type: bigint }
+  - { name: first, type: varchar }
+  - { name: last, type: varchar }
+returns:
+  - { name: entity_id, type: varchar, nullable: false }
+  - { name: rec_a_key, type: varchar, nullable: false }
+  - { name: rec_b_key, type: varchar, nullable: false }
+  - { name: match_probability, type: double, nullable: false }

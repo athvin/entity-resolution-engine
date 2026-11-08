@@ -562,6 +562,101 @@ LIMIT $4
         drop(__entered);
         UncertainPageRow::from_batches(&batches)
     }
+
+    /// One row of `within_groups`: The within-group evidence behind a page of duplicate groups' confidence: every active scored edge whose endpoints are members of the same entity in the page's id range, plus every active always-assertion as a 1.0 edge (assertion-sourced edges are never persisted to match_scores, S4.4, and are score 1.0 by definition). The per-entity join is what keeps a pair score from leaking across groups: two records may be duplicates of each other only inside their own entity. A member held by a transitive or cut path with no direct edge of its own simply appears in no row — the caller averages the members that carry evidence rather than inventing a zero. Edges repeat freely (a pair scored by two ensemble members, or scored and asserted); the caller's max is indifferent. Reads `assertions` and `entity_membership` as well as `match_scores`, declared through `reads:` so the impact surface is explicit (E009).
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct WithinGroupsRow {
+        pub entity_id: String,
+        pub rec_a_key: String,
+        pub rec_b_key: String,
+        pub match_probability: f64,
+    }
+
+    impl WithinGroupsRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![
+                ("entity_id", ::arrow::datatypes::DataType::Utf8),
+                ("rec_a_key", ::arrow::datatypes::DataType::Utf8),
+                ("rec_b_key", ::arrow::datatypes::DataType::Utf8),
+                ("match_probability", ::arrow::datatypes::DataType::Float64),
+            ]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "entity_id")?;
+                let c1: &::arrow::array::StringArray = crate::batch::col(batch, 1, "rec_a_key")?;
+                let c2: &::arrow::array::StringArray = crate::batch::col(batch, 2, "rec_b_key")?;
+                let c3: &::arrow::array::Float64Array =
+                    crate::batch::col(batch, 3, "match_probability")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        entity_id: crate::batch::req(crate::batch::opt_str(c0, i), "entity_id", i)?,
+                        rec_a_key: crate::batch::req(crate::batch::opt_str(c1, i), "rec_a_key", i)?,
+                        rec_b_key: crate::batch::req(crate::batch::opt_str(c2, i), "rec_b_key", i)?,
+                        match_probability: crate::batch::req(
+                            crate::batch::opt_f64(c3, i),
+                            "match_probability",
+                            i,
+                        )?,
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// The within-group evidence behind a page of duplicate groups' confidence: every active scored edge whose endpoints are members of the same entity in the page's id range, plus every active always-assertion as a 1.0 edge (assertion-sourced edges are never persisted to match_scores, S4.4, and are score 1.0 by definition). The per-entity join is what keeps a pair score from leaking across groups: two records may be duplicates of each other only inside their own entity. A member held by a transitive or cut path with no direct edge of its own simply appears in no row — the caller averages the members that carry evidence rather than inventing a zero. Edges repeat freely (a pair scored by two ensemble members, or scored and asserted); the caller's max is indifferent. Reads `assertions` and `entity_membership` as well as `match_scores`, declared through `reads:` so the impact surface is explicit (E009).
+    pub fn within_groups(
+        conn: &::duckdb::Connection,
+        snapshot: i64,
+        first: &str,
+        last: &str,
+    ) -> ::duckdb::Result<Vec<WithinGroupsRow>> {
+        const SQL: &str = "WITH members AS (
+  SELECT entity_id, record_key
+  FROM lake.main.entity_membership AT (VERSION => {snapshot})
+  WHERE entity_id >= $1 AND entity_id <= $2
+)
+SELECT a.entity_id, ms.rec_a_key, ms.rec_b_key, ms.match_probability
+FROM lake.main.match_scores AT (VERSION => {snapshot}) ms
+JOIN members a ON a.record_key = ms.rec_a_key
+JOIN members b ON b.record_key = ms.rec_b_key AND b.entity_id = a.entity_id
+WHERE ms.is_active
+UNION ALL
+SELECT a.entity_id, asn.rec_a_key, asn.rec_b_key, CAST(1.0 AS DOUBLE) AS match_probability
+FROM lake.main.assertions AT (VERSION => {snapshot}) asn
+JOIN members a ON a.record_key = asn.rec_a_key
+JOIN members b ON b.record_key = asn.rec_b_key AND b.entity_id = a.entity_id
+WHERE asn.kind = 'always' AND asn.active
+ORDER BY entity_id, rec_a_key, rec_b_key
+";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "match_score",
+            "read",
+            "within_groups",
+            "match_scores",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let sql = SQL.replace("{snapshot}", &snapshot.to_string());
+        let mut stmt = ::er_span::check(&__span, conn.prepare(&sql))?;
+        let batches = ::er_span::check(&__span, stmt.query_arrow(::duckdb::params![first, last]))?
+            .collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
+        WithinGroupsRow::from_batches(&batches)
+    }
 }
 
 pub mod update {

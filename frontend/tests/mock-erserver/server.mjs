@@ -1172,6 +1172,17 @@ const SOURCE_HASH = (() => {
 
 let state = initialState();
 
+/** The one 1–100 projection, exactly as er-server ships it: the display
+ * integer is the floor of 100·p, absent when there is no score. Both sides
+ * run IEEE-754 doubles, so the floor agrees bit-for-bit on the same input.
+ * Everything the mock serves with a `match_probability` passes through here —
+ * a UI that renders the shipped integer can only be tested against a mock
+ * that ships it. */
+function withConfidence(row) {
+  if (row.match_probability === null || row.match_probability === undefined) return row;
+  return { ...row, confidence: Math.floor(row.match_probability * 100) };
+}
+
 function send(res, status, body) {
   const payload = JSON.stringify(body);
   res.writeHead(status, {
@@ -2439,7 +2450,7 @@ const server = http.createServer((req, res) => {
       const next_cursor =
         rows.length > limit ? encodeCursor(0, items[items.length - 1].review_id) : null;
       return send(res, 200, {
-        items,
+        items: items.map(withConfidence),
         next_cursor,
         unscored_hidden: banded ? unscoredOpen : 0,
       });
@@ -2449,7 +2460,7 @@ const server = http.createServer((req, res) => {
       req.method === "GET"
     ) {
       const row = (state.reviews[match[1]] ?? []).find((r) => r.id === match[2]);
-      return row ? send(res, 200, row) : send(res, 404, { detail: "not found" });
+      return row ? send(res, 200, withConfidence(row)) : send(res, 404, { detail: "not found" });
     }
     if (
       (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/reviews\/([^/:]+):resolve$/.exec(
@@ -2591,16 +2602,27 @@ const server = http.createServer((req, res) => {
       // the real read API makes off the org's `entity_type`.
       const account = isAccountOrg(match[1]);
       return send(res, 200, {
-        items: rows.slice(0, Number(url.searchParams.get("limit") ?? 50)).map((row, index) => ({
-          entity_id: row.id,
-          member_count: 2,
-          members: account
+        items: rows.slice(0, Number(url.searchParams.get("limit") ?? 50)).map((row, index) => {
+          const members = account
             ? [`crm:C-${String(5000 + index * 3)}`, `vendors:V-${String(7000 + index * 3)}`]
-            : [`crm:C-${String(5000 + index * 3)}`, `webforms:W-${String(7000 + index * 3)}`],
-          ...(account
-            ? { company_name: row.company_name, domain: row.domain }
-            : { given_name: row.given_name, family_name: row.family_name, email: row.email }),
-        })),
+            : [`crm:C-${String(5000 + index * 3)}`, `webforms:W-${String(7000 + index * 3)}`];
+          // One within-group edge, so both members attach at it and the
+          // master-included average IS that edge — the same arithmetic the
+          // server runs, or the UI is being tested against a fiction.
+          const edge = 0.87 + (index % 3) * 0.04;
+          const attachment = Math.floor(edge * 100);
+          return {
+            entity_id: row.id,
+            member_count: 2,
+            members,
+            group_confidence: attachment,
+            master_record_key: members[0],
+            member_confidences: { [members[0]]: attachment, [members[1]]: attachment },
+            ...(account
+              ? { company_name: row.company_name, domain: row.domain }
+              : { given_name: row.given_name, family_name: row.family_name, email: row.email }),
+          };
+        }),
         snapshot: account ? 12 : 42,
         next_cursor: null,
       });
@@ -2635,6 +2657,9 @@ const server = http.createServer((req, res) => {
           master_key: policy === "most_recent" ? members[1] : members[0],
           member_count: members.length,
           member_records: members,
+          // The group confidence the duplicates view reports for this same
+          // group — one number, one projection, whichever surface asks.
+          group_confidence: Math.floor((0.87 + (index % 3) * 0.04) * 100),
           golden_given_name: row.given_name,
           golden_family_name: row.family_name,
           golden_email: row.email,
@@ -2657,7 +2682,11 @@ const server = http.createServer((req, res) => {
       let rows = state.matchScores[match[1]] ?? [];
       if (bandLow !== null) rows = rows.filter((r) => r.match_probability >= Number(bandLow));
       if (bandHigh !== null) rows = rows.filter((r) => r.match_probability < Number(bandHigh));
-      return send(res, 200, { items: rows.slice(0, limit), snapshot: 42, next_cursor: null });
+      return send(res, 200, {
+        items: rows.slice(0, limit).map(withConfidence),
+        snapshot: 42,
+        next_cursor: null,
+      });
     }
     // Newest first, a bare array — `read::imports_recent`. The fixtures below
     // are stored in this order (id …0003 before …0002).

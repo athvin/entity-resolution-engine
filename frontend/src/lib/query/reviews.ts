@@ -21,6 +21,11 @@ export interface ReviewRow {
   entity_id: string | null;
   reason: string;
   match_probability: number | null;
+  /** The score as the product shows it: the server's own 1–100 projection,
+   * floored to its display integer. Render it verbatim — never re-project
+   * `match_probability` client-side. Absent on structural escalations, which
+   * carry no score. */
+  confidence?: number | null;
   waterfall: Record<string, unknown> | null;
   status: string;
   first_seen_run_id: string;

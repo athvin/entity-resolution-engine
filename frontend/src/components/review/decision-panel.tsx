@@ -13,6 +13,15 @@ export function probabilityLabel(probability: number | null): string {
   return `${(probability * 100).toFixed(1)}%`;
 }
 
+/** A score the server already projected to the 1–100 scale: render it
+ * verbatim. Probability-domain labels (band bounds, thresholds) keep
+ * `probabilityLabel`; a per-record score is never re-projected client-side,
+ * so every surface shows the one projection's integer. */
+export function confidenceLabel(confidence: number | null | undefined): string {
+  if (confidence === null || confidence === undefined) return "no score";
+  return `${confidence.toString()}%`;
+}
+
 export const REASON_COPY: Record<string, string> = {
   gray_band: "scored between your review threshold and auto-merge — the engine is asking you",
   never_unsatisfiable: "a never-assertion cannot be honored without your help",
@@ -53,7 +62,7 @@ export function DecisionPanel({
             className="bg-secondary text-secondary-foreground ml-auto rounded-full px-2 py-0.5 font-sans text-xs"
             data-testid="review-probability"
           >
-            {probabilityLabel(review.match_probability)}
+            {confidenceLabel(review.confidence)}
           </span>
         </CardTitle>
         <p className="text-muted-foreground text-xs">

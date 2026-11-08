@@ -29,7 +29,7 @@ import {
   useReviewRecommendations,
 } from "@/lib/query/adjudicate";
 import { cn } from "@/lib/utils";
-import { DecisionPanel, probabilityLabel } from "./decision-panel";
+import { confidenceLabel, DecisionPanel } from "./decision-panel";
 import { RecommendationBadge } from "./recommendation-badge";
 import { SwipeCard } from "./swipe-card";
 import { useDatasetSlug } from "@/lib/use-dataset-slug";
@@ -608,7 +608,7 @@ export function ReviewInbox({ org, isSteward }: { org: string; isSteward: boolea
                 </div>
               </div>
               <span className="text-muted-foreground text-xs tabular-nums">
-                {probabilityLabel(row.match_probability)}
+                {confidenceLabel(row.confidence)}
               </span>
             </div>
           ))}
