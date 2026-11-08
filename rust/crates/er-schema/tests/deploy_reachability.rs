@@ -41,8 +41,7 @@ fn triggers_block(yaml: &str) -> &str {
         .or_else(|| rest[4..].find("\njobs:"))
         .or_else(|| rest[4..].find("\nenv:"))
         .or_else(|| rest[4..].find("\npermissions:"))
-        .map(|i| i + 4)
-        .unwrap_or(rest.len());
+        .map_or(rest.len(), |i| i + 4);
     &rest[..end]
 }
 
