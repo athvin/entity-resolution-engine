@@ -11,8 +11,7 @@
 # and say so. Nothing is deployed by tag either way, and an empty result is
 # fatal.
 #
-# Inputs (env): DEPLOY_SHA, PLATFORM_ONLY ("true" on the push path, where no
-# image was built by design). Must run from a checkout with full history —
+# Inputs (env): DEPLOY_SHA. Must run from a checkout with full history —
 # the staleness guard diffs `<built-from sha>..<DEPLOY_SHA>`, and a depth-1
 # clone would make it abstain on every deploy.
 # Outputs ($GITHUB_OUTPUT): er_api, er_web, reused_er_api, reused_er_web.
@@ -37,23 +36,14 @@ for repo in er-api er-web; do
 		#
 		# The annotation puts it in the run summary where it is read, rather
 		# than 140 lines into a step log where it was not. Two cases reach
-		# here and they deserve different volumes.
-		#
-		# On the `workflow_run` path a missing image is SUSPICIOUS: an images
-		# run did happen, so either that tree genuinely did not change or a
-		# build was skipped and this deploy is about to ship older code. That
-		# is the case the warning was added for, and it must stay loud.
-		#
-		# On the `push` path — a platform-only commit under `infra/k8s/**` —
-		# no image was built BY DESIGN, so reuse is the expected and correct
-		# outcome every single time. Warning there would fire on every such
-		# deploy and teach the reader to ignore the annotation, which would
-		# cost exactly the signal the loud case exists to provide.
-		if [ "$PLATFORM_ONLY" = "true" ]; then
-			echo "::notice title=$repo digest reused (platform-only deploy)::no image tagged $DEPLOY_SHA, which is expected: this commit touched only infra/k8s, so nothing was built. Rolling the newest digest in ECR ($d), which is what is already running."
-		else
-			echo "::warning title=$repo reused a stale digest::no image tagged $DEPLOY_SHA; rolled the newest digest in ECR instead ($d). Correct if that tree did not change in this commit — but if its build was skipped or failed, this deploy shipped older code than $DEPLOY_SHA."
-		fi
+		# here. The push path's quieter ::notice fork left with the trigger
+		# (#661): every deploy now arrives through a completed `images` run,
+		# where a missing image is either a tree that genuinely did not change
+		# (a platform-only commit — both build jobs skipped by design) or a
+		# build that was skipped when it should not have been. The staleness
+		# REFUSE below is what separates those two; this annotation only has to
+		# stay visible.
+		echo "::warning title=$repo reused a stale digest::no image tagged $DEPLOY_SHA; rolled the newest digest in ECR instead ($d). Correct if that tree did not change in this commit — but if its build was skipped or failed, this deploy shipped older code than $DEPLOY_SHA."
 		echo "$repo: no image tagged $DEPLOY_SHA — REUSED newest digest $d"
 		echo "reused_${repo//-/_}=1" >> "$GITHUB_OUTPUT"
 
@@ -72,7 +62,7 @@ for repo in er-api er-web; do
 		# it WAS built from. `git diff <that sha>..<DEPLOY_SHA>` over the
 		# image's own source paths says whether this deploy would ship older
 		# code than it claims. No image tag and no source change is the
-		# legitimate case (#587's platform-only path, or a tree that genuinely
+		# legitimate case (a platform-only commit, or a tree that genuinely
 		# did not move); no image tag WITH a source change is the bug.
 		built_from="$(aws ecr describe-images --repository-name "$repo" \
 			--image-ids "imageDigest=$d" \

@@ -12,6 +12,7 @@
 
 mod collector_allowlist;
 mod declared_names;
+mod deploy_reachability;
 mod freeform_sql;
 mod model_registry;
 mod span_boundaries;

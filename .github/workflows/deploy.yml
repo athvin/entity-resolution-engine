@@ -53,32 +53,31 @@ on:
   workflow_run:
     workflows: [images]
     types: [completed]
-  # PLATFORM-ONLY CHANGES, which the `workflow_run` path above cannot see.
+  # There is DELIBERATELY no `push:` trigger here, and one used to exist (#587,
+  # removed by #661). It was added on a misdiagnosis: #507's collector
+  # allowlist never deployed, and the diagnosis was "a platform-only commit
+  # never fires `images`, so `workflow_run` never fires". In fact `images.yml`'s
+  # own push paths already covered `infra/k8s/**` and `scripts/obs_up.sh` —
+  # a platform-only commit DOES run `images` (both build jobs skip, the run
+  # concludes success) and the deploy fires through `workflow_run`. The real
+  # cause was CANCELLATION: `cancel-in-progress: true` killed #507's images run
+  # mid-flight, fixed by #599 and by this file's own queueing semantics.
   #
-  # `images` only runs when something that goes INTO an image changes, so a
-  # commit touching just `infra/k8s/**` builds nothing, `images` never runs,
-  # and this workflow never fires — while `obs_up.sh`, which applies those
-  # values, lives inside the deploy job. The result is a change that merges
-  # green and is simply never applied.
+  # What the redundant trigger actually did, measured across every firing: it
+  # never once fired on the platform-only commit it was designed for, and on
+  # mixed commits it raced ahead of the image build — one correct staleness
+  # refusal, two cancellations, one duplicate deploy — putting red `deploy`
+  # runs on `main` that were pure noise. A red deploy that trains the reader to
+  # ignore deploy failures costs exactly the signal a real one needs.
   #
-  # Found by merging the collector's PII attribute allowlist (#507): committed,
-  # green, and absent from the cluster. It had been masked until then because
-  # every earlier observability change rode along with a Rust commit that did
-  # build an image.
+  # The invariant this leaves load-bearing: `deploy` is reachable ONLY through
+  # `images`, so `images.yml`'s push paths MUST keep covering the platform
+  # surfaces (`infra/k8s/**`, `scripts/obs_up.sh`, `scripts/ci/deploy-*.sh`,
+  # and `deploy.yml` itself). Trimming that list would make platform changes
+  # silently undeployable again — the original bug, through a third door.
+  # `er-schema/tests/deploy_reachability.rs` fails the required `test` context
+  # if any of them goes missing.
   #
-  # A `paths:` filter is safe HERE and nowhere near the gates: `deploy` is not
-  # a required status check (the required set is the rust, frontend and infra
-  # jobs), so a filtered run that never reports blocks nothing. On `rust.yml`
-  # or `frontend.yml` the same filter would block every PR forever, which is
-  # why those use the `detect`-job pattern instead.
-  push:
-    branches: [main]
-    paths:
-      - infra/k8s/**
-      - scripts/obs_up.sh
-      # The deploy's own extracted steps: without these, an edit to a deploy
-      # script would never trigger the workflow that runs it.
-      - scripts/ci/deploy-*.sh
   # The manual path, for redeploying a sha whose images already exist.
   workflow_dispatch:
     inputs:
@@ -106,7 +105,6 @@ jobs:
     # deploy, which is what they should mean.
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      github.event_name == 'push' ||
       (github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
@@ -122,16 +120,10 @@ jobs:
       # by default and `github.sha` here is the DEFAULT BRANCH tip, not the
       # built commit — using it would deploy whatever main happens to be now
       # rather than what was built, which is the subtle way this kind of split
-      # goes wrong.
-      #
-      # On the `push` path `github.sha` IS the pushed commit rather than a
-      # moving branch tip, so it is correct here for the same reason it is
-      # wrong above — the hazard is reading a branch tip, not the variable.
-      DEPLOY_SHA: ${{ github.event.inputs.sha || github.event.workflow_run.head_sha || github.sha }}
-      # True on the platform-only path, where NO image was built for this
-      # commit by design. It changes the stale-digest message below from a
-      # warning into a note — see the reasoning there.
-      PLATFORM_ONLY: ${{ github.event_name == 'push' }}
+      # goes wrong. There is deliberately no `github.sha` fallback: the two
+      # triggers above each supply their sha, and a third path should fail
+      # loudly rather than deploy a branch tip.
+      DEPLOY_SHA: ${{ github.event.inputs.sha || github.event.workflow_run.head_sha }}
     steps:
       - name: Name the commit being deployed
         run: echo "deploying $DEPLOY_SHA"
@@ -158,10 +150,10 @@ jobs:
       - name: Resolve image digests
         id: digests
         # §14.2: a deploy passes a DIGEST, never a tag — the reuse rules, the
-        # warning-versus-notice volumes and the staleness REFUSE live in
+        # reuse warning and the staleness REFUSE live in
         # scripts/ci/deploy-resolve-digests.sh with the code. Reads DEPLOY_SHA
-        # and PLATFORM_ONLY from the job env; needs the full-history checkout
-        # above for the `git diff` staleness guard.
+        # from the job env; needs the full-history checkout above for the
+        # `git diff` staleness guard.
         run: bash scripts/ci/deploy-resolve-digests.sh
       - name: Install helm
         # The shared installer, which owns the pin for all three of its
