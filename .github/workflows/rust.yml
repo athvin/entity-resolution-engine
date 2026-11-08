@@ -89,8 +89,8 @@
 # rust-toolchain selects the channel through its ref (`@stable`), which cannot
 # also carry the S9 `@<sha> # vTAG` pin the repo requires of every `uses:`.
 #
-# SPEED: every compile job shares an sccache compilation cache (the S3 backend
-# below — see the env block) and links with mold, so the jobs stop re-compiling
+# SPEED: every compile job shares an sccache compilation cache (the Actions
+# cache backend — see the env block for why it is not S3) and links with mold, so the jobs stop re-compiling
 # the same crate-units cold and the DuckDB static link is far cheaper. The heavy perf jobs (bench compile,
 # 50k scale) run only on main + nightly, not on every PR — the PR gate is
 # lint + test + the DuckLake integration e2e + cargo-deny.
@@ -105,12 +105,12 @@
 #      the other four compile jobs are restore-only (`save-if: false`).
 #      `coverage` keeps the writer on its own key — see the note there for why
 #      dropping it would buy 1.8 GiB and a timeout.
-#   2. The Actions cache is pruned to a budget nightly (`cache-prune`). Its
-#      original reason — sccache writing one entry per compilation object with
-#      nothing capping it — is GONE now that sccache is on S3. The job stays
-#      because sccache was never the only unbounded producer: `images.yml`'s
-#      `type=gha,mode=max` buildkit layer cache measured ~5,000 MiB, half the
-#      budget, and was evicting the entries that make CI fast. See the job.
+#   2. The Actions cache is pruned to a budget nightly (`cache-prune`), and its
+#      original reason is LIVE again: sccache writes one entry per compilation
+#      object with nothing else capping it. What changed is the ceiling it is
+#      capped against — the per-repository limit is purchasable now and set to
+#      20 GB, so the budget is sized to let sccache reach its natural size
+#      rather than to protect 10 GB from it. See the job.
 #   3. Every compile job reports `sccache --show-stats`, so the hit rate is
 #      observable rather than assumed.
 #
@@ -185,17 +185,40 @@ env:
   # pinned URL plus a checksum would remove the mirror from the path entirely.
   # Not done here, to keep a change on a required path small enough to trust.
   RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
-  # S3, not the Actions cache backend. The Actions one shares a 10 GB
-  # per-repository budget, LRU-evicted past it, which is why this workflow used
-  # to carry a nightly `cache-prune` job — a cap on the thing doing most of the
-  # work. When the repository sat at the ceiling GitHub evicted its largest LRU
-  # victim (the rust-cache entry every compile job restores from) and produced
-  # cold runs with nothing in the diff to explain them. S3 has no such budget,
-  # so both the prune and that eviction class are gone.
+  # The Actions cache backend, not S3 — and the reason is the bill, not speed.
+  # S3 egress was the single largest line item in the AWS account: measured by
+  # CUR 2.0 per-resource attribution, `er-ci-sccache` / `DataTransfer-Out-Bytes`
+  # was $209.32 of a $211.62 November S3 total, 2,425.7 GB. Storage was $0.02.
+  # GitHub-hosted runners are outside AWS, so every cache read is billed
+  # internet egress at ~$0.09/GB, and no VPC endpoint can reach it.
   #
-  # Bucket + roles are infra/terraform/envs/core/sccache.tf.
-  SCCACHE_BUCKET: er-ci-sccache-797781631727
-  SCCACHE_REGION: us-east-2
+  # The multiplier is compile jobs, not runs: ~8.7 sccache jobs per `rust` run,
+  # each pulling ~0.43 GB at a 99.8% hit rate, nearly all of it the same
+  # dependency objects a sibling job in the same run already fetched.
+  #
+  # What makes this a revert rather than a regression: the 10 GB per-repository
+  # ceiling that drove #350 to S3 became PURCHASABLE on 2025-11-20, at
+  # $0.07/GB-month above the included 10 GB. Eviction was the entire problem
+  # with this backend — `cache-prune`'s own comment records run 39783867347 at
+  # 96.65%/97.54% hit rate with the whole workflow in 8m03 ON THIS BACKEND — and
+  # the ceiling is the part money now fixes. The repository's eviction limit is
+  # raised to match; see #887.
+  #
+  # Note GitHub's own caveat on that setting: it "should not be used for
+  # controlling costs". It governs when LRU eviction fires, and eviction lags,
+  # so peak hourly usage — which is what is billed — can exceed it transiently.
+  # The spend guard is a billing spending limit, not this number.
+  #
+  # CACHE POISONING: this backend is strictly SAFER than the two S3 roles it
+  # replaces, which is why their reasoning does not reappear below. The S3 split
+  # existed because a PR able to write the cache is a path for a branch to plant
+  # object code a later `main` build consumes, and poisoning outlives the
+  # credential that planted it. GitHub enforces the same separation natively and
+  # unforgeably: a run "cannot restore caches created for child branches or
+  # sibling branches", so a PR-branch entry is unreadable from `main` while PRs
+  # still read what `main` populated — which was always nearly all the value.
+  # No IAM condition, no OIDC exchange, and nothing to misconfigure.
+  SCCACHE_GHA_ENABLED: "true"
 
 jobs:
   # Did anything outside `.claude/**`, `infra/terraform/**` and the agentic
@@ -564,7 +587,6 @@ jobs:
     timeout-minutes: 45
     permissions:
       contents: read
-      id-token: write # OIDC exchange for the sccache S3 role
     env:
       RUSTC_WRAPPER: sccache
     steps:
@@ -582,18 +604,6 @@ jobs:
         # The script lives at the repo root; this workflow defaults `run` to rust/.
         working-directory: ${{ github.workspace }}
         run: bash scripts/ci/install-mold.sh
-      # Pushes on main assume the WRITE role; everything else (PRs) the READ
-      # role. A PR that could write the cache would be a path for a branch to
-      # plant object code a later main build consumes, and poisoning outlives
-      # the credential that planted it. The repository is private, so that needs
-      # a collaborator rather than anyone at all — narrower, not closed.
-      # The read role still gives PRs the dependency tree, which
-      # is nearly all the value. See sccache.tf for the full reasoning and for
-      # the measurement showing a denied write is a counted miss, not a failure.
-      - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
-        with:
-          aws-region: us-east-2
-          role-to-assume: ${{ github.ref == 'refs/heads/main' && 'arn:aws:iam::797781631727:role/er-ci-sccache-write' || 'arn:aws:iam::797781631727:role/er-ci-sccache-read' }}
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       # No rust-cache. A restored `target/` carries a populated
       # `duckdb-sources/<key>/` with its `.complete` sentinel stripped, so
@@ -660,7 +670,6 @@ jobs:
     timeout-minutes: 45
     permissions:
       contents: read
-      id-token: write # OIDC exchange for the sccache S3 role
     env:
       RUSTC_WRAPPER: sccache
     steps:
@@ -681,18 +690,6 @@ jobs:
         # The script lives at the repo root; this workflow defaults `run` to rust/.
         working-directory: ${{ github.workspace }}
         run: bash scripts/ci/install-mold.sh
-      # Pushes on main assume the WRITE role; everything else (PRs) the READ
-      # role. A PR that could write the cache would be a path for a branch to
-      # plant object code a later main build consumes, and poisoning outlives
-      # the credential that planted it. The repository is private, so that needs
-      # a collaborator rather than anyone at all — narrower, not closed.
-      # The read role still gives PRs the dependency tree, which
-      # is nearly all the value. See sccache.tf for the full reasoning and for
-      # the measurement showing a denied write is a counted miss, not a failure.
-      - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
-        with:
-          aws-region: us-east-2
-          role-to-assume: ${{ github.ref == 'refs/heads/main' && 'arn:aws:iam::797781631727:role/er-ci-sccache-write' || 'arn:aws:iam::797781631727:role/er-ci-sccache-read' }}
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       # No rust-cache. A restored `target/` carries a populated
       # `duckdb-sources/<key>/` with its `.complete` sentinel stripped, so
@@ -761,12 +758,17 @@ jobs:
     # slow except the compile.
     #
     # Why a batch is always exposed to this: a merge-bus batch branch is a
-    # NOVEL TREE that has never been compiled, and the PR role holds only
-    # `er-ci-sccache-read`, so it cannot have been warmed. `build-cost.md`
-    # records the same effect for a lock-touching PR ("runs cold until it
-    # merges, by design"); a batch reaches it by being new rather than by
-    # changing a lockfile, and reaches it on EVERY run. Leaving this at 30
+    # NOVEL TREE, so its own compilation units have never been cached by any
+    # run — no backend can hand them over. It still restores the dependency
+    # objects `main` populated, which is the part a cache can help with.
+    # `build-cost.md` records the same effect for a lock-touching PR ("runs cold
+    # until it merges, by design"); a batch reaches it by being new rather than
+    # by changing a lockfile, and reaches it on EVERY run. Leaving this at 30
     # meant the bus could never land a batch that ran the Rust tier at all.
+    #
+    # This survived the move off S3 unchanged. The previous wording blamed the
+    # read-only PR role, which was never the operative reason: a tree nothing
+    # has compiled is cold whoever holds the credential.
     #
     # This only ever grants more time, never less: a genuinely hung job now
     # takes 45 minutes to be killed instead of 30.
@@ -782,7 +784,6 @@ jobs:
             args: --workspace --exclude er-match
     permissions:
       contents: read
-      id-token: write # OIDC exchange for the sccache S3 role
     env:
       RUSTC_WRAPPER: sccache
       # The debug-info settings that used to live here are now
@@ -814,18 +815,6 @@ jobs:
         # The script lives at the repo root; this workflow defaults `run` to rust/.
         working-directory: ${{ github.workspace }}
         run: bash scripts/ci/install-mold.sh
-      # Pushes on main assume the WRITE role; everything else (PRs) the READ
-      # role. A PR that could write the cache would be a path for a branch to
-      # plant object code a later main build consumes, and poisoning outlives
-      # the credential that planted it. The repository is private, so that needs
-      # a collaborator rather than anyone at all — narrower, not closed.
-      # The read role still gives PRs the dependency tree, which
-      # is nearly all the value. See sccache.tf for the full reasoning and for
-      # the measurement showing a denied write is a counted miss, not a failure.
-      - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
-        with:
-          aws-region: us-east-2
-          role-to-assume: ${{ github.ref == 'refs/heads/main' && 'arn:aws:iam::797781631727:role/er-ci-sccache-write' || 'arn:aws:iam::797781631727:role/er-ci-sccache-read' }}
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       # No rust-cache. A restored `target/` carries a populated
       # `duckdb-sources/<key>/` with its `.complete` sentinel stripped, so
@@ -974,7 +963,6 @@ jobs:
         partition: ["1/4", "2/4", "3/4", "4/4"]
     permissions:
       contents: read
-      id-token: write # OIDC exchange for the sccache S3 role
     env:
       RUSTC_WRAPPER: sccache
       # A RUNTIME gate: each lake test early-returns without this (er-cli
@@ -1007,11 +995,6 @@ jobs:
         # The script lives at the repo root; this workflow defaults `run` to rust/.
         working-directory: ${{ github.workspace }}
         run: bash scripts/ci/install-mold.sh
-      # PRs assume the READ role — see the server leg's copy for the reasoning.
-      - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
-        with:
-          aws-region: us-east-2
-          role-to-assume: ${{ github.ref == 'refs/heads/main' && 'arn:aws:iam::797781631727:role/er-ci-sccache-write' || 'arn:aws:iam::797781631727:role/er-ci-sccache-read' }}
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       # No rust-cache. A restored `target/` carries a populated
       # `duckdb-sources/<key>/` with its `.complete` sentinel stripped, so
@@ -1083,7 +1066,6 @@ jobs:
             suite: rest
     permissions:
       contents: read
-      id-token: write # OIDC exchange for the sccache S3 role
     env:
       RUSTC_WRAPPER: sccache
       DEDUPE_E2E_DUCKLAKE: "1"
@@ -1127,18 +1109,6 @@ jobs:
         # The script lives at the repo root; this workflow defaults `run` to rust/.
         working-directory: ${{ github.workspace }}
         run: bash scripts/ci/install-mold.sh
-      # Pushes on main assume the WRITE role; everything else (PRs) the READ
-      # role. A PR that could write the cache would be a path for a branch to
-      # plant object code a later main build consumes, and poisoning outlives
-      # the credential that planted it. The repository is private, so that needs
-      # a collaborator rather than anyone at all — narrower, not closed.
-      # The read role still gives PRs the dependency tree, which
-      # is nearly all the value. See sccache.tf for the full reasoning and for
-      # the measurement showing a denied write is a counted miss, not a failure.
-      - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
-        with:
-          aws-region: us-east-2
-          role-to-assume: ${{ github.ref == 'refs/heads/main' && 'arn:aws:iam::797781631727:role/er-ci-sccache-write' || 'arn:aws:iam::797781631727:role/er-ci-sccache-read' }}
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       # No rust-cache. A restored `target/` carries a populated
       # `duckdb-sources/<key>/` with its `.complete` sentinel stripped, so
@@ -1247,7 +1217,6 @@ jobs:
     if: github.event_name != 'pull_request' && github.event_name != 'merge_group'
     permissions:
       contents: read
-      id-token: write # OIDC exchange for the sccache S3 role
     env:
       RUSTC_WRAPPER: sccache
     steps:
@@ -1265,18 +1234,6 @@ jobs:
         # The script lives at the repo root; this workflow defaults `run` to rust/.
         working-directory: ${{ github.workspace }}
         run: bash scripts/ci/install-mold.sh
-      # Pushes on main assume the WRITE role; everything else (PRs) the READ
-      # role. A PR that could write the cache would be a path for a branch to
-      # plant object code a later main build consumes, and poisoning outlives
-      # the credential that planted it. The repository is private, so that needs
-      # a collaborator rather than anyone at all — narrower, not closed.
-      # The read role still gives PRs the dependency tree, which
-      # is nearly all the value. See sccache.tf for the full reasoning and for
-      # the measurement showing a denied write is a counted miss, not a failure.
-      - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
-        with:
-          aws-region: us-east-2
-          role-to-assume: ${{ github.ref == 'refs/heads/main' && 'arn:aws:iam::797781631727:role/er-ci-sccache-write' || 'arn:aws:iam::797781631727:role/er-ci-sccache-read' }}
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       # No rust-cache. A restored `target/` carries a populated
       # `duckdb-sources/<key>/` with its `.complete` sentinel stripped, so
@@ -1303,7 +1260,6 @@ jobs:
     if: github.event_name != 'pull_request' && github.event_name != 'merge_group'
     permissions:
       contents: read
-      id-token: write # OIDC exchange for the sccache S3 role
     env:
       RUSTC_WRAPPER: sccache
       DEDUPE_SCALE_TESTS: "1"
@@ -1322,18 +1278,6 @@ jobs:
         # The script lives at the repo root; this workflow defaults `run` to rust/.
         working-directory: ${{ github.workspace }}
         run: bash scripts/ci/install-mold.sh
-      # Pushes on main assume the WRITE role; everything else (PRs) the READ
-      # role. A PR that could write the cache would be a path for a branch to
-      # plant object code a later main build consumes, and poisoning outlives
-      # the credential that planted it. The repository is private, so that needs
-      # a collaborator rather than anyone at all — narrower, not closed.
-      # The read role still gives PRs the dependency tree, which
-      # is nearly all the value. See sccache.tf for the full reasoning and for
-      # the measurement showing a denied write is a counted miss, not a failure.
-      - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
-        with:
-          aws-region: us-east-2
-          role-to-assume: ${{ github.ref == 'refs/heads/main' && 'arn:aws:iam::797781631727:role/er-ci-sccache-write' || 'arn:aws:iam::797781631727:role/er-ci-sccache-read' }}
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       # No rust-cache. A restored `target/` carries a populated
       # `duckdb-sources/<key>/` with its `.complete` sentinel stripped, so
@@ -1541,23 +1485,32 @@ jobs:
       # single number: each prefix is capped independently, oldest-accessed
       # first.
       #
-      # That measurement is also why this job SURVIVED the sccache move to S3.
-      # sccache no longer writes here at all, so its 3,341 MiB line is now
-      # always zero and its budget is vestigial — kept only so a rollback to the
-      # GHA backend does not silently uncap it. buildkit — the producer that
-      # was doing the damage all along — moved to ECR too (er-buildcache;
-      # images.yml `cache-to: type=registry`), so BOTH budgets are now
-      # rollback insurance rather than live caps. images.yml keeps a
-      # transitional `type=gha` cache-FROM, which only reads; once that line
-      # is dropped this whole job's remaining value is the enumeration it
-      # prints, and retiring it becomes a fair question.
+      # THE sccache BUDGET IS LIVE AGAIN as of #887, which moved sccache back
+      # onto this backend to stop $209/month of S3 egress. It spent the S3 era
+      # vestigial — kept precisely so this rollback would not silently uncap it,
+      # which is the one reason that note existed and the reason it paid off.
+      #
+      # 5120 was its S3-era value and is now too tight. The repository's
+      # eviction limit is raised to 20 GB (Settings -> Actions, $0.07/GB-month
+      # above the included 10), and the other consumers come to ~6.5 GB once
+      # #889's single-writer guards drain the duplicate `pnpm-store` and
+      # `next-build` entries. 12288 MiB leaves sccache room to reach its natural
+      # size — it settled at 4.78 GB on S3 under a 14-day expiry — with headroom
+      # for growth between nightly runs, while still bounding the monotonic
+      # growth that evicted rust-cache in the first place. Pruning below the
+      # natural size deletes entries that are each a future compile, which is
+      # the mistake this comment's own history records.
+      #
+      # buildkit is the other half and is still rollback insurance: it moved to
+      # ECR (er-buildcache; images.yml `cache-to: type=registry`) and keeps only
+      # a transitional `type=gha` cache-FROM, which reads and never writes.
       #
       # What is deliberately NOT capped: `v1-rust*` (two ~364 MiB entries,
       # the thing all of this protects), `pnpm-store`, `next-build` and
       # `duckdb-extensions` — all small, all load-bearing, none growing without
       # bound. Only the two unbounded producers are listed.
       BUDGETS: |
-        sccache 5120
+        sccache 12288
         buildkit-blob 2048
       # Upper bound on deletions per run, so one night's work is bounded no
       # matter how large the backlog. It converges over successive runs, and
