@@ -345,9 +345,20 @@ locals {
 }
 
 resource "aws_wafv2_web_acl" "edge" {
-  name        = "er-prod-edge"
-  description = "Rate limits on the three unauthenticated write paths (§4.1)."
-  scope       = "REGIONAL"
+  name = "er-prod-edge"
+
+  # NO `§` AND NO PARENTHESES IN THIS STRING, which is not a style preference.
+  # WAFv2 validates `description` against
+  #   ^[\w+=:#@/\-,\.][\w+=:#@/\-,\.\s]+[\w+=:#@/\-,\.]$
+  # so the section marks used throughout this repository, and the brackets that
+  # usually accompany them, are both rejected — `CreateWebACL` fails with a
+  # `ValidationException` naming the regex and nothing else. It is a 400 at
+  # apply time, invisible to `validate` and to `plan`, and it cost one failed
+  # prod apply (#911) that had already created the certificate, the load
+  # balancer, both listeners and both DNS records before reaching this resource.
+  description = "Rate limits on the three unauthenticated write paths - see infrastructure.md 4.1"
+
+  scope = "REGIONAL"
 
   # Allow by default. This is a rate-limiting ACL, not an allowlist: blocking by
   # default would mean enumerating every legitimate path, and the application's
