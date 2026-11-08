@@ -4,7 +4,8 @@ How this repo's agent skills are organised, what belongs in one, and how the
 gate keeps them from rotting.
 
 The skills themselves live in `.claude/skills/`, and are bridged to
-`.agents/skills/` for Codex. This document is the standard they are held to;
+`.agents/skills/` for Codex and Kimi Code CLI. This document is the standard
+they are held to;
 `scripts/skills-check.sh` enforces the mechanical half of it and
 `scripts/ci/agent-bridge-check.sh` the bridge.
 
@@ -13,7 +14,7 @@ The skills themselves live in `.claude/skills/`, and are bridged to
 - [Why skills at all](#why-skills-at-all)
 - [The inventory](#the-inventory)
 - [Layout: why everything is at the root](#layout-why-everything-is-at-the-root)
-- [The Codex bridge: same skills, different filenames](#the-codex-bridge-same-skills-different-filenames)
+- [The agent bridge: same skills, different filenames](#the-agent-bridge-same-skills-different-filenames)
 - [Authoring rules](#authoring-rules)
 - [No skill states a count](#no-skill-states-a-count)
 - [The gate](#the-gate)
@@ -72,9 +73,9 @@ the same fix.
 | `project-board` | the `gh project` surface for user-owned project number 2 and the `project` scope it needs |
 | `rust-conventions` | that `make check` (not the bare cargo trio) is the finish line |
 | `security` | the attack surface (internet-facing Next.js BFF in front of the privileged Rust er-server control plane) |
-| `skill-audit` | the judgment half of the skill standard the gate cannot mechanise: whether a sentence survives the economy test |
+| `skill-audit` | the judgment half of the skill standard the gate cannot mechanise — whether a sentence survives the economy test |
 | `skill-writer` | triages whether the brief should become a skill at all rather than a CLAUDE.md line or a path-scoped rule or a hook (user-invoked only) |
-| `sql-analysis` | the E0xx diagnostics and their remedies, the rewrite step, what `mode: partial` skips |
+| `sql-analysis` | the E0xx diagnostics and their remedies, the rewrite step, what partial mode skips |
 | `stageshow` | Build faux product UI that looks like a real product, as a still illustration or an animated demo with a cursor |
 <!-- END GENERATED: skill-inventory -->
 
@@ -100,14 +101,16 @@ question like "how does the BFF boundary work?" fails to trigger when no
 matching file happens to be open. Precise descriptions with explicit negative
 routing do the job better.
 
-## The Codex bridge: same skills, different filenames
+## The agent bridge: same skills, different filenames
 
-Codex runs against this clone as well, Kimi K3 included — Kimi is the same
-`codex` binary under `--profile kimi`, reading a `$CODEX_HOME/<name>.config.toml`
-profile, so every statement here covers it. Codex looks for skills at
-`.agents/skills/` and instructions at `AGENTS.md`, and reads neither Claude Code
-name. The skills are still authored **once**, and bridged with relative
-symlinks:
+Codex runs against this clone as well, and so does **Kimi Code CLI** (`kimi`,
+`@moonshot-ai/kimi-code`) — a separate binary with its own config under
+`~/.kimi-code`. Reaching Kimi K3 through `codex --profile kimi` is a different
+thing: that is the same `codex` binary reading a
+`$CODEX_HOME/<name>.config.toml` profile, and it behaves as Codex does
+throughout this document. All of them look for skills at `.agents/skills/` and
+instructions at `AGENTS.md`, and read neither Claude Code name. The skills are
+still authored **once**, and bridged with relative symlinks:
 
 ```
 .agents/skills/<name> -> ../../.claude/skills/<name>
@@ -178,6 +181,22 @@ It prints the skill roots table, the per-skill descriptions, and an
   117 of its 989 characters, every routing clause included in what was
   discarded — while the description-budget table above reported the full length,
   because the gate measures the raw line.
+- **A `: ` in an unquoted frontmatter value is a parse error, and only one of
+  the three agents says so.** YAML cannot tell it from a nested mapping key.
+  Claude Code and Codex both accept the file anyway; Kimi Code CLI rejects it
+  and loads the skill as if it did not exist, so the skill is simply absent in
+  one agent and present in the other two. Six were in that state when the rule
+  was written — `aws-account-operations`, `entity-framework`, `land-pr`,
+  `landing-page`, `skill-audit`, `sql-analysis` — and `land-pr`'s was not in a
+  description at all but in `argument-hint: [a] [b] [c]`, two juxtaposed flow
+  sequences, which is why `frontmatter_scalar_breaks_yaml` is driven over every
+  top-level key rather than just the two the other rules read.
+
+  **Reword rather than quote a `description`.** Quoting is legal YAML and is the
+  right fix for any other key, but `gen_description_budget` and the Codex
+  truncation generator both extract the description with
+  `sed -n 's/^description: //p'`, which would carry the quote characters
+  straight into the generated tables. A ` — ` reads the same and costs one byte.
 
 ### What cannot live in the repo, and what is derived into place instead
 
@@ -306,21 +325,21 @@ can still accept a routing clause.
 |   26 | `er-engine-ops` | 998 |
 |   36 | `security` | 988 |
 |   40 | `frontend-bff` | 984 |
-|   41 | `aws-account-operations` | 983 |
 |   41 | `er-server-control-plane` | 983 |
+|   42 | `aws-account-operations` | 982 |
 |   45 | `project-board` | 979 |
 |   60 | `skill-audit` | 964 |
 |   62 | `rust-conventions` | 962 |
 |   63 | `observability` | 961 |
-|   66 | `entity-framework` | 958 |
+|   69 | `entity-framework` | 955 |
 |   69 | `land-pr` | 955 |
 |   72 | `infra-platform` | 952 |
 |   76 | `health-sweep` | 948 |
 |   77 | `frontend-design-system` | 947 |
 |   80 | `ducklake-lakehouse` | 944 |
+|   86 | `landing-page` | 938 |
 |   88 | `frontend-data-ui` | 936 |
 |   89 | `frontend-testing` | 935 |
-|   90 | `landing-page` | 934 |
 |   96 | `er-matching` | 928 |
 |   99 | `ci-and-supply-chain` | 925 |
 |  102 | `claim-ticket` | 922 |
@@ -328,7 +347,7 @@ can still accept a routing clause.
 |  127 | `skill-writer` | 897 |
 |  129 | `pr-review` | 895 |
 |  177 | `api-contract` | 847 |
-|  190 | `sql-analysis` | 834 |
+|  193 | `sql-analysis` | 831 |
 |  342 | `pentest` | 682 |
 |  412 | `stageshow` | 612 |
 
@@ -339,8 +358,8 @@ means trimming its **what** clause first, which is the documented fix:
 - `er-engine-ops` — 26 characters free
 - `security` — 36 characters free
 - `frontend-bff` — 40 characters free
-- `aws-account-operations` — 41 characters free
 - `er-server-control-plane` — 41 characters free
+- `aws-account-operations` — 42 characters free
 - `project-board` — 45 characters free
 
 A second cap applies that this repo does not set: **Codex truncates
@@ -353,24 +372,24 @@ measured harmless, lost trigger vocabulary measured as a misroute.
 | `project-board` | TRIGGER TEXT | 331 |
 | `skill-audit` | TRIGGER TEXT | 316 |
 | `observability` | TRIGGER TEXT | 313 |
-| `entity-framework` | TRIGGER TEXT | 310 |
+| `entity-framework` | TRIGGER TEXT | 307 |
 | `land-pr` | TRIGGER TEXT | 307 |
 | `health-sweep` | TRIGGER TEXT | 300 |
 | `frontend-design-system` | TRIGGER TEXT | 299 |
+| `landing-page` | TRIGGER TEXT | 290 |
 | `frontend-data-ui` | TRIGGER TEXT | 288 |
 | `frontend-testing` | TRIGGER TEXT | 287 |
-| `landing-page` | TRIGGER TEXT | 286 |
 | `er-matching` | TRIGGER TEXT | 280 |
 | `ci-and-supply-chain` | TRIGGER TEXT | 277 |
 | `claim-ticket` | TRIGGER TEXT | 274 |
 | `skill-writer` | TRIGGER TEXT | 249 |
 | `pr-review` | TRIGGER TEXT | 247 |
-| `sql-analysis` | TRIGGER TEXT | 186 |
+| `sql-analysis` | TRIGGER TEXT | 183 |
 | `er-engine-ops` | tail only | 350 |
 | `security` | tail only | 340 |
 | `frontend-bff` | tail only | 336 |
-| `aws-account-operations` | tail only | 335 |
 | `er-server-control-plane` | tail only | 335 |
+| `aws-account-operations` | tail only | 334 |
 | `rust-conventions` | tail only | 314 |
 | `infra-platform` | tail only | 304 |
 | `ducklake-lakehouse` | tail only | 296 |

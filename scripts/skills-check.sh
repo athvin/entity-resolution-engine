@@ -137,6 +137,16 @@ frontmatter_value() {
 	' "$file"
 }
 
+# Every TOP-LEVEL key in a SKILL.md frontmatter block, one per line. Leading
+# whitespace is what excludes a nested mapping's keys, so `stageshow`'s
+# `metadata:` block contributes `metadata` and not `version`.
+frontmatter_keys() {
+	awk 'NR == 1 && $0 != "---" { exit }
+	     NR == 1 { infm = 1; next }
+	     infm && $0 == "---" { exit }
+	     infm && /^[A-Za-z][A-Za-z0-9_-]*:/ { sub(/:.*/, ""); print }' "$1"
+}
+
 # A ` #` inside an unquoted YAML scalar opens a comment, so the value ENDS
 # there — silently, with no parse error, in every YAML reader. `project-board`
 # carried `user-owned project #2 "Product Roadmap"` and lost 872 of its 989
@@ -150,6 +160,62 @@ frontmatter_value() {
 # rule that matches nothing is indistinguishable from a clean tree.
 desc_truncated_by_yaml_comment() {
 	[[ $1 == *' #'* ]]
+}
+
+# The sibling of the rule above, one character apart and the more expensive of
+# the two: a ` #` truncates a value, this drops the whole SKILL.md.
+#
+# A `: ` inside an UNQUOTED plain scalar is not text, it is a parse error — YAML
+# cannot distinguish it from a nested mapping key. The three agents that read
+# these files disagree about it, which is why it survived so long: Claude Code
+# and Codex both accept it, and Kimi Code CLI — a separate binary from
+# `codex --profile kimi`, reading the same `.agents/skills/` bridge — rejects the
+# file and loads nothing. Six skills were in that state when this rule was
+# written (`aws-account-operations`, `entity-framework`, `land-pr`,
+# `landing-page`, `skill-audit`, `sql-analysis`): authored once, bridged
+# correctly, and invisible in one of the three agents anyway.
+#
+# Deliberately NOT a YAML parser — reimplementing one in bash would be the
+# bigger risk. It covers the shapes that actually break a plain scalar:
+#
+#   - it contains `: `, or ends in `:`
+#   - it opens a flow collection that is not the whole value, which is how
+#     `land-pr` broke: `argument-hint: [a] [b]` is two juxtaposed sequences
+#
+# A quoted scalar is legal whatever it holds, so that returns false first. The
+# bracket walk tracks depth rather than finding the first `]`, so a legitimately
+# nested `[a, [b]]` is not failed; a bracket inside a quoted string inside a
+# flow collection would still fool it, and no frontmatter here is that shape.
+#
+# Its own function so skills-check-test.sh can lift it and feed it both sides.
+frontmatter_scalar_breaks_yaml() {
+	local v=$1
+	# No value means a block mapping follows (`metadata:`), not a scalar.
+	[[ -n $v ]] || return 1
+	# A quoted scalar may contain anything, including the above.
+	case $v in
+	'"'* | "'"*) return 1 ;;
+	esac
+	[[ $v == *': '* ]] && return 0
+	[[ $v == *: ]] && return 0
+	case $v in
+	\[* | \{*)
+		local i ch depth=0 closed=-1
+		for ((i = 0; i < ${#v}; i++)); do
+			ch=${v:$i:1}
+			case $ch in
+			'[' | '{') depth=$((depth + 1)) ;;
+			']' | '}')
+				depth=$((depth - 1))
+				((depth > 0)) || { closed=$i; break; }
+				;;
+			esac
+		done
+		((closed < 0)) && return 0
+		[[ ${v:$((closed + 1))} =~ [^[:space:]] ]] && return 0
+		;;
+	esac
+	return 1
 }
 
 # Body = everything after the closing frontmatter delimiter.
@@ -240,6 +306,17 @@ lint_one_skill() {
 			err "$slug: description contains ' #', which YAML reads as a comment — every character after it is discarded before the model sees it; reword (\"project number 2\") or quote the whole scalar"
 		fi
 	fi
+
+	# Every top-level scalar, not only `description`: `land-pr` broke on
+	# `argument-hint`, which no other rule here reads.
+	local fm_key fm_val
+	while IFS= read -r fm_key; do
+		[[ -n $fm_key ]] || continue
+		fm_val=$(frontmatter_value "$skill_md" "$fm_key")
+		if frontmatter_scalar_breaks_yaml "$fm_val"; then
+			err "$slug: frontmatter '$fm_key' is not valid YAML — an unquoted plain scalar may not contain ': ' or end in ':', and a flow sequence must be the whole value. Claude Code and Codex tolerate it; Kimi Code CLI drops the entire skill. Reword it (' — ' reads the same), or quote the scalar — but not 'description', which the generators extract with a bare sed that would carry the quotes into the generated tables."
+		fi
+	done < <(frontmatter_keys "$skill_md")
 
 	# --- body size -----------------------------------------------------------
 	body_lines=$(body_line_count "$skill_md")

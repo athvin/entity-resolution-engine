@@ -233,6 +233,119 @@ else
         "a predicate nothing invokes is not a gate"
 fi
 
+# --- the strict-YAML frontmatter rule ---------------------------------------
+#
+# Six skills shipped with frontmatter that is not valid YAML, and the reason it
+# went unnoticed for so long is that the three agents reading these files
+# disagree: Claude Code and Codex both tolerate a `: ` inside an unquoted plain
+# scalar, and Kimi Code CLI — a separate binary from `codex --profile kimi`,
+# reading the same `.agents/skills/` bridge — rejects the file and loads the
+# skill as if it were not there. `aws-account-operations`, `entity-framework`,
+# `land-pr`, `landing-page`, `skill-audit` and `sql-analysis` were each
+# invisible in one of the three.
+#
+# Driven from both sides for the reason the rule above is: the way this dies is
+# by matching nothing, which reads exactly like a clean tree. The negative
+# cases carry the weight — `[issue-number]` and a bare `a:b` are both legal
+# YAML, and a rule that flagged them would push authors into quoting scalars
+# that the generators then cannot read.
+
+if [ -z "$(extract frontmatter_scalar_breaks_yaml)" ]; then
+    no "frontmatter_scalar_breaks_yaml() not found in $SCRIPT — was it renamed?"
+else
+    # shellcheck disable=SC1090
+    eval "$(extract frontmatter_scalar_breaks_yaml)"
+    strict_bad=""
+    # Must flag. The first six are the real shipped values, verbatim.
+    while IFS= read -r s; do
+        [ -n "$s" ] || continue
+        frontmatter_scalar_breaks_yaml "$s" || strict_bad="$strict_bad
+    missed: $s"
+    done <<'STRICT_FLAG'
+and two traps: cost-allocation tags never backfill
+the rewrite step, `mode: partial` and the planner stubs
+why `output: 'export'` and `ensureStatic` are unavailable
+the gate cannot mechanise: whether a sentence survives
+Read-only: it reports findings and never edits the skill.
+[pr-number-or-url] [AUTO_MERGE=true|false] [WATCH_WINDOW=30m]
+a value that ends in a colon:
+{a, b} with trailing text
+STRICT_FLAG
+    # Must NOT flag: every one of these is legal YAML. A `:` with no space
+    # after it is what makes a URL survive; a flow sequence that IS the whole
+    # value is how three skills spell their argument-hint; a quoted scalar may
+    # contain anything at all.
+    while IFS= read -r s; do
+        [ -n "$s" ] || continue
+        if frontmatter_scalar_breaks_yaml "$s"; then
+            strict_bad="$strict_bad
+    false positive: $s"
+        fi
+    done <<'STRICT_PASS'
+[issue-number]
+[dev|prod]
+<what the skill should do, or findings to apply>
+Explains the design language — the Tailwind v4 CSS-first tokens in globals.css
+see https://example.com/x for the rest
+"a quoted scalar: with a colon is legal"
+'single quoted: also legal'
+[a, [b]]
+a:b with no space is a legal plain scalar
+true
+STRICT_PASS
+    # The empty value separately: `metadata:` opens a block mapping and must
+    # not be read as a defective scalar. A heredoc cannot carry it.
+    if frontmatter_scalar_breaks_yaml ""; then
+        strict_bad="$strict_bad
+    false positive: the empty value (a block mapping like metadata:)"
+    fi
+    if [ -n "$strict_bad" ]; then
+        no "frontmatter_scalar_breaks_yaml() does not discriminate" "$strict_bad"
+    else
+        ok "frontmatter_scalar_breaks_yaml() flags unparseable plain scalars and only those"
+    fi
+fi
+
+# `frontmatter_keys` is the half that can fail silently: if it stops yielding
+# keys, the rule above examines nothing and every skill passes. So assert it
+# returns the TOP-LEVEL keys and, specifically, that it does not descend into
+# `stageshow`'s `metadata:` block and return `version`.
+if [ -z "$(extract frontmatter_keys)" ]; then
+    no "frontmatter_keys() not found in $SCRIPT — was it renamed?"
+else
+    # shellcheck disable=SC1090
+    eval "$(extract frontmatter_keys)"
+    printf -- '---\nname: house\ndescription: d\nargument-hint: [x]\nmetadata:\n  version: 1.1.1\n---\n\nbody\n' >"$tmp/keys.md"
+    got=$(frontmatter_keys "$tmp/keys.md" | tr '\n' ' ')
+    if [ "$got" = "name description argument-hint metadata " ]; then
+        ok "frontmatter_keys() returns top-level keys only (not the nested 'version')"
+    else
+        no "frontmatter_keys() returned the wrong set" \
+            "expected 'name description argument-hint metadata ', got '$got'"
+    fi
+fi
+
+# A predicate nothing calls is not a gate — the same wiring assertion the rule
+# above carries, and it must be an `err`, not a `warn`: a skill the agent never
+# loaded is not a style problem.
+if grep -q 'frontmatter_scalar_breaks_yaml "\$fm_val"' "$SCRIPT" &&
+    grep -A1 'if frontmatter_scalar_breaks_yaml "\$fm_val"; then' "$SCRIPT" | grep -q 'err '; then
+    ok "the strict-YAML rule is wired into the lint as an error"
+else
+    no "the strict-YAML rule is not called from the lint, or no longer calls err" \
+        "a predicate nothing invokes is not a gate"
+fi
+
+# And the rule must be driven over EVERY top-level key, not just description.
+# `land-pr` broke on `argument-hint`; a loop narrowed back to `$desc` would
+# pass this repo's tree today and miss the next one.
+if grep -q 'done < <(frontmatter_keys "\$skill_md")' "$SCRIPT"; then
+    ok "the strict-YAML rule iterates every frontmatter key"
+else
+    no "the strict-YAML rule no longer iterates frontmatter_keys" \
+        "land-pr's defect was in argument-hint, which no other rule reads"
+fi
+
 # --- the aws-footprint absence list is a real set difference ---------------
 #
 # `gen_aws_footprint` derives "services with nothing declared" by matching a

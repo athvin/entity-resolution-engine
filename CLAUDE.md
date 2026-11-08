@@ -364,13 +364,14 @@ is written to `~`. Those nested skills load lazily — only once a file under
 from the repository root. The root `.claude/settings.json` carries the one
 bridging hook that actually runs.
 
-### A second agent reads this repo, and it reads different filenames
+### Other agents read this repo, and they read different filenames
 
-Codex runs here too — including Kimi K3, which is the same `codex` binary under
-`--profile kimi`, so everything below covers both. It discovers skills at
-`.agents/skills/` and instructions at `AGENTS.md`, and reads **neither**
-`.claude/skills/` nor `CLAUDE.md`. Both are authored once in the Claude Code
-locations and bridged across by symlinks:
+Codex runs here too, and so does **Kimi Code CLI** (`kimi`) — a separate binary
+from Moonshot, not to be confused with reaching Kimi K3 through `codex
+--profile kimi`, which is the same `codex` binary and behaves as Codex does.
+All of them discover skills at `.agents/skills/` and instructions at
+`AGENTS.md`, and read **neither** `.claude/skills/` nor `CLAUDE.md`. Both are
+authored once in the Claude Code locations and bridged across by symlinks:
 
 ```
 .agents/skills/<name> -> ../../.claude/skills/<name>
@@ -382,6 +383,18 @@ rides ungated in `rust.yml`'s `skills` job — because a skills-only pull reques
 is exactly the shape `detect` skips, and so exactly the one that can orphan a
 symlink. **Add a skill and you add its symlink**, or it works in one tool and
 does not exist in the other.
+
+**A bridged file still has to parse, and the three readers do not agree about
+what parses.** Claude Code and Codex both tolerate a `: ` inside an unquoted
+YAML plain scalar; Kimi Code CLI rejects the file and loads the skill as if it
+were absent, logging a `SkillParseError` to `~/.kimi-code/logs/` that nothing
+in this repo reads. Six skills were in exactly that state — bridged correctly,
+and invisible in one of the three agents. `skills-check.sh`'s
+`frontmatter_scalar_breaks_yaml` now fails that in `make skills-check`, so the
+rule to know is that **a frontmatter value may not contain `: ` unless it is
+quoted** — and for `description` specifically the fix is to reword, because the
+generators extract it with a bare `sed` that would carry the quotes into their
+output.
 
 **The rest of `.claude/settings.json` is per-developer state in `$CODEX_HOME`,
 so no repo file can supply it — but two of the three can be _derived_.** Run
