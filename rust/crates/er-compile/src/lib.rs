@@ -64,7 +64,8 @@ pub enum CompileError {
          knows. Known: exact, jaro_winkler:<0..1>, levenshtein:<n>, variant_match, \
          username_exact, domain_exact, first_n:<n>, dob_same_year_month, \
          date_within_days:<n>, date_transposed, numeric_within:<tol>, \
-         numeric_within_pct:<pct>, address_components"
+         numeric_within_pct:<pct>, address_components, contains, \
+         datetime_within_hours:<n>, geo_within_km:<km>"
     )]
     UnknownLevel { column: String, level: String },
     #[error("comparisons.{column} level {level:?} has a bad parameter: {reason}")]
@@ -98,7 +99,8 @@ pub enum CompileError {
          (the entity type's variants column, or the schema's addr_*) and has no cross-field \
          reading. Group-capable tokens: exact, jaro_winkler:<0..1>, levenshtein:<n>, \
          username_exact, domain_exact, first_n:<n>, dob_same_year_month, date_within_days:<n>, \
-         date_transposed, numeric_within:<tol>, numeric_within_pct:<pct>"
+         date_transposed, numeric_within:<tol>, numeric_within_pct:<pct>, contains, \
+         datetime_within_hours:<n>, geo_within_km:<km>"
     )]
     LevelNotGroupCapable { group: String, level: String },
     #[error(
@@ -627,6 +629,82 @@ fn resolve_level_pair(
                        <= {fraction}"
                 ),
                 label: format!("{column} within {pct}%"),
+            })
+        }
+        // Substring containment, either direction: "IBM" against "IBM Corp"
+        // agrees. `contains(haystack, needle)` is strict about which argument
+        // is which, so both orders are spelled out. The empty-string guard is
+        // load-bearing — `contains(x, '')` is true for every x, which would
+        // make a blank value agree with everything.
+        "contains" => Ok(Level {
+            sql: format!(
+                "{l} <> '' AND {r} <> '' \
+                 AND (contains({l}, {r}) OR contains({r}, {l}))"
+            ),
+            label: format!("One {column} value contains the other"),
+        }),
+        // The hour-granular half of the date tolerances, for TIMESTAMP
+        // columns. The arithmetic goes through epoch seconds on purpose:
+        // `date_diff('hour', …)` counts hour BOUNDARIES crossed, so 00:59
+        // against 01:00 is "1 hour apart" there despite being one minute
+        // apart — a tolerance that fires at a boundary but not a minute
+        // earlier is not what a tolerance means.
+        _ if token.starts_with("datetime_within_hours:") => {
+            let arg = parameter(column, token)?;
+            let hours: u32 = arg.parse().map_err(|_| CompileError::BadLevelParameter {
+                column: column.to_string(),
+                level: token.to_string(),
+                reason: format!("{arg:?} is not a whole number of hours"),
+            })?;
+            Ok(Level {
+                sql: format!("abs(epoch({l}) - epoch({r})) <= {hours} * 3600"),
+                label: format!("{column} within {hours} hour(s)"),
+            })
+        }
+        // Great-circle distance over a "lat,lng" text column. There is no geo
+        // type in the schema, so the single-column encoding IS the interface:
+        // each side is split and try_cast, and a value that is not a parseable
+        // point denies rather than errors — the contract `numeric_within`
+        // already keeps.
+        _ if token.starts_with("geo_within_km:") => {
+            let arg = parameter(column, token)?;
+            let km: f64 = arg.parse().map_err(|_| CompileError::BadLevelParameter {
+                column: column.to_string(),
+                level: token.to_string(),
+                reason: format!("{arg:?} is not a number of kilometres"),
+            })?;
+            // `is_finite` first: NaN fails every comparison in Rust, so a bare
+            // `km <= 0.0` would let it through — and in DuckDB NaN sorts above
+            // every number, so `distance <= NaN` is TRUE for every pair: the
+            // level that matches everything, not nothing.
+            if !km.is_finite() || km <= 0.0 {
+                return Err(CompileError::BadLevelParameter {
+                    column: column.to_string(),
+                    level: token.to_string(),
+                    reason: "a radius must be a finite number greater than zero".to_string(),
+                });
+            }
+            // Haversine; 6371.0088 km is the IUGG mean Earth radius. The
+            // IS NOT NULL conjunction over all four try_casts is what makes
+            // 'not-a-point' a deny instead of a failed query.
+            Ok(Level {
+                sql: format!(
+                    "try_cast(split_part({l}, ',', 1) AS DOUBLE) IS NOT NULL \
+                     AND try_cast(split_part({l}, ',', 2) AS DOUBLE) IS NOT NULL \
+                     AND try_cast(split_part({r}, ',', 1) AS DOUBLE) IS NOT NULL \
+                     AND try_cast(split_part({r}, ',', 2) AS DOUBLE) IS NOT NULL \
+                     AND 2 * 6371.0088 * asin(sqrt( \
+                       pow(sin(radians( \
+                         try_cast(split_part({r}, ',', 1) AS DOUBLE) - \
+                         try_cast(split_part({l}, ',', 1) AS DOUBLE))) / 2, 2) + \
+                       cos(radians(try_cast(split_part({l}, ',', 1) AS DOUBLE))) * \
+                       cos(radians(try_cast(split_part({r}, ',', 1) AS DOUBLE))) * \
+                       pow(sin(radians( \
+                         try_cast(split_part({r}, ',', 2) AS DOUBLE) - \
+                         try_cast(split_part({l}, ',', 2) AS DOUBLE))) / 2, 2))) \
+                     <= {km}"
+                ),
+                label: format!("{column} within {km} km"),
             })
         }
         // Compare a whole address by its PARSED components rather than as one
@@ -1407,6 +1485,12 @@ mod tests {
         assert!(matches!(err, CompileError::UnknownLevel { .. }));
         // And the message tells the author what they can write instead.
         assert!(err.to_string().contains("jaro_winkler"));
+        for token in ["contains", "datetime_within_hours", "geo_within_km"] {
+            assert!(
+                err.to_string().contains(token),
+                "the known-comparator list must name {token}: {err}"
+            );
+        }
     }
 
     #[test]
@@ -1425,6 +1509,38 @@ mod tests {
         ));
         assert!(matches!(
             resolve_level("family_name", "jaro_winkler:", "name_variants").unwrap_err(),
+            CompileError::BadLevelParameter { .. }
+        ));
+        assert!(matches!(
+            resolve_level("created_at", "datetime_within_hours:soon", "name_variants").unwrap_err(),
+            CompileError::BadLevelParameter { .. }
+        ));
+        assert!(matches!(
+            resolve_level("created_at", "datetime_within_hours:", "name_variants").unwrap_err(),
+            CompileError::BadLevelParameter { .. }
+        ));
+        // A radius of zero matches only identical points, and a negative one
+        // matches nothing — both are a config typo, refused like first_n:0.
+        assert!(matches!(
+            resolve_level("geo", "geo_within_km:0", "name_variants").unwrap_err(),
+            CompileError::BadLevelParameter { .. }
+        ));
+        assert!(matches!(
+            resolve_level("geo", "geo_within_km:-5", "name_variants").unwrap_err(),
+            CompileError::BadLevelParameter { .. }
+        ));
+        assert!(matches!(
+            resolve_level("geo", "geo_within_km:nearby", "name_variants").unwrap_err(),
+            CompileError::BadLevelParameter { .. }
+        ));
+        // NaN and infinity are valid f64 parses, and in DuckDB NaN sorts above
+        // every number — a NaN radius would match EVERY pair. Refused here.
+        assert!(matches!(
+            resolve_level("geo", "geo_within_km:NaN", "name_variants").unwrap_err(),
+            CompileError::BadLevelParameter { .. }
+        ));
+        assert!(matches!(
+            resolve_level("geo", "geo_within_km:inf", "name_variants").unwrap_err(),
             CompileError::BadLevelParameter { .. }
         ));
     }

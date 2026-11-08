@@ -192,6 +192,108 @@ fn numeric_tolerances_work_absolutely_and_relatively() {
 }
 
 #[test]
+fn contains_matches_in_either_direction_but_never_on_a_blank() {
+    if !enabled() {
+        return;
+    }
+    let session = session();
+    let sql = level_sql("company_name", "contains");
+    let probe = |l: &str, r: &str| admits(&session, "company_name", "VARCHAR", l, r, &sql);
+
+    assert!(probe("'IBM'", "'IBM Corp'"), "needle on the left");
+    assert!(probe("'IBM Corp'", "'IBM'"), "needle on the right");
+    assert!(
+        probe("'IBM Corp'", "'IBM Corp'"),
+        "equal values contain each other"
+    );
+    assert!(
+        !probe("'IBM'", "'Hewlett Packard'"),
+        "no shared substring is not a match"
+    );
+    // `contains(x, '')` is true for every x in DuckDB, so without the guard a
+    // blank would agree with everything — the exact failure the guard exists
+    // to prevent.
+    assert!(!probe("''", "'IBM'"), "a blank must not match");
+    assert!(
+        !probe("'IBM'", "''"),
+        "a blank on the other side must not match"
+    );
+}
+
+#[test]
+fn a_datetime_tolerance_measures_elapsed_hours_not_boundaries() {
+    if !enabled() {
+        return;
+    }
+    let session = session();
+    let sql = level_sql("created_at", "datetime_within_hours:2");
+    let probe = |l: &str, r: &str| admits(&session, "created_at", "TIMESTAMP", l, r, &sql);
+
+    assert!(
+        probe("'2026-01-15 10:00:00'", "'2026-01-15 10:00:00'"),
+        "same instant"
+    );
+    assert!(
+        probe("'2026-01-15 10:00:00'", "'2026-01-15 11:59:00'"),
+        "just under two hours"
+    );
+    // The case `date_diff('hour', …)` gets wrong: these cross an hour
+    // BOUNDARY, so a boundary count reads them as an hour apart while being
+    // one minute apart. An elapsed-seconds tolerance admits them.
+    assert!(
+        probe("'2026-01-15 00:59:00'", "'2026-01-15 01:00:00'"),
+        "one minute apart across an hour boundary is within 2 hours — this is why the \
+         predicate is epoch arithmetic, not date_diff"
+    );
+    assert!(
+        !probe("'2026-01-15 10:00:00'", "'2026-01-15 13:00:00'"),
+        "three hours apart is outside"
+    );
+    assert!(
+        !probe("'2026-01-15 10:00:00'", "'2026-01-17 10:00:00'"),
+        "two days apart is outside"
+    );
+}
+
+#[test]
+fn a_geo_radius_measures_great_circle_distance_and_denies_malformed_points() {
+    if !enabled() {
+        return;
+    }
+    let session = session();
+    let sql = level_sql("geo", "geo_within_km:5");
+    let probe = |l: &str, r: &str| admits(&session, "geo", "VARCHAR", l, r, &sql);
+
+    // Two points in the Mission, San Francisco: ~0.9 km apart on the sphere.
+    assert!(
+        probe("'37.7599,-122.4370'", "'37.7649,-122.4294'"),
+        "under a kilometre apart is within 5 km"
+    );
+    assert!(
+        probe("'37.7599,-122.4370'", "'37.7599,-122.4370'"),
+        "a point is within its own radius"
+    );
+    // Downtown Oakland: ~13 km from the Mission — a distance the great-circle
+    // formula must see, where a flat-Earth approximation over degrees would
+    // misjudge it at this latitude.
+    assert!(
+        !probe("'37.7599,-122.4370'", "'37.8044,-122.2712'"),
+        "thirteen kilometres is outside a 5 km radius"
+    );
+    // Malformed values deny rather than error — the `try_cast` guards, same
+    // contract as numeric_within.
+    assert!(
+        !probe("'not-a-point'", "'37.7649,-122.4294'"),
+        "an unparseable point must not match"
+    );
+    assert!(
+        !probe("'37.7599'", "'37.7649,-122.4294'"),
+        "a missing longitude must not match"
+    );
+    assert!(!probe("''", "''"), "two blanks are not two agreeing points");
+}
+
+#[test]
 fn address_components_agree_where_string_similarity_would_hesitate() {
     if !enabled() {
         return;
@@ -258,6 +360,9 @@ fn a_bad_comparator_parameter_is_refused_at_compile_time() {
         "numeric_within:-1",
         "numeric_within_pct:150",
         "numeric_within_pct:abc",
+        "datetime_within_hours:soon",
+        "geo_within_km:0",
+        "geo_within_km:far",
     ] {
         let spec = er_config::ComparisonSpec {
             levels: vec![Some(token.to_string())],

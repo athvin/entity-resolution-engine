@@ -78,6 +78,9 @@ actionable:
 | `numeric_within:<tol>` | absolute tolerance |
 | `numeric_within_pct:<pct>` | relative tolerance |
 | `address_components` | — (component group) |
+| `contains` | — (substring, either direction) |
+| `datetime_within_hours:<n>` | tolerance in hours (TIMESTAMP columns) |
+| `geo_within_km:<km>` | radius over a "lat,lng" text column |
 
 Adding a comparator means adding a token here **and** the SQL that implements
 its level, and then deciding whether the analyser can plan that SQL — see the
