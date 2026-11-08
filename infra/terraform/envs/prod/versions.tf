@@ -7,8 +7,11 @@ terraform {
       version = "~> 6.0"
     }
     random = {
+      # >= 3.6 for `random_bytes`, which secrets.tf uses for the two values
+      # whose encoding is load-bearing (hex tokens, and the base64 sealing key
+      # frontend/src/lib/env.ts validates).
       source  = "hashicorp/random"
-      version = "~> 3.0"
+      version = "~> 3.6"
     }
   }
 }
