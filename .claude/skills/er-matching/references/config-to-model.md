@@ -6,6 +6,7 @@
 - A classic model is a Fellegi–Sunter model
 - The comparator token set
 - Weights
+- Cross-field comparison groups
 - The 60-bit calibration, and why louder is worse
 - Null policy and derived keys
 - Provenance: compiled is not trained
@@ -92,6 +93,49 @@ likely to be a mistake than an intent. Each weight is also range-checked to
 
 The failure messages name the total and the offending column, so a publish
 rejection is self-explaining without reading this file.
+
+## Cross-field comparison groups
+
+`comparison_groups:` pools attributes so any member on one record compares
+against every member on the other:
+
+```yaml
+comparison_groups:
+  any_phone:
+    attributes: [mobile, home_phone]
+    levels: [exact]
+```
+
+The case it exists for: a CRM holds one phone in `mobile` and the same phone
+in `home_phone` constantly, and same-column comparison scores that pair as
+disagreement on two fields — worse than no evidence, because it pushes a true
+duplicate below threshold.
+
+A group compiles to **one pooled comparison** plus **one appended blocking
+rule**, so a cross-field agreement can generate the candidate as well as score
+it. Each declared level is OR'd over the full attribute cross-product, the
+diagonal included — two records that both carry the value in `mobile` must
+agree too. The engine side needed nothing new: `dedupe-core` parses a
+comparison's input columns from its level SQL, so the member columns ride into
+`blocked_with_cols` on their own.
+
+The refusals are the design, not omissions:
+
+- **`tf: true` is refused** — a pool has no single term-frequency
+  distribution, and attaching one member's `tf_` column would mis-weight the
+  others.
+- **`variant_match` and `address_components` are refused** — both are bound to
+  fixed columns (the lexicon's `name_variants`, the schema's `addr_*`) and
+  have no pairwise reading.
+- **One attribute is refused** — that is a comparison, and declaring it as a
+  group would only obscure it.
+- **A group named like a comparison is refused** — both compile to the same
+  `gamma_<name>` column.
+
+Group weights draw from the same 100 as the per-column comparisons: the
+totals-100 rule applies to the union. Null policy reads over the pool — a side
+whose members are ALL blank is the "no evidence" case — with the same three
+policies as a per-column comparison.
 
 ## The 60-bit calibration, and why louder is worse
 

@@ -3143,7 +3143,13 @@ async fn put_lexicon(
 }
 
 /// Change tiers (`configsvc.py` `classify_tier`), biggest-blast-radius first.
-const TIER_C_BLOCKS: [&str; 3] = ["comparisons", "standardization", "sources"];
+// `comparison_groups` sits with `comparisons`: it changes what a pair scores.
+const TIER_C_BLOCKS: [&str; 4] = [
+    "comparisons",
+    "comparison_groups",
+    "standardization",
+    "sources",
+];
 // `constraints` sits with `blocking` because it changes the same thing: which
 // pairs are candidates. Editing it needs a re-score, not a retrain.
 //

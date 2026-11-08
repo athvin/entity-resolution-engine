@@ -33,7 +33,7 @@ pub const RESERVED_SOURCE_PREFIX: &str = "_";
 /// length, deliberately not restated in prose (it has read "fourteen" since it
 /// held sixteen). [`Config`]'s S6 block fields MUST equal this set; the `entity_type` discriminator (added for the
 /// Account entity type) is a meta-field, not an S6 block, and is excluded.
-pub const CONFIG_BLOCKS: [&str; 20] = [
+pub const CONFIG_BLOCKS: [&str; 21] = [
     "tenant",
     "thresholds",
     "models",
@@ -44,6 +44,7 @@ pub const CONFIG_BLOCKS: [&str; 20] = [
     "blocking",
     "constraints",
     "comparisons",
+    "comparison_groups",
     "segments",
     "data_quality",
     "survivorship",
@@ -481,6 +482,53 @@ fn is_default_null_policy(policy: &NullPolicy) -> bool {
     *policy == NullPolicy::Never
 }
 
+/// S6 `comparison_groups.<name>`: a set of attributes compared as a POOL rather
+/// than pairwise by name (spec unit 1.9, E5).
+///
+/// The case it exists for: a CRM holds one phone in `mobile` and the same
+/// phone in `home_phone` constantly, and same-column comparison scores that
+/// pair as disagreement on two fields — worse than no evidence, because it
+/// pushes a true duplicate below threshold. In a group, any member on the left
+/// compares against every member on the right, so the cross-field agreement is
+/// seen as agreement.
+///
+/// A group compiles to ONE pooled comparison (each declared level OR'd over
+/// the attribute cross-product) plus one blocking rule, so a cross-field
+/// agreement can generate the candidate as well as score it. `tf` is refused:
+/// a pool has no single frequency distribution, and attaching one member's
+/// term frequencies would mis-weight the others.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ComparisonGroupSpec {
+    /// The attributes in the pool. At least two — a one-attribute group is a
+    /// comparison — and each must name a standardized column (checked at
+    /// publish).
+    pub attributes: Vec<String>,
+    /// The comparison levels, as on [`ComparisonSpec`]. `variant_match` and
+    /// `address_components` are refused here: both are bound to fixed columns
+    /// (the lexicon's `name_variants`, the schema's `addr_*`) and have no
+    /// pairwise reading.
+    pub levels: Vec<Option<String>>,
+    /// Refused at compile time — see the struct doc. Declared so a config that
+    /// sets it fails loudly rather than silently ignoring it.
+    #[serde(default)]
+    pub tf: bool,
+    /// This group's share of the score, 0..=100, counted alongside the
+    /// per-column comparisons: when any comparison or group declares a weight
+    /// they all must, and the union must total 100.
+    ///
+    /// `skip_serializing_if` is load-bearing for the same reason as
+    /// [`ComparisonSpec::weight`]: the canonical document feeds `config_hash`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub weight: Option<f64>,
+    /// What an all-blank pool means. `Never` (the default): a side whose
+    /// members are all missing offers no evidence. `BothBlankMatches`: both
+    /// sides entirely blank counts as agreement. `EitherBlankMatches`: either
+    /// side entirely blank counts as agreement.
+    #[serde(default, skip_serializing_if = "is_default_null_policy")]
+    pub null_policy: NullPolicy,
+}
+
 /// S6 `training.em`: the arguments of every EM session (S4.3.2).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -855,6 +903,12 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "MatchConstraints::is_empty")]
     pub constraints: MatchConstraints,
     pub comparisons: BTreeMap<String, ComparisonSpec>,
+    /// Attribute pools compared cross-field (spec unit 1.9). Omitted from the
+    /// canonical document when empty, so every config written before groups
+    /// existed hashes byte-identically — the rule `constraints`, `segments`
+    /// and `features` each followed.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub comparison_groups: BTreeMap<String, ComparisonGroupSpec>,
     /// Named slices of the corpus a run may be restricted to. Omitted from the
     /// canonical document when empty, so a config written before segments
     /// existed hashes identically.
@@ -923,6 +977,9 @@ pub fn normalize(mut config: Config) -> Config {
     for comparison in config.comparisons.values_mut() {
         comparison.levels.retain(Option::is_some);
     }
+    for group in config.comparison_groups.values_mut() {
+        group.levels.retain(Option::is_some);
+    }
     for chain in config.survivorship.values_mut() {
         if chain.last().map(String::as_str) != Some(TERMINAL_SURVIVORSHIP_RULE) {
             chain.push(TERMINAL_SURVIVORSHIP_RULE.to_string());
@@ -966,9 +1023,9 @@ mod tests {
 
     #[test]
     fn blocks_and_constants() {
-        assert_eq!(CONFIG_BLOCKS.len(), 20);
+        assert_eq!(CONFIG_BLOCKS.len(), 21);
         assert_eq!(CONFIG_BLOCKS[0], "tenant");
-        assert_eq!(CONFIG_BLOCKS[19], "correction_pass");
+        assert_eq!(CONFIG_BLOCKS[20], "correction_pass");
         // `models` sits beside `thresholds` because it refines the same
         // decision — what probability merges — one threshold per member
         // instead of one for the corpus.
@@ -981,6 +1038,10 @@ mod tests {
         // pair scores nor which pairs are candidates — only how much of the
         // corpus one run re-scores.
         assert!(CONFIG_BLOCKS.contains(&"segments"));
+        // `comparison_groups` sits beside `comparisons` because it changes the
+        // same thing — what a pair scores — and so carries the same publish
+        // tier.
+        assert!(CONFIG_BLOCKS.contains(&"comparison_groups"));
         // `features` sits after `sources` and before `blocking` because it
         // widens the RECORD — the borrowed columns have to exist before a
         // blocking rule or a comparison can name them, and document order is
@@ -1170,5 +1231,39 @@ mod tests {
     fn deny_unknown_fields() {
         let err = load_config_str("tenant: x\nnot_a_block: 1\n").unwrap_err();
         assert_eq!(err.code(), 2);
+    }
+
+    #[test]
+    fn comparison_groups_parse_and_normalize() {
+        let yaml = format!(
+            "{DEFAULT_YAML}\ncomparison_groups:\n  any_phone:\n    attributes: [phone, mobile_phone]\n    levels: [exact, null]\n    weight: 20\n"
+        );
+        let config = load_config_str(&yaml).unwrap();
+        let group = &config.comparison_groups["any_phone"];
+        assert_eq!(group.attributes, vec!["phone", "mobile_phone"]);
+        // The explicit `null` token is dropped by S6.1 normalization, as on a
+        // per-column comparison.
+        assert_eq!(group.levels, vec![Some("exact".to_string())]);
+        assert_eq!(group.weight, Some(20.0));
+        assert!(!group.tf);
+        assert_eq!(group.null_policy, NullPolicy::Never);
+    }
+
+    #[test]
+    fn absent_comparison_groups_hash_identically() {
+        // The rule every optional block follows: an absent block serialises to
+        // nothing, so a config written before groups existed keeps its
+        // `config_hash` — and is not promoted to a re-score by this field
+        // existing. A DECLARED group must move the hash, or it would be
+        // unhashed config.
+        let config = load_config_str(DEFAULT_YAML).unwrap();
+        let before = config_hash(&config);
+        assert!(!canonical_document(&config).contains("comparison_groups"));
+
+        let yaml = format!(
+            "{DEFAULT_YAML}\ncomparison_groups:\n  any_phone:\n    attributes: [phone, mobile_phone]\n    levels: [exact]\n"
+        );
+        let grouped = load_config_str(&yaml).unwrap();
+        assert_ne!(before, config_hash(&grouped));
     }
 }
