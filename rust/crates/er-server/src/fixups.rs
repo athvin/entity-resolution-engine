@@ -429,7 +429,6 @@ pub(crate) async fn ensure_default_dataset_by_name(
 /// precise thing the re-key exists to allow. They are matched by COLUMN SET
 /// rather than by name, because Postgres named them and names are the
 /// fragile part.
-
 async fn dataset_id_required(tx: &tokio_postgres::Transaction<'_>) -> Result<(), SchemaError> {
     for (relation, required) in DATASET_SCOPED {
         tx.batch_execute(&format!(

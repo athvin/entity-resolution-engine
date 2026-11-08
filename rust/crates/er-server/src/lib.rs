@@ -8467,7 +8467,7 @@ struct TagIn {
     apply_min_role: Option<String>,
 }
 
-/// Steward+: the tenant's tag vocabulary, or the tags on one subject
+/// Viewer+: the tenant's tag vocabulary, or the tags on one subject
 /// (`GET /v1/orgs/{org}/tags`, optionally `?subject_type=&subject_id=`).
 ///
 /// One route for both because a caller rendering chips and a caller rendering a
@@ -8952,14 +8952,26 @@ async fn tag_application(
                     ),
                 );
             }
-            if let Some(min) = tag.apply_min_role.as_deref().and_then(Role::parse)
-                && principal.role != Role::Operator
-                && principal.role < min
-            {
-                return detail_err(
-                    StatusCode::FORBIDDEN,
-                    format!("tag {:?} requires {} role to apply", tag.name, min.as_str()),
-                );
+            match tag.apply_min_role.as_deref().map(Role::parse) {
+                Some(Some(min)) => {
+                    if principal.role != Role::Operator && principal.role < min {
+                        return detail_err(
+                            StatusCode::FORBIDDEN,
+                            format!("tag {:?} requires {} role to apply", tag.name, min.as_str()),
+                        );
+                    }
+                }
+                // A floor the server cannot read is not a floor that lifts:
+                // reachable only by writing the row directly (the API
+                // validates, fresh stores CHECK it), so fail CLOSED with a
+                // 500 — the data is broken, not the caller.
+                Some(None) => {
+                    return detail_err(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("tag {:?} has an unreadable apply_min_role", tag.name),
+                    );
+                }
+                None => {}
             }
         }
         // Unknown or retired: the writes below answer that (404), on apply as
