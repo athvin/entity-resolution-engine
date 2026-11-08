@@ -539,6 +539,43 @@ pub fn config_reference_problems(config: &Config) -> Vec<String> {
         }
     }
 
+    // Comparison groups (1.9): every attribute the pool names must be a real
+    // standardized column, and the group's name must not collide with a
+    // per-column comparison — both compile to a `gamma_<name>` column, so a
+    // collision would put two comparisons under one name in the model. `tf` is
+    // refused here rather than left for the compile endpoint to catch: a pooled
+    // comparison has no single frequency distribution, and publish is where a
+    // mistyped flag should fail.
+    for (name, group) in &config.comparison_groups {
+        if config.comparisons.contains_key(name) {
+            problems.push(format!(
+                "comparison group `{name}` collides with a comparison of the same name"
+            ));
+        }
+        if group.attributes.len() < 2 {
+            problems.push(format!(
+                "comparison group `{name}` names {} attribute(s); a group needs at least two — \
+                 a one-attribute group is a comparison",
+                group.attributes.len()
+            ));
+        }
+        for attribute in &group.attributes {
+            if !valid.contains(attribute.as_str()) {
+                problems.push(format!(
+                    "comparison group `{name}` attribute `{attribute}` is not a standardized \
+                     column"
+                ));
+            }
+        }
+        if group.tf {
+            problems.push(format!(
+                "comparison group `{name}` sets `tf: true`, but a pooled comparison has no \
+                 single term-frequency distribution — each member attribute has its own. Drop \
+                 tf, or compare the attributes individually"
+            ));
+        }
+    }
+
     // Term-frequency adjustment needs an exact-match level to scale against,
     // and nothing checked for one.
     //
@@ -885,6 +922,65 @@ mod tests {
         assert!(
             !problems.iter().any(|p| p.contains("employer_given_name")),
             "a borrowed column must be nameable by a comparison: {problems:?}"
+        );
+    }
+
+    #[test]
+    fn a_comparison_group_is_checked_at_publish() {
+        // A well-formed group over real columns is silent.
+        let good = load(&format!(
+            "{GOOD}\ncomparison_groups:\n  any_phone:\n    attributes: [phone_e164, email]\n    levels: [exact]\n"
+        ));
+        assert_eq!(config_reference_problems(&good), Vec::<String>::new());
+
+        // A typo'd member would otherwise compile to SQL referencing a column
+        // that does not exist.
+        let bad = load(&format!(
+            "{GOOD}\ncomparison_groups:\n  any_phone:\n    attributes: [phone_e164, emale]\n    levels: [exact]\n"
+        ));
+        let problems = config_reference_problems(&bad);
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("any_phone") && p.contains("`emale`")),
+            "{problems:?}"
+        );
+
+        // A name collision with a per-column comparison: both compile to the
+        // same gamma column.
+        let bad = load(&format!(
+            "{GOOD}\ncomparison_groups:\n  email:\n    attributes: [phone_e164, email]\n    levels: [exact]\n"
+        ));
+        let problems = config_reference_problems(&bad);
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("collides") && p.contains("`email`")),
+            "{problems:?}"
+        );
+
+        // tf on a pool: refused at publish rather than at the compile endpoint.
+        let bad = load(&format!(
+            "{GOOD}\ncomparison_groups:\n  any_phone:\n    attributes: [phone_e164, email]\n    levels: [exact]\n    tf: true\n"
+        ));
+        let problems = config_reference_problems(&bad);
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("any_phone") && p.contains("tf: true")),
+            "{problems:?}"
+        );
+
+        // One attribute is a comparison, not a group.
+        let bad = load(&format!(
+            "{GOOD}\ncomparison_groups:\n  alone:\n    attributes: [phone_e164]\n    levels: [exact]\n"
+        ));
+        let problems = config_reference_problems(&bad);
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("alone") && p.contains("at least two")),
+            "{problems:?}"
         );
     }
 

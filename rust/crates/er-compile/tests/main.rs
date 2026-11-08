@@ -11,5 +11,6 @@
 //! To run one file's tests: `cargo test -p er-compile --test main <name>`.
 
 mod comparator_sql_behaviour;
+mod cross_field_groups;
 mod reproduces_committed_model;
 mod score_scale_calibration;

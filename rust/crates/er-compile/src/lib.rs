@@ -48,7 +48,7 @@ use std::collections::BTreeMap;
 use dedupe_core::settings::json::{
     BlockingRuleJson, ComparisonJson, ComparisonLevelJson, LinkType, SettingsJson,
 };
-use er_config::{ComparisonSpec, Config, MatchConstraints, NullPolicy};
+use er_config::{ComparisonGroupSpec, ComparisonSpec, Config, MatchConstraints, NullPolicy};
 
 /// Why a config could not be compiled. No `#[from]` sources to interpolate —
 /// every variant is self-describing, because the message is shown to whoever
@@ -76,8 +76,35 @@ pub enum CompileError {
          leave every weight unset and they will be shared equally"
     )]
     WeightsNotHundred { total: String },
-    #[error("comparisons.{column} has weight {weight}, which is not in 0..=100")]
+    #[error("comparison or group `{column}` has weight {weight}, which is not in 0..=100")]
     WeightOutOfRange { column: String, weight: String },
+    #[error("comparison_groups.{group} declares no levels; a comparison needs at least one")]
+    GroupNoLevels { group: String },
+    #[error(
+        "comparison_groups.{group} names {count} attribute(s); a group needs at least two — \
+         a one-attribute group is a comparison"
+    )]
+    GroupTooSmall { group: String, count: usize },
+    #[error(
+        "comparison_groups.{group} sets tf: true, but a pooled comparison has no single \
+         term-frequency distribution: each member attribute has its own, and attaching one \
+         would mis-weight the others. Drop tf, or compare the attributes individually"
+    )]
+    GroupTfUnsupported { group: String },
+    #[error(
+        "comparison_groups.{group} declares level {level:?}, which is bound to fixed columns \
+         (the lexicon's name_variants, or the schema's addr_*) and has no cross-field reading. \
+         Group-capable tokens: exact, jaro_winkler:<0..1>, levenshtein:<n>, username_exact, \
+         domain_exact, first_n:<n>, dob_same_year_month, date_within_days:<n>, \
+         date_transposed, numeric_within:<tol>, numeric_within_pct:<pct>"
+    )]
+    LevelNotGroupCapable { group: String, level: String },
+    #[error(
+        "comparison_groups.{name} collides with comparisons.{name}: both compile to a \
+         comparison named `{name}`, and the model would carry two gamma columns for it. \
+         Rename one of them"
+    )]
+    GroupNameCollision { name: String },
     /// A declared score scale that would produce a model nobody wants.
     ///
     /// Refused rather than clamped, because both failure modes are silent in
@@ -383,7 +410,21 @@ fn parameter(column: &str, level: &str) -> Result<String, CompileError> {
 /// rather than a level that quietly never fires, which is the failure mode the
 /// free-string DSL had.
 fn resolve_level(column: &str, token: &str) -> Result<Level, CompileError> {
-    let (l, r) = (side(column, 'l'), side(column, 'r'));
+    resolve_level_pair(column, column, token)
+}
+
+/// [`resolve_level`] over a possibly-cross-field pair: `left` supplies the
+/// `_l` column, `right` the `_r`. The same-column call is the ordinary path and
+/// is byte-identical to what it produced before this function existed (the
+/// `reproduces_committed_model` oracle asserts it); the cross-field call is how
+/// a comparison group's level reaches `mobile` on the left against
+/// `home_phone` on the right.
+///
+/// Errors are reported against `left`, which is the comparison's own column in
+/// the same-column case and one member of the pool in the cross-field one.
+fn resolve_level_pair(left: &str, right: &str, token: &str) -> Result<Level, CompileError> {
+    let column = left;
+    let (l, r) = (side(left, 'l'), side(right, 'r'));
     let unknown = || CompileError::UnknownLevel {
         column: column.to_string(),
         level: token.to_string(),
@@ -403,19 +444,19 @@ fn resolve_level(column: &str, token: &str) -> Result<Level, CompileError> {
         }),
         // Email local part: catches one person with two domains.
         "username_exact" => Ok(Level {
-            sql: format!("split_part({column}_l,'@',1) = split_part({column}_r,'@',1)"),
-            label: format!("split_part({column}_l,'@',1) = split_part({column}_r,'@',1)"),
+            sql: format!("split_part({left}_l,'@',1) = split_part({right}_r,'@',1)"),
+            label: format!("split_part({left}_l,'@',1) = split_part({right}_r,'@',1)"),
         }),
         // The other half: same employer, different person — weak evidence, which
         // is why it is a level a tenant opts into with a small weight rather than
         // something the engine assumes.
         "domain_exact" => Ok(Level {
-            sql: format!("split_part({column}_l,'@',2) = split_part({column}_r,'@',2)"),
-            label: format!("split_part({column}_l,'@',2) = split_part({column}_r,'@',2)"),
+            sql: format!("split_part({left}_l,'@',2) = split_part({right}_r,'@',2)"),
+            label: format!("split_part({left}_l,'@',2) = split_part({right}_r,'@',2)"),
         }),
         "dob_same_year_month" => Ok(Level {
-            sql: format!("date_trunc('month', {column}_l) = date_trunc('month', {column}_r)"),
-            label: format!("date_trunc('month', {column}_l) = date_trunc('month', {column}_r)"),
+            sql: format!("date_trunc('month', {left}_l) = date_trunc('month', {right}_r)"),
+            label: format!("date_trunc('month', {left}_l) = date_trunc('month', {right}_r)"),
         }),
         _ if token.starts_with("jaro_winkler:") => {
             let arg = parameter(column, token)?;
@@ -703,6 +744,157 @@ fn compile_comparison(
     })
 }
 
+/// Level tokens that can be resolved over an arbitrary pair of columns.
+/// `variant_match` reads the lexicon's fixed `name_variants` column and
+/// `address_components` the schema's fixed `addr_*` columns, so neither has a
+/// pairwise reading — in a group they are refused rather than silently
+/// comparing the wrong thing.
+fn group_capable(token: &str) -> bool {
+    !matches!(token, "variant_match" | "address_components")
+}
+
+/// The `col IS NULL` conjunction over one side of a pool: every member missing.
+fn all_blank(attrs: &[String], suffix: char) -> String {
+    attrs
+        .iter()
+        .map(|a| format!("{} IS NULL", side(a, suffix)))
+        .collect::<Vec<_>>()
+        .join(" AND ")
+}
+
+/// One group level's SQL: the token resolved over every (left, right) pair of
+/// the pool, OR'd — any member on the left against any member on the right,
+/// the diagonal included, because two records that both carry the value in
+/// `mobile` must agree too.
+fn resolve_group_level(name: &str, attrs: &[String], token: &str) -> Result<Level, CompileError> {
+    if !group_capable(token) {
+        return Err(CompileError::LevelNotGroupCapable {
+            group: name.to_string(),
+            level: token.to_string(),
+        });
+    }
+    let mut arms = Vec::with_capacity(attrs.len() * attrs.len());
+    for a in attrs {
+        for b in attrs {
+            arms.push(resolve_level_pair(a, b, token)?.sql);
+        }
+    }
+    Ok(Level {
+        sql: format!("({})", arms.join(" OR ")),
+        label: format!("{token} on any pair of ({})", attrs.join(", ")),
+    })
+}
+
+/// The blocking rule a group adds: cross-field agreement must be able to
+/// GENERATE the candidate, not only score it, or a pair whose values sit in
+/// different columns is never seen. One rule, the OR of the cross-product
+/// equalities — appended after the declared rules so their recall is unchanged
+/// (the engine's match-key dedup excludes pairs an earlier rule already found).
+#[must_use]
+pub fn group_blocking_predicate(attrs: &[String]) -> String {
+    let mut arms = Vec::with_capacity(attrs.len() * attrs.len());
+    for a in attrs {
+        for b in attrs {
+            arms.push(format!("l.{a} = r.{b}"));
+        }
+    }
+    format!("({})", arms.join(" OR "))
+}
+
+/// Build the pooled comparison for one declared group. Mirrors
+/// `compile_comparison`'s structure — null level first, declared levels
+/// strongest-first, ELSE catch-all — so a group reads the same in the evidence
+/// waterfall as any per-column comparison.
+fn compile_group(
+    name: &str,
+    spec: &ComparisonGroupSpec,
+    weight: f64,
+    options: &CompileOptions,
+) -> Result<ComparisonJson, CompileError> {
+    if spec.tf {
+        return Err(CompileError::GroupTfUnsupported {
+            group: name.to_string(),
+        });
+    }
+    if spec.attributes.len() < 2 {
+        return Err(CompileError::GroupTooSmall {
+            group: name.to_string(),
+            count: spec.attributes.len(),
+        });
+    }
+    let tokens: Vec<&str> = spec.levels.iter().filter_map(|l| l.as_deref()).collect();
+    if tokens.is_empty() {
+        return Err(CompileError::GroupNoLevels {
+            group: name.to_string(),
+        });
+    }
+    let attrs = &spec.attributes;
+
+    let mut levels: Vec<ComparisonLevelJson> = Vec::new();
+    // The pool's null semantics, per attribute rather than per column: a side
+    // whose members are ALL missing offers no evidence (`Never`), and the two
+    // blank-matches policies extend it the same way they do per column — the
+    // agreement level precedes the null level, and the CASE's first-match-wins
+    // order is what keeps them disjoint.
+    let left_blank = all_blank(attrs, 'l');
+    let right_blank = all_blank(attrs, 'r');
+    match spec.null_policy {
+        NullPolicy::Never => levels.push(ComparisonLevelJson {
+            sql_condition: format!("({left_blank}) OR ({right_blank})"),
+            label_for_charts: Some(format!("{name} is NULL on every member of a side")),
+            is_null_level: true,
+            ..blank_level()
+        }),
+        NullPolicy::BothBlankMatches => {
+            levels.push(ComparisonLevelJson {
+                sql_condition: format!("({left_blank}) AND ({right_blank})"),
+                label_for_charts: Some(format!("{name} blank on every member of both sides")),
+                ..weighted_level(weight / f64::from(u32::try_from(tokens.len() + 1).unwrap_or(1)))
+            });
+            levels.push(ComparisonLevelJson {
+                sql_condition: format!("({left_blank}) OR ({right_blank})"),
+                label_for_charts: Some(format!("{name} is NULL on every member of a side")),
+                is_null_level: true,
+                ..blank_level()
+            });
+        }
+        NullPolicy::EitherBlankMatches => levels.push(ComparisonLevelJson {
+            sql_condition: format!("({left_blank}) OR ({right_blank})"),
+            label_for_charts: Some(format!("{name} blank on every member of either side")),
+            ..weighted_level(weight / f64::from(u32::try_from(tokens.len() + 1).unwrap_or(1)))
+        }),
+    }
+
+    let n = tokens.len() as f64;
+    for (i, token) in tokens.iter().enumerate() {
+        let resolved = resolve_group_level(name, attrs, token)?;
+        let share = (n - i as f64) / n;
+        let bits = options.full_agreement_bits * (weight / 100.0) * share;
+        levels.push(ComparisonLevelJson {
+            sql_condition: resolved.sql,
+            label_for_charts: Some(resolved.label),
+            ..weighted_level(bits)
+        });
+    }
+
+    let against = -options.full_agreement_bits * (weight / 100.0) * options.disagreement_ratio;
+    levels.push(ComparisonLevelJson {
+        sql_condition: "ELSE".to_string(),
+        label_for_charts: Some("All other comparisons".to_string()),
+        ..weighted_level(against)
+    });
+
+    Ok(ComparisonJson {
+        output_column_name: name.to_string(),
+        comparison_levels: levels,
+        comparison_description: Some(format!(
+            "{name} (cross-field group over {}, compiled from the tenant config)",
+            attrs.join(", ")
+        )),
+        extra: serde_json::Map::new(),
+    })
+}
+
 /// A level with no learned parameters — the null level, which carries none.
 fn blank_level() -> ComparisonLevelJson {
     ComparisonLevelJson {
@@ -786,19 +978,29 @@ fn check_scale(options: &CompileOptions) -> Result<(), CompileError> {
     Ok(())
 }
 
-/// Resolve each column's weight: the declared ones if any are declared,
-/// otherwise an equal share.
+/// Resolve each comparison's and each group's weight: the declared ones if any
+/// are declared, otherwise an equal share over the UNION. A group is one
+/// comparison for scoring, so it draws from the same 100 — a group declared
+/// beside per-column comparisons with no weights anywhere shares equally with
+/// them.
 fn resolve_weights(
     comparisons: &BTreeMap<String, ComparisonSpec>,
+    groups: &BTreeMap<String, ComparisonGroupSpec>,
 ) -> Result<BTreeMap<String, f64>, CompileError> {
     let declared: Vec<(&String, f64)> = comparisons
         .iter()
         .filter_map(|(c, s)| s.weight.map(|w| (c, w)))
+        .chain(groups.iter().filter_map(|(g, s)| s.weight.map(|w| (g, w))))
         .collect();
+    let count = comparisons.len() + groups.len();
     if declared.is_empty() {
         // DataGroomr's default too: 100/N each.
-        let share = 100.0 / comparisons.len() as f64;
-        return Ok(comparisons.keys().map(|c| (c.clone(), share)).collect());
+        let share = 100.0 / count as f64;
+        return Ok(comparisons
+            .keys()
+            .chain(groups.keys())
+            .map(|c| (c.clone(), share))
+            .collect());
     }
     for (column, weight) in &declared {
         if !(0.0..=100.0).contains(weight) {
@@ -808,10 +1010,10 @@ fn resolve_weights(
             });
         }
     }
-    // Every column must be weighted once any is: a silent 0 for the ones left
-    // out would quietly drop fields from the model.
+    // Every comparison and group must be weighted once any is: a silent 0 for
+    // the ones left out would quietly drop fields from the model.
     let total: f64 = declared.iter().map(|(_, w)| *w).sum();
-    if declared.len() != comparisons.len() || (total - 100.0).abs() > 0.001 {
+    if declared.len() != count || (total - 100.0).abs() > 0.001 {
         return Err(CompileError::WeightsNotHundred {
             total: format!("{total}"),
         });
@@ -843,14 +1045,27 @@ pub fn compile(config: &Config) -> Result<Compiled, CompileError> {
 /// As [`compile`].
 pub fn compile_with(config: &Config, options: &CompileOptions) -> Result<Compiled, CompileError> {
     check_scale(options)?;
-    let weights = resolve_weights(&config.comparisons)?;
+    // A group and a comparison of the same name would both compile to a
+    // comparison with that `output_column_name`, and the model would carry two
+    // gamma columns for it.
+    for name in config.comparison_groups.keys() {
+        if config.comparisons.contains_key(name) {
+            return Err(CompileError::GroupNameCollision { name: name.clone() });
+        }
+    }
+    let weights = resolve_weights(&config.comparisons, &config.comparison_groups)?;
     let conjuncts = constraint_conjuncts(&config.constraints);
     let mut notes = Vec::new();
-    if config.comparisons.values().all(|s| s.weight.is_none()) {
+    if config.comparisons.values().all(|s| s.weight.is_none())
+        && config
+            .comparison_groups
+            .values()
+            .all(|s| s.weight.is_none())
+    {
+        let count = config.comparisons.len() + config.comparison_groups.len();
         notes.push(format!(
-            "no weights declared: the {} comparisons share the score equally ({:.1}% each)",
-            config.comparisons.len(),
-            100.0 / config.comparisons.len() as f64
+            "no weights declared: the {count} comparison(s) share the score equally ({:.1}% each)",
+            100.0 / count as f64
         ));
     }
 
@@ -881,7 +1096,7 @@ pub fn compile_with(config: &Config, options: &CompileOptions) -> Result<Compile
          the {} comparison(s), and a disagreement costs {:.0}% of what an agreement earns. This \
          is {provenance}",
         options.full_agreement_bits,
-        config.comparisons.len(),
+        config.comparisons.len() + config.comparison_groups.len(),
         options.disagreement_ratio * 100.0
     ));
 
@@ -896,6 +1111,61 @@ pub fn compile_with(config: &Config, options: &CompileOptions) -> Result<Compile
                 spec.null_policy
             ));
         }
+    }
+    for (name, spec) in &config.comparison_groups {
+        let weight = weights.get(name).copied().unwrap_or(0.0);
+        comparisons.push(compile_group(name, spec, weight, options)?);
+        notes.push(format!(
+            "comparison_groups.{name} pools {} attributes ({}); any member on one record \
+             compares against every member on the other, and the group also adds a blocking \
+             rule so a cross-field agreement can generate the candidate",
+            spec.attributes.len(),
+            spec.attributes.join(", ")
+        ));
+        if spec.null_policy != NullPolicy::Never {
+            notes.push(format!(
+                "comparison_groups.{name} treats an all-blank pool as evidence ({:?}); the \
+                 default is to treat it as no evidence at all",
+                spec.null_policy
+            ));
+        }
+    }
+
+    let mut blocking_rules: Vec<BlockingRuleJson> = config
+        .blocking
+        .iter()
+        .map(|b| BlockingRuleJson::Detailed {
+            blocking_rule: {
+                let mut parts = vec![blocking_predicate(&b.expr)];
+                parts.extend(conjuncts.iter().cloned());
+                parts.join(" AND ")
+            },
+            sql_dialect: Some("duckdb".to_string()),
+            // No array-valued blocking keys from the config DSL yet: a
+            // declared key is a scalar expression. `arrays_to_explode` is
+            // how a model blocks on a list column, which is model-JSON-only
+            // until the DSL grows a token for it.
+            arrays_to_explode: Vec::new(),
+            extra: serde_json::Map::new(),
+        })
+        .collect();
+    // Group rules come AFTER the declared ones: the engine's match-key dedup
+    // excludes pairs an earlier rule already found, so the group's rule adds
+    // only the cross-field pairs no declared rule reaches — the declared
+    // rules' recall is unchanged, and a config with no groups compiles
+    // byte-identically.
+    //
+    // Every group reaching this loop has already compiled, so every one is
+    // valid — `compile_group` refused the others.
+    for spec in config.comparison_groups.values() {
+        let mut parts = vec![group_blocking_predicate(&spec.attributes)];
+        parts.extend(conjuncts.iter().cloned());
+        blocking_rules.push(BlockingRuleJson::Detailed {
+            blocking_rule: parts.join(" AND "),
+            sql_dialect: Some("duckdb".to_string()),
+            arrays_to_explode: Vec::new(),
+            extra: serde_json::Map::new(),
+        });
     }
 
     let settings = SettingsJson {
@@ -913,24 +1183,7 @@ pub fn compile_with(config: &Config, options: &CompileOptions) -> Result<Compile
         comparison_vector_value_column_prefix: "gamma_".to_string(),
         unique_id_column_name: "record_key".to_string(),
         source_dataset_column_name: "source_dataset".to_string(),
-        blocking_rules_to_generate_predictions: config
-            .blocking
-            .iter()
-            .map(|b| BlockingRuleJson::Detailed {
-                blocking_rule: {
-                    let mut parts = vec![blocking_predicate(&b.expr)];
-                    parts.extend(conjuncts.iter().cloned());
-                    parts.join(" AND ")
-                },
-                sql_dialect: Some("duckdb".to_string()),
-                // No array-valued blocking keys from the config DSL yet: a
-                // declared key is a scalar expression. `arrays_to_explode` is
-                // how a model blocks on a list column, which is model-JSON-only
-                // until the DSL grows a token for it.
-                arrays_to_explode: Vec::new(),
-                extra: serde_json::Map::new(),
-            })
-            .collect(),
+        blocking_rules_to_generate_predictions: blocking_rules,
         comparisons,
         extra: serde_json::Map::new(),
     };
@@ -1165,11 +1418,12 @@ mod tests {
             weight,
             null_policy: NullPolicy::Never,
         };
+        let no_groups = BTreeMap::new();
         // None declared -> equal shares.
         let equal: BTreeMap<String, ComparisonSpec> =
             [("a".to_string(), spec(None)), ("b".to_string(), spec(None))].into();
         assert_eq!(
-            resolve_weights(&equal).unwrap(),
+            resolve_weights(&equal, &no_groups).unwrap(),
             [("a".to_string(), 50.0), ("b".to_string(), 50.0)].into()
         );
 
@@ -1180,7 +1434,7 @@ mod tests {
         ]
         .into();
         assert_eq!(
-            resolve_weights(&declared).unwrap(),
+            resolve_weights(&declared, &no_groups).unwrap(),
             [("a".to_string(), 70.0), ("b".to_string(), 30.0)].into()
         );
 
@@ -1190,7 +1444,7 @@ mod tests {
             ("b".to_string(), spec(Some(20.0))),
         ]
         .into();
-        let err = resolve_weights(&wrong).unwrap_err();
+        let err = resolve_weights(&wrong, &no_groups).unwrap_err();
         assert!(err.to_string().contains("90"), "{err}");
 
         // Partially declared -> refused too: the undeclared field would
@@ -1200,7 +1454,161 @@ mod tests {
             ("b".to_string(), spec(None)),
         ]
         .into();
-        assert!(resolve_weights(&partial).is_err());
+        assert!(resolve_weights(&partial, &no_groups).is_err());
+    }
+
+    #[test]
+    fn group_weights_share_the_same_hundred() {
+        let spec = |weight: Option<f64>| ComparisonSpec {
+            levels: vec![Some("exact".to_string())],
+            tf: false,
+            weight,
+            null_policy: NullPolicy::Never,
+        };
+        let group = |weight: Option<f64>| ComparisonGroupSpec {
+            attributes: vec!["mobile".to_string(), "home_phone".to_string()],
+            levels: vec![Some("exact".to_string())],
+            tf: false,
+            weight,
+            null_policy: NullPolicy::Never,
+        };
+
+        // None declared anywhere -> equal shares over the union.
+        let comparisons: BTreeMap<String, ComparisonSpec> =
+            [("a".to_string(), spec(None)), ("b".to_string(), spec(None))].into();
+        let groups: BTreeMap<String, ComparisonGroupSpec> = [("g".to_string(), group(None))].into();
+        let weights = resolve_weights(&comparisons, &groups).unwrap();
+        assert!((weights["g"] - 100.0 / 3.0).abs() < 1e-9);
+        assert!((weights["a"] - 100.0 / 3.0).abs() < 1e-9);
+
+        // A declared group weight participates in the total like any
+        // comparison's: 70 + 20 + 20 = 110 is refused, naming the total.
+        let comparisons: BTreeMap<String, ComparisonSpec> = [
+            ("a".to_string(), spec(Some(70.0))),
+            ("b".to_string(), spec(Some(20.0))),
+        ]
+        .into();
+        let groups: BTreeMap<String, ComparisonGroupSpec> =
+            [("g".to_string(), group(Some(20.0)))].into();
+        let err = resolve_weights(&comparisons, &groups).unwrap_err();
+        assert!(err.to_string().contains("110"), "{err}");
+
+        // A group left unweighted when others are declared is the same silent
+        // drop the per-column rule exists to prevent.
+        let comparisons: BTreeMap<String, ComparisonSpec> =
+            [("a".to_string(), spec(Some(80.0)))].into();
+        let groups: BTreeMap<String, ComparisonGroupSpec> = [("g".to_string(), group(None))].into();
+        assert!(resolve_weights(&comparisons, &groups).is_err());
+    }
+
+    fn group_config(group_yaml: &str) -> Config {
+        let yaml = format!(
+            "{}\ncomparison_groups:\n{group_yaml}",
+            include_str!("../../er-config/tests/fixtures/test.yaml")
+        );
+        er_config::load_config_str(&yaml).expect("the probe config parses")
+    }
+
+    #[test]
+    fn a_group_compiles_to_a_pooled_comparison_and_a_blocking_rule() {
+        let config = group_config(
+            "  any_phone:\n    attributes: [phone_e164, mobile_phone]\n    levels: [exact]\n",
+        );
+        let compiled = compile(&config).expect("the group config compiles");
+        let settings: serde_json::Value = serde_json::from_str(&compiled.model_json).unwrap();
+        let comparisons = settings["comparisons"].as_array().unwrap();
+
+        // The group is one comparison, named as declared, after the per-column
+        // ones.
+        let group = comparisons
+            .iter()
+            .find(|c| c["output_column_name"] == "any_phone")
+            .expect("the pooled comparison exists");
+        let levels = group["comparison_levels"].as_array().unwrap();
+        // Null level, exact level, ELSE.
+        assert_eq!(levels.len(), 3);
+        assert_eq!(levels[0]["is_null_level"], true);
+        assert_eq!(
+            levels[0]["sql_condition"].as_str().unwrap(),
+            "(\"phone_e164_l\" IS NULL AND \"mobile_phone_l\" IS NULL) OR \
+             (\"phone_e164_r\" IS NULL AND \"mobile_phone_r\" IS NULL)"
+        );
+        assert_eq!(
+            levels[1]["sql_condition"].as_str().unwrap(),
+            "(\"phone_e164_l\" = \"phone_e164_r\" OR \"phone_e164_l\" = \"mobile_phone_r\" OR \
+             \"mobile_phone_l\" = \"phone_e164_r\" OR \"mobile_phone_l\" = \"mobile_phone_r\")"
+        );
+        assert_eq!(levels[2]["sql_condition"].as_str().unwrap(), "ELSE");
+
+        // And one blocking rule appended after the config's declared four, so a
+        // cross-field agreement can generate the candidate, not only score it.
+        let rules = settings["blocking_rules_to_generate_predictions"]
+            .as_array()
+            .unwrap();
+        assert_eq!(rules.len(), 5);
+        assert_eq!(
+            rules[4]["blocking_rule"].as_str().unwrap(),
+            "(l.phone_e164 = r.phone_e164 OR l.phone_e164 = r.mobile_phone OR \
+             l.mobile_phone = r.phone_e164 OR l.mobile_phone = r.mobile_phone)"
+        );
+    }
+
+    #[test]
+    fn a_group_refuses_tf_fixed_column_tokens_and_singletons() {
+        let err = compile(&group_config(
+            "  any_phone:\n    attributes: [phone_e164, mobile_phone]\n    levels: [exact]\n    tf: true\n",
+        ))
+        .unwrap_err();
+        assert!(
+            matches!(err, CompileError::GroupTfUnsupported { .. }),
+            "{err}"
+        );
+
+        let err = compile(&group_config(
+            "  names:\n    attributes: [given_name, family_name]\n    levels: [variant_match]\n",
+        ))
+        .unwrap_err();
+        assert!(
+            matches!(err, CompileError::LevelNotGroupCapable { .. }),
+            "{err}"
+        );
+
+        let err = compile(&group_config(
+            "  alone:\n    attributes: [phone_e164]\n    levels: [exact]\n",
+        ))
+        .unwrap_err();
+        assert!(matches!(err, CompileError::GroupTooSmall { .. }), "{err}");
+
+        // A group named like a comparison would put two gamma columns under one
+        // name.
+        let err = compile(&group_config(
+            "  phone_e164:\n    attributes: [phone_e164, mobile_phone]\n    levels: [exact]\n",
+        ))
+        .unwrap_err();
+        assert!(
+            matches!(err, CompileError::GroupNameCollision { .. }),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn a_config_without_groups_compiles_byte_identically() {
+        // The hash-stability rule's compile-side half: no block declared, no
+        // trace in the model.
+        let plain = compile(
+            &er_config::load_config_str(include_str!("../../er-config/tests/fixtures/test.yaml"))
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(!plain.model_json.contains("any_phone"));
+        let settings: serde_json::Value = serde_json::from_str(&plain.model_json).unwrap();
+        assert_eq!(
+            settings["blocking_rules_to_generate_predictions"]
+                .as_array()
+                .unwrap()
+                .len(),
+            4
+        );
     }
 
     #[test]
