@@ -304,6 +304,9 @@ fn er_run_all_reproduces_base_10_relations() {
             // test passes.
             "candidate_keys",
             "golden_overrides",
+            // The merge dialog's record-keyed overrides (S2.8): staged only by
+            // `override_field_by_record`, which base_10 never runs.
+            "golden_record_overrides",
             "record_overlays",
             "record_qualities",
             // The per-stage ledger (batch-orchestration-design §4.3). It has

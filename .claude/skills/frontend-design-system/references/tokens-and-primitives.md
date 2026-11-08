@@ -99,6 +99,7 @@ is the one that matters:
 - `button`
 - `card`
 - `confirm-typed`
+- `dialog`
 - `dropdown-menu`
 - `input`
 - `label`

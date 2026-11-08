@@ -854,4 +854,356 @@ WHERE golden_records.id IN (
         drop(__entered);
         Ok(__n)
     }
+
+    /// Apply the steward RECORD-keyed addr_city overrides over the assembled golden rows, resolving each record to its current entity through entity_membership (latest created_at wins when several member rows name the attribute; NULL value = the steward cleared the field); zero overrides match zero rows, so the determinism contract holds.
+    pub fn override_record_addr_city(
+        conn: &::duckdb::Connection,
+        updated_at: &str,
+    ) -> ::duckdb::Result<usize> {
+        const SQL: &str = "UPDATE lake.main.golden_records SET addr_city = (
+  SELECT o.value FROM lake.main.golden_record_overrides o
+  JOIN lake.main.entity_membership m
+    ON m.record_key = o.record_key AND m.entity_id = golden_records.id
+  WHERE o.attribute = 'addr_city'
+  ORDER BY o.created_at DESC, o.record_key LIMIT 1),
+    updated_at = $1::timestamp
+WHERE golden_records.id IN (
+  SELECT m.entity_id FROM lake.main.golden_record_overrides o
+  JOIN lake.main.entity_membership m ON m.record_key = o.record_key
+  WHERE o.attribute = 'addr_city')
+";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "golden_record",
+            "update",
+            "override_record_addr_city",
+            "golden_records",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, conn.execute(SQL, ::duckdb::params![updated_at]))?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
+    }
+
+    /// Apply the steward RECORD-keyed addr_number overrides over the assembled golden rows, resolving each record to its current entity through entity_membership (latest created_at wins when several member rows name the attribute; NULL value = the steward cleared the field); zero overrides match zero rows, so the determinism contract holds.
+    pub fn override_record_addr_number(
+        conn: &::duckdb::Connection,
+        updated_at: &str,
+    ) -> ::duckdb::Result<usize> {
+        const SQL: &str = "UPDATE lake.main.golden_records SET addr_number = (
+  SELECT o.value FROM lake.main.golden_record_overrides o
+  JOIN lake.main.entity_membership m
+    ON m.record_key = o.record_key AND m.entity_id = golden_records.id
+  WHERE o.attribute = 'addr_number'
+  ORDER BY o.created_at DESC, o.record_key LIMIT 1),
+    updated_at = $1::timestamp
+WHERE golden_records.id IN (
+  SELECT m.entity_id FROM lake.main.golden_record_overrides o
+  JOIN lake.main.entity_membership m ON m.record_key = o.record_key
+  WHERE o.attribute = 'addr_number')
+";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "golden_record",
+            "update",
+            "override_record_addr_number",
+            "golden_records",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, conn.execute(SQL, ::duckdb::params![updated_at]))?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
+    }
+
+    /// Apply the steward RECORD-keyed addr_postal overrides over the assembled golden rows, resolving each record to its current entity through entity_membership (latest created_at wins when several member rows name the attribute; NULL value = the steward cleared the field); zero overrides match zero rows, so the determinism contract holds.
+    pub fn override_record_addr_postal(
+        conn: &::duckdb::Connection,
+        updated_at: &str,
+    ) -> ::duckdb::Result<usize> {
+        const SQL: &str = "UPDATE lake.main.golden_records SET addr_postal = (
+  SELECT o.value FROM lake.main.golden_record_overrides o
+  JOIN lake.main.entity_membership m
+    ON m.record_key = o.record_key AND m.entity_id = golden_records.id
+  WHERE o.attribute = 'addr_postal'
+  ORDER BY o.created_at DESC, o.record_key LIMIT 1),
+    updated_at = $1::timestamp
+WHERE golden_records.id IN (
+  SELECT m.entity_id FROM lake.main.golden_record_overrides o
+  JOIN lake.main.entity_membership m ON m.record_key = o.record_key
+  WHERE o.attribute = 'addr_postal')
+";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "golden_record",
+            "update",
+            "override_record_addr_postal",
+            "golden_records",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, conn.execute(SQL, ::duckdb::params![updated_at]))?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
+    }
+
+    /// Apply the steward RECORD-keyed addr_region overrides over the assembled golden rows, resolving each record to its current entity through entity_membership (latest created_at wins when several member rows name the attribute; NULL value = the steward cleared the field); zero overrides match zero rows, so the determinism contract holds.
+    pub fn override_record_addr_region(
+        conn: &::duckdb::Connection,
+        updated_at: &str,
+    ) -> ::duckdb::Result<usize> {
+        const SQL: &str = "UPDATE lake.main.golden_records SET addr_region = (
+  SELECT o.value FROM lake.main.golden_record_overrides o
+  JOIN lake.main.entity_membership m
+    ON m.record_key = o.record_key AND m.entity_id = golden_records.id
+  WHERE o.attribute = 'addr_region'
+  ORDER BY o.created_at DESC, o.record_key LIMIT 1),
+    updated_at = $1::timestamp
+WHERE golden_records.id IN (
+  SELECT m.entity_id FROM lake.main.golden_record_overrides o
+  JOIN lake.main.entity_membership m ON m.record_key = o.record_key
+  WHERE o.attribute = 'addr_region')
+";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "golden_record",
+            "update",
+            "override_record_addr_region",
+            "golden_records",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, conn.execute(SQL, ::duckdb::params![updated_at]))?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
+    }
+
+    /// Apply the steward RECORD-keyed addr_street overrides over the assembled golden rows, resolving each record to its current entity through entity_membership (latest created_at wins when several member rows name the attribute; NULL value = the steward cleared the field); zero overrides match zero rows, so the determinism contract holds.
+    pub fn override_record_addr_street(
+        conn: &::duckdb::Connection,
+        updated_at: &str,
+    ) -> ::duckdb::Result<usize> {
+        const SQL: &str = "UPDATE lake.main.golden_records SET addr_street = (
+  SELECT o.value FROM lake.main.golden_record_overrides o
+  JOIN lake.main.entity_membership m
+    ON m.record_key = o.record_key AND m.entity_id = golden_records.id
+  WHERE o.attribute = 'addr_street'
+  ORDER BY o.created_at DESC, o.record_key LIMIT 1),
+    updated_at = $1::timestamp
+WHERE golden_records.id IN (
+  SELECT m.entity_id FROM lake.main.golden_record_overrides o
+  JOIN lake.main.entity_membership m ON m.record_key = o.record_key
+  WHERE o.attribute = 'addr_street')
+";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "golden_record",
+            "update",
+            "override_record_addr_street",
+            "golden_records",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, conn.execute(SQL, ::duckdb::params![updated_at]))?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
+    }
+
+    /// Apply the steward RECORD-keyed addr_unit overrides over the assembled golden rows, resolving each record to its current entity through entity_membership (latest created_at wins when several member rows name the attribute; NULL value = the steward cleared the field); zero overrides match zero rows, so the determinism contract holds.
+    pub fn override_record_addr_unit(
+        conn: &::duckdb::Connection,
+        updated_at: &str,
+    ) -> ::duckdb::Result<usize> {
+        const SQL: &str = "UPDATE lake.main.golden_records SET addr_unit = (
+  SELECT o.value FROM lake.main.golden_record_overrides o
+  JOIN lake.main.entity_membership m
+    ON m.record_key = o.record_key AND m.entity_id = golden_records.id
+  WHERE o.attribute = 'addr_unit'
+  ORDER BY o.created_at DESC, o.record_key LIMIT 1),
+    updated_at = $1::timestamp
+WHERE golden_records.id IN (
+  SELECT m.entity_id FROM lake.main.golden_record_overrides o
+  JOIN lake.main.entity_membership m ON m.record_key = o.record_key
+  WHERE o.attribute = 'addr_unit')
+";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "golden_record",
+            "update",
+            "override_record_addr_unit",
+            "golden_records",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, conn.execute(SQL, ::duckdb::params![updated_at]))?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
+    }
+
+    /// Apply the steward RECORD-keyed birth_date overrides over the assembled golden rows, resolving each record to its current entity through entity_membership (latest created_at wins when several member rows name the attribute; NULL value = the steward cleared the field); zero overrides match zero rows, so the determinism contract holds.
+    pub fn override_record_birth_date(
+        conn: &::duckdb::Connection,
+        updated_at: &str,
+    ) -> ::duckdb::Result<usize> {
+        const SQL: &str = "UPDATE lake.main.golden_records SET birth_date = (
+  SELECT o.value FROM lake.main.golden_record_overrides o
+  JOIN lake.main.entity_membership m
+    ON m.record_key = o.record_key AND m.entity_id = golden_records.id
+  WHERE o.attribute = 'birth_date'
+  ORDER BY o.created_at DESC, o.record_key LIMIT 1),
+    updated_at = $1::timestamp
+WHERE golden_records.id IN (
+  SELECT m.entity_id FROM lake.main.golden_record_overrides o
+  JOIN lake.main.entity_membership m ON m.record_key = o.record_key
+  WHERE o.attribute = 'birth_date')
+";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "golden_record",
+            "update",
+            "override_record_birth_date",
+            "golden_records",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, conn.execute(SQL, ::duckdb::params![updated_at]))?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
+    }
+
+    /// Apply the steward RECORD-keyed email overrides over the assembled golden rows, resolving each record to its current entity through entity_membership (latest created_at wins when several member rows name the attribute; NULL value = the steward cleared the field); zero overrides match zero rows, so the determinism contract holds.
+    pub fn override_record_email(
+        conn: &::duckdb::Connection,
+        updated_at: &str,
+    ) -> ::duckdb::Result<usize> {
+        const SQL: &str = "UPDATE lake.main.golden_records SET email = (
+  SELECT o.value FROM lake.main.golden_record_overrides o
+  JOIN lake.main.entity_membership m
+    ON m.record_key = o.record_key AND m.entity_id = golden_records.id
+  WHERE o.attribute = 'email'
+  ORDER BY o.created_at DESC, o.record_key LIMIT 1),
+    updated_at = $1::timestamp
+WHERE golden_records.id IN (
+  SELECT m.entity_id FROM lake.main.golden_record_overrides o
+  JOIN lake.main.entity_membership m ON m.record_key = o.record_key
+  WHERE o.attribute = 'email')
+";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "golden_record",
+            "update",
+            "override_record_email",
+            "golden_records",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, conn.execute(SQL, ::duckdb::params![updated_at]))?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
+    }
+
+    /// Apply the steward RECORD-keyed family_name overrides over the assembled golden rows, resolving each record to its current entity through entity_membership (latest created_at wins when several member rows name the attribute; NULL value = the steward cleared the field); zero overrides match zero rows, so the determinism contract holds.
+    pub fn override_record_family_name(
+        conn: &::duckdb::Connection,
+        updated_at: &str,
+    ) -> ::duckdb::Result<usize> {
+        const SQL: &str = "UPDATE lake.main.golden_records SET family_name = (
+  SELECT o.value FROM lake.main.golden_record_overrides o
+  JOIN lake.main.entity_membership m
+    ON m.record_key = o.record_key AND m.entity_id = golden_records.id
+  WHERE o.attribute = 'family_name'
+  ORDER BY o.created_at DESC, o.record_key LIMIT 1),
+    updated_at = $1::timestamp
+WHERE golden_records.id IN (
+  SELECT m.entity_id FROM lake.main.golden_record_overrides o
+  JOIN lake.main.entity_membership m ON m.record_key = o.record_key
+  WHERE o.attribute = 'family_name')
+";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "golden_record",
+            "update",
+            "override_record_family_name",
+            "golden_records",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, conn.execute(SQL, ::duckdb::params![updated_at]))?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
+    }
+
+    /// Apply the steward RECORD-keyed given_name overrides over the assembled golden rows, resolving each record to its current entity through entity_membership (latest created_at wins when several member rows name the attribute; NULL value = the steward cleared the field); zero overrides match zero rows, so the determinism contract holds.
+    pub fn override_record_given_name(
+        conn: &::duckdb::Connection,
+        updated_at: &str,
+    ) -> ::duckdb::Result<usize> {
+        const SQL: &str = "UPDATE lake.main.golden_records SET given_name = (
+  SELECT o.value FROM lake.main.golden_record_overrides o
+  JOIN lake.main.entity_membership m
+    ON m.record_key = o.record_key AND m.entity_id = golden_records.id
+  WHERE o.attribute = 'given_name'
+  ORDER BY o.created_at DESC, o.record_key LIMIT 1),
+    updated_at = $1::timestamp
+WHERE golden_records.id IN (
+  SELECT m.entity_id FROM lake.main.golden_record_overrides o
+  JOIN lake.main.entity_membership m ON m.record_key = o.record_key
+  WHERE o.attribute = 'given_name')
+";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "golden_record",
+            "update",
+            "override_record_given_name",
+            "golden_records",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, conn.execute(SQL, ::duckdb::params![updated_at]))?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
+    }
+
+    /// Apply the steward RECORD-keyed phone_e164 overrides over the assembled golden rows, resolving each record to its current entity through entity_membership (latest created_at wins when several member rows name the attribute; NULL value = the steward cleared the field); zero overrides match zero rows, so the determinism contract holds.
+    pub fn override_record_phone_e164(
+        conn: &::duckdb::Connection,
+        updated_at: &str,
+    ) -> ::duckdb::Result<usize> {
+        const SQL: &str = "UPDATE lake.main.golden_records SET phone_e164 = (
+  SELECT o.value FROM lake.main.golden_record_overrides o
+  JOIN lake.main.entity_membership m
+    ON m.record_key = o.record_key AND m.entity_id = golden_records.id
+  WHERE o.attribute = 'phone_e164'
+  ORDER BY o.created_at DESC, o.record_key LIMIT 1),
+    updated_at = $1::timestamp
+WHERE golden_records.id IN (
+  SELECT m.entity_id FROM lake.main.golden_record_overrides o
+  JOIN lake.main.entity_membership m ON m.record_key = o.record_key
+  WHERE o.attribute = 'phone_e164')
+";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "golden_record",
+            "update",
+            "override_record_phone_e164",
+            "golden_records",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, conn.execute(SQL, ::duckdb::params![updated_at]))?;
+        ::er_span::rows(&__span, __n as u64);
+        drop(__entered);
+        Ok(__n)
+    }
 }

@@ -271,6 +271,20 @@ export function initialState() {
         created_at: "2026-09-21T12:00:00Z",
         resources: { duckdb_threads: 2, duckdb_memory_limit: "4GB" },
       },
+      // The review merge dialog's own org (spec 2.8): its ONE open review is a
+      // pair whose rec_a already sits in a two-member entity, so the dialog's
+      // group is THREE records — the shape the pair-only grid cannot show.
+      // Private to the dialog spec, because a merge resolves the review and
+      // no other journey may watch it disappear.
+      "merge-dev": {
+        id: "uuid-merge-dev",
+        name: "merge-dev",
+        state: "active",
+        active_config_version: 1,
+        drop_root: "/dev/drop/merge-dev",
+        created_at: "2026-09-21T12:00:00Z",
+        resources: { duckdb_threads: 2, duckdb_memory_limit: "4GB" },
+      },
       // An account/org-entity tenant: the read API serves company_name/domain,
       // and the UI (wizard canonical attributes, duplicates preview, display
       // names) switches to the account vocabulary off its `entity_type: account`
@@ -323,6 +337,14 @@ export function initialState() {
         open_reviews: 3,
         snapshot: 3,
       },
+      "merge-dev": {
+        records: 12,
+        entities: 10,
+        duplicate_groups: 1,
+        records_in_duplicate_groups: 2,
+        open_reviews: 3,
+        snapshot: 4,
+      },
       "orgs-dev": {
         records: 44,
         entities: 24,
@@ -335,6 +357,7 @@ export function initialState() {
     golden: {
       "acme-dev": Array.from({ length: 230 }, (_, index) => goldenRecord(index)),
       "mutable-dev": [],
+      "merge-dev": [],
       "orgs-dev": Array.from({ length: 24 }, (_, index) => accountGoldenRecord(index)),
     },
     runs: {
@@ -408,6 +431,7 @@ export function initialState() {
       ],
       // Only tests that mutate job state touch this org, so acme-dev's fixtures
       // stay byte-stable for the visual baselines under parallel projects.
+      "merge-dev": [],
       "mutable-dev": [
         {
           id: "01jmmutable00000000000000m1",
@@ -475,6 +499,32 @@ export function initialState() {
       })),
       // Enough rows for three parallel device projects to each triage 20
       // without touching acme-dev (whose counts are pixel- and text-asserted).
+      // crm:G-1 is already one of TWO members of its entity (the merge-group
+      // read adds archive:G-1), so deciding this pair merges THREE records.
+      // THREE copies of the same pair: merging resolves the review, and the
+      // spec holds three tests — one review each, or the later tests face an
+      // empty inbox.
+      "merge-dev": ["01", "02", "03"].map((suffix) => ({
+        id: `01jmmergerev000000000000${suffix}`,
+        subject_type: "pair",
+        rec_a_key: "crm:G-1",
+        rec_b_key: "billing:G-9",
+        entity_id: null,
+        reason: "gray_band",
+        match_probability: 0.87,
+        waterfall: {
+          gamma_email: 1,
+          mw_email: 1.4,
+          gamma_family_name: 2,
+          mw_family_name: 2.2,
+          match_weight: 3.6,
+        },
+        status: "open",
+        first_seen_run_id: "01jm0000000000000000000002",
+        last_seen_run_id: "01jm0000000000000000000002",
+        resolved_by: null,
+        resolved_at: null,
+      })),
       "mutable-dev": Array.from({ length: 120 }, (_, index) => ({
         id: `01jmmutrev${String(index + 1).padStart(4, "0")}`,
         subject_type: "pair",
@@ -491,7 +541,7 @@ export function initialState() {
         resolved_at: null,
       })),
     },
-    stagedCount: { "acme-dev": 3, "mutable-dev": 0 },
+    stagedCount: { "acme-dev": 3, "mutable-dev": 0, "merge-dev": 0 },
     assertions: {
       "acme-dev": [
         {
@@ -532,6 +582,7 @@ export function initialState() {
         },
       ],
       "mutable-dev": [],
+      "merge-dev": [],
     },
     contradictions: {
       "acme-dev": [
@@ -544,6 +595,7 @@ export function initialState() {
         },
       ],
       "mutable-dev": [],
+      "merge-dev": [],
     },
     matchScores: {
       "acme-dev": Array.from({ length: 30 }, (_, index) => ({
@@ -556,6 +608,7 @@ export function initialState() {
         scored_at: "2026-09-24T06:01:00Z",
       })),
       "mutable-dev": [],
+      "merge-dev": [],
     },
     // The tag vocabulary and its applications. Retiring is a SOFT delete
     // upstream, so a retired tag keeps its taggings and simply stops being
@@ -693,6 +746,7 @@ export function initialState() {
         },
       ],
       "mutable-dev": [],
+      "merge-dev": [],
     },
     schedules: {
       "acme-dev": [
@@ -714,6 +768,7 @@ export function initialState() {
         },
       ],
       "mutable-dev": [],
+      "merge-dev": [],
     },
     // Subscriptions and the delivery log. `events` is an array of catalogued
     // names, exactly as the webhook entity's jsonb column stores it.
@@ -727,6 +782,7 @@ export function initialState() {
         },
       ],
       "mutable-dev": [],
+      "merge-dev": [],
     },
     deliveries: {
       "acme-dev": [
@@ -795,6 +851,7 @@ export function initialState() {
         },
       ],
       "mutable-dev": [],
+      "merge-dev": [],
     },
     // Retained metric snapshots, NEWEST FIRST — the order `metric_snapshot/read/
     // recent` pages in. The rates are DERIVED on read by the server, so they
@@ -846,6 +903,7 @@ export function initialState() {
         },
       ],
       "mutable-dev": [],
+      "merge-dev": [],
     },
     configs: {
       "acme-dev": {
@@ -875,6 +933,13 @@ export function initialState() {
         config_hash: "mockhash",
         state: "published",
         tier: null,
+        created_by: "operator",
+        created_at: "2026-09-20T12:00:00Z",
+        published_at: "2026-09-20T12:00:00Z",
+      },
+      "merge-dev": {
+        version: 1,
+        yaml: "tenant: merge\nthresholds:\n  auto_merge: 0.95\n  review_low: 0.60\nsurvivorship:\n  email: [validated, recency]\nsources:\n  crm:\n    priority_rank: 1",
         created_by: "operator",
         created_at: "2026-09-20T12:00:00Z",
         published_at: "2026-09-20T12:00:00Z",
@@ -2491,6 +2556,67 @@ const server = http.createServer((req, res) => {
         assertion_id: body.resolution === "dismiss" ? null : `01jmassertnew${row.id.slice(-4)}`,
         pending_until_next_reconcile: !staged,
       });
+    }
+    // The merge dialog's group read (spec 2.8): the union of BOTH sides'
+    // entity memberships. The merge-dev review's rec_a already sits in a
+    // two-member entity, so the group is THREE records — rec_a, its entity
+    // sibling (archive:G-1), then rec_b's singleton side. Every other org's
+    // reviews are genuine two-singleton pairs.
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/reviews\/([^/:]+)\/merge-group$/.exec(
+        path,
+      )) &&
+      req.method === "GET"
+    ) {
+      const row = (state.reviews[match[1]] ?? []).find((r) => r.id === match[2]);
+      if (!row) return send(res, 404, { detail: "not found" });
+      if (!row.rec_a_key || !row.rec_b_key) {
+        return send(res, 422, { detail: "this review is about an entity rather than a pair" });
+      }
+      const aId = `01jment${row.rec_a_key.replace(/[^0-9a-z]/gi, "").slice(-8)}a`;
+      const bId = `01jment${row.rec_b_key.replace(/[^0-9a-z]/gi, "").slice(-8)}b`;
+      const sibling = `archive:G-1`;
+      const items =
+        match[1] === "merge-dev"
+          ? [
+              { ...sourceRecord(row.rec_a_key), entity_id: aId },
+              { ...sourceRecord(sibling), entity_id: aId },
+              { ...sourceRecord(row.rec_b_key), entity_id: bId },
+            ]
+          : [
+              { ...sourceRecord(row.rec_a_key), entity_id: aId },
+              { ...sourceRecord(row.rec_b_key), entity_id: bId },
+            ];
+      return send(res, 200, { items, total: items.length, snapshot: 1 });
+    }
+    // The merge dialog's bundle (spec 2.8): staged together, and the named
+    // review resolves as a match — which is what removes it from the inbox.
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/merges$/.exec(path)) &&
+      req.method === "POST"
+    ) {
+      const org = match[1];
+      const body = await readBody(req);
+      const records = Array.isArray(body.records) ? body.records : [];
+      if (records.length < 2 || !records.includes(body.master)) {
+        return send(res, 422, { detail: "records must be 2..=50 and include master" });
+      }
+      const action_ids = records
+        .filter((key) => key !== body.master)
+        .map((key) => `mock-assert-${key}`);
+      action_ids.push("mock-protect");
+      for (const override of body.overrides ?? [])
+        action_ids.push(`mock-override-${override.attribute}`);
+      if (body.review_id) {
+        const row = (state.reviews[org] ?? []).find((r) => r.id === body.review_id);
+        if (row && row.status === "open") {
+          row.status = "resolved_match";
+          state.metrics[org].open_reviews = Math.max(0, state.metrics[org].open_reviews - 1);
+        }
+        action_ids.push("mock-resolve");
+      }
+      state.stagedCount[org] = (state.stagedCount[org] ?? 0) + action_ids.length;
+      return send(res, 200, { status: "staged", action_ids });
     }
     if (
       (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/reviews:bulk-resolve$/.exec(path)) &&

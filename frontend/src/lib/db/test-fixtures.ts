@@ -84,6 +84,10 @@ export const TRIAGE_ORGS = [
   "labeling-dev",
   "labeling-ios",
   "labeling-android",
+  // The review merge dialog (spec 2.8) resolves its one review, so it gets a
+  // private org like every other mutating flow. Desktop-only — the dialog
+  // opens from the decision panel, which the mobile projects do not render.
+  "merge-dev",
   // Subscribing and removing both mutate the subscription list, so the webhook
   // page gets one org per device project for the same reason the registry does.
   "webhooks-dev",

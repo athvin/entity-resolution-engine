@@ -1024,6 +1024,90 @@ pub fn review_get(
     }
 }
 
+/// What [`merge_group`] found for a review.
+pub enum MergeGroup {
+    /// The review exists but names no record pair (an entity-subject review) —
+    /// the dialog has nothing to group.
+    NoPair,
+    /// The union of both sides' memberships as records-by-key items, each
+    /// stamped with its `entity_id` (null for a record with no membership row).
+    /// `total` is the union's size before the [`MAX_KEYS`] cap truncated it.
+    Group { items: Vec<Value>, total: usize },
+}
+
+/// The review merge dialog's group read (S2.8): the union of BOTH sides'
+/// entity memberships at `snapshot`, rec_a's entity first, each item carrying
+/// its values (the same shape `records_by_key` returns) plus the `entity_id`
+/// it belongs to. A side with no membership row contributes only itself.
+///
+/// The pair alone is not the group: when one side already sits in a two-member
+/// entity, the merge the steward is deciding on combines THREE records, and a
+/// dialog that showed two would edit a merge that is not the one that lands.
+///
+/// `Ok(None)` = no such review. [`MergeGroup::NoPair`] maps to the handler's
+/// 422, mirroring the compare grid's entity-review early return.
+///
+/// # Errors
+/// Propagates a non-missing-table lake query error.
+pub fn merge_group(
+    session: &Session,
+    snapshot: i64,
+    review_id: &str,
+) -> Result<Option<MergeGroup>, String> {
+    let rows = match er_entities::review::read::by_id(session.connection(), snapshot, review_id) {
+        Ok(rows) => rows,
+        Err(e) => {
+            let s = e.to_string();
+            if is_missing_table(&s) {
+                return Ok(None);
+            }
+            return Err(s);
+        }
+    };
+    let Some(row) = rows.into_iter().next() else {
+        return Ok(None);
+    };
+    let (Some(rec_a), Some(rec_b)) = (row.rec_a_key, row.rec_b_key) else {
+        return Ok(Some(MergeGroup::NoPair));
+    };
+    let mut order: Vec<String> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut entity_of = std::collections::HashMap::<String, String>::new();
+    for side in [&rec_a, &rec_b] {
+        match entity_of_record_key(session, snapshot, side)? {
+            Some(entity_id) => {
+                for key in entity_member_keys(session, snapshot, &entity_id)? {
+                    entity_of.insert(key.clone(), entity_id.clone());
+                    if seen.insert(key.clone()) {
+                        order.push(key);
+                    }
+                }
+            }
+            None => {
+                if seen.insert(side.clone()) {
+                    order.push(side.clone());
+                }
+            }
+        }
+    }
+    let total = order.len();
+    order.truncate(MAX_KEYS);
+    let mut items = records_by_key(session, snapshot, &order)?;
+    for item in &mut items {
+        if let Value::Object(map) = item {
+            let entity = map
+                .get("record_key")
+                .and_then(Value::as_str)
+                .and_then(|key| entity_of.get(key));
+            map.insert(
+                "entity_id".to_string(),
+                entity.map_or(Value::Null, |id| json!(id)),
+            );
+        }
+    }
+    Ok(Some(MergeGroup::Group { items, total }))
+}
+
 /// The assertion ledger, keyed by `id` (`readapi.assertions_list`).
 /// Active-only unless `include_retracted`.
 ///

@@ -42,6 +42,7 @@
   "GET /v1/orgs/{org}/datasets/{ds}/records": { "envelope": "record", "keys": ["items", "snapshot"] },
   "GET /v1/orgs/{org}/datasets/{ds}/reviews": { "envelope": "record", "keys": ["items", "snapshot", "next_cursor", "unscored_hidden"] },
   "GET /v1/orgs/{org}/datasets/{ds}/reviews/{review_id}": { "envelope": "scalar" },
+  "GET /v1/orgs/{org}/datasets/{ds}/reviews/{review_id}/merge-group": { "envelope": "record", "keys": ["items", "total", "snapshot"] },
   "GET /v1/orgs/{org}/datasets/{ds}/runs": { "envelope": "bare" },
   "GET /v1/orgs/{org}/datasets/{ds}/runs/{run_id}/entity-events": { "envelope": "record", "keys": ["items", "run_id", "snapshot", "next_cursor"] },
   "GET /v1/orgs/{org}/datasets/{ds}/s3-ingest": { "envelope": "record", "keys": ["bucket", "prefix", "sources"] },

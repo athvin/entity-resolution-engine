@@ -840,6 +840,30 @@ fn ddl_specs() -> Vec<TableSpec> {
             vec![key(&["id"]), key(&["entity_id", "attribute"])],
             BTreeMap::new(),
         ),
+        // Steward RECORD-keyed golden field overrides (the review merge
+        // dialog): one latest-wins row per (record_key, attribute); `value`
+        // NULL means the steward cleared the field. Keyed by record because a
+        // merge's entity id is minted at reconcile — the assemble-time UPDATEs
+        // resolve each record to its CURRENT entity through entity_membership,
+        // so the choice lands on the entity the merge produced. Applied after
+        // the entity-keyed pass, so a dialog choice wins over a mass-update
+        // one; an empty table is a byte-exact no-op (the determinism contract
+        // holds).
+        tspec(
+            "golden_record_overrides",
+            vec![
+                nn("id", VARCHAR),
+                nn("record_key", VARCHAR),
+                nn("attribute", VARCHAR),
+                col("value", VARCHAR),
+                nn("created_by", VARCHAR),
+                nn("created_at", TIMESTAMP),
+                nn("source_action_id", VARCHAR),
+                nn("updated_at", TIMESTAMP),
+            ],
+            vec![key(&["id"]), key(&["record_key", "attribute"])],
+            BTreeMap::new(),
+        ),
         // Steward record overlays (PR 1.3): protect/suppress one record. One
         // latest-wins active row per (record_key, kind). `suppress` drops the
         // record from reconcile clustering; `protect` forces it master on the

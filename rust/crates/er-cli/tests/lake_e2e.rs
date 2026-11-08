@@ -5926,3 +5926,123 @@ fn a_second_delivery_reports_drift_against_the_first() {
 
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+/// The merge dialog's record-keyed overrides (S2.8), end to end through the
+/// real lake: three personas' entities merged by an assertion star, with the
+/// field pins keyed by RECORD — staged BEFORE the merge exists, landing on the
+/// entity reconcile mints, resolved through the fresh membership at assemble.
+///
+/// base_10's personas: P1 = {crm:C001, billing:B001, webforms:W001},
+/// P2 = {crm:C002, billing:B002, webforms:W003}, P3 = {crm:C003, billing:B003,
+/// webforms:W004} — so starring crm:C001 to billing:B002 and webforms:W004
+/// merges nine records into one entity.
+#[test]
+fn record_keyed_overrides_land_on_the_entity_the_merge_mints() {
+    if !enabled() {
+        eprintln!("skipping DuckLake e2e (set DEDUPE_E2E_DUCKLAKE=1 to run)");
+        return;
+    }
+    let (session, config, tmp) = standardized_lake("rec_override");
+    match_model(&session);
+    er_cli::run_reconcile(
+        &session,
+        &config,
+        "01RUNRECON0000000000000000",
+        "2026-01-03 00:00:00",
+    )
+    .unwrap();
+    er_cli::run_golden(&session, &config, "2026-01-03 00:00:00").unwrap();
+
+    // The dialog's bundle, staged as `apply_staged_action` receives it: an
+    // always-star to the master, the master's protect, and the field pins
+    // keyed by the master's record_key. The pins are written BEFORE reconcile
+    // — the merged entity's id does not exist yet, which is the entire reason
+    // the overrides are record-keyed.
+    let bundle = [
+        serde_json::json!({"type": "add_assertion", "a": "crm:C001", "b": "billing:B002", "kind": "always", "created_by": "test"}),
+        serde_json::json!({"type": "add_assertion", "a": "crm:C001", "b": "webforms:W004", "kind": "always", "created_by": "test"}),
+        serde_json::json!({"type": "protect_record", "record_key": "crm:C001", "created_by": "test"}),
+        serde_json::json!({"type": "override_field_by_record", "record_key": "crm:C001", "attribute": "email", "value": "chosen@merge.test", "created_by": "test"}),
+        serde_json::json!({"type": "override_field_by_record", "record_key": "crm:C001", "attribute": "addr_city", "created_by": "test"}),
+        // A second pin for the same field on a DIFFERENT member, staged later:
+        // latest created_at wins, which is what makes a re-opened dialog's new
+        // choice beat the earlier merge's.
+        serde_json::json!({"type": "override_field_by_record", "record_key": "billing:B001", "attribute": "given_name", "value": "earlier@ignored", "created_by": "test"}),
+    ];
+    for (i, action) in bundle.iter().enumerate() {
+        er_cli::apply_staged_action(
+            &session,
+            &format!("01TESTACTION{i:018}"),
+            action,
+            "2026-01-04 00:00:00",
+        )
+        .unwrap();
+    }
+    // The later pin for the same attribute (staged after the first, so its
+    // created_at is newer): the winner.
+    er_cli::apply_staged_action(
+        &session,
+        "01TESTACTION999999999999999999",
+        &serde_json::json!({"type": "override_field_by_record", "record_key": "crm:C001", "attribute": "given_name", "value": "Roberto", "created_by": "test"}),
+        "2026-01-04 00:01:00",
+    )
+    .unwrap();
+
+    er_cli::run_reconcile(
+        &session,
+        &config,
+        "01RUNRECON0000000000000001",
+        "2026-01-04 00:02:00",
+    )
+    .unwrap();
+    er_cli::run_golden(&session, &config, "2026-01-04 00:02:00").unwrap();
+
+    // One entity now holds all nine records of P1+P2+P3.
+    let merged = session
+        .query_strings(&format!(
+            "select entity_id, count(*) from {} where record_key in \
+             ('crm:C001','billing:B001','webforms:W001','crm:C002','billing:B002','webforms:W003',\
+             'crm:C003','billing:B003','webforms:W004') group by entity_id",
+            er_cli::ENTITY_MEMBERSHIP
+        ))
+        .unwrap();
+    assert_eq!(
+        merged.len(),
+        1,
+        "all nine records in one entity: {merged:?}"
+    );
+    assert_eq!(merged[0][1], "9");
+    let entity_id = &merged[0][0];
+
+    // The pins landed on the minted entity: email set, addr_city cleared, and
+    // the later given_name pin beat the earlier one.
+    let row = session
+        .query_strings(&format!(
+            "select email, addr_city, given_name from {} where id = '{entity_id}'",
+            er_cli::GOLDEN_RECORDS
+        ))
+        .unwrap();
+    assert_eq!(row.len(), 1);
+    assert_eq!(row[0][0], "chosen@merge.test", "record-keyed set landed");
+    assert_eq!(
+        row[0][1], "NULL",
+        "record-keyed clear nulls the field (query_strings renders NULL)"
+    );
+    assert_eq!(
+        row[0][2], "Roberto",
+        "latest created_at wins across member rows"
+    );
+
+    // A persona outside the merge is byte-untouched (the UPDATEs scoped to
+    // entities the membership join names).
+    let p4 = session
+        .query_strings(&format!(
+            "select g.email from {} g join {} m on m.entity_id = g.id where m.record_key = 'crm:C004'",
+            er_cli::GOLDEN_RECORDS,
+            er_cli::ENTITY_MEMBERSHIP
+        ))
+        .unwrap();
+    assert_eq!(p4[0][0], "marcus.whitfield@example.com", "P4 is untouched");
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
