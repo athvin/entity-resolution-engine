@@ -127,15 +127,13 @@ EKS per environment, on the newest minor current at build time (1.36 as of this 
 
 The runner pools are compute-optimized with local NVMe (`c6id` and siblings), not memory-optimized `r6id`, and list many families plus both capacity types deliberately (rationale: D-NODE, D-SPOT). One exclusion is load-bearing: **`c5d.4xlarge` carries only 400 GB of NVMe against the L class's 400 GiB spill limit (§5.3)** — negative headroom before image and kubelet overhead — so it stays out of `runner-l`, while `c5d.2xlarge` (200 GB against S/M's 40–150 GiB) stays in `runner-sm`. `c6id.8xlarge` (32 vCPU) is the top of the ladder, bounded by the `le=32` cap on `duckdb_threads`. Spare capacity is not waste: the one-active-job-per-org constraint means two *different* tenants' runs bin-pack onto one node, and at ~14 GiB per L pod a `c6id.4xlarge` holds two.
 
-**Account vCPU quota is the real floor on node size, and it is still binding.** The two quotas these NodePools draw on — *All Standard Spot Instance Requests* (`L-34B43A08`) and *Running On-Demand Standard instances* (`L-1216C47A`) — are measured in vCPUs, not instances. A single `runner-l` node is 16 vCPU and a `runner-sm` node is 8, so when the ceiling is low a run can never place: Karpenter's fleet request fails `VcpuLimitExceeded`/`MaxSpotInstanceCountExceeded`, the NodeClaim is torn down and retried, and the pod sits `Pending` while nothing obvious appears in its own events (observed 2026-10-11, first 10M run).
+**Account vCPU quota is the real floor on node size, and it stopped being the binding one on 2026-11-01.** The two quotas these NodePools draw on — *All Standard Spot Instance Requests* (`L-34B43A08`) and *Running On-Demand Standard instances* (`L-1216C47A`) — are measured in vCPUs, not instances. A single `runner-l` node is 16 vCPU and a `runner-sm` node is 8, so when the ceiling is low a run can never place: Karpenter's fleet request fails `VcpuLimitExceeded`/`MaxSpotInstanceCountExceeded`, the NodeClaim is torn down and retried, and the pod sits `Pending` while nothing obvious appears in its own events (observed 2026-10-11, first 10M run).
 
-**The applied value is 8 on both, not the 64 this section claimed until 2026-10-24.** An increase to 64 was *requested* for both on 2026-10-11, and both requests are `CASE_CLOSED` without having been granted — `aws service-quotas get-service-quota` returns `8.0` for each, against an AWS default of 5. With the always-on `app` node (2 vCPU spot) and the `system` node (2 vCPU on-demand) up, that leaves 6 vCPU of headroom, which is **less than one `runner-sm` node**. Consequences worth stating plainly, because they are easy to misdiagnose as slowness:
+**The applied value is now 64 on both, measured 2026-11-08.** This section said 8 until then, and that was correct when written: the increases requested on 2026-10-11 closed `CASE_CLOSED` **without** being granted. A second pair of requests on **2026-11-01** was granted, and `aws service-quotas get-service-quota` now returns `64.0` for each. So the history is the lesson rather than the number — a closed case is not a granted one, and the only way to know which happened is to read the applied value.
 
-- no runner node of either class can be provisioned today;
-- anything that needs a cold runner-shaped node has to fit the headroom, which is why `scripts/measure_runner_startup.sh` provisions a `c6id.xlarge` probe pool rather than using `runner-sm`;
-- the first real class-M or class-L run will sit `Pending` until the quota is actually raised.
+Headroom as measured the same day, across **both** clusters (which share these quotas — the §8 "dev shares prod's service quotas" hazard, now concrete in both directions): `er-dev` holds two 2-vCPU nodes and `er-prod` two, so **4 of 64 vCPU are in use** and a `runner-l` node fits comfortably. The consequences this section used to list — no runner node of either class provisionable, `scripts/measure_runner_startup.sh` having to use a `c6id.xlarge` probe pool rather than `runner-sm`, the first class-M or class-L run sitting `Pending` — no longer follow. The probe pool is still what that script uses; whether it still needs to is now a question rather than a constraint.
 
-Check the applied value rather than trusting this paragraph:
+Check the applied value rather than trusting this paragraph — which is advice this section has now been on both sides of:
 
 ```
 aws service-quotas get-service-quota --service-code ec2 --quota-code L-34B43A08 --region us-east-2
@@ -143,7 +141,7 @@ aws service-quotas list-requested-service-quota-change-history-by-quota \
   --service-code ec2 --quota-code L-34B43A08 --region us-east-2
 ```
 
-A closed case is not a granted one. This is the §8 "dev shares prod's service quotas" hazard made concrete; it must be resolved before Phase 3 onboards a real tenant.
+A closed case is not a granted one. The §8 "dev shares prod's service quotas" hazard is unchanged by the raise — two clusters now draw on one pool, so a dev measurement run and a prod tenant run compete for the same 64.
 
 ### 5.1 Karpenter disruption settings
 

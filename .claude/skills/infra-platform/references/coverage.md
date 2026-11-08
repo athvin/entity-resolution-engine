@@ -61,7 +61,7 @@ Every stack in the tree is reached by at least one tier.
 |---|---|
 | `charts` | `Makefile`, `scripts/check_kind.sh`, `scripts/ci/bluegreen-acceptance.sh`, `scripts/ci/charts-check.py`, `scripts/ci/charts-render-validate.sh`, `scripts/ci/deploy-cutover.sh`, `scripts/ci/deploy-inactive-colour.sh`, `scripts/ci/deploy-namespace-chart.sh`, `scripts/ci/helm-lint.sh`, `scripts/ci/infra-detect.sh`, `scripts/kind_env.sh` |
 | `kind` | `scripts/kind_env.sh` |
-| `network-policy-controller.yaml` | **nothing in the tree** |
+| `network-policy-controller.yaml` | `Makefile` |
 | `nodepools` | `Makefile`, `scripts/measure_runner_startup.sh` |
 | `observability` | `Makefile`, `scripts/obs_up.sh`, `scripts/otel-pii-allowlist-probe.sh` |
 | `priorityclasses` | `Makefile`, `scripts/kind_env.sh` |
@@ -70,13 +70,16 @@ Every stack in the tree is reached by at least one tier.
 
 ### NodePool manifests the cluster apply reaches
 
-`kubectl apply -f <dir>` is non-recursive, so only the top level is
-applied.
+`kubectl apply -f <dir>` is non-recursive, and `cluster-objects`
+names two directories: the top level, applied to whichever cluster is
+targeted, and `<env>/` for the pools that differ per environment.
+Any other subdirectory is reached by nothing.
 
 | Manifest | Applied |
 |---|---|
-| `app.yaml` | yes |
-| `measure/runner-probe.yaml` | no — in a subdirectory |
-| `runner-l.yaml` | yes |
-| `runner-sm.yaml` | yes |
+| `dev/app.yaml` | yes — `dev` only |
+| `measure/runner-probe.yaml` | no — subdirectory no environment is named after |
+| `prod/app.yaml` | yes — `prod` only |
+| `runner-l.yaml` | yes — every cluster |
+| `runner-sm.yaml` | yes — every cluster |
 <!-- END GENERATED: infra-coverage -->

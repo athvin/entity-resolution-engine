@@ -231,9 +231,20 @@ image-api:
 
 ER_DEV_CONTEXT ?= er-dev
 
-# Apply the cluster-scoped objects: the Karpenter NodePools (app / runner-sm /
-# runner-l) and the task PriorityClasses (batch-orchestration-design §7.1 —
-# cluster-scoped, so no per-namespace chart can carry them).
+# Which cluster `cluster-objects` targets. `dev` by default, so `make
+# cluster-objects` keeps doing exactly what it did before this was
+# parameterised; `make cluster-objects ER_ENV=prod` is the prod cluster.
+#
+# ER_CONTEXT is derived rather than listed per environment because both
+# clusters are `er-<env>` (infra/terraform/envs/*/eks.tf). Override it directly
+# if that ever stops being true.
+ER_ENV ?= dev
+ER_CONTEXT ?= er-$(ER_ENV)
+
+# Apply the cluster-scoped objects: the Karpenter NodePools, the task
+# PriorityClasses (batch-orchestration-design §7.1 — cluster-scoped, so no
+# per-namespace chart can carry them), and the CNI setting that makes
+# NetworkPolicy enforce at all.
 #
 # These are Kubernetes manifests, not AWS API objects, so Terraform does not own
 # them (infra/terraform/modules/eks/main.tf says so) and no chart renders them.
@@ -243,12 +254,38 @@ ER_DEV_CONTEXT ?= er-dev
 # does not even trigger on these paths, so there is no drift gate either —
 # `--dry-run=server` here at least shows what would move.
 #
-# infra/k8s/nodepools/measure/ is deliberately NOT applied: it holds the
-# throwaway pool scripts/measure_runner_startup.sh creates and deletes.
+# THREE APPLY LINES FOR NODEPOOLS, AND THE SPLIT IS LOAD-BEARING.
+# `kubectl apply -f <dir>` is non-recursive, so the top level carries the pools
+# both clusters share (runner-sm, runner-l — §5 gives them the same spot-with
+# -on-demand-fallback policy in either environment) and `<env>/` carries the
+# ones that differ. Today that is exactly `app`: §5's table says "spot in dev,
+# on-demand in prod", and a pool cannot express both. Both files declare a
+# NodePool NAMED `app`, which is fine because they are applied to different
+# clusters and the chart pins no `karpenter.sh/nodepool` — each cluster needs
+# exactly one untainted pool, and gets exactly one.
+#
+# infra/k8s/nodepools/measure/ is still deliberately NOT applied: it holds the
+# throwaway pool scripts/measure_runner_startup.sh creates and deletes, and it
+# is excluded by never being named rather than by an exclusion list.
+#
+# network-policy-controller.yaml is applied here because NOTHING APPLIED IT.
+# It was a standalone file applied by hand to er-dev in 2026-10-10 and never
+# wired into a target, so every cluster built afterwards had NetworkPolicy
+# objects that enforced nothing — §8.5's silent failure, which is silent
+# precisely because the policies exist and appear healthy. er-prod was in that
+# state until this line.
 cluster-objects:
-	kubectl --context $(ER_DEV_CONTEXT) apply -f infra/k8s/nodepools/
-	kubectl --context $(ER_DEV_CONTEXT) apply -f infra/k8s/priorityclasses/
-	kubectl --context $(ER_DEV_CONTEXT) get nodepools priorityclasses
+	kubectl --context $(ER_CONTEXT) apply -f infra/k8s/nodepools/
+	kubectl --context $(ER_CONTEXT) apply -f infra/k8s/nodepools/$(ER_ENV)/
+	kubectl --context $(ER_CONTEXT) apply -f infra/k8s/priorityclasses/
+	kubectl --context $(ER_CONTEXT) apply -f infra/k8s/network-policy-controller.yaml
+	# COMMA, not a space. `kubectl get nodepools priorityclasses` reads the
+	# second word as a resource NAME, so it has always failed with
+	# `nodepools.karpenter.sh "priorityclasses" not found` — meaning this target
+	# exited 1 on every invocation, after applying everything successfully. It
+	# went unnoticed because the applies above it print success first and the
+	# error arrives last.
+	kubectl --context $(ER_CONTEXT) get nodepools,priorityclasses
 
 # The old name, kept callable because muscle memory and docs point at it.
 nodepools: cluster-objects

@@ -1856,16 +1856,29 @@ gen_infra_coverage() {
 
 	echo "### NodePool manifests the cluster apply reaches"
 	echo
-	echo "\`kubectl apply -f <dir>\` is non-recursive, so only the top level is"
-	echo "applied."
+	echo "\`kubectl apply -f <dir>\` is non-recursive, and \`cluster-objects\`"
+	echo "names two directories: the top level, applied to whichever cluster is"
+	echo "targeted, and \`<env>/\` for the pools that differ per environment."
+	echo "Any other subdirectory is reached by nothing."
 	echo
 	echo "| Manifest | Applied |"
 	echo "|---|---|"
 	{ grep -rlF 'kind: NodePool' infra/k8s/nodepools 2>/dev/null || true; } | sort | while read -r s; do
-		if [[ $(dirname "$s") == infra/k8s/nodepools ]]; then
-			printf '%s\n' "| \`${s#infra/k8s/nodepools/}\` | yes |"
+		local dir rel
+		dir=$(dirname "$s")
+		rel=${s#infra/k8s/nodepools/}
+		if [[ $dir == infra/k8s/nodepools ]]; then
+			printf '%s\n' "| \`$rel\` | yes — every cluster |"
+		# An env directory is applied, and which ones exist is derived from the
+		# Makefile rather than listed here: `cluster-objects` applies
+		# `nodepools/$(ER_ENV)/`, so a directory is an env directory exactly
+		# when some env uses that name. Deriving it keeps this table honest if
+		# a third environment appears, and keeps `measure/` out without an
+		# exclusion list — nothing applies a directory no env is named after.
+		elif [[ -d infra/terraform/envs/${dir#infra/k8s/nodepools/} ]]; then
+			printf '%s\n' "| \`$rel\` | yes — \`${dir#infra/k8s/nodepools/}\` only |"
 		else
-			printf '%s\n' "| \`${s#infra/k8s/nodepools/}\` | no — in a subdirectory |"
+			printf '%s\n' "| \`$rel\` | no — subdirectory no environment is named after |"
 		fi
 	done
 }
