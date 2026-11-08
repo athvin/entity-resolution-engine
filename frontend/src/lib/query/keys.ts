@@ -15,6 +15,9 @@ const ds = (org: string, dataset: string) => ["org", org, "ds", dataset] as cons
 export const queryKeys = {
   session: () => ["session"] as const,
   org: (org: string) => ["org", org] as const,
+  /** The dataset-rooted prefix itself — for prefix invalidations across every
+   * surface of one dataset (a merge changes goldens AND entities). */
+  ds: (org: string, dataset: string) => ds(org, dataset),
   datasets: (org: string) => ["org", org, "datasets"] as const,
   dataset: (org: string, dataset: string) => [...ds(org, dataset), "detail"] as const,
   metrics: (org: string, dataset: string) => [...ds(org, dataset), "metrics"] as const,

@@ -8,10 +8,11 @@ import { RefreshCw, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useGoldenRecords, type GoldenRecord } from "@/lib/query/hooks";
+import { effectiveRole, useGoldenRecords, useSession, type GoldenRecord } from "@/lib/query/hooks";
 import { useOrgEntityType } from "@/lib/query/config";
 import { displayName, type EntityType } from "@/lib/domain/attributes";
 import { MassEditPanel } from "./mass-edit-panel";
+import { ManualMergeDialog } from "./manual-merge-dialog";
 import { useDatasetSlug } from "@/lib/use-dataset-slug";
 
 function useDebounced(value: string, ms: number): string {
@@ -81,6 +82,32 @@ export function RecordsBrowser({ org }: { org: string }) {
   const rows = useMemo(() => (query.data?.pages ?? []).flatMap((page) => page.items), [query.data]);
   const snapshot = query.data?.pages[0]?.snapshot;
 
+  // Manual group merge (spec 2.10): stewards/admins select arbitrary golden
+  // records and merge them as a group — the merge the matcher never proposed.
+  const session = useSession();
+  const role = effectiveRole(session.data, org);
+  const canMerge = role === "steward" || role === "admin";
+  const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
+  const [mergeOpen, setMergeOpen] = useState(false);
+  const [mergedMessage, setMergedMessage] = useState<string | null>(null);
+
+  function toggleSelected(id: string) {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }
+
+  const selectedRecords = useMemo(
+    () => rows.filter((row) => selectedIds.has(row.id)),
+    [rows, selectedIds],
+  );
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const virtualizer = useVirtualizer({
     count: rows.length,
@@ -139,11 +166,50 @@ export function RecordsBrowser({ org }: { org: string }) {
 
       <MassEditPanel org={org} q={q} />
 
+      {canMerge && selectedIds.size > 0 && (
+        <div
+          className="flex items-center gap-3 rounded-md border px-3 py-2"
+          data-testid="merge-selection-bar"
+        >
+          <span className="text-sm" data-testid="merge-selection-count">
+            {selectedIds.size} selected
+          </span>
+          <Button
+            size="sm"
+            disabled={selectedIds.size < 2}
+            onClick={() => {
+              setMergeOpen(true);
+            }}
+            data-testid="merge-selected"
+          >
+            Merge selected
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setSelectedIds(new Set());
+            }}
+            data-testid="merge-selection-clear"
+          >
+            Clear
+          </Button>
+        </div>
+      )}
+      {mergedMessage !== null && (
+        <p className="text-sm" role="status" data-testid="manual-merge-done">
+          {mergedMessage}
+        </p>
+      )}
+
       {/* Header row, desktop only — the virtual rows below mirror these columns. */}
-      <div className="text-muted-foreground hidden grid-cols-[1.2fr_1.6fr_1fr_1.4fr] gap-3 border-b px-3 pb-2 text-xs font-medium tracking-wide uppercase lg:grid">
-        {columns.map((column) => (
-          <span key={column.label}>{column.label}</span>
-        ))}
+      <div className="text-muted-foreground hidden gap-3 border-b px-3 pb-2 text-xs font-medium tracking-wide uppercase lg:flex lg:items-center">
+        {canMerge && <span className="w-7 shrink-0" aria-hidden="true" />}
+        <div className="grid min-w-0 flex-1 grid-cols-[1.2fr_1.6fr_1fr_1.4fr] gap-3">
+          {columns.map((column) => (
+            <span key={column.label}>{column.label}</span>
+          ))}
+        </div>
       </div>
 
       {query.isPending ? (
@@ -165,23 +231,44 @@ export function RecordsBrowser({ org }: { org: string }) {
             {virtualItems.map((item) => {
               const record = rows[item.index];
               if (!record) return null;
+              const selected = selectedIds.has(record.id);
               return (
-                <Link
+                <div
                   key={record.id}
-                  href={`/${org}/${ds}/records/${record.id}`}
                   data-index={item.index}
                   ref={virtualizer.measureElement}
-                  className="hover:bg-accent/50 absolute top-0 left-0 block w-full translate-y-(--row-y) border-b px-3 py-3"
+                  className={`hover:bg-accent/50 absolute top-0 left-0 w-full translate-y-(--row-y) border-b ${
+                    selected ? "bg-accent/40" : ""
+                  }`}
                   style={{ "--row-y": `${String(item.start)}px` } as React.CSSProperties}
                 >
-                  <div className="lg:grid lg:grid-cols-[1.2fr_1.6fr_1fr_1.4fr] lg:items-center lg:gap-3">
-                    {columns.map((column) => (
-                      <div key={column.label} className={column.className}>
-                        {column.value(record) || "—"}
+                  <div className="flex items-center gap-3 px-3 py-3">
+                    {canMerge && (
+                      <input
+                        type="checkbox"
+                        checked={selected}
+                        onChange={() => {
+                          toggleSelected(record.id);
+                        }}
+                        aria-label={`Select ${displayName(record, entityType) || record.id}`}
+                        className="size-4 w-7 shrink-0 accent-current"
+                        data-testid={`merge-select-${record.id}`}
+                      />
+                    )}
+                    <Link
+                      href={`/${org}/${ds}/records/${record.id}`}
+                      className="block min-w-0 flex-1"
+                    >
+                      <div className="lg:grid lg:grid-cols-[1.2fr_1.6fr_1fr_1.4fr] lg:items-center lg:gap-3">
+                        {columns.map((column) => (
+                          <div key={column.label} className={column.className}>
+                            {column.value(record) || "—"}
+                          </div>
+                        ))}
                       </div>
-                    ))}
+                    </Link>
                   </div>
-                </Link>
+                </div>
               );
             })}
           </div>
@@ -190,6 +277,19 @@ export function RecordsBrowser({ org }: { org: string }) {
           )}
         </div>
       )}
+
+      <ManualMergeDialog
+        org={org}
+        selected={selectedRecords}
+        open={mergeOpen}
+        onClose={() => {
+          setMergeOpen(false);
+        }}
+        onDone={(message) => {
+          setMergedMessage(message);
+          setSelectedIds(new Set());
+        }}
+      />
     </div>
   );
 }
