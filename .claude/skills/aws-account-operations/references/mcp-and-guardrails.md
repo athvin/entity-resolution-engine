@@ -146,6 +146,33 @@ Note on mechanism: `deny` and `ask` rules take effect immediately, while
 live on first clone and its permissive half is not — which is the safe
 direction for this to fail in.
 
+### Layer 3 under Codex: installed, and one rule inverts
+
+Codex and Kimi sessions run against this account too, and they read none of
+`.claude/settings.json` — no hooks, and **no `permissions.deny` list at all**.
+`scripts/codex-hooks-sync.sh` installs the same guard into
+`$CODEX_HOME/hooks.json`, with the deny patterns read out of
+`.claude/settings.json` rather than restated, so the two agents cannot be given
+different lists.
+
+Two differences matter when reasoning about what is actually protected there:
+
+- **Step 3 inverts: `ask` becomes `deny`.** Measured against Codex 0.167.0, a
+  hook returning `ask` is logged `PreToolUse Failed` and the command then
+  **runs** — so on that agent the escalation is an allow. The installer sets
+  `ER_GUARD_ASK_AS_DENY=1`, which refuses those calls instead. Consequence for
+  operating: a mutating `aws`/`kubectl`/`helm` command that Claude Code would
+  prompt about is simply refused under Codex. Run it in a session that can
+  prompt, or by hand.
+- **It must be trusted or it does nothing.** An untrusted hook is skipped
+  silently. Approve it in one interactive `codex` session, or pass
+  `--dangerously-bypass-hook-trust`. A `deny` does survive
+  `--dangerously-bypass-approvals-and-sandbox`, which is what these sessions
+  normally pass — sandbox bypass is not hook bypass.
+
+The full decision matrix behind both claims is in the `skill-writer` skill's
+agent-skills standard, under the Codex bridge.
+
 ## The profile none of them constrains
 
 `er-builder` is backed by a never-expiring `AdministratorAccess` static access

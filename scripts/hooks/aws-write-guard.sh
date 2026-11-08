@@ -16,6 +16,18 @@
 #
 # `ask` rather than `deny` for the middle case is deliberate. A guard that
 # blocks legitimate work gets disabled, and a disabled guard protects nothing.
+#
+# UNDER CODEX THERE IS NOBODY TO ASK, AND `ask` FAILS OPEN. Measured against
+# Codex 0.167.0: a hook returning `permissionDecision: ask` is logged
+# `PreToolUse Failed` and the command then RUNS. Only `deny` (or `exit 2`)
+# blocks. So the middle case — every mutating aws/terraform/kubectl/helm call —
+# would be the widest hole in the guard on exactly the agent that has no
+# prompt to fall back on.
+#
+# `ER_GUARD_ASK_AS_DENY=1` collapses `ask` to `deny` for that caller.
+# `scripts/codex-hooks-sync.sh` sets it; Claude Code does not, and keeps the
+# prompt. The flag lives here rather than in a Codex-side wrapper so there is
+# one decision table, and so this file's own tests cover both mappings.
 set -uo pipefail
 
 payload=$(cat)
@@ -35,6 +47,12 @@ done
 
 decide() {
 	# $1 = deny|ask, $2 = reason
+	local d=$1
+	# See the header: under Codex `ask` is not a weaker deny, it is an allow.
+	if [[ $d == ask && ${ER_GUARD_ASK_AS_DENY:-0} == 1 ]]; then
+		d=deny
+		set -- "$d" "$2 (no interactive approval is available on this agent, so this is refused rather than escalated — run it yourself, or use a session that can prompt)"
+	fi
 	jq -n --arg d "$1" --arg r "$2" '{
 		hookSpecificOutput: {
 			hookEventName: "PreToolUse",

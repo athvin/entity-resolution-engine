@@ -383,23 +383,39 @@ is exactly the shape `detect` skips, and so exactly the one that can orphan a
 symlink. **Add a skill and you add its symlink**, or it works in one tool and
 does not exist in the other.
 
-**The rest of `.claude/settings.json` does not port, and there is no repo file
-that can make it.** The MCP servers, the `aws-write-guard` hook, the
-`permissions.deny` list and the plugin set are all per-developer state in
-`$CODEX_HOME`. For the MCP servers that is one command, derived from
-`.mcp.json` so the two cannot drift:
+**The rest of `.claude/settings.json` is per-developer state in `$CODEX_HOME`,
+so no repo file can supply it — but two of the three can be _derived_.** Run
+both once per machine, and again after the file they read changes:
 
 ```sh
-scripts/codex-mcp-sync.sh --dry-run   # see what it would register
-scripts/codex-mcp-sync.sh             # register with codex
+scripts/codex-mcp-sync.sh     # .mcp.json           -> codex mcp add
+scripts/codex-hooks-sync.sh   # the PreToolUse guard -> $CODEX_HOME/hooks.json
 ```
 
-The one worth knowing about is the hook: under Codex there is **no**
-`PreToolUse` guard on `aws`, `terraform`, `kubectl` or `helm`, so what is left
-protecting the account is the read-only `er-readonly` profile and the IAM
-denies. [`.claude/skills/skill-writer/references/agent-skills.md`](.claude/skills/skill-writer/references/agent-skills.md)
-has the measurements behind each of those claims and the one command that shows
-what Codex actually loaded.
+Each reads the Claude Code file and nothing else, so the two agents cannot be
+given different lists by hand. The plugin set is the one with no equivalent at
+all — Codex refuses repository-scoped plugin installs.
+
+Two things about the hooks one are load-bearing, both measured against Codex
+0.167.0:
+
+- **A hook Codex has not trusted is skipped silently** — no warning, the command
+  simply runs. Start `codex` interactively once and approve it (that persists a
+  `trusted_hash`), or pass `--dangerously-bypass-hook-trust` every time. An
+  installed-but-untrusted hook is worse than none, because it reads as cover.
+- **`ask` is not a weaker `deny` there, it is an allow.** A hook returning `ask`
+  is logged `PreToolUse Failed` and the command runs, so the guard's whole
+  middle case — every mutating `aws`/`terraform`/`kubectl`/`helm` call — would
+  be its widest hole. `scripts/codex-hooks-sync.sh` therefore installs the guard
+  with `ER_GUARD_ASK_AS_DENY=1`, and under Codex those calls are **refused**
+  rather than escalated. Run them yourself, or use a session that can prompt.
+
+What does hold: a `deny` blocks even under
+`--dangerously-bypass-approvals-and-sandbox`, which is the flag set these
+sessions actually use. Sandbox bypass is not hook bypass.
+[`.claude/skills/skill-writer/references/agent-skills.md`](.claude/skills/skill-writer/references/agent-skills.md)
+carries the full decision matrix, the probe behind each row, and the one command
+that shows what Codex actually loaded.
 
 ### Repo skills
 

@@ -408,6 +408,19 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: bash scripts/ci/codex-mcp-sync-test.sh
 
+      - name: codex PreToolUse guard tests
+        # The other half of `.claude/settings.json` that has no Codex
+        # equivalent: the `permissions.deny` list and the aws-write-guard hook.
+        # Both are installed into $CODEX_HOME by scripts/codex-hooks-sync.sh and
+        # the deny list is DERIVED from settings.json, so what this asserts is
+        # that the derivation is non-empty and every deny path still fires —
+        # a guard that stopped matching is silent at runtime, because Codex logs
+        # `Completed` and runs the command. It also pins the asymmetry: `ask`
+        # must stay `ask` for Claude Code and become `deny` for Codex, where
+        # `ask` is not a weaker deny but an allow.
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/ci/codex-hooks-sync-test.sh
+
   # S9 — every `uses:` pinned to a commit SHA with its `# vTAG` comment.
   #
   # This job exists because the policy was enforced by NOTHING. `scripts/ci/
