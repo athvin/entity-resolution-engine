@@ -21,6 +21,16 @@ module "eks" {
     # the extra moving part buys little. See ci-deploy.tf.
     ci_deploy = aws_iam_role.ci_deploy_dev.arn
   }
+
+  viewer_principal_arns = {
+    # The PlatformReadOnly permission set's materialized role — the identity
+    # `aws-account-operations` documents as the general introspection profile
+    # (`er-readonly`). Without this entry the cluster 401s its token even
+    # though the IAM side is healthy; found when a session could not read pods
+    # to verify a deploy (#839). AmazonEKSViewPolicy reads no Secret contents,
+    # which matches the AWS-side ReadOnlyAccess posture.
+    platform_readonly = "arn:aws:iam::797781631727:role/aws-reserved/sso.amazonaws.com/us-east-2/AWSReservedSSO_PlatformReadOnly_32bd506ae970d37d"
+  }
 }
 
 # metrics-server: EKS doesn't ship it, so `kubectl top`, k9s CPU/MEM, and HPAs

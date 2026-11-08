@@ -22,6 +22,12 @@ variable "admin_principal_arns" {
   type        = map(string)
 }
 
+variable "viewer_principal_arns" {
+  description = "IAM principals granted cluster-wide read via access entries (AmazonEKSViewPolicy). Read-only identities belong here, never in admin_principal_arns; the policy reads no Secret contents."
+  type        = map(string)
+  default     = {}
+}
+
 data "aws_iam_policy_document" "cluster_trust" {
   statement {
     effect  = "Allow"
@@ -141,6 +147,28 @@ resource "aws_eks_access_policy_association" "admin" {
   }
 
   depends_on = [aws_eks_access_entry.admin]
+}
+
+resource "aws_eks_access_entry" "viewer" {
+  for_each = var.viewer_principal_arns
+
+  cluster_name  = aws_eks_cluster.this.name
+  principal_arn = each.value
+  type          = "STANDARD"
+}
+
+resource "aws_eks_access_policy_association" "viewer" {
+  for_each = var.viewer_principal_arns
+
+  cluster_name  = aws_eks_cluster.this.name
+  principal_arn = each.value
+  policy_arn    = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSViewPolicy"
+
+  access_scope {
+    type = "cluster"
+  }
+
+  depends_on = [aws_eks_access_entry.viewer]
 }
 
 output "cluster_name" {

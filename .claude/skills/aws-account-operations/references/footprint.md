@@ -83,6 +83,8 @@ Distinct `resource "aws_*"` blocks across `infra/terraform/`, by count:
    2  aws_db_subnet_group
    2  aws_ecr_lifecycle_policy
    2  aws_ecr_repository
+   2  aws_eks_access_entry
+   2  aws_eks_access_policy_association
    2  aws_identitystore_group
    2  aws_identitystore_group_membership
    2  aws_rds_cluster
@@ -104,8 +106,6 @@ Distinct `resource "aws_*"` blocks across `infra/terraform/`, by count:
    1  aws_efs_file_system
    1  aws_efs_mount_target
    1  aws_eip
-   1  aws_eks_access_entry
-   1  aws_eks_access_policy_association
    1  aws_eks_cluster
    1  aws_glue_catalog_database
    1  aws_glue_catalog_table
