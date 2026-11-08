@@ -30,7 +30,7 @@ statements is read or written only through the engine's own stage SQL, not
 through a typed query function.
 
 <!-- BEGIN GENERATED: entities-index -->
-**50 entities, 255 declared statements.**
+**52 entities, 261 declared statements.**
 
 | Entity | Relation | Store | Key | Natural key | History |
 |---|---|---|---|---|---|
@@ -73,9 +73,11 @@ through a typed query function.
 | `run` | `runs` | duckdb | `id` | — | — |
 | `run_stage` | `run_stages` | duckdb | `id` | `run_id, stage, try_number` | — |
 | `s3_ingest_cursor` | `s3_ingest_cursors` | postgres | `id` | `dataset_id, source` | — |
+| `salesforce_connection` | `salesforce_connections` | postgres | `id` | `org_id, name` | — |
 | `schedule` | `schedules` | postgres | `id` | — | yes |
 | `schema_migration` | `schema_migrations` | postgres | `id` | — | — |
 | `scored_record` | `scored_records` | duckdb | `id` | `record_key, model_version, tf_snapshot_id` | — |
+| `sf_extract_cursor` | `sf_extract_cursors` | postgres | `id` | `dataset_id, source` | — |
 | `staged_steward_action` | `staged_steward_actions` | postgres | `id` | — | — |
 | `statement_execution` | `statement_executions` | duckdb | `id` | `run_id, stage, seq` | — |
 | `tag` | `tags` | postgres | `id` | — | yes |
@@ -128,9 +130,11 @@ Declared statements per entity and operation:
 | `run` | 1 | 4 | 2 | 1 |
 | `run_stage` | 1 | 1 | 1 | 0 |
 | `s3_ingest_cursor` | 1 | 1 | 0 | 0 |
+| `salesforce_connection` | 1 | 2 | 1 | 0 |
 | `schedule` | 2 | 2 | 3 | 1 |
 | `schema_migration` | 1 | 2 | 0 | 0 |
 | `scored_record` | 0 | 2 | 1 | 2 |
+| `sf_extract_cursor` | 1 | 1 | 0 | 0 |
 | `staged_steward_action` | 1 | 1 | 1 | 0 |
 | `tag` | 1 | 3 | 1 | 0 |
 | `tagging` | 1 | 1 | 0 | 1 |
