@@ -153,6 +153,13 @@ test.describe("mass update (steward)", () => {
  * crm:C-5000 + webforms:W-9000; `01jm0e000001` (index 1) holds crm:C-5001.
  */
 test.describe("manual merge of arbitrary records", () => {
+  // The merge POST bumps the org's stagedCount, so the journey runs on
+  // merge-dev — the same reason merge-dialog.spec.ts does — because acme-dev's
+  // "3 decisions queued" banner is asserted verbatim by reviews.spec.ts. The
+  // viewer test mutates nothing and stays: viewer membership exists only on
+  // acme-dev.
+  const MERGE_ORG = "merge-dev";
+
   test("a viewer is offered no selection at all", async ({ page }) => {
     await login(page, USERS.viewer);
     await page.goto(`/${ORG}/${DS}/records`);
@@ -162,7 +169,7 @@ test.describe("manual merge of arbitrary records", () => {
 
   test("two selected records merge with the survivor's member as master", async ({ page }) => {
     await login(page, USERS.steward);
-    await page.goto(`/${ORG}/${DS}/records`);
+    await page.goto(`/${MERGE_ORG}/${DS}/records`);
 
     await page.getByTestId("merge-select-01jm0e000000").check();
     await page.getByTestId("merge-select-01jm0e000001").check();
@@ -180,7 +187,8 @@ test.describe("manual merge of arbitrary records", () => {
 
     const request = page.waitForRequest(
       (req) =>
-        req.url().includes(`/api/orgs/${ORG}/datasets/${DS}/merges`) && req.method() === "POST",
+        req.url().includes(`/api/orgs/${MERGE_ORG}/datasets/${DS}/merges`) &&
+        req.method() === "POST",
     );
     await page.getByTestId("manual-merge-confirm").click();
     const posted = (await request).postDataJSON() as Record<string, unknown>;
@@ -202,7 +210,7 @@ test.describe("manual merge of arbitrary records", () => {
     // once the animation completes. Reduced motion clamps it to its end state.
     await page.emulateMedia({ reducedMotion: "reduce" });
     await login(page, USERS.steward);
-    await page.goto(`/${ORG}/${DS}/records`);
+    await page.goto(`/${MERGE_ORG}/${DS}/records`);
     await page.getByTestId("merge-select-01jm0e000000").check();
     await page.getByTestId("merge-select-01jm0e000001").check();
     await page.getByTestId("merge-selected").click();

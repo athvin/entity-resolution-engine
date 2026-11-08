@@ -357,7 +357,10 @@ export function initialState() {
     golden: {
       "acme-dev": Array.from({ length: 230 }, (_, index) => goldenRecord(index)),
       "mutable-dev": [],
-      "merge-dev": [],
+      // Two entities the manual-merge spec selects on merge-dev's records
+      // screen: posting the merge bumps this org's stagedCount, which is why
+      // the journey cannot run on acme-dev (whose banner count is asserted).
+      "merge-dev": [goldenRecord(0), goldenRecord(1)],
       "orgs-dev": Array.from({ length: 24 }, (_, index) => accountGoldenRecord(index)),
     },
     runs: {

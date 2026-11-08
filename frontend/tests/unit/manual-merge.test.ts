@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { manualMergePayload, type ManualMergeSide } from "@/lib/domain/manual-merge";
-import type { EntityDetail, GoldenRecord } from "@/lib/query/hooks";
+import type { EntityDetail } from "@/lib/query/hooks";
 
 /**
  * The manual-merge bundle's assembly (spec 2.10): which records join, which
@@ -11,7 +11,7 @@ import type { EntityDetail, GoldenRecord } from "@/lib/query/hooks";
 
 function side(id: string, memberKeys: string[]): ManualMergeSide {
   return {
-    record: { id } as GoldenRecord,
+    record: { id },
     detail: {
       members: memberKeys.map((key) => ({
         source_system: key.split(":")[0],

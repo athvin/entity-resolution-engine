@@ -180,8 +180,12 @@ async fn members(app: &axum::Router, org: &str, entity_id: &str) -> Vec<String> 
 /// webforms:W001, and so on), so merging crm:C001, billing:B002 and
 /// webforms:W004 crosses THREE entities — the review dialog's 3-record group
 /// shape, where the pair alone would have hidden the third.
+/// One test, two sequential phases (`pg_serial.rs`): the dialog's bundle, then
+/// the manual-merge equality check. The phases share the file's one database
+/// and key their state on their own org names ("acme", then
+/// "initech"/"globex").
 #[tokio::test]
-async fn merge_group_stages_star_protect_and_record_keyed_pins() {
+async fn merge_group_bundle_and_manual_merge_equality() {
     let Some(db) = common::fresh_db("merge_group").await else {
         return;
     };
@@ -190,7 +194,11 @@ async fn merge_group_stages_star_protect_and_record_keyed_pins() {
         eprintln!("skipping merge-group e2e (set DEDUPE_E2E_DUCKLAKE=1 to run)");
         return;
     }
+    stages_star_protect_and_record_keyed_pins(&dsn).await;
+    manual_merge_of_ungrouped_records_equals_detected_merge(&dsn).await;
+}
 
+async fn stages_star_protect_and_record_keyed_pins(dsn: &str) {
     let tmp = std::env::temp_dir().join(format!("er_mergegrp_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(tmp.join("data")).unwrap();
@@ -207,9 +215,9 @@ async fn merge_group_stages_star_protect_and_record_keyed_pins() {
     std::fs::copy(repo_fixture("model_test_v1.tf.csv"), &tf_path).unwrap();
     populate_lake(&catalog, &data_path);
 
-    let mut client = pg::connect(&dsn).await.unwrap();
+    let mut client = pg::connect(dsn).await.unwrap();
     pg::ensure_schema(&mut client).await.unwrap();
-    let app = app(AppState::with_pg("op-secret".to_string(), dsn.clone()));
+    let app = app(AppState::with_pg("op-secret".to_string(), dsn.to_string()));
     let env = serde_json::json!({
         "ER_LAKE_CATALOG": catalog,
         "ER_LAKE_DATA_PATH": data_path,
@@ -254,7 +262,7 @@ async fn merge_group_stages_star_protect_and_record_keyed_pins() {
 
     let org_id = oid(&client, "acme").await;
     let ds = common::default_dataset(&client, "acme").await;
-    let mut harness = executor_harness::Harness::start(&dsn, tmp.clone()).await;
+    let mut harness = executor_harness::Harness::start(dsn, tmp.clone()).await;
     harness.apply_corrections(&client, &org_id, &ds).await;
 
     // One entity now holds the three personas' nine records…
@@ -443,21 +451,12 @@ async fn entity_of(app: &axum::Router, org: &str, record_key: &str) -> Option<St
 /// The pair is crm:C005 (persona P5, Yolanda Prescott) + billing:B006
 /// (persona P7, Cathy Halverson) — distinct personas, so no run ever groups
 /// them. Gated on BOTH `ER_TEST_PG_DSN` and `DEDUPE_E2E_DUCKLAKE=1`.
-#[tokio::test]
-async fn manual_merge_of_ungrouped_records_equals_detected_merge() {
-    let Some(db) = common::fresh_db("merge_manual").await else {
-        return;
-    };
-    let dsn = db.dsn().to_string();
-    if std::env::var("DEDUPE_E2E_DUCKLAKE").as_deref() != Ok("1") {
-        eprintln!("skipping manual-merge e2e (set DEDUPE_E2E_DUCKLAKE=1 to run)");
-        return;
-    }
-
+async fn manual_merge_of_ungrouped_records_equals_detected_merge(dsn: &str) {
     let tmp = std::env::temp_dir().join(format!("er_mergemanual_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&tmp);
-    // Two identical lakes: acme merges manually, globex is the detected
-    // reference.
+    // Two identical lakes: initech merges manually, globex is the detected
+    // reference. (Not "acme" — the first phase already owns that org in the
+    // file's shared database.)
     for side in ["a", "b"] {
         std::fs::create_dir_all(tmp.join(side).join("data")).unwrap();
         let catalog = tmp
@@ -478,11 +477,11 @@ async fn manual_merge_of_ungrouped_records_equals_detected_merge() {
     let tf_path = tmp.join("model_test_v1.tf.csv");
     std::fs::copy(repo_fixture("model_test_v1.tf.csv"), &tf_path).unwrap();
 
-    let mut client = pg::connect(&dsn).await.unwrap();
+    let mut client = pg::connect(dsn).await.unwrap();
     pg::ensure_schema(&mut client).await.unwrap();
-    let app = app(AppState::with_pg("op-secret".to_string(), dsn.clone()));
+    let app = app(AppState::with_pg("op-secret".to_string(), dsn.to_string()));
 
-    for (name, side) in [("acme", "a"), ("globex", "b")] {
+    for (name, side) in [("initech", "a"), ("globex", "b")] {
         let catalog = tmp
             .join(side)
             .join("catalog.ducklake")
@@ -517,7 +516,7 @@ async fn manual_merge_of_ungrouped_records_equals_detected_merge() {
         .clone()
         .oneshot(op(
             "POST",
-            "/v1/orgs/acme/datasets/default/merges",
+            "/v1/orgs/initech/datasets/default/merges",
             Body::from(body.to_string()),
         ))
         .await
@@ -557,8 +556,8 @@ async fn manual_merge_of_ungrouped_records_equals_detected_merge() {
         );
     }
 
-    let mut harness = executor_harness::Harness::start(&dsn, tmp.clone()).await;
-    for org in ["acme", "globex"] {
+    let mut harness = executor_harness::Harness::start(dsn, tmp.clone()).await;
+    for org in ["initech", "globex"] {
         let org_id = oid(&client, org).await;
         let ds = common::default_dataset(&client, org).await;
         harness.apply_corrections(&client, &org_id, &ds).await;
@@ -567,10 +566,10 @@ async fn manual_merge_of_ungrouped_records_equals_detected_merge() {
     // Box 4: the never-grouped pair merged, with the configured survivorship
     // rules applied — crm outranks billing on source_priority, so the golden
     // carries P5's crm values where the two records disagree.
-    let entity_manual = entity_of(&app, "acme", "crm:C005")
+    let entity_manual = entity_of(&app, "initech", "crm:C005")
         .await
         .expect("crm:C005 has an entity");
-    let manual_members = members(&app, "acme", &entity_manual).await;
+    let manual_members = members(&app, "initech", &entity_manual).await;
     // P5 = {crm:C005, webforms:W005} and P7 = {billing:B006, webforms:W006}
     // were two entities before the merge; the manual edge joins both wholes.
     for key in ["crm:C005", "webforms:W005", "billing:B006", "webforms:W006"] {
@@ -584,7 +583,7 @@ async fn manual_merge_of_ungrouped_records_equals_detected_merge() {
         4,
         "the two entities combined: {manual_members:?}"
     );
-    let manual = golden_row_map(&app, "acme", &entity_manual)
+    let manual = golden_row_map(&app, "initech", &entity_manual)
         .await
         .expect("manual golden row");
     assert_eq!(
@@ -613,7 +612,7 @@ async fn manual_merge_of_ungrouped_records_equals_detected_merge() {
         .clone()
         .oneshot(op(
             "GET",
-            "/v1/orgs/acme/datasets/default/assertions",
+            "/v1/orgs/initech/datasets/default/assertions",
             Body::empty(),
         ))
         .await
@@ -633,7 +632,7 @@ async fn manual_merge_of_ungrouped_records_equals_detected_merge() {
 
     let resp = app
         .clone()
-        .oneshot(op("GET", "/v1/orgs/acme/audit", Body::empty()))
+        .oneshot(op("GET", "/v1/orgs/initech/audit", Body::empty()))
         .await
         .unwrap();
     let audit = json_body(resp).await;
