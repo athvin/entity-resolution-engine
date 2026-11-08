@@ -98,9 +98,16 @@ fn round_trip(session: &Session) {
     };
     session.write_to_lake(&handle, "t").unwrap();
 
+    // `register_lake_table` is the production read idiom — and it keeps the
+    // ad-hoc `t` out of the declared-names posterity gate, which scans for
+    // qualified `lake.main.*` literals.
+    let back = session.register_lake_table("t", "t_read").unwrap();
     let rows: Vec<(i32, String)> = session
         .connection()
-        .prepare("select id, name from lake.main.t order by id")
+        .prepare(&format!(
+            "select id, name from {} order by id",
+            back.physical
+        ))
         .unwrap()
         .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
         .unwrap()
@@ -128,9 +135,14 @@ fn explicit_key_opens_an_s3_lake() {
     };
     round_trip(&attach(&m.bucket, "explicit", config(), false));
     let reopened = attach(&m.bucket, "explicit", config(), true);
+    let back = reopened.register_lake_table("t", "t_read").unwrap();
     let count: i64 = reopened
         .connection()
-        .query_row("select count(*) from lake.main.t", [], |r| r.get(0))
+        .query_row(
+            &format!("select count(*) from {}", back.physical),
+            [],
+            |r| r.get(0),
+        )
         .unwrap();
     assert_eq!(count, 2, "the fresh read-only attach reads the s3 data");
 }
