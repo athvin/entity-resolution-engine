@@ -130,6 +130,200 @@ export interface components {
              */
             updated_at: string;
         };
+        /** @description What an equi-join on one column would cost as a blocking key, measured against the corpus rather than inferred from a model. Blocking decides the entire cost of a run, and it is chosen before anything is trained — so the question has to be answerable with no model at all, which is why these numbers come from a GROUP BY over the data and not from a settings document. */
+        CandidateKey: {
+            /**
+             * Format: int64
+             * @description Rows where every key column is non-null — the only rows this key can block, because an equality is never true of a NULL.
+             */
+            covered_rows: number;
+            /**
+             * Format: date-time
+             * @description Run-logical creation time.
+             */
+            created_at: string;
+            /**
+             * Format: int64
+             * @description Distinct key values among the covered rows. The block count: more blocks of fewer rows each is what makes a key cheap.
+             */
+            distinct_values: number;
+            /**
+             * Format: double
+             * @description Shannon entropy of the key's value distribution, in bits. In bits so it is directly comparable with the compiler's match-weight scale, which is also in bits — one unit across both halves of the system.
+             */
+            entropy_bits: number;
+            /**
+             * Format: int64
+             * @description Pairs an equi-join on this key generates, exactly: the sum of C(n, 2) over the value groups. For a rule used FIRST, with nothing preceding it to dedup against, this equals the marginal comparison count a trained model's own counter reports — which is what the engine's golden test asserts, so the cheap path cannot drift from the expensive one.
+             */
+            expected_pairs: number;
+            /** @description Content-derived row id: sha256('candidate_keys:' || profile_run_id || ':' || key_columns). */
+            id: string;
+            /** @description The key's columns, joined by the unit-separator character (chr(31)) — one name for a single-column key, several for a composite. A delimiter rather than a list because this column is in the natural key, and DuckLake has no list equality to MERGE on; chr(31) specifically because it cannot occur in a column name. */
+            key_columns: string;
+            /**
+             * Format: int64
+             * @description Pairs contributed by the single largest block. The number that catches a key which looks affordable in total and is actually dominated by one value — the classic shape being a placeholder, where every record with a blank-but-present field lands in one enormous block.
+             */
+            largest_block_pairs: number;
+            /**
+             * Format: int64
+             * @description Rows in that largest block.
+             */
+            largest_block_rows: number;
+            /**
+             * Format: double
+             * @description The share of ALL corpus pairs this key can never reach because one endpoint or the other is NULL: `1 - (covered_rows / rows)^2`. The square is the part that surprises people — a key on a column that is 60% populated reaches only 36% of pairs — and it is why a cheap key is so often cheap for the wrong reason. Stored beside the cost so the trade is visible rather than implied.
+             */
+            pair_loss_from_nulls: number;
+            /** @description The profile run that measured this key. Named for the relation it points at, per the foreign-key convention; no `references` is declared because DuckLake enforces no foreign keys (V11). */
+            profile_run_id: string;
+            /**
+             * Format: int64
+             * @description Rows in the profiled corpus, carried so `expected_pairs` can be read as a share without a second lookup. Named row_count rather than rows because `rows` is reserved in DuckDB and a column called that cannot be selected unquoted.
+             */
+            row_count: number;
+            /**
+             * Format: date-time
+             * @description Run-logical last-write time.
+             */
+            updated_at: string;
+        };
+        /** @description One column's shape within one profile run: how full it is, how many distinct values it holds, how long its values are, what types they parse as, and its most frequent values. One row per column rather than per value, because the lake schema language cannot express a partition (there is no partition_by field) and a per-value table would grow with the corpus instead of with the schema. */
+        ColumnProfile: {
+            /**
+             * Format: int64
+             * @description Rows where the column is present but empty once trimmed. Counted apart from NULL because ingest lands every delivered value as a JSON string, so an empty cell arrives as '' and is not NULL — a fill rate treating the two alike reports a column as populated when every value in it is blank.
+             */
+            blank_count: number;
+            /**
+             * Format: int64
+             * @description Non-null values that parse as an integer.
+             */
+            cast_bigint: number;
+            /**
+             * Format: int64
+             * @description Non-null values that parse as a boolean.
+             */
+            cast_boolean: number;
+            /**
+             * Format: int64
+             * @description Non-null values that parse as a date. This is the whole of type detection here: ingest stores every delivered value as text, so the declared type says nothing about content and conformance is the only evidence of what a column actually holds.
+             */
+            cast_date: number;
+            /**
+             * Format: int64
+             * @description Non-null values that parse as a double.
+             */
+            cast_double: number;
+            /**
+             * Format: int64
+             * @description Non-null values that parse as a timestamp.
+             */
+            cast_timestamp: number;
+            /** @description The profiled column, as named in the corpus stage. */
+            column_name: string;
+            /**
+             * Format: date-time
+             * @description Run-logical creation time.
+             */
+            created_at: string;
+            /**
+             * Format: int64
+             * @description HyperLogLog estimate of distinct values. Always present because it is cheap, and always approximate: measured on a fixture of 1000 genuinely distinct ids it returns 978, so it is wrong in both directions and must never settle a uniqueness question on its own.
+             */
+            distinct_approx: number;
+            /**
+             * Format: int64
+             * @description Exact distinct count, NULL when it was not requested. The expensive one (a per-column sort), and the only one a uniqueness verdict may be read from.
+             */
+            distinct_exact?: number | null;
+            /**
+             * Format: int64
+             * @description Exact distinct count after lowercasing, trimming and collapsing internal whitespace; NULL when not requested. Materially below distinct_exact is the signal that a column needs standardizing before it is compared, which is otherwise invisible — the raw count looks healthy precisely because the variants are counted as distinct values.
+             */
+            distinct_normalized?: number | null;
+            /**
+             * Format: double
+             * @description Shannon entropy of the value distribution, in bits. Reported in bits so it is directly comparable with the compiler's match-weight scale, which is also in bits — one unit across both halves of the system. A low value means one or two values dominate, which makes the column a poor blocking key however full it is.
+             */
+            entropy_bits?: number | null;
+            /** @description Content-derived row id: sha256('column_profiles:' || profile_run_id || ':' || column_name). */
+            id: string;
+            /**
+             * Format: double
+             * @description Mean trimmed value length.
+             */
+            len_avg?: number | null;
+            /**
+             * Format: int64
+             * @description Longest trimmed value length. A value at a round number here is the signature of upstream truncation.
+             */
+            len_max?: number | null;
+            /**
+             * Format: int64
+             * @description Shortest trimmed value length. NULL for an all-NULL column, where a length has no meaning.
+             */
+            len_min?: number | null;
+            /**
+             * Format: int64
+             * @description Approximate median trimmed length.
+             */
+            len_p50?: number | null;
+            /**
+             * Format: int64
+             * @description Approximate 95th-percentile trimmed length. Read against len_max it separates a long tail from a single outlier.
+             */
+            len_p95?: number | null;
+            /** @description Lexically largest trimmed value. */
+            lex_max?: string | null;
+            /** @description Lexically smallest trimmed value. */
+            lex_min?: string | null;
+            /**
+             * Format: int64
+             * @description Rows where the column is not NULL.
+             */
+            non_null_count: number;
+            /**
+             * Format: double
+             * @description Mean of the values that parse as numbers.
+             */
+            num_avg?: number | null;
+            /**
+             * Format: double
+             * @description Largest value that parses as a number, NULL when none does.
+             */
+            num_max?: number | null;
+            /**
+             * Format: double
+             * @description Smallest value that parses as a number, NULL when none does.
+             */
+            num_min?: number | null;
+            /**
+             * Format: double
+             * @description Sample standard deviation of the values that parse as numbers. NULL for fewer than two such values, where it is undefined rather than zero.
+             */
+            num_std?: number | null;
+            /** @description The profile run this column belongs to. Named for the relation it points at, per the foreign-key convention, but no `references` is declared because DuckLake enforces no foreign keys (V11) and declaring one would claim a guarantee the lake does not provide. */
+            profile_run_id: string;
+            /**
+             * Format: int64
+             * @description Rows read for this column (the sampled count when sampling was on).
+             */
+            row_count: number;
+            /** @description The most frequent values with their counts and shares, bounded to a small k. Bounded because this is a per-column row: an unbounded list would put the corpus inside the profile. NOTE for consumers: these are REAL VALUES — live emails and phone numbers — so they are the one field here that carries personal data and must be role-gated before display and never sent to a model. */
+            top_values?: unknown;
+            /**
+             * Format: int64
+             * @description Rows in the corpus whether or not they were sampled, so a sampled figure can be scaled and labelled honestly.
+             */
+            total_row_count: number;
+            /**
+             * Format: date-time
+             * @description Run-logical last-write time.
+             */
+            updated_at: string;
+        };
         /** @description A versioned config document for a tenant: its YAML, hash and publish state. */
         ConfigVersion: {
             /** @description Hash of the canonicalized config. */
@@ -209,6 +403,37 @@ export interface components {
              */
             updated_at: string;
         };
+        /** @description A relationship between two resolved entities that is NOT a merge: a household, a corporate hierarchy, a 'these are related but distinct' note. The product has one answer to 'these two records belong together' — merge them — and that answer is wrong for a husband and wife at one address, or a subsidiary and its parent. Merging them loses the distinction and no later run can recover it; refusing to record anything loses the relationship. A link records it without collapsing either side. */
+        EntityLink: {
+            /** @description The entity on the member side — the person in the household, the subsidiary. */
+            child_entity_id: string;
+            /**
+             * Format: date-time
+             * @description When the link was created.
+             */
+            created_at: string;
+            /** @description The actor that created the link. */
+            created_by: string;
+            /** @description The dataset whose entities this link relates — entity ids are lake-local. */
+            dataset_id: string;
+            /** @description The link's unique id (UUIDv7, minted by the application). */
+            id: string;
+            /** @description What the relationship is. A closed set rather than free text because the whole value of a link is that something downstream can act on it, and an export or a rule cannot act on a spelling. `related` is the deliberate escape hatch for a real relationship that is neither of the other two — it says 'these are connected, do not merge them' without claiming to know how. */
+            kind: string;
+            /** @description Optional free text — why this link exists, in the words of whoever made it. */
+            note?: string | null;
+            /** @description The tenant. Every read is scoped by it. */
+            org_id: string;
+            /** @description Where the link came from. Kept apart for the reason `pair_labels.origin` is: a steward's judgement and a model's suggestion are different evidence, and a surface that cannot tell them apart will present a guess as a decision. `llm` has no producer until an adjudicator can propose a link; it is declared here because the column's accepted values are the contract that producer will be written against. */
+            origin: string;
+            /** @description The entity on the owning side — the household, the parent company. Deliberately NOT a foreign key, for the reason `taggings.subject_id` gives: an entity lives in the LAKE and this table is Postgres, so a database-level reference would point at a row this store does not own. The id is stable across runs because reconcile carries ids forward by membership overlap (INV-PERM) rather than re-deriving them, and an entity that loses that contest records `merged_into` — so a link survives its entity gaining members, and a merged-away side is followable rather than dangling. */
+            parent_entity_id: string;
+            /**
+             * Format: date-time
+             * @description When it was last changed.
+             */
+            updated_at: string;
+        };
         /** @description Per-attribute survivorship provenance: which record each surviving golden value came from. */
         GoldenLineage: {
             /** @description The survivable attribute decided (e.g. given_name, email, address). */
@@ -284,6 +509,74 @@ export interface components {
             /**
              * Format: date-time
              * @description Run-logical last-write time (equals created_at; the mart is rebuilt whole).
+             */
+            updated_at: string;
+        };
+        /** @description One delivery receipt (S4.1): per-source landing counts for a batch, including tombstones and resurrections. */
+        IngestBatch: {
+            /**
+             * Format: int64
+             * @description Rows superseding a key with new content.
+             */
+            changed_count: number;
+            /**
+             * Format: date-time
+             * @description Creation stamp (the run's logical timestamp).
+             */
+            created_at: string;
+            /** @description Whether the delivery tombstoned omitted keys. */
+            full_refresh_keys: boolean;
+            /** @description The delivery batch's unique id (caller-supplied per delivery). */
+            id: string;
+            /**
+             * Format: int64
+             * @description Screening (E9b): delivered records that joined an existing entity — their best active score reached `thresholds.auto_merge`. NULL means the delivery was never screened, which is the honest answer for a run that scored nothing (a correction pass, or a rebuild with `skip_ingest`); 0 means it was screened and nothing matched.
+             */
+            matched_count?: number | null;
+            /**
+             * Format: int64
+             * @description Rows landing a brand-new key.
+             */
+            new_count: number;
+            /** @description The delivered file's path. */
+            path: string;
+            /**
+             * Format: int64
+             * @description Previously tombstoned keys that returned.
+             */
+            resurrected_count: number;
+            /**
+             * Format: int64
+             * @description Screening (E9b): delivered records whose best active score landed in the gray band — at or above `review_low` but below `auto_merge`. These are the ones a steward has to decide.
+             */
+            review_count?: number | null;
+            /** @description The run that wrote this row. */
+            run_id: string;
+            /**
+             * Format: date-time
+             * @description When the delivery was screened, NULL if it was not. Separate from the counts so that `screened with everything unmatched` (counts 0/0/N) is distinguishable from `never screened` (all NULL) without reading three columns.
+             */
+            screened_at?: string | null;
+            /** @description The delivering source system. */
+            source_system: string;
+            /**
+             * Format: int64
+             * @description Keys tombstoned by a full refresh.
+             */
+            tombstone_count: number;
+            /**
+             * Format: int64
+             * @description Rows matching the key's current content.
+             */
+            unchanged_count: number;
+            /**
+             * Format: int64
+             * @description Screening (E9b): delivered records with no active score reaching `review_low` — genuinely new as far as the model can tell.
+             */
+            unmatched_count?: number | null;
+            /**
+             * Format: date-time
+             * @description Run-logical last-write time. Receipts were written once until E9b; the screening pass now updates the row after the match stage, because the verdicts do not exist until the run has scored.
              */
             updated_at: string;
         };
@@ -371,6 +664,154 @@ export interface components {
              */
             updated_at: string;
         };
+        /** @description An immutable version of a tenant's matching model: the settings document the engine scores against, its hash, provenance and activation state. */
+        MatchingModel: {
+            /**
+             * Format: date-time
+             * @description When this version was activated, if it ever was.
+             */
+            activated_at?: string | null;
+            /**
+             * Format: date-time
+             * @description When the version was created.
+             */
+            created_at: string;
+            /** @description Principal that created the version. */
+            created_by: string;
+            /** @description The dataset whose corpus this model was trained for. */
+            dataset_id: string;
+            /** @description Which canonical schema the model scores against; a model cannot be activated for a lake of the other entity type. */
+            entity_type: string;
+            /** @description The version row's unique id (UUIDv7, minted when the version is created). */
+            id: string;
+            /** @description SHA-256 of model_json, so a scored row can be tied back to the exact document that produced it. */
+            model_hash: string;
+            /** @description The settings document the engine loads (comparison levels, their SQL, m/u probabilities, blocking rules). Stored as text, not jsonb, so it round-trips byte-exact — model_hash is taken over these bytes and the engine's determinism depends on them. */
+            model_json: string;
+            /** @description The identity stamped onto every row this model scores (match_scores.model_version, runs.model_version). It is NOT the version number: it must equal the model_version the frozen term-frequency snapshot CSV is keyed by, because the TF lookup joins on (model_version, tf_snapshot_id) and a mismatch silently returns no term frequencies — changing a pair's score rather than failing. Seeded from the org's ER_MODEL_VERSION; required when uploading a model, for the same reason. */
+            model_version_label: string;
+            /** @description The model's name within the tenant; versions are monotonic within a name, so one tenant can keep several models (a classic rule model beside a trained one) and switch between them. */
+            name: string;
+            /** @description The tenant this model version belongs to. */
+            org_id: string;
+            /** @description Where this version came from: the seeded starter file, a training run (corpus digest, args, seed), an authored upload, or the version it was derived from. */
+            provenance: unknown;
+            /** @description Draft until activated; exactly one version of a name is active at a time, and activating the next archives the previous. There is deliberately no partial unique index enforcing that: a single UPDATE that moves both rows can transiently violate a non-deferrable unique index even when the end state is legal, so activation is instead one atomic statement that cannot produce two actives, and the active read orders by version so a hypothetical second one could never be served silently. */
+            state: string;
+            /** @description The frozen term-frequency snapshot this model scores against, when it has one. Paired with model_version_label by the TF lookup. */
+            tf_snapshot_id?: string | null;
+            /**
+             * Format: date-time
+             * @description Wall-clock last-write time (database default; advanced by mutations once the entity migrates).
+             */
+            updated_at: string;
+            /**
+             * Format: int64
+             * @description The monotonic version number within (org, name). Versions are immutable: a retrain or a weight override mints the next one rather than editing this.
+             */
+            version: number;
+        };
+        /** @description One run's resolution metrics, kept so the dashboard can show a TREND rather than only a current value. The dashboard has always computed its numbers live from the lake, which means it can say what is true now and nothing about whether that is better or worse than last week — which is the question an operator actually has. */
+        MetricSnapshot: {
+            /**
+             * Format: int64
+             * @description Active scores at or above the auto-merge threshold.
+             */
+            auto_merge_pairs: number;
+            /**
+             * Format: date-time
+             * @description The run's logical clock, not wall time — so a replayed fixture produces the same snapshot.
+             */
+            captured_at: string;
+            /**
+             * Format: date-time
+             * @description Run-logical creation time.
+             */
+            created_at: string;
+            /**
+             * Format: int64
+             * @description Entities with more than one member.
+             */
+            duplicate_groups: number;
+            /**
+             * Format: int64
+             * @description Records sitting in an entity with more than one member — the numerator of the duplicate rate. Counting GROUPS instead would call a 5-record cluster and a 2-record cluster the same amount of duplication.
+             */
+            duplicate_records: number;
+            /**
+             * Format: int64
+             * @description Entities the run resolved them into.
+             */
+            entities: number;
+            /** @description Content-derived row id: sha256('metric_snapshots:' || run_id). */
+            id: string;
+            /**
+             * Format: int64
+             * @description Members in the biggest entity. A sudden jump here is the signature of an over-merge, which an average cluster size hides completely.
+             */
+            largest_group: number;
+            /**
+             * Format: int64
+             * @description Records in the standardized corpus.
+             */
+            records: number;
+            /**
+             * Format: int64
+             * @description Open review items after the run — the work the thresholds are handing to humans.
+             */
+            review_backlog: number;
+            /**
+             * Format: int64
+             * @description Active scores in the gray band: scored, not merged. The two together say where the thresholds are actually sitting.
+             */
+            review_band_pairs: number;
+            /** @description The run these metrics describe. One snapshot per run, so a re-run of the same id overwrites rather than double-counting. */
+            run_id: string;
+            /**
+             * Format: date-time
+             * @description Run-logical last-write time.
+             */
+            updated_at: string;
+        };
+        /** @description One run's duplicate attribution, per source system. The corpus-wide duplicate rate says a tenant has a problem; it does not say WHERE the problem comes from, and the answer is nearly always one feed. Retained per run beside metric_snapshots for the same reason that table exists: a live number says what is true now and nothing about whether a source is getting better or worse. */
+        MetricSnapshotSource: {
+            /**
+             * Format: date-time
+             * @description The run's logical timestamp, duplicated here so the series is readable without joining.
+             */
+            captured_at: string;
+            /**
+             * Format: int64
+             * @description How many duplicate groups contain at least one of this source's records. A source can account for few duplicate RECORDS while touching many groups, which is the signature of a feed that adds one bad row to everything rather than one bad batch.
+             */
+            contributed_groups: number;
+            /**
+             * Format: date-time
+             * @description Creation stamp (the run's logical timestamp).
+             */
+            created_at: string;
+            /**
+             * Format: int64
+             * @description How many of them share an entity with at least one other record — counted by RECORD rather than by group, the same judgement metric_snapshots made: counting groups calls a five-record cluster and a pair the same amount of duplication.
+             */
+            duplicate_records: number;
+            /** @description Content-derived row id: sha256('metric_snapshot_sources:' || run_id || ':' || source_system). */
+            id: string;
+            /**
+             * Format: int64
+             * @description How many of this source's records are in the corpus.
+             */
+            records: number;
+            /** @description The run this attribution describes; shares its id with the metric_snapshots row. */
+            run_id: string;
+            /** @description The delivering source system. */
+            source_system: string;
+            /**
+             * Format: date-time
+             * @description Last-update stamp; a re-run of the same run_id corrects rather than appends.
+             */
+            updated_at: string;
+        };
         /** @description A tenant: its config pointer, lake env, lifecycle state and active config version. */
         Org: {
             /**
@@ -407,6 +848,216 @@ export interface components {
             /**
              * Format: date-time
              * @description Wall-clock last-write time (database default; advanced by mutations once the entity migrates).
+             */
+            updated_at: string;
+        };
+        /** @description A human (or model) verdict on one candidate pair — the training signal the engine has always been able to learn from and never had. One row per (org, pair): a re-label corrects the previous verdict rather than stacking another. */
+        PairLabel: {
+            /**
+             * Format: date-time
+             * @description When the verdict was first recorded.
+             */
+            created_at: string;
+            /** @description The dataset whose record pair this verdict is about — record keys are lake-local. */
+            dataset_id: string;
+            /** @description UUIDv7, minted by the application. */
+            id: string;
+            /** @description The actor that recorded the verdict. */
+            labeled_by: string;
+            /** @description The model whose score prompted this label, when there was one. Null for a label recorded without a score in front of it. */
+            model_version?: string | null;
+            /** @description Optional free text from the labeller. */
+            note?: string | null;
+            /** @description The tenant whose corpus the pair belongs to; every read is scoped by it. */
+            org_id: string;
+            /** @description Where the verdict came from. `human` is an explicit labelling session; `reviewer` is implicit feedback from resolving a review item; `llm` is a model's suggestion. Kept apart so training can weight or exclude a source, and so an accuracy number can say whose labels it was measured against. */
+            origin: string;
+            /** @description The pair's lower record key, canonical order — the same ordering match_scores uses, so a label and a score describe the same pair. */
+            rec_a_key: string;
+            /** @description The pair's higher record key, canonical order. */
+            rec_b_key: string;
+            /**
+             * Format: double
+             * @description The match probability shown to the labeller, so a later accuracy pass can tell what the model thought at the time rather than what it thinks now.
+             */
+            score_at_label?: number | null;
+            /**
+             * Format: date-time
+             * @description When it was last corrected.
+             */
+            updated_at: string;
+            /** @description Whether these two records are the same entity. Deliberately binary: a labeller who is unsure should skip rather than guess, because a guessed label trains the model on noise and is indistinguishable afterwards from a confident one. */
+            verdict: string;
+        };
+        /** @description One coded observation a profile made about a corpus — a column mostly null, a blocking key dominated by one value, a record id that is not unique. Stored rather than derived at read time because the thresholds that produced a finding belong to the run that applied them: re-deriving later against changed thresholds would silently rewrite history, and a finding is the part of a profile a user is most likely to act on. */
+        ProfileFinding: {
+            /** @description The finding's registry code (P001, P002, …). Codes are append-only and a retired rule keeps its code, so a stored finding stays interpretable after the rule that made it is gone — which is the point of coding them rather than storing only prose. */
+            code: string;
+            /** @description The column the finding is about, or the empty string for a dataset-level finding (a duplicate row rate, a schema change). A sentinel rather than NULL because this column is in the natural key, and a NULL key column never matches in a MERGE's ON clause — every re-profile would insert a second copy of the same finding. */
+            column_name: string;
+            /**
+             * Format: date-time
+             * @description Run-logical creation time.
+             */
+            created_at: string;
+            /** @description The measurements behind the message — the shares, counts and thresholds — so a consumer can chart or re-check a finding without re-reading the column profile. NULL for a finding whose message is already complete. */
+            detail?: unknown;
+            /** @description Content-derived row id: sha256('profile_findings:' || profile_run_id || ':' || code || ':' || column_name). */
+            id: string;
+            /** @description The finding in one human sentence, with its numbers already in it. Rendered rather than templated at read time because the numbers are what make it actionable, and a message assembled later could be assembled against different data than the one that triggered it. */
+            message: string;
+            /** @description The profile run that produced this finding. Named for the relation it points at, per the foreign-key convention; no `references` is declared because DuckLake enforces no foreign keys (V11). */
+            profile_run_id: string;
+            /** @description How much the finding should interrupt: `error`, `warning` or `info`. Carried on the row rather than looked up from the registry so that a severity reclassification does not retroactively change what a past profile reported. */
+            severity: string;
+            /**
+             * Format: date-time
+             * @description Run-logical last-write time.
+             */
+            updated_at: string;
+        };
+        /** @description One execution of the dataset profiler over one corpus stage, and the cache key for its result. A profile exists to be looked at repeatedly and compared against the previous delivery, so recomputing it on every view would make the cheap tier expensive for no new information. */
+        ProfileRun: {
+            /**
+             * Format: date-time
+             * @description The run's logical clock, not wall time — so a replayed fixture produces the same row.
+             */
+            captured_at: string;
+            /**
+             * Format: int64
+             * @description Columns profiled. Read with row_count it says how wide the scan was, which is the only honest predictor of what a re-profile will cost.
+             */
+            column_count: number;
+            /** @description The config version in force when the profile ran, so a finding about a blocking rule can be traced to the rule set it was judged against. NULL for a profile that predates any published config — the common case for a first delivery, which is exactly when profiling is most useful. */
+            config_hash?: string | null;
+            /** @description A content digest of the rows profiled, and the actual cache key: one hash per row over all its columns, summed (so row order does not matter) and folded together with the row count. Equal digest means equal data, which is the question a cache has to answer — unlike the lake snapshot, which also moves when something unrelated is written, including this profile itself. Computed in one extra scan, which is cheap beside the distinct counts and top-k the profile already pays for. */
+            corpus_digest: string;
+            /**
+             * Format: date-time
+             * @description Run-logical creation time.
+             */
+            created_at: string;
+            /**
+             * Format: int64
+             * @description Wall-clock cost of the profile, kept so the decision to run a deeper tier can be made from a measurement rather than a guess.
+             */
+            duration_ms: number;
+            /** @description Content-derived row id: sha256('profile_runs:' || subject || ':' || source_system || ':' || corpus_digest || ':' || tier). */
+            id: string;
+            /** @description For a `raw` subject profiled automatically as a delivery lands, the delivery it describes — which lets drift be read between two consecutive batches. Provenance and ONLY provenance: this described itself as the per-delivery cache key until the auto-profile was built, and it was neither, because the key is `corpus_digest` and nothing populated this column at all. The digest is the better key anyway — two deliveries carrying identical content share it, where keying on the batch recomputes the same answer for every redelivery of an unchanged file. NULL for the standardized and golden subjects, which describe the whole corpus rather than one landing, and NULL for a profile an operator or a schedule asked for, which describes whatever is landed now rather than one batch. */
+            ingest_batch_id?: string | null;
+            /** @description The model whose rules a tier-2 or tier-3 profile measured, when one existed. NULL is the normal case for a new corpus and is not a defect: the candidate-key estimates are deliberately computable without a model. */
+            model_version?: string | null;
+            /**
+             * Format: int64
+             * @description Rows the profile actually read, which is the sampled count when sampling was on. Named row_count rather than rows because `rows` is reserved in DuckDB and a column called that cannot be selected unquoted.
+             */
+            row_count: number;
+            /**
+             * Format: double
+             * @description The sampled share of rows, NULL when the whole corpus was read.
+             */
+            sample_proportion?: number | null;
+            /**
+             * Format: int64
+             * @description The salt the deterministic sample was drawn with, NULL when unsampled. Recorded because the sample is reproducible only if the seed is known, and a profile nobody can redraw cannot be compared against its successor.
+             */
+            sample_seed?: number | null;
+            /** @description Whether the figures come from a sample. Stored as its own flag rather than inferred from sample_proportion, because a consumer rendering a number has to know whether it is exact before it decides how to label it. */
+            sampled: boolean;
+            /**
+             * Format: int64
+             * @description The DuckLake snapshot version the profile was computed against — informational provenance, deliberately NOT the cache key. It cannot be: the snapshot counter is per-catalog and this profile's own write advances it, so keying on it means every profile invalidates itself and the stored result grows a duplicate on every view instead of being reused. Found by the e2e test that asserts two profiles of unchanged data are one row.
+             */
+            snapshot: number;
+            /** @description The source whose delivered rows were profiled, or `*` when the subject is not source-scoped. A sentinel rather than NULL because this column is part of the natural key, and NULL never equals NULL in a MERGE's ON clause — a nullable key column would miss every match and insert a duplicate profile on each run. */
+            source_system: string;
+            /** @description Which stage of the corpus was profiled: `raw` (as delivered, per source), `standardized` (the canonical attributes), or `golden` (post-resolution). The same aggregates run over all three, which is why a post-resolution profile costs no new machinery. Not an accepted_values list because DuckLake enforces no CHECK constraints (V11) and declaring one would promise a guarantee no layer provides. */
+            subject: string;
+            /**
+             * Format: int64
+             * @description Profiling depth: 1 shape (one aggregate pass), 2 entity-resolution readiness (blocking cost, skew, coverage), 3 model readiness (agreement rates, u-probability pre-flight). Kept in the key so a cheap profile is never mistaken for a deep one, and so asking for tier 3 does not read a tier 1 row and report it as complete.
+             */
+            tier: number;
+            /**
+             * Format: date-time
+             * @description Run-logical last-write time. A re-profile of an unchanged snapshot rewrites the row in place rather than appending, so this moves while the rest of the row does not.
+             */
+            updated_at: string;
+        };
+        /** @description A per-record data-quality score, 0-100, with the three dimensions kept separately. The dimensions are kept because a single number says a record is bad and not what to do about it: complete-but-invalid, valid-but-empty and simply old are three different jobs. */
+        RecordQuality: {
+            /**
+             * Format: double
+             * @description Weighted fraction of the configured attributes that are populated.
+             */
+            completeness: number;
+            /**
+             * Format: date-time
+             * @description Run-logical creation time.
+             */
+            created_at: string;
+            /**
+             * Format: double
+             * @description 1.0 within `fresh_days` of the run, decaying to 0.0 at `stale_days`. NULL when the source carries no timestamp, because unknown age is not the same as old.
+             */
+            freshness?: number | null;
+            /** @description Content-derived row id: sha256('record_qualities:' || record_key). */
+            id: string;
+            /** @description The standardized record scored. */
+            record_key: string;
+            /** @description The run that scored it. */
+            run_id: string;
+            /**
+             * Format: double
+             * @description 0-100, the weighted mean of the dimensions that APPLY to this record. A dimension that cannot be judged is left out of the mean rather than counted as zero.
+             */
+            score: number;
+            /**
+             * Format: date-time
+             * @description That run's logical clock.
+             */
+            scored_at: string;
+            /**
+             * Format: date-time
+             * @description Run-logical last-write time.
+             */
+            updated_at: string;
+            /**
+             * Format: double
+             * @description Fraction of the PRESENT validatable fields that passed standardization. NULL when the record has none of them — a record with no email is already penalised by completeness, and scoring its validity zero would penalise the same absence twice.
+             */
+            validity?: number | null;
+        };
+        /** @description What the auto-ingest poller has already read, one row per (org, source). The poller runs on every dispatcher tick and the newest object under a prefix stays the newest until a new one arrives, so without this row the same CSV would be re-ingested every few seconds forever — an unbounded run loop over the tenant's own lake. An upsert rather than a log: the question it answers is 'what is already in', not 'what has ever been in', and the audit log already answers the second. */
+        S3IngestCursor: {
+            /**
+             * Format: date-time
+             * @description When this source was first auto-ingested.
+             */
+            created_at: string;
+            /** @description The dataset the polled source lands in. */
+            dataset_id: string;
+            /** @description The delivery this object became, tying the cursor to the audit row and the run it enqueued. */
+            delivery_id: string;
+            /** @description The object's ETag when it was read. The reason this column exists: a tenant who overwrites `crm/daily.csv` with new content leaves the key identical, so a key-only cursor would never read the new rows. Nullable because a listing can omit it. */
+            etag?: string | null;
+            /** @description UUIDv7, minted by the application. */
+            id: string;
+            /** @description The full S3 key of the object last ingested, kept whole so a tenant asking 'which file produced this run' gets the answer rather than a reconstruction. */
+            object_key: string;
+            /** @description The tenant whose prefix was polled; every read is scoped by it. */
+            org_id: string;
+            /**
+             * Format: int64
+             * @description The object's size at ingest, so a later shrink is visible as one.
+             */
+            size_bytes: number;
+            /** @description The config source this object landed as — the first path segment under the tenant's prefix. */
+            source: string;
+            /**
+             * Format: date-time
+             * @description When it was last auto-ingested.
              */
             updated_at: string;
         };
@@ -473,6 +1124,62 @@ export interface components {
             /**
              * Format: date-time
              * @description Wall-clock last-write time (database default; advanced by mutations once the entity migrates).
+             */
+            updated_at: string;
+        };
+        /** @description A tenant's own label for entities and review groups: the vocabulary a steward sorts work by. */
+        Tag: {
+            /** @description Whether the tag is in use. Retiring is a soft delete: `taggings` references this row, every foreign key in this schema is NO ACTION, and a hard DELETE would therefore fail for exactly the tags that had been used — which is the bug D11 found in webhooks. Keeping the row also keeps the history legible: what a group was once marked as is part of why it was handled the way it was. */
+            active: boolean;
+            /** @description The minimum role allowed to apply or unapply this tag. Null means the route default (steward). Finer than the route's role check because a tag can name a decision only an admin should be able to mark — the spec's per-tag permission. */
+            apply_min_role?: string | null;
+            /**
+             * Format: date-time
+             * @description When the tag was created.
+             */
+            created_at: string;
+            /** @description The actor that created the tag. */
+            created_by: string;
+            /** @description What the tag means, for the steward who inherits it. Null when nobody wrote one. */
+            description?: string | null;
+            /** @description The tag's unique id (UUIDv7, minted by the application). */
+            id: string;
+            /** @description Who the tag belongs to. `user` is the steward's vocabulary; `system` is reserved for tags the platform itself writes (merge, manual_merge, unmatch, link, split) — a system tag cannot be retired through the API, and its name cannot be taken by a user tag, so the two vocabularies can never collide. */
+            kind: string;
+            /** @description The label a steward sees and types. Unique per tenant among active tags, because two tags with one name make a filter ambiguous and a bulk action unsafe. */
+            name: string;
+            /** @description The tenant that owns the tag. A tag is never shared across tenants: it names one tenant's own workflow. */
+            org_id: string;
+            /**
+             * Format: date-time
+             * @description Wall-clock last-write time.
+             */
+            updated_at: string;
+        };
+        /** @description One tag applied to one subject: the attachment, kept apart from the tag so retiring a tag does not rewrite what it was applied to. */
+        Tagging: {
+            /**
+             * Format: date-time
+             * @description When the tag was applied.
+             */
+            created_at: string;
+            /** @description The actor that applied the tag. Kept because tagging is how work is assigned, so who claimed it matters. */
+            created_by: string;
+            /** @description The dataset whose subject this tag is applied to — subject ids are lake-local. */
+            dataset_id: string;
+            /** @description The tagging's unique id (UUIDv7, minted by the application). */
+            id: string;
+            /** @description The tenant. Denormalised from the tag so every read is scoped by one predicate rather than a join — the same reason every other tenant-scoped relation carries it. */
+            org_id: string;
+            /** @description The entity id or review id. Deliberately NOT a foreign key: an entity lives in the lake and a review is rebuilt by every reconcile, so a database-level reference would be to a row this store does not own. A tagging whose subject has gone is harmless — it reads as absent and is cleaned up by nothing, which is the honest cost of tagging something another store owns. */
+            subject_id: string;
+            /** @description What was tagged: `entity` (a resolved cluster, by its entity id) or `review` (an open review item). Two kinds rather than two tables, because a filter and a bulk action want one list of 'things tagged X' and a union of two relations would make every such read a join. */
+            subject_type: string;
+            /** @description The tag applied. */
+            tag_id: string;
+            /**
+             * Format: date-time
+             * @description Wall-clock last-write time.
              */
             updated_at: string;
         };
@@ -647,6 +1354,60 @@ export interface components {
             updated_at: string;
             /** @description The delivery URL. */
             url: string;
+        };
+        /** @description One attempt-tracked delivery of one event to one subscriber. The event is recorded here BEFORE any network call, so a subscriber that is briefly unreachable gets the event late instead of never. */
+        WebhookDelivery: {
+            /**
+             * Format: int64
+             * @description Attempts handed out. Counted when claimed, not when reported, so a drainer that dies still consumes one.
+             */
+            attempt: number;
+            /**
+             * Format: date-time
+             * @description When the event was recorded, which is before any delivery was attempted.
+             */
+            created_at: string;
+            /** @description The dataset the delivered event came from, when it has one (provenance). */
+            dataset_id?: string | null;
+            /**
+             * Format: date-time
+             * @description When a 2xx was received; NULL unless state is delivered.
+             */
+            delivered_at?: string | null;
+            /** @description Why the last attempt did not deliver: a transport error, or the outbound-URL guard's refusal. */
+            error?: string | null;
+            /** @description The catalogued event (webhook::EVENT_CATALOG), e.g. job.succeeded. */
+            event_type: string;
+            /** @description UUIDv7, minted by the application. */
+            id: string;
+            /**
+             * Format: int64
+             * @description Attempts before giving up. Six with the backoff below spans about ten minutes.
+             */
+            max_attempts: number;
+            /**
+             * Format: date-time
+             * @description When this becomes claimable. NULL means immediately; set to a backoff in the future after a retryable failure.
+             */
+            next_attempt_at?: string | null;
+            /** @description The tenant whose subscriber this is for; every read is scoped by it. */
+            org_id: string;
+            /** @description The exact body to POST. Stored rather than rebuilt so a retry delivers the same bytes the signature was computed over, and so the log shows what was actually sent. */
+            payload: unknown;
+            /**
+             * Format: int64
+             * @description The subscriber's HTTP status, when the POST completed at all.
+             */
+            response_code?: number | null;
+            /** @description pending until a drain settles it; delivered on a 2xx; failed when retries are exhausted or the destination is refused outright. */
+            state: string;
+            /**
+             * Format: date-time
+             * @description Last write.
+             */
+            updated_at: string;
+            /** @description The subscription being delivered to. */
+            webhook_id: string;
         };
     };
     responses: never;

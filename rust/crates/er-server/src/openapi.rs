@@ -19,6 +19,21 @@ use utoipa::OpenApi;
         description = "Entity Resolution control + read API. Component schemas are generated from the entity definitions (entities/*/entity.yaml) via er-entity-gen; this document is their single serialized form.",
     ),
     components(schemas(
+        er_entities::candidate_key::CandidateKey,
+        er_entities::column_profile::ColumnProfile,
+        er_entities::entity_link::EntityLink,
+        er_entities::ingest_batch::IngestBatch,
+        er_entities::matching_model::MatchingModel,
+        er_entities::metric_snapshot::MetricSnapshot,
+        er_entities::metric_snapshot_source::MetricSnapshotSource,
+        er_entities::pair_label::PairLabel,
+        er_entities::profile_finding::ProfileFinding,
+        er_entities::profile_run::ProfileRun,
+        er_entities::record_quality::RecordQuality,
+        er_entities::s3_ingest_cursor::S3IngestCursor,
+        er_entities::tag::Tag,
+        er_entities::tagging::Tagging,
+        er_entities::webhook_delivery::WebhookDelivery,
         er_entities::golden_record::GoldenRecord,
         er_entities::golden_lineage::GoldenLineage,
         er_entities::acct_golden_record::AcctGoldenRecord,
@@ -153,23 +168,11 @@ mod tests {
     /// is. Registering one is a public-API decision (it becomes a documented
     /// schema that `er-openapi-check` then tracks for breaking changes), which is
     /// why the gate forces the decision rather than making it.
-    const JSON_WIRE_WITHOUT_SCHEMA: &[&str] = &[
-        "candidate_key",
-        "column_profile",
-        "entity_link",
-        "ingest_batch",
-        "matching_model",
-        "metric_snapshot",
-        "metric_snapshot_source",
-        "pair_label",
-        "profile_finding",
-        "profile_run",
-        "record_quality",
-        "s3_ingest_cursor",
-        "tag",
-        "tagging",
-        "webhook_delivery",
-    ];
+    ///
+    /// Empty since #762: all fifteen entities that founded the list crossed the
+    /// wire (every one has a read path in `er-server` serving its rows as JSON),
+    /// so all fifteen were registered rather than de-wired.
+    const JSON_WIRE_WITHOUT_SCHEMA: &[&str] = &[];
 
     /// The component schemas `ApiDoc` actually emits, by schema name.
     fn registered_schemas() -> std::collections::BTreeSet<String> {
