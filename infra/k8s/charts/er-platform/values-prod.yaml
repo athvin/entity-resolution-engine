@@ -1,0 +1,37 @@
+# The prod release's static values (the `app` namespace on er-prod), layered
+# over the chart defaults by deploy.yml's prod leg. Everything environment-
+# specific and STABLE lives here; everything dynamic stays a --set in the
+# deploy scripts (digests, colour, EFS ids, the target-group ARN — the last
+# discovered by name because an ARN committed here would bind to nothing,
+# reading as configured, if the group were ever recreated).
+#
+# No credentials: every secret arrives via ExternalSecrets from
+# er/prod/app/*, which envs/prod/secrets.tf owns.
+
+# The {env} segment of the §9 secret paths and ERSERVER_ENV. With
+# `developer: app` (the namespace) this resolves to er/prod/app/{erserver,erweb}.
+environment: prod
+
+erserver:
+  lake:
+    # s3://er-prod-lake-797781631727/prod/app/ — the prod half of §7.3's
+    # per-environment layout, matching envs/prod/lake.tf.
+    bucket: er-prod-lake-797781631727
+    prefix: prod
+  email:
+    # OFF until envs/prod grows ses.tf (the queue item after #556): POST
+    # /v1/email answers 503 and the BFF falls back, which is the designed
+    # degradation — better than dropping invites silently, and deliberately
+    # not `log` in an environment real users touch.
+    backend: ""
+    from: ""
+
+# The edge lives here but its ARN does not — see the header. The deploy passes
+# `--set edge.targetGroupArn=…`; without it this renders no TargetGroupBinding
+# and the target group stays empty (the edge at 503) rather than guessing one.
+edge:
+  targetGroupArn: ""
+
+# ingress-web.yaml stays OFF in prod: it was written for dev-over-Tailscale
+# with `scheme: internal`, and there is no IngressClass on er-prod to honour
+# it. The TargetGroupBinding above is the prod edge's whole join.

@@ -21,6 +21,18 @@ postgres:
   # erserver/erweb DSNs at Aurora. Pinned by digest, matching docker/compose.yaml.
   image: postgres:16@sha256:11a9d238fbb48bab14599c57e41123254452b1a2d93c6c8595bce96f346bd082
 
+bootstrap:
+  # The per-namespace Postgres role + database hook Job (templates/
+  # bootstrap.yaml). Dev needs it: each developer gets role er_{dev} and
+  # database erctl_{dev}, created as the Aurora master from
+  # er/{env}/shared/postgres. Prod does NOT: its erserver DSN uses the master
+  # role against the one `er` database (envs/prod/secrets.tf — "there is
+  # nothing to be isolated FROM"), the job's `er/prod/app/postgres` secret
+  # deliberately does not exist, and a hook that cannot resolve its
+  # ExternalSecret would block every prod upgrade. deploy-namespace-chart.sh
+  # sets this false for prod.
+  enabled: true
+
 # §12: what stops one developer's 10M-row run from starving the cluster. The
 # ephemeral-storage quota is what makes §5.3's spill sizing enforceable.
 #

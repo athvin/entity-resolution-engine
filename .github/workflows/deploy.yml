@@ -86,7 +86,10 @@ on:
         required: true
 
 concurrency:
-  group: deploy-dev
+  # One group for BOTH environment jobs: a merge landing while either deploy
+  # is in flight waits its turn. The jobs inside one run still run in parallel
+  # — they target different clusters under different roles.
+  group: deploy
   # Never cancel a deploy. See the header: cancelling one is how the previous
   # arrangement silently skipped deploying at all.
   cancel-in-progress: false
@@ -275,6 +278,124 @@ jobs:
         # cutover. Why that is the harmless direction, and why the Deployment
         # is scaled to zero rather than deleted, is in
         # scripts/ci/deploy-retire-colour.sh.
+        if: steps.colour.outputs.first != 'true'
+        env:
+          LIVE: ${{ steps.colour.outputs.live }}
+        run: bash scripts/ci/deploy-retire-colour.sh
+
+  deploy-prod:
+    name: deploy prod (app namespace)
+    # Same trigger rule as dev: a SUCCESSFUL images run on main, or a manual
+    # dispatch. The header's queueing argument applies doubled here — a
+    # half-applied prod is the outage this file's concurrency block exists to
+    # prevent.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write # OIDC exchange for er-ci-deploy-prod
+    env:
+      CI_NAMESPACE: app
+      CLUSTER: er-prod
+      AWS_REGION: us-east-2
+      DEPLOY_ENV: prod
+      # See deploy-dev's env block: the commit being deployed, never the
+      # default-branch tip.
+      DEPLOY_SHA: ${{ github.event.inputs.sha || github.event.workflow_run.head_sha }}
+      # The prod release's static values, layered under every --set the colour
+      # scripts pass. Read by deploy-inactive-colour.sh AND deploy-cutover.sh —
+      # omitting it from the second would revert the TargetGroupBinding at
+      # cutover, which is why the path is the job's env and not a step's.
+      PLATFORM_VALUES: infra/k8s/charts/er-platform/values-prod.yaml
+      DEPLOY_LABEL: prod (`app` namespace)
+    steps:
+      - name: Name the commit being deployed
+        run: echo "deploying $DEPLOY_SHA"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.DEPLOY_SHA }}
+          # Full history for the staleness guard — same reason as dev.
+          fetch-depth: 0
+      - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
+        with:
+          # er-ci-deploy-prod, created by envs/prod/ci-deploy.tf (#929) and
+          # applied BEFORE this job first ran — the ordering dev set. The OIDC
+          # subject is pinned to `ref:refs/heads/main`; a `workflow_run` run
+          # executes in the default-branch context, so the claim matches.
+          role-to-assume: arn:aws:iam::797781631727:role/er-ci-deploy-prod
+          aws-region: us-east-2
+      - name: Resolve image digests
+        id: digests
+        run: bash scripts/ci/deploy-resolve-digests.sh
+      - name: Install helm
+        run: bash scripts/ci/install-helm.sh
+      - name: kubeconfig
+        run: aws eks update-kubeconfig --name "$CLUSTER" --region "$AWS_REGION"
+      - name: Discover the prod file system, access point, secrets and target group
+        # DISCOVER, never create — envs/prod owns all four objects; the
+        # rationale and the failure modes are in the script.
+        id: env
+        run: bash scripts/ci/deploy-provision-namespace.sh
+      # NO obs_up.sh here, deliberately: prod has no observability stack yet
+      # (envs/prod/observability.tf is the queue item after #556), and the
+      # chart's otel.endpoint is inert until the exporter lands.
+      - name: Say what was deployed
+        env:
+          API_REUSED: ${{ steps.digests.outputs.reused_er_api }}
+          WEB_REUSED: ${{ steps.digests.outputs.reused_er_web }}
+          API_DIGEST: ${{ steps.digests.outputs.er_api }}
+          WEB_DIGEST: ${{ steps.digests.outputs.er_web }}
+        run: bash scripts/ci/deploy-summary.sh
+
+      - name: The namespace chart
+        # prod flips the chart's two designed seams — bootstrap off (no
+        # per-namespace Postgres role in prod), webIngressFromVpc on (the
+        # ALB's path into pod IPs). Both are explained in the script.
+        run: bash scripts/ci/deploy-namespace-chart.sh
+
+      - name: Read the live colour
+        id: colour
+        run: bash scripts/ci/deploy-read-colour.sh
+
+      - name: Deploy the inactive colour
+        env:
+          LIVE: ${{ steps.colour.outputs.live }}
+          TARGET: ${{ steps.colour.outputs.target }}
+          FIRST: ${{ steps.colour.outputs.first }}
+          LIVE_API: ${{ steps.colour.outputs.live_api }}
+          LIVE_WEB: ${{ steps.colour.outputs.live_web }}
+          NEW_API: ${{ steps.digests.outputs.er_api }}
+          NEW_WEB: ${{ steps.digests.outputs.er_web }}
+          FS: ${{ steps.env.outputs.fs }}
+          AP: ${{ steps.env.outputs.ap }}
+          TARGET_GROUP_ARN: ${{ steps.env.outputs.tg }}
+        run: bash scripts/ci/deploy-inactive-colour.sh
+
+      - name: Smoke-test the inactive colour
+        if: steps.colour.outputs.first != 'true'
+        env:
+          TARGET: ${{ steps.colour.outputs.target }}
+        run: bash scripts/ci/deploy-smoke-preview.sh
+
+      - name: Cut over
+        if: steps.colour.outputs.first != 'true'
+        env:
+          LIVE: ${{ steps.colour.outputs.live }}
+          TARGET: ${{ steps.colour.outputs.target }}
+          LIVE_API: ${{ steps.colour.outputs.live_api }}
+          LIVE_WEB: ${{ steps.colour.outputs.live_web }}
+          NEW_API: ${{ steps.digests.outputs.er_api }}
+          NEW_WEB: ${{ steps.digests.outputs.er_web }}
+          FS: ${{ steps.env.outputs.fs }}
+          AP: ${{ steps.env.outputs.ap }}
+          TARGET_GROUP_ARN: ${{ steps.env.outputs.tg }}
+        run: bash scripts/ci/deploy-cutover.sh
+
+      - name: Retire the old colour
         if: steps.colour.outputs.first != 'true'
         env:
           LIVE: ${{ steps.colour.outputs.live }}

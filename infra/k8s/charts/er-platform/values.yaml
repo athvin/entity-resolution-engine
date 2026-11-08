@@ -273,3 +273,12 @@ ingress:
   domain: dupezero.com
   host: "" # defaults to {developer}.dev.{domain}
   certificateArn: ""
+
+# The §4.1 prod edge's join: a TargetGroupBinding (templates/
+# targetgroupbinding.yaml) from the live er-web Service to the target group
+# Terraform exports as `edge_target_group_arn`. EMPTY by default, which renders
+# nothing — dev and kind have no target group, and prod gets the ARN from the
+# deploy, which discovers it by name rather than committing it (values-prod.yaml
+# says why). This is the ONLY prod edge: `ingress` above stays off there.
+edge:
+  targetGroupArn: ""

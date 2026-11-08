@@ -54,6 +54,7 @@ job instead — `terraform plan` is the worked example.
 | Job | Status-check context | Timeout | Condition |
 |---|---|---|---|
 | `deploy-dev` | deploy dev (ci namespace) | 30 | `github.event_name == 'workflow_dispatch' \|\| (github.event.workflow_run.conclusion == 'su …` |
+| `deploy-prod` | deploy prod (app namespace) | 30 | `github.event_name == 'workflow_dispatch' \|\| (github.event.workflow_run.conclusion == 'su …` |
 
 ### `devcontainer.yml`
 

@@ -1,0 +1,40 @@
+{{- if .Values.edge.targetGroupArn }}
+# Join the LIVE er-web Service to the edge target group Terraform owns and
+# exports as `edge_target_group_arn` (#556).
+#
+# The API group is `eks.amazonaws.com/v1` — EKS Auto Mode's own load-balancing
+# controller — NOT the upstream AWS Load Balancer Controller's
+# `elbv2.k8s.aws/v1beta1`. er-prod has no upstream controller and no
+# IngressClass; verified against the cluster's CRD list. The two CRDs are not
+# interchangeable: the required-field spellings differ (`targetGroupARN` here).
+#
+# WHY THE LIVE SERVICE, NOT A COLOUR. `er-web`'s selector carries the active
+# colour and the cutover moves that one field, so the binding follows traffic
+# with no deploy step knowing about it. Binding `er-web-preview` would
+# health-check the colour not yet serving; binding neither leaves the target
+# group empty and the edge at 503.
+#
+# NO `networking:` BLOCK. Both halves of the ALB-to-pod path are already
+# Terraform's (envs/prod/edge.tf: the ALB security group egresses to the VPC
+# CIDR on 3000; the EKS-managed node group accepts 3000 from it). Handing the
+# controller a networking block would make two systems manage one rule set.
+# The NetworkPolicy half of the hole is the OTHER chart's
+# `webIngressFromVpc`, which deploy-namespace-chart.sh enables for prod — a
+# pod-level admission the security groups cannot express.
+apiVersion: eks.amazonaws.com/v1
+kind: TargetGroupBinding
+metadata:
+  name: er-web
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "er-platform.labels" . | nindent 4 }}
+spec:
+  targetGroupARN: {{ .Values.edge.targetGroupArn | quote }}
+  # The targets are pod IPs. Must match the target group's own
+  # `target_type = ip` (edge.tf) — a mismatch here fails as targets that never
+  # health-check, with the security-group path reading as correct.
+  targetType: ip
+  serviceRef:
+    name: er-web
+    port: 3000
+{{- end }}

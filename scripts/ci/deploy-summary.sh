@@ -5,11 +5,12 @@
 # change actually out?". A digest alone does not answer it; whether it came
 # from this commit does.
 #
-# Inputs (env): DEPLOY_SHA, API_DIGEST, WEB_DIGEST, API_REUSED, WEB_REUSED.
+# Inputs (env): DEPLOY_SHA, API_DIGEST, WEB_DIGEST, API_REUSED, WEB_REUSED;
+# optional DEPLOY_LABEL (defaults to the dev `ci` namespace's).
 set -euo pipefail
 
 {
-	echo "### deploy — dev (\`ci\` namespace)"
+	echo "### deploy — ${DEPLOY_LABEL:-dev (\`ci\` namespace)}"
 	echo ""
 	echo "| image | digest | from this commit? |"
 	echo "|---|---|---|"
