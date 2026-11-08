@@ -95,7 +95,7 @@ export interface components {
              */
             updated_at: string;
         };
-        /** @description The append-only audit ledger: one row per authenticated mutation (actor, action, optional org scope, and structured detail). */
+        /** @description The append-only audit ledger: one row per authenticated mutation (actor, action, optional org scope, and structured detail). Append-only constrains writes, not lifetime: rows past the deployment retention window (ER_AUDIT_RETENTION_DAYS, floor 400 days per the infra D-RETENTION decision) are retired by the dispatcher's retention sweep through delete/purge_expired. */
         AuditLog: {
             /** @description The action name (e.g. steward.mass_update). */
             action: string;

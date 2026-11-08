@@ -36,6 +36,14 @@ test.describe("audit feeds", () => {
     await expect(rows).toContainText("steward.resolve_review");
     await expect(rows).toContainText("user:steward@acme.dev");
     await expect(rows).toContainText("schedule.create");
+    // The export is the same page as CSV, served through the BFF with a
+    // download disposition (spec 5.23's export half).
+    const exportLink = page.getByTestId("audit-export");
+    await expect(exportLink).toHaveAttribute("href", `/api/orgs/${ORG}/audit?format=csv&limit=100`);
+    const download = await page.request.get(`/api/orgs/${ORG}/audit?format=csv&limit=100`);
+    expect(download.status()).toBe(200);
+    expect(download.headers()["content-type"]).toContain("text/csv");
+    expect(await download.text()).toContain("steward.resolve_review");
   });
 
   test("stewards get the honest admin-only state, not an error page", async ({ page }) => {

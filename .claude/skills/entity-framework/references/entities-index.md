@@ -30,7 +30,7 @@ statements is read or written only through the engine's own stage SQL, not
 through a typed query function.
 
 <!-- BEGIN GENERATED: entities-index -->
-**52 entities, 261 declared statements.**
+**52 entities, 263 declared statements.**
 
 | Entity | Relation | Store | Key | Natural key | History |
 |---|---|---|---|---|---|
@@ -96,7 +96,7 @@ Declared statements per entity and operation:
 | `acct_int_std_record` | 0 | 2 | 0 | 0 |
 | `api_key` | 1 | 1 | 1 | 0 |
 | `assertion` | 2 | 4 | 1 | 0 |
-| `audit_log` | 1 | 1 | 0 | 0 |
+| `audit_log` | 1 | 1 | 0 | 1 |
 | `candidate_key` | 1 | 1 | 0 | 0 |
 | `column_profile` | 1 | 2 | 0 | 0 |
 | `config_version` | 1 | 2 | 1 | 0 |
@@ -141,5 +141,5 @@ Declared statements per entity and operation:
 | `task_instance` | 3 | 4 | 22 | 0 |
 | `tenant_schema_state` | 2 | 1 | 0 | 0 |
 | `webhook` | 1 | 3 | 1 | 0 |
-| `webhook_delivery` | 1 | 1 | 2 | 0 |
+| `webhook_delivery` | 1 | 1 | 2 | 1 |
 <!-- END GENERATED: entities-index -->

@@ -5244,20 +5244,39 @@ async fn audit_feed(
     org: Option<&str>,
     params: &HashMap<String, String>,
 ) -> Result<Vec<Value>, Box<axum::response::Response>> {
-    let action = params.get("action").map(String::as_str);
+    let filters = pg::AuditFilters {
+        action: params.get("action").map(String::as_str),
+        actor: params.get("actor").map(String::as_str),
+        since: params.get("since").map(String::as_str),
+        until: params.get("until").map(String::as_str),
+    };
     let before_id = params.get("before_id").and_then(|s| s.parse::<i64>().ok());
     let limit = params
         .get("limit")
         .and_then(|s| s.parse::<i64>().ok())
         .unwrap_or(100)
         .clamp(1, 500);
-    pg::audit_rows(client, org, action, before_id, limit)
+    pg::audit_rows(client, org, &filters, before_id, limit)
         .await
         .map_err(|e| Box::new(pg_err(e)))
 }
 
+/// The `format=csv` arm of the audit feeds: the same page the JSON arm would
+/// list, as text/csv. Split from the handlers so both share one export; the
+/// JSON arm stays inline in each handler because the envelope gate classifies
+/// handlers by reading their own `Json(...)` call.
+fn audit_csv_response(rows: &[Value]) -> axum::response::Response {
+    (
+        StatusCode::OK,
+        [(axum::http::header::CONTENT_TYPE, "text/csv; charset=utf-8")],
+        read::audit_csv(rows),
+    )
+        .into_response()
+}
+
 /// Operator: the cross-tenant audit feed (`GET /v1/audit`), optional
-/// `org`/`action`/`before_id` filters.
+/// `org`/`action`/`actor`/`since`/`until`/`before_id` filters; `format=csv`
+/// exports the same page.
 async fn audit_global(
     principal: Principal,
     State(state): State<AppState>,
@@ -5274,12 +5293,19 @@ async fn audit_global(
         Err(r) => return *r,
     };
     match audit_feed(&client, params.get("org").map(String::as_str), &params).await {
-        Ok(rows) => Json(json!(rows)).into_response(),
+        Ok(rows) => {
+            if params.get("format").map(String::as_str) == Some("csv") {
+                return audit_csv_response(&rows);
+            }
+            Json(json!(rows)).into_response()
+        }
         Err(r) => *r,
     }
 }
 
-/// Admin+: an org's audit feed (`GET /v1/orgs/{org}/audit`).
+/// Admin+: an org's audit feed (`GET /v1/orgs/{org}/audit`), optional
+/// `action`/`actor`/`since`/`until`/`before_id` filters; `format=csv` exports
+/// the same page.
 async fn audit_index(
     principal: Principal,
     State(state): State<AppState>,
@@ -5302,7 +5328,12 @@ async fn audit_index(
         Err(e) => return pg_err(e),
     }
     match audit_feed(&client, Some(&org), &params).await {
-        Ok(rows) => Json(json!(rows)).into_response(),
+        Ok(rows) => {
+            if params.get("format").map(String::as_str) == Some("csv") {
+                return audit_csv_response(&rows);
+            }
+            Json(json!(rows)).into_response()
+        }
         Err(r) => *r,
     }
 }

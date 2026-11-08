@@ -511,7 +511,7 @@ With a single dispatcher, an 8-vCPU account quota and tens of tenants, the in-fl
 
 ## D-RETENTION — Log retention is split: compliance window vs cost
 
-**Decision.** Audit-relevant trails (CloudTrail management + data events, `erweb.audit`, erserver `audit_log`) retain **≥ 400 days**; application debug logs retain 30 days.
+**Decision.** Audit-relevant trails (CloudTrail management + data events, `erweb.audit`, erserver `audit_log`) retain **≥ 400 days**; application debug logs retain 30 days. The erserver half is mechanical since E4 (#519): the dispatcher's retention sweep purges `audit_log` and settled `webhook_deliveries` rows past `ER_AUDIT_RETENTION_DAYS`, whose floor is clamped to 400 in code (`pg::retention_days_from`) so a deployment cannot shorten the window below this decision. `erweb.audit` has no sweep yet — its retention is still only this decision.
 
 **Context.** The first draft applied 30 days of retention uniformly. For a six-month SOC 2 Type 2 that leaves five months with no evidence — and you cannot retroactively produce six months of logs. Retention is a **compliance parameter for audit trails and a cost parameter for everything else**, and conflating them is what makes people either overpay or fail the window. 400 days is a year plus margin, so a window never runs off the end.
 
