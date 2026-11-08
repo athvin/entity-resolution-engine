@@ -26,8 +26,7 @@ fn repo_root() -> PathBuf {
 
 fn workflow(name: &str) -> String {
     let path = repo_root().join(".github/workflows").join(name);
-    fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("reading {}: {e}", path.display()))
+    fs::read_to_string(&path).unwrap_or_else(|e| panic!("reading {}: {e}", path.display()))
 }
 
 /// The triggers block of a workflow: everything between the top-level `on:`
@@ -52,7 +51,9 @@ fn deploy_has_no_push_trigger() {
     let yaml = workflow("deploy.yml");
     let triggers = triggers_block(&yaml);
     assert!(
-        !triggers.lines().any(|l| l.trim_start().starts_with("push:")),
+        !triggers
+            .lines()
+            .any(|l| l.trim_start().starts_with("push:")),
         "deploy.yml grew a push: trigger back. #587 added one on a misdiagnosis and #661 \
          removed it — the real cause of the never-deployed allowlist was cancellation \
          (fixed by queueing), and the push path only ever produced noise-red deploy runs \
