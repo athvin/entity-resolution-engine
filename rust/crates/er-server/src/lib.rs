@@ -5412,6 +5412,25 @@ async fn duplicates_list(
         }),
         ..read::DuplicateFilters::default()
     };
+    // An inverted band matches nothing, and "nothing" looks like an empty
+    // dataset — name the typo instead (the reviews handler does the same for
+    // its probability band).
+    if let (Some(lo), Some(hi)) = (filters.min_members, filters.max_members)
+        && lo > hi
+    {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("min_members {lo} is above max_members {hi}; the band is empty"),
+        );
+    }
+    if let (Some(lo), Some(hi)) = (filters.min_confidence, filters.max_confidence)
+        && lo > hi
+    {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("min_confidence {lo} is above max_confidence {hi}; the band is empty"),
+        );
+    }
     // The member-record search: resolve the key to its entity and pin the
     // list to it, so the group payload is assembled identically on both
     // paths. An unknown key is an empty result, not an error.
@@ -5461,15 +5480,27 @@ async fn duplicates_list(
                 // an exclude forbids none — both honest answers.
                 Ok(None) => std::collections::HashSet::new(),
                 Ok(Some(tag)) => {
+                    // One past the cap, so "at the cap" and "truncated at the
+                    // cap" are distinguishable — silent truncation would make
+                    // an over-broad tag quietly filter by only its first
+                    // 10,000 subjects.
                     match pg::subjects_for_tag(
                         &client,
                         &dataset.id,
                         &tag.id,
                         Some("entity"),
-                        10_000,
+                        10_001,
                     )
                     .await
                     {
+                        Ok(rows) if rows.len() > 10_000 => {
+                            return detail_err(
+                                StatusCode::UNPROCESSABLE_ENTITY,
+                                format!(
+                                    "tag {name:?} marks more than 10,000 entities — too broad to filter by"
+                                ),
+                            );
+                        }
                         Ok(rows) => rows.into_iter().map(|t| t.subject_id).collect(),
                         Err(e) => return pg_err(e),
                     }
