@@ -359,5 +359,197 @@ async fn tags_are_named_applied_and_retired_without_losing_what_they_touched() {
         "retiring a tag must not delete what it was applied to"
     );
 
+    // ---- phase 6: reserved system tags (#805) --------------------------------
+    // The five names are the platform's to write, not a steward's to squat —
+    // checked case-insensitively, because the unique index is case-sensitive
+    // and a case-sensitive check would let `Merge` through to collide later.
+    let make_body = |key: &str, body: serde_json::Value| {
+        let app = app.clone();
+        let key = key.to_string();
+        async move {
+            app.oneshot(req(
+                "POST",
+                "/v1/orgs/acme/tags",
+                &key,
+                Body::from(body.to_string()),
+            ))
+            .await
+            .unwrap()
+        }
+    };
+    for reserved in ["merge", "manual_merge", "unmatch", "link", "split"] {
+        assert_eq!(
+            make_body(&steward_key, serde_json::json!({ "name": reserved }))
+                .await
+                .status(),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{reserved} is the platform's to write, not a steward's to squat"
+        );
+    }
+    assert_eq!(
+        make_body(&steward_key, serde_json::json!({ "name": "Merge" }))
+            .await
+            .status(),
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    // Containing a reserved word is fine — only the exact name is the system's.
+    assert_eq!(
+        make_body(&steward_key, serde_json::json!({ "name": "merge-review" }))
+            .await
+            .status(),
+        StatusCode::CREATED
+    );
+    // And a caller cannot ASK for a system tag: the DTO denies unknown fields,
+    // so `kind` is a rejected body rather than a silently-ignored one (a
+    // caller who believed they minted a system tag is the failure this
+    // prevents).
+    assert_eq!(
+        make_body(
+            &steward_key,
+            serde_json::json!({ "name": "honest-mistake", "kind": "system" }),
+        )
+        .await
+        .status(),
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+
+    // ---- phase 7: apply_min_role, the per-tag permission ----------------------
+    assert_eq!(
+        make_body(
+            &steward_key,
+            serde_json::json!({ "name": "bad-floor", "apply_min_role": "viewer" }),
+        )
+        .await
+        .status(),
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "viewer is below the route's floor"
+    );
+    let resp = make_body(
+        &steward_key,
+        serde_json::json!({ "name": "exec-decision", "apply_min_role": "admin" }),
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let admin_tag = json_body(resp).await;
+    let admin_tag_id = admin_tag["id"].as_str().unwrap().to_string();
+    assert_eq!(admin_tag["apply_min_role"], "admin");
+    assert_eq!(admin_tag["kind"], "user");
+
+    let apply_to = |verb: &str, key: &str, tag_id: &str| {
+        let app = app.clone();
+        let (verb, key, tag_id) = (verb.to_string(), key.to_string(), tag_id.to_string());
+        async move {
+            app.oneshot(req(
+                "POST",
+                &format!("/v1/orgs/acme/datasets/default/tags/{tag_id}/{verb}"),
+                &key,
+                Body::from(
+                    serde_json::json!({ "subject_type": "entity", "subject_id": "E1" }).to_string(),
+                ),
+            ))
+            .await
+            .unwrap()
+        }
+    };
+
+    // The house rule: same-org, insufficient role is a 403 — never a 404.
+    let denied = apply_to("apply", &steward_key, &admin_tag_id).await;
+    assert_eq!(denied.status(), StatusCode::FORBIDDEN);
+    assert!(
+        json_body(denied).await["detail"]
+            .as_str()
+            .is_some_and(|d| d.contains("requires admin role")),
+        "the denial names the role the tag demands"
+    );
+    assert_eq!(
+        apply_to("unapply", &steward_key, &admin_tag_id)
+            .await
+            .status(),
+        StatusCode::FORBIDDEN,
+        "removing is the same guarded action"
+    );
+    assert_eq!(
+        apply_to("apply", &admin_key, &admin_tag_id).await.status(),
+        StatusCode::OK
+    );
+
+    // ---- phase 8: a system tag can be neither retired nor hand-applied --------
+    let org_id = pg::get_org(&client, "acme").await.unwrap().unwrap().id;
+    let sys = pg::create_system_tag(&client, &org_id, "merge", None, "test")
+        .await
+        .unwrap()
+        .expect("no live tag named merge exists");
+    let sys_id = sys.id.clone();
+    assert_eq!(sys.kind, "system");
+
+    // The steward never reaches the system-tag check — retiring is admin-gated
+    // at the route. The admin reaches it and is refused: a system tag is not
+    // any role's to retire.
+    assert_eq!(
+        app.clone()
+            .oneshot(req(
+                "DELETE",
+                &format!("/v1/orgs/acme/tags/{sys_id}"),
+                &steward_key,
+                Body::empty(),
+            ))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        app.clone()
+            .oneshot(req(
+                "DELETE",
+                &format!("/v1/orgs/acme/tags/{sys_id}"),
+                &admin_key,
+                Body::empty(),
+            ))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "a system tag is not any role's to retire"
+    );
+    // Nor applied by hand — a steward-marked `merge` would read identically to
+    // the platform's own mark. The operator credential (what the platform's
+    // writers authenticate as) is the exemption.
+    assert_eq!(
+        apply_to("apply", &steward_key, &sys_id).await.status(),
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(
+        apply_to("apply", &admin_key, &sys_id).await.status(),
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(
+        apply_to("apply", "op-secret", &sys_id).await.status(),
+        StatusCode::OK
+    );
+
+    // ---- phase 9: the bulk taggings read the export prequeries ----------------
+    assert_eq!(
+        get("/v1/orgs/acme/datasets/default/taggings", &viewer_key)
+            .await
+            .status(),
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "subject_type is required — a default would read as 'everything'"
+    );
+    let taggings = json_body(
+        get(
+            "/v1/orgs/acme/datasets/default/taggings?subject_type=entity",
+            &viewer_key,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(taggings["truncated"], false);
+    assert_eq!(
+        taggings["taggings"].as_array().map(Vec::len),
+        Some(3),
+        "the retired tag's surviving tagging, the admin's application, and the \
+         operator's system-tag application: {taggings}"
+    );
     let _ = std::fs::remove_file(&config_path);
 }

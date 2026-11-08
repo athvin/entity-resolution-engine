@@ -3238,6 +3238,16 @@ columns:
   - name: description
     type: varchar
     description: "What the tag means, for the steward who inherits it. Null when nobody wrote one."
+  - name: kind
+    type: varchar
+    nullable: false
+    default: "'user'"
+    accepted_values: [user, system]
+    description: "Who the tag belongs to. `user` is the steward's vocabulary; `system` is reserved for tags the platform itself writes (merge, manual_merge, unmatch, link, split) — a system tag cannot be retired through the API, and its name cannot be taken by a user tag, so the two vocabularies can never collide."
+  - name: apply_min_role
+    type: varchar
+    accepted_values: [steward, admin]
+    description: "The minimum role allowed to apply or unapply this tag. Null means the route default (steward). Finer than the route's role check because a tag can name a decision only an admin should be able to mark — the spec's per-tag permission."
   - name: active
     type: boolean
     nullable: false
@@ -3345,6 +3355,11 @@ indexes:
   # V17: the dataset-scoped read path.
   - name: taggings_dataset
     columns: [dataset_id, tag_id]
+  # The export's bulk prequery: one dataset's taggings of one kind, read in
+  # subject_id order (for_dataset). The trailing column serves the ORDER BY,
+  # so the capped read never sorts.
+  - name: taggings_dataset_subject
+    columns: [dataset_id, subject_type, subject_id]
 "#,
     ),
     (

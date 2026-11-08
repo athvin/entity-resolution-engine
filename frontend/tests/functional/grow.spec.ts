@@ -443,6 +443,19 @@ test.describe("campaigns", () => {
     for await (const chunk of stream) chunks.push(chunk as Buffer);
     const csv = Buffer.concat(chunks).toString("utf8");
     expect(csv.split("\n")[0]).toContain("id,given_name,family_name,email");
+    // #805: the export carries the tags column, last, so existing consumers'
+    // column positions do not move.
+    expect(csv.split("\n")[0]).toMatch(/,tags$/);
+
+    // The tags JOIN, end to end through the BFF and mock: acme's first golden
+    // record is the seeded tagging's subject, so its row carries the seeded
+    // tag. A join break (wrong key, retired-tag filter eating live tags) would
+    // stay green under the header assertion alone.
+    const tagged = await page.request.post(`/api/orgs/${ORG}/datasets/${DS}/segments/export`, {
+      data: { q: "", limit: 5, require: "any" },
+    });
+    expect(tagged.ok()).toBe(true);
+    expect(await tagged.text()).toContain("watchlist");
   });
 
   test("viewers can export but not create or delete", async ({ page }) => {

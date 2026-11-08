@@ -628,6 +628,8 @@ export function initialState() {
           org_id: "uuid-acme-dev",
           name: "watchlist",
           description: "Kept an eye on",
+          kind: "user",
+          apply_min_role: null,
           active: true,
           created_by: "steward@acme.dev",
           created_at: "2026-09-24T07:00:00Z",
@@ -2155,6 +2157,11 @@ const server = http.createServer((req, res) => {
       const body = await readBody(req);
       const name = String(body.name ?? "").trim();
       if (name === "") return send(res, 422, { detail: "name is required" });
+      // The platform's reserved names, refused case-insensitively like
+      // upstream: a user tag can never squat on what the system will write.
+      if (["merge", "manual_merge", "unmatch", "link", "split"].includes(name.toLowerCase())) {
+        return send(res, 422, { detail: `"${name}" is reserved for a tag the platform writes` });
+      }
       const rows = (state.tags[org] ??= []);
       // The partial unique index is on ACTIVE rows only, so a retired tag's
       // name is free again — the behaviour the pg test pins.
@@ -2166,6 +2173,8 @@ const server = http.createServer((req, res) => {
         org_id: `uuid-${org}`,
         name,
         description: body.description ?? null,
+        kind: "user",
+        apply_min_role: body.apply_min_role ?? null,
         active: true,
         created_by: "steward@acme.dev",
         created_at: "2026-09-24T07:00:00Z",
@@ -2236,6 +2245,23 @@ const server = http.createServer((req, res) => {
         .filter((g) => g.tag_id === match[2])
         .filter((g) => kind === null || g.subject_type === kind);
       return send(res, 200, { subjects });
+    }
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/taggings$/.exec(path)) &&
+      req.method === "GET"
+    ) {
+      const org = match[1];
+      if (!state.orgs[org]) return send(res, 404, { detail: "not found" });
+      const kind = url.searchParams.get("subject_type");
+      // Required upstream rather than defaulted — a missing kind would read
+      // as "everything", so the mirror refuses it the same way.
+      if (kind === null) {
+        return send(res, 422, { detail: "subject_type is required" });
+      }
+      // The mock collapses datasets (its apply route ignores the slug too),
+      // so the bulk read is the org's taggings of the asked kind.
+      const taggings = (state.taggings[org] ?? []).filter((g) => g.subject_type === kind);
+      return send(res, 200, { taggings, truncated: false });
     }
     if (
       (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/records$/.exec(path)) &&

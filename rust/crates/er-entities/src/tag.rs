@@ -14,6 +14,10 @@ pub struct Tag {
     pub name: String,
     /// What the tag means, for the steward who inherits it. Null when nobody wrote one.
     pub description: Option<String>,
+    /// Who the tag belongs to. `user` is the steward's vocabulary; `system` is reserved for tags the platform itself writes (merge, manual_merge, unmatch, link, split) — a system tag cannot be retired through the API, and its name cannot be taken by a user tag, so the two vocabularies can never collide.
+    pub kind: String,
+    /// The minimum role allowed to apply or unapply this tag. Null means the route default (steward). Finer than the route's role check because a tag can name a decision only an admin should be able to mark — the spec's per-tag permission.
+    pub apply_min_role: Option<String>,
     /// Whether the tag is in use. Retiring is a soft delete: `taggings` references this row, every foreign key in this schema is NO ACTION, and a hard DELETE would therefore fail for exactly the tags that had been used — which is the bug D11 found in webhooks. Keeping the row also keeps the history legible: what a group was once marked as is part of why it was handled the way it was.
     pub active: bool,
     /// The actor that created the tag.
@@ -42,6 +46,8 @@ impl Tag {
             "org_id",
             "name",
             "description",
+            "kind",
+            "apply_min_role",
             "active",
             "created_by",
             "created_at",
@@ -59,11 +65,13 @@ pub mod create {
         org_id: &str,
         name: &str,
         description: Option<&str>,
+        kind: &str,
+        apply_min_role: Option<&str>,
         created_by: &str,
     ) -> ::std::result::Result<Vec<super::Tag>, ::tokio_postgres::Error> {
-        const SQL: &str = "INSERT INTO public.tags (id, org_id, name, description, created_by)
-VALUES ($1, $2, $3, $4, $5)
-RETURNING id, org_id, name, description, active, created_by, created_at, updated_at
+        const SQL: &str = "INSERT INTO public.tags (id, org_id, name, description, kind, apply_min_role, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, org_id, name, description, kind, apply_min_role, active, created_by, created_at, updated_at
 ";
         let __span = ::er_span::sql_span(
             ::er_span::Store::Control,
@@ -75,7 +83,18 @@ RETURNING id, org_id, name, description, active, created_by, created_at, updated
         );
         let __result = ::er_span::instrument(
             &__span,
-            client.query(SQL, &[&tag_id, &org_id, &name, &description, &created_by]),
+            client.query(
+                SQL,
+                &[
+                    &tag_id,
+                    &org_id,
+                    &name,
+                    &description,
+                    &kind,
+                    &apply_min_role,
+                    &created_by,
+                ],
+            ),
         )
         .await;
         let __entered = __span.enter();
@@ -88,6 +107,8 @@ RETURNING id, org_id, name, description, active, created_by, created_at, updated
                 org_id: row.get("org_id"),
                 name: row.get("name"),
                 description: row.get("description"),
+                kind: row.get("kind"),
+                apply_min_role: row.get("apply_min_role"),
                 active: row.get("active"),
                 created_by: row.get("created_by"),
                 created_at: row.get("created_at"),
@@ -105,8 +126,7 @@ pub mod read {
         org_id: &str,
         tag_id: &str,
     ) -> ::std::result::Result<Vec<super::Tag>, ::tokio_postgres::Error> {
-        const SQL: &str =
-            "SELECT id, org_id, name, description, active, created_by, created_at, updated_at
+        const SQL: &str = "SELECT id, org_id, name, description, kind, apply_min_role, active, created_by, created_at, updated_at
 FROM public.tags
 WHERE org_id = $1 AND id = $2 AND active
 ";
@@ -129,6 +149,8 @@ WHERE org_id = $1 AND id = $2 AND active
                 org_id: row.get("org_id"),
                 name: row.get("name"),
                 description: row.get("description"),
+                kind: row.get("kind"),
+                apply_min_role: row.get("apply_min_role"),
                 active: row.get("active"),
                 created_by: row.get("created_by"),
                 created_at: row.get("created_at"),
@@ -144,7 +166,7 @@ WHERE org_id = $1 AND id = $2 AND active
         subject_type: &str,
         subject_id: &str,
     ) -> ::std::result::Result<Vec<super::Tag>, ::tokio_postgres::Error> {
-        const SQL: &str = "SELECT t.id, t.org_id, t.name, t.description, t.active, t.created_by, t.created_at, t.updated_at
+        const SQL: &str = "SELECT t.id, t.org_id, t.name, t.description, t.kind, t.apply_min_role, t.active, t.created_by, t.created_at, t.updated_at
 FROM public.tags t
 JOIN public.taggings g ON g.tag_id = t.id AND g.org_id = t.org_id
 WHERE t.org_id = $1
@@ -176,6 +198,8 @@ ORDER BY t.name
                 org_id: row.get("org_id"),
                 name: row.get("name"),
                 description: row.get("description"),
+                kind: row.get("kind"),
+                apply_min_role: row.get("apply_min_role"),
                 active: row.get("active"),
                 created_by: row.get("created_by"),
                 created_at: row.get("created_at"),
@@ -189,8 +213,7 @@ ORDER BY t.name
         client: &impl ::tokio_postgres::GenericClient,
         org_id: &str,
     ) -> ::std::result::Result<Vec<super::Tag>, ::tokio_postgres::Error> {
-        const SQL: &str =
-            "SELECT id, org_id, name, description, active, created_by, created_at, updated_at
+        const SQL: &str = "SELECT id, org_id, name, description, kind, apply_min_role, active, created_by, created_at, updated_at
 FROM public.tags
 WHERE org_id = $1 AND active
 ORDER BY name
@@ -214,6 +237,8 @@ ORDER BY name
                 org_id: row.get("org_id"),
                 name: row.get("name"),
                 description: row.get("description"),
+                kind: row.get("kind"),
+                apply_min_role: row.get("apply_min_role"),
                 active: row.get("active"),
                 created_by: row.get("created_by"),
                 created_at: row.get("created_at"),

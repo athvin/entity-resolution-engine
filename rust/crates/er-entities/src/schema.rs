@@ -437,6 +437,8 @@ CREATE INDEX IF NOT EXISTS staged_dataset ON public.staged_steward_actions (data
   org_id text NOT NULL REFERENCES orgs(id),
   name text NOT NULL,
   description text,
+  kind text NOT NULL DEFAULT 'user' CHECK (kind IN ('user', 'system')),
+  apply_min_role text CHECK (apply_min_role IN ('steward', 'admin')),
   active boolean NOT NULL DEFAULT true,
   created_by text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
@@ -476,6 +478,7 @@ CREATE INDEX IF NOT EXISTS taggings_org_tag ON public.taggings (org_id, tag_id);
 CREATE INDEX IF NOT EXISTS taggings_org_subject ON public.taggings (org_id, subject_type, subject_id);
 CREATE UNIQUE INDEX IF NOT EXISTS taggings_unique_application ON public.taggings (org_id, tag_id, subject_type, subject_id);
 CREATE INDEX IF NOT EXISTS taggings_dataset ON public.taggings (dataset_id, tag_id);
+CREATE INDEX IF NOT EXISTS taggings_dataset_subject ON public.taggings (dataset_id, subject_type, subject_id);
 CREATE TABLE IF NOT EXISTS public.taggings_history (
   history_id bigserial NOT NULL,
   row_id text NOT NULL,

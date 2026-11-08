@@ -30,7 +30,7 @@ statements is read or written only through the engine's own stage SQL, not
 through a typed query function.
 
 <!-- BEGIN GENERATED: entities-index -->
-**52 entities, 263 declared statements.**
+**52 entities, 264 declared statements.**
 
 | Entity | Relation | Store | Key | Natural key | History |
 |---|---|---|---|---|---|
@@ -137,7 +137,7 @@ Declared statements per entity and operation:
 | `sf_extract_cursor` | 1 | 1 | 0 | 0 |
 | `staged_steward_action` | 1 | 1 | 1 | 0 |
 | `tag` | 1 | 3 | 1 | 0 |
-| `tagging` | 1 | 1 | 0 | 1 |
+| `tagging` | 1 | 2 | 0 | 1 |
 | `task_instance` | 3 | 4 | 22 | 0 |
 | `tenant_schema_state` | 2 | 1 | 0 | 0 |
 | `webhook` | 1 | 3 | 1 | 0 |

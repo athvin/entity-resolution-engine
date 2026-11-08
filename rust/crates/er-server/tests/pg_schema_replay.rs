@@ -168,4 +168,72 @@ async fn a_live_older_store_boots_through_the_deferred_replay() {
         }
         other => panic!("expected ContractNotReady, got {other}"),
     }
+
+    // ---- phase 5: `0005_tag_kind` heals a store whose tags predate `kind` --
+    //
+    // The #805 column is NOT NULL, and the differ reads a missing NOT NULL
+    // column as breaking REGARDLESS of its default — so every store that
+    // already had `tags` would refuse to boot on the #805 release without the
+    // fixup. Age this store into exactly that shape: a tag row written before
+    // `kind` existed, the column gone, the fixup unrecorded. First repair
+    // phase 4's deliberate refusal (the ledger row is what lets a
+    // correctly-migrated store keep booting).
+    client
+        .execute(
+            "INSERT INTO public.fixups (id, name, applied_by)
+             VALUES ($1, '0004_dataset_id_required', 'pg_schema_replay')",
+            &[&er_ids::new_v7()],
+        )
+        .await
+        .unwrap();
+    let elder_id: String = client
+        .query_one("SELECT id FROM public.orgs WHERE name = 'elder'", &[])
+        .await
+        .unwrap()
+        .get(0);
+    client
+        .execute(
+            "INSERT INTO public.tags (id, org_id, name, created_by)
+             VALUES ($1, $2, 'pre-kind', 'pg_schema_replay')",
+            &[&er_ids::new_v7(), &elder_id],
+        )
+        .await
+        .unwrap();
+    client
+        .batch_execute("ALTER TABLE public.tags DROP COLUMN kind")
+        .await
+        .unwrap();
+    client
+        .execute(
+            "DELETE FROM public.fixups WHERE name = '0005_tag_kind'",
+            &[],
+        )
+        .await
+        .unwrap();
+
+    pg::ensure_schema(&mut client)
+        .await
+        .expect("a store whose tags predate kind must boot through the fixup");
+    let (kind, nullable): (String, String) = client
+        .query_one(
+            "SELECT t.kind, c.is_nullable FROM public.tags t
+             JOIN information_schema.columns c
+               ON c.table_schema = 'public' AND c.table_name = 'tags' AND c.column_name = 'kind'
+             WHERE t.name = 'pre-kind'",
+            &[],
+        )
+        .await
+        .map(|r| (r.get(0), r.get(1)))
+        .unwrap();
+    assert_eq!(kind, "user", "the default fills the pre-existing row");
+    assert_eq!(nullable, "NO", "and the column arrives NOT NULL");
+    let recorded: i64 = client
+        .query_one(
+            "SELECT count(*) FROM public.fixups WHERE name = '0005_tag_kind'",
+            &[],
+        )
+        .await
+        .unwrap()
+        .get(0);
+    assert_eq!(recorded, 1, "the heal is ledgered, not repeated per boot");
 }

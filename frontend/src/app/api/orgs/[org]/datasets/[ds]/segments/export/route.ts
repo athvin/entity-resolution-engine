@@ -2,9 +2,12 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { csvFilename, csvRow } from "@/lib/bff/csv";
+import { tagsByEntityId } from "@/lib/bff/export-tags";
 import { EXPORT_REQUIREMENTS, exportSummary, isExportable } from "@/lib/bff/exportable";
 import { forwardGoldenPage } from "@/lib/bff/golden";
-import { BffFailure, requireDatasetAccess, respond } from "@/lib/bff/proxy";
+import { BffFailure, forward, requireDatasetAccess, respond } from "@/lib/bff/proxy";
+import type { Tag } from "@/lib/entities/bindings/Tag";
+import type { Tagging } from "@/lib/entities/bindings/Tagging";
 
 const exportSchema = z.object({
   q: z.string().max(200).default(""),
@@ -27,6 +30,7 @@ const COLUMNS = [
   "addr_region",
   "addr_postal",
   "birth_date",
+  "tags",
 ] as const;
 
 /**
@@ -34,6 +38,12 @@ const COLUMNS = [
  * one consistent file — every page carries the first page's snapshot, so a
  * concurrent run cannot shear the export (the §7.19 export job's synchronous
  * little sibling; the scheduled variant arrives with the parameterized job).
+ *
+ * The consistency claim is about ROWS. The tags column is a Postgres
+ * point-in-time read (tags have no snapshot to pin to), taken once before the
+ * first page: an application made mid-export can be stale in either
+ * direction, which the single prequery at least makes uniform within the
+ * column rather than sheared across it.
  */
 export async function POST(
   request: Request,
@@ -45,6 +55,22 @@ export async function POST(
     const parsed = exportSchema.safeParse(await request.json().catch(() => null));
     if (!parsed.success) throw new BffFailure(422, "validation", "q and limit are required");
     const { q, limit, require: requirement } = parsed.data;
+
+    // The tags column, prequeried once rather than per row (#805): the whole
+    // dataset's entity taggings joined against the rows as they export.
+    // Joined through the ACTIVE vocabulary, so a retired tag stops appearing
+    // here exactly as it stops appearing as a chip. A truncated prequery
+    // (past er-server's cap) is reported in the summary header, never
+    // exported past silently.
+    const [vocabulary, taggings] = await Promise.all([
+      forward<{ tags: Tag[] }>(access, `/v1/orgs/${org}/tags`),
+      forward<{ taggings: Tagging[]; truncated: boolean }>(
+        access,
+        `/v1/orgs/${org}/datasets/${ds}/taggings`,
+        { searchParams: new URLSearchParams({ subject_type: "entity" }) },
+      ),
+    ]);
+    const tagsByEntity = tagsByEntityId(vocabulary.tags, taggings.taggings);
 
     const lines = [COLUMNS.join(",")];
     let cursor: string | null = null;
@@ -83,7 +109,13 @@ export async function POST(
           skipped += 1;
           continue;
         }
-        lines.push(csvRow(COLUMNS.map((column) => row[column])));
+        lines.push(
+          csvRow(
+            COLUMNS.map((column) =>
+              column === "tags" ? (tagsByEntity.get(String(row.id)) ?? []) : row[column],
+            ),
+          ),
+        );
       }
       if (!page.nextCursor) break;
       cursor = page.nextCursor;
@@ -97,7 +129,9 @@ export async function POST(
         // The count LEFT OUT, reported rather than inferred: an export that
         // silently returns 7,000 of 10,000 rows looks like a broken query, and
         // the reader's next move is to re-run it rather than trust it.
-        "x-export-summary": exportSummary(lines.length - 1, skipped, requirement),
+        "x-export-summary":
+          exportSummary(lines.length - 1, skipped, requirement) +
+          (taggings.truncated ? "; tags incomplete (taggings cap reached)" : ""),
         "x-export-skipped": String(skipped),
       },
     });

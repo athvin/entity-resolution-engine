@@ -1,0 +1,8 @@
+kind: statement
+operation: read
+description: "Every tagging of one subject kind in one dataset, capped — the export's prequery, which joins the whole set against the page of golden records it already holds rather than asking per row. The caller passes cap+1 and treats cap+1 rows as truncation, the same probe `subjects_by_tag` documents."
+params:
+  - { name: dataset_id, type: varchar }
+  - { name: subject_type, type: varchar }
+  - { name: limit, type: bigint }
+returns: entity
