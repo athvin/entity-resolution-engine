@@ -184,7 +184,7 @@ So "nothing alerted, so nothing is wrong" is still not sound reasoning — but n
 because the coverage is thin and one subscription may be unconfirmed, not because
 there is nothing there at all.
 
-## Two traps that cost real time
+## Traps that cost real time
 
 **Cost-allocation tags do not backfill.** Resources carry `Project`,
 `Environment`, `ManagedBy` and sometimes `Developer` through the provider's
@@ -242,6 +242,22 @@ less than one 8-vCPU `runner-sm` node, so no runner node of either class can
 place at all. Substitute the value the command returned; if it exceeds the sum
 of the always-on nodes plus the node class you are asking for, the quota is not
 your problem and the `Pending` pod is something else.
+
+**A healthy IAM says nothing about cluster access — the two are separate
+planes.** A read-only SSO role (`er-readonly` / PlatformReadOnly) can
+authenticate against every AWS API and still get **401 Unauthorized from the
+EKS cluster itself**, because Kubernetes authorization is not IAM
+authorization: without an EKS *access entry* covering the role's ARN, the
+cluster refuses the token no matter how healthy the AWS side looks. The
+discriminator is `aws sts get-caller-identity`: if it fails, the SSO token
+itself is the problem (run the login again); if it answers but `kubectl` 401s,
+the missing piece is the access entry. The grant for the read-only role lives
+in the `eks` module's `viewer_principal_arns`
+(`infra/terraform/envs/dev/eks.tf`), associated with `AmazonEKSViewPolicy` at
+cluster scope — which reads no Secret contents, matching the AWS-side
+ReadOnlyAccess posture (added by #839 / PR #844 after a session lost time to
+exactly this misdiagnosis). Verify with
+`kubectl --context er-dev-ro -n ci get pods` returning instead of 401ing.
 
 Budgets, the CUR 2.0 pipeline and per-tenant attribution:
 [references/cost-and-billing.md](references/cost-and-billing.md).
