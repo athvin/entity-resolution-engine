@@ -3127,7 +3127,7 @@ async fn put_lexicon(
             return env_write_err(e);
         }
         if let Err(e) = pg::merge_dataset_envs(&client, &org_row.id, &env_patch).await {
-            return pg_err(e);
+            return env_write_err(e);
         }
     }
 
@@ -3378,7 +3378,7 @@ async fn put_ignore_words(
             return env_write_err(e);
         }
         if let Err(e) = pg::merge_dataset_envs(&client, &org_row.id, &env_patch).await {
-            return pg_err(e);
+            return env_write_err(e);
         }
     }
 
@@ -5404,7 +5404,7 @@ async fn update_resources(
     // Resource knobs are org-wide and runs read the DATASET env: fan the patch
     // out to every dataset, exactly as the lexicon path does.
     if let Err(e) = pg::merge_dataset_envs(&client, &org_row.id, &patch).await {
-        return pg_err(e);
+        return env_write_err(e);
     }
     match pg::get_org(&client, &org).await {
         Ok(Some(o)) => Json(resources_of(&o.env)).into_response(),

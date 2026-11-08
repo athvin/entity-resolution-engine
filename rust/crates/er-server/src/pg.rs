@@ -969,7 +969,8 @@ pub async fn merge_dataset_envs(
     client: &Client,
     org_id: &str,
     patch: &serde_json::Value,
-) -> Result<(), PgError> {
+) -> Result<(), EnvWriteError> {
+    refuse_credential_keys(patch)?;
     er_entities::dataset::update::merge_env(client, patch, org_id).await?;
     Ok(())
 }
