@@ -194,7 +194,6 @@ fn numeric_tolerances_work_absolutely_and_relatively() {
 #[test]
 fn contains_matches_in_either_direction_but_never_on_a_blank() {
     if !enabled() {
-        eprintln!("skipping comparator SQL behaviour (set DEDUPE_E2E_EXTENSIONS=1)");
         return;
     }
     let session = session();

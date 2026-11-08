@@ -673,11 +673,15 @@ fn resolve_level_pair(
                 level: token.to_string(),
                 reason: format!("{arg:?} is not a number of kilometres"),
             })?;
-            if km <= 0.0 {
+            // `is_finite` first: NaN fails every comparison in Rust, so a bare
+            // `km <= 0.0` would let it through — and in DuckDB NaN sorts above
+            // every number, so `distance <= NaN` is TRUE for every pair: the
+            // level that matches everything, not nothing.
+            if !km.is_finite() || km <= 0.0 {
                 return Err(CompileError::BadLevelParameter {
                     column: column.to_string(),
                     level: token.to_string(),
-                    reason: "a radius must be greater than zero".to_string(),
+                    reason: "a radius must be a finite number greater than zero".to_string(),
                 });
             }
             // Haversine; 6371.0088 km is the IUGG mean Earth radius. The
@@ -1527,6 +1531,16 @@ mod tests {
         ));
         assert!(matches!(
             resolve_level("geo", "geo_within_km:nearby", "name_variants").unwrap_err(),
+            CompileError::BadLevelParameter { .. }
+        ));
+        // NaN and infinity are valid f64 parses, and in DuckDB NaN sorts above
+        // every number — a NaN radius would match EVERY pair. Refused here.
+        assert!(matches!(
+            resolve_level("geo", "geo_within_km:NaN", "name_variants").unwrap_err(),
+            CompileError::BadLevelParameter { .. }
+        ));
+        assert!(matches!(
+            resolve_level("geo", "geo_within_km:inf", "name_variants").unwrap_err(),
             CompileError::BadLevelParameter { .. }
         ));
     }
