@@ -1092,10 +1092,12 @@ impl Task<Session> for ExtractPull {
         // writes is indistinguishable from an uploaded one.
         let config = published_config(&ctx.order.lake_env)?;
         let Some(spec) = config.sources.get(&request.source) else {
-            return Err(TaskError::Failed(er_errors::ErError::precondition(format!(
-                "param: source {:?} is not declared in the published config",
-                request.source
-            ))));
+            return Err(TaskError::Failed(er_errors::ErError::precondition(
+                format!(
+                    "param: source {:?} is not declared in the published config",
+                    request.source
+                ),
+            )));
         };
         let columns = crate::extract_params::source_csv_columns(spec);
         let soql = crate::salesforce::build_soql(
@@ -1126,9 +1128,8 @@ impl Task<Session> for ExtractPull {
             )))
         })?;
 
-        let mut file = std::fs::File::create(&part).map_err(|e| {
-            engine_error(&format!("i/o error staging into {drop_root}: {e}"))
-        })?;
+        let mut file = std::fs::File::create(&part)
+            .map_err(|e| engine_error(&format!("i/o error staging into {drop_root}: {e}")))?;
         crate::salesforce::write_header(&columns, &mut file)
             .map_err(|e| engine_error(&format!("i/o error writing the header: {e}")))?;
         let outcome = crate::salesforce::extract_to_writer(

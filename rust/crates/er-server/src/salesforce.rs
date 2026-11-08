@@ -144,7 +144,9 @@ pub fn build_soql(
     exclude_converted_leads: bool,
 ) -> Result<String, String> {
     if !valid_identifier(object) {
-        return Err(format!("param: object {object:?} is not an sObject API name"));
+        return Err(format!(
+            "param: object {object:?} is not an sObject API name"
+        ));
     }
     if columns.is_empty() {
         return Err("param: the source declares no columns to extract".to_string());
@@ -246,7 +248,11 @@ fn token(http: &reqwest::blocking::Client, conn: &Connection) -> Result<String, 
     }
     serde_json::from_str::<serde_json::Value>(&body)
         .ok()
-        .and_then(|v| v.get("access_token").and_then(|t| t.as_str()).map(String::from))
+        .and_then(|v| {
+            v.get("access_token")
+                .and_then(|t| t.as_str())
+                .map(String::from)
+        })
         .ok_or_else(|| SfError::Protocol("the token response carries no access_token".to_string()))
 }
 
@@ -391,16 +397,11 @@ pub fn extract_to_writer<W: std::io::Write>(
             .clone();
         // Field API names match case-insensitively: Salesforce echoes the
         // field's own casing, not the query's.
-        let index_of = |name: &str| {
-            headers
-                .iter()
-                .position(|h| h.eq_ignore_ascii_case(name))
-        };
+        let index_of = |name: &str| headers.iter().position(|h| h.eq_ignore_ascii_case(name));
         let order: Vec<Option<usize>> = columns.iter().map(|c| index_of(c)).collect();
         let updated_idx = index_of(updated_at_column);
         for record in page.records() {
-            let record =
-                record.map_err(|e| SfError::Protocol(format!("results page row: {e}")))?;
+            let record = record.map_err(|e| SfError::Protocol(format!("results page row: {e}")))?;
             let row: Vec<&str> = order
                 .iter()
                 .map(|idx| idx.and_then(|i| record.get(i)).unwrap_or(""))
@@ -491,8 +492,7 @@ mod tests {
     #[test]
     fn a_custom_object_and_field_are_identifiers() {
         let cols = vec!["Id".to_string(), "Legacy_Id__c".to_string()];
-        let soql =
-            build_soql("Invoice__c", &cols, "SystemModstamp", None, None, false).unwrap();
+        let soql = build_soql("Invoice__c", &cols, "SystemModstamp", None, None, false).unwrap();
         assert_eq!(soql, "SELECT Id, Legacy_Id__c FROM Invoice__c");
     }
 
@@ -505,7 +505,12 @@ mod tests {
         ] {
             assert!(valid_datetime_literal(good), "{good}");
         }
-        for bad in ["", "yesterday", "2026-11-08", "2026-11-08T12:34:56.000Z OR 1=1"] {
+        for bad in [
+            "",
+            "yesterday",
+            "2026-11-08",
+            "2026-11-08T12:34:56.000Z OR 1=1",
+        ] {
             assert!(!valid_datetime_literal(bad), "{bad}");
         }
     }

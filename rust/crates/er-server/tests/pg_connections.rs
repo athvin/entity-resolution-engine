@@ -300,10 +300,10 @@ async fn connections_crud_and_extract_preconditions() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::CREATED);
-    let version = serde_json::from_str::<serde_json::Value>(&body_text(resp).await).unwrap()
-        ["version"]
-        .as_i64()
-        .unwrap();
+    let version =
+        serde_json::from_str::<serde_json::Value>(&body_text(resp).await).unwrap()["version"]
+            .as_i64()
+            .unwrap();
     let resp = app
         .clone()
         .oneshot(json_req(
@@ -342,8 +342,7 @@ async fn connections_crud_and_extract_preconditions() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::ACCEPTED);
-    let queued: serde_json::Value =
-        serde_json::from_str(&body_text(resp).await).unwrap();
+    let queued: serde_json::Value = serde_json::from_str(&body_text(resp).await).unwrap();
     assert_eq!(queued["job"]["kind"], "extract");
     assert_eq!(queued["job"]["state"], "queued");
 
@@ -367,9 +366,7 @@ async fn connections_crud_and_extract_preconditions() {
             "POST",
             "/v1/orgs/acme/datasets/default/schedules",
             &admin,
-            Body::from(
-                serde_json::json!({ "kind": "extract", "cron": "0 * * * *" }).to_string(),
-            ),
+            Body::from(serde_json::json!({ "kind": "extract", "cron": "0 * * * *" }).to_string()),
         ))
         .await
         .unwrap();
@@ -436,7 +433,10 @@ async fn connections_crud_and_extract_preconditions() {
         .await
         .unwrap();
     let listed: serde_json::Value = serde_json::from_str(&body_text(resp).await).unwrap();
-    assert!(listed.as_array().unwrap().is_empty(), "retired = not listed");
+    assert!(
+        listed.as_array().unwrap().is_empty(),
+        "retired = not listed"
+    );
 
     let _ = std::fs::remove_dir_all(&tmp);
 }

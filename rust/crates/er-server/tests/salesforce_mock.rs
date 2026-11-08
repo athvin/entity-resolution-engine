@@ -140,7 +140,11 @@ fn a_paged_extract_lands_one_csv_in_declared_column_order() {
         refuse_token: false,
         refuse_query: false,
     });
-    let columns = vec!["Id".to_string(), "SystemModstamp".to_string(), "Email".to_string()];
+    let columns = vec![
+        "Id".to_string(),
+        "SystemModstamp".to_string(),
+        "Email".to_string(),
+    ];
     let mut out: Vec<u8> = Vec::new();
     salesforce::write_header(&columns, &mut out).expect("header");
     let outcome = salesforce::extract_to_writer(

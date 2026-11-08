@@ -4781,15 +4781,12 @@ async fn attempt_work_order(
         // The watermark rides beside the credential; a read failure degrades
         // to a full pull, which is correct and at worst re-extracts rows the
         // landing upserts anyway.
-        let watermark = er_entities::sf_extract_cursor::read::get(
-            &client,
-            dataset_id,
-            &request.source,
-        )
-        .await
-        .ok()
-        .and_then(|rows| rows.into_iter().next())
-        .and_then(|c| c.watermark);
+        let watermark =
+            er_entities::sf_extract_cursor::read::get(&client, dataset_id, &request.source)
+                .await
+                .ok()
+                .and_then(|rows| rows.into_iter().next())
+                .and_then(|c| c.watermark);
         json!({
             "instance_url": row.instance_url,
             "client_id": row.client_id,
@@ -9021,7 +9018,10 @@ async fn create_salesforce_connection(
         ("client_secret", &body.client_secret),
     ] {
         if value.trim().is_empty() {
-            return detail_err(StatusCode::UNPROCESSABLE_ENTITY, format!("{field} is required"));
+            return detail_err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                format!("{field} is required"),
+            );
         }
     }
     let auth_kind = body.auth_kind.as_deref().unwrap_or("client_credentials");
@@ -9246,8 +9246,7 @@ async fn dataset_extract_run(
     if let Err(e) = refuse_unless_active_dataset(&org_row, &d, "extraction") {
         return *e;
     }
-    match pg::salesforce_connection_credential(&client, &org_row.id, &request.connection_id).await
-    {
+    match pg::salesforce_connection_credential(&client, &org_row.id, &request.connection_id).await {
         Ok(Some(_)) => {}
         Ok(None) => {
             return detail_err(

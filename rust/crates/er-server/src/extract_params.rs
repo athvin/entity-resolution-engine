@@ -57,7 +57,11 @@ impl ExtractRequest {
         let connection_id = required("connection_id")?;
         let object = required("object")?;
         let source = required("source")?;
-        let mode = match params.get("mode").and_then(Value::as_str).unwrap_or("incremental") {
+        let mode = match params
+            .get("mode")
+            .and_then(Value::as_str)
+            .unwrap_or("incremental")
+        {
             "incremental" => ExtractMode::Incremental,
             "full" => ExtractMode::Full,
             other => {
@@ -141,13 +145,21 @@ mod tests {
     #[test]
     fn a_lead_extract_excludes_converted_leads_unless_told_otherwise() {
         let params = json!({ "connection_id": "c1", "object": "Lead", "source": "sf_lead" });
-        assert!(ExtractRequest::from_params(&params).unwrap().exclude_converted_leads);
+        assert!(
+            ExtractRequest::from_params(&params)
+                .unwrap()
+                .exclude_converted_leads
+        );
 
         let keep = json!({
             "connection_id": "c1", "object": "Lead", "source": "sf_lead",
             "exclude_converted_leads": false,
         });
-        assert!(!ExtractRequest::from_params(&keep).unwrap().exclude_converted_leads);
+        assert!(
+            !ExtractRequest::from_params(&keep)
+                .unwrap()
+                .exclude_converted_leads
+        );
 
         // Asking for the Lead rule on a non-Lead object is refused rather than
         // deferred to a Salesforce error an hour later in the queue.

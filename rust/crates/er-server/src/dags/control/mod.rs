@@ -162,9 +162,7 @@ impl ControlTask<PgClient> for AdvanceSfCursor {
                 enqueued_job: Some(job.id.clone()),
                 watermark: report.watermark.clone(),
             }),
-            er_dag::Counters(
-                serde_json::json!({ "rows": report.rows, "enqueued": job.id }),
-            ),
+            er_dag::Counters(serde_json::json!({ "rows": report.rows, "enqueued": job.id })),
         ))
     }
 }

@@ -1872,9 +1872,8 @@ pub async fn delete_salesforce_connection(
     org_id: &str,
     connection_id: &str,
 ) -> Result<bool, PgError> {
-    let n =
-        er_entities::salesforce_connection::update::deactivate(client, org_id, connection_id)
-            .await?;
+    let n = er_entities::salesforce_connection::update::deactivate(client, org_id, connection_id)
+        .await?;
     Ok(n == 1)
 }
 
