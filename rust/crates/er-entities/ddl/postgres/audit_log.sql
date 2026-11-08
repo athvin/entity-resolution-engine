@@ -11,3 +11,4 @@ CREATE TABLE IF NOT EXISTS public.audit_log (
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (id)
 );
+CREATE INDEX IF NOT EXISTS audit_log_at ON public.audit_log (at);

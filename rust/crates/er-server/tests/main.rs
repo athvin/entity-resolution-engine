@@ -40,6 +40,7 @@ mod multicall;
 mod no_second_executor;
 mod pg_apply_corrections_dag;
 mod pg_approval;
+mod pg_audit;
 mod pg_auth;
 mod pg_clear_endpoint;
 mod pg_config;

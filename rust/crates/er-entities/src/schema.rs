@@ -108,7 +108,8 @@ CREATE OR REPLACE TRIGGER er_history_api_keys
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (id)
-);"#,
+);
+CREATE INDEX IF NOT EXISTS audit_log_at ON public.audit_log (at);"#,
     r#"CREATE TABLE IF NOT EXISTS public.datasets (
   id text NOT NULL,
   org_id text NOT NULL REFERENCES orgs(id),

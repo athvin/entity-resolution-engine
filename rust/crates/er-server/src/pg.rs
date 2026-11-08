@@ -1321,13 +1321,21 @@ pub async fn audit(
 pub async fn audit_rows(
     client: &Client,
     org: Option<&str>,
-    action: Option<&str>,
+    filters: &AuditFilters<'_>,
     before_id: Option<i64>,
     limit: i64,
 ) -> Result<Vec<serde_json::Value>, PgError> {
-    let rows =
-        er_entities::audit_log::read::page(client, org, action, before_id, limit.clamp(1, 500))
-            .await?;
+    let rows = er_entities::audit_log::read::page(
+        client,
+        org,
+        filters.action,
+        filters.actor,
+        filters.since,
+        filters.until,
+        before_id,
+        limit.clamp(1, 500),
+    )
+    .await?;
     Ok(rows
         .into_iter()
         .map(|r| {
@@ -1336,12 +1344,84 @@ pub async fn audit_rows(
                 "at": ts(&r.at),
                 "actor": r.actor,
                 "org": r.org,
+                // Restored alongside the filter work: `page.sql` always
+                // projected it and the schema always declared it, but this
+                // layer dropped it, so a UI could neither show nor filter by
+                // dataset even though the column is populated.
+                "dataset": r.dataset,
                 "action": r.action,
                 "detail": r.detail,
                 "trace_id": r.trace_id,
             })
         })
         .collect())
+}
+
+/// The audit feed's optional filters, bundled so adding one is not a fourth
+/// positional `Option<&str>` at every call site.
+#[derive(Default)]
+pub struct AuditFilters<'a> {
+    pub action: Option<&'a str>,
+    pub actor: Option<&'a str>,
+    /// Inclusive lower bound on `at`, any form `::timestamptz` accepts.
+    pub since: Option<&'a str>,
+    /// Exclusive upper bound on `at` — half-open, so adjacent windows never
+    /// double-count.
+    pub until: Option<&'a str>,
+}
+
+/// The deployment's audit retention window, in days.
+///
+/// `ER_AUDIT_RETENTION_DAYS`, default 400 — and FLOOR 400: the infra
+/// D-RETENTION decision ("audit-relevant trails retain >= 400 days", a SOC 2
+/// evidence-window parameter) is enforced here rather than trusted to every
+/// deployment's values file. A smaller value is taken as a misconfiguration,
+/// clamped up, and said out loud.
+#[must_use]
+pub fn audit_retention_days() -> i64 {
+    retention_days_from(
+        std::env::var("ER_AUDIT_RETENTION_DAYS")
+            .ok()
+            .and_then(|s| s.parse::<i64>().ok()),
+    )
+}
+
+/// The clamp, separated from the env read so the decision is testable without
+/// process-global state.
+#[must_use]
+pub fn retention_days_from(configured: Option<i64>) -> i64 {
+    const FLOOR: i64 = 400;
+    match configured {
+        Some(days) if days >= FLOOR => days,
+        Some(days) => {
+            tracing::warn!(
+                configured = days,
+                floor = FLOOR,
+                "ER_AUDIT_RETENTION_DAYS is below the D-RETENTION compliance floor; using the floor"
+            );
+            FLOOR
+        }
+        None => FLOOR,
+    }
+}
+
+/// One retention pass: retire audit rows and settled webhook-delivery rows
+/// older than [`audit_retention_days`], in bounded batches (spec 5.24).
+///
+/// Returns `(audit_rows, delivery_rows)` removed. One batch per table per
+/// call — the sweep converges across ticks rather than holding one long
+/// transaction over a year-old backlog.
+///
+/// # Errors
+/// Propagates the first delete error; the caller's tick treats that as
+/// non-fatal and retries next pass.
+pub async fn purge_expired(client: &Client) -> Result<(u64, u64), PgError> {
+    const BATCH: i64 = 10_000;
+    let days = audit_retention_days();
+    let audit = er_entities::audit_log::delete::purge_expired(client, days, BATCH).await?;
+    let deliveries =
+        er_entities::webhook_delivery::delete::purge_expired(client, days, BATCH).await?;
+    Ok((audit, deliveries))
 }
 
 /// A schedule row for the API listing (`schedules.py`).
@@ -2062,4 +2142,20 @@ pub async fn tag_by_name(
         .await?
         .into_iter()
         .find(|tag| tag.name == name))
+}
+
+#[cfg(test)]
+mod retention_tests {
+    use super::retention_days_from;
+
+    /// The D-RETENTION floor is mechanical: below-floor and absent both read
+    /// as 400, and only an explicit >= 400 value is taken at its word.
+    #[test]
+    fn the_retention_floor_clamps_and_defaults() {
+        assert_eq!(retention_days_from(None), 400);
+        assert_eq!(retention_days_from(Some(30)), 400, "below the floor clamps up");
+        assert_eq!(retention_days_from(Some(400)), 400);
+        assert_eq!(retention_days_from(Some(731)), 731, "longer retention is allowed");
+        assert_eq!(retention_days_from(Some(-1)), 400);
+    }
 }

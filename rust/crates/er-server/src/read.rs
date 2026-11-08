@@ -1702,6 +1702,48 @@ pub fn merge_plans(
     Ok(items)
 }
 
+/// Render audit rows as CSV (`format=csv` on the audit feeds): the projection
+/// `audit_rows` sends, one row per ledger entry, `detail` JSON verbatim in its
+/// own cell.
+///
+/// Cells are quoted AND formula-guarded: a cell starting `=`, `+`, `-` or `@`
+/// gets a leading `'`, because an audit export is exactly the file an admin
+/// opens in a spreadsheet, and an actor or detail string is attacker-shaped
+/// input. (`merge_plans_csv` predates this and leaves the guard to the BFF's
+/// csv helper; this export is also served to direct API callers, so the guard
+/// belongs server-side.)
+#[must_use]
+pub fn audit_csv(rows: &[Value]) -> String {
+    const COLUMNS: [&str; 8] = [
+        "id", "at", "actor", "org", "dataset", "action", "trace_id", "detail",
+    ];
+    let cell = |v: Option<&Value>| -> String {
+        let s = match v {
+            Some(Value::String(s)) => s.clone(),
+            Some(Value::Number(n)) => n.to_string(),
+            Some(Value::Null) | None => String::new(),
+            Some(other) => other.to_string(),
+        };
+        let s = if s.starts_with(['=', '+', '-', '@']) {
+            format!("'{s}")
+        } else {
+            s
+        };
+        if s.contains([',', '"', '\n']) {
+            format!("\"{}\"", s.replace('"', "\"\""))
+        } else {
+            s
+        }
+    };
+    let mut out = String::from("id,at,actor,org,dataset,action,trace_id,detail\n");
+    for row in rows {
+        let line: Vec<String> = COLUMNS.iter().map(|c| cell(row.get(*c))).collect();
+        out.push_str(&line.join(","));
+        out.push('\n');
+    }
+    out
+}
+
 /// Render merge-plan rows as CSV (`readapi.merge_plans` text/csv): the
 /// `;`-joined member list, else the golden preview columns.
 #[must_use]

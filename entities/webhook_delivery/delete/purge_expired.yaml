@@ -1,0 +1,8 @@
+kind: statement
+operation: delete
+mode: partial
+description: "Retire SETTLED delivery rows older than the retention window, in bounded batches — the 'integration records' half of spec 5.24. Pending rows are never aged out: an undelivered webhook is still work, and deleting one would silently drop a delivery rather than retire history. The log's design intent (pg.rs: 'the delivery log stays intact: it is history') holds within the window; what this adds is that history, like the audit ledger it mirrors, has a stated lifetime instead of an unbounded one."
+params:
+  - { name: retention_days, type: bigint }
+  - { name: batch, type: bigint }
+returns: none

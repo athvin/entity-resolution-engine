@@ -326,7 +326,7 @@ columns:
 version: 1
 name: audit_log
 relation: audit_log
-description: "The append-only audit ledger: one row per authenticated mutation (actor, action, optional org scope, and structured detail)."
+description: "The append-only audit ledger: one row per authenticated mutation (actor, action, optional org scope, and structured detail). Append-only constrains writes, not lifetime: rows past the deployment retention window (ER_AUDIT_RETENTION_DAYS, floor 400 days per the infra D-RETENTION decision) are retired by the dispatcher's retention sweep through delete/purge_expired."
 key: [id]
 generate:
   stores: [postgres]
@@ -378,6 +378,11 @@ columns:
     default: "now()"
     volatile: true
     description: "Wall-clock last-write time (equals created_at; audit rows are append-only)."
+indexes:
+  # The retention sweep's cutoff scan and the feed's [since, until) window both
+  # read by time; without this every hourly sweep is a sequential scan.
+  - name: audit_log_at
+    columns: [at]
 "#,
     ),
     (

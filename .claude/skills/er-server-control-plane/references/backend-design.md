@@ -250,7 +250,7 @@ catalog lever is `ER_LAKE_CATALOG_SCHEMA`.
 - **Machines:** org-scoped API keys (hashed at rest), role-scoped — what connectors and CI use.
 - **Roles:** `admin` (config publish, connections, members), `steward` (reviews, assertions, job submit), `viewer` (read-only), plus platform-internal `operator` (operator-only config blocks, train/correct/resume, maintenance). Maps directly to Cloudingo's "team access."
 - **Enforcement:** one middleware resolves principal → org → role and injects a `TenantContext` (org, role, lake-settings handle) as a FastAPI dependency; every engine call flows through it, making cross-tenant access structurally impossible rather than per-handler discipline. Isolation is schema-level, so no row-level security is needed.
-- **Audit:** a control-plane audit_log for every authenticated mutation pairs with the lake-side `entity_events` for a complete "who merged what, when" story.
+- **Audit:** a control-plane audit_log for every authenticated mutation pairs with the lake-side `entity_events` for a complete "who merged what, when" story. The feed filters by action, actor and a half-open [since, until) window and exports the same page as CSV (`format=csv`, formula-guarded server-side); retention is mechanical — the dispatcher's hourly sweep retires audit rows and settled webhook deliveries past `ER_AUDIT_RETENTION_DAYS` (default 400, floor-clamped to 400 per the infra D-RETENTION decision).
 
 ## 10. Connector abstraction and Salesforce v1
 
@@ -332,7 +332,7 @@ The canonical schema is person-centric end to end (given/family name, email, pho
 - **Progress:** the runner heartbeats stage transitions + counters into `jobs.progress` at stage boundaries plus a periodic liveness ping. API polling reads the cache; `run_stages` stays ground truth; missed heartbeats mark the job lost and apply retry policy (zombie detection for free). SSE later; polling first.
 - **Logs:** the engine's per-stage stderr JSON lines, shipped from pods tagged `tenant/job/run/stage`; `/jobs/{id}/logs` proxies.
 - **Metrics:** API RED, queue depth and dispatch latency, per-class concurrency, stage durations by tier, retry/no-op rates, per-tenant data-quality series feeding `/metrics`.
-- **Recurring system jobs:** correction pass per tenant cadence, weekly `er lake maintain` (with the snapshot-retention/cursor coupling from §8), catalog backups.
+- **Recurring system jobs:** correction pass per tenant cadence, weekly `er lake maintain` (with the snapshot-retention/cursor coupling from §8), catalog backups, and the dispatcher's hourly audit/delivery retention sweep (built — `pg::purge_expired`, batched and convergent).
 - **Alerting:** permanent job failures, assertion contradictions, schema-preflight and drift-guard refusals — the latter surfaced in-product as "this change requires a full run — run now?".
 
 ## 15. Roadmap

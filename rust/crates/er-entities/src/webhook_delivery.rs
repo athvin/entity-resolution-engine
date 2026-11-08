@@ -140,6 +140,39 @@ RETURNING id, org_id, dataset_id, webhook_id, event_type, payload, state, attemp
     }
 }
 
+pub mod delete {
+    //! @generated query functions for this entity + operation.
+    /// Retire SETTLED delivery rows older than the retention window, in bounded batches — the 'integration records' half of spec 5.24. Pending rows are never aged out: an undelivered webhook is still work, and deleting one would silently drop a delivery rather than retire history. The log's design intent (pg.rs: 'the delivery log stays intact: it is history') holds within the window; what this adds is that history, like the audit ledger it mirrors, has a stated lifetime instead of an unbounded one.
+    pub async fn purge_expired(
+        client: &impl ::tokio_postgres::GenericClient,
+        retention_days: i64,
+        batch: i64,
+    ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
+        const SQL: &str = "DELETE FROM public.webhook_deliveries
+WHERE id IN (
+  SELECT id FROM public.webhook_deliveries
+  WHERE state <> 'pending'
+    AND created_at < now() - make_interval(days => $1::bigint::int)
+  LIMIT $2
+)
+";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "webhook_delivery",
+            "delete",
+            "purge_expired",
+            "webhook_deliveries",
+            SQL,
+        );
+        let __result =
+            ::er_span::instrument(&__span, client.execute(SQL, &[&retention_days, &batch])).await;
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, __n);
+        Ok(__n)
+    }
+}
+
 pub mod read {
     //! @generated query functions for this entity + operation.
     /// The tenant's delivery log, newest first, optionally narrowed to one subscription or one state. Answers the question the old inline-and-discard path could not: did my endpoint actually receive it, and if not, why.

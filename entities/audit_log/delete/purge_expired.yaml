@@ -1,0 +1,8 @@
+kind: statement
+operation: delete
+mode: partial
+description: "Retire audit rows older than the retention window, in bounded batches. The entity's 'append-only' wording constrains WRITES — updated_at equals created_at forever — and says nothing about lifetime; this is the one statement that ends one, and it exists because an unbounded compliance ledger is itself a liability (spec 5.24, and the infra D-RETENTION decision: audit trails retain >= 400 days, which the caller enforces as a floor on $retention_days). Batched through the id subselect so a first sweep over a long backlog holds no long transaction; the sweep converges across ticks."
+params:
+  - { name: retention_days, type: bigint }
+  - { name: batch, type: bigint }
+returns: none

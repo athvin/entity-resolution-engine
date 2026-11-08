@@ -1,10 +1,13 @@
 kind: statement
 operation: read
 mode: full
-description: "A keyset page of the audit ledger, newest first, with optional org/action filters."
+description: "A keyset page of the audit ledger, newest first, with optional org/action/actor filters and an optional [since, until) time window. The window crosses as text with explicit ::timestamptz casts (the house convention for timestamp params), half-open so two adjacent windows never double-count a row."
 params:
   - { name: org, type: varchar, nullable: true }
   - { name: action, type: varchar, nullable: true }
+  - { name: actor, type: varchar, nullable: true }
+  - { name: since, type: varchar, nullable: true }
+  - { name: until, type: varchar, nullable: true }
   - { name: before_id, type: bigint, nullable: true }
   - { name: limit, type: bigint }
 returns: entity

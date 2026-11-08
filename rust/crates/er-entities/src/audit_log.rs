@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
-/// The append-only audit ledger: one row per authenticated mutation (actor, action, optional org scope, and structured detail).
+/// The append-only audit ledger: one row per authenticated mutation (actor, action, optional org scope, and structured detail). Append-only constrains writes, not lifetime: rows past the deployment retention window (ER_AUDIT_RETENTION_DAYS, floor 400 days per the infra D-RETENTION decision) are retired by the dispatcher's retention sweep through delete/purge_expired.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
 pub struct AuditLog {
     /// Monotonic ledger id (bigserial); the primary key.
@@ -92,13 +92,48 @@ VALUES ($1, $2, $3, $4, $5, $6)
     }
 }
 
+pub mod delete {
+    //! @generated query functions for this entity + operation.
+    /// Retire audit rows older than the retention window, in bounded batches. The entity's 'append-only' wording constrains WRITES — updated_at equals created_at forever — and says nothing about lifetime; this is the one statement that ends one, and it exists because an unbounded compliance ledger is itself a liability (spec 5.24, and the infra D-RETENTION decision: audit trails retain >= 400 days, which the caller enforces as a floor on $retention_days). Batched through the id subselect so a first sweep over a long backlog holds no long transaction; the sweep converges across ticks.
+    pub async fn purge_expired(
+        client: &impl ::tokio_postgres::GenericClient,
+        retention_days: i64,
+        batch: i64,
+    ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
+        const SQL: &str = "DELETE FROM public.audit_log
+WHERE id IN (
+  SELECT id FROM public.audit_log
+  WHERE at < now() - make_interval(days => $1::bigint::int)
+  LIMIT $2
+)
+";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "audit_log",
+            "delete",
+            "purge_expired",
+            "audit_log",
+            SQL,
+        );
+        let __result =
+            ::er_span::instrument(&__span, client.execute(SQL, &[&retention_days, &batch])).await;
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, __n);
+        Ok(__n)
+    }
+}
+
 pub mod read {
     //! @generated query functions for this entity + operation.
-    /// A keyset page of the audit ledger, newest first, with optional org/action filters.
+    /// A keyset page of the audit ledger, newest first, with optional org/action/actor filters and an optional [since, until) time window. The window crosses as text with explicit ::timestamptz casts (the house convention for timestamp params), half-open so two adjacent windows never double-count a row.
     pub async fn page(
         client: &impl ::tokio_postgres::GenericClient,
         org: Option<&str>,
         action: Option<&str>,
+        actor: Option<&str>,
+        since: Option<&str>,
+        until: Option<&str>,
         before_id: Option<i64>,
         limit: i64,
     ) -> ::std::result::Result<Vec<super::AuditLog>, ::tokio_postgres::Error> {
@@ -116,9 +151,12 @@ pub mod read {
 FROM public.audit_log
 WHERE ($1::text IS NULL OR org = $1)
   AND ($2::text IS NULL OR action = $2)
-  AND ($3::bigint IS NULL OR id < $3)
+  AND ($3::text IS NULL OR actor = $3)
+  AND ($4::text IS NULL OR at >= $4::timestamptz)
+  AND ($5::text IS NULL OR at < $5::timestamptz)
+  AND ($6::bigint IS NULL OR id < $6)
 ORDER BY id DESC
-LIMIT $4
+LIMIT $7
 ";
         let __span = ::er_span::sql_span(
             ::er_span::Store::Control,
@@ -130,7 +168,10 @@ LIMIT $4
         );
         let __result = ::er_span::instrument(
             &__span,
-            client.query(SQL, &[&org, &action, &before_id, &limit]),
+            client.query(
+                SQL,
+                &[&org, &action, &actor, &since, &until, &before_id, &limit],
+            ),
         )
         .await;
         let __entered = __span.enter();

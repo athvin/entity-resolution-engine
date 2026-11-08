@@ -46,6 +46,12 @@ const DELIVERY_BUDGET: usize = 8;
 /// latency on an import nobody is watching is free; the requests are not.
 const S3_POLL_EVERY: Duration = Duration::from_secs(60);
 
+/// How often the retention sweep runs. Hourly rather than daily so a restart
+/// never postpones it a full day (each tick's deadline starts at boot), and
+/// because an in-window sweep is one indexed probe per table — cheap enough
+/// that cadence is not worth tuning.
+const RETENTION_SWEEP_EVERY: Duration = Duration::from_secs(3600);
+
 /// Poll + run jobs until `term` is set or a Postgres failure occurs. Returns
 /// `Ok(())` on a clean (term-requested) exit; `Err` on a control-plane failure
 /// (the caller decides whether that's fatal — the standalone binary exits
@@ -68,6 +74,7 @@ pub async fn run_loop(
     let mut idle = IDLE_MIN;
     let mut next_schedule_tick = tokio::time::Instant::now();
     let mut next_s3_poll = tokio::time::Instant::now();
+    let mut next_retention_sweep = tokio::time::Instant::now();
     // Built lazily: see the poll tick below.
     let mut s3: Option<crate::s3_ingest::Watcher> = None;
     while !term.load(Ordering::SeqCst) {
@@ -99,6 +106,25 @@ pub async fn run_loop(
                 // failure here must not take the job loop down, or one
                 // tenant's misconfigured bucket stops every tenant's jobs.
                 Err(e) => tracing::warn!(error = %e, "an s3 auto-ingest tick failed"),
+            }
+        }
+
+        // Retention (spec 5.24): retire audit and settled webhook-delivery
+        // rows past the deployment window. Hourly and batched — cheap when
+        // nothing is old enough, convergent over a backlog — and it rides the
+        // loop for the same one-thing-to-stop-on-SIGTERM reason the others do.
+        if tokio::time::Instant::now() >= next_retention_sweep {
+            next_retention_sweep = tokio::time::Instant::now() + RETENTION_SWEEP_EVERY;
+            match pg::purge_expired(client).await {
+                Ok((0, 0)) => {}
+                Ok((audit, deliveries)) => tracing::info!(
+                    audit,
+                    deliveries,
+                    "the retention sweep retired expired rows"
+                ),
+                // The same rule as every tick: a failure must not take the
+                // job loop down; the next sweep retries.
+                Err(e) => tracing::warn!(error = %e, "a retention sweep failed"),
             }
         }
 

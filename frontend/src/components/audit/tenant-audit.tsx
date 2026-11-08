@@ -28,12 +28,25 @@ export function TenantAuditFeed({ org }: { org: string }) {
       className="mx-auto flex w-full max-w-5xl min-w-0 flex-col gap-4"
       data-testid="tenant-audit"
     >
-      <div>
-        <h1 className="text-xl font-semibold lg:text-2xl">Audit</h1>
-        <p className="text-muted-foreground mt-1 text-sm">
-          Every mutation in this workspace, with the person behind it — merges carry names, not key
-          ids.
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-semibold lg:text-2xl">Audit</h1>
+          <p className="text-muted-foreground mt-1 text-sm">
+            Every mutation in this workspace, with the person behind it — merges carry names, not
+            key ids.
+          </p>
+        </div>
+        {/* A plain same-origin anchor: the session cookie rides along, and the
+            BFF answers with content-disposition, so no client-side blob dance
+            is needed. Exports the same page the table shows (limit 100). */}
+        <a
+          href={`/api/orgs/${org}/audit?format=csv&limit=100`}
+          download
+          data-testid="audit-export"
+          className="text-sm font-medium underline underline-offset-4"
+        >
+          Export CSV
+        </a>
       </div>
       <AuditTable rows={audit.data} pending={audit.isPending} showOrg={false} testId="audit-rows" />
     </div>
