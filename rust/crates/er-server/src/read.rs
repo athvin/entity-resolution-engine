@@ -315,34 +315,35 @@ fn insert_group_confidence(
     members: &[String],
     edges: &[(String, String, f64)],
 ) {
-    match dedupe_core::confidence::group_score(members, edges) {
-        Some(score) => {
-            obj.insert(
-                "group_confidence".to_string(),
-                Value::from(score.group.display()),
-            );
-            obj.insert("master_record_key".to_string(), Value::from(score.master));
-            obj.insert(
-                "member_confidences".to_string(),
-                Value::Object(
-                    score
-                        .members
-                        .into_iter()
-                        .map(|(k, c)| (k, Value::from(c.display())))
-                        .collect(),
-                ),
-            );
-        }
-        None => {
-            obj.insert("group_confidence".to_string(), Value::Null);
-            obj.insert("master_record_key".to_string(), Value::Null);
-            obj.insert(
-                "member_confidences".to_string(),
-                Value::Object(serde_json::Map::new()),
-            );
-        }
+    if let Some(score) = dedupe_core::confidence::group_score(members, edges) {
+        obj.insert(
+            "group_confidence".to_string(),
+            Value::from(score.group.display()),
+        );
+        obj.insert("master_record_key".to_string(), Value::from(score.master));
+        obj.insert(
+            "member_confidences".to_string(),
+            Value::Object(
+                score
+                    .members
+                    .into_iter()
+                    .map(|(k, c)| (k, Value::from(c.display())))
+                    .collect(),
+            ),
+        );
+    } else {
+        obj.insert("group_confidence".to_string(), Value::Null);
+        obj.insert("master_record_key".to_string(), Value::Null);
+        obj.insert(
+            "member_confidences".to_string(),
+            Value::Object(serde_json::Map::new()),
+        );
     }
 }
+
+/// Within-group evidence for a page of entities, bucketed per entity id:
+/// `(rec_a_key, rec_b_key, match_probability)` per edge.
+type GroupEdges = std::collections::BTreeMap<String, Vec<(String, String, f64)>>;
 
 /// The within-group edges for an entity-id range, bucketed per entity so a
 /// pair's score never leaks across groups.
@@ -351,12 +352,11 @@ fn edges_by_entity(
     snapshot: i64,
     first: &str,
     last: &str,
-) -> Result<std::collections::BTreeMap<String, Vec<(String, String, f64)>>, String> {
+) -> Result<GroupEdges, String> {
     let rows =
         er_entities::match_score::read::within_groups(session.connection(), snapshot, first, last)
             .map_err(|e| e.to_string())?;
-    let mut by_entity: std::collections::BTreeMap<String, Vec<(String, String, f64)>> =
-        std::collections::BTreeMap::new();
+    let mut by_entity: GroupEdges = std::collections::BTreeMap::new();
     for row in rows {
         by_entity.entry(row.entity_id).or_default().push((
             row.rec_a_key,
