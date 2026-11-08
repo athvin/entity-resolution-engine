@@ -95,10 +95,18 @@ entry, push files (or write them to the drop dir), enqueue." No engine change.
 
 `er-server`'s webhook handlers deliver control-plane events (today
 `job.completed`) to subscribed URLs. Delivery is best-effort (a few retries, never
-blocks the queue) and each payload is signed with the subscription secret
-(HMAC-SHA256 in `X-ERServer-Signature`) so receivers can authenticate the sender.
-This is how a connector learns "a run finished, new merges are available to apply"
-without polling.
+blocks the queue) and each payload is signed with the subscription secret so
+receivers can authenticate the sender. The signature rides in the
+`X-ER-Signature` header as `sha256=<hex>` (GitHub-style): the receiver
+recomputes HMAC-SHA256 over the **raw request body** with its subscription
+secret and compares against the hex after the `sha256=` prefix — a receiver
+that hex-compares the whole header value fails on the prefix, and one that
+re-serializes the JSON before hashing fails on the bytes. A retry delivers the
+*same* bytes the original attempt did, because the body is built and stored
+once (`webhook.rs`'s `emit`) and the signature is computed over that stored
+body — so a redelivery re-validates with no special-casing. This is how a
+connector learns "a run finished, new merges are available to apply" without
+polling.
 
 ### 3.3 Writeback — designed, not yet built
 
