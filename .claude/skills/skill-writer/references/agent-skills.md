@@ -217,6 +217,23 @@ nothing else, so nobody can give the two agents different lists by editing one.
 | `permissions.deny` — `pkill`, `killall`, destructive `aws` | nothing | no per-command deny list exists; `sandbox_mode` is the whole lever and `--dangerously-bypass-approvals-and-sandbox` removes it. → the same hook, which reads the patterns **out of `.claude/settings.json`** |
 | `enabledPlugins` | `codex plugin` | no equivalent — the binary carries `repository-scoped plugin migration is not allowed`. Per-developer, permanently. |
 
+**Kimi Code CLI needs its own pair, and they are translations rather than
+copies.** It reads none of the above — not `$CODEX_HOME`, not the Claude Code
+files — so the same two rows reappear against `$KIMI_CODE_HOME`
+(default `~/.kimi-code`), measured against 2.5.2:
+
+| Claude Code | Kimi Code CLI | Measured, and what closes it |
+|---|---|---|
+| `.mcp.json` + `enabledMcpjsonServers` | `$KIMI_CODE_HOME/mcp.json` | the object shape matches (`mcpServers`), but there is **no `type` key**: stdio is inferred from `command`, HTTP from `url`, and legacy SSE needs `transport: "sse"` written out. So `type` is translated, never forwarded, and an unrecognised shape fails rather than being skipped. A project `.kimi-code/mcp.json` exists and is deliberately unused — its stdio entries execute at session start. → `scripts/kimi-mcp-sync.sh` |
+| `hooks` + `permissions.deny` | `[[hooks]]` in `$KIMI_CODE_HOME/config.toml` | user-level only — there is no project hook file at all, which is the right default and not a gap. The table accepts **exactly** `event`, `matcher`, `command`, `timeout`; a fifth field fails the whole config load, so the sync brackets its block with marker comments rather than tagging the table. → `scripts/kimi-hooks-sync.sh`, installing the same `scripts/hooks/agent-pretooluse-guard.sh` |
+
+Two differences from Codex are worth carrying. **There is no hook-trust step:**
+a `[[hooks]]` entry fired on a brand-new config home with no approval, so
+installing is sufficient — the trap that makes a Codex install read as
+protection while providing none does not exist here. But **hooks are
+fail-open by design**, which Kimi documents and warns about, so the guard is a
+seatbelt over the IAM denies rather than a barrier.
+
 ### The hook decision protocol, as measured rather than documented
 
 This matters more than the installation does, because two of these rows mean a
@@ -231,6 +248,22 @@ hook that emits each decision in turn:
 | `permissionDecision: ask` | `Failed` | **runs** |
 | `permissionDecision: allow` | `Failed` | runs |
 | non-JSON on stdout, `exit 0` | `Completed` | runs |
+
+**Kimi Code CLI 2.5.2 agrees on every row that matters.** Probed the same way,
+in a throwaway config home, with the session asked to `touch` a sentinel so the
+verdict is read off the filesystem rather than off the transcript:
+
+| the hook does | the sentinel | the command |
+|---|---|---|
+| `permissionDecision: deny` | absent | **refused** |
+| `exit 2` | absent | **refused** |
+| `permissionDecision: ask` | **present** | **runs** |
+| `exit 1` (script error) | **present** | runs — fail-open |
+
+So one guard serves both, and it is the same reason in both cases: `ask` runs
+the command. Their `PreToolUse` payloads also agree on the two fields the guard
+reads — `tool_name`, and `tool_input.command` as a string — which is what makes
+`scripts/hooks/agent-pretooluse-guard.sh` one file rather than two.
 
 Three consequences, each load-bearing:
 

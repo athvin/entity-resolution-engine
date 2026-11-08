@@ -421,6 +421,30 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: bash scripts/ci/codex-hooks-sync-test.sh
 
+      - name: kimi-mcp-sync derivation tests
+        # Kimi Code CLI is a THIRD agent on this repo and a separate binary from
+        # Codex, not `codex --profile kimi`. It reads the same `.agents/skills/`
+        # bridge but none of the Claude Code config, and its MCP schema has no
+        # `type` key — it infers stdio from `command`, HTTP from `url`, and needs
+        # `transport = "sse"` spelled out. So the derivation TRANSLATES rather
+        # than copies, and what this pins is each transport plus the rule that a
+        # shape it does not understand fails instead of being skipped. Fixture
+        # files and a fixture home throughout; no Kimi install needed.
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/ci/kimi-mcp-sync-test.sh
+
+      - name: kimi PreToolUse guard tests
+        # The same two `.claude/settings.json` protections, into
+        # $KIMI_CODE_HOME/config.toml. Measured against Kimi Code CLI 2.5.2: a
+        # `deny` verdict and exit 2 block the call, while an `ask` verdict and
+        # any non-2 error exit RUN it — the same asymmetry Codex has, so the
+        # guard only ever emits `deny`. The assertion that earns its place is
+        # that the installed `[[hooks]]` table carries only Kimi's four allowed
+        # fields: a fifth fails the entire config load, taking the provider and
+        # model tables with it.
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/ci/kimi-hooks-sync-test.sh
+
   # S9 — every `uses:` pinned to a commit SHA with its `# vTAG` comment.
   #
   # This job exists because the policy was enforced by NOTHING. `scripts/ci/

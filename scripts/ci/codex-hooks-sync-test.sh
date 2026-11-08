@@ -24,7 +24,7 @@ set -uo pipefail
 
 cd "$(dirname "$0")/../.." || exit 2
 root="$(pwd)"
-guard="$root/scripts/hooks/codex-pretooluse-guard.sh"
+guard="$root/scripts/hooks/agent-pretooluse-guard.sh"
 aws_guard="$root/scripts/hooks/aws-write-guard.sh"
 settings="$root/.claude/settings.json"
 sync="$root/scripts/codex-hooks-sync.sh"

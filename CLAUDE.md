@@ -396,18 +396,39 @@ quoted** — and for `description` specifically the fix is to reword, because th
 generators extract it with a bare `sed` that would carry the quotes into their
 output.
 
-**The rest of `.claude/settings.json` is per-developer state in `$CODEX_HOME`,
-so no repo file can supply it — but two of the three can be _derived_.** Run
-both once per machine, and again after the file they read changes:
+**The rest of `.claude/settings.json` is per-developer state in each agent's own
+config home, so no repo file can supply it — but all of it except the plugin set
+can be _derived_.** Run these once per machine, and again after the file they
+read changes:
 
 ```sh
-scripts/codex-mcp-sync.sh     # .mcp.json           -> codex mcp add
-scripts/codex-hooks-sync.sh   # the PreToolUse guard -> $CODEX_HOME/hooks.json
+scripts/codex-mcp-sync.sh     # .mcp.json            -> codex mcp add
+scripts/codex-hooks-sync.sh   # the PreToolUse guard  -> $CODEX_HOME/hooks.json
+scripts/kimi-mcp-sync.sh      # .mcp.json            -> $KIMI_CODE_HOME/mcp.json
+scripts/kimi-hooks-sync.sh    # the PreToolUse guard  -> $KIMI_CODE_HOME/config.toml
 ```
 
-Each reads the Claude Code file and nothing else, so the two agents cannot be
-given different lists by hand. The plugin set is the one with no equivalent at
-all — Codex refuses repository-scoped plugin installs.
+Each reads the Claude Code file and nothing else, so no two agents can be given
+different lists by hand, and all three non-Claude installs share one guard at
+`scripts/hooks/agent-pretooluse-guard.sh`. The plugin set is the one with no
+equivalent at all — Codex refuses repository-scoped plugin installs.
+
+**The Kimi pair is not a copy of the Codex pair**, for two measured reasons.
+Kimi's MCP schema has no `type` key — it infers stdio from `command` and HTTP
+from `url`, and needs `transport = "sse"` spelled out — so the servers are
+translated rather than forwarded. And its hooks live in `[[hooks]]` tables
+inside `config.toml` that accept **exactly** `event`, `matcher`, `command` and
+`timeout`; a fifth field fails the whole config load, taking the provider and
+model tables with it, which is why the sync brackets its block with marker
+comments instead of tagging the table.
+
+**One thing is better under Kimi and one is worse.** Better: there is no
+hook-trust step, so an installed hook is live in the next session rather than
+silently skipped until approved. Worse: hooks are fail-**open** by design — a
+crash, a timeout or any non-2 exit lets the command through, which Kimi's own
+documentation states and warns about. `ask` is an allow on both agents, so the
+guard only ever emits `deny`. Treat it as a seatbelt over the IAM denies, never
+as the thing standing between an agent and the account.
 
 Two things about the hooks one are load-bearing, both measured against Codex
 0.167.0:
