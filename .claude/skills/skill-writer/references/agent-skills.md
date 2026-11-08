@@ -74,7 +74,7 @@ the same fix.
 | `security` | the attack surface (internet-facing Next.js BFF in front of the privileged Rust er-server control plane) |
 | `skill-audit` | the judgment half of the skill standard the gate cannot mechanise: whether a sentence survives the economy test |
 | `skill-writer` | triages whether the brief should become a skill at all rather than a CLAUDE.md line or a path-scoped rule or a hook (user-invoked only) |
-| `sql-analysis` | the E0xx diagnostics and their remedies, the rewrite step that strips what the planner cannot parse |
+| `sql-analysis` | the E0xx diagnostics and their remedies, the rewrite step, what `mode: partial` skips |
 | `stageshow` | Build faux product UI that looks like a real product, as a still illustration or an animated demo with a cursor |
 <!-- END GENERATED: skill-inventory -->
 
@@ -134,11 +134,43 @@ It prints the skill roots table, the per-skill descriptions, and an
 
 ### Two things that do not survive the trip
 
-- **Codex truncates each skill `description` at ~670 characters**, cut at a word
+- **Codex truncates each skill `description` at ~650 characters**, cut at a word
   boundary, against the 1,024-character cap this standard enforces. 27 of 28
-  skills are over it, and what gets cut is the **routing tail** — the clause
-  whose only job is to disambiguate adjacent skills. So the trigger vocabulary
-  earns its place near the front of the field, not only at the end.
+  skills are over it, and **94 of the 105 `for … see …` routing clauses in the
+  tree — 89% — do not exist at selection time there.** 17 skills lose every
+  clause they have. The description-budget block above reports, per skill,
+  whether what falls past the cut is tail or trigger text.
+
+  **It matters far less than that sounds, and the measurement is the reason to
+  leave it alone.** Ten routing trials were put to Codex, each a prompt whose
+  correct skill is one of an adjacent pair whose disambiguator is in the cut
+  region: **nine selected correctly.** The surviving `Use when` clause carries
+  enough trigger vocabulary on its own, so a sweep over 27 descriptions would
+  be churn with no evidence behind it.
+
+  **The one that misrouted names the rule.** Asked whether a new query should
+  be "a declared statement or a plan-vector-tested generator", Codex chose
+  `entity-framework` over `sql-analysis`. That phrase sits at character 186 of
+  `entity-framework`'s description — visible — and sat at 748 of
+  `sql-analysis`'s, which owns the decision. Confirmed as truncation rather
+  than model judgment by the within-model A/B: the same model, the same
+  question, given the full descriptions, picks `sql-analysis`.
+
+  So the rule is not "shorten everything". It is:
+
+  > **A term two skills share, where one of them owns it, must appear inside
+  > the first ~650 characters of the owner's description.** Truncation does not
+  > just remove information — it hands a shared term to whichever skill
+  > mentions it earlier.
+
+  The fix for the measured case was the one this standard already prescribes:
+  trim the **what** clause, which the body carries, rather than reordering the
+  triggers. Reordering was tried first and rejected — it moved the discriminator
+  into view but rewrote the `Doing` row the inventory generator derives from the
+  first `Use when` item, so `sql-analysis`'s row in `CLAUDE.md` stopped
+  mentioning E0xx diagnostics. Trimming 114 characters of **what** put the
+  discriminator at 600 and left the row intact, and Codex then selected
+  `sql-analysis` — 5 of 5 on the re-run.
 - **A ` #` anywhere in a `description` ends it.** YAML opens a comment there, so
   the value simply stops, with no parse error, in both tools.
   `scripts/skills-check.sh` now fails on it (`desc_truncated_by_yaml_comment`);
@@ -234,6 +266,12 @@ are enforced by `scripts/skills-check.sh lint`.
 - End the description with **negative routing** where two skills are adjacent:
   "For X see *other-skill*." Overlapping triggers are the real cost of a large
   skill collection, not the metadata.
+- **Put a shared discriminating term inside the first ~650 characters.** Codex
+  truncates there, so a term two skills both use goes to whichever mentions it
+  earlier — regardless of which one owns it. This is the one measured misroute
+  in the tree; see the Codex bridge section for it and for why the routing tail
+  past that point turned out not to matter. The fix when it does not fit is the
+  same as for the 1,024 cap: trim the **what**, never the triggers.
 - **The description is a shared append target, and the cap is the constraint
   that bites.** Routing goes both ways, so closing an overlap means appending a
   clause to a *neighbour's* description — and several audits closing unrelated
@@ -278,7 +316,6 @@ can still accept a routing clause.
 |   69 | `land-pr` | 955 |
 |   72 | `infra-platform` | 952 |
 |   76 | `health-sweep` | 948 |
-|   76 | `sql-analysis` | 948 |
 |   77 | `frontend-design-system` | 947 |
 |   80 | `ducklake-lakehouse` | 944 |
 |   88 | `frontend-data-ui` | 936 |
@@ -291,6 +328,7 @@ can still accept a routing clause.
 |  127 | `skill-writer` | 897 |
 |  129 | `pr-review` | 895 |
 |  177 | `api-contract` | 847 |
+|  190 | `sql-analysis` | 834 |
 |  342 | `pentest` | 682 |
 |  412 | `stageshow` | 612 |
 
@@ -304,6 +342,45 @@ means trimming its **what** clause first, which is the documented fix:
 - `aws-account-operations` — 41 characters free
 - `er-server-control-plane` — 41 characters free
 - `project-board` — 45 characters free
+
+A second cap applies that this repo does not set: **Codex truncates
+each description at ~648 characters** in its skill listing. The question
+that matters is which KIND of text falls past it — a lost routing tail
+measured harmless, lost trigger vocabulary measured as a misroute.
+
+| Skill | What is cut | Chars past the cut |
+|---|---|---:|
+| `project-board` | TRIGGER TEXT | 331 |
+| `skill-audit` | TRIGGER TEXT | 316 |
+| `observability` | TRIGGER TEXT | 313 |
+| `entity-framework` | TRIGGER TEXT | 310 |
+| `land-pr` | TRIGGER TEXT | 307 |
+| `health-sweep` | TRIGGER TEXT | 300 |
+| `frontend-design-system` | TRIGGER TEXT | 299 |
+| `frontend-data-ui` | TRIGGER TEXT | 288 |
+| `frontend-testing` | TRIGGER TEXT | 287 |
+| `landing-page` | TRIGGER TEXT | 286 |
+| `er-matching` | TRIGGER TEXT | 280 |
+| `ci-and-supply-chain` | TRIGGER TEXT | 277 |
+| `claim-ticket` | TRIGGER TEXT | 274 |
+| `skill-writer` | TRIGGER TEXT | 249 |
+| `pr-review` | TRIGGER TEXT | 247 |
+| `sql-analysis` | TRIGGER TEXT | 186 |
+| `er-engine-ops` | tail only | 350 |
+| `security` | tail only | 340 |
+| `frontend-bff` | tail only | 336 |
+| `aws-account-operations` | tail only | 335 |
+| `er-server-control-plane` | tail only | 335 |
+| `rust-conventions` | tail only | 314 |
+| `infra-platform` | tail only | 304 |
+| `ducklake-lakehouse` | tail only | 296 |
+| `ducklake-performance` | tail only | 272 |
+| `api-contract` | tail only | 199 |
+| `pentest` | tail only | 34 |
+
+`TRIGGER TEXT` is the row to act on, and only when the lost words are
+a term a neighbouring skill also uses — see the Codex bridge section for
+the measured case and why the other 26 rows were left alone.
 <!-- END GENERATED: description-budget -->
 - No `allowed-tools`: it only *pre-approves* tools, it cannot restrict them, and
   nothing here needs pre-approval.
@@ -529,7 +606,7 @@ skill, so it gets the same fix.
 | `post-merge-surface` | `land-pr/references/post-merge.md` | each non-gh-aw workflow's `on:` block, narrowed to those that run after a merge, set-differenced against the ones carrying a `pull_request` trigger — what is left is the surface no pull request can pre-test |
 | `obs-surface` | `observability/references/surface.md` | `er-obs`'s `Role::service_name` match arms, the telemetry gates found by their own module docs, and `tracing` event sites set-differenced against the files still writing only `eprintln!` |
 | `review-gates` | `pr-review/references/not-a-finding.md` | every `rust/crates/*/tests/*.rs` that reads `.rs` source with `read_to_string` and asserts `is_empty()` — the structural gates whose finding would be a red test — each with the first line of its own module doc as the claim, and whether a tier variable makes it self-skip in `make check` |
-| `description-budget` | this document | every `SKILL.md`'s `description` length against the 1,024-character cap, sorted by headroom, plus the median length of the `for … see …` routing clauses it would have to make room for |
+| `description-budget` | this document | every `SKILL.md`'s `description` length against the 1,024-character cap, sorted by headroom, plus the median length of the `for … see …` routing clauses it would have to make room for — and, against Codex's own ~650-character cut, whether what each description loses there is its routing tail or its trigger text |
 | `skill-inventory` | this document **and** `CLAUDE.md` | every `SKILL.md`'s `name`, `description` and `disable-model-invocation` |
 The **set difference** is the shape worth copying — `diagnostics`,
 `screens-coverage`, `post-merge-surface`, the inline-policy column of
