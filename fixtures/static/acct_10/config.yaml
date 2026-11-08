@@ -72,16 +72,15 @@ blocking:
   - { key_type: company_prefix, expr: "substr(company_name_norm,1,6)" }
 
 # `acct_model_v1.json` carries a fourth company-name level — "company_variants
-# intersection >= 1" — and this config deliberately does NOT declare the
-# `variant_match` that would compile to it. `er-compile` emits that level as
-# `list_intersect("name_variants_l", "name_variants_r")`, hardcoding the PERSON
-# column (er-compile/src/lib.rs:400; `company_variants` appears nowhere in the
-# crate). An account config declaring `variant_match` therefore compiles,
-# publishes, and then fails every run at predict with
-# `Binder Error: ... does not have a column named "name_variants"`.
-# That is the same shape as the `tf: true`-without-an-exact-level bug (#616):
-# accepted at config time, fatal at run time. Until it is either refused in
-# `config_check` or taught `company_variants`, the level cannot appear here.
+# intersection >= 1" — which this config deliberately does NOT declare, so the
+# scale grid below keeps its three-level input fixed against the committed
+# model (a level redistributes the field's bits; the findings pinned by these
+# tests were measured at exactly this comparison space). The level itself is
+# no longer the bug the old comment here recorded: `er-compile` used to emit
+# it over the PERSON column (`name_variants`), so an account config declaring
+# `variant_match` compiled, published, and failed every run at predict (#662).
+# The compiler now resolves the variants column by entity type, and
+# `config_variant.yaml` in this directory declares the level and runs green.
 comparisons:
   company_name_norm: { levels: [exact, jaro_winkler:0.92, null] }
   domain_norm:       { levels: [exact, null] }

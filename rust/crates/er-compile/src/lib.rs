@@ -48,7 +48,9 @@ use std::collections::BTreeMap;
 use dedupe_core::settings::json::{
     BlockingRuleJson, ComparisonJson, ComparisonLevelJson, LinkType, SettingsJson,
 };
-use er_config::{ComparisonGroupSpec, ComparisonSpec, Config, MatchConstraints, NullPolicy};
+use er_config::{
+    ComparisonGroupSpec, ComparisonSpec, Config, EntityType, MatchConstraints, NullPolicy,
+};
 
 /// Why a config could not be compiled. No `#[from]` sources to interpolate —
 /// every variant is self-describing, because the message is shown to whoever
@@ -93,9 +95,9 @@ pub enum CompileError {
     GroupTfUnsupported { group: String },
     #[error(
         "comparison_groups.{group} declares level {level:?}, which is bound to fixed columns \
-         (the lexicon's name_variants, or the schema's addr_*) and has no cross-field reading. \
-         Group-capable tokens: exact, jaro_winkler:<0..1>, levenshtein:<n>, username_exact, \
-         domain_exact, first_n:<n>, dob_same_year_month, date_within_days:<n>, \
+         (the entity type's variants column, or the schema's addr_*) and has no cross-field \
+         reading. Group-capable tokens: exact, jaro_winkler:<0..1>, levenshtein:<n>, \
+         username_exact, domain_exact, first_n:<n>, dob_same_year_month, date_within_days:<n>, \
          date_transposed, numeric_within:<tol>, numeric_within_pct:<pct>"
     )]
     LevelNotGroupCapable { group: String, level: String },
@@ -389,6 +391,18 @@ fn side(column: &str, suffix: char) -> String {
     format!("\"{column}_{suffix}\"")
 }
 
+/// The variants column `variant_match` reads, by entity type: the person
+/// lexicon's `name_variants`, or the account schema's `company_variants`.
+/// Both are `LIST(VARCHAR) NOT NULL` on their standardized records, filled by
+/// standardize — hardcoding the person one compiled an account config that
+/// then failed every run at predict (#662).
+fn variants_column(entity_type: EntityType) -> &'static str {
+    match entity_type {
+        EntityType::Person => "name_variants",
+        EntityType::Account => "company_variants",
+    }
+}
+
 /// Parse the numeric argument of a parameterised token (`jaro_winkler:0.9`).
 fn parameter(column: &str, level: &str) -> Result<String, CompileError> {
     level
@@ -409,8 +423,8 @@ fn parameter(column: &str, level: &str) -> Result<String, CompileError> {
 /// spelling. Nothing is invented silently: an unrecognised token is an error
 /// rather than a level that quietly never fires, which is the failure mode the
 /// free-string DSL had.
-fn resolve_level(column: &str, token: &str) -> Result<Level, CompileError> {
-    resolve_level_pair(column, column, token)
+fn resolve_level(column: &str, token: &str, variants_col: &str) -> Result<Level, CompileError> {
+    resolve_level_pair(column, column, token, variants_col)
 }
 
 /// [`resolve_level`] over a possibly-cross-field pair: `left` supplies the
@@ -422,7 +436,12 @@ fn resolve_level(column: &str, token: &str) -> Result<Level, CompileError> {
 ///
 /// Errors are reported against `left`, which is the comparison's own column in
 /// the same-column case and one member of the pool in the cross-field one.
-fn resolve_level_pair(left: &str, right: &str, token: &str) -> Result<Level, CompileError> {
+fn resolve_level_pair(
+    left: &str,
+    right: &str,
+    token: &str,
+    variants_col: &str,
+) -> Result<Level, CompileError> {
     let column = left;
     let (l, r) = (side(left, 'l'), side(right, 'r'));
     let unknown = || CompileError::UnknownLevel {
@@ -434,14 +453,18 @@ fn resolve_level_pair(left: &str, right: &str, token: &str) -> Result<Level, Com
             sql: format!("{l} = {r}"),
             label: format!("Exact match on {column}"),
         }),
-        // The person lexicon's variant array: nicknames agree when the variant
-        // sets intersect. Only meaningful for name columns, which is why it is
-        // spelled as its own token rather than derived from the column.
-        "variant_match" => Ok(Level {
-            sql: "array_length(list_intersect(\"name_variants_l\", \"name_variants_r\")) >= 1"
-                .to_string(),
-            label: "Array intersection size >= 1".to_string(),
-        }),
+        // The variant array: nicknames (or company spellings) agree when the
+        // variant sets intersect. Only meaningful for name columns, which is
+        // why it is spelled as its own token rather than derived from the
+        // column. WHICH variants column is the entity type's, resolved by the
+        // caller — person `name_variants`, account `company_variants`.
+        "variant_match" => {
+            let (vl, vr) = (side(variants_col, 'l'), side(variants_col, 'r'));
+            Ok(Level {
+                sql: format!("array_length(list_intersect({vl}, {vr})) >= 1"),
+                label: "Array intersection size >= 1".to_string(),
+            })
+        }
         // Email local part: catches one person with two domains.
         "username_exact" => Ok(Level {
             sql: format!("split_part({left}_l,'@',1) = split_part({right}_r,'@',1)"),
@@ -654,6 +677,7 @@ fn compile_comparison(
     spec: &ComparisonSpec,
     weight: f64,
     options: &CompileOptions,
+    variants_col: &str,
 ) -> Result<ComparisonJson, CompileError> {
     let tokens: Vec<&str> = spec.levels.iter().filter_map(|l| l.as_deref()).collect();
     if tokens.is_empty() {
@@ -709,7 +733,7 @@ fn compile_comparison(
     // tenant having to say so.
     let n = tokens.len() as f64;
     for (i, token) in tokens.iter().enumerate() {
-        let resolved = resolve_level(column, token)?;
+        let resolved = resolve_level(column, token, variants_col)?;
         let share = (n - i as f64) / n;
         let bits = options.full_agreement_bits * (weight / 100.0) * share;
         let tf_column = if spec.tf && i == 0 {
@@ -745,7 +769,7 @@ fn compile_comparison(
 }
 
 /// Level tokens that can be resolved over an arbitrary pair of columns.
-/// `variant_match` reads the lexicon's fixed `name_variants` column and
+/// `variant_match` reads the entity type's fixed variants column and
 /// `address_components` the schema's fixed `addr_*` columns, so neither has a
 /// pairwise reading — in a group they are refused rather than silently
 /// comparing the wrong thing.
@@ -766,7 +790,12 @@ fn all_blank(attrs: &[String], suffix: char) -> String {
 /// the pool, OR'd — any member on the left against any member on the right,
 /// the diagonal included, because two records that both carry the value in
 /// `mobile` must agree too.
-fn resolve_group_level(name: &str, attrs: &[String], token: &str) -> Result<Level, CompileError> {
+fn resolve_group_level(
+    name: &str,
+    attrs: &[String],
+    token: &str,
+    variants_col: &str,
+) -> Result<Level, CompileError> {
     if !group_capable(token) {
         return Err(CompileError::LevelNotGroupCapable {
             group: name.to_string(),
@@ -776,7 +805,7 @@ fn resolve_group_level(name: &str, attrs: &[String], token: &str) -> Result<Leve
     let mut arms = Vec::with_capacity(attrs.len() * attrs.len());
     for a in attrs {
         for b in attrs {
-            arms.push(resolve_level_pair(a, b, token)?.sql);
+            arms.push(resolve_level_pair(a, b, token, variants_col)?.sql);
         }
     }
     Ok(Level {
@@ -810,6 +839,7 @@ fn compile_group(
     spec: &ComparisonGroupSpec,
     weight: f64,
     options: &CompileOptions,
+    variants_col: &str,
 ) -> Result<ComparisonJson, CompileError> {
     if spec.tf {
         return Err(CompileError::GroupTfUnsupported {
@@ -867,7 +897,7 @@ fn compile_group(
 
     let n = tokens.len() as f64;
     for (i, token) in tokens.iter().enumerate() {
-        let resolved = resolve_group_level(name, attrs, token)?;
+        let resolved = resolve_group_level(name, attrs, token, variants_col)?;
         let share = (n - i as f64) / n;
         let bits = options.full_agreement_bits * (weight / 100.0) * share;
         levels.push(ComparisonLevelJson {
@@ -1101,9 +1131,16 @@ pub fn compile_with(config: &Config, options: &CompileOptions) -> Result<Compile
     ));
 
     let mut comparisons = Vec::new();
+    let variants_col = variants_column(config.entity_type);
     for (column, spec) in &config.comparisons {
         let weight = weights.get(column).copied().unwrap_or(0.0);
-        comparisons.push(compile_comparison(column, spec, weight, options)?);
+        comparisons.push(compile_comparison(
+            column,
+            spec,
+            weight,
+            options,
+            variants_col,
+        )?);
         if spec.null_policy != NullPolicy::Never {
             notes.push(format!(
                 "comparisons.{column} treats blanks as evidence ({:?}); the default is to treat a \
@@ -1114,7 +1151,7 @@ pub fn compile_with(config: &Config, options: &CompileOptions) -> Result<Compile
     }
     for (name, spec) in &config.comparison_groups {
         let weight = weights.get(name).copied().unwrap_or(0.0);
-        comparisons.push(compile_group(name, spec, weight, options)?);
+        comparisons.push(compile_group(name, spec, weight, options, variants_col)?);
         notes.push(format!(
             "comparison_groups.{name} pools {} attributes ({}); any member on one record \
              compares against every member on the other, and the group also adds a blocking \
@@ -1353,7 +1390,7 @@ mod tests {
 
     #[test]
     fn an_unknown_level_is_an_error_not_a_level_that_never_fires() {
-        let err = resolve_level("email", "soundex").unwrap_err();
+        let err = resolve_level("email", "soundex", "name_variants").unwrap_err();
         assert!(matches!(err, CompileError::UnknownLevel { .. }));
         // And the message tells the author what they can write instead.
         assert!(err.to_string().contains("jaro_winkler"));
@@ -1362,19 +1399,19 @@ mod tests {
     #[test]
     fn parameterised_levels_validate_their_argument() {
         assert!(matches!(
-            resolve_level("family_name", "jaro_winkler:nope").unwrap_err(),
+            resolve_level("family_name", "jaro_winkler:nope", "name_variants").unwrap_err(),
             CompileError::BadLevelParameter { .. }
         ));
         assert!(matches!(
-            resolve_level("family_name", "jaro_winkler:1.5").unwrap_err(),
+            resolve_level("family_name", "jaro_winkler:1.5", "name_variants").unwrap_err(),
             CompileError::BadLevelParameter { .. }
         ));
         assert!(matches!(
-            resolve_level("family_name", "first_n:0").unwrap_err(),
+            resolve_level("family_name", "first_n:0", "name_variants").unwrap_err(),
             CompileError::BadLevelParameter { .. }
         ));
         assert!(matches!(
-            resolve_level("family_name", "jaro_winkler:").unwrap_err(),
+            resolve_level("family_name", "jaro_winkler:", "name_variants").unwrap_err(),
             CompileError::BadLevelParameter { .. }
         ));
     }
@@ -1385,25 +1422,40 @@ mod tests {
         // If the renderer drifts from them, compiling the committed config stops
         // reproducing the committed model — which tests/compile.rs then fails.
         assert_eq!(
-            resolve_level("given_name", "exact").unwrap().sql,
+            resolve_level("given_name", "exact", "name_variants")
+                .unwrap()
+                .sql,
             "\"given_name_l\" = \"given_name_r\""
         );
         assert_eq!(
-            resolve_level("given_name", "jaro_winkler:0.90")
+            resolve_level("given_name", "jaro_winkler:0.90", "name_variants")
                 .unwrap()
                 .sql,
             "jaro_winkler_similarity(\"given_name_l\", \"given_name_r\") >= 0.9"
         );
         assert_eq!(
-            resolve_level("given_name", "variant_match").unwrap().sql,
+            resolve_level("given_name", "variant_match", "name_variants")
+                .unwrap()
+                .sql,
             "array_length(list_intersect(\"name_variants_l\", \"name_variants_r\")) >= 1"
         );
+        // The account spelling of the same level: the variants column follows
+        // the entity type — this exact string is read off
+        // fixtures/static/acct_model_v1.json, byte for byte.
         assert_eq!(
-            resolve_level("email", "username_exact").unwrap().sql,
+            resolve_level("company_name_norm", "variant_match", "company_variants")
+                .unwrap()
+                .sql,
+            "array_length(list_intersect(\"company_variants_l\", \"company_variants_r\")) >= 1"
+        );
+        assert_eq!(
+            resolve_level("email", "username_exact", "name_variants")
+                .unwrap()
+                .sql,
             "split_part(email_l,'@',1) = split_part(email_r,'@',1)"
         );
         assert_eq!(
-            resolve_level("birth_date", "dob_same_year_month")
+            resolve_level("birth_date", "dob_same_year_month", "name_variants")
                 .unwrap()
                 .sql,
             "date_trunc('month', birth_date_l) = date_trunc('month', birth_date_r)"
@@ -1620,7 +1672,14 @@ mod tests {
             null_policy: NullPolicy::Never,
         };
         // Default: a missing value is a null level — no evidence either way.
-        let c = compile_comparison("email", &base, 100.0, &CompileOptions::default()).unwrap();
+        let c = compile_comparison(
+            "email",
+            &base,
+            100.0,
+            &CompileOptions::default(),
+            "name_variants",
+        )
+        .unwrap();
         let null_levels: Vec<_> = c
             .comparison_levels
             .iter()
@@ -1642,7 +1701,14 @@ mod tests {
             null_policy: NullPolicy::BothBlankMatches,
             ..base.clone()
         };
-        let c = compile_comparison("email", &both, 100.0, &CompileOptions::default()).unwrap();
+        let c = compile_comparison(
+            "email",
+            &both,
+            100.0,
+            &CompileOptions::default(),
+            "name_variants",
+        )
+        .unwrap();
         assert_eq!(
             c.comparison_levels[0].sql_condition,
             "\"email_l\" IS NULL AND \"email_r\" IS NULL"
@@ -1666,8 +1732,14 @@ mod tests {
             weight: None,
             null_policy: NullPolicy::Never,
         };
-        let c =
-            compile_comparison("family_name", &spec, 100.0, &CompileOptions::default()).unwrap();
+        let c = compile_comparison(
+            "family_name",
+            &spec,
+            100.0,
+            &CompileOptions::default(),
+            "name_variants",
+        )
+        .unwrap();
         let bits =
             |l: &ComparisonLevelJson| (l.m_probability.unwrap() / l.u_probability.unwrap()).log2();
         // [null, exact, jaro, ELSE]
@@ -1692,8 +1764,14 @@ mod tests {
             weight: None,
             null_policy: NullPolicy::Never,
         };
-        let c =
-            compile_comparison("family_name", &spec, 100.0, &CompileOptions::default()).unwrap();
+        let c = compile_comparison(
+            "family_name",
+            &spec,
+            100.0,
+            &CompileOptions::default(),
+            "name_variants",
+        )
+        .unwrap();
         let tf: Vec<_> = c
             .comparison_levels
             .iter()
