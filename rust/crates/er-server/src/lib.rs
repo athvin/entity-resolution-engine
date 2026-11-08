@@ -8006,10 +8006,10 @@ async fn create_schedule(
     // An extract schedule's params are its whole meaning — a bare `{}` would
     // enqueue jobs that fail at planning, forever, on a cron. Validated by the
     // same parser the executor uses, the `dataset_profile_run` rule.
-    if body.kind == "extract" {
-        if let Err(message) = crate::extract_params::ExtractRequest::from_params(&params) {
-            return detail_err(StatusCode::UNPROCESSABLE_ENTITY, message);
-        }
+    if body.kind == "extract"
+        && let Err(message) = crate::extract_params::ExtractRequest::from_params(&params)
+    {
+        return detail_err(StatusCode::UNPROCESSABLE_ENTITY, message);
     }
     // History images record the acting principal (er.actor).
     let _ = pg::set_actor(&client, &principal.actor).await;

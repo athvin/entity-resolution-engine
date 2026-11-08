@@ -1147,7 +1147,7 @@ impl Task<Session> for ExtractPull {
         })?;
         file.sync_all()
             .map_err(|e| engine_error(&format!("i/o error flushing the delivery: {e}")))?;
-        let bytes = i64::try_from(file.metadata().map(|m| m.len()).unwrap_or(0)).unwrap_or(0);
+        let bytes = i64::try_from(file.metadata().map_or(0, |m| m.len())).unwrap_or(0);
         drop(file);
 
         let rows = i64::try_from(outcome.rows).unwrap_or(i64::MAX);

@@ -408,12 +408,11 @@ pub fn extract_to_writer<W: std::io::Write>(
             out.write_record(&row)
                 .map_err(|e| SfError::Protocol(format!("writing a row: {e}")))?;
             rows += 1;
-            if let Some(stamp) = updated_idx.and_then(|i| record.get(i)) {
-                if valid_datetime_literal(stamp)
-                    && max_updated.as_deref().is_none_or(|m| stamp > m)
-                {
-                    max_updated = Some(stamp.to_string());
-                }
+            if let Some(stamp) = updated_idx.and_then(|i| record.get(i))
+                && valid_datetime_literal(stamp)
+                && max_updated.as_deref().is_none_or(|m| stamp > m)
+            {
+                max_updated = Some(stamp.to_string());
             }
         }
 
