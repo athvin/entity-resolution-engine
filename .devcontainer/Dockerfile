@@ -37,7 +37,7 @@ USER root
 # there is a Dockerfile to look at, rather than at the developer's first
 # `make check`.
 RUN apt-get update \
-	&& apt-get install -y --no-install-recommends mold er-probe-764-no-such-package \
+	&& apt-get install -y --no-install-recommends mold \
 	&& rm -rf /var/lib/apt/lists/*
 
 # DELIBERATELY ABSENT: cmake.
