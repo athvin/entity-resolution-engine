@@ -4,10 +4,15 @@
 # dispatcher restart, cancel-through-canceling, and a seven-pod `run_all_full`
 # where each stage reads what the previous stage's PROCESS wrote.
 #
-# Nightly + manual, and DELIBERATELY NOT a required check: the
-# frontend-testing standard says a gate must be observed failing before it is
-# trusted, and this one has not been yet. It also builds the full release
-# image in-job (~40 min cold), which is the wrong cost for every PR.
+# Nightly + manual, and DELIBERATELY NOT a required check. It has now been
+# observed failing four times for four distinct causes (#614, #622, #624,
+# #610) and passing since — all six phases green on the 2026-11-07 nightly
+# and again on 2026-11-08 (#655) — so the frontend-testing "a gate must be
+# observed failing before it is trusted" premise this comment once carried
+# is satisfied. It stays unrequired on cost grounds: it builds the full
+# release image in-job (~29 min measured, ~40 min cold), which is the wrong
+# price for every PR, and the per-PR `assertions` job below covers the cheap
+# half.
 #
 # Two jobs, and the split is the point. `probe` is the nightly cluster run.
 # `assertions` runs on PRs that touch the probe and mutation-tests its
@@ -64,6 +69,9 @@ jobs:
     # phase adds seven sequential pods, each paying a cold DuckDB open, against
     # a 30-minute wait of its own. At 90 a slow build and a slow pipeline
     # together would cancel the job just before its most interesting assertion.
+    # Measured on the first green runs (#655): 28m42s on 2026-11-07 and 33m51s
+    # on 2026-11-08 end to end (~25-29 min kind up + image, ~3 min probe), so
+    # 120 holds with ~4x headroom and phase 6's feared ~22 min did not appear.
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
