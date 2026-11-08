@@ -82,7 +82,12 @@ fn topo_order<'a>(entities: &[&'a Entity]) -> Vec<&'a Entity> {
     ordered
 }
 
-/// A nullable column's `ADD COLUMN` fragment for the given store.
+/// An addable column's `ADD COLUMN` fragment for the given store — nullable
+/// columns always qualify, a NOT NULL column only with a declared default (see
+/// `missing_column_is_additive`), and the fragment must then carry both
+/// clauses: without `NOT NULL` the store drifts from the catalog, without
+/// `DEFAULT` the old release's column-named INSERTs (E011) start failing
+/// underneath the deploy.
 fn add_column_sql(store: Store, relation: &str, column: &Column) -> String {
     match store {
         Store::Duckdb => format!(
@@ -96,6 +101,9 @@ fn add_column_sql(store: Store, relation: &str, column: &Column) -> String {
                 column.name,
                 column.col_type.postgres_type()
             );
+            if !column.nullable {
+                sql.push_str(" NOT NULL");
+            }
             if let Some(default) = &column.default {
                 sql.push_str(" DEFAULT ");
                 sql.push_str(default);
@@ -157,7 +165,9 @@ pub fn plan_migration(
                 let present: std::collections::BTreeSet<&str> =
                     cols.iter().map(|c| c.name.as_str()).collect();
                 for column in &entity.columns {
-                    if !present.contains(column.name.as_str()) && column.nullable {
+                    if !present.contains(column.name.as_str())
+                        && crate::missing_column_is_additive(store, column)
+                    {
                         plan.statements.push(Planned {
                             relation: qualify(&entity.relation),
                             sql: add_column_sql(store, &entity.relation, column),
@@ -266,6 +276,43 @@ mod tests {
             plan.breaking
                 .iter()
                 .any(|d| d.message.contains("priority: type integer -> bigint"))
+        );
+    }
+
+    /// The #904 deploy shape: a store from before `tags.kind` existed must
+    /// plan additive — both new columns as statements, nothing breaking — and
+    /// the NOT NULL one must carry its DEFAULT, or the old release's
+    /// column-named INSERTs fail underneath the deploy.
+    #[test]
+    fn a_not_null_column_with_a_default_plans_an_add_with_both_clauses() {
+        const TAG_YAML: &str = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../entities/tag/entity.yaml"
+        ));
+        let catalog: Catalog =
+            Catalog::from_entities(vec![serde_norway::from_str(TAG_YAML).unwrap()]).unwrap();
+        let live_cols: Vec<LiveColumn> = live_like(&catalog, "tag")
+            .into_iter()
+            .filter(|c| c.name != "kind" && c.name != "apply_min_role")
+            .collect();
+        let mut live = BTreeMap::new();
+        live.insert("tags".to_string(), live_cols);
+        live.insert("tags_history".to_string(), Vec::new());
+
+        let plan = plan_migration(&catalog, Store::Postgres, &live);
+        assert_eq!(plan.breaking, Vec::new(), "{:?}", plan.breaking);
+        assert!(
+            plan.statements.iter().any(|s| s.sql
+                == "ALTER TABLE public.tags ADD COLUMN kind text NOT NULL DEFAULT 'user';"),
+            "{:?}",
+            plan.statements
+        );
+        assert!(
+            plan.statements
+                .iter()
+                .any(|s| s.sql == "ALTER TABLE public.tags ADD COLUMN apply_min_role text;"),
+            "{:?}",
+            plan.statements
         );
     }
 
