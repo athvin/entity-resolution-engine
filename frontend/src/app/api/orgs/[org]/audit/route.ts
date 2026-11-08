@@ -6,7 +6,16 @@ import { forward, requireOrgAccess, respond } from "@/lib/bff/proxy";
 const PASSTHROUGH = ["action", "actor", "since", "until", "before_id", "limit"] as const;
 
 /** The columns the CSV export carries, in the order the server's own export uses. */
-const CSV_COLUMNS = ["id", "at", "actor", "org", "dataset", "action", "trace_id", "detail"] as const;
+const CSV_COLUMNS = [
+  "id",
+  "at",
+  "actor",
+  "org",
+  "dataset",
+  "action",
+  "trace_id",
+  "detail",
+] as const;
 
 /**
  * The tenant-facing audit feed (design §7.20) — admin-gated, like the server.
