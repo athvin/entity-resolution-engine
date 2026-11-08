@@ -218,7 +218,66 @@ env:
   # sibling branches", so a PR-branch entry is unreadable from `main` while PRs
   # still read what `main` populated — which was always nearly all the value.
   # No IAM condition, no OIDC exchange, and nothing to misconfigure.
-  SCCACHE_GHA_ENABLED: "true"
+  # Cloudflare R2 over the S3 API — the third backend, and the first that is
+  # both cheap and fast. #909.
+  #
+  # S3 (#350) was fast and expensive: runners are outside AWS, so every read was
+  # billed internet egress — $209.32 of a $211.62 November S3 total by CUR
+  # per-resource attribution, against $0.02 of storage.
+  #
+  # The Actions cache backend (#893) was cheap and slow, measured on `main`:
+  # 25.1 min against 9.8 on S3. Two causes. Per-hit read latency roughly doubled
+  # (0.122s -> 0.242s), and GitHub rate-limits cache writes PER WORKFLOW RUN
+  # shared across every job in it, while sccache's `GHACache::build` installs no
+  # `RetryLayer` and so counts the HTTP 429 instead of retrying it
+  # (mozilla/sccache#2821, unfixed in the pinned 0.19.0). That run dropped 3,763
+  # writes and landed 1,164 — 24% success, ~27% mean hit rate.
+  #
+  # R2 has zero egress fees AND is not GitHub's cache service, so neither the
+  # quota nor the retry bug applies. ~$2/month.
+  #
+  # `SCCACHE_REGION=auto` because R2 has no regions and the S3 client requires
+  # the field to be set to something. The endpoint must be the DEFAULT one, not
+  # a jurisdiction-specific `.us.`/`.eu.` variant — jurisdictions are separate
+  # NAMESPACES rather than aliases, and this bucket was created with none, so
+  # the `.us.` endpoint answers `NoSuchBucket`. Measured both ways.
+  #
+  # Bucket + lifecycle are infra/terraform/envs/core/r2.tf.
+  SCCACHE_BUCKET: er-ci-sccache
+  SCCACHE_ENDPOINT: https://9eefbe6bc92d11b2bb4e962494765a4c.r2.cloudflarestorage.com
+  SCCACHE_REGION: auto
+  #
+  # CREDENTIALS, and why there are two. R2 has no OIDC and no IAM condition
+  # keys, so the `er-ci-sccache-read` / `-write` role split cannot be
+  # reproduced directly — and it has to be reproduced, because a PR able to
+  # write the cache is a path for a branch to plant object code a later `main`
+  # build consumes, and poisoning outlives the credential that planted it. The
+  # Actions backend gave that property away free via branch scoping (verified on
+  # #893: all 1,137 entries landed on `refs/pull/893/merge`, none on `main`);
+  # giving it up is the one way R2 is a step backwards.
+  #
+  # So: an Object-Read-only token in REPOSITORY secrets, and an
+  # Object-Read-&-Write token in the `sccache-write` ENVIRONMENT, which is
+  # `protected_branches: true`. Each compile job below selects between them with
+  #
+  #   environment: ${{ github.ref == 'refs/heads/main' && 'sccache-write' || '' }}
+  #   AWS_ACCESS_KEY_ID: ${{ secrets.R2_WRITE_ACCESS_KEY_ID || secrets.R2_READ_... }}
+  #
+  # Three facts make that work, and all three were MEASURED on a throwaway probe
+  # workflow rather than assumed, because the docs do not state any of them:
+  #
+  #   1. An environment-name expression evaluating to the EMPTY STRING means "no
+  #      environment". The job runs normally — it is not blocked and does not
+  #      error.
+  #   2. An Environment secret a job cannot reach resolves to the empty string,
+  #      which is falsy, so `||` selects the read credential. Probe output on a
+  #      non-main branch: `write_len=0 read_len=32`.
+  #   3. No deployment record is created when the expression is empty, so PRs do
+  #      not spam the Deployments tab.
+  #
+  # The read token was verified to be genuinely read-only: list succeeds, PutObject
+  # returns AccessDenied. A denied write is a counted miss in sccache, not a
+  # failure — the same behaviour `sccache.tf` relied on for the S3 read role.
 
 jobs:
   # Did anything outside `.claude/**`, `infra/terraform/**` and the agentic
@@ -611,8 +670,15 @@ jobs:
     timeout-minutes: 45
     permissions:
       contents: read
+    # `main` writes the cache, every other ref only reads it. See the env block
+    # at the top of this file for why two credentials exist and for the three
+    # measured facts this one-liner depends on.
+    environment: ${{ github.ref == 'refs/heads/main' && 'sccache-write' || '' }}
     env:
       RUSTC_WRAPPER: sccache
+      # sccache's S3 backend takes the standard AWS credential variables.
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_WRITE_ACCESS_KEY_ID || secrets.R2_READ_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_WRITE_SECRET_ACCESS_KEY || secrets.R2_READ_SECRET_ACCESS_KEY }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install stable toolchain
@@ -694,8 +760,15 @@ jobs:
     timeout-minutes: 45
     permissions:
       contents: read
+    # `main` writes the cache, every other ref only reads it. See the env block
+    # at the top of this file for why two credentials exist and for the three
+    # measured facts this one-liner depends on.
+    environment: ${{ github.ref == 'refs/heads/main' && 'sccache-write' || '' }}
     env:
       RUSTC_WRAPPER: sccache
+      # sccache's S3 backend takes the standard AWS credential variables.
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_WRITE_ACCESS_KEY_ID || secrets.R2_READ_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_WRITE_SECRET_ACCESS_KEY || secrets.R2_READ_SECRET_ACCESS_KEY }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install stable toolchain
@@ -808,8 +881,15 @@ jobs:
             args: --workspace --exclude er-match
     permissions:
       contents: read
+    # `main` writes the cache, every other ref only reads it. See the env block
+    # at the top of this file for why two credentials exist and for the three
+    # measured facts this one-liner depends on.
+    environment: ${{ github.ref == 'refs/heads/main' && 'sccache-write' || '' }}
     env:
       RUSTC_WRAPPER: sccache
+      # sccache's S3 backend takes the standard AWS credential variables.
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_WRITE_ACCESS_KEY_ID || secrets.R2_READ_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_WRITE_SECRET_ACCESS_KEY || secrets.R2_READ_SECRET_ACCESS_KEY }}
       # The debug-info settings that used to live here are now
       # `[profile.dev.package."*"]` / `[profile.test]` in `rust/Cargo.toml`, with
       # the measurement. They were job env on this job alone, so `lint`,
@@ -987,8 +1067,15 @@ jobs:
         partition: ["1/4", "2/4", "3/4", "4/4"]
     permissions:
       contents: read
+    # `main` writes the cache, every other ref only reads it. See the env block
+    # at the top of this file for why two credentials exist and for the three
+    # measured facts this one-liner depends on.
+    environment: ${{ github.ref == 'refs/heads/main' && 'sccache-write' || '' }}
     env:
       RUSTC_WRAPPER: sccache
+      # sccache's S3 backend takes the standard AWS credential variables.
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_WRITE_ACCESS_KEY_ID || secrets.R2_READ_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_WRITE_SECRET_ACCESS_KEY || secrets.R2_READ_SECRET_ACCESS_KEY }}
       # A RUNTIME gate: each lake test early-returns without this (er-cli
       # tests/lake_e2e.rs). A shard that lost this env would go green in
       # seconds — if a shard finishes suspiciously fast, check here first.
@@ -1090,8 +1177,15 @@ jobs:
             suite: rest
     permissions:
       contents: read
+    # `main` writes the cache, every other ref only reads it. See the env block
+    # at the top of this file for why two credentials exist and for the three
+    # measured facts this one-liner depends on.
+    environment: ${{ github.ref == 'refs/heads/main' && 'sccache-write' || '' }}
     env:
       RUSTC_WRAPPER: sccache
+      # sccache's S3 backend takes the standard AWS credential variables.
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_WRITE_ACCESS_KEY_ID || secrets.R2_READ_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_WRITE_SECRET_ACCESS_KEY || secrets.R2_READ_SECRET_ACCESS_KEY }}
       DEDUPE_E2E_DUCKLAKE: "1"
       # No DEDUPE_E2E_EXTENSIONS here any more: the extensions step rides the
       # `test` tier's rest leg now, with the env scoped to that one step.
@@ -1241,8 +1335,15 @@ jobs:
     if: github.event_name != 'pull_request' && github.event_name != 'merge_group'
     permissions:
       contents: read
+    # `main` writes the cache, every other ref only reads it. See the env block
+    # at the top of this file for why two credentials exist and for the three
+    # measured facts this one-liner depends on.
+    environment: ${{ github.ref == 'refs/heads/main' && 'sccache-write' || '' }}
     env:
       RUSTC_WRAPPER: sccache
+      # sccache's S3 backend takes the standard AWS credential variables.
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_WRITE_ACCESS_KEY_ID || secrets.R2_READ_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_WRITE_SECRET_ACCESS_KEY || secrets.R2_READ_SECRET_ACCESS_KEY }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install stable toolchain
@@ -1284,8 +1385,15 @@ jobs:
     if: github.event_name != 'pull_request' && github.event_name != 'merge_group'
     permissions:
       contents: read
+    # `main` writes the cache, every other ref only reads it. See the env block
+    # at the top of this file for why two credentials exist and for the three
+    # measured facts this one-liner depends on.
+    environment: ${{ github.ref == 'refs/heads/main' && 'sccache-write' || '' }}
     env:
       RUSTC_WRAPPER: sccache
+      # sccache's S3 backend takes the standard AWS credential variables.
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_WRITE_ACCESS_KEY_ID || secrets.R2_READ_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_WRITE_SECRET_ACCESS_KEY || secrets.R2_READ_SECRET_ACCESS_KEY }}
       DEDUPE_SCALE_TESTS: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
