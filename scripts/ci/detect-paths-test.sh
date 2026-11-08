@@ -94,6 +94,15 @@ expect 'devcontainer.yml' "$NONE" '.github/workflows/devcontainer.yml'
 expect 'the whole devcontainer change' "$NONE" \
 	'.devcontainer/Dockerfile' '.devcontainer/devcontainer.json' \
 	'.github/workflows/devcontainer.yml'
+# The Codex bridge. Both sides are symlinks into the authored Claude Code tree,
+# so neither is read by anything in `make check` — and `agent-bridge-check.sh`,
+# which does read them, runs ungated in the `skills` job. `AGENTS.md` is its own
+# alternation rather than being caught by `CLAUDE\.md$`, so it is asserted
+# separately. Note it classifies NONE and not `drift=true`: no generator derives
+# anything from it, unlike CLAUDE.md, whose skill-inventory table does.
+expect 'a bridged skill entry' "$NONE" '.agents/skills/land-pr'
+expect 'the whole skills bridge' "$NONE" '.agents/skills/land-pr' '.agents/skills/pr-review'
+expect 'AGENTS.md alone' "$NONE" 'AGENTS.md'
 
 # --- `lint` only, for the drift check -------------------------------------
 # This is the shape of a real skill PR: the inventory rows regenerate into

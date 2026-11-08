@@ -313,9 +313,10 @@ jobs:
   # needs no toolchain (pure shell, no cargo, no node, no network), so running
   # it unconditionally costs seconds.
   #
-  # The same reasoning keeps the `.agents/skills` bridge gate in this job:
-  # `detect` exempts `.claude/**` and `.agents/**`, so a skills-only PR reaches
-  # only this job — which is exactly the PR that can orphan a symlink.
+  # The same reasoning keeps the Codex config bridge gate (`.agents/skills`
+  # and `AGENTS.md`) in this job: `detect` exempts `.claude/**` and
+  # `.agents/**`, so a skills-only PR reaches only this job — which is exactly
+  # the PR that can orphan a symlink.
   skills:
     name: agent skills (lint + drift)
     runs-on: ubuntu-latest
@@ -376,23 +377,36 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: bash scripts/ci/skills-check-test.sh
 
-      - name: agent-skill bridge symlinks (Codex/Kimi Code discovery)
-        # Claude Code discovers project skills at .claude/skills; Codex and
-        # Kimi Code discover them at .agents/skills. Skills are authored once,
-        # under .claude/skills, and bridged across by symlinks — a PR that
-        # adds a skill without its bridge, or forks the bridge into a real
-        # copy, fails here. Runs in THIS job rather than behind `detect`
+      - name: agent config bridge symlinks (Codex discovery)
+        # Claude Code discovers project skills at .claude/skills and its
+        # instructions at CLAUDE.md; Codex discovers them at .agents/skills
+        # and AGENTS.md, and reads neither Claude Code name. Both are authored
+        # once in the Claude Code locations and bridged across by symlinks — a
+        # PR that adds a skill without its bridge, or forks a bridge into a
+        # real copy, fails here. Runs in THIS job rather than behind `detect`
         # because a skills-only PR is exactly the shape `detect` skips; see
         # the job header. Same bare-checkout budget as the steps above.
         working-directory: ${{ github.workspace }}
-        run: bash scripts/ci/skills-bridge-check.sh
+        run: bash scripts/ci/agent-bridge-check.sh
 
-      - name: skills-bridge regression tests
+      - name: agent-bridge regression tests
         # Same contract as the skills-check suite two steps up: a detector
         # breaks by noticing nothing, and this gate's rename-detection exits
         # are precisely what must never start passing silently.
         working-directory: ${{ github.workspace }}
-        run: bash scripts/ci/skills-bridge-check-test.sh
+        run: bash scripts/ci/agent-bridge-check-test.sh
+
+      - name: codex-mcp-sync derivation tests
+        # The one piece of agent config no symlink can bridge: Codex reads MCP
+        # servers from $CODEX_HOME/config.toml and ignores a project
+        # .codex/config.toml's `mcp_servers`. scripts/codex-mcp-sync.sh derives
+        # `codex mcp add` from .mcp.json instead, and what this asserts is that
+        # it still refuses every shape it does not understand — a sync that
+        # passed over a server quietly would read as "synced" with the tool
+        # missing. Everything runs through --dry-run, so no Codex install and
+        # no $CODEX_HOME write; jq is preinstalled on the runner.
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/ci/codex-mcp-sync-test.sh
 
   # S9 — every `uses:` pinned to a commit SHA with its `# vTAG` comment.
   #

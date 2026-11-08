@@ -137,6 +137,21 @@ frontmatter_value() {
 	' "$file"
 }
 
+# A ` #` inside an unquoted YAML scalar opens a comment, so the value ENDS
+# there — silently, with no parse error, in every YAML reader. `project-board`
+# carried `user-owned project #2 "Product Roadmap"` and lost 872 of its 989
+# characters: its whole trigger vocabulary and all four routing clauses, in both
+# Claude Code and Codex. `frontmatter_value` reads the raw line, which is why
+# the cap check and the description-budget table both reported the full length
+# while the model was being shown a 117-character stub.
+#
+# Its own function so `skills-check-test.sh` can lift it and feed it both sides.
+# The risk this rule carries is a predicate that quietly stops matching, and a
+# rule that matches nothing is indistinguishable from a clean tree.
+desc_truncated_by_yaml_comment() {
+	[[ $1 == *' #'* ]]
+}
+
 # Body = everything after the closing frontmatter delimiter.
 body_line_count() {
 	awk 'NR==1 && $0=="---" { infm=1; next }
@@ -218,6 +233,11 @@ lint_one_skill() {
 		# measurably hurts discovery.
 		if printf '%s' "$desc" | grep -qiE '(^| )(I |I'\''m|I can|we can|you can use this)'; then
 			err "$slug: description must be third person (no 'I'/'you can use this')"
+		fi
+		# The cap above bounds how much of the description is too much. This one
+		# bounds how much of it EXISTS: see desc_truncated_by_yaml_comment.
+		if desc_truncated_by_yaml_comment "$desc"; then
+			err "$slug: description contains ' #', which YAML reads as a comment — every character after it is discarded before the model sees it; reword (\"project number 2\") or quote the whole scalar"
 		fi
 	fi
 

@@ -1,31 +1,36 @@
 #!/usr/bin/env bash
-# skills-bridge-check — the .agents/skills mirror must stay a symlink bridge.
+# agent-bridge-check — the agent config Codex reads must stay a symlink bridge.
 #
-# Claude Code discovers project skills at .claude/skills/; Codex and Kimi Code
-# discover them at .agents/skills/. The skills are AUTHORED once, under
-# .claude/skills/, and bridged to the other tools through symlinks:
+# Claude Code discovers project skills at .claude/skills/ and its instructions
+# at CLAUDE.md. Codex discovers skills at .agents/skills/ and instructions at
+# AGENTS.md, and reads neither Claude Code name. Both are AUTHORED once, in the
+# Claude Code locations, and bridged across by symlinks:
 #
 #     .agents/skills/<name> -> ../../.claude/skills/<name>
+#     AGENTS.md             -> CLAUDE.md
 #
 # This gate fails the change that:
-#   - adds a skill under .claude/skills/ without its bridge (works in Claude,
-#     invisible in Codex/Kimi Code), or
-#   - lets the bridge fork into a real copy (two skills that drift apart).
+#   - adds a skill under .claude/skills/ without its bridge (works in Claude
+#     Code, invisible in Codex), or
+#   - lets a bridge fork into a real copy — two files that then drift apart,
+#     which is worse than the gap because both look authoritative.
 #
 # Pure bash, no dependencies, no network: a gate with no dependencies cannot
 # be deleted by a dependency cleanup (the lesson the S9 pin check documents).
-# Runs ungated in rust.yml's `skills` job, because `detect` exempts
-# .claude/** — a skills-only PR skips the compile jobs, so a bridge gate
+# Runs ungated in rust.yml's `skills` job, because `detect` exempts .claude/**
+# and .agents/** — a skills-only PR skips the compile jobs, so a bridge gate
 # behind `detect` would never run on exactly the PR it exists for.
 #
 # Fail-closed on every side:
-#   - either tree missing or empty is a failure (rename detection — a gate
-#     that examines nothing must not report green);
+#   - either skills tree missing or empty is a failure (rename detection — a
+#     gate that examines nothing must not report green);
 #   - every .claude/skills/<name> needs a symlink at .agents/skills/<name>
 #     that RESOLVES to the authored directory (the link's spelling is not
 #     asserted, resolution is, so absolute links still pass);
 #   - nothing may live at .agents/skills/ that is not such a symlink, so the
-#     bridge can never silently become a forked copy.
+#     bridge can never silently become a forked copy;
+#   - AGENTS.md must be a symlink resolving to the same file as CLAUDE.md, and
+#     CLAUDE.md must be the real file, so the authored side cannot swap.
 #
 # Optional $1 is the tree root (defaults to the cwd); the regression suite
 # uses it to exercise fixtures outside the repo.
@@ -34,6 +39,8 @@ set -euo pipefail
 root="${1:-.}"
 claude_skills="$root/.claude/skills"
 agents_skills="$root/.agents/skills"
+claude_md="$root/CLAUDE.md"
+agents_md="$root/AGENTS.md"
 fail=0
 checked=0
 
@@ -68,7 +75,7 @@ for name in "${claude_set[@]}"; do
     checked=$((checked + 1))
     bridge="$agents_skills/$name"
     if [ ! -e "$bridge" ] && [ ! -L "$bridge" ]; then
-        err "missing bridge: .agents/skills/$name (Codex/Kimi Code would not see this skill)"
+        err "missing bridge: .agents/skills/$name (Codex would not see this skill)"
         continue
     fi
     if [ ! -L "$bridge" ]; then
@@ -90,7 +97,7 @@ for name in "${claude_set[@]}"; do
 done
 
 # Reverse: nothing un-bridged lives on the far side — no real copies, no
-# skills that exist only for Codex/Kimi and not for Claude.
+# skills that exist only for Codex and not for Claude Code.
 for name in "${agents_set[@]}"; do
     checked=$((checked + 1))
     bridge="$agents_skills/$name"
@@ -108,15 +115,44 @@ for name in "${agents_set[@]}"; do
     esac
 done
 
-# Examined-nothing guard: if the loops above ever stop iterating (renamed
-# variable, glob change), the count is zero and that fails, not passes.
+# The instruction bridge. Codex never reads CLAUDE.md — probed against Codex
+# 0.167.0, whose binary does not carry the string — so without AGENTS.md it
+# starts with no project instructions at all, which is a silent degradation
+# rather than an error anyone sees.
+#
+# `-ef` is the right test and the reason is worth stating: it compares device
+# and inode THROUGH symlinks, so it answers "same file?" without this script
+# having to resolve a link by hand. A spelling comparison would reject an
+# absolute link that is perfectly correct.
+#
+# This one deliberately does NOT increment `checked`: that counter guards the
+# skill loops below, and an unconditional increment here would make it count
+# 1 forever and so stop discriminating — a guard whose precondition always
+# holds is decoration.
+if [ ! -e "$claude_md" ]; then
+    err "$claude_md is missing (renamed?)"
+elif [ -L "$claude_md" ]; then
+    err "CLAUDE.md is a symlink — it is the authored file; bridge AGENTS.md to it, not the reverse"
+elif [ ! -e "$agents_md" ] && [ ! -L "$agents_md" ]; then
+    err "missing bridge: AGENTS.md (Codex would start with no project instructions); ln -s CLAUDE.md AGENTS.md"
+elif [ ! -L "$agents_md" ]; then
+    err "AGENTS.md is a real file, not a symlink — the instruction bridge has forked; replace it with a symlink to CLAUDE.md"
+elif [ ! -e "$agents_md" ]; then
+    err "AGENTS.md is a dangling symlink"
+elif [ ! "$agents_md" -ef "$claude_md" ]; then
+    err "AGENTS.md does not resolve to CLAUDE.md"
+fi
+
+# Examined-nothing guard: if the skill loops above ever stop iterating
+# (renamed variable, glob change), the count is zero and that fails, not
+# passes.
 if [ "$checked" -eq 0 ]; then
-    err "examined nothing (rename detection)"
+    err "examined no skills (rename detection)"
     fail=1
 fi
 
 if [ "$fail" -ne 0 ]; then
-    printf 'skills-bridge: FAILED (%d checks)\n' "$checked" >&2
+    printf 'agent-bridge: FAILED (%d skill checks + the instruction bridge)\n' "$checked" >&2
     exit 1
 fi
-printf 'skills-bridge: OK (%d skills bridged)\n' "${#claude_set[@]}"
+printf 'agent-bridge: OK (%d skills bridged, AGENTS.md -> CLAUDE.md)\n' "${#claude_set[@]}"

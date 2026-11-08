@@ -1,16 +1,19 @@
 # Agent skills — the standard
 
-How this repo's Claude Code skills are organised, what belongs in one, and how
-the gate keeps them from rotting.
+How this repo's agent skills are organised, what belongs in one, and how the
+gate keeps them from rotting.
 
-The skills themselves live in `.claude/skills/`. This document is the standard
-they are held to; `scripts/skills-check.sh` enforces the mechanical half of it.
+The skills themselves live in `.claude/skills/`, and are bridged to
+`.agents/skills/` for Codex. This document is the standard they are held to;
+`scripts/skills-check.sh` enforces the mechanical half of it and
+`scripts/ci/agent-bridge-check.sh` the bridge.
 
 ## Contents
 
 - [Why skills at all](#why-skills-at-all)
 - [The inventory](#the-inventory)
 - [Layout: why everything is at the root](#layout-why-everything-is-at-the-root)
+- [The Codex bridge: same skills, different filenames](#the-codex-bridge-same-skills-different-filenames)
 - [Authoring rules](#authoring-rules)
 - [No skill states a count](#no-skill-states-a-count)
 - [The gate](#the-gate)
@@ -66,7 +69,7 @@ the same fix.
 | `observability` | the `er-span`/`er-obs` split where library crates carry only `tracing` while a binary installs the subscriber |
 | `pentest` | a Strix-style run that does recon over the attack surface, fans out a tester subagent per vulnerability category (user-invoked only) |
 | `pr-review` | reviewing a pull request, a branch or the working diff before merge (user-invoked only) |
-| `project-board` | the `gh project` surface for user-owned project #2 "Product Roadmap" and the `project` scope it needs |
+| `project-board` | the `gh project` surface for user-owned project number 2 and the `project` scope it needs |
 | `rust-conventions` | that `make check` (not the bare cargo trio) is the finish line |
 | `security` | the attack surface (internet-facing Next.js BFF in front of the privileged Rust er-server control plane) |
 | `skill-audit` | the judgment half of the skill standard the gate cannot mechanise: whether a sentence survives the economy test |
@@ -96,6 +99,79 @@ So: one flat directory, and no `paths:` frontmatter. `paths:` would gate
 question like "how does the BFF boundary work?" fails to trigger when no
 matching file happens to be open. Precise descriptions with explicit negative
 routing do the job better.
+
+## The Codex bridge: same skills, different filenames
+
+Codex runs against this clone as well, Kimi K3 included — Kimi is the same
+`codex` binary under `--profile kimi`, reading a `$CODEX_HOME/<name>.config.toml`
+profile, so every statement here covers it. Codex looks for skills at
+`.agents/skills/` and instructions at `AGENTS.md`, and reads neither Claude Code
+name. The skills are still authored **once**, and bridged with relative
+symlinks:
+
+```
+.agents/skills/<name> -> ../../.claude/skills/<name>
+AGENTS.md             -> CLAUDE.md
+```
+
+`scripts/ci/agent-bridge-check.sh` (in `make check` as `agent-bridge-check`, and
+ungated in `rust.yml`'s `skills` job) fails a missing bridge in either
+direction, a dangling link, a bridge that resolves elsewhere, and a bridge
+forked into a real copy. It refuses an inverted instruction bridge too — every
+reference in the repo names `CLAUDE.md`, so making that one the symlink leaves
+the authored file as the one nothing points at.
+
+**One command shows exactly what Codex loaded**, which is how every claim in
+this section was established rather than read off documentation:
+
+```sh
+codex debug prompt-input | jq -r '.[].content[].text'
+```
+
+It prints the skill roots table, the per-skill descriptions, and an
+`agents_md.instructions` block — or no such block, which is how the missing
+`AGENTS.md` was found. Measured against Codex **0.167.0**.
+
+### Two things that do not survive the trip
+
+- **Codex truncates each skill `description` at ~670 characters**, cut at a word
+  boundary, against the 1,024-character cap this standard enforces. 27 of 28
+  skills are over it, and what gets cut is the **routing tail** — the clause
+  whose only job is to disambiguate adjacent skills. So the trigger vocabulary
+  earns its place near the front of the field, not only at the end.
+- **A ` #` anywhere in a `description` ends it.** YAML opens a comment there, so
+  the value simply stops, with no parse error, in both tools.
+  `scripts/skills-check.sh` now fails on it (`desc_truncated_by_yaml_comment`);
+  before that rule, `project-board` carried `project #2` and was selected on
+  117 of its 989 characters, every routing clause included in what was
+  discarded — while the description-budget table above reported the full length,
+  because the gate measures the raw line.
+
+### What has no repo-scoped equivalent at all
+
+Everything else in `.claude/settings.json` is per-developer state in
+`$CODEX_HOME`, and a project file cannot supply it. A project-level
+`.codex/config.toml` **is** merged into the session — a `sandbox_mode` set there
+takes effect — which makes the exceptions below easy to assume away, so each was
+probed.
+
+| Claude Code | Codex | Measured |
+|---|---|---|
+| `.mcp.json` + `enabledMcpjsonServers` | `[mcp_servers.*]` in `$CODEX_HOME/config.toml` | a project `.codex/config.toml`'s `mcp_servers` table is **ignored**. A real stdio MCP server declared both ways: in the project file the tool is absent from the session, injected with `-c` it is present. Registered at `$CODEX_HOME` it does reach a `--profile kimi` session, so one sync serves every profile. |
+| `hooks` — the `aws-write-guard` `PreToolUse` guard on `aws`/`terraform`/`kubectl`/`helm` | `$CODEX_HOME/hooks.json` | neither `.codex/hooks.json` nor `.agents/hooks.json` fires from a project directory; only the `$CODEX_HOME` file did. Those path strings exist in the binary inside its Claude-Code **migration** reader, which imports into `$CODEX_HOME` — which is what makes them look project-scoped. |
+| `permissions.deny` — `pkill`, `killall`, destructive `aws` | `sandbox_mode` / `approval_policy` | no per-command deny list exists; the sandbox is the whole lever, and `--dangerously-bypass-approvals-and-sandbox` removes it. |
+| `enabledPlugins` | `codex plugin` | per-developer; the binary carries `repository-scoped plugin migration is not allowed`. |
+
+For the MCP servers, `scripts/codex-mcp-sync.sh` closes the gap by **deriving**
+`codex mcp add` from `.mcp.json` — so the invocation is never retyped, which is
+where `--read-only` and `--profile er-readonly` would go missing. It honours
+`enabledMcpjsonServers`, reports what it skipped, and refuses any shape it does
+not understand rather than passing over a server quietly.
+
+The row to carry away is the hook. Under Codex nothing intercepts an `aws`,
+`terraform`, `kubectl` or `helm` write, so the read-only `er-readonly` profile
+and the account's IAM denies are the only thing left — see the
+`aws-account-operations` skill for what those cover.
 
 ## Authoring rules
 
@@ -146,11 +222,11 @@ can still accept a routing clause.
 | Headroom | Skill | Length |
 |---:|---|---:|
 |   26 | `er-engine-ops` | 998 |
-|   33 | `project-board` | 991 |
 |   36 | `security` | 988 |
 |   40 | `frontend-bff` | 984 |
 |   41 | `aws-account-operations` | 983 |
 |   41 | `er-server-control-plane` | 983 |
+|   45 | `project-board` | 979 |
 |   60 | `skill-audit` | 964 |
 |   62 | `rust-conventions` | 962 |
 |   63 | `observability` | 961 |
@@ -179,11 +255,11 @@ headroom than that cannot take another one — adding routing to any of them
 means trimming its **what** clause first, which is the documented fix:
 
 - `er-engine-ops` — 26 characters free
-- `project-board` — 33 characters free
 - `security` — 36 characters free
 - `frontend-bff` — 40 characters free
 - `aws-account-operations` — 41 characters free
 - `er-server-control-plane` — 41 characters free
+- `project-board` — 45 characters free
 <!-- END GENERATED: description-budget -->
 - No `allowed-tools`: it only *pre-approves* tools, it cannot restrict them, and
   nothing here needs pre-approval.
@@ -603,13 +679,16 @@ session rather than assumed, given it fails silently on a malformed value.
 - [ ] 7. Write evals.md with three scenarios aimed at real failure modes. If the
          new skill overrides a general-purpose one, make one scenario the prompt
          that general skill would answer differently.
-- [ ] 8. make skills-check   (the inventory tables regenerate themselves)
-- [ ] 9. Break it on purpose and confirm the gate fails with a useful message.
-- [ ] 10. Pose the three eval scenarios in a fresh session and confirm the right
+- [ ] 8. ln -s ../../.claude/skills/<name> .agents/skills/<name>
+         Without it the skill works in Claude Code and does not exist in Codex.
+- [ ] 9. make skills-check && make agent-bridge-check
+         (the inventory tables regenerate themselves)
+- [ ] 10. Break it on purpose and confirm the gate fails with a useful message.
+- [ ] 11. Pose the three eval scenarios in a fresh session and confirm the right
           skill triggers — and that an adjacent one does not.
 ```
 
-Step 10 is the one that actually measures the skill. Steps 1–9 only make it
+Step 11 is the one that actually measures the skill. Steps 1–10 only make it
 well-formed.
 
 Step 6 is the one most often skipped, and it fails quietly: a new skill that

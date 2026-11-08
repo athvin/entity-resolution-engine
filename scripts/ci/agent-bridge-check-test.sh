@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Regression suite for skills-bridge-check.sh — the sibling that forces the
+# Regression suite for agent-bridge-check.sh — the sibling that forces the
 # failure modes every time, same contract as skills-check-test.sh and
 # actionlint-required-test.sh: a detector breaks by noticing nothing, and a
 # bridge gate that silently stopped iterating reports a clean tree forever.
@@ -11,20 +11,23 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
-check="$here/skills-bridge-check.sh"
+check="$here/agent-bridge-check.sh"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
 root="$work/root"
 assertions=0
 
-# Fixture: two authored skills, one bridged. $1 names extra bridge entries to
-# add (real dir, dangling link, foreign link); the caller edits from there.
+# Fixture: two authored skills, one bridged, plus a correct instruction
+# bridge. $1.. name extra bridge entries to add (real dir, dangling link,
+# foreign link); the caller edits from there.
 mk() {
     rm -rf "$root"
     mkdir -p "$root/.claude/skills/alpha" "$root/.claude/skills/beta"
     printf -- '---\nname: alpha\ndescription: alpha skill\n---\n\nalpha\n' >"$root/.claude/skills/alpha/SKILL.md"
     printf -- '---\nname: beta\ndescription: beta skill\n---\n\nbeta\n' >"$root/.claude/skills/beta/SKILL.md"
+    printf -- '# Instructions\n' >"$root/CLAUDE.md"
+    ln -s CLAUDE.md "$root/AGENTS.md"
     mkdir -p "$root/.agents/skills"
     ln -s ../../.claude/skills/alpha "$root/.agents/skills/alpha"
     for spec in "$@"; do
@@ -71,6 +74,11 @@ expect_fail() {
 mk beta
 expect_pass 'a fully bridged tree'
 
+# An absolute bridge link is correct too: resolution is asserted, not spelling.
+mk
+ln -s "$root/.claude/skills/beta" "$root/.agents/skills/beta"
+expect_pass 'an absolutely-spelled bridge symlink'
+
 mk
 expect_fail 'a skill without its bridge' 'missing bridge: .agents/skills/beta'
 
@@ -100,6 +108,46 @@ mk beta
 mv "$root/.agents/skills" "$root/.agents/skills-moved"
 expect_fail 'a renamed .agents/skills' 'is missing (renamed?)'
 
+# ── The instruction bridge ────────────────────────────────────────────────
+# Same four failure modes as a skill bridge, on the one file Codex reads
+# instead of CLAUDE.md. Each is asserted separately because each is reached
+# by a different branch, and an elif chain is exactly where a reordering
+# silently stops testing one of them.
+
+mk beta
+rm "$root/AGENTS.md"
+expect_fail 'no AGENTS.md at all' 'missing bridge: AGENTS.md'
+
+mk beta
+rm "$root/AGENTS.md"
+printf -- '# Forked instructions\n' >"$root/AGENTS.md"
+expect_fail 'AGENTS.md forked into a real file' 'real file, not a symlink'
+
+mk beta
+rm "$root/AGENTS.md"
+ln -s CLAUDE-gone.md "$root/AGENTS.md"
+expect_fail 'AGENTS.md dangling' 'AGENTS.md is a dangling symlink'
+
+mk beta
+rm "$root/AGENTS.md"
+printf -- '# Something else\n' >"$root/OTHER.md"
+ln -s OTHER.md "$root/AGENTS.md"
+expect_fail 'AGENTS.md pointing at the wrong file' 'does not resolve to CLAUDE.md'
+
+mk beta
+rm "$root/CLAUDE.md" "$root/AGENTS.md"
+expect_fail 'a renamed CLAUDE.md' 'CLAUDE.md is missing (renamed?)'
+
+# The bridge inverted: AGENTS.md authored, CLAUDE.md the link. It would work
+# in both tools today, and it is still refused — every reference in the repo
+# names CLAUDE.md, so swapping which one is real makes the authored file the
+# one nothing points at.
+mk beta
+rm "$root/CLAUDE.md" "$root/AGENTS.md"
+printf -- '# Instructions\n' >"$root/AGENTS.md"
+ln -s AGENTS.md "$root/CLAUDE.md"
+expect_fail 'an inverted instruction bridge' 'CLAUDE.md is a symlink'
+
 # Mutation guard: if this suite stops discriminating (cases stop building
 # fixtures, the check starts passing broken trees), it has asserted nothing
 # and must fail, not print a vacuous green.
@@ -107,4 +155,4 @@ if [ "$assertions" -eq 0 ]; then
     echo 'BAD  - the suite asserted nothing' >&2
     exit 1
 fi
-printf 'skills-bridge-check-test: %d cases, all discriminating\n' "$assertions"
+printf 'agent-bridge-check-test: %d cases, all discriminating\n' "$assertions"

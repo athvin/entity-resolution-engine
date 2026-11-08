@@ -182,6 +182,57 @@ else
         "the warning is not a substitute for the cap — both must exist"
 fi
 
+# --- the YAML-comment truncation rule ---------------------------------------
+#
+# `project-board`'s description contained `project #2` and so ENDED there: YAML
+# opens a comment at ` #`, with no parse error, and both Claude Code and Codex
+# were shown 117 of its 989 characters. The gate could not see it because
+# `frontmatter_value` reads the raw line.
+#
+# The predicate is lifted and driven from both sides, because the way a rule
+# like this dies is by quietly matching nothing — which reads exactly like a
+# clean tree. The negative cases are the ones that matter: a `#` NOT preceded
+# by a space is harmless in YAML, and a rule that flagged it would push authors
+# into quoting scalars for no reason.
+
+if [ -z "$(extract desc_truncated_by_yaml_comment)" ]; then
+    no "desc_truncated_by_yaml_comment() not found in $SCRIPT — was it renamed?"
+else
+    # shellcheck disable=SC1090
+    eval "$(extract desc_truncated_by_yaml_comment)"
+    yaml_bad=""
+    # Must flag: a space-preceded # anywhere in the value.
+    for s in 'board — the surface for user-owned project #2 "Product Roadmap" and the scope' \
+        'closes #823' \
+        'trailing #'; do
+        desc_truncated_by_yaml_comment "$s" || yaml_bad="$yaml_bad
+    missed: $s"
+    done
+    # Must NOT flag: no space before the #, so YAML keeps the whole scalar.
+    for s in 'the C# comparison level' \
+        'a tag#value pair' \
+        'Explains the board. Use when asked what is on it.' \
+        '' ; do
+        if desc_truncated_by_yaml_comment "$s"; then
+            yaml_bad="$yaml_bad
+    false positive: $s"
+        fi
+    done
+    if [ -n "$yaml_bad" ]; then
+        no "desc_truncated_by_yaml_comment() does not discriminate" "$yaml_bad"
+    else
+        ok "desc_truncated_by_yaml_comment() flags ' #' and only ' #'"
+    fi
+fi
+
+if grep -q 'desc_truncated_by_yaml_comment "\$desc"' "$SCRIPT" &&
+    grep -A1 'if desc_truncated_by_yaml_comment "\$desc"; then' "$SCRIPT" | grep -q 'err '; then
+    ok "the YAML-comment rule is wired into the lint as an error"
+else
+    no "the YAML-comment rule is not called from the lint, or no longer calls err" \
+        "a predicate nothing invokes is not a gate"
+fi
+
 # --- the aws-footprint absence list is a real set difference ---------------
 #
 # `gen_aws_footprint` derives "services with nothing declared" by matching a

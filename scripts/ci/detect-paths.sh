@@ -68,16 +68,17 @@
 # regex does not cover, so a change to one pays the full backend gate. That is
 # the fail-safe direction and is left alone.
 
-# `.agents/` is the discovery path Codex and Kimi Code read project skills
-# from. Every entry under it is a symlink into `.claude/skills/` — the skills
-# are authored once and bridged across, which `scripts/ci/skills-bridge-check.sh`
-# enforces — so nothing in `make check` reads it, for the same reason
-# `.claude/` doesn't. What keeps the exemption honest is the same mechanism as
-# `.devcontainer/` two paragraphs up: the gate that DOES read it runs ungated
+# `.agents/` and `AGENTS.md` are where Codex looks for the skills and the
+# project instructions this repo authors under `.claude/skills/` and
+# `CLAUDE.md`. Both are symlinks into the authored side — written once, bridged
+# across, which `scripts/ci/agent-bridge-check.sh` enforces — so nothing in
+# `make check` reads either, for the same reason `.claude/` and `CLAUDE.md`
+# aren't read. What keeps the exemption honest is the same mechanism as
+# `.devcontainer/` two paragraphs up: the gate that DOES read them runs ungated
 # in rust.yml's `skills` job.
 #
 # Everything the Rust gate never reads.
-DETECT_EXEMPT='^(\.claude/|\.agents/|\.devcontainer/|CLAUDE\.md$|infra/terraform/|scripts/ci/tf-|scripts/hooks/|\.github/aw/|\.github/workflows/((infra|drift|devcontainer)\.yml$|shared/|agentics-maintenance\.yml$|[A-Za-z0-9._-]+\.md$|[A-Za-z0-9._-]+\.lock\.yml$))'
+DETECT_EXEMPT='^(\.claude/|\.agents/|\.devcontainer/|CLAUDE\.md$|AGENTS\.md$|infra/terraform/|scripts/ci/tf-|scripts/hooks/|\.github/aw/|\.github/workflows/((infra|drift|devcontainer)\.yml$|shared/|agentics-maintenance\.yml$|[A-Za-z0-9._-]+\.md$|[A-Za-z0-9._-]+\.lock\.yml$))'
 
 # A generated artifact `er-entity verify` re-renders and byte-compares.
 DETECT_ERD='^\.claude/skills/entity-framework/references/erd\.md$'

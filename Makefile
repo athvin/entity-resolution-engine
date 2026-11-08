@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := check
-.PHONY: build fmt lint doc test check check-e2e entities-check skills-check scripts-home-check workflow-shell-check tf-static-credentials-check frontend frontend-audit frontend-coverage run frontend-dev frontend-e2e frontend-baselines frontend-dev-reset image-api cluster-objects nodepools kind-up kind-down check-kind measure-runner-startup dev-up dev-suspend dev-resume dev-down obs-up clean symposium
+.PHONY: build fmt lint doc test check check-e2e entities-check skills-check agent-bridge-check scripts-home-check workflow-shell-check tf-static-credentials-check frontend frontend-audit frontend-coverage run frontend-dev frontend-e2e frontend-baselines frontend-dev-reset image-api cluster-objects nodepools kind-up kind-down check-kind measure-runner-startup dev-up dev-suspend dev-resume dev-down obs-up clean symposium
 
 # --- Rust backend: the application (engine, CLI, control plane) lives in rust/ ---
 #
@@ -59,6 +59,24 @@ entities-check:
 skills-check:
 	bash scripts/ci/skills-check-test.sh && bash scripts/skills-check.sh all
 
+# The half of the agent configuration a second tool reads: the `.agents/skills`
+# and `AGENTS.md` symlink bridges Codex discovers, and the `.mcp.json` ->
+# `codex mcp add` derivation for the one piece that cannot be bridged. Self-
+# tests first, same reasoning as the three targets below — a detector breaks by
+# noticing nothing, which reads exactly like a clean tree.
+#
+# It belongs in `make check` and not only in CI: the bridge is a symlink, and
+# the way it breaks is `mkdir`ing a skill under `.claude/skills/` and forgetting
+# the other side. Finding that out from a red required check, after the push, is
+# the whole failure this gate exists to make local.
+#
+# Pure bash plus jq — no toolchain, no network, and no Codex install (the sync
+# self-test runs everything through `--dry-run`). CI runs the same scripts
+# ungated in rust.yml's `skills` job. `&&`, not separate recipe lines, so the
+# fail-fast is explicit in gates.md too.
+agent-bridge-check:
+	bash scripts/ci/agent-bridge-check-test.sh && bash scripts/ci/agent-bridge-check.sh && bash scripts/ci/codex-mcp-sync-test.sh
+
 # Tracked shell scripts live under scripts/ (CLAUDE.md conventions). CI runs
 # the same script in rust.yml's `workflow pins (S9)` job, ungated.
 scripts-home-check:
@@ -92,7 +110,7 @@ tf-static-credentials-check:
 # The fast PR-equivalent backend gate (mirrors rust.yml's lint + test tiers),
 # plus the skill gate — a stale generated reference is the same class of defect
 # as a stale generated entity artifact.
-check: fmt lint doc entities-check skills-check scripts-home-check workflow-shell-check pr-contract-check tf-static-credentials-check test
+check: fmt lint doc entities-check skills-check agent-bridge-check scripts-home-check workflow-shell-check pr-contract-check tf-static-credentials-check test
 
 # The gated e2e tiers: the DuckLake + extension pipeline and the Postgres
 # control-plane queue/dispatch. Needs the DuckDB extensions and a local
