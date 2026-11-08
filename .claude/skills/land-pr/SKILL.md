@@ -1,7 +1,7 @@
 ---
 name: land-pr
 description: Drives a pull request from opened to green on `main`, then closes its post-merge ledger — the PR loop, the main loop for the push-only workflows no PR can run, the false greens `gh pr checks` reports on a PR that compiled nothing, the house merge rules (no auto-merge; a single-commit PR squashes to the commit subject; only the merge bus judges a combination), and the ledger ticked in the merged body as the record the follow-ups happened. Use when asked to monitor, watch, babysit or land a pull request, when its checks are red or stuck pending, when a failure may be the account rather than the diff, when a merge turns `main` red, or when a merged PR's ledger has open boxes. For why a job fails see `ci-and-supply-chain`; for the local gates see `rust-conventions` and `frontend-testing`; for the card of the issue it closes see `project-board`; for claiming the ticket and the draft PR see `claim-ticket`; for reviewing the diff see `pr-review`.
-argument-hint: [pr-number-or-url] [AUTO_MERGE=true|false] [WATCH_WINDOW=30m]
+argument-hint: "[pr-number-or-url] [AUTO_MERGE=true|false] [WATCH_WINDOW=30m]"
 ---
 
 # Landing a pull request
