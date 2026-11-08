@@ -9,6 +9,7 @@
 - Cross-field comparison groups
 - The 60-bit calibration, and why louder is worse
 - Null policy and derived keys
+- Hard constraints and the hierarchy exclusion
 - Provenance: compiled is not trained
 
 ## The gap this closes
@@ -205,6 +206,33 @@ Two capabilities the DSL declared but could not express before:
 - **Derived keys** — a blocking key computed from columns rather than being a
   column, which is what lets a tenant block on something the schema does not
   literally store.
+
+## Hard constraints and the hierarchy exclusion
+
+`constraints` compiles to conjuncts on EVERY blocking rule, so a violating
+pair is never generated as a candidate — "before similarity counts" is
+literally true there. Three column forms (`required_match`, `veto`,
+`exclude_when_equal`) and one structural form:
+
+```yaml
+constraints:
+  exclude_hierarchy:
+    parent: ParentId            # a metadata key: the raw source column holding
+                                # the parent record's source id
+    # include_parent_child: true  # the opt-out toggle
+```
+
+`exclude_when_equal` on a parent column sees ONE level; `exclude_hierarchy`
+walks the chain. The compiler freezes a `NOT EXISTS` conjunct against
+`__dedupe__hierarchy_ancestors` — a depth-capped recursive closure the engine
+materializes from the concat before blocking runs (`settings.hierarchy` is
+what tells it to; the conjunct and that block always travel together) — so a
+grandparent and a grandchild never pair while siblings, who share a parent but
+sit on no chain together, still do. **The default is exclusion: declaring the
+hierarchy turns it on**, and `include_parent_child: true` is the recorded
+opt-out (the spec's "Include Parent/Child" toggle). The parent reference is a
+`metadata` key because raw linkage columns are deliberately not canonical
+attributes; a key absent from the data builds no chain and excludes nothing.
 
 ## Provenance: compiled is not trained
 

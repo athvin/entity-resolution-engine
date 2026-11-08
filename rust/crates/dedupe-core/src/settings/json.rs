@@ -73,6 +73,14 @@ pub struct SettingsJson {
     /// byte-identically.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub comparator_algorithm_version: Option<u32>,
+    /// The record hierarchy whose ancestor chains the blocking rules exclude.
+    /// Present exactly when a rule carries the `__dedupe__hierarchy_ancestors`
+    /// conjunct — the block is what tells the engine to materialize that
+    /// closure before blocking runs, so one without the other is a broken
+    /// model and `er-compile` writes them together. Absent in every older
+    /// document, which therefore blocks exactly as before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hierarchy: Option<HierarchyJson>,
     #[serde(default = "d_em_convergence")]
     pub em_convergence: f64,
     #[serde(default = "d_max_iterations")]
@@ -185,4 +193,24 @@ impl SettingsJson {
     pub fn comparator_algorithm_version(&self) -> u32 {
         self.comparator_algorithm_version.unwrap_or(1)
     }
+}
+
+/// One declared record hierarchy (`settings.hierarchy`): how to derive the
+/// ancestor closure the blocking conjunct reads.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct HierarchyJson {
+    /// The `metadata` JSON key holding a record's parent reference; its value
+    /// must equal the parent record's `source_record_id` within the same
+    /// `source_system`.
+    pub parent_metadata_key: String,
+    /// How many parent hops the closure walks. Also the cycle guard: a
+    /// corrupted tree that loops terminates at this depth instead of hanging
+    /// the recursion.
+    #[serde(default = "d_hierarchy_depth")]
+    pub max_depth: u32,
+}
+
+fn d_hierarchy_depth() -> u32 {
+    10
 }

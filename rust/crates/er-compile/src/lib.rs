@@ -46,7 +46,7 @@
 use std::collections::BTreeMap;
 
 use dedupe_core::settings::json::{
-    BlockingRuleJson, ComparisonJson, ComparisonLevelJson, LinkType, SettingsJson,
+    BlockingRuleJson, ComparisonJson, ComparisonLevelJson, HierarchyJson, LinkType, SettingsJson,
 };
 use er_config::{
     ComparisonGroupSpec, ComparisonSpec, Config, EntityType, MatchConstraints, NullPolicy,
@@ -59,6 +59,12 @@ use er_config::{
 pub enum CompileError {
     #[error("comparisons.{column} declares no levels; a comparison needs at least one")]
     NoLevels { column: String },
+    #[error(
+        "constraints.exclude_hierarchy.parent {key:?} is not a source column name: it is \
+         spliced into the closure's JSON lookup, so only letters, digits and underscores are \
+         accepted"
+    )]
+    BadHierarchyParent { key: String },
     #[error(
         "comparisons.{column} declares level {level:?}, which is not a comparator this engine \
          knows. Known: exact, jaro_winkler:<0..1>, levenshtein:<n>, variant_match, \
@@ -158,6 +164,12 @@ pub enum CompileError {
 /// their own document, so a bump re-groups nothing until the model is
 /// recompiled.
 pub const COMPARATOR_ALGORITHM_VERSION: u32 = 1;
+
+/// How many parent hops a hierarchy exclusion walks — deep enough for any real
+/// org tree, and the cycle guard for a corrupted one. Stamped into the model
+/// (`settings.hierarchy.max_depth`) so a compiled model's behaviour does not
+/// move when this default does.
+const HIERARCHY_MAX_DEPTH: u32 = 10;
 
 const DEFAULT_FULL_AGREEMENT_BITS: f64 = 60.0;
 
@@ -1174,7 +1186,37 @@ pub fn compile_with(config: &Config, options: &CompileOptions) -> Result<Compile
         }
     }
     let weights = resolve_weights(&config.comparisons, &config.comparison_groups)?;
-    let conjuncts = constraint_conjuncts(&config.constraints);
+    let mut conjuncts = constraint_conjuncts(&config.constraints);
+    // The hierarchy exclusion's conjunct and its settings block travel
+    // TOGETHER: the conjunct reads the `__dedupe__hierarchy_ancestors` closure,
+    // and the block is what tells the engine to materialize it — a model
+    // carrying one without the other fails its first blocking pass. The
+    // DEFAULT is exclusion: declaring the hierarchy turns it on, and
+    // `include_parent_child: true` is the recorded opt-out.
+    let hierarchy: Option<HierarchyJson> = match &config.constraints.exclude_hierarchy {
+        Some(h) => {
+            if h.parent.is_empty()
+                || !h
+                    .parent
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_')
+            {
+                return Err(CompileError::BadHierarchyParent {
+                    key: h.parent.clone(),
+                });
+            }
+            if h.include_parent_child {
+                None
+            } else {
+                conjuncts.push(dedupe_core::stages::hierarchy::exclusion_conjunct());
+                Some(HierarchyJson {
+                    parent_metadata_key: h.parent.clone(),
+                    max_depth: HIERARCHY_MAX_DEPTH,
+                })
+            }
+        }
+        None => None,
+    };
     let mut notes = Vec::new();
     if config.comparisons.values().all(|s| s.weight.is_none())
         && config
@@ -1304,6 +1346,7 @@ pub fn compile_with(config: &Config, options: &CompileOptions) -> Result<Compile
         sql_dialect: Some("duckdb".to_string()),
         linker_uid: None,
         comparator_algorithm_version: Some(COMPARATOR_ALGORITHM_VERSION),
+        hierarchy,
         em_convergence: 0.0001,
         max_iterations: 25,
         match_weight_column_prefix: "mw_".to_string(),
@@ -1381,11 +1424,15 @@ mod tests {
             ]
         );
 
-        // All three at once, in declaration order.
+        // All three column forms at once, in declaration order. The hierarchy
+        // exclusion is deliberately absent here: its conjunct is composed in
+        // `compile_with` beside the settings block it cannot work without, and
+        // `tests/hierarchy_exclusion.rs` owns that pairing.
         let all = MatchConstraints {
             required_match: vec!["tax_id".to_string()],
             veto: vec!["ssn".to_string()],
             exclude_when_equal: vec!["household_id".to_string()],
+            exclude_hierarchy: None,
         };
         assert_eq!(constraint_conjuncts(&all).len(), 3);
     }

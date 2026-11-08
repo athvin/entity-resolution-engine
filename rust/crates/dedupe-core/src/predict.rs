@@ -10,10 +10,76 @@ use crate::settings::Settings;
 use crate::sql::pipeline::CtePipeline;
 use crate::stages::block::{self, BLOCKED_ID_PAIRS};
 use crate::stages::concat::{self, DF_CONCAT};
+use crate::stages::hierarchy;
 use crate::stages::score;
 use crate::stages::tf::{self, DF_CONCAT_WITH_TF};
 use crate::stages::uid_expr_for;
 use crate::stages::vectors::{self, BLOCKED_WITH_COLS, DF_COMPARISON_VECTORS};
+
+/// Materialize the ancestor closure a hierarchy-declaring model's blocking
+/// conjunct reads, from one concat-shaped table. `None` when the model
+/// declares no hierarchy — the overwhelmingly common case, which pays nothing.
+///
+/// The handle must be registered on EVERY pipeline that executes the blocking
+/// rules, so the conjunct's templated `__dedupe__hierarchy_ancestors` rewrites
+/// to this materialization's physical name — an unregistered pipeline fails
+/// loudly ("table does not exist") rather than silently admitting the pairs.
+pub fn materialize_hierarchy_ancestors(
+    session: &Session,
+    settings: &Settings,
+    concat: &TableHandle,
+) -> Result<Option<TableHandle>> {
+    let Some(h) = &settings.json.hierarchy else {
+        return Ok(None);
+    };
+    let mut p = CtePipeline::new().with_input(concat);
+    p.enqueue(
+        hierarchy::ancestors_sql(h),
+        hierarchy::DF_HIERARCHY_ANCESTORS,
+    );
+    session.materialize(&p).map(Some)
+}
+
+/// As [`materialize_hierarchy_ancestors`], over TWO concat-shaped tables — the
+/// incremental cross-blocking case, where the chain can cross the boundary (a
+/// new child arriving under an existing parent must still be excluded against
+/// it). Both sides carry the same templated name, so the union references them
+/// by physical name and re-stands the result as the concat CTE the closure SQL
+/// reads.
+pub fn materialize_hierarchy_ancestors_cross(
+    session: &Session,
+    settings: &Settings,
+    existing: &TableHandle,
+    new: &TableHandle,
+) -> Result<Option<TableHandle>> {
+    let Some(h) = &settings.json.hierarchy else {
+        return Ok(None);
+    };
+    // Two pipelines, not one: `ancestors_sql` opens with WITH RECURSIVE, which
+    // only parses at the head of a statement — rendered as a second CTE after
+    // the union it is a syntax error. The union materializes first (standing
+    // in as the concat the closure reads), and the closure then renders as a
+    // single-task pipeline, i.e. standalone.
+    let mut union = CtePipeline::new();
+    union.enqueue(
+        format!(
+            "select record_key, source_system, source_record_id, metadata from {}\n\
+             union all\n\
+             select record_key, source_system, source_record_id, metadata from {}",
+            existing.physical, new.physical
+        ),
+        DF_CONCAT,
+    );
+    let both = session.materialize(&union)?;
+    let mut p = CtePipeline::new().with_input(&both);
+    p.enqueue(
+        hierarchy::ancestors_sql(h),
+        hierarchy::DF_HIERARCHY_ANCESTORS,
+    );
+    let out = session.materialize(&p)?;
+    session.drop_table(&both)?;
+    Ok(Some(out))
+}
 
 /// Materialize `__dedupe__concat` from a single registered input table.
 pub fn materialize_concat(session: &Session, input: &TableHandle) -> Result<TableHandle> {
@@ -88,6 +154,7 @@ pub fn materialize_blocked_pairs_chunk(
 ) -> Result<TableHandle> {
     let uid = uid_expr_for(settings);
     let rules = &settings.blocking_rules;
+    let ancestors = materialize_hierarchy_ancestors(session, settings, concat)?;
 
     if !rules
         .iter()
@@ -95,6 +162,9 @@ pub fn materialize_blocked_pairs_chunk(
     {
         // Fast path: no array explosion, a single UNION-ALL of scalar arms.
         let mut p = CtePipeline::new().with_input(concat);
+        if let Some(a) = &ancestors {
+            p.add_input(a);
+        }
         p.enqueue(
             block::blocked_id_pairs_sql(
                 rules,
@@ -110,7 +180,7 @@ pub fn materialize_blocked_pairs_chunk(
         return session.materialize(&p);
     }
 
-    materialize_blocked_pairs_exploding(session, settings, concat, &uid, right_chunk)
+    materialize_blocked_pairs_exploding(session, settings, concat, &uid, right_chunk, ancestors)
 }
 
 /// Exploding-rule path: materialize each exploding rule's marginal id-pairs
@@ -127,6 +197,7 @@ fn materialize_blocked_pairs_exploding(
     concat: &TableHandle,
     uid: &crate::stages::UidExpr,
     right_chunk: Option<(u32, u32)>,
+    ancestors: Option<TableHandle>,
 ) -> Result<TableHandle> {
     let rules = &settings.blocking_rules;
     let sd_col = if settings.source_dataset_required() {
@@ -155,6 +226,9 @@ fn materialize_blocked_pairs_exploding(
             right_chunk,
         );
         let mut mp = CtePipeline::new().with_input(concat);
+        if let Some(a) = &ancestors {
+            mp.add_input(a);
+        }
         mp.enqueue(unnest_sql, block::DF_CONCAT_UNNESTED);
         mp.enqueue(
             marginal_sql,
@@ -171,6 +245,9 @@ fn materialize_blocked_pairs_exploding(
     // UNION ALL (scalar arms + exploding arms reading their marginals) ->
     // non-unique, then `min(match_key)` dedup.
     let mut p = CtePipeline::new().with_input(concat);
+    if let Some(a) = &ancestors {
+        p.add_input(a);
+    }
     p.enqueue(
         block::blocked_id_pairs_sql(
             rules,

@@ -44,10 +44,24 @@ pub fn predict_between(
 ) -> Result<TableHandle> {
     let uid = uid_expr_for(settings);
 
+    // The hierarchy closure, when the model declares one — over BOTH sides,
+    // because a new child of an existing parent is exactly the pair the
+    // exclusion must still see. Registered as a pipeline input so the rules'
+    // frozen conjunct rewrites to the physical table.
+    let ancestors = predict::materialize_hierarchy_ancestors_cross(
+        session,
+        settings,
+        existing_concat,
+        new_concat,
+    )?;
+
     // Cross-table blocked pairs (existing = left, new = right). Both concats
     // carry the `__dedupe__concat` templated name, so the SQL references
     // them by physical name to disambiguate the sides (no pipeline inputs).
     let mut bp = CtePipeline::new();
+    if let Some(a) = &ancestors {
+        bp.add_input(a);
+    }
     bp.enqueue(
         block::blocked_id_pairs_cross_sql(
             &settings.blocking_rules,

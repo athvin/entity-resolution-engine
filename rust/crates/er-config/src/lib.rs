@@ -473,6 +473,36 @@ pub struct MatchConstraints {
     /// person resolution: two people at one address with one surname.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exclude_when_equal: Vec<String>,
+    /// The multi-level form of the relationship exclusion (spec 1.25): records
+    /// on one ANCESTOR CHAIN of a declared hierarchy are related, not
+    /// duplicates — and unlike `exclude_when_equal` on the parent column, which
+    /// only sees one level, this walks the chain, so a grandparent and a
+    /// grandchild are excluded too while siblings (who share a parent but sit
+    /// on no chain together) still group. Declaring the block turns the
+    /// exclusion ON; `include_parent_child: true` is the explicit opt-out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exclude_hierarchy: Option<HierarchyExclusion>,
+}
+
+/// One declared record hierarchy: which raw source column carries the parent
+/// reference, and whether ancestor-chain pairs are admitted anyway.
+///
+/// `parent` names a key of the standardized record's `metadata` — the JSON of
+/// every source column NOT mapped to a canonical attribute — because a parent
+/// reference (Salesforce's `ParentId`, a household id pointing at a record) is
+/// raw linkage, not a matchable attribute. Its value must equal the parent
+/// record's own source record id within the same source system; a key absent
+/// from the data builds no chain and excludes nothing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HierarchyExclusion {
+    /// The metadata key holding the parent record's source id, e.g. `ParentId`.
+    pub parent: String,
+    /// The spec's "Include Parent/Child" toggle: `true` keeps the hierarchy
+    /// declared but admits ancestor-chain pairs as candidates again. The
+    /// DEFAULT is exclusion — declaring a hierarchy is turning it on.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub include_parent_child: bool,
 }
 
 impl MatchConstraints {
@@ -480,10 +510,16 @@ impl MatchConstraints {
     /// all, which is what keeps an existing config's model byte-identical.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.required_match.is_empty() && self.veto.is_empty() && self.exclude_when_equal.is_empty()
+        self.required_match.is_empty()
+            && self.veto.is_empty()
+            && self.exclude_when_equal.is_empty()
+            && self.exclude_hierarchy.is_none()
     }
 
     /// Every column the block names, for validating them against the schema.
+    /// `exclude_hierarchy.parent` is deliberately NOT here: it names a
+    /// `metadata` key (a raw source column), not a standardized column, so the
+    /// schema check cannot vouch for it.
     pub fn columns(&self) -> impl Iterator<Item = &str> {
         self.required_match
             .iter()
