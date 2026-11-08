@@ -27,6 +27,8 @@ test.describe("model registry", () => {
     await expect(table.getByTestId("model-default-2")).toContainText("draft");
     await expect(table.getByTestId("model-default-2")).toContainText("uploaded");
     await expect(table.getByTestId("model-strict-1")).toContainText("compiled");
+    // The comparator algorithm version is on the row, not only in storage.
+    await expect(table.getByTestId("model-default-1")).toContainText("v1");
   });
 
   test("the weights view reads log2(m/u) off the model", async ({ page }, testInfo) => {
@@ -45,6 +47,8 @@ test.describe("model registry", () => {
     await expect(weights).toContainText("12.7");
     // A null level carries neither probability, and says so rather than 0.
     await expect(weights).toContainText("email is NULL");
+    // And the version is on the detail too, read off the stored document.
+    await expect(weights).toContainText("Comparator algorithm: v1");
   });
 
   test("the evaluation panel measures a version against its own labels", async ({

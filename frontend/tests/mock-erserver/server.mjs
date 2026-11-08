@@ -664,6 +664,7 @@ export function initialState() {
           entity_type: "person",
           model_hash: "f9051b00384be3eff7790b690c842b9c19b40081f91203b2c11c9b364ab12c8d",
           model_version_label: "v0001",
+          comparator_algorithm_version: 1,
           tf_snapshot_id: "01JWMDTFSNAP00000000000001",
           state: "active",
           provenance: { origin: "seeded" },
@@ -678,6 +679,7 @@ export function initialState() {
           entity_type: "person",
           model_hash: "aa11bb22cc33dd44ee55ff6677889900aabbccddeeff00112233445566778899",
           model_version_label: "v0002",
+          comparator_algorithm_version: 1,
           tf_snapshot_id: "01JWMDTFSNAP00000000000002",
           state: "draft",
           provenance: { origin: "uploaded", by: "admin@acme.dev" },
@@ -692,6 +694,7 @@ export function initialState() {
           entity_type: "person",
           model_hash: "bb22cc33dd44ee55ff6677889900aabbccddeeff001122334455667788990011",
           model_version_label: "v0001-strict",
+          comparator_algorithm_version: 1,
           tf_snapshot_id: "01JWMDTFSNAP00000000000003",
           state: "active",
           provenance: { origin: "compiled" },
@@ -3173,6 +3176,9 @@ const server = http.createServer((req, res) => {
         entity_type: "person",
         model_hash: "cc33dd44ee55ff6677889900aabbccddeeff001122334455667788990011aabb",
         model_version_label: `v${String(version).padStart(4, "0")}`,
+        // The real server stamps a compiled model with er-compile's current
+        // COMPARATOR_ALGORITHM_VERSION.
+        comparator_algorithm_version: 1,
         tf_snapshot_id: null,
         state: "draft",
         provenance: { origin: "compiled" },
@@ -3198,6 +3204,9 @@ const server = http.createServer((req, res) => {
         entity_type: "person",
         model_hash: "dd44ee55ff6677889900aabbccddeeff001122334455667788990011aabbccdd",
         model_version_label: body.model_version_label,
+        // The real server derives this from the uploaded document; a document
+        // with no stamp predates versioning, and those all read as 1.
+        comparator_algorithm_version: 1,
         tf_snapshot_id: body.tf_snapshot_id ?? null,
         // A draft: authoring a model must not re-cluster a tenant's corpus.
         state: "draft",

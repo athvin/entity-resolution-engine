@@ -125,6 +125,7 @@ export function ModelsContent({ org }: { org: string }) {
                   <th className="py-1.5 pr-4 font-medium">State</th>
                   <th className="py-1.5 pr-4 font-medium">Origin</th>
                   <th className="py-1.5 pr-4 font-medium">Stamp</th>
+                  <th className="py-1.5 pr-4 font-medium">Algo</th>
                   <th className="py-1.5 pr-4 font-medium">Created</th>
                   <th className="py-1.5 pr-4" />
                 </tr>
@@ -152,6 +153,11 @@ export function ModelsContent({ org }: { org: string }) {
                     </td>
                     <td className="text-muted-foreground py-2 pr-4 font-mono text-xs">
                       {row.model_version_label}
+                    </td>
+                    <td className="text-muted-foreground py-2 pr-4 text-xs tabular-nums">
+                      {row.comparator_algorithm_version === null
+                        ? "—"
+                        : `v${String(row.comparator_algorithm_version)}`}
                     </td>
                     <td className="text-muted-foreground py-2 pr-4 text-xs">
                       {row.created_at.slice(0, 10)}
@@ -224,6 +230,12 @@ export function ModelsContent({ org }: { org: string }) {
                   Prior — P(two random records match):{" "}
                   <span className="font-mono">
                     {detail.data.weights.probability_two_random_records_match ?? "—"}
+                  </span>{" "}
+                  · Comparator algorithm:{" "}
+                  <span className="font-mono">
+                    {detail.data.comparator_algorithm_version === null
+                      ? "—"
+                      : `v${String(detail.data.comparator_algorithm_version)}`}
                   </span>
                 </p>
                 <table className="w-full min-w-[40rem] text-sm">

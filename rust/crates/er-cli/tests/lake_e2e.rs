@@ -361,6 +361,71 @@ fn match_through_ducklake_matches_golden() {
     let _ = std::fs::remove_dir_all(&tmp);
 }
 
+/// #798's load-bearing regression: the recorded comparator algorithm version
+/// is a RECORD, not a scoring input. A model whose stamp is not the current
+/// version — the shape "the implementation changed underneath this model"
+/// takes — must re-group to an identical partition, because scoring executes
+/// the comparator SQL frozen in the model's own document, never re-derived.
+#[test]
+fn the_recorded_comparator_version_does_not_change_the_groups() {
+    if !enabled() {
+        eprintln!("skipping DuckLake e2e (set DEDUPE_E2E_DUCKLAKE=1 to run)");
+        return;
+    }
+
+    let mut stamped: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(repo_fixture("model_test_v1.json")).unwrap())
+            .unwrap();
+    stamped["comparator_algorithm_version"] = serde_json::Value::from(99u64);
+    let stamped = serde_json::to_string_pretty(&stamped).unwrap();
+    let committed = std::fs::read_to_string(repo_fixture("model_test_v1.json")).unwrap();
+
+    let partition_with = |tag: &str, model_json: &str| {
+        let (session, config, tmp) = standardized_lake(tag);
+        let tf_csv = repo_fixture("model_test_v1.tf.csv");
+        er_cli::run_match(
+            &session,
+            &config,
+            &er_cli::MatchModel {
+                settings_json: model_json,
+                tf_csv_path: std::path::Path::new(&tf_csv),
+                model_version: "v0001",
+                tf_snapshot_id: "01JWMDTFSNAP00000000000001",
+            },
+            0.60,
+            "01RUNMATCH0000000000000000",
+            "2026-01-02 00:00:00",
+        )
+        .unwrap();
+        er_cli::run_reconcile(
+            &session,
+            &config,
+            "01RUNRECON0000000000000000",
+            "2026-01-02 00:00:00",
+        )
+        .unwrap();
+        let rows: Vec<(String, String)> = session
+            .query_strings(&format!(
+                "select entity_id, record_key from {}",
+                er_cli::ENTITY_MEMBERSHIP
+            ))
+            .unwrap()
+            .into_iter()
+            .map(|r| (r[0].clone(), r[1].clone()))
+            .collect();
+        let _ = std::fs::remove_dir_all(&tmp);
+        partition(&rows)
+    };
+
+    let base = partition_with("algo_ver_base", &committed);
+    let restamped = partition_with("algo_ver_99", &stamped);
+    assert_eq!(
+        base, restamped,
+        "a model stamped with a comparator version that is not the current one \
+         must group identically"
+    );
+}
+
 #[test]
 fn reconcile_through_ducklake_matches_golden() {
     if !enabled() {
