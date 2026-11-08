@@ -18,7 +18,7 @@ pub use reconcile::{
     ReconcileError, Reconciled, lake_relations, ledger_kind, reconcile_lake, reconcile_postgres,
 };
 
-use er_entity_spec::{Catalog, Entity, SpecError, Store};
+use er_entity_spec::{Catalog, Column, Entity, SpecError, Store};
 use sha2::{Digest, Sha256};
 
 /// One column as the live store reports it.
@@ -174,6 +174,27 @@ pub fn diff_store(
     diffs
 }
 
+/// May the reconciler add a column the live store is missing, on its own?
+///
+/// Nullable columns, always. A NOT NULL column only when the entity declares a
+/// `default` — Postgres then fills existing rows from the default
+/// (metadata-only since v11 for a non-volatile one), and the old release keeps
+/// serving underneath: its INSERTs name their columns (E011), so the default
+/// fills the new column for them, and its SELECTs enumerate the columns they
+/// know. The deploy gate (`er-server migrate --expect-additive`) plans against
+/// the live store BEFORE any fixup runs, so a NOT NULL column this rule reads
+/// as breaking can never reach the fixup that would heal it — measured on the
+/// #805 deploy, whose `tags.kind text NOT NULL DEFAULT 'user'` refused the
+/// schema-migrate hook until this rule learned what a default means (#904).
+///
+/// Postgres-only: a lake relation is rebuilt from parquet on the next run, so
+/// conservative there costs nothing. Control-plane tables are small — the
+/// volume lives in the lake — so a volatile default's rewrite cannot run a
+/// hook past its deadline in practice.
+pub(crate) fn missing_column_is_additive(store: Store, col: &Column) -> bool {
+    col.nullable || (store == Store::Postgres && col.default.is_some())
+}
+
 fn diff_entity(
     entity: &Entity,
     store: Store,
@@ -187,8 +208,8 @@ fn diff_entity(
     for col in &entity.columns {
         let Some(live) = live_by_name.get(col.name.as_str()) else {
             // A declared column missing from the live store: adding a nullable
-            // column is safe; a NOT NULL add needs a default (breaking here).
-            let severity = if col.nullable {
+            // column is safe; a NOT NULL add needs a default.
+            let severity = if missing_column_is_additive(store, col) {
                 Severity::Safe
             } else {
                 Severity::Breaking
@@ -424,5 +445,81 @@ mod tests {
         assert_eq!(diffs.len(), 1);
         assert_eq!(diffs[0].severity, Severity::Safe);
         assert!(diffs[0].message.contains("create table"));
+    }
+
+    /// The #904 deploy: `tags.kind` is NOT NULL **with a default**, so a store
+    /// that predates it must read as additive — the schema-migrate hook plans
+    /// before any fixup runs, and reading it breaking made the release
+    /// undeployable.
+    #[test]
+    fn a_not_null_column_with_a_default_is_a_safe_add_on_postgres() {
+        const TAG_YAML: &str = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../entities/tag/entity.yaml"
+        ));
+        let tag: Entity = serde_norway::from_str(TAG_YAML).unwrap();
+        // The live store as a pre-#805 deploy left it: every column but the
+        // two the release added.
+        let live_cols: Vec<LiveColumn> = tag
+            .columns
+            .iter()
+            .filter(|c| c.name != "kind" && c.name != "apply_min_role")
+            .map(|c| LiveColumn {
+                name: c.name.clone(),
+                type_name: c.col_type.postgres_type().to_string(),
+                nullable: c.nullable,
+            })
+            .collect();
+        let catalog = Catalog::from_entities(vec![tag]).unwrap();
+        let mut live = BTreeMap::new();
+        live.insert("tags".to_string(), live_cols);
+        live.insert("tags_history".to_string(), Vec::new());
+
+        let diffs = diff_store(&catalog, Store::Postgres, &live);
+        assert_eq!(diffs.len(), 2, "{diffs:?}");
+        assert!(
+            diffs.iter().all(|d| d.severity == Severity::Safe),
+            "both additions must read additive: {diffs:?}"
+        );
+        assert!(diffs.iter().any(|d| d.message.contains("kind is absent")));
+    }
+
+    #[test]
+    fn missing_column_additivity() {
+        let col = |nullable: bool, default: Option<&str>| Column {
+            name: "c".to_string(),
+            col_type: er_entity_spec::ColumnType::Varchar,
+            nullable,
+            description: "a probe column".to_string(),
+            volatile: false,
+            default: default.map(str::to_string),
+            serial: false,
+            references: None,
+            accepted_values: None,
+        };
+        // Nullable is additive on both stores.
+        assert!(missing_column_is_additive(
+            Store::Postgres,
+            &col(true, None)
+        ));
+        assert!(missing_column_is_additive(Store::Duckdb, &col(true, None)));
+        // NOT NULL with a default: additive on Postgres, conservative on the lake.
+        assert!(missing_column_is_additive(
+            Store::Postgres,
+            &col(false, Some("'user'"))
+        ));
+        assert!(!missing_column_is_additive(
+            Store::Duckdb,
+            &col(false, Some("'user'"))
+        ));
+        // NOT NULL without a default stays breaking everywhere.
+        assert!(!missing_column_is_additive(
+            Store::Postgres,
+            &col(false, None)
+        ));
+        assert!(!missing_column_is_additive(
+            Store::Duckdb,
+            &col(false, None)
+        ));
     }
 }
