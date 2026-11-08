@@ -547,28 +547,48 @@ async fn orgs_crud_and_state_machine() {
 /// 3. a write with no request behind it (the dispatcher's bookkeeping, a CLI)
 ///    writes NULL, permanently and on purpose.
 ///
-/// Runs under `capture_spans` so request spans are recording — without a
-/// subscriber every `trace_id` is NULL and case 1 would pass vacuously.
-/// `capture_spans` is synchronous, so this is a plain `#[test]` driving a
-/// current-thread runtime: every poll stays on the subscribed thread.
+/// The recorder is the GLOBAL one, not `capture_spans`: callsite interest is
+/// cached process-wide, and in a concurrent test binary a callsite first hit
+/// on an unsubscribed thread caches "never interested" for every thread —
+/// under a thread-local subscriber this test flapped between passing alone
+/// and capturing zero spans in the pg shard. The anti-vacuity assertion below
+/// (the recorder saw the traced request's span) runs BEFORE the ledger
+/// assertions, so a recording failure names itself instead of surfacing as a
+/// bare `trace_id: null`.
+///
+/// A plain `#[test]`, not `#[tokio::test]`: `pg_serial.rs` counts async test
+/// attributes per file, and this file's one is taken.
 #[test]
 fn audit_rows_carry_the_requests_trace_id() {
+    const TRACE_ID: &str = "4bf92f3577b34da6a3ce929d0e0e4736";
+
+    let recorder = er_obs::testing::global_recorder();
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .unwrap();
-    // The spans themselves are asserted in telemetry_trace_continuation.rs;
-    // here the subscriber exists only so the request spans RECORD.
-    let _ = er_obs::testing::capture_spans(|| rt.block_on(audit_trace_id_phase()));
-}
-
-async fn audit_trace_id_phase() {
-    const TRACEPARENT: &str = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
-    const TRACE_ID: &str = "4bf92f3577b34da6a3ce929d0e0e4736";
-
-    let Some(db) = common::fresh_db("audit_trace").await else {
+    let Some(dsn) = rt.block_on(audit_trace_id_requests()) else {
         return;
     };
+
+    let spans = recorder.captured();
+    assert!(
+        spans.iter().any(|s| s.trace_id == TRACE_ID),
+        "the recorder saw no span in the traced request's tree — the ledger \
+         assertions below would be judging a path nothing recorded. Captured: {:?}",
+        spans.iter().map(|s| s.name.as_str()).collect::<Vec<_>>()
+    );
+
+    rt.block_on(audit_trace_id_assertions(&dsn));
+}
+
+/// The two requests and the no-request write. No assertions on the ledger
+/// here; the read-back is [`audit_trace_id_assertions`]. Returns the test
+/// database's DSN, or `None` when `ER_TEST_PG_DSN` is unset (the house skip).
+async fn audit_trace_id_requests() -> Option<String> {
+    const TRACEPARENT: &str = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+
+    let db = common::fresh_db("audit_trace").await?;
     let dsn = db.dsn().to_string();
     let mut client = pg::connect(&dsn).await.unwrap();
     pg::ensure_schema(&mut client).await.unwrap();
@@ -618,7 +638,13 @@ async fn audit_trace_id_phase() {
     .await
     .unwrap();
 
-    // Read the ledger back through the operator feed.
+    Some(dsn)
+}
+
+async fn audit_trace_id_assertions(dsn: &str) {
+    const TRACE_ID: &str = "4bf92f3577b34da6a3ce929d0e0e4736";
+
+    let app = app(AppState::with_pg("op-secret".to_string(), dsn.to_string()));
     let resp = app
         .clone()
         .oneshot(req("GET", "/v1/audit", "op-secret", Body::empty()))

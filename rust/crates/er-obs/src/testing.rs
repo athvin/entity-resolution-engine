@@ -56,6 +56,81 @@ pub struct CapturedSpan {
     pub is_root: bool,
 }
 
+fn to_captured(span: opentelemetry_sdk::trace::SpanData) -> CapturedSpan {
+    CapturedSpan {
+        name: span.name.to_string(),
+        trace_id: span.span_context.trace_id().to_string(),
+        parent_span_id: span.parent_span_id.to_string(),
+        parent_is_remote: span.parent_span_is_remote,
+        is_root: span.parent_span_id == SpanId::INVALID,
+    }
+}
+
+/// A handle to the process-global recording subscriber's captured spans.
+///
+/// Clone freely — the exporter is shared. Every clone sees every span the
+/// process has finished since installation, including other tests', so
+/// assertions should select by the span they mean (a trace id, a name).
+#[derive(Debug, Clone)]
+pub struct GlobalRecorder {
+    exporter: InMemorySpanExporter,
+}
+
+impl GlobalRecorder {
+    /// Every span finished so far, in close order.
+    #[must_use]
+    pub fn captured(&self) -> Vec<CapturedSpan> {
+        self.exporter
+            .get_finished_spans()
+            .unwrap_or_default()
+            .into_iter()
+            .map(to_captured)
+            .collect()
+    }
+}
+
+/// Install the process-global recording subscriber and return its handle.
+///
+/// This exists because [`capture_spans`]'s thread-local subscriber composes
+/// badly with a *concurrent* test binary. Callsite interest is cached
+/// process-wide, and a callsite first hit on an unsubscribed thread caches
+/// "never interested" for the whole process — including later hits on the
+/// subscribed thread. Observed on PR #841: the same test passed alone and
+/// failed under the pg shard with zero spans captured, flapping on which
+/// thread hit each callsite first. A global default closes the race: once
+/// set, no thread ever evaluates the none dispatch again, so no callsite can
+/// cache "never".
+///
+/// The subscriber is installed once per process and lives to process end;
+/// every caller gets a handle to the same exporter.
+pub fn global_recorder() -> GlobalRecorder {
+    static GLOBAL: std::sync::OnceLock<GlobalRecorder> = std::sync::OnceLock::new();
+    GLOBAL
+        .get_or_init(|| {
+            let exporter = InMemorySpanExporter::default();
+            let provider = SdkTracerProvider::builder()
+                .with_sampler(Sampler::AlwaysOn)
+                .with_simple_exporter(exporter.clone())
+                .build();
+            let subscriber = tracing_subscriber::registry().with(
+                tracing_opentelemetry::layer()
+                    .with_tracer(provider.tracer("er-obs::testing::global"))
+                    .with_filter(crate::SpansOnly),
+            );
+            tracing::subscriber::set_global_default(subscriber)
+                .expect("a global default subscriber is already installed");
+            // A callsite first hit before this point may have cached "never
+            // interested" from the no-subscriber dispatch; clear the cache so
+            // every callsite re-registers against this subscriber.
+            tracing::callsite::rebuild_interest_cache();
+            // The provider must outlive every span its tracers record; the
+            // process ends first.
+            std::mem::forget(provider);
+            GlobalRecorder { exporter }
+        })
+        .clone()
+}
+
 /// Run `f` with a span-exporting subscriber installed, and return every span
 /// it finished.
 ///
@@ -101,12 +176,6 @@ pub fn capture_spans<F: FnOnce()>(f: F) -> Vec<CapturedSpan> {
         .get_finished_spans()
         .unwrap_or_default()
         .into_iter()
-        .map(|span| CapturedSpan {
-            name: span.name.to_string(),
-            trace_id: span.span_context.trace_id().to_string(),
-            parent_span_id: span.parent_span_id.to_string(),
-            parent_is_remote: span.parent_span_is_remote,
-            is_root: span.parent_span_id == SpanId::INVALID,
-        })
+        .map(to_captured)
         .collect()
 }
