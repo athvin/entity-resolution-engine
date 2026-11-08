@@ -1,0 +1,8 @@
+kind: statement
+operation: update
+mode: partial
+description: "Apply the steward RECORD-keyed phone_e164 overrides over the assembled golden rows, resolving each record to its current entity through entity_membership (latest created_at wins when several member rows name the attribute; NULL value = the steward cleared the field); zero overrides match zero rows, so the determinism contract holds."
+params:
+  - { name: updated_at, type: varchar }
+reads: [golden_record_override, entity_membership]
+returns: none

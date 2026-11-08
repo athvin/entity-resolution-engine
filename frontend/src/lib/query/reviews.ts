@@ -6,6 +6,7 @@ import {
   useQuery,
   useQueryClient,
   type InfiniteData,
+  type QueryClient,
 } from "@tanstack/react-query";
 
 import { bffFetch } from "@/lib/api/client";
@@ -91,6 +92,21 @@ export function useReviewInbox(
     initialPageParam: "",
     getNextPageParam: (last) => last.next_cursor ?? undefined,
   });
+}
+
+/** Remove reviews from every cached inbox page for the org — the optimistic
+ * half a verdict and the merge dialog's submit share. */
+export function dropReviewsFromInboxCache(
+  queryClient: QueryClient,
+  org: string,
+  ids: ReadonlySet<string>,
+) {
+  const pages = queryClient.getQueriesData<InfiniteData<ReviewPage>>({
+    queryKey: [...queryKeys.org(org), "review-inbox"],
+  });
+  for (const [key, data] of pages) {
+    queryClient.setQueryData(key, dropReviews(data, ids));
+  }
 }
 
 function dropReviews(

@@ -67,6 +67,10 @@ export const UI_ACTIONS = [
   // Separate from the single-pair actions on purpose. A bulk resolve is a
   // different cost and a different risk, and averaging it together with
   // single decisions hides both.
+  /** The merge dialog's submit: a pair decision PLUS the group edit (master
+   *  choice and field pins) riding with it. */
+  "review.merge.confirm",
+
   "review.bulk.match",
   "review.bulk.no_match",
   "review.bulk.recommend",

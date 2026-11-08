@@ -30,7 +30,7 @@ statements is read or written only through the engine's own stage SQL, not
 through a typed query function.
 
 <!-- BEGIN GENERATED: entities-index -->
-**49 entities, 242 declared statements.**
+**50 entities, 255 declared statements.**
 
 | Entity | Relation | Store | Key | Natural key | History |
 |---|---|---|---|---|---|
@@ -52,6 +52,7 @@ through a typed query function.
 | `golden_lineage` | `golden_lineage` | duckdb | `id` | `entity_id, attribute` | — |
 | `golden_override` | `golden_overrides` | duckdb | `id` | `entity_id, attribute` | — |
 | `golden_record` | `golden_records` | duckdb | `id` | — | — |
+| `golden_record_override` | `golden_record_overrides` | duckdb | `id` | `record_key, attribute` | — |
 | `ingest_batch` | `ingest_batches` | duckdb | `id` | — | — |
 | `int_std_record` | `int_std_records` | duckdb | `id` | `record_key` | — |
 | `job` | `jobs` | postgres | `id` | — | — |
@@ -105,7 +106,8 @@ Declared statements per entity and operation:
 | `fixup` | 1 | 1 | 0 | 0 |
 | `golden_lineage` | 0 | 1 | 0 | 0 |
 | `golden_override` | 1 | 0 | 0 | 1 |
-| `golden_record` | 0 | 5 | 11 | 0 |
+| `golden_record` | 0 | 5 | 22 | 0 |
+| `golden_record_override` | 1 | 0 | 0 | 1 |
 | `ingest_batch` | 1 | 2 | 1 | 1 |
 | `int_std_record` | 0 | 5 | 0 | 0 |
 | `job` | 2 | 4 | 10 | 0 |

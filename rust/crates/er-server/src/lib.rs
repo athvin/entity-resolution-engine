@@ -6523,6 +6523,39 @@ async fn review_detail(
     }
 }
 
+/// Viewer+: the review merge dialog's group
+/// (`GET /v1/orgs/{org}/datasets/{ds}/reviews/{review_id}/merge-group`) — the
+/// union of BOTH sides' entity memberships with values, so the dialog edits the
+/// merge that would actually land, not just the pair the review names.
+async fn review_merge_group(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, ds, review_id)): Path<(String, String, String)>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let session = match dataset_lake(&state, &org, &ds).await {
+        Ok(s) => s,
+        Err(r) => return *r,
+    };
+    let snapshot = match read::latest_snapshot(&session) {
+        Ok(s) => s,
+        Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}")),
+    };
+    match read::merge_group(&session, snapshot, &review_id) {
+        Ok(Some(read::MergeGroup::Group { items, total })) => {
+            Json(json!({ "items": items, "total": total, "snapshot": snapshot })).into_response()
+        }
+        Ok(Some(read::MergeGroup::NoPair)) => detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "this review is about an entity rather than a pair of records",
+        ),
+        Ok(None) => detail_err(StatusCode::NOT_FOUND, format!("no review '{review_id}'")),
+        Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
+    }
+}
+
 /// Viewer+: the assertion ledger (`GET /v1/orgs/{org}/datasets/{ds}/assertions`), active-only
 /// unless `?include_retracted=true`.
 async fn assertions_list(
@@ -9381,6 +9414,201 @@ async fn bulk_resolve_reviews(
     (StatusCode::OK, Json(resp)).into_response()
 }
 
+#[derive(Deserialize)]
+struct MergeOverrideIn {
+    attribute: String,
+    #[serde(default)]
+    value: Option<String>,
+    #[serde(default)]
+    clear: bool,
+}
+
+#[derive(Deserialize)]
+struct MergeGroupIn {
+    records: Vec<String>,
+    master: String,
+    #[serde(default)]
+    overrides: Vec<MergeOverrideIn>,
+    #[serde(default)]
+    review_id: Option<String>,
+    #[serde(default)]
+    apply_now: bool,
+}
+
+/// Steward+: merge a GROUP of records from the review dialog
+/// (`POST /v1/orgs/{org}/datasets/{ds}/merges`). One bundle, staged together so
+/// one drain applies it atomically from the steward's point of view:
+///
+///   - an `always` assertion star to the chosen master (every non-master
+///     record), which is what forces the merge at the next reconcile;
+///   - `protect_record` on the master, so the read path elects it;
+///   - each field override as `override_field_by_record` keyed by the MASTER's
+///     record_key — the merge's entity id is minted at reconcile and cannot be
+///     known here, so the pin rides the record and the assemble-time UPDATEs
+///     resolve it through the fresh membership;
+///   - `resolve_review(match)` when the dialog names its review.
+///
+/// Overrides carry no record_key of their own BY DESIGN: "copy this member's
+/// value" pins the VALUE against the master, so it survives the source record
+/// later leaving the entity. 2..=50 distinct records, 0..=11 overrides, master
+/// must be one of the records.
+async fn merge_group(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, ds)): Path<(String, String)>,
+    Json(body): Json<MergeGroupIn>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Steward) {
+        return e.into_response();
+    }
+    let records: Vec<&str> = body.records.iter().map(String::as_str).collect();
+    let distinct: std::collections::BTreeSet<&&str> = records.iter().collect();
+    if records.len() < 2
+        || records.len() > 50
+        || distinct.len() != records.len()
+        || records.iter().any(|r| r.is_empty())
+    {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "records must be 2..=50 distinct, non-empty record keys",
+        );
+    }
+    if !records.contains(&body.master.as_str()) {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "master must be one of records",
+        );
+    }
+    let override_attrs: std::collections::BTreeSet<&str> = body
+        .overrides
+        .iter()
+        .map(|o| o.attribute.as_str())
+        .collect();
+    if override_attrs.len() != body.overrides.len()
+        || !override_attrs.iter().all(|a| OVERRIDABLE_ATTRS.contains(a))
+    {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "each override needs a distinct attribute in the golden field set",
+        );
+    }
+    let Some(dsn) = &state.dsn else {
+        return detail_err(
+            StatusCode::NOT_IMPLEMENTED,
+            "steward actions require Postgres",
+        );
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let org_row = match pg::get_org(&client, &org).await {
+        Ok(Some(o)) if o.state == "active" => o,
+        Ok(Some(o)) => {
+            return detail_err(
+                StatusCode::CONFLICT,
+                format!(
+                    "org '{org}' is {}; steward actions are accepted only when active",
+                    o.state
+                ),
+            );
+        }
+        Ok(None) => return detail_err(StatusCode::NOT_FOUND, format!("no org '{org}'")),
+        Err(e) => return pg_err(e),
+    };
+    let d = match dataset_or_404(&client, &org_row, &ds).await {
+        Ok(row) => row,
+        Err(r) => return *r,
+    };
+    let mut actions: Vec<Value> = Vec::new();
+    for record in &records {
+        if *record == body.master {
+            continue;
+        }
+        actions.push(json!({
+            "type": "add_assertion",
+            "kind": "always",
+            "a": body.master,
+            "b": record,
+            "created_by": principal.actor,
+            "note": "review merge dialog",
+        }));
+    }
+    actions.push(json!({
+        "type": "protect_record",
+        "record_key": body.master,
+        "created_by": principal.actor,
+    }));
+    for o in &body.overrides {
+        actions.push(json!({
+            "type": "override_field_by_record",
+            "record_key": body.master,
+            "attribute": o.attribute,
+            // `clear: true` and a NULL value mean the same thing to the apply
+            // arm; send value only when setting.
+            "value": if o.clear { None } else { o.value.clone() },
+            "created_by": principal.actor,
+        }));
+    }
+    if let Some(review_id) = &body.review_id {
+        actions.push(json!({
+            "type": "resolve_review",
+            "review_id": review_id,
+            "resolution": "match",
+        }));
+    }
+    let mut action_ids = Vec::with_capacity(actions.len());
+    for action in &actions {
+        match pg::stage_action(
+            &client,
+            &org_row.id,
+            Some(d.id.as_str()),
+            action,
+            &principal.actor,
+        )
+        .await
+        {
+            Ok(id) => action_ids.push(id),
+            Err(e) => return pg_err(e),
+        }
+    }
+    let _ = pg::audit(
+        &client,
+        &principal.actor,
+        Some(&org),
+        None,
+        "steward.merge_group",
+        &json!({
+            "records": records.len(),
+            "master": body.master,
+            "overrides": body.overrides.len(),
+            "action_ids": action_ids.len(),
+        }),
+    )
+    .await;
+    let mut resp = json!({ "status": "staged", "action_ids": action_ids });
+    if body.apply_now {
+        let idem = format!("merge-group-apply:{}", er_ids::new_v7());
+        let params = json!({ "skip_ingest": true });
+        match pg::enqueue(
+            &client,
+            &org_row.id,
+            Some(d.id.as_str()),
+            "apply_corrections",
+            0,
+            Some(&idem),
+            Some(&params),
+            principal.provenance(),
+        )
+        .await
+        {
+            Ok(job) => resp["apply_job"] = json!(job.id),
+            Err(e) => return pg_err(e),
+        }
+    }
+    (StatusCode::OK, Json(resp)).into_response()
+}
+
 /// The 11 overridable golden columns (er-golden SCALAR + ADDRESS); the mass-update
 /// API only accepts these.
 const OVERRIDABLE_ATTRS: [&str; 11] = [
@@ -9835,6 +10063,11 @@ fn build_routes(state: AppState) -> Router {
             "/v1/orgs/{org}/datasets/{ds}/reviews/{review_id}",
             get(review_detail),
         )
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/reviews/{review_id}/merge-group",
+            get(review_merge_group),
+        )
+        .route("/v1/orgs/{org}/datasets/{ds}/merges", post(merge_group))
         .route(
             "/v1/orgs/{org}/datasets/{ds}/reviews/{review_id}/resolve",
             post(resolve_review),

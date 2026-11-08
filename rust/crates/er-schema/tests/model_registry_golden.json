@@ -21,6 +21,7 @@
   "run_stages",
   "ingest_batches",
   "golden_overrides",
+  "golden_record_overrides",
   "record_overlays",
   "schema_migrations"
  ],
@@ -1086,6 +1087,68 @@
     {
      "columns": [
       "entity_id",
+      "attribute"
+     ],
+     "where": null
+    }
+   ],
+   "owner": "ddl"
+  },
+  "golden_record_overrides": {
+   "columns": [
+    {
+     "name": "id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "record_key",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "attribute",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "value",
+     "nullable": true,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "created_by",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "created_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
+    },
+    {
+     "name": "source_action_id",
+     "nullable": false,
+     "type": "VARCHAR"
+    },
+    {
+     "name": "updated_at",
+     "nullable": false,
+     "type": "TIMESTAMP"
+    }
+   ],
+   "create_table_sql": "CREATE TABLE IF NOT EXISTS lake.main.golden_record_overrides (\n  id VARCHAR NOT NULL,\n  record_key VARCHAR NOT NULL,\n  attribute VARCHAR NOT NULL,\n  value VARCHAR,\n  created_by VARCHAR NOT NULL,\n  created_at TIMESTAMP NOT NULL,\n  source_action_id VARCHAR NOT NULL,\n  updated_at TIMESTAMP NOT NULL\n);",
+   "enums": {},
+   "keys": [
+    {
+     "columns": [
+      "id"
+     ],
+     "where": null
+    },
+    {
+     "columns": [
+      "record_key",
       "attribute"
      ],
      "where": null

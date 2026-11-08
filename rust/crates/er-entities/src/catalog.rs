@@ -1189,6 +1189,52 @@ columns:
 "#,
     ),
     (
+        "golden_record_override",
+        r#"kind: entity
+version: 1
+name: golden_record_override
+relation: golden_record_overrides
+description: "One steward golden-field override keyed by RECORD (latest-wins per record and attribute); resolved to the record's current entity through entity_membership at golden-assembly time, so a value chosen in the review merge dialog lands on the entity the merge mints. A NULL value means the steward cleared the field."
+key: [id]
+natural_key: [record_key, attribute]
+generate:
+  stores: [duckdb]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "Content-derived row id: sha256('golden_record_overrides:' || record_key || ':' || attribute)."
+  - name: record_key
+    type: varchar
+    nullable: false
+    description: "The record whose override this is (the merge dialog keys every override by the chosen master)."
+  - name: attribute
+    type: varchar
+    nullable: false
+    description: "The golden attribute the override pins."
+  - name: value
+    type: varchar
+    description: "The pinned value; NULL means the steward cleared the field."
+  - name: created_by
+    type: varchar
+    nullable: false
+    description: "The steward or system actor that created the row."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    description: "Creation stamp (the run's logical timestamp)."
+  - name: source_action_id
+    type: varchar
+    nullable: false
+    description: "The staged steward action that produced this row."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical last-write time (set at insert; overrides are replaced, not edited)."
+"#,
+    ),
+    (
         "ingest_batch",
         r#"kind: entity
 version: 1

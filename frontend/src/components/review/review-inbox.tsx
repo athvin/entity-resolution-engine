@@ -30,6 +30,7 @@ import {
 } from "@/lib/query/adjudicate";
 import { cn } from "@/lib/utils";
 import { confidenceLabel, DecisionPanel } from "./decision-panel";
+import { MergeGroupDialog } from "./merge-group-dialog";
 import { RecommendationBadge } from "./recommendation-badge";
 import { SwipeCard } from "./swipe-card";
 import { useDatasetSlug } from "@/lib/use-dataset-slug";
@@ -123,6 +124,7 @@ function LastResult({ status }: { status: "applied" | "staged" | null }) {
 export function ReviewInbox({ org, isSteward }: { org: string; isSteward: boolean }) {
   const ds = useDatasetSlug();
   const [reason, setReason] = useState<string | null>(null);
+  const [mergeReview, setMergeReview] = useState<ReviewRow | null>(null);
   const [bandKey, setBandKey] = useState<string>("all");
   const band = BANDS.find((b) => b.key === bandKey);
   const bandActive = bandKey !== "all";
@@ -567,6 +569,25 @@ export function ReviewInbox({ org, isSteward }: { org: string; isSteward: boolea
         }}
       />
 
+      {mergeReview !== null && (
+        <MergeGroupDialog
+          org={org}
+          review={mergeReview}
+          open
+          onClose={() => {
+            setMergeReview(null);
+          }}
+          onMerged={() => {
+            // The bundle carries the review's own match resolution, so the
+            // inbox treats this like a verdict: the staged chip moves and the
+            // cursor settles on the next item.
+            setLastStatus("staged");
+            setMergeReview(null);
+            setCursor((position) => Math.max(0, Math.min(position, rows.length - 2)));
+          }}
+        />
+      )}
+
       <StagedBanner org={org} />
 
       {/* Desktop: queue list + decision panel. */}
@@ -622,6 +643,13 @@ export function ReviewInbox({ org, isSteward }: { org: string; isSteward: boolea
             review={active}
             disabled={!isSteward || resolve.isPending}
             onResolve={act}
+            onOpenMerge={
+              isSteward && active.rec_a_key !== null && active.rec_b_key !== null
+                ? () => {
+                    setMergeReview(active);
+                  }
+                : undefined
+            }
             showKeyHints
             recommendation={
               <RecommendationBadge

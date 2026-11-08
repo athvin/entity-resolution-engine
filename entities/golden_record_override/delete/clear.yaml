@@ -1,0 +1,8 @@
+kind: statement
+operation: delete
+mode: partial
+description: "Drop the prior override for (record_key, attribute) so the new one is latest-wins."
+params:
+  - { name: record_key, type: varchar }
+  - { name: attribute, type: varchar }
+returns: none

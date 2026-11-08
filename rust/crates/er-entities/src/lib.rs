@@ -23,6 +23,7 @@ pub mod fixup;
 pub mod golden_lineage;
 pub mod golden_override;
 pub mod golden_record;
+pub mod golden_record_override;
 pub mod ingest_batch;
 pub mod int_std_record;
 pub mod job;

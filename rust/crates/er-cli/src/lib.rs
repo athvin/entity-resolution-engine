@@ -2421,6 +2421,22 @@ pub fn preview_transform(
         .collect())
 }
 
+/// The 11 overridable golden columns (er-golden SCALAR + ADDRESS) — the set
+/// both golden-override arms accept, entity-keyed and record-keyed alike.
+const OVERRIDABLE_GOLDEN_ATTRS: [&str; 11] = [
+    "given_name",
+    "family_name",
+    "email",
+    "phone_e164",
+    "birth_date",
+    "addr_number",
+    "addr_street",
+    "addr_unit",
+    "addr_city",
+    "addr_region",
+    "addr_postal",
+];
+
 /// Apply one drained steward action to the lake (the control plane's
 /// `staged_steward_actions`, dispatched when the org's writer lock is free):
 ///   - `add_assertion` → insert an active assertion on the canonicalized pair
@@ -2567,21 +2583,7 @@ pub fn apply_staged_action_labeled(
             create_ddl_table(session, "golden_overrides")?;
             let entity_id = field("entity_id");
             let attribute = field("attribute");
-            // The 11 overridable golden columns (er-golden SCALAR + ADDRESS).
-            const OVERRIDABLE: [&str; 11] = [
-                "given_name",
-                "family_name",
-                "email",
-                "phone_e164",
-                "birth_date",
-                "addr_number",
-                "addr_street",
-                "addr_unit",
-                "addr_city",
-                "addr_region",
-                "addr_postal",
-            ];
-            if !entity_id.is_empty() && OVERRIDABLE.contains(&attribute) {
+            if !entity_id.is_empty() && OVERRIDABLE_GOLDEN_ATTRS.contains(&attribute) {
                 let value = if kind == "clear_field" {
                     None
                 } else {
@@ -2595,6 +2597,34 @@ pub fn apply_staged_action_labeled(
                 er_entities::golden_override::create::set(
                     session.connection(),
                     entity_id,
+                    attribute,
+                    value,
+                    field("created_by"),
+                    applied_at,
+                    action_id,
+                )?;
+            }
+        }
+        // The review merge dialog's override (S2.8): set (or, with no value,
+        // clear) one golden field keyed by RECORD — the merge's entity id is
+        // minted at reconcile, so the dialog pins values against the chosen
+        // master record and the assemble-time UPDATEs resolve the record to
+        // its current entity through entity_membership. Latest-wins per
+        // (record_key, attribute).
+        Some("override_field_by_record") => {
+            create_ddl_table(session, "golden_record_overrides")?;
+            let record_key = field("record_key");
+            let attribute = field("attribute");
+            if !record_key.is_empty() && OVERRIDABLE_GOLDEN_ATTRS.contains(&attribute) {
+                let value = action.get("value").and_then(serde_json::Value::as_str);
+                er_entities::golden_record_override::delete::clear(
+                    session.connection(),
+                    record_key,
+                    attribute,
+                )?;
+                er_entities::golden_record_override::create::set(
+                    session.connection(),
+                    record_key,
                     attribute,
                     value,
                     field("created_by"),
@@ -3534,6 +3564,36 @@ pub fn run_golden(session: &Session, config: &Config, run_at: &str) -> Result<()
             ov::override_addr_city,
             ov::override_addr_region,
             ov::override_addr_postal,
+        ] {
+            apply(conn, run_at)?;
+        }
+    }
+
+    // The merge dialog's RECORD-keyed overrides (S2.8), applied AFTER the
+    // entity-keyed pass so a dialog choice wins over a mass-update one. Each
+    // UPDATE resolves the pinned record to its CURRENT entity through
+    // entity_membership — which is the whole point: a review merge mints its
+    // entity id at reconcile, after the override was staged, and this pass is
+    // where the choice catches up with the entity the merge produced. Same
+    // determinism argument: an empty/absent table matches zero rows.
+    let record_overrides_present = session
+        .lake_table_exists("golden_record_overrides")
+        .unwrap_or(false);
+    if record_overrides_present {
+        use er_entities::golden_record::update as ov;
+        let conn = session.connection();
+        for apply in [
+            ov::override_record_given_name,
+            ov::override_record_family_name,
+            ov::override_record_email,
+            ov::override_record_phone_e164,
+            ov::override_record_birth_date,
+            ov::override_record_addr_number,
+            ov::override_record_addr_street,
+            ov::override_record_addr_unit,
+            ov::override_record_addr_city,
+            ov::override_record_addr_region,
+            ov::override_record_addr_postal,
         ] {
             apply(conn, run_at)?;
         }

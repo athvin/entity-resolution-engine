@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, SkipForward, X } from "lucide-react";
+import { Check, GitMerge, SkipForward, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -34,6 +34,9 @@ interface DecisionPanelProps {
   disabled: boolean;
   onResolve: (resolution: Resolution) => void;
   showKeyHints: boolean;
+  /** Steward-only: opens the editable merge dialog (spec 2.8). Absent for
+   * viewers and for entity-subject reviews, which have no pair to merge. */
+  onOpenMerge?: (() => void) | undefined;
   /** The AI recommendation slot (V6). Optional so the panel renders without it —
    * AI-off is a clean absence here, not a hole. */
   recommendation?: React.ReactNode;
@@ -49,6 +52,7 @@ export function DecisionPanel({
   disabled,
   onResolve,
   showKeyHints,
+  onOpenMerge,
   recommendation,
 }: DecisionPanelProps) {
   return (
@@ -79,6 +83,18 @@ export function DecisionPanel({
             the suggestion is a second opinion on it, and the verdict is
             theirs. Putting it at the top would have it read as the answer. */}
         {recommendation}
+        {onOpenMerge !== undefined && (
+          <Button
+            variant="secondary"
+            className="w-full"
+            disabled={disabled}
+            onClick={onOpenMerge}
+            data-testid="open-merge-dialog"
+          >
+            <GitMerge />
+            Edit &amp; merge the group…
+          </Button>
+        )}
         <div className="grid grid-cols-3 gap-2">
           <Button
             variant="default"
