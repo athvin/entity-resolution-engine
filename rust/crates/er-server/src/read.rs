@@ -353,16 +353,41 @@ fn edges_by_entity(
     first: &str,
     last: &str,
 ) -> Result<GroupEdges, String> {
-    let rows =
-        er_entities::match_score::read::within_groups(session.connection(), snapshot, first, last)
-            .map_err(|e| e.to_string())?;
     let mut by_entity: GroupEdges = std::collections::BTreeMap::new();
-    for row in rows {
-        by_entity.entry(row.entity_id).or_default().push((
-            row.rec_a_key,
-            row.rec_b_key,
-            row.match_probability,
-        ));
+    // A lake has `match_scores` only once a match run has written them and
+    // `assertions` only once a steward has staged one; either side can
+    // legitimately be absent (a freshly resolved lake has no assertions table
+    // at all). Each arm is fetched only when its table exists rather than
+    // rescued from a planner error, the same reason `merge_plans` probes
+    // `record_overlay` before emitting SQL that names it.
+    let conn = session.connection();
+    if session
+        .lake_table_exists("match_scores")
+        .map_err(|e| e.to_string())?
+    {
+        let rows = er_entities::match_score::read::within_groups(conn, snapshot, first, last)
+            .map_err(|e| e.to_string())?;
+        for row in rows {
+            by_entity.entry(row.entity_id).or_default().push((
+                row.rec_a_key,
+                row.rec_b_key,
+                row.match_probability,
+            ));
+        }
+    }
+    if session
+        .lake_table_exists("assertions")
+        .map_err(|e| e.to_string())?
+    {
+        let rows = er_entities::assertion::read::within_groups(conn, snapshot, first, last)
+            .map_err(|e| e.to_string())?;
+        for row in rows {
+            by_entity.entry(row.entity_id).or_default().push((
+                row.rec_a_key,
+                row.rec_b_key,
+                row.match_probability,
+            ));
+        }
     }
     Ok(by_entity)
 }

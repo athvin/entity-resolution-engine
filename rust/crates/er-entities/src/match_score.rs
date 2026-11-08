@@ -563,7 +563,7 @@ LIMIT $4
         UncertainPageRow::from_batches(&batches)
     }
 
-    /// One row of `within_groups`: The within-group evidence behind a page of duplicate groups' confidence: every active scored edge whose endpoints are members of the same entity in the page's id range, plus every active always-assertion as a 1.0 edge (assertion-sourced edges are never persisted to match_scores, S4.4, and are score 1.0 by definition). The per-entity join is what keeps a pair score from leaking across groups: two records may be duplicates of each other only inside their own entity. A member held by a transitive or cut path with no direct edge of its own simply appears in no row — the caller averages the members that carry evidence rather than inventing a zero. Edges repeat freely (a pair scored by two ensemble members, or scored and asserted); the caller's max is indifferent. Reads `assertions` and `entity_membership` as well as `match_scores`, declared through `reads:` so the impact surface is explicit (E009).
+    /// One row of `within_groups`: The scored half of a page of duplicate groups' confidence: every active scored edge whose endpoints are members of the same entity in the page's id range. The per-entity join is what keeps a pair score from leaking across groups: two records may be duplicates of each other only inside their own entity. A member held by a transitive or cut path with no direct edge of its own simply appears in no row — the caller averages the members that carry evidence rather than inventing a zero. Edges repeat freely (a pair scored by two ensemble members); the caller's max is indifferent. The caller fetches this arm only when the lake has a `match_scores` table — a lake resolved without a match run legitimately does not — so the statement itself never has to fail on its absence; `assertion.read.within_groups` supplies the other arm. Reads `entity_membership` as well as `match_scores`, declared through `reads:` so the impact surface is explicit (E009).
     #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
     pub struct WithinGroupsRow {
         pub entity_id: String,
@@ -615,7 +615,7 @@ LIMIT $4
         }
     }
 
-    /// The within-group evidence behind a page of duplicate groups' confidence: every active scored edge whose endpoints are members of the same entity in the page's id range, plus every active always-assertion as a 1.0 edge (assertion-sourced edges are never persisted to match_scores, S4.4, and are score 1.0 by definition). The per-entity join is what keeps a pair score from leaking across groups: two records may be duplicates of each other only inside their own entity. A member held by a transitive or cut path with no direct edge of its own simply appears in no row — the caller averages the members that carry evidence rather than inventing a zero. Edges repeat freely (a pair scored by two ensemble members, or scored and asserted); the caller's max is indifferent. Reads `assertions` and `entity_membership` as well as `match_scores`, declared through `reads:` so the impact surface is explicit (E009).
+    /// The scored half of a page of duplicate groups' confidence: every active scored edge whose endpoints are members of the same entity in the page's id range. The per-entity join is what keeps a pair score from leaking across groups: two records may be duplicates of each other only inside their own entity. A member held by a transitive or cut path with no direct edge of its own simply appears in no row — the caller averages the members that carry evidence rather than inventing a zero. Edges repeat freely (a pair scored by two ensemble members); the caller's max is indifferent. The caller fetches this arm only when the lake has a `match_scores` table — a lake resolved without a match run legitimately does not — so the statement itself never has to fail on its absence; `assertion.read.within_groups` supplies the other arm. Reads `entity_membership` as well as `match_scores`, declared through `reads:` so the impact surface is explicit (E009).
     pub fn within_groups(
         conn: &::duckdb::Connection,
         snapshot: i64,
@@ -626,18 +626,16 @@ LIMIT $4
   SELECT entity_id, record_key
   FROM lake.main.entity_membership AT (VERSION => {snapshot})
   WHERE entity_id >= $1 AND entity_id <= $2
+),
+scored AS (
+  SELECT rec_a_key, rec_b_key, match_probability
+  FROM lake.main.match_scores AT (VERSION => {snapshot})
+  WHERE is_active
 )
-SELECT a.entity_id, ms.rec_a_key, ms.rec_b_key, ms.match_probability
-FROM lake.main.match_scores AT (VERSION => {snapshot}) ms
-JOIN members a ON a.record_key = ms.rec_a_key
-JOIN members b ON b.record_key = ms.rec_b_key AND b.entity_id = a.entity_id
-WHERE ms.is_active
-UNION ALL
-SELECT a.entity_id, asn.rec_a_key, asn.rec_b_key, CAST(1.0 AS DOUBLE) AS match_probability
-FROM lake.main.assertions AT (VERSION => {snapshot}) asn
-JOIN members a ON a.record_key = asn.rec_a_key
-JOIN members b ON b.record_key = asn.rec_b_key AND b.entity_id = a.entity_id
-WHERE asn.kind = 'always' AND asn.active
+SELECT a.entity_id, scored.rec_a_key, scored.rec_b_key, scored.match_probability
+FROM scored
+JOIN members a ON a.record_key = scored.rec_a_key
+JOIN members b ON b.record_key = scored.rec_b_key AND b.entity_id = a.entity_id
 ORDER BY entity_id, rec_a_key, rec_b_key
 ";
         let __span = ::er_span::sql_span(
