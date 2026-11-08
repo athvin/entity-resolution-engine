@@ -1,0 +1,52 @@
+# §5/§5.1: the prod app pool — er-api, er-web, er-dispatcher.
+#
+# ON-DEMAND ONLY, which is the one thing that differs from dev/app.yaml. §5's
+# table says "spot in dev, on-demand in prod", and the reason is the pods rather
+# than the money: `er-dispatcher` runs `replicas: 1` with a `Recreate` strategy
+# and holds the only Job-create RBAC in the cluster, and the web+api pod is a
+# single merged pod behind a blue/green cutover. A spot reclaim gives two
+# minutes' notice and then takes the serving pod with it — there is no second
+# replica to carry the traffic, so the interruption is an outage rather than a
+# rescheduling event.
+#
+# That is also why `capacity-type` lists ONE value instead of putting
+# `on-demand` second as a fallback. Karpenter prefers spot when both are
+# allowed, so `["spot", "on-demand"]` would be the dev behaviour with extra
+# words — the fallback only engages when spot capacity is unavailable, not when
+# it is reclaimed.
+#
+# Everything else matches dev deliberately: same families, same size, same
+# disruption policy. The chart's resource requests are identical across
+# environments, so a different instance shape here would make a prod capacity
+# problem unreproducible in dev.
+#
+# WhenEmptyOrUnderutilized is correct HERE and forbidden on the runner pools
+# (which are shared, one level up): an app pod is a replaceable replica, a
+# runner pod is an hour of work.
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: app
+spec:
+  template:
+    spec:
+      nodeClassRef:
+        group: eks.amazonaws.com
+        kind: NodeClass
+        name: default
+      requirements:
+        - key: eks.amazonaws.com/instance-family
+          operator: In
+          values: ["m6i", "m6a"]
+        - key: eks.amazonaws.com/instance-size
+          operator: In
+          values: ["large"]
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["on-demand"]
+        - key: kubernetes.io/arch
+          operator: In
+          values: ["amd64"]
+  disruption:
+    consolidationPolicy: WhenEmptyOrUnderutilized
+    consolidateAfter: 1m

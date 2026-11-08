@@ -75,13 +75,19 @@ records which option was chosen at each fork and what was rejected.
 [references/plan-to-aws.md](references/plan-to-aws.md) is the ordered build-out
 tracker the other two defer to for live status — read status there, design in
 them. None is a substitute for reading the Terraform.
-- A new pool goes **beside the deployed ones**, not under
-  `infra/k8s/nodepools/measure/`. `make cluster-objects` — still callable by its
-  old name `make nodepools` — applies that directory **non-recursively**, which
-  is the whole mechanism keeping the subdirectory out of the cluster with no
-  exclusion list to maintain. It holds a measurement-only pool, the one
-  `NodePool` carrying `limits`, so a runaway measurement cannot provision a
-  fleet.
+- **Where a new pool goes depends on whether both clusters want it.**
+  `make cluster-objects` — still callable by its old name `make nodepools` —
+  applies `infra/k8s/nodepools/` and `infra/k8s/nodepools/<env>/`, each
+  **non-recursively**, against `ER_ENV` (default `dev`; `ER_ENV=prod` for
+  prod). So a pool both clusters share goes at the top level, and one that
+  differs per environment goes in the env directory. Today exactly one differs:
+  `app` is spot-preferring in dev and on-demand-only in prod, because the
+  dispatcher is a single replica holding the cluster's only Job-create RBAC and
+  a spot reclaim there is an outage rather than a reschedule.
+  `infra/k8s/nodepools/measure/` is reached by neither apply — it holds a
+  measurement-only pool, the one `NodePool` carrying `limits`, so a runaway
+  measurement cannot provision a fleet. It stays out because nothing names it,
+  not because of an exclusion list.
 
 The distinction matters for disruption in particular:
 `WhenEmptyOrUnderutilized` is right for the stateless app pool and forbidden on

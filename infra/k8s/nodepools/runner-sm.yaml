@@ -52,13 +52,15 @@ spec:
     # a longer idle timer does nothing to that. Only the timer moves.
     #
     # ONE COUPLING TO KNOW ABOUT. A lingering idle node holds account vCPU
-    # quota, and that quota is currently the binding constraint, not cost: the
-    # applied ceiling is 8 vCPU (§5) and the always-on app and system nodes take
-    # 2 each. So a lingering 8-vCPU runner-sm node leaves nothing for a second
-    # runner of any size, and the next job for a *different* class would sit
-    # Pending behind an idle node rather than launching beside it. That was
-    # observed while measuring: with a probe node up, the cluster sat at exactly
-    # 8 vCPU. Sequential jobs — the case this timer exists for — are unaffected,
-    # since the second job wants the very node that is lingering. Raise the
-    # quota before relying on concurrent runners of different classes.
+    # quota. That quota WAS the binding constraint — at an applied ceiling of
+    # 8 vCPU a single lingering runner-sm node left nothing for a runner of any
+    # other class, so the next job would sit Pending behind an idle node rather
+    # than launching beside it, observed while measuring with a probe node up.
+    #
+    # Both Standard quotas were raised to 64 on 2026-11-01 (measured
+    # 2026-11-08; §5 carries the history), so that specific starvation no
+    # longer applies — 4 vCPU are in use across both clusters. The coupling
+    # itself is unchanged and worth keeping in mind, because the pool is now
+    # shared by er-dev and er-prod, which draw on the SAME account quota: a
+    # lingering dev measurement node and a prod tenant run compete.
     consolidateAfter: 10m
