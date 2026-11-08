@@ -147,31 +147,75 @@ It prints the skill roots table, the per-skill descriptions, and an
   discarded — while the description-budget table above reported the full length,
   because the gate measures the raw line.
 
-### What has no repo-scoped equivalent at all
+### What cannot live in the repo, and what is derived into place instead
 
 Everything else in `.claude/settings.json` is per-developer state in
-`$CODEX_HOME`, and a project file cannot supply it. A project-level
+`$CODEX_HOME`, and no project file can supply it. A project-level
 `.codex/config.toml` **is** merged into the session — a `sandbox_mode` set there
 takes effect — which makes the exceptions below easy to assume away, so each was
 probed.
 
-| Claude Code | Codex | Measured |
+The fix for three of the four rows is the same shape as the skills bridge:
+**derive, do not restate.** A sync script reads the Claude Code file and
+nothing else, so nobody can give the two agents different lists by editing one.
+
+| Claude Code | Codex | Measured, and what closes it |
 |---|---|---|
-| `.mcp.json` + `enabledMcpjsonServers` | `[mcp_servers.*]` in `$CODEX_HOME/config.toml` | a project `.codex/config.toml`'s `mcp_servers` table is **ignored**. A real stdio MCP server declared both ways: in the project file the tool is absent from the session, injected with `-c` it is present. Registered at `$CODEX_HOME` it does reach a `--profile kimi` session, so one sync serves every profile. |
-| `hooks` — the `aws-write-guard` `PreToolUse` guard on `aws`/`terraform`/`kubectl`/`helm` | `$CODEX_HOME/hooks.json` | neither `.codex/hooks.json` nor `.agents/hooks.json` fires from a project directory; only the `$CODEX_HOME` file did. Those path strings exist in the binary inside its Claude-Code **migration** reader, which imports into `$CODEX_HOME` — which is what makes them look project-scoped. |
-| `permissions.deny` — `pkill`, `killall`, destructive `aws` | `sandbox_mode` / `approval_policy` | no per-command deny list exists; the sandbox is the whole lever, and `--dangerously-bypass-approvals-and-sandbox` removes it. |
-| `enabledPlugins` | `codex plugin` | per-developer; the binary carries `repository-scoped plugin migration is not allowed`. |
+| `.mcp.json` + `enabledMcpjsonServers` | `[mcp_servers.*]` in `$CODEX_HOME/config.toml` | a project `.codex/config.toml`'s `mcp_servers` table is **ignored**. A real stdio MCP server declared both ways: in the project file the tool is absent from the session, injected with `-c` it is present. Registered at `$CODEX_HOME` it does reach a `--profile kimi` session, so one sync serves every profile. → `scripts/codex-mcp-sync.sh` |
+| `hooks` — the `aws-write-guard` `PreToolUse` guard | `$CODEX_HOME/hooks.json` | neither `.codex/hooks.json` nor `.agents/hooks.json` fires from a project directory; only the `$CODEX_HOME` file did. Those path strings are in the binary inside its Claude-Code **migration** reader, which imports into `$CODEX_HOME` — which is what makes them look project-scoped. → `scripts/codex-hooks-sync.sh` |
+| `permissions.deny` — `pkill`, `killall`, destructive `aws` | nothing | no per-command deny list exists; `sandbox_mode` is the whole lever and `--dangerously-bypass-approvals-and-sandbox` removes it. → the same hook, which reads the patterns **out of `.claude/settings.json`** |
+| `enabledPlugins` | `codex plugin` | no equivalent — the binary carries `repository-scoped plugin migration is not allowed`. Per-developer, permanently. |
 
-For the MCP servers, `scripts/codex-mcp-sync.sh` closes the gap by **deriving**
-`codex mcp add` from `.mcp.json` — so the invocation is never retyped, which is
-where `--read-only` and `--profile er-readonly` would go missing. It honours
-`enabledMcpjsonServers`, reports what it skipped, and refuses any shape it does
-not understand rather than passing over a server quietly.
+### The hook decision protocol, as measured rather than documented
 
-The row to carry away is the hook. Under Codex nothing intercepts an `aws`,
-`terraform`, `kubectl` or `helm` write, so the read-only `er-readonly` profile
-and the account's IAM denies are the only thing left — see the
-`aws-account-operations` skill for what those cover.
+This matters more than the installation does, because two of these rows mean a
+guard that looks installed and refuses nothing. Codex 0.167.0, driven with a
+hook that emits each decision in turn:
+
+| the hook does | Codex logs | the command |
+|---|---|---|
+| silent `exit 0` | `Completed` | runs — the correct pass |
+| `permissionDecision: deny` | `Blocked` | **refused** |
+| `exit 2`, reason on stderr | `Blocked` | **refused** |
+| `permissionDecision: ask` | `Failed` | **runs** |
+| `permissionDecision: allow` | `Failed` | runs |
+| non-JSON on stdout, `exit 0` | `Completed` | runs |
+
+Three consequences, each load-bearing:
+
+1. **`ask` is not a weaker deny, it is an allow.** `aws-write-guard.sh` grades
+   its verdicts — destructive calls `deny`, everything else mutating escalates
+   to `ask` so a human decides — and that middle case is most of the surface.
+   Ported unchanged it would be the guard's widest hole on the one agent with no
+   prompt to fall back on. So the installer sets `ER_GUARD_ASK_AS_DENY=1` and
+   those calls are refused, with a reason saying so. The flag lives in the guard
+   rather than in a wrapper, so there is one decision table and
+   `codex-hooks-sync-test.sh` can pin both mappings — Claude Code must keep
+   `ask`, Codex must not get one.
+2. **A guard that breaks fails open**, silently: garbage on stdout is logged
+   `Completed` and the command proceeds. There is no runtime signal for this, so
+   the assertion that the deny list actually parsed belongs in the gate, which
+   is where it is.
+3. **Sandbox bypass is not hook bypass.** A `deny` still blocks under
+   `--dangerously-bypass-approvals-and-sandbox`, which is the flag set these
+   sessions use. That is what makes the whole exercise worth anything.
+
+### Hook trust: the step that decides whether any of it runs
+
+**A hook Codex has not trusted is skipped silently.** No warning, no log line;
+the command runs. Trust is a `[hooks.state."<file>:<event>:<i>:<j>"]
+trusted_hash` entry in `$CODEX_HOME/config.toml`, and
+`--dangerously-bypass-hook-trust` does **not** write one — verified across four
+bypassed runs, which left the config untouched. So each machine needs either
+
+- one interactive `codex` session where the hook is approved, which persists the
+  trust and makes every later run honour it, `codex exec` included; or
+- `--dangerously-bypass-hook-trust` on every invocation.
+
+`scripts/codex-hooks-sync.sh` prints that after installing, because an
+installed-but-untrusted hook is worse than no hook: it reads as cover. Confirm
+it is live the only way that proves anything — have a session attempt a denied
+command and look for `Command blocked by PreToolUse hook: …`.
 
 ## Authoring rules
 
