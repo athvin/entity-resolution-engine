@@ -9845,6 +9845,12 @@ struct MergeGroupIn {
 ///     resolve it through the fresh membership;
 ///   - `resolve_review(match)` when the dialog names its review.
 ///
+/// The bundle's origin is derived, not declared: a `review_id` means the
+/// detected-group dialog (`review`), its absence means an arbitrary selection
+/// (`manual`, spec 2.10). The origin lands in the assertion notes and the
+/// audit detail, so a manual merge is distinguishable from a scored one in
+/// both stores — and there is no client-supplied flag to spoof.
+///
 /// Overrides carry no record_key of their own BY DESIGN: "copy this member's
 /// value" pins the VALUE against the master, so it survives the source record
 /// later leaving the entity. 2..=50 distinct records, 0..=11 overrides, master
@@ -9917,6 +9923,12 @@ async fn merge_group(
         Ok(row) => row,
         Err(r) => return *r,
     };
+    let manual = body.review_id.is_none();
+    let note = if manual {
+        "manual merge (no detected group)"
+    } else {
+        "review merge dialog"
+    };
     let mut actions: Vec<Value> = Vec::new();
     for record in &records {
         if *record == body.master {
@@ -9928,7 +9940,7 @@ async fn merge_group(
             "a": body.master,
             "b": record,
             "created_by": principal.actor,
-            "note": "review merge dialog",
+            "note": note,
         }));
     }
     actions.push(json!({
@@ -9980,6 +9992,7 @@ async fn merge_group(
             "master": body.master,
             "overrides": body.overrides.len(),
             "action_ids": action_ids.len(),
+            "origin": if manual { "manual" } else { "review" },
         }),
     )
     .await;

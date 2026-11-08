@@ -42,8 +42,11 @@ export function useMergeGroup(org: string, ds: string, reviewId: string | null) 
 export interface MergeGroupPayload {
   records: string[];
   master: string;
-  overrides: MergeOverridePayload[];
+  /** Absent on a manual merge (spec 2.10): field corrections stay post-merge. */
+  overrides?: MergeOverridePayload[];
   review_id?: string;
+  /** The review dialog stages deliberately; the manual merge applies now. */
+  apply_now?: boolean;
 }
 
 export interface MergeGroupResult {
@@ -74,6 +77,12 @@ export function useMergeGroupSubmit(org: string, ds: string) {
         dropReviewsFromInboxCache(queryClient, org, new Set([payload.review_id]));
       }
       void queryClient.invalidateQueries({ queryKey: [...queryKeys.org(org), "review-inbox"] });
+      // The merged entity's golden changed either way (review dialog or the
+      // records browser's manual selection) — refresh both read surfaces.
+      void queryClient.invalidateQueries({
+        queryKey: [...queryKeys.ds(org, ds), "golden-records"],
+      });
+      void queryClient.invalidateQueries({ queryKey: [...queryKeys.ds(org, ds), "entity"] });
       // The staged banner's key is org-rooted (no ds segment) — mirror
       // `useResolveReview`'s settled invalidations rather than inventing one.
       void queryClient.invalidateQueries({ queryKey: [...queryKeys.org(org), "staged"] });
