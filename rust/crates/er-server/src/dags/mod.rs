@@ -22,13 +22,13 @@ pub mod tasks;
 use er_dag::{Dag, DagBuilder, TriggerRule};
 
 use control::{
-    Activate, CreateCatalog, DrainActions, EmitWriteBack, RegisterModel, SettleActions,
-    StageApproved,
+    Activate, AdvanceSfCursor, CreateCatalog, DrainActions, EmitWriteBack, RegisterModel,
+    SettleActions, StageApproved,
 };
 use tasks::{
-    ApplyStaged, Assemble, CorrectReconcile, CorrectionsInit, CorrectionsReconcile, Finish, Ingest,
-    Init, LakeInit, Maintain, Match, ProfileCorpus, Reconcile, ReconcileSchema, Standardize, Train,
-    WriteBackScan,
+    ApplyStaged, Assemble, CorrectReconcile, CorrectionsInit, CorrectionsReconcile, ExtractPull,
+    Finish, Ingest, Init, LakeInit, Maintain, Match, ProfileCorpus, Reconcile, ReconcileSchema,
+    Standardize, Train, WriteBackScan,
 };
 
 /// The lake session type every pod task body takes; fixed here so `er-dag`
@@ -54,10 +54,11 @@ pub enum JobKind {
     DatasetProvision,
     ApplyCorrections,
     ApplyApproved,
+    Extract,
 }
 
 impl JobKind {
-    pub const ALL: [JobKind; 11] = [
+    pub const ALL: [JobKind; 12] = [
         JobKind::RunAllFull,
         JobKind::RunAllIncremental,
         JobKind::Correct,
@@ -69,6 +70,7 @@ impl JobKind {
         JobKind::DatasetProvision,
         JobKind::ApplyCorrections,
         JobKind::ApplyApproved,
+        JobKind::Extract,
     ];
 
     #[must_use]
@@ -85,6 +87,7 @@ impl JobKind {
             JobKind::DatasetProvision => "dataset_provision",
             JobKind::ApplyCorrections => "apply_corrections",
             JobKind::ApplyApproved => "apply_approved",
+            JobKind::Extract => "extract",
         }
     }
 
@@ -123,6 +126,7 @@ pub fn dag_for(kind: JobKind) -> Dag {
         JobKind::DatasetProvision => dataset_provision(),
         JobKind::ApplyCorrections => apply_corrections(),
         JobKind::ApplyApproved => apply_approved(),
+        JobKind::Extract => extract(),
     }
 }
 
@@ -244,6 +248,12 @@ pub async fn run_control_task(
             let trained = control_pin::<er_dag::Plan<plans::TrainedModel>>(ctx, 0)?;
             completed(control::RegisterModel.run(ctx, (trained,)).await?)
         }
+        // `extract`'s Postgres half: publish the staged delivery (enqueue the
+        // ingest run) and advance the (dataset, source) watermark.
+        (JobKind::Extract, "advance_sf_cursor") => {
+            let report = control_pin::<er_dag::Plan<plans::ExtractReport>>(ctx, 0)?;
+            completed(control::AdvanceSfCursor.run(ctx, (report,)).await?)
+        }
         (kind, task) => Err(er_dag::TaskError::Failed(er_errors::ErError::precondition(
             format!(
                 "the dispatcher does not yet run control task '{task}' of kind '{}' — the \
@@ -338,6 +348,7 @@ pub fn run_pod_task(
             let schema = pin::<er_dag::Plan<plans::SchemaReconciled>>(ctx, 0)?;
             completed(tasks::ProfileCorpus.run(ctx, (schema,))?)
         }
+        (JobKind::Extract, "extract") => completed(tasks::ExtractPull.run(ctx, ())?),
         // The pipeline stages (§11 Phase 3). Each rehydrates its upstream
         // references POSITIONALLY, in the order the DAG wired them — which is
         // what the typed `Input` tuples make checkable at compile time.
@@ -506,6 +517,17 @@ fn apply_corrections() -> Dag {
     let emitted = d.control::<EmitWriteBack>((scanned,));
     d.epilogue::<Finish>(&[settled.id(), emitted.id()], TriggerRule::AllTerminal);
     d.build().expect("the apply_corrections DAG assembles")
+}
+
+/// Pull one sObject from Salesforce and publish it as a delivery: the pod
+/// stages the CSV, the control half enqueues the ingest run and advances the
+/// watermark. No `reconcile_schema` source — the stage never opens the lake,
+/// and the `run_all_incremental` it enqueues reconciles on its own `init`.
+fn extract() -> Dag {
+    let mut d = Builder::new(JobKind::Extract.dag_name());
+    let pulled = d.source::<ExtractPull>();
+    let _ = d.control::<AdvanceSfCursor>((pulled,));
+    d.build().expect("the extract DAG assembles")
 }
 
 fn apply_approved() -> Dag {

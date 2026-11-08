@@ -78,7 +78,7 @@ serde_json = { workspace = true }
 sha2 = { workspace = true }
 # Webhook delivery: HMAC-SHA256 payload signatures + the outbound HTTP POST.
 hmac = { workspace = true }
-reqwest = { workspace = true }
+reqwest = { workspace = true, features = ["blocking", "json"] }
 hex = { workspace = true }
 # Email (§7.5): SES via the API, not the SMTP interface, so the pod's EKS Pod
 # Identity credentials sign the call and no static access key is ever minted
@@ -139,6 +139,7 @@ er-obs = { version = "0.1.0", path = "../er-obs" }
 tracing.workspace = true
 tower-http = { version = "0.6", default-features = false, features = ["trace", "request-id"] }
 ring = "0.17"
+csv = "1"
 
 [lints]
 workspace = true

@@ -1775,6 +1775,109 @@ pub async fn delete_webhook(
     Ok(n == 1)
 }
 
+/// A Salesforce connection as the API lists it. Like [`WebhookRow`], a
+/// deliberate projection: the `client_secret` is never listed — the one read
+/// that returns it is [`salesforce_connection_credential`], which only the
+/// work-order resolver calls.
+pub struct SalesforceConnectionRow {
+    pub id: String,
+    pub name: String,
+    pub instance_url: String,
+    pub auth_kind: String,
+    pub api_version: String,
+    pub active: bool,
+}
+
+/// Register a Salesforce connection; returns its id.
+///
+/// # Errors
+/// Propagates the insert error (incl. the unique violation for a duplicate
+/// name, which the handler turns into a 409).
+#[allow(clippy::too_many_arguments)] // mirrors the statement's parameter list
+pub async fn create_salesforce_connection(
+    client: &Client,
+    org_id: &str,
+    name: &str,
+    instance_url: &str,
+    auth_kind: &str,
+    client_id: &str,
+    client_secret: &str,
+    api_version: &str,
+) -> Result<String, PgError> {
+    let connection_id = er_ids::new_v7();
+    er_entities::salesforce_connection::create::create(
+        client,
+        &connection_id,
+        org_id,
+        name,
+        instance_url,
+        auth_kind,
+        client_id,
+        client_secret,
+        api_version,
+    )
+    .await?;
+    Ok(connection_id)
+}
+
+/// An org's active connections, oldest first, without the secret.
+///
+/// # Errors
+/// Propagates the query error.
+pub async fn list_salesforce_connections(
+    client: &Client,
+    org_id: &str,
+) -> Result<Vec<SalesforceConnectionRow>, PgError> {
+    Ok(
+        er_entities::salesforce_connection::read::list_active(client, org_id)
+            .await?
+            .into_iter()
+            .map(|c| SalesforceConnectionRow {
+                id: c.id,
+                name: c.name,
+                instance_url: c.instance_url,
+                auth_kind: c.auth_kind,
+                api_version: c.api_version,
+                active: c.active,
+            })
+            .collect(),
+    )
+}
+
+/// One active connection WITH its secret — the work-order resolver's read, and
+/// nothing else's. Unlike [`list_salesforce_connections`], this returns the
+/// credential, because it is what the extract pod authenticates with.
+///
+/// # Errors
+/// Propagates the query error.
+pub async fn salesforce_connection_credential(
+    client: &Client,
+    org_id: &str,
+    connection_id: &str,
+) -> Result<Option<er_entities::salesforce_connection::SalesforceConnection>, PgError> {
+    Ok(
+        er_entities::salesforce_connection::read::by_id(client, org_id, connection_id)
+            .await?
+            .into_iter()
+            .next(),
+    )
+}
+
+/// Retire a connection (soft, like webhooks). `true` iff a row changed.
+///
+/// # Errors
+/// Propagates the update error.
+pub async fn delete_salesforce_connection(
+    client: &Client,
+    org_id: &str,
+    connection_id: &str,
+) -> Result<bool, PgError> {
+    let n =
+        er_entities::salesforce_connection::update::deactivate(client, org_id, connection_id)
+            .await?;
+    Ok(n == 1)
+}
+
 /// Mark a version published and point the org at it (`configsvc.py` `publish`
 /// DB writes): `config_versions` state/tier/`published_at`, then
 /// `orgs.active_config_version`.

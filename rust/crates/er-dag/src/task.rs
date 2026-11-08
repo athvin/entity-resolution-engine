@@ -324,6 +324,15 @@ pub struct WorkOrder {
     /// is why it defaults rather than being required.
     #[serde(default)]
     pub models: serde_json::Value,
+    /// An `extract` job's resolved Salesforce credential (`instance_url`,
+    /// `client_id`, `client_secret`, `api_version`, plus the source's
+    /// incremental `watermark`), resolved by the control plane for the same
+    /// §6.4 reason as `models`. Null for every other kind. It carries a live
+    /// secret, so nothing may log or serialize an order wholesale — the
+    /// channel it crosses is the bearer-authed attempt channel, the same one
+    /// that already carries the training labels.
+    #[serde(default)]
+    pub connection: serde_json::Value,
 }
 
 /// Where a running task leaves its latest counter snapshot for the heartbeat
