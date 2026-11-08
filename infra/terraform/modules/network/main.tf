@@ -144,6 +144,13 @@ output "vpc_id" {
   value = aws_vpc.this.id
 }
 
+# Read back rather than re-stating `var.cidr` at the call site: a security-group
+# rule scoped to "inside this VPC" should track the VPC it was derived from.
+# envs/prod/edge.tf is the first caller (the ALB's egress to pod addresses).
+output "vpc_cidr" {
+  value = aws_vpc.this.cidr_block
+}
+
 output "public_subnet_ids" {
   value = aws_subnet.public[*].id
 }

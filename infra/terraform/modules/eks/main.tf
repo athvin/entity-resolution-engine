@@ -185,6 +185,20 @@ output "cluster_endpoint" {
   value = aws_eks_cluster.this.endpoint
 }
 
+# The EKS-managed cluster security group, which Auto Mode attaches to the nodes.
+#
+# Needed to let an external load balancer reach pods. With an ALB target type of
+# `ip` the targets are pod IPs, and a pod IP is a secondary address on a node
+# ENI — so the traffic is evaluated against the NODE's security group, not
+# against anything pod-shaped. envs/prod/edge.tf is the first caller.
+#
+# Read from the cluster rather than created here: Auto Mode owns this group's
+# lifecycle, and declaring our own would leave two groups both claiming to
+# govern node ingress.
+output "cluster_security_group_id" {
+  value = aws_eks_cluster.this.vpc_config[0].cluster_security_group_id
+}
+
 output "node_role_arn" {
   value = aws_iam_role.node.arn
 }
