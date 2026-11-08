@@ -531,3 +531,158 @@ async fn orgs_crud_and_state_machine() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
 }
+
+/// #840: `audit_log.trace_id` is the JOIN KEY to the span store, and before
+/// this test nothing at any level proved it is ever populated. Span lineage
+/// is locked by `telemetry_trace_continuation.rs`; this locks that the id the
+/// span carries is the id the ledger writes.
+///
+/// One assertion per state the column can be in, against the code's
+/// documented intent (`er_obs::current_trace_id`):
+///
+/// 1. a request carrying a `traceparent` writes a row whose `trace_id` IS the
+///    caller's trace id;
+/// 2. a request carrying none still writes a non-null id — a traced request
+///    is a fresh root trace, not an untraced one — and it is not the caller's;
+/// 3. a write with no request behind it (the dispatcher's bookkeeping, a CLI)
+///    writes NULL, permanently and on purpose.
+///
+/// The recorder is the GLOBAL one, not `capture_spans`: callsite interest is
+/// cached process-wide, and in a concurrent test binary a callsite first hit
+/// on an unsubscribed thread caches "never interested" for every thread —
+/// under a thread-local subscriber this test flapped between passing alone
+/// and capturing zero spans in the pg shard. The anti-vacuity assertion below
+/// (the recorder saw the traced request's span) runs BEFORE the ledger
+/// assertions, so a recording failure names itself instead of surfacing as a
+/// bare `trace_id: null`.
+///
+/// A plain `#[test]`, not `#[tokio::test]`: `pg_serial.rs` counts async test
+/// attributes per file, and this file's one is taken.
+#[test]
+fn audit_rows_carry_the_requests_trace_id() {
+    const TRACE_ID: &str = "4bf92f3577b34da6a3ce929d0e0e4736";
+
+    let recorder = er_obs::testing::global_recorder();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let Some(dsn) = rt.block_on(audit_trace_id_requests()) else {
+        return;
+    };
+
+    let spans = recorder.captured();
+    assert!(
+        spans.iter().any(|s| s.trace_id == TRACE_ID),
+        "the recorder saw no span in the traced request's tree — the ledger \
+         assertions below would be judging a path nothing recorded. Captured: {:?}",
+        spans.iter().map(|s| s.name.as_str()).collect::<Vec<_>>()
+    );
+
+    rt.block_on(audit_trace_id_assertions(&dsn));
+}
+
+/// The two requests and the no-request write. No assertions on the ledger
+/// here; the read-back is [`audit_trace_id_assertions`]. Returns the test
+/// database's DSN, or `None` when `ER_TEST_PG_DSN` is unset (the house skip).
+async fn audit_trace_id_requests() -> Option<String> {
+    const TRACEPARENT: &str = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+
+    let db = common::fresh_db("audit_trace").await?;
+    let dsn = db.dsn().to_string();
+    let mut client = pg::connect(&dsn).await.unwrap();
+    pg::ensure_schema(&mut client).await.unwrap();
+    let app = app(AppState::with_pg("op-secret".to_string(), dsn.clone()));
+
+    // Case 1: a mutation carrying the caller's traceparent.
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/orgs")
+                .header(header::AUTHORIZATION, "Bearer op-secret")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header("traceparent", TRACEPARENT)
+                .body(Body::from(
+                    r#"{"name":"traced","config_path":"/configs/traced.yaml"}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+
+    // Case 2: the same mutation with no traceparent.
+    let resp = app
+        .clone()
+        .oneshot(req(
+            "POST",
+            "/v1/orgs",
+            "op-secret",
+            Body::from(r#"{"name":"untraced","config_path":"/configs/untraced.yaml"}"#),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+
+    // Case 3: a write with no request behind it at all.
+    pg::audit(
+        &client,
+        "test",
+        None,
+        None,
+        "test.no_request",
+        &serde_json::json!({}),
+    )
+    .await
+    .unwrap();
+
+    Some(dsn)
+}
+
+async fn audit_trace_id_assertions(dsn: &str) {
+    const TRACE_ID: &str = "4bf92f3577b34da6a3ce929d0e0e4736";
+
+    let app = app(AppState::with_pg("op-secret".to_string(), dsn.to_string()));
+    let resp = app
+        .clone()
+        .oneshot(req("GET", "/v1/audit", "op-secret", Body::empty()))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let feed = json_body(resp).await;
+    let rows = feed.as_array().unwrap();
+    let row_for = |org: &str| {
+        rows.iter()
+            .find(|r| r["action"] == "org.upsert" && r["org"] == org)
+            .unwrap_or_else(|| panic!("no org.upsert audit row for {org}"))
+    };
+
+    let traced = row_for("traced");
+    assert_eq!(
+        traced["trace_id"], TRACE_ID,
+        "a request carrying traceparent wrote a row without its trace id — the \
+         ledger cannot be joined to the span store: {traced}"
+    );
+
+    let untraced = row_for("untraced");
+    let fresh = untraced["trace_id"].as_str().unwrap_or_else(|| {
+        panic!("a headerless request wrote a NULL trace_id — the request was traced (a fresh root), so the column should name that trace: {untraced}")
+    });
+    assert_eq!(fresh.len(), 32, "trace_id is not 32 hex: {fresh:?}");
+    assert_ne!(
+        fresh, TRACE_ID,
+        "the headerless request inherited the other request's trace id"
+    );
+
+    let direct = rows
+        .iter()
+        .find(|r| r["action"] == "test.no_request")
+        .expect("no test.no_request audit row");
+    assert!(
+        direct["trace_id"].is_null(),
+        "a write with no request behind it must record NULL, not a synthetic \
+         id: {direct}"
+    );
+}
