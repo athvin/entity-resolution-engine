@@ -519,6 +519,26 @@ jobs:
       - name: terraform plan (to a file)
         env:
           DIR: ${{ matrix.dir }}
+          # The Cloudflare account that owns the R2 sccache bucket (#910).
+          # NOT a secret — it appears in every dashboard URL and the S3-API
+          # endpoint is derived from it — so it belongs in the tree, exactly as
+          # `rust.yml` carries the AWS account id in `SCCACHE_BUCKET`. The
+          # credential is `secrets.CLOUDFLARE_API_TOKEN` below.
+          #
+          # Set unconditionally rather than per-leg: only `envs/core` declares
+          # this variable, and Terraform silently ignores a `TF_VAR_` for an
+          # undeclared one (unlike `-var`, which errors). A `matrix.key ==
+          # 'core' && … || ''` expression would be worse than useless here — it
+          # yields the empty STRING for the other legs, which is not null, so
+          # `local.r2_enabled` would flip true with no account id to use.
+          TF_VAR_cloudflare_account_id: 9eefbe6bc92d11b2bb4e962494765a4c
+          # Reaches only this job, because `infra-apply-core` is an Environment
+          # secret and that environment is `protected_branches: true`. A pull
+          # request cannot read it even by editing this workflow, which is the
+          # property that replaces the `er-ci-sccache-read`/`-write` role split
+          # S3 had. Empty on the dev and prod legs, which declare no Cloudflare
+          # resources.
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         # Plan to a file and apply THAT file, rather than `apply -auto-approve`
         # letting Terraform re-plan inside the apply. Same work, but what lands
         # becomes a thing that can be shown, counted and refused first.
