@@ -145,6 +145,30 @@ fn untrained_model_round_trips() {
 }
 
 #[test]
+fn the_comparator_algorithm_version_round_trips_and_absent_reads_as_one() {
+    // A stamped model keeps its stamp across the parse → compile → re-emit
+    // round-trip that training (`er train`) saves through.
+    let mut doc = load_golden_json("model_final.json");
+    doc["comparator_algorithm_version"] = Value::from(1u64);
+    let text = serde_json::to_string(&doc).unwrap();
+    let settings = Settings::from_json_str(&text).unwrap();
+    assert_eq!(settings.json.comparator_algorithm_version(), 1);
+    let emitted = serde_json::to_value(settings.to_settings_json()).unwrap();
+    assert_eq!(emitted["comparator_algorithm_version"], Value::from(1u64));
+
+    // A pre-versioning document carries no stamp and still reads as 1 —
+    // every such model was built by the v1 implementation — and it re-emits
+    // WITHOUT the key, so a legacy document stays byte-identical.
+    let settings = Settings::from_json_str(&load_golden_text("model_final.json")).unwrap();
+    assert_eq!(settings.json.comparator_algorithm_version(), 1);
+    let emitted = serde_json::to_value(settings.to_settings_json()).unwrap();
+    assert!(
+        emitted.get("comparator_algorithm_version").is_none(),
+        "an unstamped model must not acquire a stamp by round-tripping"
+    );
+}
+
+#[test]
 fn trained_models_after_each_step_compile() {
     for name in [
         "model_after_prior.json",

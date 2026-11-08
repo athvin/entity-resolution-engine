@@ -2065,6 +2065,15 @@ async fn create_config_version(
 /// responses — it is the largest field by far and a list of twenty versions
 /// would be mostly settings documents nobody asked for.
 fn model_summary(m: &er_entities::matching_model::MatchingModel) -> Value {
+    // The recorded comparator algorithm version, derived from the stored
+    // document the `model_weights` way rather than duplicated into a column,
+    // so it cannot drift from what the engine loads. Absent in the document
+    // reads as 1 — every pre-versioning model is a v1 model; an unparseable
+    // document yields null, surfacing the corruption rather than hiding it.
+    let comparator_algorithm_version =
+        dedupe_core::settings::json::SettingsJson::from_json_str(&m.model_json)
+            .ok()
+            .map(|s| s.comparator_algorithm_version());
     json!({
         "id": m.id,
         "name": m.name,
@@ -2072,6 +2081,7 @@ fn model_summary(m: &er_entities::matching_model::MatchingModel) -> Value {
         "entity_type": m.entity_type,
         "model_hash": m.model_hash,
         "model_version_label": m.model_version_label,
+        "comparator_algorithm_version": comparator_algorithm_version,
         "tf_snapshot_id": m.tf_snapshot_id,
         "state": m.state,
         "provenance": m.provenance,

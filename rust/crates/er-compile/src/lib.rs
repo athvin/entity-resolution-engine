@@ -145,6 +145,18 @@ pub enum CompileError {
 /// 60 bits, 18 at 20, 9 at 120. It was prose-only until then, so the number
 /// every compiled model depends on was protected by nothing, and turning it up
 /// "to be safe" would have passed every gate while merging distinct people.
+/// The comparator algorithm version compiled models are stamped with.
+///
+/// A level token names an algorithm and a threshold (`jaro_winkler:0.90`),
+/// not the implementation behind it — and the implementation is what a pair
+/// actually scores against. Bump this when any comparator's SQL semantics
+/// change (a fix or improvement to what a token compiles to), never for a
+/// refactor that leaves the emitted SQL byte-identical. Models stamped with
+/// an older version keep it: their scores are computed by the SQL frozen in
+/// their own document, so a bump re-groups nothing until the model is
+/// recompiled.
+pub const COMPARATOR_ALGORITHM_VERSION: u32 = 1;
+
 const DEFAULT_FULL_AGREEMENT_BITS: f64 = 60.0;
 
 /// What disagreement costs, as a fraction of what agreement earns.
@@ -1213,6 +1225,7 @@ pub fn compile_with(config: &Config, options: &CompileOptions) -> Result<Compile
         additional_columns_to_retain: Vec::new(),
         sql_dialect: Some("duckdb".to_string()),
         linker_uid: None,
+        comparator_algorithm_version: Some(COMPARATOR_ALGORITHM_VERSION),
         em_convergence: 0.0001,
         max_iterations: 25,
         match_weight_column_prefix: "mw_".to_string(),
@@ -1660,6 +1673,22 @@ mod tests {
                 .unwrap()
                 .len(),
             4
+        );
+    }
+
+    #[test]
+    fn a_compiled_model_records_the_comparator_algorithm_version() {
+        // The stamp is what lets a reader tell which implementation built the
+        // model once a comparator's SQL has changed underneath old models.
+        let compiled = compile(
+            &er_config::load_config_str(include_str!("../../er-config/tests/fixtures/test.yaml"))
+                .unwrap(),
+        )
+        .unwrap();
+        let settings = SettingsJson::from_json_str(&compiled.model_json).unwrap();
+        assert_eq!(
+            settings.comparator_algorithm_version,
+            Some(COMPARATOR_ALGORITHM_VERSION)
         );
     }
 

@@ -122,7 +122,18 @@ const PAIRS = {
     "display_name" | "registered" | "has_credentials"
   >,
 
-  modelVersion: true satisfies NoUndeclaredFields<ModelVersionRow, MatchingModel>,
+  /**
+   * `comparator_algorithm_version` is DERIVED, not stored: `model_summary`
+   * parses the settings document and reports the stamp (absent reads as 1,
+   * since every pre-versioning model is a v1 model). The entity has no such
+   * column and should not — it is a view over `model_json`, which the entity
+   * does have. Same pattern as `weights` below.
+   */
+  modelVersion: true satisfies NoUndeclaredFields<
+    ModelVersionRow,
+    MatchingModel,
+    "comparator_algorithm_version"
+  >,
 
   /**
    * `weights` is DERIVED, not stored: `model_weights` parses the settings
@@ -133,7 +144,7 @@ const PAIRS = {
   modelVersionDetail: true satisfies NoUndeclaredFields<
     ModelVersionDetail,
     MatchingModel,
-    "weights"
+    "weights" | "comparator_algorithm_version"
   >,
 
   /**

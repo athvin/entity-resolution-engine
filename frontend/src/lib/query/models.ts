@@ -13,6 +13,13 @@ export interface ModelVersionRow {
   entity_type: string;
   model_hash: string;
   model_version_label: string;
+  /**
+   * The comparator algorithm version the model was built against, derived by
+   * `model_summary` from the stored settings document — never a column.
+   * Documents written before versioning existed carry no stamp and read as 1;
+   * null only when the stored document cannot be parsed at all.
+   */
+  comparator_algorithm_version: number | null;
   tf_snapshot_id: string | null;
   state: "draft" | "active" | "archived";
   provenance: { origin?: string; by?: string } | null;

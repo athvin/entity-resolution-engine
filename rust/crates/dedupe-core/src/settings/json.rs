@@ -67,6 +67,12 @@ pub struct SettingsJson {
     pub sql_dialect: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub linker_uid: Option<String>,
+    /// The comparator algorithm version this model was built against.
+    /// Stamped by `er-compile` at compile time; absent in every document
+    /// written before versioning existed, so those parse and re-emit
+    /// byte-identically.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub comparator_algorithm_version: Option<u32>,
     #[serde(default = "d_em_convergence")]
     pub em_convergence: f64,
     #[serde(default = "d_max_iterations")]
@@ -169,5 +175,14 @@ impl SettingsJson {
 
     pub fn to_json_string_pretty(&self) -> serde_json::Result<String> {
         serde_json::to_string_pretty(self)
+    }
+
+    /// The comparator algorithm version this model was built against, with
+    /// history applied: every model written before the field existed was
+    /// built by the v1 implementation, so absence reads as 1. The default is
+    /// a fact about the past, not a pointer at the current version — bumping
+    /// `er_compile::COMPARATOR_ALGORITHM_VERSION` must NOT change it.
+    pub fn comparator_algorithm_version(&self) -> u32 {
+        self.comparator_algorithm_version.unwrap_or(1)
     }
 }

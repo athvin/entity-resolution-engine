@@ -162,6 +162,8 @@ async fn the_model_registry_seeds_versions_and_activates_exactly_one() {
          snapshot CSV is keyed by it"
     );
     assert_eq!(listed["items"][0]["provenance"]["origin"], "seeded");
+    // The committed starter model predates the stamp; absent reads as v1.
+    assert_eq!(listed["items"][0]["comparator_algorithm_version"], 1);
     // The list must not carry the settings documents.
     assert!(
         listed["items"][0].get("model_json").is_none(),

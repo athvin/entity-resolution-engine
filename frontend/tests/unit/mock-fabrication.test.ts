@@ -77,6 +77,8 @@ const EXPLAINED: Record<string, string> = {
     "a wire rename: the entity's `id` column is serialized as `assertion_id` (er-server/src/lib.rs:5974)",
   "run.auto_merged_pairs":
     "derived on read from the auto_merge threshold (er-server/src/read.rs:1020), asserted by pg_golden_read.rs",
+  "matching_model.comparator_algorithm_version":
+    "derived on read from the stored settings document in model_summary (er-server/src/lib.rs), never a column",
   // The five below are one response, not five strays. `model_version_evaluation`
   // computes them in `label_evaluation` (er-server/src/lib.rs) and echoes the
   // model's identity fields alongside — which is *why* they land here: the
