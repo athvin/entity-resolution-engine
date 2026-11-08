@@ -85,6 +85,7 @@ were `cancelled` with `jobs=0` and the 3 survivors had 19–22. So:
 
 | Workflow | Triggers |
 |---|---|
+| `cluster-objects` | `push workflow_dispatch` |
 | `deploy` | `workflow_dispatch workflow_run` |
 | `devcontainer` | `pull_request push workflow_dispatch` |
 | `drift` | `schedule workflow_dispatch` |
@@ -100,6 +101,7 @@ were `cancelled` with `jobs=0` and the 3 survivors had 19–22. So:
 These carry no `pull_request` trigger, so a green PR says nothing about
 them. **This is the surface the main loop exists for.**
 
+- `cluster-objects` — `push workflow_dispatch`
 - `deploy` — `workflow_dispatch workflow_run`
 - `drift` — `schedule workflow_dispatch`
 - `frontend-experiments` — `schedule workflow_dispatch`
