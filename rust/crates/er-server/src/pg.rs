@@ -2153,9 +2153,17 @@ mod retention_tests {
     #[test]
     fn the_retention_floor_clamps_and_defaults() {
         assert_eq!(retention_days_from(None), 400);
-        assert_eq!(retention_days_from(Some(30)), 400, "below the floor clamps up");
+        assert_eq!(
+            retention_days_from(Some(30)),
+            400,
+            "below the floor clamps up"
+        );
         assert_eq!(retention_days_from(Some(400)), 400);
-        assert_eq!(retention_days_from(Some(731)), 731, "longer retention is allowed");
+        assert_eq!(
+            retention_days_from(Some(731)),
+            731,
+            "longer retention is allowed"
+        );
         assert_eq!(retention_days_from(Some(-1)), 400);
     }
 }

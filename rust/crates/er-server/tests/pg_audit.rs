@@ -75,7 +75,7 @@ async fn audit_filters_export_and_retention() {
     assert_eq!(resp.status(), StatusCode::OK);
     let rows: serde_json::Value = serde_json::from_str(&body_text(resp).await).unwrap();
     let rows = rows.as_array().unwrap();
-    assert!(!rows.is_empty());
+    assert_eq!(rows.len(), 1, "one sf-extract row was seeded");
     assert!(
         rows.iter().all(|r| r["actor"] == "sf-extract"),
         "every row is the filtered actor: {rows:?}"
@@ -186,9 +186,16 @@ async fn audit_filters_export_and_retention() {
     .await
     .unwrap();
     for _ in 0..2 {
-        er_server::webhook::emit(&client, &org_id, None, "acme", "job.succeeded", &json!({"n": 1}))
-            .await
-            .unwrap();
+        er_server::webhook::emit(
+            &client,
+            &org_id,
+            None,
+            "acme",
+            "job.succeeded",
+            &json!({"n": 1}),
+        )
+        .await
+        .unwrap();
     }
     client
         .execute(
