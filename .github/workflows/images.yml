@@ -51,6 +51,10 @@ on:
       # "'Merged' did not mean 'deployed'" failure this file's own header
       # describes at length, arriving through a different door.
       - ".github/workflows/deploy.yml"
+      # The deploy's own extracted steps, for the same reason as the workflow
+      # file: with deploy.yml's push trigger gone (#661), this list is the ONLY
+      # road a deploy-script edit has to the workflow that runs it.
+      - "scripts/ci/deploy-*.sh"
   # A Dockerfile change was UNVALIDATABLE before merge: this workflow ran on
   # `push` to main only, so the first exercise of a restructured build was the
   # merge itself, and a break blocked dev deploys until someone reverted it.
