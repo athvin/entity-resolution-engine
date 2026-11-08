@@ -35,7 +35,7 @@ written, and nothing failed while the prose said otherwise.
 | `tf-static-credentials-check` | `bash scripts/ci/tf-static-credentials-check-test.sh && bash scripts/ci/tf-static-credentials-check.sh` |
 | `test` | `cd rust && cargo test --workspace` |
 
-**57 test files read `ER_TEST_PG_DSN`** and self-skip without it.
+**58 test files read `ER_TEST_PG_DSN`** and self-skip without it.
 <!-- END GENERATED: rust-gates -->
 
 ## What it does not cover
