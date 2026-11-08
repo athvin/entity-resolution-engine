@@ -34,7 +34,7 @@
     // Matches the DSN rust.yml hands its `postgres:16-alpine` service, so
     // `make check-e2e` needs no argument in here. The server is started by
     // scripts/devcontainer-poststart.sh.
-    "ER_TEST_PG_DSN": "host=localhost port=5432 user=er password=er dbname=er"
+    "ER_TEST_PG_DSN": "host=localhost port=5432 user=er password=er dbname=er",
     // THE BUILD DIRECTORY LIVES OUTSIDE THE WORKSPACE, and that is the single
     // most important line in this file for a Windows reader. `rust/target` is
     // 30–80 GB in this repo (the primary checkout's was measured at 132 GB).
@@ -46,6 +46,7 @@
     // the Docker VM's own filesystem. It also makes copy-up possible: see the
     // Dockerfile's mount-point stanza for why a workspace-relative volume
     // cannot be made writable without root.
+    "CARGO_TARGET_DIR": "/home/vscode/.cache/er/cargo-target"
     // NO CARGO_HOME HERE, AND IT IS NOT AN OVERSIGHT. Setting it is futile: the
     // base image's /etc/bash.bashrc carries an unconditional
     // `export CARGO_HOME="/usr/local/cargo"`, which the CLI's `userEnvProbe`
@@ -137,7 +138,7 @@
         // It does duplicate artifacts, and this repo is unusually sensitive to
         // that (`rust/target` is 30–80 GB). The duplicate is `cargo check`
         // output rather than a second full build, so it is a fraction of that —
-        // but it does land in the `er-rust-target` volume, which is where to
+        // but it does land in the `er-cargo-target` volume, which is where to
         // look if that volume grows faster than expected.
         "rust-analyzer.cargo.targetDir": true,
         "eslint.workingDirectories": ["frontend"]
