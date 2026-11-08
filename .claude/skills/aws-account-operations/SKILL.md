@@ -184,7 +184,7 @@ So "nothing alerted, so nothing is wrong" is still not sound reasoning — but n
 because the coverage is thin and one subscription may be unconfirmed, not because
 there is nothing there at all.
 
-## Two traps that cost real time
+## Traps that cost real time
 
 **Cost-allocation tags do not backfill.** Resources carry `Project`,
 `Environment`, `ManagedBy` and sometimes `Developer` through the provider's
