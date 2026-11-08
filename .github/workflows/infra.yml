@@ -24,14 +24,29 @@
 # minted per run, and that job's `pull-requests: write` is the only write scope
 # anywhere in this file.)
 #
-# ONE NON-AWS CREDENTIAL EXISTS, and the distinction that keeps the claim above
-# true is worth stating rather than leaving to be rediscovered.
-# `CLOUDFLARE_API_TOKEN` (#910, the R2 sccache bucket) is an **Environment**
-# secret on `infra-apply-core`, NOT a repository secret. Every objection the
-# paragraph above raises to a repository secret is about reach — "reachable by
-# every workflow in the repository rather than by one job" — and an Environment
-# secret on a `protected_branches: true` environment is reachable by exactly one
-# job on `main`. A pull request cannot read it even by editing this workflow.
+# NON-AWS CREDENTIALS EXIST — TWO OF THEM, both Cloudflare, and they are
+# different tokens on purpose. The distinction that keeps the claim above true
+# is worth stating rather than leaving to be rediscovered.
+#
+#   core — an R2 bucket (#910), needing `Workers R2 Storage: Edit` on the
+#          ACCOUNT. Held as an **Environment** secret on `infra-apply-core`,
+#          NOT a repository secret. Every objection the paragraph above raises
+#          to a repository secret is about reach — "reachable by every workflow
+#          in the repository rather than by one job" — and an Environment
+#          secret on a `protected_branches: true` environment is reachable by
+#          exactly one job on `main`. A pull request cannot read it even by
+#          editing this workflow.
+#   prod — DNS records (#555), needing `Zone DNS: Edit` on ONE zone. Held in
+#          Secrets Manager (`er/shared/cloudflare`) and read with the prod
+#          apply role's own credentials, so there is no stored GitHub secret
+#          for it at all.
+#
+# Neither token can do the other's job — measured, not assumed: the
+# zone-scoped one returns `9109` on `/accounts/<id>` and `10000` on
+# `/accounts/<id>/r2/buckets`. One shared token would need both scopes and be
+# strictly broader than either leg. `scripts/ci/tf-cloudflare-token.sh` picks
+# the source per leg and is the only thing that sets `CLOUDFLARE_API_TOKEN`;
+# see its header for why it must be a step rather than a job-level `env:`.
 #
 # What does NOT survive the move is the expiry argument: unlike every AWS
 # identity here, a Cloudflare API token is long-lived, so it is rotated by hand
@@ -503,13 +518,19 @@ jobs:
       # the other legs, and `"" != null`, so `local.r2_enabled` would flip true
       # with no account id to use.
       TF_VAR_cloudflare_account_id: 9eefbe6bc92d11b2bb4e962494765a4c
-      # Resolves only on the core leg, because `CLOUDFLARE_API_TOKEN` is an
-      # Environment secret on `infra-apply-core` and that environment is
-      # `protected_branches: true`. A pull request cannot read it even by
-      # editing this workflow, which is the property replacing the
-      # `er-ci-sccache-read`/`-write` role split S3 had. Empty on dev and prod,
-      # which need no Cloudflare credential — dev's `ses.tf` is opt-in and off.
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      # `CLOUDFLARE_API_TOKEN` is DELIBERATELY NOT SET HERE, and that is a
+      # correction rather than an omission — see the `cloudflare token` step.
+      #
+      # It was a job-level `env:` resolving the `infra-apply-core` Environment
+      # secret, on the stated reasoning that it is "empty on dev and prod, which
+      # need no Cloudflare credential". That was true when written and stopped
+      # being true the moment `envs/prod` got DNS records (#555).
+      #
+      # A job-level `env:` OVERRIDES anything a step writes to `$GITHUB_ENV`, so
+      # the empty value on the prod leg silently shadowed the token the prod
+      # step had just exported — and the apply failed with Cloudflare `9106`
+      # (no authorization header at all) while the export step reported success.
+      # Precedence, not the fetch, was the bug.
     permissions:
       contents: read
       id-token: write # OIDC exchange for er-ci-tf-apply
@@ -558,14 +579,32 @@ jobs:
           aws-region: us-east-2
           role-to-assume: arn:aws:iam::797781631727:role/er-ci-tf-apply-prod
           role-chaining: true
-      - name: cloudflare token (prod only)
-        # envs/prod declares a Cloudflare provider — the DNS plane (§18.8) —
-        # and this is the only tier given its credential. It runs AFTER the
-        # prod hop above, because the token is fetched with the prod role's
-        # own permissions rather than from a repository secret, which is what
-        # keeps this workflow's "no repository secrets" property (see the
-        # header) true. The script argues the rest.
-        if: matrix.key == 'prod'
+      - name: cloudflare token
+        # TWO STACKS NEED A CLOUDFLARE CREDENTIAL, AND THEY NEED DIFFERENT ONES.
+        # `envs/core` creates an R2 bucket, which wants `Workers R2 Storage:
+        # Edit` on the ACCOUNT; `envs/prod` writes DNS records, which wants
+        # `Zone DNS: Edit` on ONE zone. Neither token can do the other's job —
+        # measured: the zone-scoped token returns `9109` on the account
+        # endpoint and `10000` on `r2/buckets` — so one shared token would have
+        # to carry both scopes and would be strictly broader than either leg
+        # needs. Two least-privilege tokens is the design, not an accident.
+        #
+        # Hence one variable, sourced per leg, exported by one script:
+        #   core -> the `infra-apply-core` Environment secret, passed in below.
+        #   prod -> Secrets Manager `er/shared/cloudflare`, read with the prod
+        #           role's own credentials AFTER the §14.2 hop above.
+        #
+        # It must be a STEP and not a job-level `env:` — a job-level `env:`
+        # wins over `$GITHUB_ENV`, which is exactly the shadowing that broke
+        # the prod apply (see the note where that value used to be set).
+        if: matrix.key == 'core' || matrix.key == 'prod'
+        env:
+          # Resolves only on the core leg: this is an Environment secret on
+          # `infra-apply-core`, and that environment is
+          # `protected_branches: true`, so a pull request cannot read it even
+          # by editing this workflow. Empty elsewhere, which is the signal the
+          # script uses to fall through to Secrets Manager.
+          CF_TOKEN_FROM_ENVIRONMENT: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: bash scripts/ci/tf-cloudflare-token.sh
       - name: terraform plan (to a file)
         env:
