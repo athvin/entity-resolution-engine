@@ -4,6 +4,7 @@
 
 pub mod block;
 pub mod concat;
+pub mod hierarchy;
 pub mod score;
 pub mod tf;
 pub mod vectors;

@@ -12,5 +12,6 @@
 
 mod comparator_sql_behaviour;
 mod cross_field_groups;
+mod hierarchy_exclusion;
 mod reproduces_committed_model;
 mod score_scale_calibration;
