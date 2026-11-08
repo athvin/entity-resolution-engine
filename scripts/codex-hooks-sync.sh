@@ -71,7 +71,7 @@ done
 
 command -v jq >/dev/null 2>&1 || die "jq is required"
 
-guard="$root/scripts/hooks/codex-pretooluse-guard.sh"
+guard="$root/scripts/hooks/agent-pretooluse-guard.sh"
 settings="$root/.claude/settings.json"
 hooks_file="$codex_home/hooks.json"
 

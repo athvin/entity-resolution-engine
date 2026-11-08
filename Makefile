@@ -75,7 +75,7 @@ skills-check:
 # ungated in rust.yml's `skills` job. `&&`, not separate recipe lines, so the
 # fail-fast is explicit in gates.md too.
 agent-bridge-check:
-	bash scripts/ci/agent-bridge-check-test.sh && bash scripts/ci/agent-bridge-check.sh && bash scripts/ci/codex-mcp-sync-test.sh && bash scripts/ci/codex-hooks-sync-test.sh
+	bash scripts/ci/agent-bridge-check-test.sh && bash scripts/ci/agent-bridge-check.sh && bash scripts/ci/codex-mcp-sync-test.sh && bash scripts/ci/codex-hooks-sync-test.sh && bash scripts/ci/kimi-mcp-sync-test.sh && bash scripts/ci/kimi-hooks-sync-test.sh
 
 # Tracked shell scripts live under scripts/ (CLAUDE.md conventions). CI runs
 # the same script in rust.yml's `workflow pins (S9)` job, ungated.

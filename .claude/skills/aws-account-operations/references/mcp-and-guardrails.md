@@ -146,14 +146,21 @@ Note on mechanism: `deny` and `ask` rules take effect immediately, while
 live on first clone and its permissive half is not — which is the safe
 direction for this to fail in.
 
-### Layer 3 under Codex: installed, and one rule inverts
+### Layer 3 under the other agents: installed, and one rule inverts
 
-Codex and Kimi sessions run against this account too, and they read none of
-`.claude/settings.json` — no hooks, and **no `permissions.deny` list at all**.
-`scripts/codex-hooks-sync.sh` installs the same guard into
-`$CODEX_HOME/hooks.json`, with the deny patterns read out of
-`.claude/settings.json` rather than restated, so the two agents cannot be given
-different lists.
+Codex sessions run against this account too, as do **Kimi Code CLI** sessions —
+a separate binary from `codex --profile kimi` — and none of them read
+`.claude/settings.json`: no hooks, and **no `permissions.deny` list at all**.
+One guard, `scripts/hooks/agent-pretooluse-guard.sh`, is installed into each by
+its own sync script:
+
+```sh
+scripts/codex-hooks-sync.sh   # -> $CODEX_HOME/hooks.json
+scripts/kimi-hooks-sync.sh    # -> $KIMI_CODE_HOME/config.toml
+```
+
+Both read the deny patterns out of `.claude/settings.json` rather than
+restating them, so no two agents can be given different lists.
 
 Two differences matter when reasoning about what is actually protected there:
 
