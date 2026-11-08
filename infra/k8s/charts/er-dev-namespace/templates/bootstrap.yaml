@@ -1,3 +1,4 @@
+{{- if .Values.bootstrap.enabled -}}
 {{- $ns := include "er-dev-namespace.name" . -}}
 {{- /* Postgres identifiers are lowercase alnum + underscore; DNS-safe dev names
        may contain hyphens, so fold them to underscores for the role + db. */ -}}
@@ -127,3 +128,5 @@ spec:
                 "SELECT 1 FROM pg_database WHERE datname='$db'" | grep -q 1 \
                 || psql -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"$db\" OWNER \"$role\""
               echo "bootstrap ok: role=$role db=$db"
+
+{{- end }}

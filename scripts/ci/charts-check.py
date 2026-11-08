@@ -115,6 +115,12 @@ def main() -> int:
             "ingress.enabled=true",
             "--set",
             "ingress.certificateArn=arn:aws:acm:us-east-2:0:certificate/0",
+            # The TargetGroupBinding only renders once an ARN is set (prod's
+            # edge), so render it ON here — the same reason ingress is on
+            # above: the check exists for the objects nobody sees until the
+            # environment that needs them is live.
+            "--set",
+            "edge.targetGroupArn=arn:aws:elasticloadbalancing:us-east-2:0:targetgroup/t/0",
         ]
     )
     namespace_chart = render(
@@ -212,6 +218,34 @@ def main() -> int:
                 f"environment, and after the pod merge only the PORT list keeps "
                 f"that true"
             )
+
+    # (3b) the TargetGroupBinding must reference the LIVE er-web Service, by
+    # name and port. Binding a preview Service would health-check the colour
+    # not serving; a port the Service does not carry registers targets that
+    # never go healthy, which is the edge-stuck-at-503 failure #556 exists to
+    # close. Rendered on (above) precisely so this is checked here rather than
+    # against a live cluster.
+    tgb = next((d for d in platform if d.get("kind") == "TargetGroupBinding"), None)
+    web = next((s for s in services if s["metadata"]["name"] == "er-web"), None)
+    if tgb is None or web is None:
+        problems.append(
+            "expected a TargetGroupBinding and a Service/er-web to check the "
+            "edge binding against; one is missing, so this check examined nothing"
+        )
+    else:
+        ref = tgb["spec"]["serviceRef"]
+        web_ports = {port["port"] for port in web["spec"]["ports"]}
+        if ref["name"] != "er-web":
+            problems.append(
+                f"TargetGroupBinding binds Service/{ref['name']}, not er-web — "
+                f"the live Service is the only one whose selector follows a cutover"
+            )
+        if ref["port"] not in web_ports:
+            problems.append(
+                f"TargetGroupBinding port {ref['port']} is not one of er-web's "
+                f"ports {sorted(web_ports)} — targets would never health-check"
+            )
+        print(f"  TargetGroupBinding -> Service/{ref['name']}:{ref['port']}")
 
     # (4) the live pair and the preview pair must select DIFFERENT colours
     #

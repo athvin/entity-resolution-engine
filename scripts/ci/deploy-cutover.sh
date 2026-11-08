@@ -5,11 +5,17 @@
 # running, so a rollback is the same field moving back — the summary this
 # writes prints the command while that is still true.
 #
+# The optional inputs are the same seam deploy-inactive-colour.sh documents,
+# and they are LOAD-BEARING HERE rather than repeated for symmetry: this step
+# re-renders the release, so a value the inactive phase set and this one omits
+# is REVERTED to the chart default at cutover — for prod that deletes the
+# TargetGroupBinding at the exact moment traffic moves to it.
+#
 # Inputs (env): CI_NAMESPACE, LIVE, TARGET, LIVE_API, LIVE_WEB,
-# NEW_API, NEW_WEB, FS, AP.
+# NEW_API, NEW_WEB, FS, AP; optional PLATFORM_VALUES, TARGET_GROUP_ARN.
 set -euo pipefail
 
-helm upgrade er-platform infra/k8s/charts/er-platform \
+args=(
 	--namespace "$CI_NAMESPACE" --set "developer=$CI_NAMESPACE" \
 	--set "images.api.digest=$NEW_API" --set "images.web.digest=$NEW_WEB" \
 	--set "efs.fileSystemId=$FS" --set "efs.accessPointId=$AP" \
@@ -20,7 +26,15 @@ helm upgrade er-platform infra/k8s/charts/er-platform \
 	--set "color.$LIVE.replicas=1" \
 	--set "color.$LIVE.api.digest=$LIVE_API" \
 	--set "color.$LIVE.web.digest=$LIVE_WEB" \
-	--atomic --wait --timeout 10m
+)
+if [ -n "${PLATFORM_VALUES:-}" ]; then
+	args+=(-f "$PLATFORM_VALUES")
+fi
+if [ -n "${TARGET_GROUP_ARN:-}" ]; then
+	args+=(--set "edge.targetGroupArn=$TARGET_GROUP_ARN")
+fi
+helm upgrade er-platform infra/k8s/charts/er-platform \
+	"${args[@]}" --atomic --wait --timeout 10m
 now="$(kubectl -n "$CI_NAMESPACE" get svc er-web \
 	-o jsonpath='{.spec.selector.er\.dupezero\.com/color}')"
 [ "$now" = "$TARGET" ] || {
