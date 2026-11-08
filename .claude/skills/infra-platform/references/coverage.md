@@ -63,7 +63,7 @@ Every stack in the tree is reached by at least one tier.
 | `kind` | `scripts/kind_env.sh` |
 | `network-policy-controller.yaml` | **nothing in the tree** |
 | `nodepools` | `Makefile`, `scripts/measure_runner_startup.sh` |
-| `observability` | `Makefile`, `scripts/obs_up.sh` |
+| `observability` | `Makefile`, `scripts/obs_up.sh`, `scripts/otel-pii-allowlist-probe.sh` |
 | `priorityclasses` | `Makefile`, `scripts/kind_env.sh` |
 | `secrets` | **nothing in the tree** |
 | `storage` | `Makefile`, `scripts/ci/deploy-namespace-chart.sh` |
