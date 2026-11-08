@@ -65,7 +65,7 @@ Every stack in the tree is reached by at least one tier.
 | `nodepools` | `.github/workflows/cluster-objects.yml`, `scripts/cluster_objects.sh`, `scripts/measure_runner_startup.sh` |
 | `observability` | `Makefile`, `scripts/obs_up.sh`, `scripts/otel-pii-allowlist-probe.sh` |
 | `priorityclasses` | `.github/workflows/cluster-objects.yml`, `scripts/cluster_objects.sh`, `scripts/kind_env.sh` |
-| `secrets` | **nothing in the tree** |
+| `secrets` | `.github/workflows/cluster-objects.yml`, `scripts/cluster_objects.sh` |
 | `storage` | `Makefile`, `scripts/ci/deploy-namespace-chart.sh` |
 
 ### NodePool manifests the cluster apply reaches
