@@ -1,0 +1,8 @@
+kind: statement
+operation: read
+mode: full
+description: "One source's high-water mark, read by the work-order resolver so an incremental extract asks Salesforce only for rows changed since. Zero rows is the ordinary first-run answer and means a full pull."
+params:
+  - { name: dataset_id, type: varchar }
+  - { name: source, type: varchar }
+returns: entity

@@ -193,6 +193,19 @@ erDiagram
         timestamp created_at
         timestamp updated_at
     }
+    salesforce_connections {
+        varchar id PK
+        varchar org_id FK
+        varchar name
+        varchar instance_url
+        varchar auth_kind
+        varchar client_id
+        varchar client_secret
+        varchar api_version
+        boolean active
+        timestamp created_at
+        timestamp updated_at
+    }
     schedules {
         varchar id PK
         varchar org_id FK
@@ -215,6 +228,18 @@ erDiagram
         varchar relation
         varchar statement
         varchar applied_by
+    }
+    sf_extract_cursors {
+        varchar id PK
+        varchar org_id FK
+        varchar dataset_id FK
+        varchar source
+        varchar object
+        varchar watermark
+        varchar delivery_id
+        bigint rows_extracted
+        timestamp created_at
+        timestamp updated_at
     }
     staged_steward_actions {
         varchar id PK
@@ -351,8 +376,11 @@ erDiagram
     pair_labels }o--|| datasets : "dataset_id → id"
     s3_ingest_cursors }o--|| orgs : "org_id → id"
     s3_ingest_cursors }o--|| datasets : "dataset_id → id"
+    salesforce_connections }o--|| orgs : "org_id → id"
     schedules }o--|| orgs : "org_id → id"
     schedules }o--|| datasets : "dataset_id → id"
+    sf_extract_cursors }o--|| orgs : "org_id → id"
+    sf_extract_cursors }o--|| datasets : "dataset_id → id"
     staged_steward_actions }o--|| orgs : "org_id → id"
     staged_steward_actions }o--|| datasets : "dataset_id → id"
     tags }o--|| orgs : "org_id → id"
@@ -385,8 +413,10 @@ erDiagram
 | `orgs` | A tenant: its config pointer, lake env, lifecycle state and active config version. |
 | `pair_labels` | A human (or model) verdict on one candidate pair — the training signal the engine has always been able to learn from and never had. One row per (org, pair): a re-label corrects the previous verdict rather than stacking another. |
 | `s3_ingest_cursors` | What the auto-ingest poller has already read, one row per (org, source). The poller runs on every dispatcher tick and the newest object under a prefix stays the newest until a new one arrives, so without this row the same CSV would be re-ingested every few seconds forever — an unbounded run loop over the tenant's own lake. An upsert rather than a log: the question it answers is 'what is already in', not 'what has ever been in', and the audit log already answers the second. |
+| `salesforce_connections` | A tenant's Salesforce org credential: the instance URL and the OAuth client-credentials pair the extract job authenticates with. Org-scoped — one connection is one Salesforce org (connectors.md §4.1), and a credential is a tenant-level fact that several datasets may extract through. Deliberately NOT history: true — the history trigger copies whole rows as jsonb into an append-only companion, which would duplicate the client secret into a table nothing ever deletes from. |
 | `schedules` | A recurring job schedule for a tenant: its kind, cron and source. |
 | `schema_migrations` | The control-plane schema ledger: one row per DDL statement the reconciler applied to public.*, plus one `verified` row each time a new catalog version found the live schema already current. The latest row's catalog_hash is the version the database is at. |
+| `sf_extract_cursors` | The extract job's high-water mark, one row per (dataset, source): the newest SystemModstamp already pulled from Salesforce, so an incremental extract asks only for what changed since. The s3_ingest_cursor shape for an API-polled provider — an upsert rather than a log, because the question is 'what is already in', and advanced only AFTER the delivery is published, so a failure re-extracts once rather than skipping rows forever. |
 | `staged_steward_actions` | A steward action staged for review/apply: its payload, state and outcome. |
 | `tags` | A tenant's own label for entities and review groups: the vocabulary a steward sorts work by. |
 | `taggings` | One tag applied to one subject: the attachment, kept apart from the tag so retiring a tag does not rewrite what it was applied to. |

@@ -1,0 +1,8 @@
+kind: statement
+operation: update
+mode: partial
+description: "Retire a connection. A SOFT delete, like webhooks: sf_extract_cursors and queued extract jobs reference the id as provenance, and the row records which credential a past extract ran under. Every read filters AND active, so deactivating is indistinguishable from deletion to the listing and the work-order resolver, and the AND active here makes a second retire affect zero rows, so a repeated call honestly reports that nothing changed."
+params:
+  - { name: org_id, type: varchar }
+  - { name: connection_id, type: varchar }
+returns: none
