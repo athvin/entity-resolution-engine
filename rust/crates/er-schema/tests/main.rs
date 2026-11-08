@@ -11,7 +11,6 @@
 //! To run one file's tests: `cargo test -p er-schema --test main <name>`.
 
 mod collector_allowlist;
-mod webhook_doc_parity;
 mod declared_names;
 mod freeform_sql;
 mod model_registry;
@@ -19,3 +18,4 @@ mod span_boundaries;
 mod sql_span_pii;
 mod structured_logging;
 mod telemetry_layering;
+mod webhook_doc_parity;
