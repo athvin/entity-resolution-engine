@@ -924,6 +924,71 @@ gen_description_budget() {
 		fi
 	done < <(printf '%s\n' "${rows[@]}" | sort -n)
 	((blocked > 0)) || echo "- none; every skill can take another clause"
+
+	# --- the second cap, which is not ours -------------------------------
+	#
+	# Codex truncates each description at ~650 characters in its skill listing,
+	# well under the 1,024 this repo enforces. Measured by diffing the authored
+	# frontmatter against what `codex debug prompt-input` reports (Codex
+	# 0.167.0): listed lengths clustered at 648–652, cut at a word boundary.
+	# RE-MEASURE with that command rather than trusting this constant — it is
+	# the one number here that another vendor can change.
+	#
+	# What matters is not the overflow but WHAT overflows. A description whose
+	# only lost text is its `for … see …` routing tail measured fine: 9 of 10
+	# routing trials selected correctly with 89% of all routing clauses
+	# invisible. The one that misrouted lost TRIGGER vocabulary — a term it
+	# shares with a neighbour that mentions the same term earlier. So the
+	# column below reports which kind of text is being cut, which is the
+	# actionable distinction.
+	local cut=648
+	local -a overflow=()
+	for f in "$skills_dir"/*/SKILL.md; do
+		[[ -f $f ]] || continue
+		slug=$(basename "$(dirname "$f")")
+		desc=$(sed -n 's/^description: //p' "$f")
+		((${#desc} > cut)) || continue
+		# Where the routing tail starts, if there is one. Everything from there
+		# on is a `for … see …` clause; losing that is the benign case.
+		local tail_at
+		tail_at=$(printf '%s' "$desc" | awk -v cut="$cut" '{
+			best = 0
+			n = split($0, _unused, "")   # force a string context
+			s = $0
+			# Scan for the earliest "for " that is followed by " see " before the
+			# next sentence end — the shape of a routing clause.
+			for (i = 1; i <= length(s) - 4; i++) {
+				if (tolower(substr(s, i, 4)) == "for " && (i == 1 || substr(s, i-1, 1) ~ /[ ;.]/)) {
+					rest = substr(s, i)
+					p = index(tolower(rest), " see ")
+					if (p > 0 && p < 200) { best = i; break }
+				}
+			}
+			print best
+		}')
+		if ((tail_at > 0 && tail_at <= cut)); then
+			overflow+=("$(printf '%s\ttail only\t%d' "$slug" $((${#desc} - cut)))")
+		else
+			overflow+=("$(printf '%s\tTRIGGER TEXT\t%d' "$slug" $((${#desc} - cut)))")
+		fi
+	done
+
+	echo
+	printf 'A second cap applies that this repo does not set: **Codex truncates\n'
+	printf 'each description at ~%d characters** in its skill listing. The question\n' "$cut"
+	printf 'that matters is which KIND of text falls past it — a lost routing tail\n'
+	echo "measured harmless, lost trigger vocabulary measured as a misroute."
+	echo
+	echo "| Skill | What is cut | Chars past the cut |"
+	echo "|---|---|---:|"
+	printf '%s\n' "${overflow[@]+"${overflow[@]}"}" | sort -t$'\t' -k2,2 -k3,3nr |
+		while IFS=$'\t' read -r slug kind n; do
+			[[ -n $slug ]] && printf '| `%s` | %s | %s |\n' "$slug" "$kind" "$n"
+		done
+	echo
+	echo "\`TRIGGER TEXT\` is the row to act on, and only when the lost words are"
+	echo "a term a neighbouring skill also uses — see the Codex bridge section for"
+	echo "the measured case and why the other 26 rows were left alone."
 }
 
 gen_required_checks() {

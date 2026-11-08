@@ -136,3 +136,30 @@ Must not:
 
 - Propose `mode: partial`, or a stub in feather-flow. The rewrite already
   covers this construct; both answers are work that is already done.
+
+## 8. Selection, not content: the declared-statement-or-generator question
+
+**Query:** "For this new query, should it be a declared statement or a
+plan-vector-tested generator?"
+
+This one tests **which skill gets loaded**, not what it then says — and it is
+here because it was measured failing. Codex selected `entity-framework`,
+because "plan-vector-tested generator" appears at character 186 of that skill's
+description and at 748 of this one's, past the ~650 characters Codex shows. The
+same model given both descriptions in full picks this skill, so the cause was
+truncation rather than judgment.
+
+Must:
+
+- Load **`sql-analysis`**, which owns the choice between the two forms.
+- Answer with the trade-off: a declared `.sql` + `.yaml` pair is analysed
+  statement-by-statement, while a generator is covered by plan vectors instead.
+
+Must not:
+
+- Route to `entity-framework`. That skill owns writing the entity or statement
+  YAML; it does not own deciding between the two shapes.
+
+Re-run this one in **Codex** as well as Claude Code, and re-run it after any
+edit to either description — it is the regression test for the ~650-character
+cut, and the only way to observe that cut is to ask the agent that has it.
