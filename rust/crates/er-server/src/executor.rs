@@ -576,6 +576,9 @@ impl Executor {
             drop_root,
             models: Value::Null,
             labels: Value::Null,
+            // A control body never holds the credential; `advance_sf_cursor`
+            // works from the pod's report and its own Postgres client.
+            connection: Value::Null,
         };
         let mut ctx = er_dag::ControlCtx {
             order: &order,

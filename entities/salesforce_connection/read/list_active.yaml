@@ -1,0 +1,7 @@
+kind: statement
+operation: read
+mode: full
+description: "An org's active connections, oldest first. Returns the full entity because returns: entity is the whole column set by rule; the API projection (pg::list_salesforce_connections) drops the client secret, the same split webhook listing makes."
+params:
+  - { name: org_id, type: varchar }
+returns: entity

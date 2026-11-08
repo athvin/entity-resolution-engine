@@ -151,6 +151,7 @@ fn variant(kind: JobKind) -> &'static str {
         JobKind::DatasetProvision => "DatasetProvision",
         JobKind::ApplyCorrections => "ApplyCorrections",
         JobKind::ApplyApproved => "ApplyApproved",
+        JobKind::Extract => "Extract",
     }
 }
 

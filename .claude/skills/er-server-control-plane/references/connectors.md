@@ -124,22 +124,47 @@ to end.
 > OIDC (frontend-design §2.4) authenticates *users*; the Salesforce *connector*
 > moves *data*. They share a vendor, not a code path.
 
-### 4.1 Ingress
+### 4.1 Ingress — BUILT (#512), with one recorded deviation
 
-- **Auth:** OAuth 2.0 connected app (web-server flow); one connection = one
-  Salesforce org; sandbox connections supported. Tokens live in the secret store.
+The extraction half is shipped: the `salesforce_connection` entity and its
+`/v1/orgs/{org}/connections` CRUD (admin; the secret is never listed, echoed
+or audited), the `extract` job kind (schedulable), the Bulk API 2.0 client
+(`er-server/src/salesforce.rs`, proven against a mock in
+`tests/salesforce_mock.rs`), and the `sf_extract_cursor` watermark. The pod
+stages the result as an ordinary drop-root CSV delivery in the source's
+declared column order (`extract_params::source_csv_columns`, shared with
+`push_records`); the control half enqueues `run_all_incremental` and advances
+the cursor, publish-then-advance like the S3 poller.
+
+- **Auth — deviates from the original sketch, deliberately.** This section
+  used to specify the web-server flow; what shipped is **OAuth 2.0
+  client-credentials** (`auth_kind: client_credentials`, the only kind v1
+  accepts). An extract job is headless: a web-server flow means a redirect
+  URI, a refresh token and a user present, none of which a scheduled pod has.
+  One connection = one Salesforce org; sandbox orgs work the same way (their
+  My Domain is the `instance_url`). There is still **no secret store**: the
+  client secret is a plaintext column under the `webhook.secret` discipline
+  (no `history: true`, one credential-returning statement that only the
+  work-order resolver calls), and the credential reaches the pod on the work
+  order, resolved per attempt with the instance URL re-checked against the
+  outbound-URL guard.
 - **Objects: Lead and Contact first** — both map cleanly onto the person schema
   (Lead's `Company` carried as metadata). Account is second, blocked on the
-  organization entity type (backend-design.md §13).
+  organization entity type (backend-design.md §13). The extract itself takes
+  any queryable sObject name; `IsConverted = false` is applied to Lead by
+  default (spec 1.26).
 - **Initial sync:** Bulk API 2.0, extracting **only mapped fields** (this minimizes
   our data footprint and is part of the security answer). Each object becomes one
   engine source (`sf_contact`, `sf_lead`) with `record_id_column = Id`,
   `updated_at_column = SystemModstamp`. The mapping UI's output compiles directly
   into a `sources:` config block entry.
-- **Change capture: polling, not CDC, for v1** — `SystemModstamp > watermark` plus
-  `getDeleted`, every 1–5 minutes. Deletions become tombstone files; the engine's
-  retraction path does the rest. Polling matches the micro-batch cadence the ~40s
-  incremental cycle supports and burns few API calls. CDC is the later upgrade for a
+- **Change capture: polling, not CDC, for v1** — a schedule on the `extract`
+  kind running `SystemModstamp > watermark`. **Deletions do not propagate
+  yet, on any mode**: `getDeleted` is not built, and the executor's ingest
+  always lands base deliveries (`stage_ingest` passes `full_refresh: false`
+  unconditionally), so even a `mode: full` extract upserts rather than
+  tombstones. Both halves — the `getDeleted` poll and a full-refresh landing
+  mode — are one follow-up ticket. CDC is the later upgrade for a
   near-real-time tier.
 
 ### 4.2 The convergence loop

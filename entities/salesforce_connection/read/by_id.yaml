@@ -1,0 +1,8 @@
+kind: statement
+operation: read
+mode: full
+description: "One active connection by id, org-scoped — the read the work-order resolver makes when an extract attempt needs its credential. This is the one statement that hands the client secret to a caller; it filters on active so a queued extract against a retired connection fails with 'no longer exists' rather than resolving a dangling credential."
+params:
+  - { name: org_id, type: varchar }
+  - { name: connection_id, type: varchar }
+returns: entity

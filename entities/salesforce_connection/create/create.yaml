@@ -1,0 +1,14 @@
+kind: statement
+operation: create
+mode: partial
+description: "Register a Salesforce connection; the client secret is the OAuth client-credentials secret the extract job authenticates with."
+params:
+  - { name: connection_id, type: varchar }
+  - { name: org_id, type: varchar }
+  - { name: name, type: varchar }
+  - { name: instance_url, type: varchar }
+  - { name: auth_kind, type: varchar }
+  - { name: client_id, type: varchar }
+  - { name: client_secret, type: varchar }
+  - { name: api_version, type: varchar }
+returns: none

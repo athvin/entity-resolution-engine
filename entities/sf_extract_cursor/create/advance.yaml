@@ -1,0 +1,14 @@
+kind: statement
+operation: create
+mode: partial
+description: "Record what an extract has already pulled, replacing whatever was there. Written AFTER the delivery is published and its run enqueued, never before — a cursor advanced first over a failed publish would skip those rows permanently, while this order at worst re-extracts once, which is visible and recoverable. The watermark COALESCEs so a full refresh (which carries no mark of its own) does not erase the incremental high-water mark behind it."
+params:
+  - { name: cursor_id, type: varchar }
+  - { name: org_id, type: varchar }
+  - { name: dataset_id, type: varchar }
+  - { name: source, type: varchar }
+  - { name: object, type: varchar }
+  - { name: watermark, type: varchar, nullable: true }
+  - { name: delivery_id, type: varchar }
+  - { name: rows_extracted, type: bigint }
+returns: entity

@@ -38,6 +38,7 @@ pub mod dispatcher_bin;
 pub mod errfmt;
 pub mod exec_task;
 pub mod executor;
+pub mod extract_params;
 pub(crate) mod fixups;
 pub mod mail;
 pub mod migrate_plan;
@@ -48,6 +49,7 @@ pub mod provision;
 pub mod read;
 pub mod runctx;
 pub mod s3_ingest;
+pub mod salesforce;
 pub mod satoken;
 pub mod schema;
 pub mod shutdown;
@@ -4739,6 +4741,62 @@ async fn attempt_work_order(
     } else {
         Vec::new()
     };
+    // An extract pulls from Salesforce with a credential only Postgres holds
+    // (§6.4, the `models`/`labels` precedent). Resolved per attempt rather
+    // than frozen at enqueue so a rotated secret takes effect on the next try,
+    // and the instance URL is re-checked against the outbound-URL guard HERE —
+    // registration already checked it, but DNS can change between the two,
+    // which is exactly the webhook delivery path's reasoning.
+    let connection: Value = if job.kind == "extract" {
+        let request = match crate::extract_params::ExtractRequest::from_params(&job.params) {
+            Ok(r) => r,
+            Err(m) => return detail_err(StatusCode::CONFLICT, m),
+        };
+        let Some(dataset_id) = job.dataset_id.as_deref() else {
+            return detail_err(StatusCode::CONFLICT, "an extract job must name a dataset");
+        };
+        let row = match pg::salesforce_connection_credential(
+            &client,
+            &current.org_id,
+            &request.connection_id,
+        )
+        .await
+        {
+            Ok(Some(row)) => row,
+            Ok(None) => {
+                return detail_err(
+                    StatusCode::CONFLICT,
+                    "the job's salesforce connection no longer exists",
+                );
+            }
+            Err(e) => return pg_err(e),
+        };
+        if let Err(rejection) = urlguard::check(&row.instance_url, urlguard::Egress::Guarded).await
+        {
+            return detail_err(
+                StatusCode::CONFLICT,
+                format!("the connection's instance URL is refused: {rejection}"),
+            );
+        }
+        // The watermark rides beside the credential; a read failure degrades
+        // to a full pull, which is correct and at worst re-extracts rows the
+        // landing upserts anyway.
+        let watermark =
+            er_entities::sf_extract_cursor::read::get(&client, dataset_id, &request.source)
+                .await
+                .ok()
+                .and_then(|rows| rows.into_iter().next())
+                .and_then(|c| c.watermark);
+        json!({
+            "instance_url": row.instance_url,
+            "client_id": row.client_id,
+            "client_secret": row.client_secret,
+            "api_version": row.api_version,
+            "watermark": watermark,
+        })
+    } else {
+        Value::Null
+    };
     let order = json!({
         "org_id": current.org_id,
         "dataset_id": job.dataset_id,
@@ -4763,6 +4821,7 @@ async fn attempt_work_order(
         "drop_root": drop_root,
         "models": models,
         "labels": labels,
+        "connection": connection,
     });
     (StatusCode::OK, Json(json!(order))).into_response()
 }
@@ -7326,16 +7385,10 @@ async fn push_records(
 
     // The columns this source declares, in a stable order: its record id, its
     // updated-at stamp, then every mapped column. Taken from the config rather
-    // than from the records so a missing value is an empty cell, not a shift.
-    let mut columns: Vec<String> = vec![spec.record_id_column.clone()];
-    if !spec.updated_at_column.is_empty() && spec.updated_at_column != spec.record_id_column {
-        columns.push(spec.updated_at_column.clone());
-    }
-    for raw in spec.columns.values() {
-        if !columns.contains(raw) {
-            columns.push(raw.clone());
-        }
-    }
+    // than from the records so a missing value is an empty cell, not a shift —
+    // and factored with the Salesforce extract, which must render the same
+    // order or its deliveries would shift columns silently.
+    let columns = crate::extract_params::source_csv_columns(spec);
 
     let mut csv = String::new();
     csv.push_str(&columns.join(","));
@@ -7866,7 +7919,7 @@ async fn merge_plans(
 /// actually routed. `train` sat in this list with no dispatcher arm, failing
 /// every time it fired; a list of kinds the scheduler will enqueue is a promise
 /// that something handles them.
-pub const SCHEDULABLE_KINDS: [&str; 7] = [
+pub const SCHEDULABLE_KINDS: [&str; 8] = [
     "run_all_full",
     "run_all_incremental",
     "correct",
@@ -7880,6 +7933,11 @@ pub const SCHEDULABLE_KINDS: [&str; 7] = [
     // default to the standardized corpus at tier 1 with exact distinct counts,
     // so a bare `{}` schedule is the useful one.
     "profile",
+    // The Salesforce poll (spec 1.24: incremental by default). A schedule is
+    // the whole point of an incremental extract — its params carry the
+    // connection, object and source, validated at schedule-create time by the
+    // same parser the executor uses.
+    "extract",
 ];
 
 /// Whether a cron expression is one the scheduler can actually run.
@@ -7942,6 +8000,14 @@ async fn create_schedule(
         Err(r) => return *r,
     };
     let params = body.params.unwrap_or_else(|| json!({}));
+    // An extract schedule's params are its whole meaning — a bare `{}` would
+    // enqueue jobs that fail at planning, forever, on a cron. Validated by the
+    // same parser the executor uses, the `dataset_profile_run` rule.
+    if body.kind == "extract"
+        && let Err(message) = crate::extract_params::ExtractRequest::from_params(&params)
+    {
+        return detail_err(StatusCode::UNPROCESSABLE_ENTITY, message);
+    }
     // History images record the acting principal (er.actor).
     let _ = pg::set_actor(&client, &principal.actor).await;
     match pg::create_schedule(
@@ -8905,6 +8971,326 @@ async fn delete_webhook(
             }
             Json(json!({ "deleted": deleted })).into_response()
         }
+        Err(e) => pg_err(e),
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SalesforceConnectionIn {
+    /// The operator's label, unique per org.
+    name: String,
+    /// The Salesforce My Domain base URL, https.
+    instance_url: String,
+    /// The connected app's consumer key.
+    client_id: String,
+    /// The connected app's consumer secret.
+    client_secret: String,
+    /// The OAuth flow; only `client_credentials` today, which is also the default.
+    #[serde(default)]
+    auth_kind: Option<String>,
+    /// The REST API version segment, e.g. `v62.0`; defaulted when omitted.
+    #[serde(default)]
+    api_version: Option<String>,
+}
+
+/// The REST version a connection gets when the caller does not pin one.
+const DEFAULT_SF_API_VERSION: &str = "v62.0";
+
+/// Admin+: register a Salesforce connection (`POST /v1/orgs/{org}/connections`).
+/// The client secret is stored for the extract job's client-credentials flow
+/// and is never returned by any endpoint — not even this one's 201, which
+/// echoes only the non-secret half (the caller already holds the secret; an
+/// echo would be one more place it lands).
+async fn create_salesforce_connection(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+    Json(body): Json<SalesforceConnectionIn>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Admin) {
+        return e.into_response();
+    }
+    for (field, value) in [
+        ("name", &body.name),
+        ("instance_url", &body.instance_url),
+        ("client_id", &body.client_id),
+        ("client_secret", &body.client_secret),
+    ] {
+        if value.trim().is_empty() {
+            return detail_err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                format!("{field} is required"),
+            );
+        }
+    }
+    let auth_kind = body.auth_kind.as_deref().unwrap_or("client_credentials");
+    if auth_kind != "client_credentials" {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!(
+                "auth_kind {auth_kind:?} is not supported; the extract job is headless, so \
+                 only client_credentials is"
+            ),
+        );
+    }
+    let api_version = body
+        .api_version
+        .as_deref()
+        .unwrap_or(DEFAULT_SF_API_VERSION);
+    if !api_version
+        .strip_prefix('v')
+        .is_some_and(|rest| rest.chars().all(|c| c.is_ascii_digit() || c == '.'))
+    {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("api_version {api_version:?} is not a version segment like v62.0"),
+        );
+    }
+    // The outbound-URL guard, exactly as webhook registration runs it: the
+    // extract pod will POST this tenant-supplied URL with credentials attached,
+    // so an internal or metadata address must be refused before it reaches the
+    // table. The work-order resolver re-checks, because DNS can change.
+    if let Err(rejection) = urlguard::check(&body.instance_url, urlguard::Egress::Guarded).await {
+        return detail_err(StatusCode::UNPROCESSABLE_ENTITY, rejection.to_string());
+    }
+    let Some(dsn) = &state.dsn else {
+        return detail_err(StatusCode::NOT_IMPLEMENTED, "connections require Postgres");
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
+    match pg::list_salesforce_connections(&client, &org_row.id).await {
+        Ok(rows) if rows.iter().any(|c| c.name == body.name) => {
+            return detail_err(
+                StatusCode::CONFLICT,
+                format!("a connection named {:?} already exists", body.name),
+            );
+        }
+        Ok(_) => {}
+        Err(e) => return pg_err(e),
+    }
+    match pg::create_salesforce_connection(
+        &client,
+        &org_row.id,
+        &body.name,
+        &body.instance_url,
+        auth_kind,
+        &body.client_id,
+        &body.client_secret,
+        api_version,
+    )
+    .await
+    {
+        Ok(connection_id) => {
+            // The audit detail names the connection and its URL — never the
+            // secret, the key.issue rule.
+            let _ = pg::audit(
+                &client,
+                &principal.actor,
+                Some(&org),
+                None,
+                "connection.create",
+                &json!({
+                    "connection_id": connection_id,
+                    "name": body.name,
+                    "instance_url": body.instance_url,
+                    "auth_kind": auth_kind,
+                }),
+            )
+            .await;
+            (
+                StatusCode::CREATED,
+                Json(json!({
+                    "id": connection_id,
+                    "name": body.name,
+                    "instance_url": body.instance_url,
+                    "auth_kind": auth_kind,
+                    "api_version": api_version,
+                    "active": true,
+                })),
+            )
+                .into_response()
+        }
+        Err(e) => pg_err(e),
+    }
+}
+
+/// Viewer+: list an org's active Salesforce connections
+/// (`GET /v1/orgs/{org}/connections`); the client secret is never listed.
+async fn salesforce_connections_index(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let Some(dsn) = &state.dsn else {
+        return detail_err(StatusCode::NOT_IMPLEMENTED, "connections require Postgres");
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
+    match pg::list_salesforce_connections(&client, &org_row.id).await {
+        Ok(rows) => {
+            let out: Vec<Value> = rows
+                .iter()
+                .map(|c| {
+                    json!({
+                        "id": c.id,
+                        "name": c.name,
+                        "instance_url": c.instance_url,
+                        "auth_kind": c.auth_kind,
+                        "api_version": c.api_version,
+                        "active": c.active,
+                    })
+                })
+                .collect();
+            Json(json!(out)).into_response()
+        }
+        Err(e) => pg_err(e),
+    }
+}
+
+/// Admin+: retire a Salesforce connection
+/// (`DELETE /v1/orgs/{org}/connections/{connection_id}`). Soft, like webhooks:
+/// cursors and past jobs reference the id, and a queued extract against it
+/// fails with "no longer exists" rather than resolving a dangling credential.
+async fn delete_salesforce_connection(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, connection_id)): Path<(String, String)>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Admin) {
+        return e.into_response();
+    }
+    let Some(dsn) = &state.dsn else {
+        return detail_err(StatusCode::NOT_IMPLEMENTED, "connections require Postgres");
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
+    match pg::delete_salesforce_connection(&client, &org_row.id, &connection_id).await {
+        Ok(deleted) => {
+            if deleted {
+                let _ = pg::audit(
+                    &client,
+                    &principal.actor,
+                    Some(&org),
+                    None,
+                    "connection.delete",
+                    &json!({ "connection_id": connection_id }),
+                )
+                .await;
+            }
+            Json(json!({ "deleted": deleted })).into_response()
+        }
+        Err(e) => pg_err(e),
+    }
+}
+
+/// Steward+: pull an sObject from Salesforce into this dataset
+/// (`POST /v1/orgs/{org}/datasets/{ds}/extract`). Body: `connection_id`,
+/// `object`, `source`, optional `mode` (`incremental` default | `full`),
+/// `where`, `exclude_converted_leads`. Returns 202 and the job id.
+///
+/// Validated HERE through the same parser the executor uses, so a bad request
+/// is a 422 naming the problem rather than a job that sits in the queue and
+/// then fails — the `dataset_profile_run` rule. The connection is also
+/// resolved now: a dangling id is the caller's typo, not the dispatcher's
+/// discovery.
+async fn dataset_extract_run(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, ds)): Path<(String, String)>,
+    Json(body): Json<Value>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Steward) {
+        return e.into_response();
+    }
+    let request = match crate::extract_params::ExtractRequest::from_params(&body) {
+        Ok(r) => r,
+        Err(message) => return detail_err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+    let Some(dsn) = &state.dsn else {
+        return detail_err(StatusCode::NOT_IMPLEMENTED, "extraction requires Postgres");
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
+    let d = match dataset_or_404(&client, &org_row, &ds).await {
+        Ok(row) => row,
+        Err(r) => return *r,
+    };
+    if let Err(e) = refuse_unless_active_dataset(&org_row, &d, "extraction") {
+        return *e;
+    }
+    match pg::salesforce_connection_credential(&client, &org_row.id, &request.connection_id).await {
+        Ok(Some(_)) => {}
+        Ok(None) => {
+            return detail_err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                format!("no connection {:?} in this org", request.connection_id),
+            );
+        }
+        Err(e) => return pg_err(e),
+    }
+    // The source must be a published config source, the same precondition a
+    // delivery has: an extract that lands as an undeclared source would be
+    // refused at ingest anyway, an hour later and off the caller's screen.
+    match dataset_active_config(&client, &d).await {
+        Ok(config) if !config.sources.contains_key(&request.source) => {
+            let known: Vec<&str> = config.sources.keys().map(String::as_str).collect();
+            return detail_err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                format!(
+                    "source {:?} is not declared in the published config (declared: {})",
+                    request.source,
+                    known.join(", ")
+                ),
+            );
+        }
+        Ok(_) => {}
+        Err(r) => return *r,
+    }
+    match pg::enqueue(
+        &client,
+        &org_row.id,
+        Some(d.id.as_str()),
+        "extract",
+        0,
+        None,
+        Some(&body),
+        principal.provenance(),
+    )
+    .await
+    {
+        Ok(job) => (
+            StatusCode::ACCEPTED,
+            Json(json!({ "job": { "id": job.id, "kind": job.kind, "state": job.state } })),
+        )
+            .into_response(),
         Err(e) => pg_err(e),
     }
 }
@@ -10593,6 +10979,18 @@ fn build_routes(state: AppState) -> Router {
         .route(
             "/v1/orgs/{org}/webhooks/{webhook_id}",
             axum::routing::delete(delete_webhook),
+        )
+        .route(
+            "/v1/orgs/{org}/connections",
+            get(salesforce_connections_index).post(create_salesforce_connection),
+        )
+        .route(
+            "/v1/orgs/{org}/connections/{connection_id}",
+            axum::routing::delete(delete_salesforce_connection),
+        )
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/extract",
+            post(dataset_extract_run),
         )
         .route(
             "/v1/orgs/{org}/datasets/{ds}/schedules/{schedule_id}",

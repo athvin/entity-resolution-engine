@@ -22,8 +22,8 @@ use er_dag::{LakeRef, NodePolicy, Outcome, Plan, Task, TaskCtx, TaskError};
 
 use super::edges::{Assembled, Landed, Profiled, Resolved, Scored, Standardized};
 use super::plans::{
-    DrainedActions, FinishReport, LakeInitialized, MaintenanceReport, RunPlan, SchemaReconciled,
-    TrainedModel,
+    DrainedActions, ExtractReport, FinishReport, LakeInitialized, MaintenanceReport, RunPlan,
+    SchemaReconciled, TrainedModel,
 };
 use super::{JobKind, Session};
 
@@ -1017,6 +1017,204 @@ impl Task<Session> for Maintain {
             Err(e) => Err(engine_error(&format!("{e:#}"))),
         }
     }
+}
+
+/// Pull one sObject from Salesforce into a drop-root CSV delivery — the
+/// Bulk API 2.0 half of the `extract` kind (E2's remaining gap: "our ingestion
+/// reads S3 and CSV, not an org").
+///
+/// A pod task, not a control one, although nothing here opens the lake: a Bulk
+/// API extract blocks for as long as Salesforce takes to run the query, and a
+/// control body runs inside the dispatcher, where minutes of waiting would
+/// stall every other tenant's launches. The pod pays for one idle node
+/// instead; the Postgres half (`advance_sf_cursor`) stays with the dispatcher.
+///
+/// The delivery lands exactly the way an upload or the S3 poller lands one —
+/// staged as `.{source}.{delivery_id}.csv.part`, renamed to `{source}.csv` —
+/// so the downstream `run_all_incremental` the control half enqueues ingests
+/// it with zero new code. Bulk API results are already CSV; each page is
+/// re-emitted in the source's declared column order (the same
+/// record-id/updated-at/mapped order `push_records` renders), which also
+/// strips the per-page header repeats.
+#[derive(Default)]
+pub struct ExtractPull;
+
+impl Task<Session> for ExtractPull {
+    const NAME: &'static str = "extract";
+    const VERSION: u32 = 1;
+    type Input = ();
+    type Output = Plan<ExtractReport>;
+    const WRITES_LAKE: bool = false;
+
+    fn run(
+        &mut self,
+        ctx: &mut TaskCtx<'_, Session>,
+        (): Self::Input,
+    ) -> Result<Outcome<Self::Output>, TaskError> {
+        let request = crate::extract_params::ExtractRequest::from_params(&ctx.order.params)
+            .map_err(|m| TaskError::Failed(er_errors::ErError::precondition(m)))?;
+
+        // The credential, resolved by the control plane into the order — the
+        // pod holds no database credential (§6.4), the `models` precedent.
+        let conn = &ctx.order.connection;
+        let field = |key: &str| conn.get(key).and_then(serde_json::Value::as_str);
+        let connection = match (
+            field("instance_url"),
+            field("client_id"),
+            field("client_secret"),
+            field("api_version"),
+        ) {
+            (Some(instance_url), Some(client_id), Some(client_secret), Some(api_version)) => {
+                crate::salesforce::Connection {
+                    instance_url: instance_url.to_string(),
+                    client_id: client_id.to_string(),
+                    client_secret: client_secret.to_string(),
+                    api_version: api_version.to_string(),
+                }
+            }
+            _ => {
+                return Err(TaskError::Failed(er_errors::ErError::precondition(
+                    "the work order carries no salesforce credential — the connection no \
+                     longer exists, or this order predates the extract kind",
+                )));
+            }
+        };
+        let watermark = match request.mode {
+            crate::extract_params::ExtractMode::Incremental => {
+                field("watermark").map(str::to_string)
+            }
+            crate::extract_params::ExtractMode::Full => None,
+        };
+
+        // The source's declared CSV shape, from the published config the lake
+        // env names — the same file read the control half makes, and the same
+        // column order `push_records` renders, so the delivery this stage
+        // writes is indistinguishable from an uploaded one.
+        let config = published_config(&ctx.order.lake_env)?;
+        let Some(spec) = config.sources.get(&request.source) else {
+            return Err(TaskError::Failed(er_errors::ErError::precondition(
+                format!(
+                    "param: source {:?} is not declared in the published config",
+                    request.source
+                ),
+            )));
+        };
+        let columns = crate::extract_params::source_csv_columns(spec);
+        let soql = crate::salesforce::build_soql(
+            &request.object,
+            &columns,
+            &spec.updated_at_column,
+            watermark.as_deref(),
+            request.where_clause.as_deref(),
+            request.exclude_converted_leads,
+        )
+        .map_err(|m| TaskError::Failed(er_errors::ErError::precondition(m)))?;
+
+        let drop_root = ctx.order.drop_root.as_deref().ok_or_else(|| {
+            TaskError::Failed(er_errors::ErError::precondition(
+                "the dataset has no drop_root, so an extract has nowhere to land",
+            ))
+        })?;
+        let delivery_id = er_ids::new_v7();
+        let part = crate::s3_ingest::staging_path(
+            std::path::Path::new(drop_root),
+            &request.source,
+            &delivery_id,
+        )
+        .ok_or_else(|| {
+            TaskError::Failed(er_errors::ErError::precondition(format!(
+                "param: source {:?} is not a safe path segment",
+                request.source
+            )))
+        })?;
+
+        let mut file = std::fs::File::create(&part)
+            .map_err(|e| engine_error(&format!("i/o error staging into {drop_root}: {e}")))?;
+        crate::salesforce::write_header(&columns, &mut file)
+            .map_err(|e| engine_error(&format!("i/o error writing the header: {e}")))?;
+        let outcome = crate::salesforce::extract_to_writer(
+            &connection,
+            &soql,
+            &columns,
+            &spec.updated_at_column,
+            &mut file,
+        )
+        .map_err(|e| {
+            // A half-written part file must not survive a failure: the leading
+            // dot keeps it from being ingested, but the next try mints a new
+            // delivery id and would leave this one behind forever.
+            let _ = std::fs::remove_file(&part);
+            sf_error(&e)
+        })?;
+        file.sync_all()
+            .map_err(|e| engine_error(&format!("i/o error flushing the delivery: {e}")))?;
+        let bytes = i64::try_from(file.metadata().map_or(0, |m| m.len())).unwrap_or(0);
+        drop(file);
+
+        let rows = i64::try_from(outcome.rows).unwrap_or(i64::MAX);
+        let report = ExtractReport {
+            connection_id: request.connection_id.clone(),
+            source: request.source.clone(),
+            object: request.object.clone(),
+            delivery_id: delivery_id.clone(),
+            mode: match request.mode {
+                crate::extract_params::ExtractMode::Incremental => "incremental".to_string(),
+                crate::extract_params::ExtractMode::Full => "full".to_string(),
+            },
+            rows,
+            bytes,
+            watermark: outcome.max_updated,
+        };
+        if outcome.rows == 0 {
+            // Nothing changed upstream. The empty page set is a SUCCESS — a
+            // scheduled incremental mostly finds nothing — but there is no
+            // delivery to publish, so the part file goes and the control half
+            // sees `rows: 0` and enqueues nothing.
+            let _ = std::fs::remove_file(&part);
+            return Ok(Outcome::NoOp(Plan(report)));
+        }
+        let live = std::path::Path::new(drop_root).join(format!("{}.csv", request.source));
+        std::fs::rename(&part, &live)
+            .map_err(|e| engine_error(&format!("i/o error publishing the delivery: {e}")))?;
+        Ok(Outcome::Done(
+            Plan(report),
+            er_dag::Counters(serde_json::json!({ "rows": rows, "bytes": bytes })),
+        ))
+    }
+}
+
+/// The published config, from the path the lake env names — a plain file read,
+/// the same one the control half's `load_published_config` makes.
+fn published_config(lake_env: &serde_json::Value) -> Result<er_config::Config, TaskError> {
+    let path = lake_env
+        .get("ER_CONFIG_PATH")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            TaskError::Failed(er_errors::ErError::config(
+                "org env missing ER_CONFIG_PATH".to_string(),
+            ))
+        })?;
+    let text = std::fs::read_to_string(path).map_err(|e| {
+        TaskError::Failed(er_errors::ErError::config(format!(
+            "read config {path}: {e}"
+        )))
+    })?;
+    er_config::load_config_str(&text)
+        .map_err(|e| TaskError::Failed(er_errors::ErError::config(crate::errfmt::chain(&e))))
+}
+
+/// Map a [`crate::salesforce::SfError`] onto the er-errors taxonomy: the
+/// variants pre-sorted it, so this is a lookup rather than a message read.
+fn sf_error(e: &crate::salesforce::SfError) -> TaskError {
+    use crate::salesforce::SfError as E;
+    let err = match e {
+        E::Auth(_) => er_errors::ErError::config(e.to_string()),
+        E::Refused(_) => er_errors::ErError::precondition(e.to_string()),
+        E::Transient(_) => er_errors::ErError::stage_failure(e.to_string())
+            .with_class(er_errors::ErrorClass::TransientIo),
+        E::Protocol(_) => er_errors::ErError::stage_failure(e.to_string()),
+    };
+    TaskError::Failed(err)
 }
 
 /// Classify an engine failure STRING into the er-errors taxonomy.

@@ -340,6 +340,22 @@ CREATE INDEX IF NOT EXISTS pair_labels_dataset ON public.pair_labels (dataset_id
 );
 CREATE UNIQUE INDEX IF NOT EXISTS s3_ingest_cursors_org_source ON public.s3_ingest_cursors (org_id, source);
 CREATE INDEX IF NOT EXISTS s3_ingest_cursors_dataset ON public.s3_ingest_cursors (dataset_id, source);"#,
+    r#"CREATE TABLE IF NOT EXISTS public.salesforce_connections (
+  id text NOT NULL,
+  org_id text NOT NULL REFERENCES orgs(id),
+  name text NOT NULL,
+  instance_url text NOT NULL,
+  auth_kind text NOT NULL,
+  client_id text NOT NULL,
+  client_secret text NOT NULL,
+  api_version text NOT NULL,
+  active boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (id),
+  UNIQUE (org_id, name)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS salesforce_connections_org_name ON public.salesforce_connections (org_id, name);"#,
     r#"CREATE TABLE IF NOT EXISTS public.schedules (
   id text NOT NULL,
   org_id text NOT NULL REFERENCES orgs(id),
@@ -384,6 +400,22 @@ CREATE OR REPLACE TRIGGER er_history_schedules
   PRIMARY KEY (id)
 );
 CREATE INDEX IF NOT EXISTS schema_migrations_created_at ON public.schema_migrations (created_at);"#,
+    r#"CREATE TABLE IF NOT EXISTS public.sf_extract_cursors (
+  id text NOT NULL,
+  org_id text NOT NULL REFERENCES orgs(id),
+  dataset_id text NOT NULL REFERENCES datasets(id),
+  source text NOT NULL,
+  object text NOT NULL,
+  watermark text,
+  delivery_id text NOT NULL,
+  rows_extracted bigint NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (id),
+  UNIQUE (dataset_id, source)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS sf_extract_cursors_dataset_source ON public.sf_extract_cursors (dataset_id, source);
+CREATE INDEX IF NOT EXISTS sf_extract_cursors_org_source ON public.sf_extract_cursors (org_id, source);"#,
     r#"CREATE TABLE IF NOT EXISTS public.staged_steward_actions (
   id text NOT NULL,
   org_id text NOT NULL REFERENCES orgs(id),

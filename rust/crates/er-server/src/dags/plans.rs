@@ -255,6 +255,44 @@ impl PlanDoc for StagedApproved {
     const STABLE_NAME: &'static str = "staged_approved";
 }
 
+/// `extract`'s record of the delivery it staged from Salesforce: what landed in
+/// the drop root, under which delivery id, and the new high-water mark.
+///
+/// It carries the identifiers `advance_sf_cursor` needs because the Postgres
+/// writes — the run enqueue, the audit row, the cursor upsert — are the control
+/// half's, and a pod holds no control-plane credential (§6.4). `watermark` is
+/// the max updated-at value the pull actually saw, never a clock reading: a
+/// server-side clock could sit ahead of a row still being committed in
+/// Salesforce, and rows under a skipped mark never arrive again.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExtractReport {
+    pub connection_id: String,
+    pub source: String,
+    pub object: String,
+    pub delivery_id: String,
+    pub mode: String,
+    pub rows: i64,
+    pub bytes: i64,
+    #[serde(default)]
+    pub watermark: Option<String>,
+}
+impl PlanDoc for ExtractReport {
+    const STABLE_NAME: &'static str = "extract_report";
+}
+
+/// `advance_sf_cursor`'s receipt: the run it enqueued (none for an empty pull)
+/// and the mark it recorded.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SfCursorAdvanced {
+    #[serde(default)]
+    pub enqueued_job: Option<String>,
+    #[serde(default)]
+    pub watermark: Option<String>,
+}
+impl PlanDoc for SfCursorAdvanced {
+    const STABLE_NAME: &'static str = "sf_cursor_advanced";
+}
+
 /// One kind of entity event and how many of them a run produced.
 ///
 /// Named fields rather than a `(String, i64)` tuple because this lands in a

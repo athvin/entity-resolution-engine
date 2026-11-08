@@ -219,6 +219,12 @@ const DATASET_SCOPED: &[(&str, bool)] = &[
     ("matching_models", true),
     ("schedules", true),
     ("s3_ingest_cursors", true),
+    // The Salesforce twin of the row above. No real store predates datasets
+    // AND carries this table — it shipped after the re-key — but the aged
+    // stores pg_schema_replay/pg_schema_race synthesize drop dataset_id from
+    // EVERY table that has one, and a NOT NULL column only heals through this
+    // fixup: the reconciler rightly refuses to add it (Breaking).
+    ("sf_extract_cursors", true),
     ("pair_labels", true),
     // NULL is meaningful here: provisioning records an ORG-LEVEL lake
     // position before any dataset exists, and the deploy sweep falls back to

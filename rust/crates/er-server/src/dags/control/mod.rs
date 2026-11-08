@@ -22,9 +22,150 @@ use er_dag::{ControlCtx, ControlTask, Outcome, Plan, TaskError};
 
 use super::PgClient;
 use super::plans::{
-    CatalogCreated, DrainedActions, LakeInitialized, ModelRegistered, OrgActivated, SettledActions,
-    StagedApplied, StagedApproved, TrainedModel,
+    CatalogCreated, DrainedActions, ExtractReport, LakeInitialized, ModelRegistered, OrgActivated,
+    SettledActions, SfCursorAdvanced, StagedApplied, StagedApproved, TrainedModel,
 };
+
+/// The actor an extract's delivery is attributed to — the mechanism, like
+/// `s3-ingest` and `scheduler`: nobody authorised this particular import, and
+/// attributing it to whoever registered the connection would make the audit
+/// log read as though they had.
+const SF_EXTRACT_ACTOR: &str = "sf-extract";
+
+/// Publish what the `extract` pod staged: enqueue the incremental run that
+/// ingests the delivery, write the audit row and the `import.received` event,
+/// and only then advance the (dataset, source) watermark — the same
+/// publish-then-advance order the S3 poller keeps, because a cursor advanced
+/// over a failed publish skips those rows forever while the reverse at worst
+/// re-extracts once.
+///
+/// The enqueue carries an idempotency key derived from the delivery id, so a
+/// retry of this task (after, say, a cursor write that failed) re-finds the
+/// job it already made rather than queueing the ingest twice.
+#[derive(Default)]
+pub struct AdvanceSfCursor;
+
+impl ControlTask<PgClient> for AdvanceSfCursor {
+    const NAME: &'static str = "advance_sf_cursor";
+    const VERSION: u32 = 1;
+    type Input = (Plan<ExtractReport>,);
+    type Output = Plan<SfCursorAdvanced>;
+
+    async fn run(
+        &mut self,
+        ctx: &mut ControlCtx<'_, PgClient>,
+        (report,): Self::Input,
+    ) -> Result<Outcome<Self::Output>, TaskError> {
+        let report = report.0;
+        if report.rows == 0 {
+            // The pod found nothing new and published nothing — the ordinary
+            // scheduled-incremental outcome. No run, no cursor movement.
+            return Ok(Outcome::NoOp(Plan(SfCursorAdvanced {
+                enqueued_job: None,
+                watermark: None,
+            })));
+        }
+        let Some(dataset_id) = ctx.order.dataset_id.clone() else {
+            return Err(TaskError::Failed(er_errors::ErError::precondition(
+                "an extract job must name a dataset".to_string(),
+            )));
+        };
+
+        let idem = format!("extract:{}", report.delivery_id);
+        let job = crate::pg::enqueue(
+            ctx.client,
+            &ctx.order.org_id,
+            Some(dataset_id.as_str()),
+            "run_all_incremental",
+            0,
+            Some(&idem),
+            Some(&serde_json::json!({
+                "source": report.source,
+                "delivery_id": report.delivery_id,
+            })),
+            crate::pg::Provenance::actor(SF_EXTRACT_ACTOR),
+        )
+        .await
+        .map_err(|e| {
+            TaskError::Failed(
+                er_errors::ErError::stage_failure(format!("enqueueing the ingest run: {e}"))
+                    .with_class(er_errors::ErrorClass::TransientIo),
+            )
+        })?;
+
+        // Best-effort reporting, the finish_delivery discipline: the delivery
+        // is committed and its run queued, so neither row may undo that.
+        let _ = crate::pg::audit(
+            ctx.client,
+            SF_EXTRACT_ACTOR,
+            Some(&ctx.order.org_id),
+            Some(&dataset_id),
+            "import.extract",
+            &serde_json::json!({
+                "source": report.source,
+                "object": report.object,
+                "connection_id": report.connection_id,
+                "delivery_id": report.delivery_id,
+                "rows": report.rows,
+                "bytes": report.bytes,
+                "job_id": job.id,
+            }),
+        )
+        .await;
+        let org_name = match crate::pg::get_org_by_id(ctx.client, &ctx.order.org_id).await {
+            Ok(Some(org)) => org.name,
+            _ => ctx.order.org_id.clone(),
+        };
+        if let Err(e) = crate::webhook::emit(
+            ctx.client,
+            &ctx.order.org_id,
+            Some(dataset_id.as_str()),
+            &org_name,
+            "import.received",
+            &serde_json::json!({
+                "source": report.source,
+                "delivery_id": report.delivery_id,
+                "bytes": report.bytes,
+                "job_id": job.id,
+            }),
+        )
+        .await
+        {
+            tracing::warn!(er.source = %report.source, error = %e, "the import.received webhook was not queued");
+        }
+
+        // The advance comes LAST. A failure here retries the task; the enqueue
+        // above dedupes on its idempotency key, so the retry converges on the
+        // cursor instead of double-queueing the run.
+        let cursor_id = er_ids::new_v7();
+        er_entities::sf_extract_cursor::create::advance(
+            ctx.client,
+            &cursor_id,
+            &ctx.order.org_id,
+            &dataset_id,
+            &report.source,
+            &report.object,
+            report.watermark.as_deref(),
+            &report.delivery_id,
+            report.rows,
+        )
+        .await
+        .map_err(|e| {
+            TaskError::Failed(
+                er_errors::ErError::stage_failure(format!("advancing the extract cursor: {e}"))
+                    .with_class(er_errors::ErrorClass::TransientIo),
+            )
+        })?;
+
+        Ok(Outcome::Done(
+            Plan(SfCursorAdvanced {
+                enqueued_job: Some(job.id.clone()),
+                watermark: report.watermark.clone(),
+            }),
+            er_dag::Counters(serde_json::json!({ "rows": report.rows, "enqueued": job.id })),
+        ))
+    }
+}
 
 /// Queue one `entity.write_back` per entity the pass changed (O4).
 ///

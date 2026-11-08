@@ -1,0 +1,64 @@
+kind: entity
+version: 1
+name: sf_extract_cursor
+relation: sf_extract_cursors
+description: "The extract job's high-water mark, one row per (dataset, source): the newest SystemModstamp already pulled from Salesforce, so an incremental extract asks only for what changed since. The s3_ingest_cursor shape for an API-polled provider — an upsert rather than a log, because the question is 'what is already in', and advanced only AFTER the delivery is published, so a failure re-extracts once rather than skipping rows forever."
+key: [id]
+natural_key: [dataset_id, source]
+generate:
+  stores: [postgres]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "UUIDv7, minted by the application."
+  - name: org_id
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: id }
+    description: "The tenant whose Salesforce org was extracted; denormalized beside the dataset scope per V17."
+  - name: dataset_id
+    type: varchar
+    nullable: false
+    references: { relation: datasets, column: id }
+    description: "The dataset the extracted source lands in."
+  - name: source
+    type: varchar
+    nullable: false
+    description: "The config source the extract delivers as — the same name the drop-root CSV carries."
+  - name: object
+    type: varchar
+    nullable: false
+    description: "The sObject API name the source was extracted from (Lead, Contact, a custom object), kept so an operator asking 'where did this watermark come from' gets the answer."
+  - name: watermark
+    type: varchar
+    description: "The max SystemModstamp among rows ever extracted, in Salesforce's own ISO-8601 text, verbatim. Text rather than a timestamp column because it round-trips into the next SOQL literal unchanged — a parse-and-reformat is where a timezone or a millisecond would silently shift the boundary. Nullable: a connection that has only ever full-refreshed has no mark."
+  - name: delivery_id
+    type: varchar
+    nullable: false
+    description: "The delivery the last extract became, tying the cursor to the audit row and the run it enqueued."
+  - name: rows_extracted
+    type: bigint
+    nullable: false
+    description: "How many records the last extract pulled, so a shrinking incremental is visible as one."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When this source was first extracted."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When it was last extracted."
+indexes:
+  # The natural-key upsert target, and V17's dataset-scoped read path.
+  - name: sf_extract_cursors_dataset_source
+    columns: [dataset_id, source]
+    unique: true
+  # V15: the org-scoped read path.
+  - name: sf_extract_cursors_org_source
+    columns: [org_id, source]

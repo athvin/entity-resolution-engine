@@ -2743,6 +2743,77 @@ indexes:
 "#,
     ),
     (
+        "salesforce_connection",
+        r#"kind: entity
+version: 1
+name: salesforce_connection
+relation: salesforce_connections
+description: "A tenant's Salesforce org credential: the instance URL and the OAuth client-credentials pair the extract job authenticates with. Org-scoped — one connection is one Salesforce org (connectors.md §4.1), and a credential is a tenant-level fact that several datasets may extract through. Deliberately NOT history: true — the history trigger copies whole rows as jsonb into an append-only companion, which would duplicate the client secret into a table nothing ever deletes from."
+key: [id]
+natural_key: [org_id, name]
+generate:
+  stores: [postgres]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "UUIDv7, minted by the application."
+  - name: org_id
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: id }
+    description: "The tenant that owns the connection; every read is scoped by it."
+  - name: name
+    type: varchar
+    nullable: false
+    description: "The operator's label for the connection, unique per org — what a dataset's extract params name."
+  - name: instance_url
+    type: varchar
+    nullable: false
+    description: "The Salesforce My Domain base URL (https, no path). Checked by the outbound-URL guard at registration AND re-checked when a work order resolves it, the same two-point check webhook delivery makes — DNS can change between the two."
+  - name: auth_kind
+    type: varchar
+    nullable: false
+    description: "The OAuth flow this credential drives. Only 'client_credentials' today: an extract job is headless, so the web-server flow connectors.md §4 sketched (redirect URI, refresh token, a user present) is the wrong shape — the deviation is recorded there."
+  - name: client_id
+    type: varchar
+    nullable: false
+    description: "The connected app's consumer key."
+  - name: client_secret
+    type: varchar
+    nullable: false
+    description: "The connected app's consumer secret. Plaintext at rest like webhook.secret, and under the same discipline: returned by exactly one statement (by_id, which only the work-order resolver calls), never listed, never audited, never on a span."
+  - name: api_version
+    type: varchar
+    nullable: false
+    description: "The REST API version segment the extract calls, e.g. 'v62.0'. Stored per connection because a tenant's org pins what it supports; the handler defaults it."
+  - name: active
+    type: boolean
+    nullable: false
+    default: "true"
+    description: "Whether the connection may be used. Deletion is deactivation: a queued extract job that names a retired connection must fail with 'no longer exists' rather than resolve a dangling id."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the connection was registered."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "Wall-clock last-write time."
+indexes:
+  # V15, and the per-org uniqueness the natural key promises: a second
+  # connection with the same name is a 409, not a silent twin.
+  - name: salesforce_connections_org_name
+    columns: [org_id, name]
+    unique: true
+"#,
+    ),
+    (
         "schedule",
         r#"kind: entity
 version: 1
@@ -2923,6 +2994,74 @@ columns:
     type: timestamp
     nullable: false
     description: "Run-logical last-write time (the latest scoring run's clock)."
+"#,
+    ),
+    (
+        "sf_extract_cursor",
+        r#"kind: entity
+version: 1
+name: sf_extract_cursor
+relation: sf_extract_cursors
+description: "The extract job's high-water mark, one row per (dataset, source): the newest SystemModstamp already pulled from Salesforce, so an incremental extract asks only for what changed since. The s3_ingest_cursor shape for an API-polled provider — an upsert rather than a log, because the question is 'what is already in', and advanced only AFTER the delivery is published, so a failure re-extracts once rather than skipping rows forever."
+key: [id]
+natural_key: [dataset_id, source]
+generate:
+  stores: [postgres]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "UUIDv7, minted by the application."
+  - name: org_id
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: id }
+    description: "The tenant whose Salesforce org was extracted; denormalized beside the dataset scope per V17."
+  - name: dataset_id
+    type: varchar
+    nullable: false
+    references: { relation: datasets, column: id }
+    description: "The dataset the extracted source lands in."
+  - name: source
+    type: varchar
+    nullable: false
+    description: "The config source the extract delivers as — the same name the drop-root CSV carries."
+  - name: object
+    type: varchar
+    nullable: false
+    description: "The sObject API name the source was extracted from (Lead, Contact, a custom object), kept so an operator asking 'where did this watermark come from' gets the answer."
+  - name: watermark
+    type: varchar
+    description: "The max SystemModstamp among rows ever extracted, in Salesforce's own ISO-8601 text, verbatim. Text rather than a timestamp column because it round-trips into the next SOQL literal unchanged — a parse-and-reformat is where a timezone or a millisecond would silently shift the boundary. Nullable: a connection that has only ever full-refreshed has no mark."
+  - name: delivery_id
+    type: varchar
+    nullable: false
+    description: "The delivery the last extract became, tying the cursor to the audit row and the run it enqueued."
+  - name: rows_extracted
+    type: bigint
+    nullable: false
+    description: "How many records the last extract pulled, so a shrinking incremental is visible as one."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When this source was first extracted."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When it was last extracted."
+indexes:
+  # The natural-key upsert target, and V17's dataset-scoped read path.
+  - name: sf_extract_cursors_dataset_source
+    columns: [dataset_id, source]
+    unique: true
+  # V15: the org-scoped read path.
+  - name: sf_extract_cursors_org_source
+    columns: [org_id, source]
 "#,
     ),
     (
