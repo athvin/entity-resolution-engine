@@ -531,3 +531,132 @@ async fn orgs_crud_and_state_machine() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
 }
+
+/// #840: `audit_log.trace_id` is the JOIN KEY to the span store, and before
+/// this test nothing at any level proved it is ever populated. Span lineage
+/// is locked by `telemetry_trace_continuation.rs`; this locks that the id the
+/// span carries is the id the ledger writes.
+///
+/// One assertion per state the column can be in, against the code's
+/// documented intent (`er_obs::current_trace_id`):
+///
+/// 1. a request carrying a `traceparent` writes a row whose `trace_id` IS the
+///    caller's trace id;
+/// 2. a request carrying none still writes a non-null id — a traced request
+///    is a fresh root trace, not an untraced one — and it is not the caller's;
+/// 3. a write with no request behind it (the dispatcher's bookkeeping, a CLI)
+///    writes NULL, permanently and on purpose.
+///
+/// Runs under `capture_spans` so request spans are recording — without a
+/// subscriber every `trace_id` is NULL and case 1 would pass vacuously.
+/// `capture_spans` is synchronous, so this is a plain `#[test]` driving a
+/// current-thread runtime: every poll stays on the subscribed thread.
+#[test]
+fn audit_rows_carry_the_requests_trace_id() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    // The spans themselves are asserted in telemetry_trace_continuation.rs;
+    // here the subscriber exists only so the request spans RECORD.
+    let _ = er_obs::testing::capture_spans(|| rt.block_on(audit_trace_id_phase()));
+}
+
+async fn audit_trace_id_phase() {
+    const TRACEPARENT: &str = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+    const TRACE_ID: &str = "4bf92f3577b34da6a3ce929d0e0e4736";
+
+    let Some(db) = common::fresh_db("audit_trace").await else {
+        return;
+    };
+    let dsn = db.dsn().to_string();
+    let mut client = pg::connect(&dsn).await.unwrap();
+    pg::ensure_schema(&mut client).await.unwrap();
+    let app = app(AppState::with_pg("op-secret".to_string(), dsn.clone()));
+
+    // Case 1: a mutation carrying the caller's traceparent.
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/orgs")
+                .header(header::AUTHORIZATION, "Bearer op-secret")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header("traceparent", TRACEPARENT)
+                .body(Body::from(
+                    r#"{"name":"traced","config_path":"/configs/traced.yaml"}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+
+    // Case 2: the same mutation with no traceparent.
+    let resp = app
+        .clone()
+        .oneshot(req(
+            "POST",
+            "/v1/orgs",
+            "op-secret",
+            Body::from(r#"{"name":"untraced","config_path":"/configs/untraced.yaml"}"#),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+
+    // Case 3: a write with no request behind it at all.
+    pg::audit(
+        &client,
+        "test",
+        None,
+        None,
+        "test.no_request",
+        &serde_json::json!({}),
+    )
+    .await
+    .unwrap();
+
+    // Read the ledger back through the operator feed.
+    let resp = app
+        .clone()
+        .oneshot(req("GET", "/v1/audit", "op-secret", Body::empty()))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let feed = json_body(resp).await;
+    let rows = feed.as_array().unwrap();
+    let row_for = |org: &str| {
+        rows.iter()
+            .find(|r| r["action"] == "org.upsert" && r["org"] == org)
+            .unwrap_or_else(|| panic!("no org.upsert audit row for {org}"))
+    };
+
+    let traced = row_for("traced");
+    assert_eq!(
+        traced["trace_id"], TRACE_ID,
+        "a request carrying traceparent wrote a row without its trace id — the \
+         ledger cannot be joined to the span store: {traced}"
+    );
+
+    let untraced = row_for("untraced");
+    let fresh = untraced["trace_id"].as_str().unwrap_or_else(|| {
+        panic!("a headerless request wrote a NULL trace_id — the request was traced (a fresh root), so the column should name that trace: {untraced}")
+    });
+    assert_eq!(fresh.len(), 32, "trace_id is not 32 hex: {fresh:?}");
+    assert_ne!(
+        fresh, TRACE_ID,
+        "the headerless request inherited the other request's trace id"
+    );
+
+    let direct = rows
+        .iter()
+        .find(|r| r["action"] == "test.no_request")
+        .expect("no test.no_request audit row");
+    assert!(
+        direct["trace_id"].is_null(),
+        "a write with no request behind it must record NULL, not a synthetic \
+         id: {direct}"
+    );
+}
