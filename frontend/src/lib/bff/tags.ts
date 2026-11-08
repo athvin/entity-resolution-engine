@@ -12,6 +12,10 @@ import { z } from "zod";
 export const tagSchema = z.object({
   name: z.string().trim().min(1).max(100),
   description: z.string().max(1000).optional(),
+  /** The minimum role allowed to apply the tag; omitted is the route default
+   * (steward). er-server owns the reserved-name refusal — the BFF does not
+   * pre-check it, same as the duplicate-name 409. */
+  apply_min_role: z.enum(["steward", "admin"]).optional(),
 });
 
 /**

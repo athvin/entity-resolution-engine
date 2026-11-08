@@ -258,6 +258,8 @@ erDiagram
         varchar org_id FK
         varchar name
         varchar description
+        varchar kind "in {system, user}"
+        varchar apply_min_role "in {admin, steward}"
         boolean active
         varchar created_by
         timestamp created_at

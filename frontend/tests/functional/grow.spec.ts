@@ -443,6 +443,9 @@ test.describe("campaigns", () => {
     for await (const chunk of stream) chunks.push(chunk as Buffer);
     const csv = Buffer.concat(chunks).toString("utf8");
     expect(csv.split("\n")[0]).toContain("id,given_name,family_name,email");
+    // #805: the export carries the tags column, last, so existing consumers'
+    // column positions do not move.
+    expect(csv.split("\n")[0]).toMatch(/,tags$/);
   });
 
   test("viewers can export but not create or delete", async ({ page }) => {

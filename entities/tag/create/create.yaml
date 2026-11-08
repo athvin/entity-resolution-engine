@@ -7,5 +7,7 @@ params:
   - { name: org_id, type: varchar }
   - { name: name, type: varchar }
   - { name: description, type: varchar, nullable: true }
+  - { name: kind, type: varchar }
+  - { name: apply_min_role, type: varchar, nullable: true }
   - { name: created_by, type: varchar }
 returns: entity

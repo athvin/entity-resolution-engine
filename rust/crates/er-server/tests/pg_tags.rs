@@ -361,3 +361,250 @@ async fn tags_are_named_applied_and_retired_without_losing_what_they_touched() {
 
     let _ = std::fs::remove_file(&config_path);
 }
+
+/// The spec's reserved system tags and per-tag permission (#805):
+///   * the five reserved names cannot be user-created (422, case-insensitive —
+///     the unique index is case-sensitive, so `Merge` would otherwise slip
+///     past), and a system tag cannot be retired or hand-applied;
+///   * `apply_min_role` is enforced as a 403 on role — never a 404 — per the
+///     house rule, on unapply as well as apply;
+///   * the bulk taggings read the export prequeries.
+#[tokio::test]
+async fn system_tags_are_reserved_and_apply_min_role_is_enforced() {
+    let Some(db) = common::fresh_db("tags_sys").await else {
+        return;
+    };
+    let dsn = db.dsn().to_string();
+    let mut client = pg::connect(&dsn).await.unwrap();
+    pg::ensure_schema(&mut client).await.unwrap();
+
+    let app = app(AppState::with_pg("op-secret".to_string(), dsn.clone()));
+    let config_path = std::env::temp_dir().join(format!("er_tags_sys_{}.yaml", std::process::id()));
+    std::fs::write(&config_path, DEFAULT_YAML).unwrap();
+    let resp = app
+        .clone()
+        .oneshot(req(
+            "POST",
+            "/v1/orgs",
+            "op-secret",
+            Body::from(
+                serde_json::json!({
+                    "name": "globex",
+                    "config_path": config_path.to_string_lossy(),
+                })
+                .to_string(),
+            ),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let keys = |role: &str| {
+        let app = app.clone();
+        let role = role.to_string();
+        async move {
+            let resp = app
+                .oneshot(req(
+                    "POST",
+                    "/v1/orgs/globex/api-keys",
+                    "op-secret",
+                    Body::from(serde_json::json!({ "role": role }).to_string()),
+                ))
+                .await
+                .unwrap();
+            json_body(resp).await["key"].as_str().unwrap().to_string()
+        }
+    };
+    let admin_key = keys("admin").await;
+    let steward_key = keys("steward").await;
+    let viewer_key = keys("viewer").await;
+
+    let make = |key: &str, body: serde_json::Value| {
+        let app = app.clone();
+        let key = key.to_string();
+        async move {
+            app.oneshot(req(
+                "POST",
+                "/v1/orgs/globex/tags",
+                &key,
+                Body::from(body.to_string()),
+            ))
+            .await
+            .unwrap()
+        }
+    };
+
+    // ---- reserved names ------------------------------------------------------
+    for reserved in ["merge", "manual_merge", "unmatch", "link", "split"] {
+        assert_eq!(
+            make(&steward_key, serde_json::json!({ "name": reserved }))
+                .await
+                .status(),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{reserved} is the platform's to write, not a steward's to squat"
+        );
+    }
+    // Case-insensitive: the unique index is case-sensitive, so a
+    // case-sensitive check would let this through to collide later.
+    assert_eq!(
+        make(&steward_key, serde_json::json!({ "name": "Merge" }))
+            .await
+            .status(),
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    // Containing a reserved word is fine — only the exact name is the system's.
+    assert_eq!(
+        make(&steward_key, serde_json::json!({ "name": "merge-review" }))
+            .await
+            .status(),
+        StatusCode::CREATED
+    );
+
+    // ---- apply_min_role ------------------------------------------------------
+    assert_eq!(
+        make(
+            &steward_key,
+            serde_json::json!({ "name": "bad-floor", "apply_min_role": "viewer" }),
+        )
+        .await
+        .status(),
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "viewer is below the route's floor"
+    );
+    let resp = make(
+        &steward_key,
+        serde_json::json!({ "name": "exec-decision", "apply_min_role": "admin" }),
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let admin_tag = json_body(resp).await;
+    let admin_tag_id = admin_tag["id"].as_str().unwrap().to_string();
+    assert_eq!(admin_tag["apply_min_role"], "admin");
+    assert_eq!(admin_tag["kind"], "user");
+
+    let apply_tag = |verb: &str, key: &str, tag_id: &str| {
+        let app = app.clone();
+        let (verb, key, tag_id) = (verb.to_string(), key.to_string(), tag_id.to_string());
+        async move {
+            app.oneshot(req(
+                "POST",
+                &format!("/v1/orgs/globex/datasets/default/tags/{tag_id}/{verb}"),
+                &key,
+                Body::from(
+                    serde_json::json!({ "subject_type": "entity", "subject_id": "E1" }).to_string(),
+                ),
+            ))
+            .await
+            .unwrap()
+        }
+    };
+
+    // The house rule: same-org, insufficient role is a 403 — never a 404.
+    let denied = apply_tag("apply", &steward_key, &admin_tag_id).await;
+    assert_eq!(denied.status(), StatusCode::FORBIDDEN);
+    assert!(
+        json_body(denied).await["detail"]
+            .as_str()
+            .is_some_and(|d| d.contains("requires admin role")),
+        "the denial names the role the tag demands"
+    );
+    assert_eq!(
+        apply_tag("unapply", &steward_key, &admin_tag_id)
+            .await
+            .status(),
+        StatusCode::FORBIDDEN,
+        "removing is the same guarded action"
+    );
+    assert_eq!(
+        apply_tag("apply", &admin_key, &admin_tag_id).await.status(),
+        StatusCode::OK
+    );
+
+    // ---- system tags ----------------------------------------------------------
+    let org_id = pg::get_org(&client, "globex").await.unwrap().unwrap().id;
+    let sys = pg::create_system_tag(&client, &org_id, "merge", None, "test")
+        .await
+        .unwrap()
+        .expect("no live tag named merge exists");
+    let sys_id = sys.id.clone();
+    assert_eq!(sys.kind, "system");
+
+    // The steward never reaches the system-tag check — retiring is admin-gated
+    // at the route. The admin reaches it and is refused: a system tag is not
+    // any role's to retire.
+    assert_eq!(
+        app.clone()
+            .oneshot(req(
+                "DELETE",
+                &format!("/v1/orgs/globex/tags/{sys_id}"),
+                &steward_key,
+                Body::empty(),
+            ))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        app.clone()
+            .oneshot(req(
+                "DELETE",
+                &format!("/v1/orgs/globex/tags/{sys_id}"),
+                &admin_key,
+                Body::empty(),
+            ))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "a system tag is not any role's to retire"
+    );
+    // Nor applies it by hand — a steward-marked `merge` would read identically
+    // to the platform's own mark. The operator credential (what the platform's
+    // writers authenticate as) is the exemption.
+    assert_eq!(
+        apply_tag("apply", &steward_key, &sys_id).await.status(),
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(
+        apply_tag("apply", &admin_key, &sys_id).await.status(),
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(
+        apply_tag("apply", "op-secret", &sys_id).await.status(),
+        StatusCode::OK
+    );
+
+    // ---- the bulk taggings read the export prequeries -------------------------
+    let get = |uri: &str, key: &str| {
+        let app = app.clone();
+        let (uri, key) = (uri.to_string(), key.to_string());
+        async move {
+            app.oneshot(req("GET", &uri, &key, Body::empty()))
+                .await
+                .unwrap()
+        }
+    };
+    assert_eq!(
+        get("/v1/orgs/globex/datasets/default/taggings", &viewer_key)
+            .await
+            .status(),
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "subject_type is required — a default would read as 'everything'"
+    );
+    let taggings = json_body(
+        get(
+            "/v1/orgs/globex/datasets/default/taggings?subject_type=entity",
+            &viewer_key,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(taggings["truncated"], false);
+    assert_eq!(
+        taggings["taggings"].as_array().map(Vec::len),
+        Some(2),
+        "the admin's application and the operator's system-tag application: {taggings}"
+    );
+
+    let _ = std::fs::remove_file(&config_path);
+}

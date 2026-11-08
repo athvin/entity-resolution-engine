@@ -8460,6 +8460,10 @@ struct TagIn {
     name: String,
     #[serde(default)]
     description: Option<String>,
+    /// The minimum role allowed to apply the tag — `steward` (the route
+    /// default) or `admin`. Omitted means steward.
+    #[serde(default)]
+    apply_min_role: Option<String>,
 }
 
 /// Steward+: the tenant's tag vocabulary, or the tags on one subject
@@ -8543,6 +8547,32 @@ async fn create_tag(
             "name is at most 100 characters",
         );
     }
+    // Case-insensitive because the unique index is case-sensitive: a
+    // case-sensitive check would let `Merge` squat on the system's `merge`.
+    if pg::RESERVED_TAG_NAMES
+        .iter()
+        .any(|r| r.eq_ignore_ascii_case(name))
+    {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!(
+                "{name:?} is reserved for a tag the platform writes itself; reserved names are {:?}",
+                pg::RESERVED_TAG_NAMES
+            ),
+        );
+    }
+    let apply_min_role = match body.apply_min_role.as_deref() {
+        None => None,
+        Some(s @ ("steward" | "admin")) => Some(s.to_string()),
+        // `viewer` is below the route's floor and `operator` would lock the
+        // admins out of their own vocabulary — neither is a real choice.
+        Some(other) => {
+            return detail_err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                format!("apply_min_role must be steward or admin, got {other:?}"),
+            );
+        }
+    };
     let Some(dsn) = &state.dsn else {
         return detail_err(StatusCode::NOT_IMPLEMENTED, "tags require Postgres");
     };
@@ -8560,7 +8590,16 @@ async fn create_tag(
         .as_deref()
         .map(str::trim)
         .filter(|d| !d.is_empty());
-    match pg::create_tag(&client, &org_row.id, name, description, &principal.actor).await {
+    match pg::create_tag(
+        &client,
+        &org_row.id,
+        name,
+        description,
+        apply_min_role.as_deref(),
+        &principal.actor,
+    )
+    .await
+    {
         Ok(Some(tag)) => (StatusCode::CREATED, Json(json!(tag))).into_response(),
         // The partial unique index is what rejects a duplicate, so a race
         // between two stewards naming the same tag ends here rather than
@@ -8599,6 +8638,24 @@ async fn retire_tag(
         Err(r) => return *r,
     };
     let _ = pg::set_actor(&client, &principal.actor).await;
+    match pg::tag_by_id(&client, &org_row.id, &tag_id).await {
+        // A system tag names a mark the platform writes; retiring it by hand
+        // would leave the action that set it writing a tag that reads as
+        // gone. 422 rather than 403: no role may do this, so it is not a
+        // role denial.
+        Ok(Some(tag)) if tag.kind == "system" => {
+            return detail_err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                format!(
+                    "{:?} is a system tag; the platform retires its own",
+                    tag.name
+                ),
+            );
+        }
+        Ok(Some(_)) => {}
+        Ok(None) => return detail_err(StatusCode::NOT_FOUND, "no such tag"),
+        Err(e) => return pg_err(e),
+    }
     match pg::retire_tag(&client, &org_row.id, &tag_id).await {
         // A JSON body rather than 204, matching `delete_webhook`: the BFF's only
         // forwarding helper parses the response as JSON, so a 204 reaches it as
@@ -8873,6 +8930,41 @@ async fn tag_application(
         Ok(row) => row,
         Err(r) => return *r,
     };
+    // The tag's own guards, read from the row before writing. Existence first
+    // (404) — which leaks nothing, since Viewer+ can list the whole vocabulary
+    // — then the system/written-by-hand guard, then the per-tag role floor as
+    // a 403 (the house rule: same-org, insufficient role).
+    match pg::tag_by_id(&client, &org_row.id, &tag_id).await {
+        Ok(Some(tag)) => {
+            // A system tag is the platform's own mark; a human applying one by
+            // hand forges provenance (a steward-marked `unmatch` reads
+            // identically to the matcher's). The operator credential — what
+            // the platform's writers authenticate as — is exempt. 422 rather
+            // than 403: this is not a role floor, no role may cross it.
+            if tag.kind == "system" && principal.role != Role::Operator {
+                return detail_err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    format!(
+                        "{:?} is written by the platform, not applied by hand",
+                        tag.name
+                    ),
+                );
+            }
+            if let Some(min) = tag.apply_min_role.as_deref().and_then(Role::parse)
+                && principal.role != Role::Operator
+                && principal.role < min
+            {
+                return detail_err(
+                    StatusCode::FORBIDDEN,
+                    format!("tag {:?} requires {} role to apply", tag.name, min.as_str()),
+                );
+            }
+        }
+        // Unknown or retired: the writes below answer that (404), on apply as
+        // "no such tag" and on unapply as "not applied to that subject".
+        Ok(None) => {}
+        Err(e) => return pg_err(e),
+    }
     let outcome = if apply {
         pg::apply_tag(
             &client,
@@ -8962,6 +9054,74 @@ async fn tag_subjects(
     .await
     {
         Ok(rows) => Json(json!({ "subjects": rows })).into_response(),
+        Err(e) => pg_err(e),
+    }
+}
+
+/// Viewer+: every tagging of one subject kind in one dataset
+/// (`GET /v1/orgs/{org}/datasets/{ds}/taggings?subject_type=entity`).
+///
+/// The bulk read an export prequeries: joining tags onto an exported page
+/// per row would be one query per row, so the caller takes the whole set once
+/// and joins client-side. Capped, with the cap+1 probe distinguishing "at the
+/// cap" from "truncated at the cap" — truncation is reported in the envelope
+/// (`truncated: true`) rather than exporting a subset that reads as complete.
+async fn taggings_index(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, ds)): Path<(String, String)>,
+    Query(params): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    // The kind is required rather than defaulted: the only bulk caller today
+    // wants entities, and a default would make a caller who forgot the param
+    // believe it had everything.
+    let Some(subject_type) = params.get("subject_type").map(String::as_str) else {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!(
+                "subject_type is required, one of {:?}",
+                pg::TAG_SUBJECT_KINDS
+            ),
+        );
+    };
+    if !pg::is_tag_subject(subject_type) {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("subject_type must be one of {:?}", pg::TAG_SUBJECT_KINDS),
+        );
+    }
+    let Some(dsn) = &state.dsn else {
+        return detail_err(StatusCode::NOT_IMPLEMENTED, "tags require Postgres");
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
+    let d = match dataset_or_404(&client, &org_row, &ds).await {
+        Ok(row) => row,
+        Err(r) => return *r,
+    };
+    /// Past this a tenant has outgrown the prequery shape and the export wants
+    /// a taggings join in the lake read instead — a real design conversation,
+    /// not a silent subset.
+    const TAGGINGS_CAP: i64 = 100_000;
+    match pg::taggings_for_dataset(&client, &d.id, subject_type, TAGGINGS_CAP + 1).await {
+        Ok(rows) => {
+            let truncated = rows.len() as i64 > TAGGINGS_CAP;
+            let rows = if truncated {
+                &rows[..TAGGINGS_CAP as usize]
+            } else {
+                &rows[..]
+            };
+            Json(json!({ "taggings": rows, "truncated": truncated })).into_response()
+        }
         Err(e) => pg_err(e),
     }
 }
@@ -10960,6 +11120,7 @@ fn build_routes(state: AppState) -> Router {
             "/v1/orgs/{org}/datasets/{ds}/tags/{tag_id}/apply",
             post(apply_tag),
         )
+        .route("/v1/orgs/{org}/datasets/{ds}/taggings", get(taggings_index))
         .route(
             "/v1/orgs/{org}/datasets/{ds}/tags/{tag_id}/unapply",
             post(unapply_tag),

@@ -139,6 +139,52 @@ WHERE dataset_id = $1
 
 pub mod read {
     //! @generated query functions for this entity + operation.
+    /// Every tagging of one subject kind in one dataset, capped — the export's prequery, which joins the whole set against the page of golden records it already holds rather than asking per row. The caller passes cap+1 and treats cap+1 rows as truncation, the same probe `subjects_by_tag` documents.
+    pub async fn for_dataset(
+        client: &impl ::tokio_postgres::GenericClient,
+        dataset_id: &str,
+        subject_type: &str,
+        limit: i64,
+    ) -> ::std::result::Result<Vec<super::Tagging>, ::tokio_postgres::Error> {
+        const SQL: &str = "SELECT id, org_id, dataset_id, tag_id, subject_type, subject_id, created_by, created_at, updated_at
+FROM public.taggings
+WHERE dataset_id = $1
+  AND subject_type = $2
+ORDER BY subject_id
+LIMIT $3
+";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "tagging",
+            "read",
+            "for_dataset",
+            "taggings",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.query(SQL, &[&dataset_id, &subject_type, &limit]),
+        )
+        .await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
+        Ok(rows
+            .iter()
+            .map(|row| super::Tagging {
+                id: row.get("id"),
+                org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
+                tag_id: row.get("tag_id"),
+                subject_type: row.get("subject_type"),
+                subject_id: row.get("subject_id"),
+                created_by: row.get("created_by"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
+            })
+            .collect())
+    }
+
     /// What carries a tag — the filter, and the scope every bulk action by tag will read. Optionally narrowed to one subject kind. The explicit ::varchar casts are needed because Postgres cannot infer a parameter's type from `$x IS NULL` alone and resolves left to right.
     pub async fn subjects_by_tag(
         client: &impl ::tokio_postgres::GenericClient,

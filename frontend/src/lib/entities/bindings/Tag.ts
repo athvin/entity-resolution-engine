@@ -11,6 +11,10 @@ export interface Tag {
   name: string;
   /** What the tag means, for the steward who inherits it. Null when nobody wrote one. */
   description: string | null;
+  /** Who the tag belongs to. `user` is the steward's vocabulary; `system` is reserved for tags the platform itself writes (merge, manual_merge, unmatch, link, split) — a system tag cannot be retired through the API, and its name cannot be taken by a user tag, so the two vocabularies can never collide. */
+  kind: string;
+  /** The minimum role allowed to apply or unapply this tag. Null means the route default (steward). Finer than the route's role check because a tag can name a decision only an admin should be able to mark — the spec's per-tag permission. */
+  apply_min_role: string | null;
   /** Whether the tag is in use. Retiring is a soft delete: `taggings` references this row, every foreign key in this schema is NO ACTION, and a hard DELETE would therefore fail for exactly the tags that had been used — which is the bug D11 found in webhooks. Keeping the row also keeps the history legible: what a group was once marked as is part of why it was handled the way it was. */
   active: boolean;
   /** The actor that created the tag. */

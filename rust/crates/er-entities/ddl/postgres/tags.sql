@@ -3,6 +3,8 @@ CREATE TABLE IF NOT EXISTS public.tags (
   org_id text NOT NULL REFERENCES orgs(id),
   name text NOT NULL,
   description text,
+  kind text NOT NULL DEFAULT 'user' CHECK (kind IN ('user', 'system')),
+  apply_min_role text CHECK (apply_min_role IN ('steward', 'admin')),
   active boolean NOT NULL DEFAULT true,
   created_by text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),

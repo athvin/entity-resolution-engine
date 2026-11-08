@@ -1995,6 +1995,13 @@ pub fn is_tag_subject(kind: &str) -> bool {
     TAG_SUBJECT_KINDS.contains(&kind)
 }
 
+/// The names the platform reserves for tags IT writes (`tag.kind = 'system'`):
+/// the merge family and the match-corrective actions. A user tag may not take
+/// one of these, so a steward's vocabulary can never collide with a tag an
+/// automated action is about to write — and a filter naming `merge` always
+/// means the system's marks, never someone's homemade label.
+pub const RESERVED_TAG_NAMES: [&str; 5] = ["merge", "manual_merge", "unmatch", "link", "split"];
+
 /// Add a label to the tenant's vocabulary. `Ok(None)` means the name is already
 /// taken by a live tag.
 ///
@@ -2008,15 +2015,75 @@ pub async fn create_tag(
     org_id: &str,
     name: &str,
     description: Option<&str>,
+    apply_min_role: Option<&str>,
     actor: &str,
 ) -> Result<Option<er_entities::tag::Tag>, PgError> {
     let tag_id = er_ids::new_v7();
-    match er_entities::tag::create::create(client, &tag_id, org_id, name, description, actor).await
+    match er_entities::tag::create::create(
+        client,
+        &tag_id,
+        org_id,
+        name,
+        description,
+        "user",
+        apply_min_role,
+        actor,
+    )
+    .await
     {
         Ok(rows) => Ok(rows.into_iter().next()),
         Err(e) if e.code() == Some(&tokio_postgres::error::SqlState::UNIQUE_VIOLATION) => Ok(None),
         Err(e) => Err(e),
     }
+}
+
+/// A system tag: one of the reserved names, created by the platform itself for
+/// an automated action to write with (`kind = 'system'`). Not reachable from
+/// the API — a steward cannot mint one, cannot retire one, and cannot apply
+/// one by hand, so `merge` on a subject always means the platform put it
+/// there. `Ok(None)` means the name is already taken, same as `create_tag`.
+///
+/// # Errors
+/// Propagates the query error.
+pub async fn create_system_tag(
+    client: &Client,
+    org_id: &str,
+    name: &str,
+    description: Option<&str>,
+    actor: &str,
+) -> Result<Option<er_entities::tag::Tag>, PgError> {
+    let tag_id = er_ids::new_v7();
+    match er_entities::tag::create::create(
+        client,
+        &tag_id,
+        org_id,
+        name,
+        description,
+        "system",
+        None,
+        actor,
+    )
+    .await
+    {
+        Ok(rows) => Ok(rows.into_iter().next()),
+        Err(e) if e.code() == Some(&tokio_postgres::error::SqlState::UNIQUE_VIOLATION) => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+/// One live tag by id, org-scoped — the row the apply and retire guards read.
+///
+/// # Errors
+/// Propagates the query error.
+pub async fn tag_by_id(
+    client: &Client,
+    org_id: &str,
+    tag_id: &str,
+) -> Result<Option<er_entities::tag::Tag>, PgError> {
+    Ok(er_entities::tag::read::by_id(client, org_id, tag_id)
+        .await?
+        .into_iter()
+        .next())
 }
 
 /// The tenant's live vocabulary, alphabetical.
@@ -2121,6 +2188,22 @@ pub async fn subjects_for_tag(
 ) -> Result<Vec<er_entities::tagging::Tagging>, PgError> {
     er_entities::tagging::read::subjects_by_tag(client, dataset_id, tag_id, subject_type, limit)
         .await
+}
+
+/// Every tagging of one subject kind in one dataset — the export's prequery,
+/// joined client-side against the page of golden records it already holds.
+/// Pass one MORE than the cap you can honour: `rows.len() > cap` then means
+/// truncated, which the caller must report rather than export past silently.
+///
+/// # Errors
+/// Propagates the query error.
+pub async fn taggings_for_dataset(
+    client: &Client,
+    dataset_id: &str,
+    subject_type: &str,
+    limit: i64,
+) -> Result<Vec<er_entities::tagging::Tagging>, PgError> {
+    er_entities::tagging::read::for_dataset(client, dataset_id, subject_type, limit).await
 }
 
 /// One live tag by NAME, for resolving a config's approval gate.

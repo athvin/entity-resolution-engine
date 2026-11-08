@@ -21,6 +21,8 @@ function tag(id: string, name: string): Tag {
     org_id: "uuid-acme",
     name,
     description: null,
+    kind: "user",
+    apply_min_role: null,
     active: true,
     created_by: "steward@acme.dev",
     created_at: "2026-09-24T07:00:00Z",
