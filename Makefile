@@ -124,18 +124,18 @@ check-e2e:
 # --- agent tooling: repo-local Symposium (part of the local dev install) ---
 #
 # Symposium (https://github.com/symposium-dev/symposium) matches plugins against
-# the rust/ dependency graph and installs the Claude Code skills they ship —
+# the rust/ dependency graph and installs the Claude Code and Codex skills they ship —
 # currently the error-handling and rust-best-practice sets pulled in by our
 # thiserror/anyhow deps.
 #
 # Everything stays inside the repo instead of the developer's home directory:
 # the cargo-agents binary in .tools/bin, config + cache in .symposium, and the
-# skills in rust/.claude/skills. All three are gitignored except the config —
+# skills in rust/.claude/skills and rust/.agents/skills. All are gitignored except the config —
 # the binary is a 15MB per-platform artifact, so it is fetched here rather than
 # committed. scripts/symposium is the wrapper that sets SYMPOSIUM_HOME and runs
 # from rust/ (symposium finds its project via `cargo metadata`).
 #
-# Re-run after changing rust/ dependencies; a SessionStart hook also re-syncs.
+# Re-run after changing rust/ dependencies; both agents' SessionStart hooks also re-sync.
 symposium:
 	scripts/symposium install
 	scripts/symposium sync

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Self-test for the Codex PreToolUse guard and its installer.
+# Self-test for the Codex guard, Symposium startup, and their installer.
 #
 # Three things are asserted, and the order reflects which failure is worst:
 #
@@ -168,6 +168,32 @@ hard="aws s3 ""rb s3://some-bucket"
 	ok "a hard deny is identical in both modes" ||
 	no "a hard deny differs between modes"
 
+# --- Symposium startup derives from Claude's hook, not a second command ----
+mkdir -p "$work/fakerepo/.tools/bin" "$work/fakerepo/rust" "$work/fakerepo/.symposium"
+cp "$settings" "$work/fakerepo/.claude/settings.json"
+cat >"$work/fakerepo/.tools/bin/cargo-agents" <<'EOF'
+#!/usr/bin/env bash
+printf '%s|%s|%s\n' "$SYMPOSIUM_HOME" "$*" "$PWD"
+EOF
+chmod +x "$work/fakerepo/.tools/bin/cargo-agents"
+bash "$sync" --root "$work/fakerepo" --codex-home "$work/fakehome" >/dev/null 2>&1
+startup=$(jq -r '.hooks.SessionStart[]?.hooks[]? | select(.description=="er-codex-symposium-session-start") | .command' "$work/fakehome/hooks.json")
+got=$(bash -c "$startup")
+want="$work/fakerepo/.symposium|hook codex session-start|$work/fakerepo/rust"
+[ "$got" = "$want" ] &&
+	ok "Symposium startup uses the repo-local binary, config, and Codex event" ||
+	no "Symposium startup is not derived correctly" "got '$got'; wanted '$want'"
+
+jq 'del(.hooks.SessionStart)' "$settings" >"$work/fakerepo/.claude/settings.json"
+if out=$(bash "$sync" --dry-run --root "$work/fakerepo" --codex-home "$work/fakehome" 2>&1); then
+	no "the installer accepted a missing Claude Symposium startup" "$out"
+else
+	case "$out" in
+	*"expected one Symposium SessionStart"*) ok "a missing startup hook fails instead of silently dropping Codex parity" ;;
+	*) no "missing startup hook failed for the wrong reason" "$out" ;;
+	esac
+fi
+
 # --- the installer is idempotent and leaves other hooks alone --------------
 home="$work/home2"
 mkdir -p "$home"
@@ -175,17 +201,19 @@ printf '{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"true","
 bash "$sync" --root "$root" --codex-home "$home" >/dev/null 2>&1
 bash "$sync" --root "$root" --codex-home "$home" >/dev/null 2>&1
 pre=$(jq -r '[.hooks.PreToolUse[]?.hooks[]? | select(.description=="er-codex-pretooluse-guard")] | length' "$home/hooks.json")
-other=$(jq -r '[.hooks.SessionStart[]?.hooks[]?] | length' "$home/hooks.json")
-{ [ "$pre" = 1 ] && [ "$other" = 1 ]; } &&
-	ok "installing twice leaves one entry and preserves a hand-added hook" ||
-	no "the installer is not idempotent or clobbered another hook" "ours=$pre other=$other"
+startup_count=$(jq -r '[.hooks.SessionStart[]?.hooks[]? | select(.description=="er-codex-symposium-session-start")] | length' "$home/hooks.json")
+other=$(jq -r '[.hooks.SessionStart[]?.hooks[]? | select(.description=="not-ours")] | length' "$home/hooks.json")
+{ [ "$pre" = 1 ] && [ "$startup_count" = 1 ] && [ "$other" = 1 ]; } &&
+	ok "installing twice leaves one of each derived hook and preserves another hook" ||
+	no "the installer is not idempotent or clobbered another hook" "guard=$pre startup=$startup_count other=$other"
 
 bash "$sync" --remove --root "$root" --codex-home "$home" >/dev/null 2>&1
 pre=$(jq -r '[.hooks.PreToolUse[]?.hooks[]? | select(.description=="er-codex-pretooluse-guard")] | length' "$home/hooks.json")
-other=$(jq -r '[.hooks.SessionStart[]?.hooks[]?] | length' "$home/hooks.json")
-{ [ "$pre" = 0 ] && [ "$other" = 1 ]; } &&
-	ok "--remove takes ours out and leaves the rest" ||
-	no "--remove removed the wrong thing" "ours=$pre other=$other"
+startup_count=$(jq -r '[.hooks.SessionStart[]?.hooks[]? | select(.description=="er-codex-symposium-session-start")] | length' "$home/hooks.json")
+other=$(jq -r '[.hooks.SessionStart[]?.hooks[]? | select(.description=="not-ours")] | length' "$home/hooks.json")
+{ [ "$pre" = 0 ] && [ "$startup_count" = 0 ] && [ "$other" = 1 ]; } &&
+	ok "--remove takes both derived hooks out and leaves the rest" ||
+	no "--remove removed the wrong thing" "guard=$pre startup=$startup_count other=$other"
 
 echo "---"
 printf 'codex-hooks-sync-test: %d passed, %d failed\n' "$pass" "$fail"

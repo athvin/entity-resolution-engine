@@ -10,11 +10,14 @@
 # writes is relative to rust/ (the cargo workspace root), NOT the repo root:
 #   rust/.claude/skills/<name>/   skills  — Claude Code reads these as nested,
 #                                           directory-scoped skills
+#   rust/.agents/skills/<name>/   skills  — Codex reads these as nested skills
 #   rust/.claude/settings.json    hooks   — INERT, Claude Code only reads the
 #                                           repo-root settings file
+#   rust/.codex/hooks.json        hooks   — INERT, Codex reads the trusted hook
+#                                           installed in $CODEX_HOME/hooks.json
 #   rust/.mcp.json                MCP     — INERT, same reason
-# The repo-root .claude/settings.json carries the bridging hook entries that
-# actually fire; see the comment there.
+# The root Claude settings and scripts/codex-hooks-sync.sh install the hooks
+# that actually fire.
 
 # Re-sync skills automatically during hook invocations, so a dependency change
 # in rust/ updates the installed skills without a manual run.
@@ -23,8 +26,8 @@ auto-sync = true
 # Mirror skills authored in <workspace>/.agents/skills into .claude/skills.
 agents-syncing = true
 
-# Write hooks/MCP into the project rather than ~/.claude. See the path note
-# above: "project" means rust/, and those files are bridged from the root.
+# Write hooks/MCP into the project rather than either agent's config home.
+# "Project" means rust/ here; root hooks are installed separately as above.
 hook-scope = "project"
 
 # MUST stay "off". The default ("on") self-updates via `cargo install`, which
@@ -34,6 +37,9 @@ auto-update = "off"
 
 [[agent]]
 name = "claude"
+
+[[agent]]
+name = "codex"
 
 [logging]
 level = "info"
