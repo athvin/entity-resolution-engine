@@ -117,6 +117,12 @@ fn append_base_delivery(
 ) -> anyhow::Result<usize> {
     let mut reader = csv::Reader::from_reader(csv_text.as_bytes());
     let headers: Vec<String> = reader.headers()?.iter().map(str::to_string).collect();
+    let mut seen_headers = BTreeSet::new();
+    for header in &headers {
+        if !seen_headers.insert(header.as_str()) {
+            anyhow::bail!("duplicate CSV header `{header}`");
+        }
+    }
 
     let mut rows: Vec<er_entities::raw_record::AppendRow> = Vec::new();
     for record in reader.records() {

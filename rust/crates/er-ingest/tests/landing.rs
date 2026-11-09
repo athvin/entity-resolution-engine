@@ -61,6 +61,58 @@ fn lands_base_10_into_raw_records() {
 }
 
 #[test]
+fn duplicate_headers_fail_before_landing_and_distinct_headers_preserve_fields() {
+    let config = load_config_str(include_str!("fixtures/default.yaml")).unwrap();
+    let session = Session::open_in_memory(SessionOptions::deterministic()).unwrap();
+    session.execute_batch("ATTACH ':memory:' AS lake;").unwrap();
+    session
+        .execute_batch(&create_raw_records_sql("lake.main.raw_records"))
+        .unwrap();
+
+    for (csv, duplicate) in [
+        ("crm_id,first_name,first_name\nC1,Alice,Eve\n", "first_name"),
+        ("crm_id,note,note\nC1,one,two\n", "note"),
+    ] {
+        let error = land_base_delivery(
+            &session,
+            "crm",
+            &config.sources["crm"],
+            csv,
+            "batch",
+            "2026-01-01",
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains(&format!("duplicate CSV header `{duplicate}`"))
+        );
+        assert_eq!(session.count("lake.main.raw_records").unwrap(), 0);
+    }
+
+    let distinct = "crm_id,first_name,note\nC1,Alice,one\n";
+    assert_eq!(
+        land_base_delivery(
+            &session,
+            "crm",
+            &config.sources["crm"],
+            distinct,
+            "batch",
+            "2026-01-01",
+        )
+        .unwrap(),
+        1
+    );
+    let rows = session
+        .query_strings("SELECT payload FROM lake.main.raw_records")
+        .unwrap();
+    let payload: serde_json::Value = serde_json::from_str(&rows[0][0]).unwrap();
+    assert_eq!(payload["crm_id"], "C1");
+    assert_eq!(payload["first_name"], "Alice");
+    assert_eq!(payload["note"], "one");
+}
+
+#[test]
 fn failed_second_append_chunk_rolls_back_first_chunk_and_retries_cleanly() {
     let config = load_config_str(include_str!("fixtures/default.yaml")).unwrap();
     let session = Session::open_in_memory(SessionOptions::deterministic()).unwrap();
