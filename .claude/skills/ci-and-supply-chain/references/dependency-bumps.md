@@ -38,7 +38,8 @@ Dependabot-triggered workflows receive Dependabot secrets, not repository
 Actions secrets. The R2 read token used by human PRs is therefore absent on a
 Dependabot PR. `rust.yml` selects sccache's GitHub Actions backend for those
 PRs, exports the runner's cache URL and token before sccache starts, and leaves
-the R2 bucket empty so sccache does not try its S3 backend. Human PRs keep R2
+the R2 bucket and credentials empty so sccache does not try its S3 backend,
+even if a maintainer triggers the bot PR's workflow. Human PRs keep R2
 read access; `main` keeps R2 write access. The GitHub cache scopes entries to
 the PR branch, so a bot PR cannot populate a cache that `main` restores.
 

@@ -262,7 +262,8 @@ env:
   #
   # So: an Object-Read-only token in REPOSITORY secrets, and an
   # Object-Read-&-Write token in the `sccache-write` ENVIRONMENT, which is
-  # `protected_branches: true`. Each compile job below selects between them with
+  # `protected_branches: true`. Dependabot PRs receive neither token even when
+  # a maintainer triggers their workflow. Other compile jobs select with
   #
   #   environment: ${{ github.ref == 'refs/heads/main' && 'sccache-write' || '' }}
   #   AWS_ACCESS_KEY_ID: ${{ secrets.R2_WRITE_ACCESS_KEY_ID || secrets.R2_READ_... }}
@@ -681,8 +682,8 @@ jobs:
     env:
       RUSTC_WRAPPER: sccache
       # sccache's S3 backend takes the standard AWS credential variables.
-      AWS_ACCESS_KEY_ID: ${{ secrets.R2_WRITE_ACCESS_KEY_ID || secrets.R2_READ_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_WRITE_SECRET_ACCESS_KEY || secrets.R2_READ_SECRET_ACCESS_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ (github.event_name != 'pull_request' || github.event.pull_request.user.login != 'dependabot[bot]') && (secrets.R2_WRITE_ACCESS_KEY_ID || secrets.R2_READ_ACCESS_KEY_ID) || '' }}
+      AWS_SECRET_ACCESS_KEY: ${{ (github.event_name != 'pull_request' || github.event.pull_request.user.login != 'dependabot[bot]') && (secrets.R2_WRITE_SECRET_ACCESS_KEY || secrets.R2_READ_SECRET_ACCESS_KEY) || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install stable toolchain
@@ -703,8 +704,11 @@ jobs:
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
-            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL || '');
-            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+            if (process.env.AWS_ACCESS_KEY_ID || process.env.AWS_SECRET_ACCESS_KEY) throw new Error('Dependabot must not receive R2 credentials');
+            if (!process.env.ACTIONS_RESULTS_URL || !process.env.ACTIONS_RUNTIME_TOKEN) throw new Error('GitHub cache runtime credentials are missing');
+            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL);
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN);
+            core.info('Dependabot sccache: GitHub Actions cache, no R2 credentials');
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       # No rust-cache. A restored `target/` carries a populated
       # `duckdb-sources/<key>/` with its `.complete` sentinel stripped, so
@@ -778,8 +782,8 @@ jobs:
     env:
       RUSTC_WRAPPER: sccache
       # sccache's S3 backend takes the standard AWS credential variables.
-      AWS_ACCESS_KEY_ID: ${{ secrets.R2_WRITE_ACCESS_KEY_ID || secrets.R2_READ_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_WRITE_SECRET_ACCESS_KEY || secrets.R2_READ_SECRET_ACCESS_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ (github.event_name != 'pull_request' || github.event.pull_request.user.login != 'dependabot[bot]') && (secrets.R2_WRITE_ACCESS_KEY_ID || secrets.R2_READ_ACCESS_KEY_ID) || '' }}
+      AWS_SECRET_ACCESS_KEY: ${{ (github.event_name != 'pull_request' || github.event.pull_request.user.login != 'dependabot[bot]') && (secrets.R2_WRITE_SECRET_ACCESS_KEY || secrets.R2_READ_SECRET_ACCESS_KEY) || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install stable toolchain
@@ -803,8 +807,11 @@ jobs:
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
-            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL || '');
-            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+            if (process.env.AWS_ACCESS_KEY_ID || process.env.AWS_SECRET_ACCESS_KEY) throw new Error('Dependabot must not receive R2 credentials');
+            if (!process.env.ACTIONS_RESULTS_URL || !process.env.ACTIONS_RUNTIME_TOKEN) throw new Error('GitHub cache runtime credentials are missing');
+            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL);
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN);
+            core.info('Dependabot sccache: GitHub Actions cache, no R2 credentials');
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       # No rust-cache. A restored `target/` carries a populated
       # `duckdb-sources/<key>/` with its `.complete` sentinel stripped, so
@@ -906,8 +913,8 @@ jobs:
     env:
       RUSTC_WRAPPER: sccache
       # sccache's S3 backend takes the standard AWS credential variables.
-      AWS_ACCESS_KEY_ID: ${{ secrets.R2_WRITE_ACCESS_KEY_ID || secrets.R2_READ_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_WRITE_SECRET_ACCESS_KEY || secrets.R2_READ_SECRET_ACCESS_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ (github.event_name != 'pull_request' || github.event.pull_request.user.login != 'dependabot[bot]') && (secrets.R2_WRITE_ACCESS_KEY_ID || secrets.R2_READ_ACCESS_KEY_ID) || '' }}
+      AWS_SECRET_ACCESS_KEY: ${{ (github.event_name != 'pull_request' || github.event.pull_request.user.login != 'dependabot[bot]') && (secrets.R2_WRITE_SECRET_ACCESS_KEY || secrets.R2_READ_SECRET_ACCESS_KEY) || '' }}
       # The debug-info settings that used to live here are now
       # `[profile.dev.package."*"]` / `[profile.test]` in `rust/Cargo.toml`, with
       # the measurement. They were job env on this job alone, so `lint`,
@@ -942,8 +949,11 @@ jobs:
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
-            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL || '');
-            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+            if (process.env.AWS_ACCESS_KEY_ID || process.env.AWS_SECRET_ACCESS_KEY) throw new Error('Dependabot must not receive R2 credentials');
+            if (!process.env.ACTIONS_RESULTS_URL || !process.env.ACTIONS_RUNTIME_TOKEN) throw new Error('GitHub cache runtime credentials are missing');
+            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL);
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN);
+            core.info('Dependabot sccache: GitHub Actions cache, no R2 credentials');
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       # No rust-cache. A restored `target/` carries a populated
       # `duckdb-sources/<key>/` with its `.complete` sentinel stripped, so
@@ -1099,8 +1109,8 @@ jobs:
     env:
       RUSTC_WRAPPER: sccache
       # sccache's S3 backend takes the standard AWS credential variables.
-      AWS_ACCESS_KEY_ID: ${{ secrets.R2_WRITE_ACCESS_KEY_ID || secrets.R2_READ_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_WRITE_SECRET_ACCESS_KEY || secrets.R2_READ_SECRET_ACCESS_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ (github.event_name != 'pull_request' || github.event.pull_request.user.login != 'dependabot[bot]') && (secrets.R2_WRITE_ACCESS_KEY_ID || secrets.R2_READ_ACCESS_KEY_ID) || '' }}
+      AWS_SECRET_ACCESS_KEY: ${{ (github.event_name != 'pull_request' || github.event.pull_request.user.login != 'dependabot[bot]') && (secrets.R2_WRITE_SECRET_ACCESS_KEY || secrets.R2_READ_SECRET_ACCESS_KEY) || '' }}
       # A RUNTIME gate: each lake test early-returns without this (er-cli
       # tests/lake_e2e.rs). A shard that lost this env would go green in
       # seconds — if a shard finishes suspiciously fast, check here first.
@@ -1169,8 +1179,11 @@ jobs:
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
-            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL || '');
-            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+            if (process.env.AWS_ACCESS_KEY_ID || process.env.AWS_SECRET_ACCESS_KEY) throw new Error('Dependabot must not receive R2 credentials');
+            if (!process.env.ACTIONS_RESULTS_URL || !process.env.ACTIONS_RUNTIME_TOKEN) throw new Error('GitHub cache runtime credentials are missing');
+            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL);
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN);
+            core.info('Dependabot sccache: GitHub Actions cache, no R2 credentials');
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       # No rust-cache. A restored `target/` carries a populated
       # `duckdb-sources/<key>/` with its `.complete` sentinel stripped, so
@@ -1255,8 +1268,8 @@ jobs:
     env:
       RUSTC_WRAPPER: sccache
       # sccache's S3 backend takes the standard AWS credential variables.
-      AWS_ACCESS_KEY_ID: ${{ secrets.R2_WRITE_ACCESS_KEY_ID || secrets.R2_READ_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_WRITE_SECRET_ACCESS_KEY || secrets.R2_READ_SECRET_ACCESS_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ (github.event_name != 'pull_request' || github.event.pull_request.user.login != 'dependabot[bot]') && (secrets.R2_WRITE_ACCESS_KEY_ID || secrets.R2_READ_ACCESS_KEY_ID) || '' }}
+      AWS_SECRET_ACCESS_KEY: ${{ (github.event_name != 'pull_request' || github.event.pull_request.user.login != 'dependabot[bot]') && (secrets.R2_WRITE_SECRET_ACCESS_KEY || secrets.R2_READ_SECRET_ACCESS_KEY) || '' }}
       DEDUPE_E2E_DUCKLAKE: "1"
       # No DEDUPE_E2E_EXTENSIONS here any more: the extensions step rides the
       # `test` tier's rest leg now, with the env scoped to that one step.
@@ -1303,8 +1316,11 @@ jobs:
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
-            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL || '');
-            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+            if (process.env.AWS_ACCESS_KEY_ID || process.env.AWS_SECRET_ACCESS_KEY) throw new Error('Dependabot must not receive R2 credentials');
+            if (!process.env.ACTIONS_RESULTS_URL || !process.env.ACTIONS_RUNTIME_TOKEN) throw new Error('GitHub cache runtime credentials are missing');
+            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL);
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN);
+            core.info('Dependabot sccache: GitHub Actions cache, no R2 credentials');
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       # No rust-cache. A restored `target/` carries a populated
       # `duckdb-sources/<key>/` with its `.complete` sentinel stripped, so
@@ -1420,8 +1436,8 @@ jobs:
     env:
       RUSTC_WRAPPER: sccache
       # sccache's S3 backend takes the standard AWS credential variables.
-      AWS_ACCESS_KEY_ID: ${{ secrets.R2_WRITE_ACCESS_KEY_ID || secrets.R2_READ_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_WRITE_SECRET_ACCESS_KEY || secrets.R2_READ_SECRET_ACCESS_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ (github.event_name != 'pull_request' || github.event.pull_request.user.login != 'dependabot[bot]') && (secrets.R2_WRITE_ACCESS_KEY_ID || secrets.R2_READ_ACCESS_KEY_ID) || '' }}
+      AWS_SECRET_ACCESS_KEY: ${{ (github.event_name != 'pull_request' || github.event.pull_request.user.login != 'dependabot[bot]') && (secrets.R2_WRITE_SECRET_ACCESS_KEY || secrets.R2_READ_SECRET_ACCESS_KEY) || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install stable toolchain
@@ -1442,8 +1458,11 @@ jobs:
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
-            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL || '');
-            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+            if (process.env.AWS_ACCESS_KEY_ID || process.env.AWS_SECRET_ACCESS_KEY) throw new Error('Dependabot must not receive R2 credentials');
+            if (!process.env.ACTIONS_RESULTS_URL || !process.env.ACTIONS_RUNTIME_TOKEN) throw new Error('GitHub cache runtime credentials are missing');
+            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL);
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN);
+            core.info('Dependabot sccache: GitHub Actions cache, no R2 credentials');
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       # No rust-cache. A restored `target/` carries a populated
       # `duckdb-sources/<key>/` with its `.complete` sentinel stripped, so
@@ -1477,8 +1496,8 @@ jobs:
     env:
       RUSTC_WRAPPER: sccache
       # sccache's S3 backend takes the standard AWS credential variables.
-      AWS_ACCESS_KEY_ID: ${{ secrets.R2_WRITE_ACCESS_KEY_ID || secrets.R2_READ_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_WRITE_SECRET_ACCESS_KEY || secrets.R2_READ_SECRET_ACCESS_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ (github.event_name != 'pull_request' || github.event.pull_request.user.login != 'dependabot[bot]') && (secrets.R2_WRITE_ACCESS_KEY_ID || secrets.R2_READ_ACCESS_KEY_ID) || '' }}
+      AWS_SECRET_ACCESS_KEY: ${{ (github.event_name != 'pull_request' || github.event.pull_request.user.login != 'dependabot[bot]') && (secrets.R2_WRITE_SECRET_ACCESS_KEY || secrets.R2_READ_SECRET_ACCESS_KEY) || '' }}
       DEDUPE_SCALE_TESTS: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1500,8 +1519,11 @@ jobs:
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
-            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL || '');
-            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+            if (process.env.AWS_ACCESS_KEY_ID || process.env.AWS_SECRET_ACCESS_KEY) throw new Error('Dependabot must not receive R2 credentials');
+            if (!process.env.ACTIONS_RESULTS_URL || !process.env.ACTIONS_RUNTIME_TOKEN) throw new Error('GitHub cache runtime credentials are missing');
+            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL);
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN);
+            core.info('Dependabot sccache: GitHub Actions cache, no R2 credentials');
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       # No rust-cache. A restored `target/` carries a populated
       # `duckdb-sources/<key>/` with its `.complete` sentinel stripped, so
