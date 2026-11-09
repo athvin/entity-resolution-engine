@@ -45,13 +45,26 @@ soon after another supersedes the earlier build; the newest run completes and
 deploys. `deploy` itself does **not** cancel in progress — deploys queue — which
 is what stops a merge from killing a rollout half-applied.
 
-**`workflow_run` runs carry the triggering SHA.** So
-`gh run list --commit $MERGE_SHA` does find the deploy, but it appears late —
-keep polling until nothing on that SHA has an empty `conclusion`, rather than
-concluding from one pass. Poll on the conclusion rather than on a list of
-statuses: a run held by a concurrency group reads `pending`, which slips past
-`queued`/`in_progress`. It is one of the false greens in `polling.md`, beside
-this one and reached from the skill body.
+**Find a `workflow_run` deploy by the commit it logs, not its displayed head
+SHA.** First identify the successful `images` run with
+`gh run list --workflow images.yml --commit "$MERGE_SHA"`. Then list recent
+`workflow_run` deploys without a commit filter and inspect their `Name the
+commit being deployed` step for `deploying $MERGE_SHA`:
+
+```bash
+gh run list --workflow deploy.yml --event workflow_run --limit 50 \
+  --json databaseId,createdAt,headSha,status,conclusion
+gh run view <candidate-run-id> --log | rg -F "deploying $MERGE_SHA"
+```
+
+Poll until the matching run appears and concludes; a run can be `pending` in a
+concurrency group, and its log may not be available until the step executes.
+The log establishes `DEPLOY_SHA`, which `deploy.yml` takes from
+`github.event.workflow_run.head_sha`. A commit-filtered list can omit the
+deploy: for #952, [deploy run 42550124002](https://github.com/athvin/entity-resolution-engine/actions/runs/42550124002)
+displayed `headSha=f64f03ff` after `main` advanced, but logged
+`deploying f65f6834` for the triggering image run. After finding the run,
+verify the live service selector and a process-emitted startup line below.
 
 **Your merge SHA's `rust` and `frontend` runs may never run at all, and that is
 not about your change.** `cancel-in-progress` is `${{ github.event_name ==

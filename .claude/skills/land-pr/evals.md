@@ -131,3 +131,18 @@ arc the invocation already authorises.
 This is the failure that motivated making the skill model-invocable: a session
 already driving a PR to merge was blocked from loading the procedure and had to
 rebuild it from memory, which is exactly how the false-green traps get re-made.
+
+## 9. A deploy whose displayed SHA moved with main
+
+> `/land-pr 952` — (the image run built merge SHA `f65f6834`; deploy run
+> 42550124002 displays `headSha=f64f03ff` but its commit-naming step logs
+> `deploying f65f6834`)
+
+**Must:** find the successful image run by the merge SHA, search recent
+`workflow_run` deploys without `--commit`, confirm the matching deploy's logged
+`DEPLOY_SHA`, then verify the selected live service and a process-emitted
+startup line before ticking the deploy ledger item.
+
+**Must not:** conclude no deploy ran because `gh run list --commit f65f6834`
+omits it; treat the displayed deploy `headSha` as the deployed commit; tick the
+ledger from a green deploy workflow alone.

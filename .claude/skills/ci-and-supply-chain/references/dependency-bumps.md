@@ -32,6 +32,24 @@ when bumping by hand.
 real: when npm was added, `next` was several patch releases behind a set of six
 advisories, one a high-severity SSRF.
 
+### Rust cache on Dependabot pull requests
+
+Dependabot-triggered workflows receive Dependabot secrets, not repository
+Actions secrets. The R2 read token used by human PRs is therefore absent on a
+Dependabot PR. `rust.yml` selects sccache's GitHub Actions backend for those
+PRs, exports the runner's cache URL and token before sccache starts, and leaves
+the R2 bucket and credentials empty so sccache does not try its S3 backend,
+even if a maintainer triggers the bot PR's workflow. Human PRs keep R2
+read access; `main` keeps R2 write access. The GitHub cache scopes entries to
+the PR branch, so a bot PR cannot populate a cache that `main` restores.
+
+The fallback is slower and may encounter the GitHub cache write rate limit;
+that does not skip a Rust gate. When diagnosing a bot PR, confirm the required
+`lint`, `entities`, `test`, and DuckLake jobs actually ran, then distinguish a
+compiler or assertion failure from an sccache startup failure. The failure
+that prompted this split was [run 42536742701](https://github.com/athvin/entity-resolution-engine/actions/runs/42536742701)
+on the dependency PRs later combined into #952.
+
 ## The pins that cannot move alone
 
 | Pin | Locked to |
