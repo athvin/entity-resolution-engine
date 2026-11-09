@@ -372,7 +372,39 @@ s3://er-prod-lake/{ns}/              prod
 
 ### 7.4 EFS
 
-One filesystem per environment with an access point per namespace, mounted at `ERSERVER_CONFIG_ROOT` and `ERSERVER_DROP_ROOT` — by the API, the dispatcher, and every runner Job (§6.2). Elastic throughput. Content is org YAML and CSV import drops — a few gigabytes, ~$1/mo — and no object store substitutes without an application change. EFS automatic backups (AWS Backup default plan, daily, 35-day retention, pennies) is enabled; what it uniquely protects is CSV drops awaiting ingest, since the org YAMLs are a projection of `config_versions.yaml` in the control-plane DB that `provision.seed_config` rewrites on replay (`server/src/erserver/provision.py:218`).
+One filesystem per environment with an access point per namespace, mounted by the API, dispatcher, and runner Jobs (§6.2), using elastic throughput. The platform chart mounts it at `/srv/er` by default. Backups protect the filesystem's contents, including tenant configuration and import drops; do not assume configuration is reconstructible from the control-plane database. The Rust provisioner's `create_workspace` writes a starter configuration only when the file is absent and preserves an existing file ([`provision.rs`](../../../../rust/crates/er-server/src/provision.rs)).
+
+The shared Terraform [`efs` module](../../../../infra/terraform/modules/efs/main.tf) enables EFS automatic backups through `aws_efs_backup_policy`. AWS manages the default backup plan and vault: the observed plan schedules daily backups at 05:00 UTC with 35-day retention. Both dev and prod had enabled policies and completed, encrypted recovery points on 2026-11-09. The verification record below carries the resource identifiers, timestamps, and repeatable read commands. This establishes backup creation; it does not establish successful restoration.
+
+#### EFS backup verification — 2026-11-09
+
+Acceptance evidence for [#551](https://github.com/athvin/entity-resolution-engine/issues/551), read from account `797781631727`, region `us-east-2`, using the `er-readonly` profile. This is a dated observation, not a continuing health guarantee or a restore test.
+
+##### Observed state
+
+Both `efs describe-backup-policy` responses reported `BackupPolicy.Status = ENABLED`. The most recent completed recovery points from `backup list-recovery-points-by-resource` were checked with `backup describe-recovery-point` on 2026-11-09 at approximately 10:12 UTC:
+
+| Environment | EFS filesystem | Recovery-point ID | Completion (UTC) |
+|---|---|---|---|
+| dev | `fs-06e1100cb147f6e6a` | `ada53f3f-4a98-490e-b9a4-b1c3be282aac` | 2026-11-09T07:28:08.494000Z |
+| prod | `fs-05ee4143366be7722` | `a1b8aca1-a43b-4465-acde-8b395102ac54` | 2026-11-09T06:34:40.105000Z |
+
+Both points were created at `2026-11-09T05:00:00Z`, reported `Status = COMPLETED`, `IsEncrypted = true`, and `Lifecycle.DeleteAfterDays = 35`; each `ResourceArn` matched the filesystem in its row. Their vault is `aws/efs/automatic-backup-vault`. Recovery-point ARNs use `arn:aws:backup:us-east-2:797781631727:recovery-point:<ID>`.
+
+Both points' `CreatedBy` identifies plan `aws/efs/73d922fb-9312-3a70-99c3-e69367f9fdad`, version `NmEwZDQ1MmEtYWE1Mi00OWQwLWI0OGEtNTg0YjI3ODg5M2Zh`, rule `111db7df-8ffa-4f82-b435-547ceaa5e4bf`. The same-session plan read earlier that morning returned `aws/efs/automatic-backup-plan`, rule `aws/efs/automatic-backup-rule`, schedule `cron(0 5 ? * * *)` in `Etc/UTC`, a 480-minute start window, a 10080-minute completion window, and 35-day retention. These are allowed windows, not measured recovery times. A later refresh of that plan read was refused by the local agent hook; the completed points independently confirm the plan version and retention.
+
+##### Reproduce the reads
+
+Substitute either filesystem and its recovery-point ARN from the table:
+
+```sh
+aws --profile er-readonly --region us-east-2 efs describe-backup-policy --file-system-id <filesystem-id>
+aws --profile er-readonly --region us-east-2 backup list-recovery-points-by-resource --resource-arn arn:aws:elasticfilesystem:us-east-2:797781631727:file-system/<filesystem-id>
+aws --profile er-readonly --region us-east-2 backup describe-recovery-point --backup-vault-name aws/efs/automatic-backup-vault --recovery-point-arn <recovery-point-arn>
+aws --profile er-readonly --region us-east-2 backup get-backup-plan --backup-plan-id aws/efs/73d922fb-9312-3a70-99c3-e69367f9fdad
+```
+
+The declaration is [`aws_efs_backup_policy.this`](../../../../infra/terraform/modules/efs/main.tf), used by the dev and prod EFS modules. The ticket's search for `aws_backup` missed this EFS resource; a second independently managed backup plan was unnecessary. The rollout checkbox is in `plan-to-aws.md` §1.5, rather than the issue's stale §1.6 reference.
 
 ### 7.5 Email: SES
 

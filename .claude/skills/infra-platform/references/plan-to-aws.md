@@ -205,7 +205,7 @@ gate today is `make check` plus `make check-e2e`, and the frontend tiers in
   - One ALB serves multiple test Ingresses via `group.name`.
 - [x] **1.5 EFS** (§7.4) — *er-dev-config: elastic throughput, own CMK, mount targets across the three private subnets, EFS CSI addon via Pod Identity.*
   - [x] Probe (2026-10-10): write on one pod, read on another, through an access point.
-  - [ ] AWS Backup default plan is attached (policy ENABLED); first recovery point lands after the first daily window.
+  - [x] AWS Backup default plan is attached (policy ENABLED); completed encrypted recovery points verified in dev and prod on 2026-11-09, with 35-day retention. Evidence and repeatable reads: `infrastructure.md` §7.4 (#551).
 - [x] **1.6 Secrets** (§9, §9.1) — *ESO 2.12 + reloader 2.2 installed; ClusterSecretStore `aws-secrets-manager` (Pod Identity, read scoped to `er/*`).*
   - [x] Probe (2026-10-10): ExternalSecret synced an SM entry; editing it rolled the annotated Deployment (generation 1→2, new pod saw the new value) — restart observed, not assumed.
   - [x] §8.5 grep: the only cloud secrets are er/* entries created by this design; no committed dev value present (trivially — re-grep as real secrets land).
