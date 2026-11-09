@@ -781,7 +781,8 @@ async fn readyz(State(state): State<AppState>) -> (StatusCode, Json<Value>) {
     // (`pg::connect`), so this is the same cost a real request pays.
     let probe = tokio::time::timeout(std::time::Duration::from_secs(2), async {
         let client = pg::connect(&dsn).await?;
-        client.simple_query("SELECT 1").await.map(|_| ())
+        client.simple_query("SELECT 1").await?;
+        Ok::<(), er_pg_tls::Error>(())
     })
     .await;
 

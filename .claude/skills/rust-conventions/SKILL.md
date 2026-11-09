@@ -141,9 +141,10 @@ These are not style choices; relaxing one breaks the build image or the pod.
   it authenticates by EKS Pod Identity (the container-credentials provider).
 - Consequence for local work: **`aws sso login` credentials will not work for a
   local `er-server`.** Use `ER_MAIL_BACKEND=log`.
-- Postgres TLS goes through `er-pg-tls`, which gives `sslmode=require`
-  semantics — encrypt, do not verify — because the RDS CA is not in system
-  roots.
+- Postgres connections go through `er_pg_tls::connect`. URI
+  `sslmode=verify-full` requires `sslrootcert` and verifies both trust and
+  hostname; the runtime images carry `/etc/ssl/rds/global-bundle.pem`.
+  `sslmode=require` retains encryption without certificate verification.
 
 ## Dependencies
 

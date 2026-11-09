@@ -36,12 +36,12 @@ pub const DISPATCHING: &str = "dispatching";
 /// Connect to the control-plane database, spawning the connection driver.
 ///
 /// # Errors
-/// Propagates the connection error.
-pub async fn connect(dsn: &str) -> Result<Client, PgError> {
-    let (client, connection) = tokio_postgres::connect(dsn, er_pg_tls::make_tls()).await?;
-    tokio::spawn(async move {
-        let _ = connection.await;
-    });
+/// Propagates the planning or connection error; a `sslmode=verify-full` DSN
+/// fails here when its `sslrootcert` bundle is absent or unreadable.
+pub async fn connect(dsn: &str) -> Result<Client, er_pg_tls::Error> {
+    // Dropping the JoinHandle detaches the driver task, which is the behaviour
+    // the spawned-and-ignored connection had: it runs until the client drops.
+    let (client, _driver) = er_pg_tls::connect(dsn).await?;
     Ok(client)
 }
 
@@ -231,7 +231,7 @@ pub async fn set_actor(client: &Client, actor: &str) -> Result<(), PgError> {
 ///
 /// # Errors
 /// Propagates the connect / query error.
-pub async fn connect_pg_as(dsn: &str, actor: &str) -> Result<Client, PgError> {
+pub async fn connect_pg_as(dsn: &str, actor: &str) -> Result<Client, er_pg_tls::Error> {
     let client = connect(dsn).await?;
     set_actor(&client, actor).await?;
     Ok(client)

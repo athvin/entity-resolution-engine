@@ -13,6 +13,14 @@ tokio-postgres-rustls = { workspace = true }
 # direct dependency turns the default `runtime` feature back on so the
 # MakeTlsConnect impl exists when this crate is built standalone.
 tokio-postgres = { workspace = true }
+url = "2.5.8"
+rustls-pemfile = "2.2.0"
+thiserror.workspace = true
+tokio = { workspace = true, features = ["rt"] }
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+rcgen = { version = "0.14.10", default-features = false, features = ["ring", "pem", "crypto"] }
+tempfile = "3.27.0"

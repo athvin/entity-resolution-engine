@@ -756,9 +756,12 @@ pub(crate) fn append_tf_snapshot(tf_path: &str, tf_rows: &str) -> Result<(), Str
 /// hand-built identifier is exactly the shape that becomes an injection the day
 /// someone relaxes the folding.
 pub(crate) async fn create_tenant_database(maint_dsn: &str, database: &str) -> Result<(), String> {
-    let client = pg::connect(maint_dsn)
-        .await
-        .map_err(|e| format!("connect to the provisioning maintenance DSN: {e}"))?;
+    let client = pg::connect(maint_dsn).await.map_err(|e| {
+        format!(
+            "connect to the provisioning maintenance DSN: {}",
+            crate::errfmt::chain(&e)
+        )
+    })?;
     let existing = client
         .query("SELECT 1 FROM pg_database WHERE datname = $1", &[&database])
         .await
