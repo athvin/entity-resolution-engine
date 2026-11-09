@@ -25,7 +25,9 @@ workspace root.
          JSON_WIRE_WITHOUT_SCHEMA there. The Rust test job fails until one
          of the two is true
 - [ ] 5. cd rust && cargo run -q -p er-server --bin er-openapi \
-            > ../frontend/src/lib/api/openapi.json
+            -- --audience internal > ../frontend/src/lib/api/openapi.json
+         cargo run -q -p er-server --bin er-openapi \
+            -- --audience public > ../frontend/src/lib/api/openapi.public.json
 - [ ] 6. cd frontend && pnpm gen:api
 - [ ] 7. Fix the Rust and TypeScript call sites that no longer compile
 - [ ] 8. make check   (and make frontend if the UI changed)
@@ -47,7 +49,7 @@ is `ci-and-supply-chain/references/required-checks.md`.
 |---|---|---|
 | definition changed, artifacts not regenerated | `er-entity verify` | Rust `entities` job / `make check` |
 | a `returns: entity` statement no longer projects every column | **E003** | same |
-| `openapi.json` stale | `openapi_json_matches_the_committed_document` | Rust `test` job |
+| either OpenAPI document stale | internal/public snapshot tests | Rust `test` job |
 | `schema.d.ts` stale | `pnpm gen:api` + `git diff --exit-code` | frontend `check` job |
 | a new `wire: [json]` entity with no component schema | `every_json_wire_entity_has_a_schema_or_a_declared_gap` | Rust `test` job |
 | a schema registered for an entity that does not declare `wire: [json]` | `no_schema_is_registered_for_an_entity_that_is_not_on_the_json_wire` | Rust `test` job |
@@ -67,16 +69,19 @@ and hide the next real gap.
 
 ## What counts as breaking
 
-`er-openapi-check` reports exactly four things:
+`er-openapi-check` compares both audiences and reports:
 
 | Reported | Example |
 |---|---|
 | a schema removed | an entity deleted, or its `ToSchema` unregistered |
 | a property removed | a column dropped |
 | a property whose `type` changed | `varchar` → `bigint` |
-| a property no longer required | a non-null column made nullable |
+| a response property no longer required | a non-null column made nullable |
+| an operation removed | a route or method deleted |
+| a path parameter added | a required path input introduced |
+| a required request property added | a new required field, or an optional input made required |
 
-Additions are **not** reported, because adding an optional property is
+New operations and optional properties are not reported, because they are
 backward-compatible for a consumer that ignores unknown fields.
 
 Two notes on the edges:
@@ -84,9 +89,12 @@ Two notes on the edges:
 - "No longer required" is reported because a consumer that relied on a field
   always being present now has to handle its absence. That is a real break even
   though it loosens the schema.
-- Making an optional property **required** is a break for *producers* but is
-  not in the reported set. Think about direction, not just about which way the
-  constraint moved.
+- Making an optional request property **required** is a break for producers.
+  Request checks follow local schema/body references, nested objects, arrays and
+  the emitter's nullable `anyOf` shape. Arbitrary composition and query parameter
+  compatibility are not covered. Think about direction, not just constraint size.
+- CI compares each audience with its own `origin/main` snapshot. First publication
+  has no baseline and is reported explicitly; it does not borrow the other audience.
 
 ## Making a genuinely breaking change
 
@@ -139,6 +147,5 @@ sites a backend change affects. Find them by hand.
   request ends up on all but one; the module this consolidated
   (`src/lib/api/erserver.ts`) was deleted precisely because a dead path is one
   the next person revives.
-- **Adding a path-level response shape in the frontend because the document
-  does not describe operations.** It does not describe them *yet*; inventing a
-  parallel description is the thing the contract exists to avoid.
+- **Adding a parallel path contract in the frontend.** Operations are derived
+  from backend source; extend that derivation when its shape coverage is missing.

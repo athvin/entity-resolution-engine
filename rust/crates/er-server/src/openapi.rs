@@ -11,6 +11,15 @@
 
 use utoipa::OpenApi;
 
+mod compatibility;
+
+/// Consumers of the generated contract. TypeScript continues to use Internal.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+pub enum Audience {
+    Internal,
+    Public,
+}
+
 #[derive(OpenApi)]
 #[openapi(
     info(
@@ -55,9 +64,9 @@ pub struct ApiDoc;
 /// The OpenAPI document as pretty-printed JSON — the exact bytes committed to
 /// `frontend/src/lib/api/openapi.json` and pinned by the snapshot test.
 #[must_use]
-pub fn openapi_json() -> String {
+pub fn openapi_json(audience: Audience) -> String {
     let mut doc = ApiDoc::openapi();
-    add_operations(&mut doc);
+    add_operations(&mut doc, audience);
     let mut json = doc
         .to_pretty_json()
         .expect("serialize the OpenAPI document");
@@ -65,7 +74,7 @@ pub fn openapi_json() -> String {
     json
 }
 
-fn add_operations(doc: &mut utoipa::openapi::OpenApi) {
+fn add_operations(doc: &mut utoipa::openapi::OpenApi, audience: Audience) {
     use utoipa::openapi::{
         Required,
         path::{
@@ -80,6 +89,13 @@ fn add_operations(doc: &mut utoipa::openapi::OpenApi) {
             .description(Some("Tenant API key erk_{key_id}_{secret}, scoped to its organization and role. Operator operations require the separately configured operator bearer token; tenant keys cannot grant operator access. Roles form viewer < steward < admin < operator."))
             .build(),
     ));
+    if audience == Audience::Internal {
+        components.add_security_scheme("attemptAuth", SecurityScheme::Http(
+            HttpBuilder::new().scheme(HttpAuthScheme::Bearer)
+                .description(Some("Attempt-bound projected Kubernetes ServiceAccount token, or per-attempt fallback bearer token. Tenant API keys and the operator token do not authenticate this channel."))
+                .build(),
+        ));
+    }
     let schemas = components.schemas.keys().cloned().collect();
     let operations = er_api_spec::operations(
         include_str!("lib.rs"),
@@ -89,11 +105,21 @@ fn add_operations(doc: &mut utoipa::openapi::OpenApi) {
     .unwrap_or_else(|e| panic!("derive OpenAPI operations: {e}"));
     let mut paths = PathsBuilder::new();
     for derived in operations {
+        if audience == Audience::Public
+            && (derived.role == "operator" || derived.path.starts_with("/v1/internal/"))
+        {
+            continue;
+        }
         let mut operation = OperationBuilder::new()
             .operation_id(Some(&derived.name))
             .summary(Some(&derived.summary))
             .securities(Some(if derived.role == "public" {
                 vec![]
+            } else if derived.role == "attempt" {
+                vec![SecurityRequirement::new(
+                    "attemptAuth",
+                    Vec::<String>::new(),
+                )]
             } else {
                 // OpenAPI 3.1 permits role names for non-OAuth security schemes.
                 vec![SecurityRequirement::new("bearerAuth", [&derived.role])]
@@ -250,12 +276,12 @@ fn required_set(schema: &serde_json::Value) -> std::collections::BTreeSet<String
         .unwrap_or_default()
 }
 
-/// The breaking changes between two OpenAPI documents' component schemas: a schema
-/// removed, a property removed, a property whose `type` changed, or a property that
-/// is no longer required (each breaks a consumer generated against the old shape).
-/// Additions — a new schema, a new property — are backward-compatible and not
-/// reported. The rule set is deliberately small; the gate is advisory until the
-/// first external org key, blocking after.
+/// Report component response-schema breaks and operation/request breaks.
+/// Removed operations, added path parameters and newly required request fields
+/// supplement removed/retyped response properties and dropped required fields.
+/// New operations and optional properties are compatible. This is deliberately
+/// not a full OpenAPI compatibility engine; the CI gate remains advisory until
+/// the first external org key.
 #[must_use]
 pub fn breaking_changes(base_json: &str, new_json: &str) -> Vec<String> {
     let base: serde_json::Value =
@@ -301,6 +327,7 @@ pub fn breaking_changes(base_json: &str, new_json: &str) -> Vec<String> {
             }
         }
     }
+    breaks.extend(compatibility::operation_changes(&base, &new));
     breaks.sort();
     breaks
 }
@@ -312,14 +339,78 @@ mod tests {
     const COMMITTED: &str = include_str!("../../../../frontend/src/lib/api/openapi.json");
 
     #[test]
+    fn public_document_matches_the_committed_document() {
+        assert_eq!(
+            openapi_json(Audience::Public),
+            include_str!("../../../../frontend/src/lib/api/openapi.public.json")
+        );
+    }
+
+    #[test]
+    fn public_operations_are_a_complete_filtered_subset_of_internal() {
+        let internal: serde_json::Value =
+            serde_json::from_str(&openapi_json(Audience::Internal)).unwrap();
+        let public: serde_json::Value =
+            serde_json::from_str(&openapi_json(Audience::Public)).unwrap();
+        let source = er_api_spec::operations(
+            include_str!("lib.rs"),
+            &[("mail", include_str!("mail.rs"))],
+            &registered_schemas(),
+        )
+        .unwrap();
+        for operation in &source {
+            let method = operation.method.to_lowercase();
+            let exported = &public["paths"][&operation.path][&method];
+            if operation.role == "operator" || operation.path.starts_with("/v1/internal/") {
+                assert!(exported.is_null(), "leaked {method} {}", operation.path);
+            } else {
+                assert!(exported.is_object());
+                assert_eq!(exported, &internal["paths"][&operation.path][&method]);
+            }
+        }
+        for (path, item) in public["paths"].as_object().unwrap() {
+            assert!(!path.starts_with("/v1/internal/"));
+            for (method, operation) in item.as_object().unwrap() {
+                assert_eq!(operation, &internal["paths"][path][method]);
+            }
+        }
+        assert!(
+            public["components"]["securitySchemes"]
+                .get("attemptAuth")
+                .is_none()
+        );
+        assert_eq!(
+            public["components"]["schemas"],
+            internal["components"]["schemas"]
+        );
+    }
+
+    #[test]
+    fn internal_attempt_routes_use_attempt_authentication() {
+        let doc: serde_json::Value =
+            serde_json::from_str(&openapi_json(Audience::Internal)).unwrap();
+        let mut found = 0;
+        for (path, item) in doc["paths"].as_object().unwrap() {
+            if path.starts_with("/v1/internal/") {
+                for operation in item.as_object().unwrap().values() {
+                    assert_eq!(
+                        operation["security"],
+                        serde_json::json!([{"attemptAuth": []}])
+                    );
+                    found += 1;
+                }
+            }
+        }
+        assert!(found >= 4);
+    }
+
+    #[test]
     fn operations_cover_the_router_and_generate_typescript_paths() {
-        let doc: serde_json::Value = serde_json::from_str(&openapi_json()).unwrap();
+        let doc: serde_json::Value =
+            serde_json::from_str(&openapi_json(Audience::Internal)).unwrap();
         let paths = doc["paths"].as_object().unwrap();
         assert!(paths.len() > 80, "operation derivation lost the router");
         for route in er_api_spec::routes(include_str!("lib.rs")) {
-            if route.path.starts_with("/v1/internal/") {
-                continue;
-            }
             for method in er_api_spec::verbs_in(route.handlers) {
                 let operation = &paths[route.path][method.to_lowercase()];
                 assert!(operation.is_object(), "missing {method} {}", route.path);
@@ -338,7 +429,8 @@ mod tests {
 
     #[test]
     fn bearer_security_describes_roles_and_public_health_stays_public() {
-        let doc: serde_json::Value = serde_json::from_str(&openapi_json()).unwrap();
+        let doc: serde_json::Value =
+            serde_json::from_str(&openapi_json(Audience::Internal)).unwrap();
         let scheme = &doc["components"]["securitySchemes"]["bearerAuth"];
         assert_eq!(scheme["type"], "http");
         assert_eq!(scheme["scheme"], "bearer");
@@ -359,7 +451,8 @@ mod tests {
 
     #[test]
     fn get_responses_agree_with_every_committed_envelope_class() {
-        let doc: serde_json::Value = serde_json::from_str(&openapi_json()).unwrap();
+        let doc: serde_json::Value =
+            serde_json::from_str(&openapi_json(Audience::Internal)).unwrap();
         let ledger: serde_json::Value = serde_json::from_str(include_str!(
             "../../../../frontend/src/lib/api/envelopes.json"
         ))
@@ -417,7 +510,8 @@ mod tests {
 
     #[test]
     fn upload_optional_body_and_delegated_write_are_described() {
-        let doc: serde_json::Value = serde_json::from_str(&openapi_json()).unwrap();
+        let doc: serde_json::Value =
+            serde_json::from_str(&openapi_json(Audience::Internal)).unwrap();
         let paths = &doc["paths"];
         let upload = &paths["/v1/orgs/{org}/datasets/{ds}/imports"]["post"];
         assert!(
@@ -453,7 +547,8 @@ mod tests {
 
     #[test]
     fn secret_columns_are_absent_from_public_contracts() {
-        let doc: serde_json::Value = serde_json::from_str(&openapi_json()).unwrap();
+        let doc: serde_json::Value =
+            serde_json::from_str(&openapi_json(Audience::Internal)).unwrap();
         for (entity, field) in [
             ("Webhook", "secret"),
             ("ApiKey", "key_hash"),
@@ -554,7 +649,8 @@ mod tests {
 
     #[test]
     fn component_properties_match_public_columns_for_every_json_entity() {
-        let doc: serde_json::Value = serde_json::from_str(&openapi_json()).unwrap();
+        let doc: serde_json::Value =
+            serde_json::from_str(&openapi_json(Audience::Internal)).unwrap();
         for entity in er_entities::catalog::catalog()
             .entities()
             .iter()
@@ -581,7 +677,7 @@ mod tests {
     #[test]
     fn openapi_json_matches_the_committed_document() {
         assert_eq!(
-            openapi_json(),
+            openapi_json(Audience::Internal),
             COMMITTED,
             "the committed frontend/src/lib/api/openapi.json is stale; run \
              `cargo run -p er-server --bin er-openapi > frontend/src/lib/api/openapi.json` \
@@ -750,7 +846,7 @@ mod tests {
 
     #[test]
     fn the_document_is_compatible_with_itself() {
-        let json = openapi_json();
+        let json = openapi_json(Audience::Internal);
         assert_eq!(breaking_changes(&json, &json), Vec::<String>::new());
     }
 }

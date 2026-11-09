@@ -1,11 +1,11 @@
 /**
  * Regenerate src/lib/api/schema.d.ts from the committed OpenAPI document
- * (src/lib/api/openapi.json).
+ * (src/lib/api/openapi.json, the internal audience).
  *
  * That document is now owned by er-server: it is emitted from the utoipa `ApiDoc`
  * (which references the generated entity structs' `ToSchema`) and pinned by a Rust
  * snapshot test. Refresh it with:
- *   cargo run -p er-server --bin er-openapi > frontend/src/lib/api/openapi.json
+ *   cd rust && cargo run -p er-server --bin er-openapi -- --audience internal > ../frontend/src/lib/api/openapi.json
  * then run this script (`pnpm gen:api`) to derive the TypeScript types. The old
  * path dumped a since-deleted Python FastAPI app via `uv`; that is gone.
  */

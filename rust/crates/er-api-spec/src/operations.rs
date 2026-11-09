@@ -71,7 +71,7 @@ impl<'a> Source<'a> {
     }
 }
 
-/// Derive every non-internal registration. Additional module source is injected
+/// Derive every registration, including the separate attempt-token channel. Additional module source is injected
 /// by the caller for qualified request types; registered wire schemas are the
 /// only names permitted in component references. No file or network I/O occurs.
 pub fn operations(
@@ -87,9 +87,6 @@ pub fn operations(
     let mut result = Vec::new();
     let mut seen = BTreeSet::new();
     for route in routes(source) {
-        if route.path.starts_with("/v1/internal/") {
-            continue;
-        }
         let handlers = method_handlers(route.handlers)?;
         if handlers.keys().cloned().collect::<BTreeSet<_>>() != verbs_in(route.handlers) {
             return Err(format!(
@@ -106,8 +103,19 @@ pub fn operations(
                 .get(&handler)
                 .ok_or_else(|| format!("missing handler {handler}"))?;
             let docs = doc_text(&function.attrs);
-            let role = role_of(&docs).ok_or_else(|| format!("missing role on {handler}"))?;
-            let summary = summary(&docs);
+            // The internal namespace is the per-attempt credential channel, not
+            // a role mintable on a tenant API key. Other routes require role docs.
+            let internal = route.path.starts_with("/v1/internal/");
+            let role = if internal {
+                "attempt"
+            } else {
+                role_of(&docs).ok_or_else(|| format!("missing role on {handler}"))?
+            };
+            let summary = if internal {
+                docs.split(" (`").next().unwrap_or("").trim().to_string()
+            } else {
+                summary(&docs)
+            };
             if summary.is_empty() {
                 return Err(format!("missing summary on {handler}"));
             }

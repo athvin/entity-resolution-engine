@@ -142,6 +142,7 @@ ring = "0.17"
 csv = "1"
 er-span = { version = "0.1.0", path = "../er-span" }
 er-api-spec = { version = "0.1.0", path = "../er-api-spec" }
+clap = { workspace = true, features = ["derive"] }
 
 [lints]
 workspace = true
