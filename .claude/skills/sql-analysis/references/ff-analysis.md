@@ -81,6 +81,7 @@ so the analyser can type-check calls the engine really makes. By tag:
 | v0.1.2 | the golden-lineage constructs: a custom `ExprPlanner` for DuckDB `MAP {…}` literals and subscript access, window-function stubs (`row_number`, `rank`, `lag`, …), `concat` / `concat_ws` / `element_at` |
 | v0.1.3 | the standardization-stage surface: json payload accessors, `LIST(VARCHAR)`-typed list shaping, unicode normalizers, variadic regexp forms, array-literal planning |
 | v0.1.4 | `sha256`, for the content-derived id mints |
+| v0.1.5 | `array_to_string`, for rejoining named-dictionary word transforms; input-column resolution remains checked |
 
 **If the pinned tag in the matrix above has no row in this table, the table is
 behind the pin** — check feather-flow's own history before concluding a function
