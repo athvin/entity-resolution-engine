@@ -369,6 +369,32 @@ def main() -> int:
         print(f"  {pre_hook_pods} pre-install hook pod(s); "
               f"hook SAs {sorted(hook_sas)}, release SAs {sorted(plain_sas)}")
 
+    # A developer database must not overwrite the shared queue series. Check
+    # both canonical deployments, developer namespaces and crossed env/name pairs.
+    for environment, ns, enabled in [
+        ("dev", "ci", "true"), ("prod", "app", "true"),
+        ("dev", "alice", "false"), ("prod", "alice", "false"),
+        ("dev", "app", "false"), ("prod", "ci", "false"),
+    ]:
+        docs = render([
+            "er-platform", REPO_CHART, "--namespace", ns,
+            "--set", f"environment={environment}", "--set", f"developer={ns}",
+            "--set", "efs.fileSystemId=fs-0", "--set", "efs.accessPointId=fsap-0",
+        ])
+        publishers = 0
+        for doc in docs:
+            if doc.get("kind") != "Deployment":
+                continue
+            for container in doc["spec"]["template"]["spec"]["containers"]:
+                settings = {e["name"]: e.get("value") for e in container.get("env", [])}
+                if "ER_PG_DSN" not in settings:
+                    continue
+                publishers += 1
+                if settings.get("ER_OPERATIONAL_METRICS") != enabled:
+                    problems.append(f"{environment}/{ns}/{container['name']}: operational metric scope must be {enabled}")
+        if publishers < 2:
+            problems.append(f"{environment}/{ns}: metric scope check missed API or dispatcher")
+
     if problems:
         print("\ncharts-check FAILED:\n", file=sys.stderr)
         for problem in problems:

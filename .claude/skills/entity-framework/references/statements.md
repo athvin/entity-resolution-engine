@@ -149,4 +149,4 @@ Per statement, one Rust fn in `rust/crates/er-entities/src/<entity>.rs` under
   via the generated `er_entities::batch` module) + `fn -> Vec<Row>`.
 - Lake writes → `fn(conn, …) -> duckdb::Result<usize>`.
 - Control statements → `async fn(client: &tokio_postgres::Client, …)`
-  returning `Vec<Entity>` (entity reads / RETURNING) or `u64` (`returns: none`).
+  returning `Vec<Entity>` (entity reads / RETURNING), `Vec<NameRow>` for a typed read projection, or `u64` (`returns: none`). Typed control reads map declared columns with `Row::try_get`, so a runtime type/null mismatch returns an error; their shape is also checked by E003. Typed control writes remain unsupported.

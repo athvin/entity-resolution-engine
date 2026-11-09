@@ -51,7 +51,7 @@ use opentelemetry_http::{Bytes, HttpClient, HttpError, Request, Response};
 use opentelemetry_otlp::{MetricExporter, SpanExporter, WithExportConfig, WithHttpConfig};
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::error::OTelSdkResult;
-use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
+use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider, Temporality};
 use opentelemetry_sdk::trace::{Sampler, SdkTracerProvider, SpanData, SpanProcessor};
 
 use crate::init::Role;
@@ -422,18 +422,20 @@ pub fn meter_provider_for(
     timeout: Duration,
 ) -> Result<SdkMeterProvider, Box<dyn std::error::Error + Send + Sync>> {
     let client = ReqwestClient::new(timeout)?;
+    // awsemf discards the first cumulative sample as a baseline. Native
+    // deltas preserve a lone failure and cannot replay a producer's lifetime
+    // count when the collector restarts and loses its conversion cache.
     let exporter = MetricExporter::builder()
+        .with_temporality(Temporality::Delta)
         .with_http()
         .with_http_client(client)
         .with_endpoint(endpoint)
         .with_timeout(timeout)
         .build()?;
 
-    // 60s rather than the SDK's default 30s. These are four series on a
-    // histogram; exporting them twice a minute buys no resolution anyone will
-    // use and doubles the request count against a collector that bills by the
-    // byte downstream. An ingest spike must come from a real change in
-    // behaviour, not from the reporting interval.
+    // One export per minute matches the operational dashboard resolution.
+    // Queue snapshots run more often, but the exported gauge is the latest
+    // value and counters/histograms describe this export interval.
     let reader = PeriodicReader::builder(exporter)
         .with_interval(Duration::from_secs(60))
         .build();

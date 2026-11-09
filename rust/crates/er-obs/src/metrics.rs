@@ -76,7 +76,13 @@ pub(crate) fn install(meter: &Meter) {
 /// Split from [`install`] so a test can supply its own meter with no exporter
 /// and no network.
 pub(crate) fn install_from_global() {
-    install(&global::meter_provider().meter("er-obs"));
+    let meter = global::meter_provider().meter("er-obs");
+    install(&meter);
+    // Separate developer databases must never overwrite the canonical queue
+    // gauges. The platform chart opts in only dev/ci and prod/app.
+    if std::env::var("ER_OPERATIONAL_METRICS").as_deref() == Ok("true") {
+        crate::operational::install(&meter);
+    }
 }
 
 /// Whether the instruments exist, i.e. a meter provider was installed.
@@ -193,6 +199,7 @@ pub(crate) mod test_support {
                 .with_reader(PeriodicReader::builder(exporter.clone()).build())
                 .build();
             super::install(&provider.meter("test"));
+            crate::operational::install(&provider.meter("test"));
             (provider, exporter)
         })
     }

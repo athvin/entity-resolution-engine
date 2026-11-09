@@ -1,0 +1,7 @@
+kind: statement
+operation: read
+description: "Current live pod-task claims by resource class, including launch and cancellation waits. Archived tries and dispatcher-local control tasks do not occupy runner capacity."
+params: []
+returns:
+  - { name: resource_class, type: varchar }
+  - { name: active, type: bigint }

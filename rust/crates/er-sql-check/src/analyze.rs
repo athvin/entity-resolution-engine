@@ -111,13 +111,15 @@ pub fn analyze_statement(
         }
     }
 
-    // E012 — `returns: columns` is lake-read-only in this phase; a control read
-    // declares `returns: entity` (the control emitter maps rows by entity column).
-    if store == Store::Postgres && matches!(stmt.returns, Returns::Columns(_)) {
+    // E012 — typed projections are read-only. Read schemas undergo E003 below.
+    if store == Store::Postgres
+        && stmt.operation != Operation::Read
+        && matches!(stmt.returns, Returns::Columns(_))
+    {
         diags.push(Diagnostic::new(
             "E012",
             &stmt.path,
-            "returns: columns is lake-read-only in this phase; a control read declares `returns: entity`",
+            "typed columns are supported only for reads",
         ));
     }
 
@@ -1623,13 +1625,13 @@ mod tests {
     }
 
     #[test]
-    fn a_control_statement_cannot_return_columns() {
+    fn a_control_read_can_return_typed_columns() {
         let cat = catalog();
         let entity = cat.by_name("org").unwrap();
         let pg = build_store_catalog(&cat, Store::Postgres);
         let registry = FunctionRegistry::new();
         let provider = FeatherFlowProvider::new(&pg, &registry);
-        let stmt = LoadedStatement {
+        let mut stmt = LoadedStatement {
             entity: "org".to_string(),
             operation: Operation::Read,
             description: "test".to_string(),
@@ -1639,7 +1641,7 @@ mod tests {
                 col_type: ColumnType::Varchar,
                 nullable: false,
             }]),
-            mode: crate::Mode::Partial,
+            mode: crate::Mode::Full,
             reads: vec![],
             pin: Pin::Snapshot,
             pin_reason: String::new(),
@@ -1647,11 +1649,24 @@ mod tests {
             path: PathBuf::from("entities/org/read/test.sql"),
         };
         let diags = analyze_statement(&stmt, entity, Store::Postgres, &provider, &cat);
+        assert!(diags.is_empty(), "typed control read rejected: {diags:#?}");
+        stmt.returns = Returns::Columns(vec![crate::ReturnColumn {
+            name: "wrong_name".to_string(),
+            col_type: ColumnType::Varchar,
+            nullable: false,
+        }]);
+        let diags = analyze_statement(&stmt, entity, Store::Postgres, &provider, &cat);
+        assert!(
+            diags.iter().any(|d| d.code == "E003"),
+            "typed control projection escaped shape checks: {diags:#?}"
+        );
+        stmt.operation = Operation::Update;
+        let diags = analyze_statement(&stmt, entity, Store::Postgres, &provider, &cat);
         assert!(
             diags
                 .iter()
-                .any(|d| d.code == "E012" && d.message.contains("lake-read-only")),
-            "expected the control-columns E012, got {diags:#?}"
+                .any(|d| d.code == "E012" && d.message.contains("only for reads")),
+            "typed writes must remain rejected: {diags:#?}"
         );
     }
 

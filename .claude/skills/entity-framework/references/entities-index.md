@@ -30,7 +30,7 @@ statements is read or written only through the engine's own stage SQL, not
 through a typed query function.
 
 <!-- BEGIN GENERATED: entities-index -->
-**52 entities, 264 declared statements.**
+**52 entities, 266 declared statements.**
 
 | Entity | Relation | Store | Key | Natural key | History |
 |---|---|---|---|---|---|
@@ -112,7 +112,7 @@ Declared statements per entity and operation:
 | `golden_record_override` | 1 | 0 | 0 | 1 |
 | `ingest_batch` | 1 | 2 | 1 | 1 |
 | `int_std_record` | 0 | 5 | 0 | 0 |
-| `job` | 2 | 4 | 10 | 0 |
+| `job` | 2 | 5 | 10 | 0 |
 | `lake_schema_migration` | 1 | 1 | 0 | 0 |
 | `match_score` | 0 | 6 | 3 | 0 |
 | `matching_model` | 1 | 4 | 1 | 0 |
@@ -138,7 +138,7 @@ Declared statements per entity and operation:
 | `staged_steward_action` | 1 | 1 | 1 | 0 |
 | `tag` | 1 | 3 | 1 | 0 |
 | `tagging` | 1 | 2 | 0 | 1 |
-| `task_instance` | 3 | 4 | 22 | 0 |
+| `task_instance` | 3 | 5 | 22 | 0 |
 | `tenant_schema_state` | 2 | 1 | 0 | 0 |
 | `webhook` | 1 | 3 | 1 | 0 |
 | `webhook_delivery` | 1 | 1 | 2 | 1 |

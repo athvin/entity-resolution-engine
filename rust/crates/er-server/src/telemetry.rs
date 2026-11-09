@@ -39,13 +39,10 @@
 //!
 //! ## What is deliberately absent
 //!
-//! No metric instruments *here*. `er_obs::metrics` owns the instruments and the
-//! registry that bounds their cardinality (one `er.db.query.duration` histogram
-//! over two closed dimensions); a second, hand-rolled instrument in this layer
-//! would be a cardinality decision made in the wrong place. RED metrics over
-//! `http.route` derive from these spans through a `spanmetrics` connector in the
-//! collector's config, which is the cheaper place to put a decision that may
-//! need reverting.
+//! Instruments remain in `er_obs`, whose registry bounds their dimensions. This
+//! layer records aggregate RED observations by status class before collector
+//! trace sampling, so sampled spans cannot undercount request volume. Routes and
+//! tenant identifiers remain span-only; health probes emit neither.
 
 use axum::body::Body;
 use axum::extract::MatchedPath;
@@ -203,6 +200,7 @@ pub fn on_response(res: &Response<Body>, latency: Duration, span: &Span) {
     }
 
     let status = res.status();
+    er_obs::operational::http_response(status.as_u16(), latency);
     span.record("http.response.status_code", status.as_u16());
 
     // A 5xx is ours; a 4xx is the caller's. Logging them at one level would

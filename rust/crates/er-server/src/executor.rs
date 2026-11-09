@@ -1044,10 +1044,10 @@ impl Executor {
                         // The pod's own finish normally landed this; the record
                         // is the recovery path (a lost report) — same guarded
                         // statement, a no-op when already posted.
-                        let _ = er_entities::task_instance::update::finish(
+                        if let Ok(rows) = er_entities::task_instance::update::finish(
                             &self.client,
                             record.state == TerminalState::Skipped,
-                            "done",
+                            if record.exit == 10 { "no_op" } else { "done" },
                             record.output.as_ref(),
                             record.snapshot_start,
                             record.snapshot_end,
@@ -1056,7 +1056,12 @@ impl Executor {
                             &row.id,
                             row.pod_uid.as_deref().unwrap_or_default(),
                         )
-                        .await;
+                        .await
+                        {
+                            for completed in &rows {
+                                crate::ops::task_completed(completed);
+                            }
+                        }
                     }
                     TerminalState::Failed => {
                         let class = record.error_class.as_deref().unwrap_or("internal");
@@ -1339,7 +1344,10 @@ impl Executor {
                     let _ = taskpg::fail_or_retry_task(&mut self.client, &row.id, &failure).await;
                 }
             }
-            Ok(_) => {}
+            Ok(_) => er_obs::operational::pod_failed(
+                er_obs::operational::Class::from_value(row.resource_class.as_deref()),
+                Some(reason),
+            ),
             Err(e) => {
                 tracing::warn!(er.task_instance_id = %row.id, error = %e, "requeueing the row failed");
             }

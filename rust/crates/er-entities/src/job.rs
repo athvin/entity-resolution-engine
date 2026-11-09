@@ -770,6 +770,45 @@ FOR UPDATE
             })
             .collect())
     }
+
+    /// The dispatcher's operational queue gauge, aggregated across tenants; no tenant identity leaves this query. Includes delayed jobs because they still occupy the waiting queue.
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize)]
+    pub struct OperationalQueueRow {
+        pub resource_class: Option<String>,
+        pub depth: Option<i64>,
+    }
+
+    pub async fn operational_queue(
+        client: &impl ::tokio_postgres::GenericClient,
+    ) -> ::std::result::Result<Vec<OperationalQueueRow>, ::tokio_postgres::Error> {
+        const SQL: &str = "SELECT resource_class, count(*) AS depth
+FROM public.jobs
+WHERE state = 'queued'
+GROUP BY resource_class
+";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "job",
+            "read",
+            "operational_queue",
+            "jobs",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.query(SQL, &[])).await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
+        let decoded = rows
+            .iter()
+            .map(|row| {
+                Ok(OperationalQueueRow {
+                    resource_class: row.try_get("resource_class")?,
+                    depth: row.try_get("depth")?,
+                })
+            })
+            .collect();
+        ::er_span::check(&__span, decoded)
+    }
 }
 
 pub mod update {
