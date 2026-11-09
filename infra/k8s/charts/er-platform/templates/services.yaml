@@ -1,13 +1,12 @@
 {{- $active := include "er-platform.activeColor" . }}
 {{- $inactive := include "er-platform.inactiveColor" . }}
-# Four Services over two colours.
+# Four application Services over two colours, plus the optional ALB Service.
 #
 # `er-api` and `er-web` are the LIVE pair: they add
 # `er.dupezero.com/color: {{ $active }}` to the selector, so moving traffic
 # between colours is a one-field change to these two objects and nothing else.
-# That is the whole cutover — no new controller, no second Ingress, no weighted
-# target group. Rollback is the same field moving back, with the old pod still
-# running because the colour was never scaled down.
+# The ALB-facing Service separately stages target registration before this
+# switch. Rollback selects the old colour while its pod is still running.
 #
 # `er-api-preview` and `er-web-preview` are the INACTIVE pair, and they are what
 # makes the cutover gateable: the new colour can be deployed, probed and
@@ -97,6 +96,31 @@ spec:
   type: ClusterIP
   selector:
     {{- include "er-platform.selectorLabels" (dict "root" . "name" "web-api" "color" $inactive) | nindent 4 }}
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
+{{- end }}
+
+{{- if and .Values.web.enabled .Values.edge.targetGroupArn }}
+---
+# The ALB's Service alone can overlap colours after preview smoke. The live
+# er-web/er-api selectors stay unambiguous even if a deploy is interrupted.
+apiVersion: v1
+kind: Service
+metadata:
+  name: er-web-edge
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "er-platform.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- if .Values.edge.overlap }}
+    {{- include "er-platform.selectorLabels" (dict "root" . "name" "web-api") | nindent 4 }}
+    {{- else }}
+    {{- include "er-platform.selectorLabels" (dict "root" . "name" "web-api" "color" $active) | nindent 4 }}
+    {{- end }}
   ports:
     - name: http
       port: 3000

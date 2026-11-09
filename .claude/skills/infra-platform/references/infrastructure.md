@@ -799,7 +799,23 @@ The second is **the prod hop**, now built. `envs/prod` applies under `er-ci-tf-a
 
 **Helm.** Dev platform releases apply from CI on `main`; `make dev-up` stays a human command. Prod deploys are manually triggered, pass an image **digest** — never a tag — and gate on that digest being present in the registry first. This is the minimum that turns promote-by-digest from a convention into a property (why it is load-bearing: D-DEPLOY). Argo CD remains out of scope (§6.1), and so is Argo Rollouts, for a different reason (D-BLUEGREEN).
 
-**The serving tier deploys blue/green, and the schema migration runs ahead of it.** `web-api` renders as two Deployments, `web-api-blue` and `web-api-green`, each carrying its own replica count and image digests; `er-api` and `er-web` select `er.dupezero.com/color: {{ .Values.color.active }}`, and `er-api-preview` / `er-web-preview` select the inactive colour. A release is two `--atomic` `helm upgrade` calls and a scale-down: deploy the inactive colour and smoke-test it through the preview Services, flip `color.active`, then retire the old colour. The old colour is held warm between the second and third steps, so rollback is one more flip of a label rather than a redeploy. **Which colour is live is read out of the Service selector** (`kubectl get svc er-web -o jsonpath`), never inferred from Helm's state, so the chart and the cluster cannot disagree. The live colour's digests are also pinned to what it is *already* serving, or deploying the release would re-render the serving Deployment to the new image and restart the pod taking traffic — the outage this exists to remove.
+**The serving tier deploys blue/green, and the schema migration runs ahead of it.** `web-api` renders as two Deployments, `web-api-blue` and `web-api-green`, each carrying its own replica count and image digests; `er-api` and `er-web` select `er.dupezero.com/color: {{ .Values.color.active }}`, and `er-api-preview` / `er-web-preview` select the inactive colour. A development release is two `--atomic` `helm upgrade` calls and a scale-down: deploy the inactive colour and smoke-test it through the preview Services, flip `color.active`, then retire the old colour. The old colour is held warm between the second and third steps, so rollback is one more flip of a label rather than a redeploy. **Which colour is live is read out of the Service selector** (`kubectl get svc er-web -o jsonpath`), never inferred from Helm's state, so the chart and the cluster cannot disagree. The live colour's digests are also pinned to what it is *already* serving, or deploying the release would re-render the serving Deployment to the new image and restart the pod taking traffic — the outage this exists to remove.
+
+**Production adds a staged ALB registration step after preview smoke.** The
+TargetGroupBinding uses `er-web-edge`, normally selecting the active colour.
+`edge.overlap=true` temporarily selects both ready colours while the controller
+registers the replacement IPs. `deploy-cutover.py` waits for those exact IPs to
+be healthy, then switches the canonical Services and edge selector to the new
+colour, requires three minutes of public `/api/healthz` success, and waits for
+old targets to finish draining before retirement. The old Deployment stays
+running and is restored on failed verification. An interrupted overlap leaves
+`er-web`/`er-api` colour-specific, so the next deployment can still identify the
+previous active colour. During overlap both already-smoke-tested BFF versions
+may serve requests; each reaches its own same-pod API and migrations must remain
+additive. Selector-only Helm upgrades use `--no-hooks`: the inactive deployment
+already ran schema and tenant migrations, and repeating them at cutover adds
+work precisely while traffic moves. The gate reads ALB target health; it never
+registers targets itself or changes listener rules.
 
 Retirement is `kubectl scale`, and deliberately **not** coupled to the cutover's `--atomic`: it runs only after the cutover has been verified, so a failure there leaves traffic correctly on the new colour with one surplus pod, which is the harmless direction. The Deployment is kept rather than deleted so the next release scales it up with its image already cached. That this is safe depends on a Helm property worth stating, because a `kubectl`-modified replica count that Helm declined to restore would leave the next release's target colour at zero — where `--atomic --wait` and `rollout status` both pass trivially and only the smoke test would fail: Helm 3 patches the live object against the rendered manifest, not against the previous one, so the next release restores the count even though its manifest never changed. Measured on a kind cluster — install at 1, `kubectl scale` to 0, `helm upgrade` with an unchanged value, back to 1.
 

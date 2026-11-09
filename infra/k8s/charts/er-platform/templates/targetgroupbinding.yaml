@@ -1,5 +1,5 @@
 {{- if .Values.edge.targetGroupArn }}
-# Join the LIVE er-web Service to the edge target group Terraform owns and
+# Join the deploy-controlled er-web-edge Service to the edge target group Terraform owns and
 # exports as `edge_target_group_arn` (#556).
 #
 # The API group is `eks.amazonaws.com/v1` — EKS Auto Mode's own load-balancing
@@ -8,11 +8,10 @@
 # IngressClass; verified against the cluster's CRD list. The two CRDs are not
 # interchangeable: the required-field spellings differ (`targetGroupARN` here).
 #
-# WHY THE LIVE SERVICE, NOT A COLOUR. `er-web`'s selector carries the active
-# colour and the cutover moves that one field, so the binding follows traffic
-# with no deploy step knowing about it. Binding `er-web-preview` would
-# health-check the colour not yet serving; binding neither leaves the target
-# group empty and the edge at 503.
+# The dedicated edge Service normally selects the live colour. During a
+# verified deploy it temporarily selects both colours, so the controller can
+# register replacement targets before removing old ones. The canonical er-web
+# selector and preview Services remain colour-specific throughout.
 #
 # NO `networking:` BLOCK. Both halves of the ALB-to-pod path are already
 # Terraform's (envs/prod/edge.tf: the ALB security group egresses to the VPC
@@ -35,6 +34,6 @@ spec:
   # health-check, with the security-group path reading as correct.
   targetType: ip
   serviceRef:
-    name: er-web
+    name: er-web-edge
     port: 3000
 {{- end }}

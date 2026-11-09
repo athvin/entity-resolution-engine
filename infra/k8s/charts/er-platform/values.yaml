@@ -282,3 +282,6 @@ ingress:
 # says why). This is the ONLY prod edge: `ingress` above stays off there.
 edge:
   targetGroupArn: ""
+  # Temporary deploy-controlled overlap AFTER preview smoke; normal releases
+  # select one colour. Neither workload labels nor pod templates change.
+  overlap: false
