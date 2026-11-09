@@ -57,13 +57,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends mold \
 # itself, which is why it sits in the shared base stage: the layer is reused by
 # both stages below and only rebuilt when this version changes.
 ARG TARGETARCH
-RUN case "$TARGETARCH" in \
+RUN --mount=type=secret,id=sccache_archive \
+    case "$TARGETARCH" in \
       amd64) arch=x86_64; digest=aa73c7270c997894038c0d8f0d297865f57569e1687883322bc431713d4bb9dd ;; \
       arm64) arch=aarch64; digest=3e47fc4a71b1ddd1b4294a0de9d34498922fdf41e3cd0bda5df3954e3d6deb9d ;; \
       *) exit 1 ;; \
     esac \
-    && curl -fSL --connect-timeout 10 --max-time 60 --retry 3 --retry-all-errors \
-      "https://github.com/mozilla/sccache/releases/download/v0.19.0/sccache-v0.19.0-${arch}-unknown-linux-musl.tar.gz" -o /tmp/sccache.tar.gz \
+    && if [ -f /run/secrets/sccache_archive ]; then cp /run/secrets/sccache_archive /tmp/sccache.tar.gz; \
+       else curl -fSL --connect-timeout 10 --max-time 60 --retry 3 --retry-all-errors \
+      "https://github.com/mozilla/sccache/releases/download/v0.19.0/sccache-v0.19.0-${arch}-unknown-linux-musl.tar.gz" -o /tmp/sccache.tar.gz; fi \
     && echo "$digest  /tmp/sccache.tar.gz" | sha256sum -c - \
     && tar xzf /tmp/sccache.tar.gz -C /tmp \
     && install "/tmp/sccache-v0.19.0-${arch}-unknown-linux-musl/sccache" /usr/local/bin/sccache \

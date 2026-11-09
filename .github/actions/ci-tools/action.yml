@@ -5,6 +5,10 @@ inputs:
     description: Space-separated tool names from scripts/ci/tools.json
     required: false
     default: mold sccache
+outputs:
+  sccache_archive:
+    description: Absolute path to the checksum-verified sccache archive
+    value: ${{ steps.install.outputs.sccache_archive }}
 runs:
   using: composite
   steps:
@@ -13,6 +17,7 @@ runs:
         path: ~/.cache/er-ci-tools/archives
         key: ci-tools-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.tools }}-${{ hashFiles('scripts/ci/tools.json') }}
     - name: Verify and install tools
+      id: install
       shell: bash
       env:
         CI_TOOL_NAMES: ${{ inputs.tools }}
