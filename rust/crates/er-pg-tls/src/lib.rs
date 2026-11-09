@@ -100,15 +100,14 @@ pub enum Error {
 
 /// Split a DSN into what tokio-postgres can parse and what it cannot.
 ///
-/// Only the URI form is inspected (every DSN in this repo is one); anything
-/// that does not parse as a URI passes through unchanged, which is today's
-/// behaviour for the libpq keyword form.
+/// Verified connections use the URI form. Non-URI DSNs pass through unchanged
+/// to tokio-postgres, preserving its existing keyword-form parsing and modes.
 ///
 /// # Errors
 /// Unsupported or duplicate TLS options and a missing verification bundle
 /// fail before any connection is attempted.
 pub fn plan(dsn: &str) -> Result<Plan, Error> {
-    let Ok(mut url) = url::Url::parse(dsn) else {
+    let Ok(mut uri) = url::Url::parse(dsn) else {
         // The libpq keyword form ("host=… sslmode=…"): not URI-shaped. Pass
         // through rather than guess at a second grammar.
         return Ok(Plan {
@@ -120,12 +119,12 @@ pub fn plan(dsn: &str) -> Result<Plan, Error> {
     let mut mode = SslMode::Prefer;
     // Postgres URI queries use percent encoding, not HTML form encoding:
     // a literal '+' must survive the form decoder used by url::Url.
-    let query = url.query().map(|query| query.replace('+', "%2B"));
-    url.set_query(query.as_deref());
+    let query = uri.query().map(|query| query.replace('+', "%2B"));
+    uri.set_query(query.as_deref());
     let mut has_sslmode = false;
     let mut sslrootcert = None;
     let mut kept: Vec<(String, String)> = Vec::new();
-    for (key, value) in url.query_pairs() {
+    for (key, value) in uri.query_pairs() {
         match key.as_ref() {
             "sslmode" => {
                 if has_sslmode {
@@ -159,7 +158,7 @@ pub fn plan(dsn: &str) -> Result<Plan, Error> {
     // Rebuild the query: verify-full travels as require on the wire (the
     // connector below is what adds verification), and sslrootcert never
     // reaches tokio-postgres at all.
-    url.set_query(None);
+    uri.set_query(None);
     let wire_mode = match mode {
         SslMode::VerifyFull | SslMode::Require => "require",
         SslMode::Disable => "disable",
@@ -169,7 +168,7 @@ pub fn plan(dsn: &str) -> Result<Plan, Error> {
     // empty serializer would leave a stray `?` behind.
     let state_sslmode = has_sslmode;
     if !kept.is_empty() || state_sslmode {
-        let mut query = url.query_pairs_mut();
+        let mut query = uri.query_pairs_mut();
         for (key, value) in &kept {
             query.append_pair(key, value);
         }
@@ -177,10 +176,10 @@ pub fn plan(dsn: &str) -> Result<Plan, Error> {
             query.append_pair("sslmode", wire_mode);
         }
     }
-    let query = url.query().map(|query| query.replace('+', "%20"));
-    url.set_query(query.as_deref());
+    let query = uri.query().map(|query| query.replace('+', "%20"));
+    uri.set_query(query.as_deref());
     Ok(Plan {
-        dsn: url.into(),
+        dsn: uri.into(),
         mode,
         sslrootcert,
     })
