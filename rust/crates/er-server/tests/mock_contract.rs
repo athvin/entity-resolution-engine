@@ -29,10 +29,6 @@ const ROUTER_SRC: &str = include_str!("../src/lib.rs");
 /// The frontend's stand-in for this server.
 const MOCK_SRC: &str = include_str!("../../../../frontend/tests/mock-erserver/server.mjs");
 
-/// The HTTP verbs a route registration can name, as they appear in the builder
-/// (`get(h)`, `axum::routing::patch(h)`, …).
-const VERBS: [&str; 5] = ["get", "post", "put", "patch", "delete"];
-
 /// Path shape -> methods served at it. `{param}` names are erased so the two
 /// sources' different spellings (`{org}` vs a regex capture) compare equal.
 type Routes = BTreeMap<String, BTreeSet<String>>;
@@ -57,72 +53,16 @@ fn erase_params(path: &str) -> String {
     out
 }
 
-/// The verbs named in a `.route(path, …)` handler expression. Matched as whole
-/// identifiers directly followed by `(`, so `get(get_org)` yields one `GET` and
-/// `axum::routing::patch(h)` yields `PATCH`.
-fn verbs_in(handler_expr: &str) -> BTreeSet<String> {
-    let bytes = handler_expr.as_bytes();
-    let mut found = BTreeSet::new();
-    for verb in VERBS {
-        let mut from = 0usize;
-        while let Some(rel) = handler_expr[from..].find(verb) {
-            let at = from + rel;
-            let after = at + verb.len();
-            let boundary_before = at == 0 || {
-                let p = bytes[at - 1];
-                !p.is_ascii_alphanumeric() && p != b'_'
-            };
-            let call = handler_expr[after..].starts_with('(');
-            if boundary_before && call {
-                found.insert(verb.to_uppercase());
-                break;
-            }
-            from = after;
-        }
-    }
-    found
-}
-
-/// Parse the router's `.route("<path>", <handlers>)` registrations.
-///
-/// Hand-scanned rather than pattern-matched: the registrations are interleaved
-/// with comments and span lines freely, and paren-counting is indifferent to
-/// both. (A regex with a "next `.route(` follows" lookahead silently drops every
-/// registration preceded by a comment — it dropped five here.)
+/// Read the shared registrations, preserving this gate's erased-parameter view.
 fn router_routes(src: &str) -> Routes {
-    const OPEN: &str = ".route(";
-    let bytes = src.as_bytes();
     let mut out: Routes = BTreeMap::new();
-    let mut i = 0usize;
-    while let Some(rel) = src[i..].find(OPEN) {
-        let after_open = i + rel + OPEN.len();
-        // The path literal is the first quoted string inside the call.
-        let Some(q1) = src[after_open..].find('"') else {
-            break;
-        };
-        let path_start = after_open + q1 + 1;
-        let Some(q2) = src[path_start..].find('"') else {
-            break;
-        };
-        let path_end = path_start + q2;
-        // The handler expression runs to the `)` that closes this `.route(`.
-        let mut depth = 1usize;
-        let mut j = path_end + 1;
-        while j < bytes.len() && depth > 0 {
-            match bytes[j] {
-                b'(' => depth += 1,
-                b')' => depth -= 1,
-                _ => {}
-            }
-            j += 1;
-        }
-        let verbs = verbs_in(&src[path_end + 1..j.saturating_sub(1)]);
+    for route in er_api_spec::routes(src) {
+        let verbs = er_api_spec::verbs_in(route.handlers);
         if !verbs.is_empty() {
-            out.entry(erase_params(&src[path_start..path_end]))
+            out.entry(erase_params(route.path))
                 .or_default()
                 .extend(verbs);
         }
-        i = j.max(after_open);
     }
     out
 }
