@@ -143,6 +143,59 @@ for pattern in "${destructive_patterns[@]}"; do
 	fi
 done
 
+# A narrowly parsed local manifest check creates no API object. Require both
+# client dry-run and disabled API schema validation; reject unknown flags,
+# duplicate flags and shell syntax instead of guessing what kubectl will see.
+# This intentionally does not exempt exec, apply, delete or server dry-runs.
+is_kubectl_client_check() {
+	local text=$1 token value i=1 create=0 dry=0 validation=0 file=0 output=0
+	local -a words
+	[[ $text =~ ^[[:space:]A-Za-z0-9_./:=,@+-]+$ ]] || return 1
+	read -r -a words <<< "$text"
+	[[ ${words[0]:-} == kubectl ]] || return 1
+	while ((i < ${#words[@]})); do
+		token=${words[$i]}
+		if ((create == 0)); then
+			case $token in
+			create) create=1 ;;
+			--context | --namespace | --kubeconfig | -n)
+				i=$((i + 1))
+				value=${words[$i]:-}
+				[[ -n $value && $value != -* ]] || return 1
+				;;
+			--context=?* | --namespace=?* | --kubeconfig=?*) ;;
+			*) return 1 ;;
+			esac
+		else
+			case $token in
+			--dry-run=client) dry=$((dry + 1)) ;;
+			--validate=false) validation=$((validation + 1)) ;;
+			-f | --filename | -o | --output)
+				i=$((i + 1))
+				value=${words[$i]:-}
+				[[ -n $value && $value != -* ]] || return 1
+				case $token in
+				-f | --filename) file=$((file + 1)) ;;
+				*)
+					[[ $value == name || $value == json || $value == yaml ]] || return 1
+					output=$((output + 1))
+					;;
+				esac
+				;;
+			--filename=?*)
+				value=${token#--filename=}
+				[[ $value != -* ]] || return 1
+				file=$((file + 1))
+				;;
+			--output=name | --output=json | --output=yaml) output=$((output + 1)) ;;
+			*) return 1 ;;
+			esac
+		fi
+		i=$((i + 1))
+	done
+	[[ $create == 1 && $dry == 1 && $validation == 1 && $file == 1 && $output -le 1 ]]
+}
+
 # --- grade every command on the line, not just the first --------------------
 # Split everywhere a command can start. Each segment is env-stripped and
 # graded by its own head, so `… | kubectl apply -f -` and
@@ -175,6 +228,10 @@ while IFS= read -r seg; do
 	# make, so the target name is the trigger.
 	if [[ $seg =~ ^[[:space:]]*make[[:space:]] ]] && [[ $seg =~ $cluster_objects_re ]]; then
 		pending_ask="make cluster-objects applies the infra/k8s objects to a cluster. On main that is CI's job (cluster-objects.yml); a manual run is the disclosed exception — confirm it is deliberate."
+		continue
+	fi
+
+	if is_kubectl_client_check "$seg"; then
 		continue
 	fi
 
