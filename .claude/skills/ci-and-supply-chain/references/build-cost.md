@@ -70,7 +70,11 @@ The implemented policy:
 - Bench compilation and scale goldens run nightly/manual; correctness suites
   remain pre-merge for affected packages. `ci:full` forces the complete gate.
 - Release images retain ECR layer caching and add branch-scoped GHA compiler
-  caching through BuildKit secrets. This does not replace CI's R2 cache. The
+  caching through BuildKit secrets. This does not replace CI's R2 cache.
+  The builder pins `RUSTUP_TOOLCHAIN` to its base-image compiler: otherwise
+  copying `rust-toolchain.toml` switches the final build to floating stable.
+  PR #1031's first image run exposed precisely that 1.99.0 → 1.99.1 switch,
+  rebuilding Rust dependencies after cooking (24m23 cook, 8m56 final build). The
   image job cannot attach `sccache-write`: doing so changes the OIDC subject
   and breaks the branch-pinned ECR role. Monitor release-cache write errors;
   its effectiveness on lockfile changes is a separate cold/warm measurement.

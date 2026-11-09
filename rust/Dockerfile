@@ -37,6 +37,10 @@
 # different feature set than the final build asks for, and every crate whose
 # features differed would compile a second time — handing back the saving.
 FROM rust:1.99.0-bookworm@sha256:114c7a4425406451c2866b6aafe69fe29b1b298832db1277d411ac73c82d04d6 AS chef
+# Keep prepare, cook and build on the compiler pinned by the base image.
+# COPY brings in rust-toolchain.toml (channel=stable); without this override
+# it can switch the final build to a newer compiler and rebuild dependencies.
+ENV RUSTUP_TOOLCHAIN=1.99.0
 WORKDIR /src
 # mold is the LINKER FIX, not an optimisation: on aarch64-linux, GNU ld fails
 # this link with `undefined reference to duckdb_register_static_extensions` —
