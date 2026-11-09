@@ -39,6 +39,32 @@ ServiceAccount. If you find yourself adding an
 `eks.amazonaws.com/role-arn` annotation, that is the IRSA pattern and it will
 not work here.
 
+## Runner identities are tenant-scoped
+
+`infra/k8s/charts/er-platform/tenant-runners.json` is the reviewed enrollment
+registry, keyed by environment, namespace and **org id**, with one literal S3
+prefix per org. Terraform and Helm read the same file. `tenant-runner` creates
+one role/association per binding; the trust pins cluster ARN, namespace and
+ServiceAccount. Prefixes must not overlap. The executor chooses the account
+from the claimed task's org, never from job params or tenant env.
+
+The shared `er-runner` fallback has only bucket-location access, so unenrolled
+orgs keep local/EFS execution without acquiring AWS data permissions. Enrollment
+is an infrastructure change: its prefix must agree with provisioning's data
+path, Terraform must apply, and the chart must deploy before S3 use. The
+registry-only CI detector test prevents a Helm-only deployment of an IAM change.
+
+The `_isolation/probe-a/` and `_isolation/probe-b/` entries are reserved acceptance
+fixtures, not customer orgs. The live acceptance probe must show own-prefix
+success and cross-prefix AccessDenied using these actual ServiceAccounts; a
+mocked policy test alone does not establish the AWS boundary. After the matching
+Terraform apply and platform deploy succeed on main, dispatch
+`runner-isolation.yml` on main. It runs bounded Jobs in dev/ci and prod/app,
+requires own-prefix put/get/list success and explicit AccessDenied for foreign
+put/get/list/delete and root listing, then removes its Jobs and ConfigMaps.
+Only synthetic markers are written; deleted versions expire through the lake
+bucket’s existing noncurrent-version lifecycle. Record the run in the PR ledger.
+
 ## EKS Auto Mode — there are no node groups
 
 The clusters run **Auto Mode**: `compute_config` enabled with the `system` node

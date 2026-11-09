@@ -71,14 +71,8 @@ resource "aws_iam_role" "er_runner_pod" {
   }
 }
 
-# The lake grants (lake.tf). In prod this role is the ONLY thing that has ever
-# held them — dev reached the same document through a static IAM-user key for
-# its first phase and retired it at 4.1, which is the history prod skips.
-#
-# Deliberately ahead of its first use: the engine cannot open an `s3://` lake
-# today (the ducklake-lakehouse skill records the gap), so the prod data path
-# is EFS at /srv/er and these grants go unexercised until that lands. The
-# association, not the policy, is the part that must exist first.
+# Compatibility identity for local/EFS-only orgs. It has no lake data grants;
+# registered orgs receive prefix-scoped identities from tenant_runners.tf.
 resource "aws_iam_role_policy" "er_runner_lake" {
   name   = "er-prod-runner-lake"
   role   = aws_iam_role.er_runner_pod.id

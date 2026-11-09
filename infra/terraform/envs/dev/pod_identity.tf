@@ -64,25 +64,16 @@ output "er_api_pod_role_arn" {
   value       = aws_iam_role.er_api_pod.arn
 }
 
-# The `er-runner` task pod's AWS identity (batch-orchestration-design §6.7).
-#
-# The runner pod — one Kubernetes Job per task attempt, `er-server exec-task` —
-# holds no Kubernetes credential at all (automount off, no RBAC) and gets its
-# AWS identity the same way er-api does: Pod Identity, never IRSA. The role
-# carries the lake-prefix S3 policy for when the engine can open an `s3://`
-# lake; today it cannot (the ducklake-lakehouse skill records this), so EFS at
-# /srv/er remains the data path and this role is deliberately ahead of its
-# first use — the association is the part that must exist before the first
-# executor-run Job launches, because there is no node-credential fallback.
-#
-# Same per-namespace list shape as `er_api_pod_namespaces`, same reason: dev
-# namespaces are created by scripts/dev_env.sh/Helm, not Terraform, and Pod
-# Identity has no wildcard.
+# The fallback runner identity keeps existing associations stable, but has
+# only GetBucketLocation. It cannot read, write or list lake objects. Registered
+# orgs use the distinct identities in tenant_runners.tf; the chart and executor
+# select them from the same registry and the authoritative task org.
+# Local/EFS-only orgs need no AWS lake grants and keep the fallback account.
 
 variable "er_runner_pod_namespaces" {
   description = <<-EOT
-    Namespaces whose `er-runner` ServiceAccount gets an AWS identity (the
-    lake-prefix S3 access, for when the S3 lake is openable).
+    Namespaces whose `er-runner` ServiceAccount gets an AWS identity (bucket
+    location only; tenant lake access is registered in tenant_runners.tf).
 
     Empty by default, like `er_api_pod_namespaces` and for the same reason.
   EOT
@@ -100,9 +91,7 @@ resource "aws_iam_role" "er_runner_pod" {
   }
 }
 
-# The lake grants (lake.tf). The §9.2 interim service user that used to hold the
-# same document has retired, so this role is now the only thing carrying them —
-# the engine's credential-chain access lives here and nowhere else.
+# Retain the policy address while removing all bucket-wide data grants.
 resource "aws_iam_role_policy" "er_runner_lake" {
   name   = "er-dev-runner-lake"
   role   = aws_iam_role.er_runner_pod.id

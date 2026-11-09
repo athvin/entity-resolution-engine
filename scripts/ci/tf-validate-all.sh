@@ -22,3 +22,7 @@ for d in bootstrap/state-backend bootstrap/organization envs/core envs/dev envs/
 	terraform -chdir="infra/terraform/$d" init -backend=false -input=false
 	terraform -chdir="infra/terraform/$d" validate -no-color
 done
+
+# Mock-provider plans exercise tenant trust/prefix boundaries without AWS.
+terraform -chdir=infra/terraform/modules/tenant-runner init -backend=false -input=false
+terraform -chdir=infra/terraform/modules/tenant-runner test -no-color

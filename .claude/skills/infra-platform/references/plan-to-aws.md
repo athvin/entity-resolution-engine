@@ -349,7 +349,7 @@ data into a developer namespace using only the designed path.
   - S3: DuckDB `credential_chain` + boto3 default chain via IRSA; `tests/unit/test_dbt_profiles.py` still holds the three config sites identical.
   - Email: `mailer.py` ported to the SES API under IRSA; invites and password resets still deliver.
   - The check that makes it real: `aws iam list-users` / `list-access-keys` in the account returns **zero** service users — §8.1's claim becomes unconditional.
-- [ ] **4.2 Per-tenant runner ServiceAccounts** (§6.4) — a runner for tenant A, given tenant B's prefix explicitly, gets AccessDenied from S3.
+- [ ] **4.2 Per-tenant runner ServiceAccounts** (§6.4) — a runner for tenant A, given tenant B's prefix explicitly, gets AccessDenied from S3. Implementation and layered regression coverage are in #550 / #1027; completion still requires the `runner isolation` main-only workflow after Terraform apply and platform deploy, with evidence in that PR’s ledger.
 - [ ] **4.3 Observability completion** (§10.6 Phase 4) — dashboards for the backend-design §14 metric list; alerts on queue depth, eviction/OOM counts, spot interruption rate, `ProdAdmin` assumption (§8.6); `ER_PROFILE_*` as span events.
 - [ ] **4.4 Audit artifacts with teeth** (§8.6)
   - A full Aurora **restore test performed and its record written** — a backup never restored is a finding.

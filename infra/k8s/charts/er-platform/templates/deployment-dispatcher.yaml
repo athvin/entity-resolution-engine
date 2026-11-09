@@ -74,6 +74,8 @@ spec:
             # is its namespace and in-cluster identity, both of which it has.
             - name: ER_EXECUTOR_IN_FLIGHT_CAP
               value: {{ .Values.executor.inFlightCap | quote }}
+            - name: ER_TENANT_RUNNER_ORGS
+              value: {{ include "er-platform.tenantRunners" . | fromJson | keys | sortAlpha | toJson | quote }}
             - name: ER_TASK_TEMPLATE_PATH
               value: /etc/er/task-template/task-template-S.yaml
             - name: ER_NAMESPACE

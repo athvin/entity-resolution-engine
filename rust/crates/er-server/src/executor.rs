@@ -53,6 +53,9 @@ pub struct ExecutorConfig {
     /// The Job template (the chart's ConfigMap, mounted as a file).
     pub template: String,
     pub image_digest: Option<String>,
+    /// Orgs enrolled in the chart/Terraform tenant-runner registry. All other
+    /// orgs use the unprivileged runner account, never another org's identity.
+    pub runner_orgs: BTreeSet<String>,
 }
 
 impl ExecutorConfig {
@@ -83,7 +86,16 @@ impl ExecutorConfig {
             },
             Err(_) => er_k8s::manifest::REFERENCE_TEMPLATE.to_string(),
         };
+        let runner_orgs =
+            match parse_runner_orgs(std::env::var("ER_TENANT_RUNNER_ORGS").ok().as_deref()) {
+                Ok(orgs) => orgs,
+                Err(message) => {
+                    tracing::error!(error = message, "invalid tenant runner configuration");
+                    return None;
+                }
+            };
         Some(ExecutorConfig {
+            runner_orgs,
             profile: crate::provision::Profile::from_env(),
             in_flight_cap,
             template,
@@ -678,7 +690,10 @@ impl Executor {
         };
         let mut manifest = er_k8s::render_job(&self.cfg.template, &attempt)
             .map_err(|e| format!("render: {}", crate::errfmt::chain(&e)))?;
-        inject_attempt_env(&mut manifest, &job_name, token);
+        // The claimed task row is authoritative. Neither the request params
+        // nor the tenant's lake env may choose a Kubernetes/AWS identity.
+        let service_account = runner_service_account(&row.org_id, &self.cfg.runner_orgs);
+        inject_attempt_env(&mut manifest, &job_name, token, &service_account);
         match self.api.create_job(&manifest).await {
             Ok(()) => {
                 self.pending_since.insert(job_name, Instant::now());
@@ -1518,12 +1533,15 @@ fn inject_attempt_env(
     job: &mut er_k8s::k8s_openapi::api::batch::v1::Job,
     job_name: &str,
     token: &str,
+    service_account: &str,
 ) {
     use er_k8s::k8s_openapi::api::core::v1::EnvVar;
     if let Some(spec) = job.spec.as_mut()
         && let Some(pod) = spec.template.spec.as_mut()
         && let Some(container) = pod.containers.first_mut()
     {
+        pod.service_account_name = Some(service_account.to_string());
+        pod.automount_service_account_token = Some(false);
         let env = container.env.get_or_insert_with(Vec::new);
         env.push(EnvVar {
             name: "ER_ATTEMPT_TOKEN".into(),
@@ -1544,5 +1562,82 @@ impl JobKind {
     async fn parse_row_kind(client: &Client, row: &TaskInstance) -> Option<JobKind> {
         let job = pg::get_job(client, &row.org_id, &row.job_id).await.ok()??;
         JobKind::parse(&job.kind)
+    }
+}
+
+/// Parse only an operator/chart-provided enrollment list. A malformed list
+/// disables the executor; it must not silently become an unscoped identity.
+fn parse_runner_orgs(raw: Option<&str>) -> Result<BTreeSet<String>, &'static str> {
+    let Some(raw) = raw else {
+        return Ok(BTreeSet::new());
+    };
+    let orgs: BTreeSet<String> = serde_json::from_str(raw)
+        .map_err(|_| "ER_TENANT_RUNNER_ORGS must be a JSON array of org ids")?;
+    if orgs.iter().any(|org| org.trim().is_empty()) {
+        return Err("ER_TENANT_RUNNER_ORGS contains an empty org id");
+    }
+    Ok(orgs)
+}
+
+/// The naming recipe is shared with Helm and Terraform: twenty hex digits of
+/// SHA-256 over the exact org id. Hashing keeps arbitrary ids out of YAML and
+/// Kubernetes names; enrollment and the IAM trust, not the name, grant access.
+fn runner_service_account(org_id: &str, enrolled: &BTreeSet<String>) -> String {
+    if enrolled.contains(org_id) {
+        format!("er-runner-{}", &pg::hash_secret(org_id)[..20])
+    } else {
+        "er-runner".to_string()
+    }
+}
+
+#[cfg(test)]
+mod runner_identity_tests {
+    use super::*;
+
+    #[test]
+    fn tenant_identity_is_enrolled_and_never_inherited() {
+        let enrolled = parse_runner_orgs(Some(r#"["tenant-a","tenant-b"]"#)).unwrap();
+        let a = runner_service_account("tenant-a", &enrolled);
+        let b = runner_service_account("tenant-b", &enrolled);
+        assert_ne!(a, b);
+        assert_eq!(a, "er-runner-80a707af7dc77ee1228f");
+        assert_eq!(runner_service_account("tenant-c", &enrolled), "er-runner");
+        assert_eq!(
+            runner_service_account("tenant-a", &BTreeSet::new()),
+            "er-runner"
+        );
+    }
+
+    #[test]
+    fn malformed_enrollment_is_refused() {
+        for bad in ["", "null", "{}", "[42]", r#"[""]"#, r#"["  "]"#] {
+            assert!(parse_runner_orgs(Some(bad)).is_err(), "{bad}");
+        }
+        assert!(parse_runner_orgs(None).unwrap().is_empty());
+        assert!(parse_runner_orgs(Some("[]")).unwrap().is_empty());
+    }
+
+    #[test]
+    fn launch_identity_overrides_template_and_keeps_kubernetes_credentials_off() {
+        let mut job = er_k8s::k8s_openapi::api::batch::v1::Job {
+            spec: Some(Default::default()),
+            ..Default::default()
+        };
+        let pod = job
+            .spec
+            .as_mut()
+            .unwrap()
+            .template
+            .spec
+            .insert(Default::default());
+        pod.service_account_name = Some("er-api".into());
+        pod.automount_service_account_token = Some(true);
+        pod.containers.push(Default::default());
+        let enrolled = parse_runner_orgs(Some(r#"["tenant-a","tenant-b"]"#)).unwrap();
+        let chosen = runner_service_account("tenant-a", &enrolled);
+        inject_attempt_env(&mut job, "attempt-1", "test-token", &chosen);
+        let pod = job.spec.unwrap().template.spec.unwrap();
+        assert_eq!(pod.service_account_name.as_deref(), Some(chosen.as_str()));
+        assert_eq!(pod.automount_service_account_token, Some(false));
     }
 }

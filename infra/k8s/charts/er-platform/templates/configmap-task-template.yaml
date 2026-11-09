@@ -73,6 +73,8 @@ data:
             er.dupezero.com/task-instance-id: "${ER_TASK_INSTANCE_ID}"
         spec:
           restartPolicy: Never
+          # The executor overwrites this from the claimed task's org and the
+          # registry. The shared fallback has no lake data permissions.
           serviceAccountName: er-runner
           automountServiceAccountToken: false
           # SIGTERM -> rollback -> exit 3; must exceed the longest write-back.

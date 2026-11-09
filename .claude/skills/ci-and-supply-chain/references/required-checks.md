@@ -144,6 +144,12 @@ job instead — `terraform plan` is the worked example.
 |---|---|---|---|
 | `contract` | pull request contract | 5 | `always` |
 
+### `runner-isolation.yml`
+
+| Job | Status-check context | Timeout | Condition |
+|---|---|---|---|
+| `probe` | tenant S3 boundary (${{ matrix.env }}) | 15 | `github.ref == 'refs/heads/main'` |
+
 ### `rust.yml`
 
 | Job | Status-check context | Timeout | Condition |

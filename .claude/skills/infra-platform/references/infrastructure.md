@@ -280,7 +280,17 @@ One writer per dataset is three partial unique indexes on `jobs` (`jobs_one_acti
 
 **The pod holds no database credential at all now** (D-CHANNEL), which strengthens the first bullet rather than replacing it: the process-scoped env still addresses exactly one tenant's lake, but `ER_CATALOG_DSN` is not in it. The pod's only credential is the projected, audience-bound ServiceAccount token at `/var/run/er`, which Kubernetes mints for that specific pod and `er-api` verifies offline against the cluster key set, binding the attempt by pod name.
 
-Namespace-per-tenant was rejected (D-TENANCY) — it is the right shape for the enterprise tier [backend-design.md](../../er-server-control-plane/references/backend-design.md) §7 earmarks for dedicated buckets and STS-scoped credentials, and not before. **The anticipated ServiceAccount parameter is real:** task pods run as `er-runner`, distinct from `er-dispatcher` and from the API's identity. It is still scoped per *role* rather than per *tenant*, so the "per-tenant STS credentials" item in [backend-design.md](../../er-server-control-plane/references/backend-design.md) §15 phase 4 is unchanged work — but it is now a parameter to narrow, not one to add.
+Namespace-per-tenant was rejected (D-TENANCY) — it is the right shape for the enterprise tier [backend-design.md](../../er-server-control-plane/references/backend-design.md) §7 earmarks for dedicated buckets and STS-scoped credentials, and not before. **Runner identities now have a tenant enrollment seam:** the shared
+`infra/k8s/charts/er-platform/tenant-runners.json` registry maps an org id to a
+literal prefix within each environment/namespace. Terraform creates a distinct
+role and Pod Identity association; Helm creates the matching ServiceAccount,
+`er-runner-<first 20 hex of SHA-256(org id)>`. The dispatcher selects it from the
+claimed task row. The fallback `er-runner` role cannot read, write or list lake
+data. Enrollment is reviewed infrastructure, and its prefix must agree with the
+org's provisioning data path; it is not automatically granted by creating an
+org. The S3 lake-support gap is unchanged. #550's post-merge ledger records the
+live positive-control/cross-prefix-denial acceptance; static policy tests alone
+must never be described as that live proof.
 
 ### 6.5 Sizing the Job: CPU is the lever, memory is nearly flat
 

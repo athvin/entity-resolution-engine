@@ -47,7 +47,7 @@ esac
 changed="$(git diff --name-only "$range")"
 printf 'changed paths in %s:\n%s\n' "$range" "$changed"
 n="$(printf '%s\n' "$changed" \
-      | grep -cE '^(infra/terraform/|scripts/ci/tf-|scripts/ci/infra-detect\.sh$|scripts/ci/gate-all-legs\.sh$|\.github/workflows/infra\.yml$)' || true)"
+      | grep -cE '^(infra/terraform/|infra/k8s/charts/er-platform/tenant-runners\.json$|scripts/ci/tf-|scripts/ci/infra-detect(-test)?\.sh$|scripts/ci/gate-all-legs\.sh$|\.github/workflows/infra\.yml$)' || true)"
 if [ "${n:-0}" -gt 0 ]; then
   echo "infra=true" >> "$GITHUB_OUTPUT"
 else
@@ -55,7 +55,8 @@ else
 fi
 
 # The HELM half, computed separately because it shares none of the
-# terraform tiers' inputs: a chart change must not trigger a
+# terraform tiers' inputs, EXCEPT tenant-runners.json: the registry feeds
+# both Terraform identities and the chart. Other chart changes must not trigger a
 # `terraform plan`, and a terraform change must not pay for a chart
 # render. Same allowlist direction, same `grep -c`, same reason.
 #
@@ -76,7 +77,7 @@ fi
 # `install-helm.sh` owns the helm pin for three workflows, so a bump
 # to it must render the charts with the helm that will deploy them.
 c="$(printf '%s\n' "$changed" \
-      | grep -cE '^(infra/k8s/charts/|scripts/ci/charts-check\.py$|scripts/ci/charts-render-validate\.sh$|scripts/ci/helm-lint\.sh$|scripts/ci/install-chart-tools\.sh$|scripts/ci/install-helm\.sh$|\.github/workflows/infra\.yml$)' || true)"
+      | grep -cE '^(infra/k8s/charts/|scripts/ci/charts-check\.py$|scripts/ci/tenant-runners-check\.py$|scripts/ci/runner-isolation[^/]*\.(sh|py)$|\.github/workflows/runner-isolation\.yml$|scripts/ci/charts-render-validate\.sh$|scripts/ci/helm-lint\.sh$|scripts/ci/install-chart-tools\.sh$|scripts/ci/install-helm\.sh$|\.github/workflows/infra\.yml$)' || true)"
 if [ "${c:-0}" -gt 0 ]; then
   echo "charts=true" >> "$GITHUB_OUTPUT"
 else
