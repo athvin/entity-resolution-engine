@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openobserve
+  namespace: observability
+spec:
+  template:
+    spec:
+      containers:
+        - name: openobserve
+          env:
+            - name: ZO_CLUSTER_NAME
+              value: er-prod
+            - name: ZO_S3_BUCKET_NAME
+              value: er-prod-obs-797781631727
+          volumeMounts:
+            - name: rds-ca
+              mountPath: /etc/ssl/rds
+              readOnly: true
+      volumes:
+        - name: rds-ca
+          configMap:
+            name: rds-ca
+            defaultMode: 0444

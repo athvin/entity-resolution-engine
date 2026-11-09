@@ -176,8 +176,8 @@ What the shape of that table means, which is the part worth carrying:
   topic beside the existing one with both Budgets repointed.
 - The operational dashboard and queue/runner-failure alarms use metrics emitted
   by `er-obs`, through the existing collector. Metric filters remain absent:
-  no log line is promoted into a metric. Dev is wired; production operational
-  telemetry still depends on #944's collector deployment.
+  no log line is promoted into a metric. Dev and production use separate collectors and `ER/Dev` / `ER/Prod`
+  namespaces; production has its own trace store (#944).
 - An SNS email subscription is `PENDING` until the address confirms it, Terraform
   cannot confirm it, and `alerts.tf` notes an unconfirmed subscription looks
   identical to a working one in the console. **Whether an alarm reaches anyone is

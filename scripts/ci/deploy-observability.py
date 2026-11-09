@@ -44,20 +44,26 @@ def healthy(releases, workloads):
 
 
 def main():
+    environment = os.environ.get('DEPLOY_ENV', 'dev')
+    if environment not in {'dev', 'prod'}:
+        raise ValueError('DEPLOY_ENV must be dev or prod')
+    secret_id = 'er/prod/openobserve' if environment == 'prod' else 'er/shared/openobserve'
     # Version metadata includes rotations without reading or hashing secret values.
     versions = json.loads(command('aws', 'secretsmanager', 'describe-secret', '--secret-id',
-                                  'er/shared/openobserve', '--query', 'VersionIdsToStages', '--output', 'json'))
+                                  secret_id, '--query', 'VersionIdsToStages', '--output', 'json'))
     current = sorted(v for v, stages in versions.items() if 'AWSCURRENT' in stages)
     if not current:
         raise ValueError('OpenObserve has no current secret version')
-    digest = hashlib.sha256(json.dumps(current).encode())
-    files = [ROOT/'scripts/obs_up.sh', Path(__file__).resolve(), *sorted((ROOT/'infra/k8s/observability').rglob('*'))]
+    digest = hashlib.sha256(json.dumps([environment, secret_id, current]).encode())
+    files = [ROOT/'scripts/obs_up.sh', Path(__file__).resolve(), *sorted((ROOT/'infra/k8s/observability').rglob('*')),
+             *sorted((ROOT/'infra/k8s/observability-prod').rglob('*'))]
     for path in files:
         if path.is_file():
             digest.update(str(path.relative_to(ROOT)).encode() + b'\0' + path.read_bytes())
     fingerprint = digest.hexdigest()
-    ctx = ['--context', os.environ['ER_DEV_CONTEXT']] if os.environ.get('ER_DEV_CONTEXT') else []
-    helm_ctx = ['--kube-context', os.environ['ER_DEV_CONTEXT']] if ctx else []
+    context = os.environ.get('ER_CONTEXT') or os.environ.get('ER_DEV_CONTEXT')
+    ctx = ['--context', context] if context else []
+    helm_ctx = ['--kube-context', context] if context else []
 
     def state():
         return healthy(json.loads(command('helm', *helm_ctx, 'list', '-n', NAMESPACE, '--all', '-o', 'json')),

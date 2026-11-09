@@ -1,0 +1,5 @@
+config:
+  exporters:
+    awsemf:
+      namespace: ER/Prod
+      log_group_name: /er/prod/metrics

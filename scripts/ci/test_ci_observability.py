@@ -101,3 +101,41 @@ class Reconciliation(unittest.TestCase):
             with self.assertRaises(subprocess.CalledProcessError):
                 obs.main()
             self.assertEqual(marker, previous)
+
+
+class EnvironmentBoundary(unittest.TestCase):
+    def test_prod_reads_only_prod_secret_and_cannot_reuse_dev_marker(self):
+        import json
+        from unittest.mock import patch
+        releases, workloads = state()
+        marker, secrets, reconciles = {}, [], []
+
+        def command(*args):
+            if args[0] == 'aws':
+                secrets.append(args[args.index('--secret-id') + 1])
+                return json.dumps({'same-version': ['AWSCURRENT']})
+            if 'configmap' in args:
+                return json.dumps(marker)
+            return json.dumps(releases if args[0] == 'helm' else workloads)
+
+        def run(args, **kwargs):
+            if args[0] == 'bash':
+                reconciles.append(True)
+            if 'input' in kwargs:
+                marker.update(json.loads(kwargs['input']))
+
+        with patch.object(obs, 'command', side_effect=command), patch.object(obs.subprocess, 'run', side_effect=run):
+            with patch.dict(obs.os.environ, {'DEPLOY_ENV': 'dev'}):
+                obs.main()
+            with patch.dict(obs.os.environ, {'DEPLOY_ENV': 'prod'}):
+                obs.main()
+                obs.main()
+        self.assertEqual(secrets, ['er/shared/openobserve', 'er/prod/openobserve', 'er/prod/openobserve'])
+        self.assertEqual(len(reconciles), 2)
+
+    def test_unknown_environment_fails_before_reading_credentials(self):
+        from unittest.mock import patch
+        with patch.dict(obs.os.environ, {'DEPLOY_ENV': 'prodd'}), patch.object(obs, 'command') as command:
+            with self.assertRaises(ValueError):
+                obs.main()
+            command.assert_not_called()

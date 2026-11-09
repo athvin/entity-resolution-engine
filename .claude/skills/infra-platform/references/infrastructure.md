@@ -979,3 +979,27 @@ Measurements and decisions this design is still waiting on. (Resolved items — 
 
     `er-pipeline`, which this question named, no longer exists; the measurement is of `er-api`, the one image that now carries the engine CLI too.
 17. ~~**Whether Phase 4's two credential retirements land as one change or two.**~~ **Resolved, and it turned out to be one.** The SES half (§9.3) landed with the mailer, because writing the Rust sender against the SES API was cheaper than building the SMTP path the retirement was scheduled to undo. No SES key was ever created, so "no static keys anywhere" now rests on §9.2's S3 credential chain alone.
+
+
+### Production telemetry topology (#944, owner decision 2026-11-09)
+
+Production runs its own private OpenObserve service in the `observability`
+namespace. Metadata stays in production Aurora; telemetry objects stay in
+`er-prod-obs-797781631727`, with a dedicated Pod Identity role. The existing
+core/development store remains unchanged. No cross-VPC route or public trace
+endpoint is introduced.
+
+`DEPLOY_ENV=prod` selects `er/prod/openobserve`, the production Kustomize
+overlay and shipper values. The installer verifies and mounts the same pinned
+RDS CA bundle used by application images; the metadata DSN uses `verify-full`.
+Fluent Bit writes `/er/prod/containers`; the collector writes `/er/prod/metrics`
+and `ER/Prod`, alongside the cluster-local trace store. The production
+operational dashboard and alarms consume that namespace. SNS subscription
+confirmation is still a separate live requirement: a configured alarm cannot
+deliver to an unconfirmed email subscription.
+
+The Terraform store/secret/identity prerequisite must apply before enabling the
+production installer. `deploy-observability.py` includes environment and secret
+identity in its fingerprint and verifies workload health before recording it.
+The store retains the existing single-node/Recreate/emptyDir WAL trade: recent
+unflushed telemetry can be lost on restart; S3 data and Aurora metadata persist.

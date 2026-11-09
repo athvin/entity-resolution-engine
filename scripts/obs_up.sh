@@ -16,7 +16,14 @@
 # (buckets, roles, Pod Identity associations) is Terraform's.
 set -euo pipefail
 
-KUBE_CONTEXT="${ER_DEV_CONTEXT:-}"
+environment="${DEPLOY_ENV:-dev}"
+case "$environment" in
+  dev) secret_id=er/shared/openobserve ;;
+  prod) secret_id=er/prod/openobserve ;;
+  *) echo "obs-up: DEPLOY_ENV must be dev or prod" >&2; exit 1 ;;
+esac
+
+KUBE_CONTEXT="${ER_CONTEXT:-${ER_DEV_CONTEXT:-}}"
 ctx=()
 if [ -n "$KUBE_CONTEXT" ]; then ctx=(--kube-context "$KUBE_CONTEXT"); fi
 
@@ -50,7 +57,7 @@ helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm
 # the chart offers no existing-secret indirection, so `--set` is the only way
 # to keep them out of the repository.
 secret="$(aws secretsmanager get-secret-value \
-  --secret-id er/shared/openobserve --query SecretString --output text)"
+  --secret-id "$secret_id" --query SecretString --output text)"
 oo_email="$(printf '%s' "$secret" | python3 -c 'import json,sys; print(json.load(sys.stdin)["root_email"])')"
 oo_password="$(printf '%s' "$secret" | python3 -c 'import json,sys; print(json.load(sys.stdin)["root_password"])')"
 oo_dsn="$(printf '%s' "$secret" | python3 -c 'import json,sys; print(json.load(sys.stdin)["meta_dsn"])')"
@@ -64,7 +71,19 @@ kubectl ${ctx[@]+"${ctx[@]}"} -n observability create secret generic openobserve
   --from-literal="ZO_META_POSTGRES_DSN=$oo_dsn" \
   --dry-run=client -o yaml | kubectl ${ctx[@]+"${ctx[@]}"} apply -f -
 
-kubectl ${ctx[@]+"${ctx[@]}"} apply -f "$values/openobserve.yaml"
+if [ "$environment" = prod ]; then
+  # Public RDS trust bundle, pinned to the same bytes as the application images.
+  ca_tmp="$(mktemp)"
+  trap 'rm -f "$ca_tmp"' EXIT
+  curl --fail --silent --show-error --location --retry 3 \
+    https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem -o "$ca_tmp"
+  printf '90a6f1a7978a1b1b096dca6c57511ca48d3b8cf052f8e704baf358f34ea2f21b  %s\n' "$ca_tmp" | shasum -a 256 -c -
+  kubectl ${ctx[@]+"${ctx[@]}"} -n observability create configmap rds-ca \
+    --from-file="global-bundle.pem=$ca_tmp" --dry-run=client -o yaml | kubectl ${ctx[@]+"${ctx[@]}"} apply -f -
+  kubectl ${ctx[@]+"${ctx[@]}"} apply -k "$values-prod"
+else
+  kubectl ${ctx[@]+"${ctx[@]}"} apply -f "$values/openobserve.yaml"
+fi
 kubectl ${ctx[@]+"${ctx[@]}"} -n observability rollout status deploy/openobserve --timeout=5m
 
 # The collector and the log shipper authenticate to the store as that root
@@ -80,13 +99,20 @@ kubectl ${ctx[@]+"${ctx[@]}"} -n observability create secret generic openobserve
 
 # --- shippers ---------------------------------------------------------------
 
+fluent_values=()
+collector_values=()
+if [ "$environment" = prod ]; then
+  fluent_values=(-f "$values-prod/fluent-bit-values.yaml")
+  collector_values=(-f "$values-prod/otel-collector-values.yaml")
+fi
+
 helm ${ctx[@]+"${ctx[@]}"} upgrade --install fluent-bit eks/aws-for-fluent-bit \
   --version "$FLUENT_BIT_VERSION" --namespace observability \
-  -f "$values/fluent-bit-values.yaml"
+  -f "$values/fluent-bit-values.yaml" ${fluent_values[@]+"${fluent_values[@]}"}
 
 helm ${ctx[@]+"${ctx[@]}"} upgrade --install otel-collector open-telemetry/opentelemetry-collector \
   --version "$COLLECTOR_VERSION" --namespace observability \
-  -f "$values/otel-collector-values.yaml"
+  -f "$values/otel-collector-values.yaml" ${collector_values[@]+"${collector_values[@]}"}
 
 helm ${ctx[@]+"${ctx[@]}"} upgrade --install otel-operator open-telemetry/opentelemetry-operator \
   --version "$OPERATOR_VERSION" --namespace observability \
