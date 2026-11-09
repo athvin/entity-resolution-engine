@@ -32,12 +32,12 @@ case "${EVENT:-}" in
     # container every time. `before` is all-zeroes on a branch's first
     # push and unresolvable after a force-push, so fall back to
     # running rather than skipping — a wasted run beats a silent one.
-    if [ -z "${PUSH_BEFORE:-}" ] || [ "$PUSH_BEFORE" = "0000000000000000000000000000000000000000" ] \
-       || ! git cat-file -e "$PUSH_BEFORE^{commit}" 2>/dev/null; then
+    if [ -z "${SUCCESS_BASE:-}" ] || [ "$SUCCESS_BASE" = "0000000000000000000000000000000000000000" ] \
+       || ! git merge-base --is-ancestor "$SUCCESS_BASE" "$PUSH_AFTER" 2>/dev/null; then
       printf 'frontend=true\nmarketing_only=false\n' >> "$GITHUB_OUTPUT"
       exit 0
     fi
-    RANGE="$PUSH_BEFORE..$PUSH_AFTER"
+    RANGE="$SUCCESS_BASE..$PUSH_AFTER"
     ;;
   *)
     # schedule / workflow_dispatch: nothing to diff against.

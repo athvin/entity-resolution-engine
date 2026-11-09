@@ -1,125 +1,10 @@
-# The application's CI. The engine, CLI, and control plane are Rust (under
-# `rust/`); the Python/dbt implementation has been removed, so this is the whole
-# backend gate — effectively unfiltered (the frontend keeps its own pnpm gate).
-#
-# Exemptions: a PR confined to the paths in scripts/ci/detect-paths.sh, including
-# agent/skill prose, Terraform, agentic workflows and the static marketing site, runs
-# none of the compile jobs. Because the required jobs below are REQUIRED status
-# checks, a workflow-level path filter would leave them "pending" forever and
-# block the PR; instead a `detect` job computes whether any file outside those
-# sets changed and the required jobs gate on it with `if:`. A job skipped by
-# `if:` reports a "skipped" conclusion, which branch protection accepts as
-# satisfied — so the PR stays mergeable with zero compute.
-#
-# Another exception, and it is a different kind: a PR that changes NO FILES AT
-# ALL. `detect` reports `code=false` for it too, but that case needed a guard of
-# its own, because this is the one detect in the repo built as a DENYLIST and an
-# empty path list inverts through it — the blank line a shell `printf` emits for
-# an empty string matches no exemption, so it counted as real code and ran the
-# whole gate. The four allowlist detects (frontend, infra, images, devcontainer)
-# never had it: zero paths is zero matches there. See `detect_classify` in
-# scripts/ci/detect-paths.sh.
-#
-# Unlike the other three, an empty PR must not come out GREEN — a skip alone
-# would satisfy every required context having proved nothing — so the `empty`
-# job below fails on purpose. `claim-ticket` opens exactly this shape (a draft
-# PR from an empty commit, claiming a ticket before any code exists), which is
-# why the case is worth a guard rather than a shrug.
-#
-# Why `infra/terraform/**` is safe to skip, which is not obvious: nothing in the
-# Rust gate reads it. No crate or manifest references it (the two mentions under
-# `rust/` are prose in comments), and `make check` touches `infra/` nowhere.
-# `scripts/skills-check.sh` DOES derive generated skill references from it — it
-# counts `resource "aws_*"` blocks, IAM users, Pod Identity associations and the
-# pinned provider versions — so a terraform-only PR can make a reference stale.
-# That is covered, and by design: the `skills` job below runs the same drift
-# check and is deliberately NOT gated on `detect`, which is the whole reason it
-# exists as a separate job. The terraform gate itself lives in `infra.yml`.
-#
-# The agentic workflows (`.github/workflows/*.md`, the `*.lock.yml` compiled from
-# each, and `shared/`) qualify on the same two grounds: nothing in `make check`
-# reads them, and the drift they CAN cause — `skills-check.sh` derives the
-# agentic-workflow table in `required-checks.md` from those `.md` files — is
-# caught by the ungated `skills` job. Note those are matched per FILE rather than
-# as a directory, because this file and its three siblings live there too.
-#
-# `.claude/**` and `CLAUDE.md` are exempt too, but NOT wholesale — and the reason
-# the earlier blanket "docs must run the gate" rule existed is worth keeping in
-# view, because it was correct about the risk and only wrong about the scope.
-# Exactly four files under those prefixes are coupled to a gate, and they split
-# across two different jobs, which is why one `code` output could not express it.
-# All four used to live under `docs/`; that directory is gone and each now sits
-# in the `references/` of the skill that owns it, which changed their paths and
-# nothing else about this mechanism:
-#
-#   entity-framework/references/erd.md
-#       a GENERATED artifact; `er-entity verify` fails on staleness
-#                                                             -> `entities`
-#   entity-framework/references/entity-framework-design.md
-#       the set-difference source for skills-check's `diagnostics` generator
-#                                                             -> drift (`lint`)
-#   skill-writer/references/agent-skills.md, and CLAUDE.md
-#       skill-inventory generator TARGETS; a hand-edit inside a generated
-#       block is drift                                        -> drift (`lint`)
-#
-# So `detect` emits two more outputs, `erd` and `drift`, and those two jobs gate
-# on `code OR <their own>`. Everything else still gates on `code` alone. A PR of
-# nothing but skills therefore runs `lint` and nothing else, and a PR of pure
-# prose under `.claude/` runs no compile job at all.
-#
-# Why this mattered: the `.claude/**` exemption was close to dead letter. Any
-# skill whose DESCRIPTION changes regenerates rows in `.claude/skills/skill-writer/references/agent-skills.md` and
-# `CLAUDE.md` — so the commit that exempted skills was immediately defeated by
-# the regeneration those same skills require, and the full ~40-minute backend
-# gate ran on prose anyway. The exemption only ever worked for a skill-body edit
-# that left every description untouched.
-#
-# `lint` still compiles clippy to verify a markdown table, which is wasteful but
-# is the cheapest thing that can BLOCK: the `skills` job runs the same drift
-# check and is not a required status check, so it cannot. Promoting it is the
-# follow-up that would let `lint` skip here too.
-#
-# A JOB'S `name:` IS ITS BRANCH-PROTECTION CONTEXT. Renaming one silently
-# un-protects it, and adding a required context for a job that does not yet
-# exist on `main` blocks every PR until it does. `entities` was split out of
-# `lint` and is required; it was added to protection only after it had reported
-# green on `main`, which is the only safe order.
-#
-# The toolchain is installed with `rustup` rather than an action: dtolnay's
-# rust-toolchain selects the channel through its ref (`@stable`), which cannot
-# also carry the S9 `@<sha> # vTAG` pin the repo requires of every `uses:`.
-#
-# SPEED: every compile job uses sccache (R2 for human PRs/main; GitHub Actions
-# cache for Dependabot PRs) and links with mold, so jobs stop re-compiling the
-# same crate-units cold and the DuckDB static link is far cheaper. The heavy perf jobs (bench compile,
-# 50k scale) run only on main + nightly, not on every PR — the PR gate is
-# lint + test + the DuckLake integration e2e + cargo-deny.
-#
-# The GitHub Actions cache has a per-repository eviction limit; R2 has its own
-# lifecycle. They fail differently, which is why both exist. rust-cache keys on
-# `Cargo.lock` and so misses wholesale on any dependency change; sccache is
-# content-addressed per compilation unit and still hits for every crate a bump did
-# not touch. Three rules follow, each load-bearing:
-#
-#   1. `lint` is the SINGLE WRITER of `shared-key: rust`, and only from `main`;
-#      the other four compile jobs are restore-only (`save-if: false`).
-#      `coverage` keeps the writer on its own key — see the note there for why
-#      dropping it would buy 1.8 GiB and a timeout.
-#   2. The Actions cache is pruned to a budget nightly (`cache-prune`), and its
-#      original reason is LIVE again: sccache writes one entry per compilation
-#      object with nothing else capping it. What changed is the ceiling it is
-#      capped against — the per-repository limit is purchasable now and set to
-#      20 GB, so the budget is sized to let sccache reach its natural size
-#      rather than to protect 10 GB from it. See the job.
-#   3. Every compile job reports `sccache --show-stats`, so the hit rate is
-#      observable rather than assumed.
-#
-# Without 1 and 2 the repository sat at the ceiling and GitHub evicted its largest
-# LRU victim — the rust-cache entry every compile job restores from — producing
-# cold runs with no dependency change to explain them. Cold is a 3x penalty on the
-# critical-path job. The measurements, and the decisions taken against them
-# (including why headstart is not one of them), are in the `ci-and-supply-chain`
-# skill's build-cost reference.
+# Backend CI. Package tests follow Cargo reverse dependencies; unknown inputs,
+# manifests and nightly/manual runs select the complete workspace. The selection
+# policy and its fail-closed aggregates are tested in scripts/ci/test_ci_*.py.
+# Required job names are stable. The test/e2e aggregate contexts always report,
+# including when classification fails or deliberately selects no backend work.
+# Tool archives are cached and checksum-verified by the local ci-tools action.
+# See ci-and-supply-chain/references/build-cost.md for measurements and history.
 name: rust
 
 on:
@@ -289,6 +174,9 @@ jobs:
   # skip only for a proven marketing-only change; other pushes, nightly and
   # manual runs retain the full gate. Missing push history runs everything.
   detect:
+    permissions:
+      contents: read
+      actions: read
     name: detect changes
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -304,10 +192,23 @@ jobs:
       # the compile tier skips, and `empty` fails.
       empty: ${{ steps.filter.outputs.empty }}
       pass_key: ${{ steps.key.outputs.key }}
+      test_matrix: ${{ steps.filter.outputs.test_matrix }}
+      packages: ${{ steps.filter.outputs.packages }}
+      lake: ${{ steps.filter.outputs.lake }}
+      server: ${{ steps.filter.outputs.server }}
+      extensions: ${{ steps.filter.outputs.extensions }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      - id: baseline
+        if: github.event_name == 'push'
+        working-directory: ${{ github.workspace }}
+        env:
+          EVENT: ${{ github.event_name }}
+          GH_TOKEN: ${{ github.token }}
+          CI_WORKFLOW: rust.yml
+        run: python3 scripts/ci/successful-base.py
       - id: filter
         working-directory: ${{ github.workspace }}
         env:
@@ -315,8 +216,9 @@ jobs:
           # One of the two pairs is set: a PR's, or the merge queue's.
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
-          PUSH_BEFORE: ${{ github.event.before }}
+          SUCCESS_BASE: ${{ steps.baseline.outputs.sha }}
           PUSH_AFTER: ${{ github.event.after }}
+          SELECT_PACKAGES: "true"
           FULL_CI: ${{ contains(github.event.pull_request.labels.*.name, 'ci:full') }}
         # The last detect step to become a script; frontend.yml, infra.yml and
         # images.yml already had one. Its classification lives in
@@ -339,6 +241,7 @@ jobs:
         working-directory: ${{ github.workspace }}
         env:
           GATE: rust
+          SELECTION_KEY: ${{ steps.filter.outputs.packages }}
         run: bash scripts/ci/pass-key.sh
       - id: lookup
         if: steps.key.outputs.key != ''
@@ -561,17 +464,9 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: install actionlint (pinned, checksum-verified)
-        # This replaced `taiki-e/install-action` with `tool: actionlint` and
-        # `continue-on-error: true`, which could NEVER succeed: that action
-        # resolves an unknown tool as a Rust crate and actionlint is a Go binary
-        # absent from its TOOLS.md. Every run logged `× For crate actionlint:
-        # actionlint is not found`, the swallowed failure left the binary absent,
-        # and the linting half skipped while the job stayed green on the pin
-        # check alone. No `continue-on-error` here: a failed install is now a
-        # failed job, which is the only way absence can stop reading as success.
-        working-directory: ${{ github.workspace }}
-        run: bash scripts/ci/install-actionlint.sh
+      - uses: ./.github/actions/ci-tools
+        with:
+          tools: actionlint
       - name: every `uses:` is SHA-pinned with its tag comment
         # Mandatory: this workflow defaults every `run` to `rust/`, and the
         # script lives at the repo root. Without it the step dies with exit 127
@@ -591,6 +486,9 @@ jobs:
         # class of defect.
         working-directory: ${{ github.workspace }}
         run: bash scripts/ci/actionlint-required-test.sh
+      - name: CI selection, setup and measurement self-tests
+        working-directory: ${{ github.workspace }}
+        run: python3 -m unittest discover -s scripts/ci -p 'test_ci_*.py'
       - name: the `detect` path classifier still classifies
         # Lives in this job because it must be UNGATED. `detect` decides whether
         # the compile jobs run, so a test for it placed in a job that `detect`
@@ -664,12 +562,13 @@ jobs:
   lint:
     name: fmt + clippy + docs
     needs: detect
-    # `drift` too: this job carries a generated-reference drift check as a
+    # Generated-reference drift is independently required in the skills job.
+    # Previously this job carried that check as a
     # backstop for code PRs. The ungated `skills` job is the primary copy and
     # is itself a required status check (probed on `main`) — this duplicate
     # exists so a `detect` regression could not let a code PR through with
     # drift unexamined; see the `skills` job header.
-    if: needs.detect.outputs.code == 'true' || needs.detect.outputs.drift == 'true'
+    if: needs.detect.outputs.code == 'true'
     runs-on: ubuntu-latest
     # 45, not 30: on a cold cache this job has to build the bundled duckdb C++
     # tree before clippy can lint 27 crates and rustdoc can document them, and
@@ -692,16 +591,7 @@ jobs:
       - name: Install stable toolchain
         working-directory: ${{ github.workspace }}
         run: bash scripts/ci/install-rust.sh --components
-      - name: Install mold
-        # One copy for the seven jobs here that link with mold (agent-task.yml
-        # has the eighth): retried, time-boxed, and falling back to the default
-        # linker by stripping mold from RUSTFLAGS — the why and the measured
-        # failure modes live in scripts/ci/install-mold.sh's header. 13 min
-        # lets all three bounded attempts run (3 x 2 x 120s = 12 min).
-        timeout-minutes: 13
-        # The script lives at the repo root; this workflow defaults `run` to rust/.
-        working-directory: ${{ github.workspace }}
-        run: bash scripts/ci/install-mold.sh
+      - uses: ./.github/actions/ci-tools
       - name: Export GitHub cache credentials for Dependabot
         if: env.SCCACHE_GHA_ENABLED == 'on'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
@@ -712,7 +602,6 @@ jobs:
             core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL);
             core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN);
             core.info('Dependabot sccache: GitHub Actions cache, no R2 credentials');
-      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       # No rust-cache. A restored `target/` carries a populated
       # `duckdb-sources/<key>/` with its `.complete` sentinel stripped, so
       # `libduckdb-sys` tries to `fs::rename` a fresh unpack over it and gets
@@ -794,16 +683,7 @@ jobs:
         # for free in `lint` (clippy's job installs it); here it must be asked
         # for, or every generated file reads as stale.
         run: rustup update stable --no-self-update && rustup default stable && rustup component add rustfmt
-      - name: Install mold
-        # One copy for the seven jobs here that link with mold (agent-task.yml
-        # has the eighth): retried, time-boxed, and falling back to the default
-        # linker by stripping mold from RUSTFLAGS — the why and the measured
-        # failure modes live in scripts/ci/install-mold.sh's header. 13 min
-        # lets all three bounded attempts run (3 x 2 x 120s = 12 min).
-        timeout-minutes: 13
-        # The script lives at the repo root; this workflow defaults `run` to rust/.
-        working-directory: ${{ github.workspace }}
-        run: bash scripts/ci/install-mold.sh
+      - uses: ./.github/actions/ci-tools
       - name: Export GitHub cache credentials for Dependabot
         if: env.SCCACHE_GHA_ENABLED == 'on'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
@@ -814,7 +694,6 @@ jobs:
             core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL);
             core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN);
             core.info('Dependabot sccache: GitHub Actions cache, no R2 credentials');
-      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       # No rust-cache. A restored `target/` carries a populated
       # `duckdb-sources/<key>/` with its `.complete` sentinel stripped, so
       # `libduckdb-sys` tries to `fs::rename` a fresh unpack over it and gets
@@ -900,12 +779,7 @@ jobs:
     strategy:
       # A flaky leg can be re-run alone; its sibling's green stands.
       fail-fast: false
-      matrix:
-        include:
-          - slice: er-match
-            args: -p er-match
-          - slice: rest
-            args: --workspace --exclude er-match
+      matrix: ${{ fromJSON(needs.detect.outputs.test_matrix) }}
     permissions:
       contents: read
     # `main` writes the cache, every other ref only reads it. See the env block
@@ -936,16 +810,7 @@ jobs:
       - name: Install stable toolchain
         working-directory: ${{ github.workspace }}
         run: bash scripts/ci/install-rust.sh
-      - name: Install mold
-        # One copy for the seven jobs here that link with mold (agent-task.yml
-        # has the eighth): retried, time-boxed, and falling back to the default
-        # linker by stripping mold from RUSTFLAGS — the why and the measured
-        # failure modes live in scripts/ci/install-mold.sh's header. 13 min
-        # lets all three bounded attempts run (3 x 2 x 120s = 12 min).
-        timeout-minutes: 13
-        # The script lives at the repo root; this workflow defaults `run` to rust/.
-        working-directory: ${{ github.workspace }}
-        run: bash scripts/ci/install-mold.sh
+      - uses: ./.github/actions/ci-tools
       - name: Export GitHub cache credentials for Dependabot
         if: env.SCCACHE_GHA_ENABLED == 'on'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
@@ -956,7 +821,6 @@ jobs:
             core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL);
             core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN);
             core.info('Dependabot sccache: GitHub Actions cache, no R2 credentials');
-      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       # No rust-cache. A restored `target/` carries a populated
       # `duckdb-sources/<key>/` with its `.complete` sentinel stripped, so
       # `libduckdb-sys` tries to `fs::rename` a fresh unpack over it and gets
@@ -978,9 +842,11 @@ jobs:
         # split, a second RUNNER for the one binary that dwarfs the rest.
         # Doctests stay complete across the legs: `-p er-match` runs er-match's,
         # `--exclude er-match` runs everyone else's.
-        run: cargo test ${{ matrix.args }}
+        env:
+          SELECTED_PACKAGES: ${{ toJSON(matrix.packages) }}
+        run: python3 ../scripts/ci/run-selected-tests.py
       - name: Cache DuckDB extensions
-        if: matrix.slice == 'rest'
+        if: matrix.slice == 'rest' && needs.detect.outputs.extensions == 'true'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.duckdb/extensions
@@ -995,7 +861,7 @@ jobs:
         # purpose: er-compile and er-sql-check also gate tests behind
         # DEDUPE_E2E_EXTENSIONS, and a job-level env would silently start
         # running those on every PR.
-        if: matrix.slice == 'rest'
+        if: matrix.slice == 'rest' && needs.detect.outputs.extensions == 'true'
         env:
           DEDUPE_E2E_EXTENSIONS: "1"
         run: cargo test -p dedupe-core --test main extensions
@@ -1014,10 +880,11 @@ jobs:
   test-gate:
     name: test
     needs: [detect, test-shard]
-    # `!cancelled()`: the gate must RUN (and fail) when a leg fails — a gate
+    # Always report: classification failures and unexpected skipped legs fail.
+    # The gate must RUN (and fail) when a leg fails — a gate
     # skipped because its `needs` failed would read to branch protection as
     # satisfied.
-    if: ${{ !cancelled() && needs.detect.outputs.code == 'true' }}
+    if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -1028,9 +895,10 @@ jobs:
         env:
           # The matrix aggregate: `success` only if every leg succeeded,
           # `failure` if any failed, `skipped` if the whole job was.
+          DETECT_RESULT: ${{ needs.detect.result }}
           GATE_LEGS: |
-            test-shard=${{ needs.test-shard.result }}
-        run: bash scripts/ci/gate-all-legs.sh
+            test-shard=${{ needs.detect.outputs.code == 'true' }},${{ needs.test-shard.result }}
+        run: bash scripts/ci/gate-selection.sh
 
   security:
     name: cargo-deny (advisories + licenses + bans)
@@ -1089,7 +957,7 @@ jobs:
   lake-e2e:
     name: DuckLake e2e shard (${{ matrix.partition }})
     needs: detect
-    if: needs.detect.outputs.code == 'true'
+    if: needs.detect.outputs.code == 'true' && needs.detect.outputs.lake == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
@@ -1166,16 +1034,9 @@ jobs:
       - name: Install stable toolchain
         working-directory: ${{ github.workspace }}
         run: bash scripts/ci/install-rust.sh
-      - name: Install mold
-        # One copy for the seven jobs here that link with mold (agent-task.yml
-        # has the eighth): retried, time-boxed, and falling back to the default
-        # linker by stripping mold from RUSTFLAGS — the why and the measured
-        # failure modes live in scripts/ci/install-mold.sh's header. 13 min
-        # lets all three bounded attempts run (3 x 2 x 120s = 12 min).
-        timeout-minutes: 13
-        # The script lives at the repo root; this workflow defaults `run` to rust/.
-        working-directory: ${{ github.workspace }}
-        run: bash scripts/ci/install-mold.sh
+      - uses: ./.github/actions/ci-tools
+        with:
+          tools: mold sccache cargo-nextest
       - name: Export GitHub cache credentials for Dependabot
         if: env.SCCACHE_GHA_ENABLED == 'on'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
@@ -1186,7 +1047,6 @@ jobs:
             core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL);
             core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN);
             core.info('Dependabot sccache: GitHub Actions cache, no R2 credentials');
-      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       # No rust-cache. A restored `target/` carries a populated
       # `duckdb-sources/<key>/` with its `.complete` sentinel stripped, so
       # `libduckdb-sys` tries to `fs::rename` a fresh unpack over it and gets
@@ -1203,9 +1063,6 @@ jobs:
           key: duckdb-extensions-${{ hashFiles('rust/Cargo.lock') }}
           restore-keys: |
             duckdb-extensions-
-      - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
-        with:
-          tool: cargo-nextest
       - name: Create the s3 test bucket
         # One per shard (each leg has its own rustfs service); idempotent by
         # the store, not by a shell test. aws CLI is preinstalled on
@@ -1227,7 +1084,7 @@ jobs:
   ducklake-e2e:
     name: DuckLake e2e server (${{ matrix.slice }})
     needs: detect
-    if: needs.detect.outputs.code == 'true'
+    if: needs.detect.outputs.code == 'true' && needs.detect.outputs.server == 'true'
     runs-on: ubuntu-latest
     # 45 for the same reason as `lint`: this measured 29 min on a cold cache,
     # one minute inside the old limit. It passed by luck, not by margin.
@@ -1303,16 +1160,7 @@ jobs:
       - name: Install stable toolchain
         working-directory: ${{ github.workspace }}
         run: bash scripts/ci/install-rust.sh
-      - name: Install mold
-        # One copy for the seven jobs here that link with mold (agent-task.yml
-        # has the eighth): retried, time-boxed, and falling back to the default
-        # linker by stripping mold from RUSTFLAGS — the why and the measured
-        # failure modes live in scripts/ci/install-mold.sh's header. 13 min
-        # lets all three bounded attempts run (3 x 2 x 120s = 12 min).
-        timeout-minutes: 13
-        # The script lives at the repo root; this workflow defaults `run` to rust/.
-        working-directory: ${{ github.workspace }}
-        run: bash scripts/ci/install-mold.sh
+      - uses: ./.github/actions/ci-tools
       - name: Export GitHub cache credentials for Dependabot
         if: env.SCCACHE_GHA_ENABLED == 'on'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
@@ -1323,7 +1171,6 @@ jobs:
             core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL);
             core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN);
             core.info('Dependabot sccache: GitHub Actions cache, no R2 credentials');
-      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       # No rust-cache. A restored `target/` carries a populated
       # `duckdb-sources/<key>/` with its `.complete` sentinel stripped, so
       # `libduckdb-sys` tries to `fs::rename` a fresh unpack over it and gets
@@ -1401,10 +1248,11 @@ jobs:
   ducklake-gate:
     name: DuckLake + extensions e2e
     needs: [detect, lake-e2e, ducklake-e2e]
-    # `!cancelled()`: the gate must RUN (and fail) when a leg fails — a gate
+    # Always report: classification failures and unexpected skipped legs fail.
+    # The gate must RUN (and fail) when a leg fails — a gate
     # skipped because its `needs` failed would read to branch protection as
     # satisfied, which is the exact false-green this job exists to prevent.
-    if: ${{ !cancelled() && needs.detect.outputs.code == 'true' }}
+    if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -1416,10 +1264,11 @@ jobs:
           # For each matrix job this is the aggregate: `success` only if every
           # leg succeeded, `failure` if any failed, `skipped` if the whole job
           # was.
+          DETECT_RESULT: ${{ needs.detect.result }}
           GATE_LEGS: |
-            lake-e2e=${{ needs.lake-e2e.result }}
-            ducklake-e2e=${{ needs.ducklake-e2e.result }}
-        run: bash scripts/ci/gate-all-legs.sh
+            lake-e2e=${{ needs.detect.outputs.code == 'true' && needs.detect.outputs.lake == 'true' }},${{ needs.lake-e2e.result }}
+            ducklake-e2e=${{ needs.detect.outputs.code == 'true' && needs.detect.outputs.server == 'true' }},${{ needs.ducklake-e2e.result }}
+        run: bash scripts/ci/gate-selection.sh
 
   # --- heavy perf jobs: main + nightly only (skipped on PRs for latency) ---
 
@@ -1429,7 +1278,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # Not on merge_group either: the queue is a PR gate, these are main+nightly.
-    if: needs.detect.outputs.code == 'true' && github.event_name != 'pull_request' && github.event_name != 'merge_group'
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     permissions:
       contents: read
     # `main` writes the cache, every other ref only reads it. See the env block
@@ -1446,16 +1295,7 @@ jobs:
       - name: Install stable toolchain
         working-directory: ${{ github.workspace }}
         run: bash scripts/ci/install-rust.sh
-      - name: Install mold
-        # One copy for the seven jobs here that link with mold (agent-task.yml
-        # has the eighth): retried, time-boxed, and falling back to the default
-        # linker by stripping mold from RUSTFLAGS — the why and the measured
-        # failure modes live in scripts/ci/install-mold.sh's header. 13 min
-        # lets all three bounded attempts run (3 x 2 x 120s = 12 min).
-        timeout-minutes: 13
-        # The script lives at the repo root; this workflow defaults `run` to rust/.
-        working-directory: ${{ github.workspace }}
-        run: bash scripts/ci/install-mold.sh
+      - uses: ./.github/actions/ci-tools
       - name: Export GitHub cache credentials for Dependabot
         if: env.SCCACHE_GHA_ENABLED == 'on'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
@@ -1466,7 +1306,6 @@ jobs:
             core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL);
             core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN);
             core.info('Dependabot sccache: GitHub Actions cache, no R2 credentials');
-      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       # No rust-cache. A restored `target/` carries a populated
       # `duckdb-sources/<key>/` with its `.complete` sentinel stripped, so
       # `libduckdb-sys` tries to `fs::rename` a fresh unpack over it and gets
@@ -1490,7 +1329,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # Not on merge_group either: the queue is a PR gate, these are main+nightly.
-    if: needs.detect.outputs.code == 'true' && github.event_name != 'pull_request' && github.event_name != 'merge_group'
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     permissions:
       contents: read
     # `main` writes the cache, every other ref only reads it. See the env block
@@ -1508,16 +1347,7 @@ jobs:
       - name: Install stable toolchain
         working-directory: ${{ github.workspace }}
         run: bash scripts/ci/install-rust.sh
-      - name: Install mold
-        # One copy for the seven jobs here that link with mold (agent-task.yml
-        # has the eighth): retried, time-boxed, and falling back to the default
-        # linker by stripping mold from RUSTFLAGS — the why and the measured
-        # failure modes live in scripts/ci/install-mold.sh's header. 13 min
-        # lets all three bounded attempts run (3 x 2 x 120s = 12 min).
-        timeout-minutes: 13
-        # The script lives at the repo root; this workflow defaults `run` to rust/.
-        working-directory: ${{ github.workspace }}
-        run: bash scripts/ci/install-mold.sh
+      - uses: ./.github/actions/ci-tools
       - name: Export GitHub cache credentials for Dependabot
         if: env.SCCACHE_GHA_ENABLED == 'on'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
@@ -1528,7 +1358,6 @@ jobs:
             core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL);
             core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN);
             core.info('Dependabot sccache: GitHub Actions cache, no R2 credentials');
-      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       # No rust-cache. A restored `target/` carries a populated
       # `duckdb-sources/<key>/` with its `.complete` sentinel stripped, so
       # `libduckdb-sys` tries to `fs::rename` a fresh unpack over it and gets

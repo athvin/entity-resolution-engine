@@ -85,10 +85,10 @@ DETECT_EXEMPT='^(\.claude/|\.agents/|\.devcontainer/|CLAUDE\.md$|AGENTS\.md$|inf
 # Use the same boundary for path detection and pass-key hashing.
 # shellcheck source=scripts/ci/marketing-paths.sh
 . "$(dirname "${BASH_SOURCE[0]}")/marketing-paths.sh"
-DETECT_EXEMPT="$DETECT_EXEMPT|$MARKETING_INCLUDE"
+DETECT_EXEMPT="$DETECT_EXEMPT|^frontend/"
 
 # A generated artifact `er-entity verify` re-renders and byte-compares.
-DETECT_ERD='^\.claude/skills/entity-framework/references/erd\.md$'
+DETECT_ERD='^(frontend/src/lib/entities/|frontend/drizzle/meta/)|^\.claude/skills/entity-framework/references/erd\.md$'
 
 # Inputs to, and targets of, skills-check's generated references. A change here
 # can make a committed generated block wrong, and the drift check that catches
@@ -98,7 +98,10 @@ DETECT_DRIFT='^(\.claude/skills/entity-framework/references/entity-framework-des
 # The union: exempt by prefix, but still read by some gate, so the
 # content-addressed pass key must keep hashing them or a change to one could
 # ride a stale pass marker.
-DETECT_COUPLED='^(\.claude/skills/entity-framework/references/erd\.md|\.claude/skills/entity-framework/references/entity-framework-design\.md|\.claude/skills/skill-writer/references/agent-skills\.md|CLAUDE\.md)$'
+DETECT_CONTRACT='^frontend/(src/lib/api/(openapi\.json|schema\.d\.ts|envelopes\.json)$|tests/mock-erserver/)'
+DETECT_COUPLED='^(frontend/src/lib/entities/|frontend/drizzle/meta/)|^(\.claude/skills/entity-framework/references/erd\.md|\.claude/skills/entity-framework/references/entity-framework-design\.md|\.claude/skills/skill-writer/references/agent-skills\.md|CLAUDE\.md)$'
+
+DETECT_COUPLED="$DETECT_COUPLED|$DETECT_CONTRACT"
 
 # Classify a newline-separated list of changed paths on stdin. Emits the four
 # `key=value` lines `detect` writes to $GITHUB_OUTPUT, in that order.
@@ -153,7 +156,8 @@ detect_classify() {
 	erd_n="$(printf '%s\n' "$changed" | grep -cE "$DETECT_ERD" || true)"
 	drift_n="$(printf '%s\n' "$changed" | grep -cE "$DETECT_DRIFT" || true)"
 
-	if [ "${noncode:-0}" -gt 0 ]; then
+	contracts="$(printf '%s\n' "$changed" | grep -cE "$DETECT_CONTRACT" || true)"
+	if [ "${noncode:-0}" -gt 0 ] || [ "${contracts:-0}" -gt 0 ]; then
 		# Real code changed, so every job runs anyway. Forcing the two narrow
 		# outputs true keeps downstream `if:` expressions from having to know
 		# that `code` subsumes them.
