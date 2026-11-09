@@ -288,7 +288,9 @@ role and Pod Identity association; Helm creates the matching ServiceAccount,
 claimed task row. The fallback `er-runner` role cannot read, write or list lake
 data. Enrollment is reviewed infrastructure, and its prefix must agree with the
 org's provisioning data path; it is not automatically granted by creating an
-org. The S3 lake-support gap is unchanged. #550's post-merge ledger records the
+org. Rust can open S3 lakes through the credential-chain path added in #792;
+S3-backed orgs must be enrolled before the restricted runner is used.
+#550's post-merge ledger records the
 live positive-control/cross-prefix-denial acceptance; static policy tests alone
 must never be described as that live proof.
 
@@ -509,17 +511,26 @@ A process environment is fixed at exec time, so on rotation ESO updates the Kube
 
 **`ERWEB_CREDENTIAL_KEY` must not be rotated automatically at all.** It unseals every org's stored erserver API key in `erweb.org_credentials` (AES-256-GCM with AAD `"<org>\0<role>"`, per [frontend/src/lib/db/crypto.ts](../../../../frontend/src/lib/db/crypto.ts)); rotating it without a re-encrypt pass bricks the vault. Documented as manual-with-migration, deliberately not wired to a schedule.
 
-### 9.2 S3 credentials: the static key is gone, and nothing replaced it
+### 9.2 S3 credentials: use the runner's Pod Identity
 
-**This section used to describe a live static lake key and a phased migration to the credential chain. The key has been deleted; the migration turned out to have nothing to migrate.**
+The Python implementation required a static lake key. That user and its secret
+were deleted in #549 / #791. Rust's object-store path subsequently landed in
+#792: `ObjectStoreConfig` creates a session-scoped S3 secret before attaching the
+lake. Without an explicit key it uses `PROVIDER CREDENTIAL_CHAIN`, including
+the pod's container credentials. Explicit keys remain for MinIO-class stores
+and CI. Credential-shaped values are refused in org-row env.
 
-What this section said was true of the Python implementation: `ObjectStore.from_env()` in `src/er/lake/objectstore.py` and `attach_statements()` in `src/er/lake/ducklake.py` required a literal `ER_S3_ACCESS_KEY_ID` / `ER_S3_SECRET_ACCESS_KEY` and a non-empty scheme-less `ER_S3_ENDPOINT`, so Phase 1 was one IAM user per environment with its keys in Secrets Manager. Both files were deleted with the Python tree, along with the `dbt/profiles/profiles.yml` and `tests/unit/test_dbt_profiles.py` that made Phase 4 a three-file change.
+Runner lake grants belong to the tenant roles described in §6.4. The shared
+fallback has no S3 object or KMS grant, so a lake using `s3://` must have a reviewed
+enrollment whose prefix matches its data path. Local/EFS lakes need no AWS data
+permission. A credential-chain implementation is not proof of deployed IAM
+isolation: that evidence comes from the main-only `runner isolation` workflow
+and is recorded in the implementing PR's post-merge ledger.
 
-**The Rust engine has no object-store path at all** — no `httpfs`/`aws` load, no `CREATE SECRET`, no `ER_S3_*` reader. So the static key had no consumer: it was minted, written to `er/dev/shared/s3`, and read by nothing. Retiring it was therefore a deletion rather than a cutover, and the grants it carried now sit only on the `er-dev-runner-pod` Pod Identity role (`pod_identity.tf`).
-
-The one real S3 client in the tree, `er-server`'s `s3_ingest::Watcher`, has always built from the default credential chain — in-cluster, the container-credentials provider Pod Identity populates.
-
-**What is actually still owed** is the feature the old Phase 4 was mis-describing: an object-store config whose fields are all optional, producing a `CREATE OR REPLACE SECRET` in which the *absence* of an explicit key selects the credential chain rather than a mode flag choosing it, an explicit key remaining for MinIO and CI which have no chain to consult, plus a credential filter so nothing credential-shaped is persisted into an org row. Until that lands an `s3://` lake cannot be opened from Rust and a lake is a filesystem path — in-cluster, EFS at `/srv/er`. The ducklake-lakehouse skill's [attach-and-tenancy.md](../../ducklake-lakehouse/references/attach-and-tenancy.md) is the owner of that status.
+The `er-server` S3 ingestion watcher also uses the default credential chain; its
+control-plane identity is separate from the per-attempt runner identity. The
+[attach-and-tenancy reference](../../ducklake-lakehouse/references/attach-and-tenancy.md)
+owns the engine credential contract.
 
 ### 9.3 SES: the second static credential, retired before it was created
 

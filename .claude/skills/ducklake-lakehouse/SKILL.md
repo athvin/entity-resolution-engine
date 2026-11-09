@@ -151,7 +151,8 @@ extension and emits a session-scoped `CREATE OR REPLACE SECRET` ahead of the
 ATTACH. The secret's shape comes from `ObjectStoreConfig`, and there is no
 mode flag — the credential's shape is the mode: **no explicit key selects
 `PROVIDER CREDENTIAL_CHAIN`** (the pod's own identity in-cluster; the Pod
-Identity role already carries the lake-bucket grants), while an explicit
+Identity role must be enrolled for that org’s lake prefix — see infra-platform),
+while an explicit
 `ER_LAKE_S3_KEY_ID`/`ER_LAKE_S3_SECRET` pair is for MinIO-class stores and CI,
 which have no chain to consult. The `ER_LAKE_S3_*` variables are host-level
 process env, never org-row env — the credential filter in `er_server::pg`
@@ -178,5 +179,6 @@ exists to prevent.
 
 **Needing an `s3://` lake.** Point `ER_LAKE_DATA_PATH` at the `s3://` URL
 and give the host its credential shape — nothing at all in-cluster (the pod
-identity is the credential), the `ER_LAKE_S3_*` process env elsewhere. The
+identity is the credential, with the org enrolled in the tenant-runner registry),
+the `ER_LAKE_S3_*` process env elsewhere. The
 catalog metadata is unchanged: still a Postgres DSN or a local file.

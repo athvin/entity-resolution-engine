@@ -1619,8 +1619,12 @@ mod runner_identity_tests {
 
     #[test]
     fn launch_identity_overrides_template_and_keeps_kubernetes_credentials_off() {
+        use er_k8s::k8s_openapi::api::{
+            batch::v1::JobSpec,
+            core::v1::{Container, PodSpec},
+        };
         let mut job = er_k8s::k8s_openapi::api::batch::v1::Job {
-            spec: Some(Default::default()),
+            spec: Some(JobSpec::default()),
             ..Default::default()
         };
         let pod = job
@@ -1629,10 +1633,10 @@ mod runner_identity_tests {
             .unwrap()
             .template
             .spec
-            .insert(Default::default());
+            .insert(PodSpec::default());
         pod.service_account_name = Some("er-api".into());
         pod.automount_service_account_token = Some(true);
-        pod.containers.push(Default::default());
+        pod.containers.push(Container::default());
         let enrolled = parse_runner_orgs(Some(r#"["tenant-a","tenant-b"]"#)).unwrap();
         let chosen = runner_service_account("tenant-a", &enrolled);
         inject_attempt_env(&mut job, "attempt-1", "test-token", &chosen);
