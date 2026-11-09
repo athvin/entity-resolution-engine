@@ -31,10 +31,12 @@ er_entities::<entity>::<Name>Wire  (public columns; derives utoipa::ToSchema)
    ▼
 cd rust && cargo run -p er-server --bin er-openapi
    ▼
-frontend/src/lib/api/openapi.json     committed, pinned by a Rust snapshot test
+frontend/src/lib/api/openapi.json     internal, pinned by a Rust snapshot test
    │   pnpm gen:api  (openapi-typescript)
    ▼
 frontend/src/lib/api/schema.d.ts      committed, byte-compared in CI
+
+--audience public emits openapi.public.json, independently snapshot-pinned
 ```
 
 A schema change therefore starts in `entities/`, not in a TypeScript interface.
@@ -46,20 +48,22 @@ consumed* below before assuming a call site is typed against the backend.
 ```sh
 # 1. backend → the document. The cargo workspace root is rust/, so the
 #    redirect is relative to it rather than to the repo root.
-cd rust && cargo run -q -p er-server --bin er-openapi > ../frontend/src/lib/api/openapi.json
+cd rust
+cargo run -q -p er-server --bin er-openapi -- --audience internal > ../frontend/src/lib/api/openapi.json
+cargo run -q -p er-server --bin er-openapi -- --audience public > ../frontend/src/lib/api/openapi.public.json
 
 # 2. document → the TypeScript types
 cd frontend && pnpm gen:api
 ```
 
-Both outputs are **committed**, and both belong in the same commit as the entity
+Both documents and the internal TypeScript output are **committed**, and both belong in the same commit as the entity
 change. Never hand-edit either, and never edit `schema.d.ts` to make the
 frontend compile — that silently decouples the two sides, which is the exact
 failure the contract exists to prevent.
 
 ## What pins each step
 
-The snapshot test lives in `er-server`, so **a stale `openapi.json` fails a Rust
+The snapshot test lives in `er-server`, so **either stale OpenAPI snapshot fails a Rust
 test job**, not a frontend one. If backend CI fails on an OpenAPI snapshot after
 you changed an entity, you have found step 1, not a bug.
 
@@ -105,11 +109,15 @@ The operation contract is generated and gated, with deliberate limits:
 
 - **Paths and operations come from source.** `openapi.rs` builds utoipa paths
   from `er_api_spec::operations`: the shared router walk, adjacent handler docs,
-  signatures and response constructors. Every non-internal registration must
+  signatures and response constructors. Every registration must
   resolve; unsupported request types or unclassifiable responses fail generation.
   Path parameters, summaries, role requirements and body media/schema are emitted.
   HTTP bearer auth documents tenant `erk_` keys and the separate operator token;
-  public health operations have no security requirement. OpenAPI 3.1 permits
+  public health operations have no security requirement. Internal attempt routes
+  use a separate `attemptAuth` scheme for projected ServiceAccount or per-attempt
+  fallback tokens. The public audience drops operator roles and `/v1/internal/*`
+  from that same derivation; it has no separate route allowlist. TypeScript still
+  uses the complete internal document. OpenAPI 3.1 permits
   role names in a non-OAuth security requirement.
 - **Responses remain envelope-level.** Success uses `2XX`; bare and typed JSON
   values stay unconstrained rather than guessing arrays from variable names.
@@ -163,14 +171,19 @@ justify guessing a new OpenAPI request schema.
 
 ## Breaking changes
 
-`er-openapi-check` diffs the document this build emits against `main`'s and
-reports four things: a schema removed, a property removed, a property whose
-`type` changed, and a property no longer required. Additions are **not**
-reported — adding an optional property is compatible.
+`er-openapi-check --audience internal|public` compares the selected document
+with its baseline. Alongside removed schemas/properties, property type changes
+and dropped response requirements, it reports removed operations, added path
+parameters and newly required request properties (including optional-to-required
+fields and local references). New operations and optional properties are
+compatible. This is bounded detection, not complete schema-language compatibility:
+query inputs, arbitrary schema compositions and response payload narrowing remain
+outside it.
 
 It is a step in the Rust `entities` job, on **pull requests only** (it diffs
 against `origin/main`, so a push to `main` has no base and it examines nothing),
-and it is **advisory**: every stage is `|| true` or `|| exit 0`, so it cannot
+and compares both audiences. A missing baseline is explicitly reported as initial
+publication, never compared against the other audience. It is **advisory**, so it cannot
 fail the job. The
 product requirement is to have **blocking compatibility checks ready before the
 first external production org key is issued**. The deployed-baseline work is
@@ -181,7 +194,7 @@ So an advisory warning here is not noise to be ignored — it is a preview of wh
 will block later, and the right time to decide whether the change is really
 compatible.
 
-The four with worked examples, the two edges the list does not cover, and what
+The detected changes, known limits, and what
 to do when a change genuinely must break:
 [references/changing-a-schema.md](references/changing-a-schema.md).
 

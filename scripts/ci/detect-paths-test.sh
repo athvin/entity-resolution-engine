@@ -51,7 +51,7 @@ expect 'marketing visual baseline' "$NONE" 'frontend/tests/functional/marketing.
 expect 'marketing social image' "$NONE" 'frontend/src/app/opengraph-image.png'
 expect 'marketing and shared shell' "$NONE" 'frontend/src/app/(marketing)/page.tsx' 'frontend/src/app/layout.tsx'
 expect 'marketing and backend' "$ALL" 'frontend/src/components/marketing/hero.tsx' 'rust/Cargo.lock'
-for path in frontend/src/app/globals.css frontend/src/proxy.ts frontend/package.json frontend/pnpm-lock.yaml frontend/src/lib/api/openapi.json frontend/src/lib/entities/bindings/Entity.ts frontend/drizzle/meta/0000_snapshot.json frontend/src/components/settings/webhooks-content.tsx frontend/src/components/marketing-shared.tsx 'frontend/src/app/(marketing)/api/route.ts' frontend/tests/functional/marketing.spec.ts.extra; do
+for path in frontend/src/app/globals.css frontend/src/proxy.ts frontend/package.json frontend/pnpm-lock.yaml frontend/src/lib/api/openapi.json frontend/src/lib/api/openapi.public.json frontend/src/lib/entities/bindings/Entity.ts frontend/drizzle/meta/0000_snapshot.json frontend/src/components/settings/webhooks-content.tsx frontend/src/components/marketing-shared.tsx 'frontend/src/app/(marketing)/api/route.ts' frontend/tests/functional/marketing.spec.ts.extra; do
 	case "$path" in
     frontend/src/lib/api/*) expected="$ALL" ;;
     frontend/src/lib/entities/*|frontend/drizzle/meta/*) expected='code=false erd=true drift=false empty=false' ;;

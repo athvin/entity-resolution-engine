@@ -704,10 +704,9 @@ jobs:
         # `|| exit 0`. It is advisory until the first external org key, after
         # which the release pipeline runs `er-openapi-check --strict`.
         if: github.event_name == 'pull_request'
-        # Diffs the control-plane OpenAPI document against main's and reports
-        # breaking component-schema changes (removed schema/field, retype,
-        # dropped required). The `|| exit 0` / `|| true` chain that makes it
-        # unable to fail this job is in the script.
+        # Compares internal and tenant-public contracts with main, including
+        # operation removals and newly required request/path inputs. The script
+        # remains advisory; first publication reports its absent baseline.
         working-directory: ${{ github.workspace }}
         run: bash scripts/ci/api-breaking-gate.sh
       - name: Build cost (sccache stats, target size)

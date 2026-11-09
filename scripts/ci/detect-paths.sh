@@ -98,7 +98,7 @@ DETECT_DRIFT='^(\.claude/skills/entity-framework/references/entity-framework-des
 # The union: exempt by prefix, but still read by some gate, so the
 # content-addressed pass key must keep hashing them or a change to one could
 # ride a stale pass marker.
-DETECT_CONTRACT='^frontend/(src/lib/api/(openapi\.json|schema\.d\.ts|envelopes\.json)$|tests/mock-erserver/)'
+DETECT_CONTRACT='^frontend/(src/lib/api/(openapi(\.public)?\.json|schema\.d\.ts|envelopes\.json)$|tests/mock-erserver/)'
 DETECT_COUPLED='^(frontend/src/lib/entities/|frontend/drizzle/meta/)|^(\.claude/skills/entity-framework/references/erd\.md|\.claude/skills/entity-framework/references/entity-framework-design\.md|\.claude/skills/skill-writer/references/agent-skills\.md|CLAUDE\.md)$'
 
 DETECT_COUPLED="$DETECT_COUPLED|$DETECT_CONTRACT"

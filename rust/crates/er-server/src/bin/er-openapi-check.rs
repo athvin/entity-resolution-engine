@@ -1,6 +1,6 @@
 //! Report breaking changes between a base OpenAPI document and the current one.
 //!
-//!   cargo run -p er-server --bin er-openapi-check -- <base.json> [--strict]
+//!   cargo run -p er-server --bin er-openapi-check -- <base.json> [--audience internal|public] [--strict]
 //!
 //! Compares `<base.json>` (e.g. `git show origin/main:frontend/src/lib/api/openapi.json`)
 //! against the document this build emits. It is **advisory** by default (always
@@ -10,21 +10,32 @@
 
 use std::process::ExitCode;
 
+use clap::Parser;
+use er_server::openapi::Audience;
+
+#[derive(Parser)]
+struct Args {
+    base_path: String,
+    #[arg(long)]
+    strict: bool,
+    #[arg(long, value_enum, default_value = "internal")]
+    audience: Audience,
+}
+
 fn main() -> ExitCode {
-    let args: Vec<String> = std::env::args().collect();
-    let strict = args.iter().any(|a| a == "--strict");
-    let Some(base_path) = args.iter().skip(1).find(|a| !a.starts_with("--")) else {
-        eprintln!("usage: er-openapi-check <base-openapi.json> [--strict]");
-        return ExitCode::from(64);
-    };
-    let base = match std::fs::read_to_string(base_path) {
+    let Args {
+        base_path,
+        strict,
+        audience,
+    } = Args::parse();
+    let base = match std::fs::read_to_string(&base_path) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("er-openapi-check: cannot read {base_path}: {e}");
             return ExitCode::from(64);
         }
     };
-    let current = er_server::openapi::openapi_json();
+    let current = er_server::openapi::openapi_json(audience);
     let breaks = er_server::openapi::breaking_changes(&base, &current);
     if breaks.is_empty() {
         println!("er-openapi-check: no breaking API changes");

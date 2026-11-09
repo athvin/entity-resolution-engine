@@ -189,7 +189,7 @@ done
 
 # An exempt path the Rust gate provably never reads must leave the rust key
 # alone — that is the whole point of the skip.
-for path in frontend/src/lib/api/openapi.json frontend/src/lib/api/schema.d.ts frontend/src/lib/api/envelopes.json frontend/tests/mock-erserver/server.mjs frontend/src/lib/entities/bindings/Entity.ts frontend/drizzle/meta/0000_snapshot.json scripts/ci/rust-select.py scripts/ci/successful-base.py .github/actions/ci-tools/action.yml; do
+for path in frontend/src/lib/api/openapi.json frontend/src/lib/api/openapi.public.json frontend/src/lib/api/schema.d.ts frontend/src/lib/api/envelopes.json frontend/tests/mock-erserver/server.mjs frontend/src/lib/entities/bindings/Entity.ts frontend/drizzle/meta/0000_snapshot.json scripts/ci/rust-select.py scripts/ci/successful-base.py .github/actions/ci-tools/action.yml; do
     differs "key: coupled input moves Rust: $path" "$rk" "$(keyat rust "$(probed "$path")")"
 done
 

@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Diff the control-plane OpenAPI document against main's and report breaking
-# component-schema changes (removed schema or field, retype, dropped
-# required).
+# schema and operation changes for both internal and public audiences.
 #
 # IT CANNOT FAIL THE REQUIRED JOB IT RIDES ON, and that is structural rather
 # than incidental: every stage is `|| exit 0` or `|| true`. No `set -e` here
@@ -23,5 +22,18 @@ set -uo pipefail
 cd "$(dirname "$0")/../.."
 
 git fetch --no-tags --depth=1 origin main || exit 0
-git show origin/main:frontend/src/lib/api/openapi.json > /tmp/base-openapi.json 2>/dev/null || exit 0
-(cd rust && cargo run -q -p er-server --bin er-openapi-check -- /tmp/base-openapi.json) || true
+base_dir="$(mktemp -d)" || exit 0
+trap 'rm -rf "$base_dir"' EXIT
+for audience in internal public; do
+    artifact=openapi.json
+    if [ "$audience" = public ]; then
+        artifact=openapi.public.json
+    fi
+    printf '\nAPI compatibility: %s audience (advisory)\n' "$audience"
+    if ! git cat-file -e "origin/main:frontend/src/lib/api/$artifact" 2>/dev/null; then
+        printf 'No %s baseline on origin/main; initial publication, no comparison.\n' "$audience"
+        continue
+    fi
+    git show "origin/main:frontend/src/lib/api/$artifact" > "$base_dir/$artifact" || continue
+    (cd rust && cargo run -q -p er-server --bin er-openapi-check -- "$base_dir/$artifact" --audience "$audience") || true
+done

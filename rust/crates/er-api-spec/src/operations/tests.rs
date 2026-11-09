@@ -148,3 +148,34 @@ struct Input { name: String }
         );
     }
 }
+
+#[test]
+fn internal_attempt_operations_use_a_separate_credential_channel() {
+    let src = r#"
+fn router() { Router::new().route("/v1/internal/attempts/{id}", get(work)); }
+/// Read a work order (`GET /v1/internal/attempts/{id}`).
+async fn work(Path(id): Path<String>, headers: HeaderMap) { Json(json!({"input": value})) }
+"#;
+    let ops = operations(src, &[], &BTreeSet::new()).unwrap();
+    assert_eq!(ops.len(), 1);
+    assert_eq!(ops[0].role, "attempt");
+    assert_eq!(ops[0].summary, "Read a work order");
+    assert_eq!(ops[0].params[0].name, "id");
+}
+
+#[test]
+fn returned_map_or_else_closures_contribute_success_responses_only() {
+    let src = r#"
+fn router() { Router::new().route("/v1/internal/attempts/{id}/start", post(start)); }
+/// Report attempt start (`POST /v1/internal/attempts/{id}/start`).
+async fn start(Path(id): Path<String>) {
+    let unrelated = || Json(json!({"not_returned": true}));
+    rows.next().map_or_else(
+        || Json(json!({"detail":"stale"})).into_response(),
+        |row| { let background = async { Json(json!({"not_returned_either": true})) }; (StatusCode::OK, Json(json!(row))).into_response() }
+    )
+}
+"#;
+    let ops = operations(src, &[], &BTreeSet::new()).unwrap();
+    assert_eq!(ops[0].responses, vec![Envelope::Bare]);
+}

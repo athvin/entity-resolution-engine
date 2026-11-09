@@ -85,6 +85,15 @@ impl Responses<'_, '_> {
             Expr::MethodCall(expr) if expr.method == "into_response" => {
                 self.response(&expr.receiver);
             }
+            // These closures are the returned value of the option/result
+            // combinator, unlike unrelated callbacks in the handler body.
+            Expr::MethodCall(expr) if expr.method == "map_or_else" => {
+                for argument in &expr.args {
+                    if let Expr::Closure(closure) = argument {
+                        self.response(&closure.body);
+                    }
+                }
+            }
             Expr::Tuple(expr) => {
                 for value in &expr.elems {
                     self.response(value);
