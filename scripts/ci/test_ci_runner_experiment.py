@@ -25,6 +25,7 @@ test tests::same_name ... ok
 test src/lib.rs - example (line 1) ... ignored
 Running extension tests from the already-built dedupe-core binary
 test extensions::loads ... ok
+test result: ok. 3 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out
 '''
         names = runner.identities(log, [self.artifact('a','main-a'), self.artifact('b','main-b')],
                                   {'a':'package-a','b':'package-b'})
@@ -32,6 +33,10 @@ test extensions::loads ... ok
                                       'package-b/main/test/tests::same_name:ok',
                                       'doctest/package_a/src/lib.rs - example (line 1):ignored',
                                       'dedupe-core/main/test/extensions::loads:ok']))
+        with self.assertRaisesRegex(ValueError, 'every reported test'):
+            runner.identities(log.replace('3 passed', '4 passed'),
+                              [self.artifact('a','main-a'), self.artifact('b','main-b')],
+                              {'a':'package-a','b':'package-b'})
 
     def test_unknown_missing_or_unattributed_results_fail(self):
         for log in ['', 'test foo ... ok', 'Running tests/main.rs (target/unknown)\ntest foo ... ok']:

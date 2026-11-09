@@ -40,6 +40,9 @@ def identities(log, artifacts, packages):
             found.append(f"{suite}/{test[1]}:{test[2]}")
     if not found:
         raise ValueError("no test identities found")
+    totals = re.findall(r"test result: ok\. (\d+) passed; 0 failed; (\d+) ignored", log)
+    if sum(int(passed) + int(ignored) for passed, ignored in totals) != len(found):
+        raise ValueError("attributed identities do not cover every reported test")
     return sorted(found)
 
 
