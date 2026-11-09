@@ -2482,9 +2482,9 @@ pub fn preview_transform(
         "json_extract_string(payload, '$.{}')",
         column.replace('\'', "''")
     );
-    let after = rules
-        .iter()
-        .fold(before.clone(), |acc, rule| rule.apply_sql(&acc));
+    let after = rules.iter().fold(before.clone(), |acc, rule| {
+        rule.apply_sql_with_dictionaries(&acc, &config.replacement_dictionaries)
+    });
     // Only rows the rules actually CHANGE: a preview padded with unaffected
     // values makes a rule look inert, and the whole point is to see the effect.
     let rows = session.query_scratch_strings(&format!(

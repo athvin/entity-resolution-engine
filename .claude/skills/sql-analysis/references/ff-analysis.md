@@ -36,7 +36,7 @@ inside the markers.
 <!-- BEGIN GENERATED: sql-planner-pins -->
 | What | Version | Where it comes from |
 |---|---|---|
-| ff-analysis | `er-entity-v0.1.4` (rev `a812d6aed3ed`) | the `tag =` in `er-sql-check/Cargo.toml` |
+| ff-analysis | `er-entity-v0.1.5` (rev `2a643bc55528`) | the `tag =` in `er-sql-check/Cargo.toml` |
 | DataFusion | 52.5.0 | brought by ff-analysis; `datafusion-common`/`-expr` are pinned here to match |
 | arrow, analyser side | 57.3.1 | brought by ff-analysis |
 | arrow, rest of the workspace | 60.1.0 (declared `60`) | the major the `duckdb` crate pulls |

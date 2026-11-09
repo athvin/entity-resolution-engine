@@ -3423,10 +3423,12 @@ async fn put_ignore_words(
 
 /// Change tiers (`configsvc.py` `classify_tier`), biggest-blast-radius first.
 // `comparison_groups` sits with `comparisons`: it changes what a pair scores.
-const TIER_C_BLOCKS: [&str; 4] = [
+const TIER_C_BLOCKS: [&str; 6] = [
     "comparisons",
     "comparison_groups",
     "standardization",
+    "transforms",
+    "replacement_dictionaries",
     "sources",
 ];
 // `constraints` sits with `blocking` because it changes the same thing: which

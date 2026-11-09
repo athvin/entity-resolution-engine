@@ -98,3 +98,57 @@ test("a failed read cannot be saved as an empty dictionary", async ({ page }) =>
   await editor.getByRole("button", { name: "Retry" }).click();
   await expect(editor.getByTestId("ignore-word-row")).toHaveCount(13);
 });
+
+test("an admin publishes reusable replacement mappings and retains a failed draft", async ({
+  page,
+}, info) => {
+  const org =
+    info.project.name === "mobile-safari"
+      ? "replacement-ios"
+      : info.project.name === "mobile-chrome"
+        ? "replacement-android"
+        : "replacement-dev";
+  const endpoint = `/api/orgs/${org}/datasets/${DS}/config/versions`;
+  await login(page, USERS.admin);
+  await page.goto(`/${org}/${DS}/settings/config`);
+  const editor = page.getByTestId("replacement-dictionaries-editor");
+  await editor.getByRole("button", { name: "Add dictionary" }).click();
+  await editor.getByLabel("Source value", { exact: true }).fill("Strasse");
+  await editor.getByLabel("Replacement value", { exact: true }).fill("Street");
+  await editor.getByRole("button", { name: "Add mapping" }).click();
+  await editor.getByRole("button", { name: "Use on field" }).click();
+  await expect(page.getByTestId("publish-button")).toContainText("full rebuild");
+  await page.route(`**${endpoint}`, async (route) => {
+    if (route.request().method() === "POST")
+      await route.fulfill({
+        status: 503,
+        json: { code: "internal", message: "temporarily unavailable" },
+      });
+    else await route.continue();
+  });
+  await page.getByTestId("publish-button").click();
+  await expect(page.getByTestId("publish-error")).toContainText("temporarily unavailable");
+  await expect(editor.getByRole("cell", { name: "Strasse", exact: true })).toBeVisible();
+  await page.unroute(`**${endpoint}`);
+  await page.getByTestId("publish-button").click();
+  await expect(page.getByTestId("publish-result")).toContainText("tier C");
+  await expect(page.getByTestId("publish-result")).toContainText("2 jobs enqueued");
+  await page.reload();
+  await expect(editor.getByRole("cell", { name: "Strasse", exact: true })).toBeVisible();
+  await expect(editor).toContainText("address_line · space-separated words");
+  await expect(page.getByTestId("publish-button")).toBeDisabled();
+});
+
+test("viewers can inspect replacement dictionaries but cannot publish configuration", async ({
+  page,
+}) => {
+  await login(page, USERS.viewer);
+  await page.goto(`/${ORG}/${DS}/settings/config`);
+  const editor = page.getByTestId("replacement-dictionaries-editor");
+  await expect(editor).toContainText("Only configuration administrators");
+  await expect(editor.getByRole("button", { name: "Add dictionary" })).toHaveCount(0);
+  const denied = await page.request.post(`/api/orgs/${ORG}/datasets/${DS}/config/versions`, {
+    data: { yaml: "tenant: acme" },
+  });
+  expect(denied.status()).toBe(403);
+});

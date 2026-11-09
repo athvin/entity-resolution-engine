@@ -52,8 +52,8 @@ pub fn rewrite_map_subscript(sql: &str) -> String {
         .into_owned()
 }
 
-/// The two lambda arguments `source_metadata` (er-std) emits — the ONLY lambdas
-/// in the governed generator surface, both generator-fixed shapes. DataFusion
+/// The two lambda arguments `source_metadata` (er-std) emits, both
+/// generator-fixed shapes. DataFusion
 /// cannot plan a lambda, so each is dropped for planning (the enclosing
 /// `list_filter`/`list_transform` stubs are variadic and type-preserving); the
 /// runtime SQL is untouched.
@@ -78,6 +78,54 @@ static METADATA_TRANSFORM_LAMBDA: LazyLock<Regex> = LazyLock::new(|| {
 pub fn rewrite_metadata_lambdas(sql: &str) -> String {
     let sql = METADATA_FILTER_LAMBDA.replace_all(sql, "");
     METADATA_TRANSFORM_LAMBDA.replace_all(&sql, "").into_owned()
+}
+
+/// The named dictionary generator's literal-only CASE lambda. As with metadata
+/// lambdas, planning retains the list input/type; real DuckDB execution tests
+/// prove replacement semantics. Any other lambda shape remains unplannable.
+static DICTIONARY_LAMBDA: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r", lambda word: case word(?: when '(?:[^']|'')*' then '(?:[^']|'')*')+ else word end",
+    )
+    .unwrap()
+});
+
+/// Remove only the fixed, literal-only named dictionary lambda for planning.
+#[must_use]
+pub fn rewrite_dictionary_lambdas(sql: &str) -> String {
+    // Dictionary values are user literals. Lambda-shaped text inside a quoted
+    // value is data and must survive the planning rewrite.
+    let bytes = sql.as_bytes();
+    let mut result = String::with_capacity(sql.len());
+    let mut quote = None;
+    let mut index = 0;
+    let mut copied = 0;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if let Some(delimiter) = quote {
+            if byte == delimiter {
+                if bytes.get(index + 1) == Some(&delimiter) {
+                    index += 2;
+                    continue;
+                }
+                quote = None;
+            }
+        } else if byte == b'\'' || byte == b'"' {
+            quote = Some(byte);
+        } else if byte == b','
+            && sql[index..].starts_with(", lambda word: case word")
+            && let Some(found) = DICTIONARY_LAMBDA.find_at(sql, index)
+            && found.start() == index
+        {
+            result.push_str(&sql[copied..index]);
+            index = found.end();
+            copied = index;
+            continue;
+        }
+        index += 1;
+    }
+    result.push_str(&sql[copied..]);
+    result
 }
 
 /// What the rewrite step removed from a statement, so later passes can check the
@@ -216,5 +264,21 @@ mod tests {
     fn leaves_plain_sql_untouched_by_map_subscript_rewrite() {
         let sql = "select entity_id from lake.main.golden_records";
         assert_eq!(rewrite_map_subscript(sql), sql);
+    }
+
+    #[test]
+    fn dictionary_rewrite_only_accepts_the_generated_literal_case() {
+        let sql = "list_transform(string_split(value, ' '), lambda word: case word when 'O''Way' then 'O''Road' when 'Street' then 'St' else word end)";
+        assert_eq!(
+            rewrite_dictionary_lambdas(sql),
+            "list_transform(string_split(value, ' '))"
+        );
+        for sql in [
+            "select ', lambda word: case word when ''x'' then ''y'' else word end'",
+            "list_transform(xs, lambda word: case word when 'x' then secret_column else word end)",
+            "list_transform(xs, lambda other: other)",
+        ] {
+            assert_eq!(rewrite_dictionary_lambdas(sql), sql);
+        }
     }
 }

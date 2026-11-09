@@ -24,6 +24,65 @@ fn render_col(column: &str) -> String {
 }
 
 #[test]
+fn named_mappings_execute_once_preserve_null_and_escape_values() {
+    use er_config::{DictionaryMode, TransformRule};
+    let session = Session::open_in_memory(SessionOptions::deterministic()).unwrap();
+    let dictionaries = BTreeMap::from([(
+        "streets".into(),
+        BTreeMap::from([
+            ("Strasse".into(), "Street".into()),
+            ("Street".into(), "Avenue".into()),
+            ("O'Way".into(), "O'Road".into()),
+        ]),
+    )]);
+    for (mode, input, expected) in [
+        (DictionaryMode::Value, "'Strasse'", "Street"),
+        (
+            DictionaryMode::Words,
+            "'12 Strasse O''Way'",
+            "12 Street O'Road",
+        ),
+        (
+            DictionaryMode::Words,
+            "'strasse unchanged'",
+            "strasse unchanged",
+        ),
+        (DictionaryMode::Words, "'  Strasse  '", "  Street  "),
+    ] {
+        let rule = TransformRule::NamedDictionary {
+            dictionary: "streets".into(),
+            mode,
+        };
+        let sql = rule.apply_sql_with_dictionaries(input, &dictionaries);
+        assert_eq!(
+            session.query_strings(&format!("select {sql}")).unwrap()[0][0],
+            expected
+        );
+        let nullable = rule.apply_sql_with_dictionaries("NULL::VARCHAR", &dictionaries);
+        assert_eq!(
+            session
+                .query_strings(&format!("select ({nullable}) is null"))
+                .unwrap()[0][0],
+            "true"
+        );
+    }
+    let empty = BTreeMap::from([("empty".into(), BTreeMap::new())]);
+    let rule = TransformRule::NamedDictionary {
+        dictionary: "empty".into(),
+        mode: DictionaryMode::Words,
+    };
+    assert_eq!(rule.apply_sql_with_dictionaries("value", &empty), "value");
+    assert!(
+        session
+            .query_strings(&format!(
+                "select {}",
+                rule.apply_sql_with_dictionaries("'x'", &BTreeMap::new())
+            ))
+            .is_err()
+    );
+}
+
+#[test]
 fn base_10_std_hashes_match_fixture() {
     let config = load_config_str(include_str!("fixtures/test.yaml")).unwrap();
     let session = Session::open_in_memory(SessionOptions::deterministic()).unwrap();

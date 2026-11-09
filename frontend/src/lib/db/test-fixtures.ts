@@ -37,6 +37,9 @@ export const TRIAGE_ORGS = [
   "wizard-dev",
   "wizard-ios",
   "wizard-android",
+  "replacement-dev",
+  "replacement-ios",
+  "replacement-android",
   // The select-all journey resolves its whole 130-review queue in one action,
   // so it gets a private org like every other mutating flow.
   "selectall-dev",

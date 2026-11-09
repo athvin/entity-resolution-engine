@@ -25,6 +25,9 @@ export interface ComparisonSpec {
   tf: boolean;
 }
 
+export type ReplacementDictionaries = Record<string, Record<string, string>>;
+export type ConfigTransforms = Record<string, Record<string, unknown>[]>;
+
 export interface ConfigView {
   tenant: string | null;
   /** The tenant's entity type; "person" when the config omits `entity_type`. */
@@ -33,6 +36,8 @@ export interface ConfigView {
   survivorship: Record<string, string[]>;
   blocking: BlockingRule[];
   comparisons: Record<string, ComparisonSpec>;
+  replacementDictionaries: ReplacementDictionaries;
+  transforms: ConfigTransforms;
   sources: string[];
   /** Columns borrowed from a related record (E11a), by the names a blocking
    *  expr or comparison would use. Real columns by the time the engine scores,
@@ -239,9 +244,43 @@ export function parseConfig(yamlText: string): ConfigView {
     survivorship,
     blocking,
     comparisons,
+    replacementDictionaries: readReplacementDictionaries(root.replacement_dictionaries),
+    transforms: readTransforms(root.transforms),
     sources,
     derivedColumns,
   };
+}
+
+function readReplacementDictionaries(value: unknown): ReplacementDictionaries {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).flatMap(([name, entries]) => {
+      if (typeof entries !== "object" || entries === null || Array.isArray(entries)) return [];
+      const mappings = Object.entries(entries).filter(
+        (entry): entry is [string, string] => typeof entry[1] === "string",
+      );
+      return [[name, Object.fromEntries(mappings)]];
+    }),
+  );
+}
+
+function readTransforms(value: unknown): ConfigTransforms {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value).flatMap(([attribute, rules]) =>
+      Array.isArray(rules)
+        ? [
+            [
+              attribute,
+              rules.filter(
+                (rule): rule is Record<string, unknown> =>
+                  typeof rule === "object" && rule !== null && !Array.isArray(rule),
+              ),
+            ],
+          ]
+        : [],
+    ),
+  );
 }
 
 export interface StudioEdits {
@@ -249,6 +288,8 @@ export interface StudioEdits {
   survivorship?: Record<string, string[]>;
   blocking?: BlockingRule[];
   comparisons?: Record<string, ComparisonSpec>;
+  replacementDictionaries?: ReplacementDictionaries;
+  transforms?: ConfigTransforms;
 }
 
 /** Apply the studio's edits onto the document, byte-preserving everything else.
@@ -285,6 +326,15 @@ export function applyEdits(yamlText: string, edits: StudioEdits): string {
       doc.setIn(["comparisons", column, "tf"], spec.tf);
     }
   }
+  if (edits.replacementDictionaries) {
+    if (Object.keys(edits.replacementDictionaries).length === 0)
+      doc.delete("replacement_dictionaries");
+    else doc.setIn(["replacement_dictionaries"], doc.createNode(edits.replacementDictionaries));
+  }
+  if (edits.transforms) {
+    if (Object.keys(edits.transforms).length === 0) doc.delete("transforms");
+    else doc.setIn(["transforms"], doc.createNode(edits.transforms));
+  }
   return doc.toString();
 }
 
@@ -304,6 +354,7 @@ export function addSourceBlock(
 
 /** Client-side mirror of the server's tier table — display only, never enforced. */
 export function tierForEdits(edits: StudioEdits): "A" | "B" | "C" | null {
+  if (edits.replacementDictionaries || edits.transforms) return "C";
   if (edits.comparisons && Object.keys(edits.comparisons).length > 0) return "C";
   if (edits.blocking) return "B";
   if (edits.thresholds || edits.survivorship) return "A";

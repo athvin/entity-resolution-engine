@@ -3948,6 +3948,69 @@ fn cleanse_rules_change_the_corpus_and_their_absence_changes_nothing() {
     let _ = std::fs::remove_dir_all(&tmp);
 }
 
+#[test]
+fn named_street_dictionary_changes_standardization_and_preview() {
+    if !enabled() {
+        eprintln!("skipping DuckLake e2e (set DEDUPE_E2E_DUCKLAKE=1 to run)");
+        return;
+    }
+    let (session, config, tmp) = standardized_lake("named_streets");
+    let read = || {
+        session.query_strings(&format!(
+        "select record_key, coalesce(addr_street, ''), coalesce(email, '') from {} order by record_key",
+        er_cli::INT_STD_RECORDS
+    )).unwrap()
+    };
+    let baseline = read();
+    let mut changed = config.clone();
+    changed.replacement_dictionaries.insert(
+        "street_types".into(),
+        ["Street", "St", "St.", "Road", "Rd", "Rd."]
+            .into_iter()
+            .map(|word| (word.to_string(), "Boulevard".to_string()))
+            .collect(),
+    );
+    let rule = er_config::TransformRule::NamedDictionary {
+        dictionary: "street_types".into(),
+        mode: er_config::DictionaryMode::Words,
+    };
+    changed
+        .transforms
+        .insert("address_line".into(), vec![rule.clone()]);
+    let preview =
+        er_cli::preview_transform(&session, &changed, "address_line", &[rule], 50).unwrap();
+    assert!(
+        !preview.is_empty(),
+        "the named street list must be visible in preview"
+    );
+    assert!(
+        preview
+            .iter()
+            .all(|(_, before, after)| before != after && after.contains("Boulevard"))
+    );
+    er_cli::run_standardize(&session, &changed, "2026-01-01 00:00:00").unwrap();
+    let after = read();
+    assert_eq!(after.len(), baseline.len());
+    assert_ne!(
+        after, baseline,
+        "the named list must change stored standardized addresses"
+    );
+    assert!(
+        after
+            .iter()
+            .zip(&baseline)
+            .all(|(a, b)| a[0] == b[0] && a[2] == b[2]),
+        "other attributes and record identities are unchanged"
+    );
+    er_cli::run_standardize(&session, &config, "2026-01-01 00:00:00").unwrap();
+    assert_eq!(
+        read(),
+        baseline,
+        "removing the named list restores the original corpus"
+    );
+    let _ = std::fs::remove_dir_all(tmp);
+}
+
 /// E5b: a ONE-member ensemble must be indistinguishable from the single-model
 /// path — same active scores, bit for bit, and the same partition.
 ///

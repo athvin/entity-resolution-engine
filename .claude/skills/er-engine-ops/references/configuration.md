@@ -26,6 +26,7 @@ The current dictionary capabilities are distinct:
 |---|---|---|
 | Nickname synonyms | Config studio's nickname editor; `GET`/`PUT …/lexicon` | Symmetric name pairs used in `name_variants`, not directed replacements |
 | Named ignore-word lists | Config studio's ignore-word editor; `GET`/`PUT …/ignore-words` | Remove whole space-separated tokens, ignoring letter case, when a field's `ignore_words` rule names the list |
+| Named directed replacements | Config studio’s replacement editor; versioned `replacement_dictionaries` and `named_dictionary` transforms | Reuse a map across fields; match a whole value or each space-separated word, case-sensitively |
 | Exact-value replacements | The published configuration's `dictionary` transform | Inline mappings; unmatched values pass through |
 
 Both API suffixes live under `/v1/orgs/{org}/datasets/{ds}`. Viewers may read;
@@ -59,10 +60,43 @@ dataset URL therefore does not promise separate dictionary storage, and saving
 only queues a rebuild for the addressed dataset. Coordinate other affected
 dataset rebuilds when those inputs are shared.
 
-Reusable named directed replacement lists (for example, a street-type map
-referenced by multiple fields) are not implemented. Inline replacement maps
-and the address parser do not imply that capability. The original #522 coverage
-percentage predates #799's ignore-word backend and is not a current estimate.
+Named directed replacements live in the versioned configuration, with no CSV
+input or mutable external identity. Administrators stage mappings and field
+rules together in Config studio, then publish through the existing configuration
+API. Viewers and stewards can inspect them. Changes to either the registry or
+`transforms` are tier C: publishing queues retraining and a full rebuild.
+Contents contribute to `config_hash`; an absent or empty registry preserves the
+hash of an older configuration.
+
+```yaml
+replacement_dictionaries:
+  street_types:
+    Strasse: Street
+    Rd: Road
+transforms:
+  address_line: # use addr_street for an account configuration
+    - op: named_dictionary
+      dictionary: street_types
+      mode: words
+```
+
+The default `mode: value` matches the complete string. `words` matches tokens
+separated by literal spaces, preserving spacing. Matching is case-sensitive and
+does not remove punctuation. A rule replaces each input once: `A: B, B: C`
+turns A into B, while separately ordered rules can intentionally cascade.
+Unmatched values and NULL pass through; an empty replacement removes that token's
+contents. An empty mapping is an identity operation. Dictionary names are ASCII
+identifiers of at most 64 bytes. The loader rejects missing references, empty
+source keys, control characters, more than 128 dictionaries or 2,000 entries per
+dictionary, and values over 1,024 bytes. Word-mode source keys cannot contain
+whitespace. Removing the dictionary's field rules is required before deleting it.
+
+The real DuckLake `named_street_dictionary_changes_standardization_and_preview`
+check proves the street mapping changes preview and stored standardized values,
+leaves record identities and other attributes unchanged, and can be undone by
+restoring the previous config. `pg_publish` verifies both registry-only and
+rule-only edits enqueue tier-C jobs and unknown references are rejected.
+
 The engine check `ignore_words_dictionary_decides_an_account_pair` in
 `er-cli/tests/acct_e2e.rs` proves that `Acme PTY` and `Acme` cluster together
 only when the custom list is loaded; `pg_ignore_words.rs` proves the API's

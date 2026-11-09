@@ -36,6 +36,7 @@ enforce the rule the construct stood for. Removal is not forgiveness.
 | Construct | Rewrite | Rule preserved |
 |---|---|---|
 | `AT (VERSION => $snapshot)` | stripped, snapshot param recorded | **E006** — a lake read is snapshot-pinned unless it declares `pin: live` with a `pin_reason` |
+| Named replacement dictionary lambda | Remove only the generator-fixed literal CASE lambda for planning; retain its list input | none — no schema-bearing references inside the literal map; real DuckDB and DuckLake tests prove runtime replacement semantics |
 | `name := value` | prefix dropped, args become positional | none — DataFusion rejects named args, and positions are all schema inference needs |
 | `MERGE INTO` | split: source query planned; target assignments checked by name/type against the entity | **E005** (no key assignment), **E014** (`updated_at` assigned), **E015** (ON matches `natural_key`) |
 | `RETURNING` | removed | output schema taken from the entity's columns |
