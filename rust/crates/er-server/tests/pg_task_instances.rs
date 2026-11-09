@@ -195,6 +195,81 @@ async fn the_task_ledger_statements_hold_their_contracts() {
 
     // The pod half runs over the attempt channel with the fallback token.
     let app = er_server::app(AppState::with_pg("op-secret".to_string(), dsn.clone()));
+    // The public task ledger must not serialize the storage row's active
+    // credential hash. Exercise the viewer boundary before the attempt finishes
+    // and clears its token, so a null credential cannot make this pass vacuously.
+    assert!(launched.token_hash.as_ref().is_some_and(|h| !h.is_empty()));
+    let resp = app
+        .clone()
+        .oneshot(
+            bearer(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/orgs/acme/api-keys"),
+                "op-secret",
+            )
+            .body(Body::from(r#"{"role":"viewer"}"#))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let viewer_key = body_json(resp).await["key"].as_str().unwrap().to_string();
+    let task_rows = er_entities::task_instance::read::by_job(&client, &org_id, &job.id)
+        .await
+        .unwrap();
+    // Capture the old serialized payload, with exactly the declared internal
+    // field removed. Comparing bytes below pins every other field and value,
+    // without deriving the expectation from the wire converter under test.
+    let mut public_rows = serde_json::to_value(&task_rows).unwrap();
+    for row in public_rows.as_array_mut().unwrap() {
+        row.as_object_mut().unwrap().remove("token_hash");
+    }
+    let expected = serde_json::to_vec(&json!({ "tasks": public_rows })).unwrap();
+    let resp = app
+        .clone()
+        .oneshot(
+            bearer(
+                Request::builder().uri(format!(
+                    "/v1/orgs/acme/datasets/default/jobs/{}/tasks",
+                    job.id
+                )),
+                &viewer_key,
+            )
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    let listed: Value = serde_json::from_slice(&bytes).unwrap();
+    let tasks = listed["tasks"].as_array().unwrap();
+    assert_eq!(tasks.len(), task_rows.len());
+    assert!(
+        tasks.iter().all(|task| task.get("token_hash").is_none()),
+        "the public task list must omit the internal token_hash field"
+    );
+    assert_eq!(bytes.as_ref(), expected.as_slice());
+    let resp = app
+        .clone()
+        .oneshot(
+            bearer(
+                Request::builder().uri(format!(
+                    "/v1/orgs/other/datasets/default/jobs/{}/tasks",
+                    job.id
+                )),
+                &viewer_key,
+            )
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+
     // A wrong token is refused before anything is read.
     let resp = app
         .clone()

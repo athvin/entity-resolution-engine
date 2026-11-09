@@ -4402,7 +4402,13 @@ async fn list_job_tasks(
         return *r;
     }
     match er_entities::task_instance::read::by_job(&client, &org_row.id, &job_id).await {
-        Ok(tasks) => Json(json!({ "tasks": tasks })).into_response(),
+        Ok(tasks) => {
+            let tasks: Vec<_> = tasks
+                .iter()
+                .map(er_entities::task_instance::TaskInstanceWire::from)
+                .collect();
+            Json(json!({ "tasks": tasks })).into_response()
+        }
         Err(e) => pg_err(e),
     }
 }
