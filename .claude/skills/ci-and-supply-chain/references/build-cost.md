@@ -81,7 +81,8 @@ The implemented policy:
 baseline groups with five build-once/archive groups. Include producer and
 transfer time when comparing the maximum shard duration per group. Keep the
 existing method unless the archive arm improves the median by at least 15%,
-all corresponding test counts match and every leg succeeds. Never share an
+all corresponding test identities match and every leg succeeds. Run
+`python3 scripts/ci/archive-verdict.py <run-id>` to compute that verdict. Never share an
 archive across commits or workflow runs.
 
 Targets are sub-five-minute ordinary warm PR feedback and warm merge-to-prod.

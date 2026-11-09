@@ -107,3 +107,23 @@ class GreenBase(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class EmbeddedFrontendInputs(unittest.TestCase):
+    def test_rust_embedded_frontend_files_are_never_exempt(self):
+        import re
+        seen = set()
+        for source in (ROOT/'rust/crates').rglob('*.rs'):
+            for relative in re.findall(r'include_(?:str|bytes)!\(\s*"([^"]+)"\s*\)', source.read_text()):
+                path = (source.parent/relative).resolve()
+                try:
+                    relative = str(path.relative_to(ROOT))
+                except ValueError:
+                    continue
+                if not relative.startswith('frontend/'):
+                    continue
+                seen.add(relative)
+                output = subprocess.check_output(['bash', '-c', '. scripts/ci/detect-paths.sh; detect_classify'],
+                                                 input=relative+'\n', cwd=ROOT, text=True)
+                self.assertIn('code=true', output, relative)
+        self.assertTrue(seen, 'must discover the existing cross-language contract inputs')
