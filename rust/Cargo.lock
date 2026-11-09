@@ -2052,6 +2052,7 @@ dependencies = [
  "assert_cmd",
  "chrono",
  "clap",
+ "csv",
  "dedupe-core",
  "er-compile",
  "er-config",
@@ -2191,13 +2192,6 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_norway",
- "thiserror",
-]
-
-[[package]]
-name = "er-env"
-version = "0.1.0"
-dependencies = [
  "thiserror",
 ]
 

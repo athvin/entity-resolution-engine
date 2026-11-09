@@ -31,6 +31,13 @@ pub enum AssemblyError {
     Empty,
     #[error("duplicate task name {task_id}")]
     DuplicateTaskName { task_id: &'static str },
+    #[error("task {task_id} has an upstream node from another builder")]
+    ForeignUpstream { task_id: &'static str },
+    #[error("task {task_id} has upstream index {upstream} that is not an earlier node")]
+    InvalidUpstream {
+        task_id: &'static str,
+        upstream: usize,
+    },
     #[error("teardown task {task_id} has data inputs")]
     TeardownWithInputs { task_id: &'static str },
     #[error("task {task_id} escalates on OOM from a fixed L class, which has no next class")]
@@ -172,7 +179,15 @@ pub fn assemble(name: String, nodes: Vec<Node>) -> Result<Dag, AssemblyError> {
     }
 
     let mut seen = BTreeSet::new();
-    for n in &nodes {
+    for (index, n) in nodes.iter().enumerate() {
+        for upstream in &n.upstream {
+            if upstream.index() >= index {
+                return Err(AssemblyError::InvalidUpstream {
+                    task_id: n.task_id,
+                    upstream: upstream.index(),
+                });
+            }
+        }
         if !seen.insert(n.task_id) {
             return Err(AssemblyError::DuplicateTaskName { task_id: n.task_id });
         }

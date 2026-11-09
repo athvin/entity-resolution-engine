@@ -105,7 +105,7 @@ pub fn generate(catalog: &Catalog) -> Result<GeneratedTree, ConvertError> {
         if entity.has_language(Language::Rust) {
             tree.push(
                 format!("{RUST_ENTITIES_DIR}/{}.rs", entity.name),
-                rust::emit_module(entity),
+                rust::emit_module(entity)?,
             );
             rust_modules.push(&entity.name);
         }
@@ -386,8 +386,11 @@ fn emit_crate_root(modules: &[&str]) -> String {
 }
 
 /// Emit just the Rust module for one entity (used by tests and the CLI).
-#[must_use]
-pub fn emit_rust_module(entity: &Entity) -> String {
+///
+/// # Errors
+/// Returns an error when the entity requests append for a list column that
+/// duckdb-rs cannot bind.
+pub fn emit_rust_module(entity: &Entity) -> Result<String, ConvertError> {
     rust::emit_module(entity)
 }
 
@@ -562,7 +565,7 @@ mod tests {
         assert!(ddl.contains("PRIMARY KEY (id)"));
         assert!(ddl.contains("detail jsonb NOT NULL DEFAULT '{}'::jsonb"));
         // The struct keeps the plain bigint (i64) — serial is a DDL-only decoration.
-        let module = emit_rust_module(audit);
+        let module = emit_rust_module(audit).expect("emits Rust module");
         assert!(module.contains("pub id: i64,"), "{module}");
     }
 
@@ -580,7 +583,7 @@ mod tests {
 
     #[test]
     fn rust_module_has_struct_and_arrow_schema() {
-        let module = emit_rust_module(&golden());
+        let module = emit_rust_module(&golden()).expect("emits Rust module");
         assert!(module.contains("pub struct GoldenRecord {"));
         assert!(module.contains("pub id: String,"));
         assert!(module.contains("pub given_name: Option<String>,"));
@@ -645,6 +648,25 @@ mod tests {
                 .iter()
                 .any(|p| p.ends_with("entities/readers/GoldenRecord.ts"))
         );
+    }
+
+    #[test]
+    fn append_list_column_returns_an_error_without_a_lint_pass() {
+        let mut entity: Entity = serde_norway::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../entities/raw_record/entity.yaml"
+        )))
+        .unwrap();
+        entity.columns[0].col_type = er_entity_spec::ColumnType::ListVarchar;
+        let catalog = Catalog::from_entities(vec![entity.clone()]).unwrap();
+        assert!(matches!(
+            emit_rust_module(&entity),
+            Err(ConvertError::UnsupportedAppendColumn { column, .. }) if column == "id"
+        ));
+        assert!(matches!(
+            generate(&catalog),
+            Err(ConvertError::UnsupportedAppendColumn { column, .. }) if column == "id"
+        ));
     }
 
     #[test]

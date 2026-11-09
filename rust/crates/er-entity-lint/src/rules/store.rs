@@ -4,7 +4,7 @@
 //! because `--explain` and the generated reference need something to key on, and
 //! because a reviewer citing "the lake default ban" should be able to cite V11.
 
-use er_entity_spec::{Entity, Language, Store};
+use er_entity_spec::{ColumnType, Entity, Language, Store};
 
 use crate::{Code, EntityRule, RuleInfo, Severity, Violation};
 
@@ -63,6 +63,22 @@ const V13_BAD: &str = r"generate:
   stores: [duckdb]
   languages: [rust]
   history: true
+";
+
+const V18_GOOD: &str = r"generate:
+  stores: [duckdb]
+  languages: [rust]
+  append: true
+columns:
+  - { name: payload, type: json, description: 'JSON crosses as text' }
+";
+
+const V18_BAD: &str = r"generate:
+  stores: [duckdb]
+  languages: [rust]
+  append: true
+columns:
+  - { name: tags, type: list<varchar>, description: 'LIST has no binding' }
 ";
 
 /// V11 — a lake entity declares nothing the lake will not enforce.
@@ -218,5 +234,44 @@ impl EntityRule for HistoryIsControlPlaneOnly {
             &entity.name,
             "history: true is control-plane only (lake history is DuckLake snapshots)",
         )]
+    }
+}
+
+/// V18 — generated lake append cannot bind LIST values.
+pub struct AppendHasBindableColumns;
+
+impl EntityRule for AppendHasBindableColumns {
+    fn info(&self) -> RuleInfo {
+        RuleInfo {
+            code: Code("V18"),
+            title: "a lake entity with `append: true` has no `list<varchar>` column",
+            explain: "The generated bulk append binds each row through duckdb-rs, which has no \
+                      LIST parameter binding. A `list<varchar>` column therefore cannot be \
+                      written by the generated append primitive. This rule catches the \
+                      unsupported shape before the generator runs.",
+            conforming: V18_GOOD,
+            violating: V18_BAD,
+            severity: Severity::Error,
+        }
+    }
+
+    fn check(&self, entity: &Entity) -> Vec<Violation> {
+        if !entity.generate.append || !entity.has_store(Store::Duckdb) {
+            return Vec::new();
+        }
+        entity
+            .columns
+            .iter()
+            .filter(|column| column.col_type == ColumnType::ListVarchar)
+            .map(|column| {
+                Violation::new(
+                    &entity.name,
+                    format!(
+                        "append: true cannot bind list<varchar> column {:?} (duckdb-rs has no LIST binding)",
+                        column.name
+                    ),
+                )
+            })
+            .collect()
     }
 }

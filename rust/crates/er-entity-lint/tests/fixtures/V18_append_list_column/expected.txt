@@ -1,0 +1,1 @@
+[V18] thing: append: true cannot bind list<varchar> column "tags" (duckdb-rs has no LIST binding)

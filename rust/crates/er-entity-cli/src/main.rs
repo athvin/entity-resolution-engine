@@ -226,8 +226,13 @@ fn load_erweb_snapshot(root: &Path) -> Result<Option<String>> {
     }
     let mut snapshots: Vec<PathBuf> = fs::read_dir(&meta)
         .with_context(|| format!("reading {}", meta.display()))?
-        .filter_map(Result::ok)
-        .map(|e| e.path())
+        .map(|entry| {
+            entry
+                .with_context(|| format!("reading directory entry in {}", meta.display()))
+                .map(|entry| entry.path())
+        })
+        .collect::<Result<Vec<_>>>()?
+        .into_iter()
         .filter(|p| {
             p.file_name()
                 .and_then(|n| n.to_str())

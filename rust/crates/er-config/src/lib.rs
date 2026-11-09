@@ -29,6 +29,16 @@ pub const TERMINAL_SURVIVORSHIP_RULE: &str = "record_key ASC";
 /// sources and rejected in a user document (S6.1 V11).
 pub const RESERVED_SOURCE_PREFIX: &str = "_";
 
+/// Group tokens are interpolated into generated SQL identifiers such as
+/// `attr_<token>` and `_token_composite`. A safe fragment starts with an ASCII
+/// letter or underscore and continues with ASCII letters, digits, or underscores.
+#[must_use]
+pub fn is_sql_identifier_fragment(token: &str) -> bool {
+    let mut bytes = token.bytes();
+    matches!(bytes.next(), Some(b'a'..=b'z' | b'A'..=b'Z' | b'_'))
+        && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+}
+
 /// The top-level blocks of S6, in document order — the count is the array's own
 /// length, deliberately not restated in prose (it has read "fourteen" since it
 /// held sixteen). [`Config`]'s S6 block fields MUST equal this set; the `entity_type` discriminator (added for the
@@ -1037,6 +1047,12 @@ pub enum ConfigError {
     // a reporter walking `.source()` prints the line/column detail once.
     #[error("config is not valid YAML or does not match S6")]
     Parse(#[from] serde_norway::Error),
+    #[error("{0} must be a finite number")]
+    NonFiniteNumber(String),
+    #[error("source name {0:?} must be nonempty and contain no ':'")]
+    InvalidSourceName(String),
+    #[error("survivorship_groups token {0:?} must match [A-Za-z_][A-Za-z0-9_]*")]
+    InvalidSurvivorshipGroupToken(String),
 }
 
 impl ConfigError {
@@ -1070,7 +1086,96 @@ pub fn normalize(mut config: Config) -> Config {
 /// `config_hash` is computed over. (Full V1–V16 validation is not yet ported.)
 pub fn load_config_str(yaml: &str) -> Result<Config, ConfigError> {
     let config: Config = serde_norway::from_str(yaml)?;
+    if let Some(source) = config
+        .sources
+        .keys()
+        .find(|source| source.is_empty() || source.contains(':'))
+    {
+        return Err(ConfigError::InvalidSourceName(source.clone()));
+    }
+    if let Some(token) = config
+        .survivorship_groups
+        .keys()
+        .find(|token| !is_sql_identifier_fragment(token))
+    {
+        return Err(ConfigError::InvalidSurvivorshipGroupToken(token.clone()));
+    }
+    if let Some(field) = nonfinite_number_field(&config) {
+        return Err(ConfigError::NonFiniteNumber(field));
+    }
     Ok(normalize(config))
+}
+
+/// Return the first nonfinite numeric field with a path an author can find in
+/// the YAML. JSON serialisation maps NaN and infinities to `null`, so this must
+/// run before a document is hashed or stored as a version.
+fn nonfinite_number_field(config: &Config) -> Option<String> {
+    let check = |value: f64, path: &str| (!value.is_finite()).then(|| path.to_string());
+    let check_optional = |value: Option<f64>, path: &str| value.and_then(|v| check(v, path));
+
+    check(config.thresholds.auto_merge, "thresholds.auto_merge")
+        .or_else(|| check(config.thresholds.review_low, "thresholds.review_low"))
+        .or_else(|| {
+            check_optional(
+                config.thresholds.full_agreement_bits,
+                "thresholds.full_agreement_bits",
+            )
+        })
+        .or_else(|| {
+            check_optional(
+                config.thresholds.disagreement_ratio,
+                "thresholds.disagreement_ratio",
+            )
+        })
+        .or_else(|| {
+            config.models.iter().enumerate().find_map(|(i, model)| {
+                check_optional(model.threshold, &format!("models[{i}].threshold"))
+            })
+        })
+        .or_else(|| {
+            config.comparisons.iter().find_map(|(name, comparison)| {
+                check_optional(comparison.weight, &format!("comparisons.{name}.weight"))
+            })
+        })
+        .or_else(|| {
+            config.comparison_groups.iter().find_map(|(name, group)| {
+                check_optional(group.weight, &format!("comparison_groups.{name}.weight"))
+            })
+        })
+        .or_else(|| check(config.training.recall, "training.recall"))
+        .or_else(|| {
+            check(
+                config.clustering.cut_protect_probability,
+                "clustering.cut_protect_probability",
+            )
+        })
+        .or_else(|| {
+            config
+                .data_quality
+                .completeness
+                .iter()
+                .find_map(|(name, value)| {
+                    check(*value, &format!("data_quality.completeness.{name}"))
+                })
+        })
+        .or_else(|| {
+            check(
+                config.data_quality.weights.completeness,
+                "data_quality.weights.completeness",
+            )
+        })
+        .or_else(|| {
+            check(
+                config.data_quality.weights.validity,
+                "data_quality.weights.validity",
+            )
+        })
+        .or_else(|| {
+            check(
+                config.data_quality.weights.freshness,
+                "data_quality.weights.freshness",
+            )
+        })
 }
 
 /// The canonical JSON serialisation S5.2 hashes: sorted keys, compact separators,
@@ -1081,6 +1186,10 @@ pub fn load_config_str(yaml: &str) -> Result<Config, ConfigError> {
 /// The caller passes the NORMALIZED document (what [`load_config_str`] returns).
 #[must_use]
 pub fn canonical_document(config: &Config) -> String {
+    assert!(
+        nonfinite_number_field(config).is_none(),
+        "config contains a nonfinite numeric field"
+    );
     let value = serde_json::to_value(config).expect("Config serialises to JSON");
     serde_json::to_string(&value).expect("JSON value serialises")
 }

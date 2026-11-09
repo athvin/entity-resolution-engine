@@ -1,0 +1,27 @@
+kind: entity
+version: 1
+name: lake_shadow
+relation: orgs_history
+description: "A lake relation with the Postgres history companion's name."
+key: [id]
+natural_key: [record_key]
+generate:
+  stores: [duckdb]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "The row id."
+  - name: record_key
+    type: varchar
+    nullable: false
+    description: "The natural identity."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    description: "When the row was created."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    description: "When the row was updated."

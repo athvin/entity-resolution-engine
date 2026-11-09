@@ -203,20 +203,39 @@ impl IdFactory for DeterministicV7Factory {
 /// (UTC; the inverse of the dispatcher's civil-from-days rendering).
 #[must_use]
 pub fn parse_lake_timestamp_ms(ts: &str) -> Option<u64> {
-    let (date, time) = ts.split_once(' ')?;
-    let mut d = date.split('-');
+    let bytes = ts.as_bytes();
+    if bytes.len() != 19
+        || bytes[4] != b'-'
+        || bytes[7] != b'-'
+        || bytes[10] != b' '
+        || bytes[13] != b':'
+        || bytes[16] != b':'
+        || bytes
+            .iter()
+            .enumerate()
+            .any(|(i, byte)| !matches!(i, 4 | 7 | 10 | 13 | 16) && !byte.is_ascii_digit())
+    {
+        return None;
+    }
     let (y, m, day): (i64, i64, i64) = (
-        d.next()?.parse().ok()?,
-        d.next()?.parse().ok()?,
-        d.next()?.parse().ok()?,
+        ts[0..4].parse().ok()?,
+        ts[5..7].parse().ok()?,
+        ts[8..10].parse().ok()?,
     );
-    let mut c = time.split(':');
     let (hh, mm, ss): (i64, i64, i64) = (
-        c.next()?.parse().ok()?,
-        c.next()?.parse().ok()?,
-        c.next()?.parse().ok()?,
+        ts[11..13].parse().ok()?,
+        ts[14..16].parse().ok()?,
+        ts[17..19].parse().ok()?,
     );
-    if !(1..=12).contains(&m) || !(1..=31).contains(&day) || hh > 23 || mm > 59 || ss > 59 {
+    let leap_year = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
+    let days_in_month = match m {
+        2 if leap_year => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        _ => return None,
+    };
+    if !(1..=days_in_month).contains(&day) || hh > 23 || mm > 59 || ss > 59 {
         return None;
     }
     // Howard Hinnant's days-from-civil (exact, dependency-free).
@@ -430,6 +449,20 @@ mod tests {
         );
         assert_eq!(parse_lake_timestamp_ms("2026-13-01 00:00:00"), None);
         assert_eq!(parse_lake_timestamp_ms("nope"), None);
+        assert!(parse_lake_timestamp_ms("2028-02-29 00:00:00").is_some());
+        for invalid in [
+            "2026-02-29 00:00:00",
+            "2026-02-31 00:00:00",
+            "2026-04-31 00:00:00",
+            "2026-01-01 -1:00:00",
+            "2026-01-01 00:-1:00",
+            "2026-01-01 00:00:-1",
+            "2026-01-01 00:00:00:01",
+            "2026-01-01-01 00:00:00",
+            "-9223372036854775808-01-01 00:00:00",
+        ] {
+            assert_eq!(parse_lake_timestamp_ms(invalid), None, "{invalid}");
+        }
     }
 
     #[test]

@@ -2,11 +2,12 @@
 //! `er-engine-ops` skill as `references/batch-orchestration-design.md`.
 //!
 //! A **task is a pipeline stage**; a **DAG is a job kind**, written in Rust in
-//! the one multicall binary, with typed durable edges so that wiring, arity,
-//! cycles and trigger-rule misuse fail at `cargo build`:
+//! the one multicall binary, with typed durable edges so that wiring, arity and
+//! trigger-rule misuse fail at `cargo build`, and invalid graph edges fail at
+//! assembly:
 //!
-//! - Handles are minted only by the builder, so an edge can only point at an
-//!   already-registered node — a cycle is unwritable.
+//! - Handles are minted only by the builder, and assembly rejects foreign or
+//!   non-topological edges before readiness evaluates the graph.
 //! - `then::<T>(deps)` requires the handle tuple to match `T::Input`
 //!   positionally; a mismatch names both types in the compile error.
 //! - `Output: DurableOutput` means an in-memory type cannot be an edge.

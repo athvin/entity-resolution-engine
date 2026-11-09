@@ -1,21 +1,41 @@
-//! The typed builder (§3.2/§3.3). Handles are minted only here, so an edge can
-//! only point at an already-registered node — a cycle is unwritable, and
-//! registration order is therefore already a topological order.
+//! The typed builder (§3.2/§3.3). Handles are minted only here, and assembly
+//! checks their builder identity and topological position before use.
 
 use std::marker::PhantomData;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::assembly::{AssemblyError, Dag, Node, assemble};
 use crate::policy::TriggerRule;
 use crate::task::{ControlTask, DepList, DurableOutput, Task};
 
-/// A node's position in its DAG (also its topological `seq`).
+static NEXT_BUILDER_ID: AtomicU64 = AtomicU64::new(1);
+
+fn next_builder_id() -> u64 {
+    let mut id = NEXT_BUILDER_ID.load(Ordering::Relaxed);
+    loop {
+        let next = id
+            .checked_add(1)
+            .expect("DAG builder identity space exhausted");
+        match NEXT_BUILDER_ID.compare_exchange_weak(id, next, Ordering::Relaxed, Ordering::Relaxed)
+        {
+            Ok(_) => return id,
+            Err(actual) => id = actual,
+        }
+    }
+}
+
+/// A node's position in its DAG (also its topological `seq`). Its builder
+/// identity prevents a handle from another graph binding by coincident index.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct NodeId(pub(crate) usize);
+pub struct NodeId {
+    pub(crate) index: usize,
+    pub(crate) builder_id: u64,
+}
 
 impl NodeId {
     #[must_use]
     pub fn index(self) -> usize {
-        self.0
+        self.index
     }
 }
 
@@ -63,6 +83,7 @@ impl NodeKind {
 pub struct DagBuilder<S, C> {
     name: String,
     nodes: Vec<Node>,
+    builder_id: u64,
     _s: PhantomData<fn() -> S>,
     _c: PhantomData<fn() -> C>,
 }
@@ -73,13 +94,17 @@ impl<S, C> DagBuilder<S, C> {
         DagBuilder {
             name: name.into(),
             nodes: Vec::new(),
+            builder_id: next_builder_id(),
             _s: PhantomData,
             _c: PhantomData,
         }
     }
 
     fn push(&mut self, node: Node) -> NodeId {
-        let id = NodeId(self.nodes.len());
+        let id = NodeId {
+            index: self.nodes.len(),
+            builder_id: self.builder_id,
+        };
         self.nodes.push(node);
         id
     }
@@ -172,6 +197,15 @@ impl<S, C> DagBuilder<S, C> {
     /// # Errors
     /// The graph breaks an assembly invariant.
     pub fn build(self) -> Result<Dag, AssemblyError> {
+        for node in &self.nodes {
+            for upstream in &node.upstream {
+                if upstream.builder_id != self.builder_id {
+                    return Err(AssemblyError::ForeignUpstream {
+                        task_id: node.task_id,
+                    });
+                }
+            }
+        }
         assemble(self.name, self.nodes)
     }
 }

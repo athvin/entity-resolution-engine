@@ -313,7 +313,7 @@ pub fn n_largest_blocks(
     let key_select = keys
         .iter()
         .enumerate()
-        .map(|(i, k)| format!("\"{k}\" as key_{i}"))
+        .map(|(i, k)| format!("{} as key_{i}", qi(k)))
         .collect::<Vec<_>>()
         .join(", ");
     let key_cols = (0..keys.len())
@@ -329,11 +329,7 @@ pub fn n_largest_blocks(
          order by block_count desc\n\
          limit {n_largest}",
         c = concat.physical,
-        gb = keys
-            .iter()
-            .map(|k| format!("\"{k}\""))
-            .collect::<Vec<_>>()
-            .join(", "),
+        gb = keys.iter().map(|k| qi(k)).collect::<Vec<_>>().join(", "),
     );
     let rows = session.query_strings(&sql)?;
     let n_keys = keys.len();

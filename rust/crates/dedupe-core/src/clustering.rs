@@ -540,14 +540,21 @@ pub fn cluster_using_single_best_links(
         "__dedupe__sbl_representatives",
     )?;
 
+    // Dataset names are values, not identifier fragments. Keep their spelling
+    // in the comparison literal and use stable ordinal aliases for flag names.
     let contains_expr = dup_free
         .iter()
-        .map(|d| format!("max(cast(source_dataset = '{d}' as int)) > 0 as contains_{d}"))
+        .enumerate()
+        .map(|(i, d)| {
+            let literal = d.replace('\'', "''");
+            format!("max(cast(source_dataset = '{literal}' as int)) > 0 as contains_{i}")
+        })
         .collect::<Vec<_>>()
         .join(", ");
     let duplicate_criteria = dup_free
         .iter()
-        .map(|d| format!("(l.contains_{d} and r.contains_{d})"))
+        .enumerate()
+        .map(|(i, _)| format!("(l.contains_{i} and r.contains_{i})"))
         .collect::<Vec<_>>()
         .join(" or ");
 
@@ -654,7 +661,7 @@ fn drop_ties(
 ) -> Result<TableHandle> {
     let in_list = dup_free
         .iter()
-        .map(|d| format!("'{d}'"))
+        .map(|d| format!("'{}'", d.replace('\'', "''")))
         .collect::<Vec<_>>()
         .join(", ");
     let ties_l = materialize_sql(

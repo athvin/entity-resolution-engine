@@ -727,6 +727,11 @@ pub fn config_reference_problems(config: &Config) -> Vec<String> {
     };
     let mut claimed_by: BTreeMap<&str, &str> = BTreeMap::new();
     for (token, group) in &config.survivorship_groups {
+        if !er_config::is_sql_identifier_fragment(token) {
+            problems.push(format!(
+                "survivorship_groups token {token:?} must match [A-Za-z_][A-Za-z0-9_]*"
+            ));
+        }
         if group.fields.len() < 2 {
             // A one-field group is a scalar wearing a group's name: it would
             // generate a lineage row under a token nothing else uses and change
@@ -1068,6 +1073,29 @@ mod tests {
             .survivorship
             .insert("full_name".to_string(), vec!["recency".to_string()]);
         assert_eq!(config_reference_problems(&config), Vec::<String>::new());
+    }
+
+    #[test]
+    fn direct_config_with_unsafe_group_token_is_refused() {
+        let mut config = with_group_block(
+            "survivorship_groups:\n  full_name:\n    fields: [given_name, family_name]\n",
+            &["given_name", "family_name"],
+        );
+        let group = config.survivorship_groups.remove("full_name").unwrap();
+        config
+            .survivorship_groups
+            .insert("full-name".to_string(), group);
+        config
+            .survivorship
+            .insert("full-name".to_string(), vec!["recency".to_string()]);
+        let problems = config_reference_problems(&config);
+        assert!(
+            problems
+                .iter()
+                .any(|problem| problem.contains("survivorship_groups token")
+                    && problem.contains("full-name")),
+            "{problems:?}"
+        );
     }
 
     #[test]

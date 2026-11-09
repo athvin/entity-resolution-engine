@@ -17,7 +17,7 @@ Reading it: the crates divide into the engine (`dedupe-*`), the pipeline stages
 (`er-ingest`, `er-standardize`, `er-match`, `er-reconcile`, `er-golden`), the
 entity framework (`er-entity-*`, `er-entities`, `er-sql-check`), the control
 plane (`er-server`, `er-pg-tls`), the CLIs, and dependency-light primitives
-(`er-ids`, `er-hash`, `er-schema`, `er-errors`, `er-env`, `er-obs`,
+(`er-ids`, `er-hash`, `er-schema`, `er-errors`, `er-obs`,
 `er-versions`) that the rest can depend on without pulling a database into
 their graph.
 
@@ -29,7 +29,7 @@ not carry: `datafusion` lives in `er-sql-check`'s manifest, not the workspace
 table, so it does not appear in the generated pin block at all.
 
 <!-- BEGIN GENERATED: crate-map -->
-**33 crates.** The cargo workspace root is `rust/`, not the repo root.
+**32 crates.** The cargo workspace root is `rust/`, not the repo root.
 
 | Crate | Purpose |
 |---|---|
@@ -45,7 +45,6 @@ table, so it does not appear in the generated pin block at all.
 | `er-entity-gen` | `er-entity-gen` — the emitters |
 | `er-entity-lint` | `er-entity-lint` — the entity-convention rules as a registry |
 | `er-entity-spec` | `er-entity-spec` — the parsed entity YAML model |
-| `er-env` | The one reader of the `ER_*` environment set (port of `src/er/lake/env.py`) |
 | `er-errors` | The S4.7 failure taxonomy and the S4.0 exit-code contract (Rust port of `src/er/errors.py`) |
 | `er-eval` | Pairwise quality metrics — the S8.5 contract (Rust port of `src/er/eval/metrics.py`) |
 | `er-golden` | The golden-record (survivorship) stage (port of the retired dbt models `marts/golden_*` + `macros/survivorship/*`, DesignDoc.md S4.6) |

@@ -58,15 +58,15 @@ pub enum MetricsError {
 /// The ratio conventions, over already-counted pair sets (S8.5).
 #[must_use]
 pub fn pairwise_metrics_from_counts(tp: u64, fp: u64, r#fn: u64) -> PairwiseMetrics {
-    let precision = if tp + fp == 0 {
+    let precision = if tp == 0 && fp == 0 {
         1.0
     } else {
-        tp as f64 / (tp + fp) as f64
+        tp as f64 / (u128::from(tp) + u128::from(fp)) as f64
     };
-    let recall = if tp + r#fn == 0 {
+    let recall = if tp == 0 && r#fn == 0 {
         1.0
     } else {
-        tp as f64 / (tp + r#fn) as f64
+        tp as f64 / (u128::from(tp) + u128::from(r#fn)) as f64
     };
     let f1 = if precision + recall == 0.0 {
         0.0
@@ -212,6 +212,21 @@ mod tests {
 
         let be = pairwise_metrics(&BTreeSet::new(), &BTreeSet::new(), &BTreeSet::new()).unwrap();
         assert!(approx(be.precision, 1.0) && approx(be.recall, 1.0) && approx(be.f1, 1.0));
+    }
+
+    #[test]
+    fn count_denominators_do_not_overflow() {
+        for (tp, fp, missed) in [(u64::MAX, 1, u64::MAX), (1, u64::MAX, 1), (0, u64::MAX, 0)] {
+            let metrics = pairwise_metrics_from_counts(tp, fp, missed);
+            for value in [metrics.precision, metrics.recall, metrics.f1] {
+                assert!(value.is_finite() && (0.0..=1.0).contains(&value));
+            }
+        }
+        let metrics = pairwise_metrics_from_counts(u64::MAX, u64::MAX, u64::MAX);
+        assert_eq!(
+            (metrics.precision, metrics.recall, metrics.f1),
+            (0.5, 0.5, 0.5)
+        );
     }
 
     // test_partition_shapes: all-singletons vs all-in-one over 5 records / 4 true pairs.

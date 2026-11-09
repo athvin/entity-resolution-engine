@@ -438,7 +438,7 @@ pub fn resolve_record(
     // against, which is a legitimate answer rather than a failure.
     let corpus = match session.register_lake_table("int_std_records", "int_std_records") {
         Ok(handle) => handle,
-        Err(e) if is_missing_table(&e.to_string()) => {
+        Err(e) if is_missing_table(&e.to_string(), "int_std_records") => {
             return Ok(ResolveResult {
                 candidates: Vec::new(),
                 decision: "reject".to_string(),
@@ -2013,7 +2013,7 @@ fn ignore_words_fingerprint(rows: &[(String, String)]) -> String {
 pub fn prior_fingerprint(session: &Session) -> Result<Option<er_versions::RunFingerprint>> {
     let rows = match er_entities::run::read::latest_fingerprint(session.connection()) {
         Ok(rows) => rows,
-        Err(e) if is_missing_table(&e.to_string()) => return Ok(None),
+        Err(e) if is_missing_table(&e.to_string(), "runs") => return Ok(None),
         Err(e) => return Err(e.into()),
     };
     Ok(rows
@@ -2846,7 +2846,7 @@ fn load_active_assertions(session: &Session) -> Result<Vec<Assertion>> {
     let rows = match er_entities::assertion::read::active_pairs_live(session.connection()) {
         Ok(rows) => rows,
         Err(e) => {
-            if is_missing_table(&e.to_string()) {
+            if is_missing_table(&e.to_string(), "assertions") {
                 return Ok(Vec::new());
             }
             return Err(e.into());
@@ -2888,7 +2888,7 @@ fn load_overlay_keys(session: &Session, kind: &str) -> Result<BTreeSet<String>> 
     match er_entities::record_overlay::read::active_keys_by_kind_live(session.connection(), kind) {
         Ok(rows) => Ok(rows.into_iter().map(|r| r.record_key).collect()),
         Err(e) => {
-            if is_missing_table(&e.to_string()) {
+            if is_missing_table(&e.to_string(), "record_overlays") {
                 Ok(BTreeSet::new())
             } else {
                 Err(e.into())
@@ -3691,10 +3691,10 @@ pub fn run_golden(session: &Session, config: &Config, run_at: &str) -> Result<()
 /// Whether a lake query error is "the table isn't there" (vs a real failure):
 /// the DuckDB/DuckLake surface for a relation that the pipeline/drain hasn't
 /// created yet. Lets readers treat an absent relation as empty.
-fn is_missing_table(err: &str) -> bool {
-    err.contains("does not exist")
-        || err.contains("Catalog Error")
-        || err.contains("Table with name")
+fn is_missing_table(err: &str, relation: &str) -> bool {
+    err.contains(&format!(
+        "Catalog Error: Table with name {relation} does not exist"
+    ))
 }
 
 /// The lake relations `doctor` inspects, by bare name, in pipeline order. The
@@ -3747,7 +3747,7 @@ pub fn doctor(session: &Session, config: &Config) -> Result<serde_json::Value> {
         Ok(rows) => rows
             .first()
             .map(|r| serde_json::json!({ "run_id": r.id, "status": r.status, "mode": r.mode })),
-        Err(e) if is_missing_table(&e.to_string()) => None,
+        Err(e) if is_missing_table(&e.to_string(), "runs") => None,
         Err(e) => return Err(e.into()),
     };
 
@@ -4553,7 +4553,7 @@ pub fn stage_correct_init(
     run_at: &str,
 ) -> Result<(String, String)> {
     let latest = er_entities::run::read::latest_live(session.connection()).map_err(|e| {
-        if is_missing_table(&e.to_string()) {
+        if is_missing_table(&e.to_string(), "runs") {
             anyhow::anyhow!("no prior run to correct; run a full run first")
         } else {
             e.into()
@@ -4998,6 +4998,27 @@ fn stage_match_labels(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn prior_fingerprint_only_treats_the_absent_runs_relation_as_empty() {
+        assert!(!is_missing_table(
+            "Catalog Error: Scalar Function with name missing_fn does not exist!",
+            "runs"
+        ));
+        let session = Session::open_in_memory(SessionOptions::deterministic()).unwrap();
+        session.execute_batch("ATTACH ':memory:' AS lake").unwrap();
+        assert!(prior_fingerprint(&session).unwrap().is_none());
+
+        session
+            .execute_batch(
+                "CREATE TABLE \"lake\".\"main\".\"dependency\" (id VARCHAR); \
+                 CREATE VIEW \"lake\".\"main\".\"runs\" AS SELECT * FROM \"lake\".\"main\".\"dependency\"; \
+                 DROP TABLE \"lake\".\"main\".\"dependency\";",
+            )
+            .unwrap();
+        let error = prior_fingerprint(&session).unwrap_err();
+        assert!(format!("{error:#}").contains("dependency"), "{error:#}");
+    }
 
     fn report_at(bits: f64) -> TrainReport {
         TrainReport {

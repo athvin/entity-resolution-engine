@@ -26,6 +26,10 @@ pub const RAW_RECORDS_COLUMNS: [&str; 11] = [
 pub const TOMBSTONE_CONTENT_HASH: &str =
     "0000000000000000000000000000000000000000000000000000000000000000";
 
+// Match the generated append primitive's chunk size without retaining every
+// transport row from a delivery in memory at once.
+const APPEND_BATCH_ROWS: usize = 500;
+
 /// The unmapped delivered fields, sorted (S4.2): the delivered keys minus the
 /// mapped canonical columns, the record-id column, the updated-at column, and the
 /// reserved `persona_id`. This is both `source_metadata`'s retained set and the
@@ -92,10 +96,43 @@ pub fn land_base_delivery(
     ingest_batch_id: &str,
     ingested_at: &str,
 ) -> anyhow::Result<usize> {
+    // A generated append issues one INSERT per chunk. Keep all of a delivery
+    // inside one lake transaction so a later chunk cannot leave earlier rows.
+    let tx = session.connection().unchecked_transaction()?;
+    let landed = append_base_delivery(
+        session,
+        source,
+        spec,
+        csv_text,
+        ingest_batch_id,
+        ingested_at,
+    )?;
+    tx.commit()?;
+    Ok(landed)
+}
+
+fn append_base_delivery(
+    session: &Session,
+    source: &str,
+    spec: &SourceSpec,
+    csv_text: &str,
+    ingest_batch_id: &str,
+    ingested_at: &str,
+) -> anyhow::Result<usize> {
+    // A direct caller can supply a source without passing through config
+    // parsing. Check it even for an empty delivery, before any row is landed.
+    er_ids::record_key(source, "probe")?;
     let mut reader = csv::Reader::from_reader(csv_text.as_bytes());
     let headers: Vec<String> = reader.headers()?.iter().map(str::to_string).collect();
+    let mut seen_headers = BTreeSet::new();
+    for header in &headers {
+        if !seen_headers.insert(header.as_str()) {
+            anyhow::bail!("duplicate CSV header `{header}`");
+        }
+    }
 
-    let mut rows: Vec<er_entities::raw_record::AppendRow> = Vec::new();
+    let mut rows: Vec<er_entities::raw_record::AppendRow> = Vec::with_capacity(APPEND_BATCH_ROWS);
+    let mut landed = 0;
     for record in reader.records() {
         let record = record?;
         let mut payload: BTreeMap<String, Option<String>> = BTreeMap::new();
@@ -112,6 +149,7 @@ pub fn land_base_delivery(
                 anyhow::anyhow!("row missing record-id column {}", spec.record_id_column)
             })?
             .to_string();
+        er_ids::record_key(source, &source_record_id)?;
         let content_hash = row_content_hash(&payload, spec);
         let json_map: serde_json::Map<String, serde_json::Value> = payload
             .iter()
@@ -139,10 +177,18 @@ pub fn land_base_delivery(
             created_at: ingested_at.to_string(),
             updated_at: ingested_at.to_string(),
         });
+        if rows.len() == APPEND_BATCH_ROWS {
+            landed += er_entities::raw_record::append_rows(session.connection(), &rows)
+                .map_err(|e| anyhow::anyhow!("append into raw_records: {e}"))?;
+            rows.clear();
+        }
     }
 
-    er_entities::raw_record::append_rows(session.connection(), &rows)
-        .map_err(|e| anyhow::anyhow!("append into raw_records: {e}"))
+    if !rows.is_empty() {
+        landed += er_entities::raw_record::append_rows(session.connection(), &rows)
+            .map_err(|e| anyhow::anyhow!("append into raw_records: {e}"))?;
+    }
+    Ok(landed)
 }
 
 /// Land a full-refresh delivery (S4.1.1, `--full-refresh-keys`): land the
@@ -164,7 +210,10 @@ pub fn land_full_refresh(
     ingest_batch_id: &str,
     ingested_at: &str,
 ) -> anyhow::Result<usize> {
-    let landed = land_base_delivery(
+    // Omitted-key discovery must see this delivery's rows, and the resulting
+    // tombstones must commit with them. A failure in either phase rolls back.
+    let tx = session.connection().unchecked_transaction()?;
+    let landed = append_base_delivery(
         session,
         source,
         spec,
@@ -182,9 +231,10 @@ pub fn land_full_refresh(
     )
     .map_err(|e| anyhow::anyhow!("full-refresh omitted-key query: {e}"))?;
     if !omitted.is_empty() {
-        let rows: Vec<er_entities::raw_record::AppendRow> = omitted
-            .into_iter()
-            .map(|r| er_entities::raw_record::AppendRow {
+        let mut rows = Vec::with_capacity(APPEND_BATCH_ROWS);
+        for r in omitted {
+            er_ids::record_key(source, &r.source_record_id)?;
+            rows.push(er_entities::raw_record::AppendRow {
                 id: er_ids::natural_id(
                     "raw_records",
                     &[
@@ -204,11 +254,19 @@ pub fn land_full_refresh(
                 ingested_at: ingested_at.to_string(),
                 created_at: ingested_at.to_string(),
                 updated_at: ingested_at.to_string(),
-            })
-            .collect();
-        er_entities::raw_record::append_rows(session.connection(), &rows)
-            .map_err(|e| anyhow::anyhow!("append tombstones into raw_records: {e}"))?;
+            });
+            if rows.len() == APPEND_BATCH_ROWS {
+                er_entities::raw_record::append_rows(session.connection(), &rows)
+                    .map_err(|e| anyhow::anyhow!("append tombstones into raw_records: {e}"))?;
+                rows.clear();
+            }
+        }
+        if !rows.is_empty() {
+            er_entities::raw_record::append_rows(session.connection(), &rows)
+                .map_err(|e| anyhow::anyhow!("append tombstones into raw_records: {e}"))?;
+        }
     }
+    tx.commit()?;
     Ok(landed)
 }
 

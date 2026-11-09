@@ -109,7 +109,7 @@ pub fn build_lake_stage_catalog(entities: &Catalog, account: bool) -> SchemaCata
 mod tests {
     use super::*;
     use ff_analysis::sqlparser::dialect::DuckDbDialect;
-    use ff_analysis::{FeatherFlowProvider, FunctionRegistry};
+    use ff_analysis::{FeatherFlowProvider, FunctionRegistry, UserFunctionStub};
     use std::path::PathBuf;
 
     fn entities_catalog() -> Catalog {
@@ -183,7 +183,14 @@ mod tests {
             std::thread::Builder::new()
                 .stack_size(16 * 1024 * 1024)
                 .spawn_scoped(scope, || {
-                    let registry = FunctionRegistry::new();
+                    // DuckDB's `error(varchar)` makes invalid record-key
+                    // components fail during standardization. Feather-Flow's
+                    // built-in function catalog does not model it yet; this
+                    // plan-only stub preserves its varchar expression shape.
+                    let error =
+                        UserFunctionStub::new("error", vec!["VARCHAR".to_string()], "VARCHAR")
+                            .expect("nonempty function name");
+                    let registry = FunctionRegistry::with_user_functions(&[error], &[]);
                     let provider = FeatherFlowProvider::new(catalog, &registry);
                     let dialect = DuckDbDialect {};
                     let rewritten = crate::rewrite_lake(sql);
@@ -462,6 +469,56 @@ mod tests {
                 lineage_cols.contains(&required.to_string()),
                 "acct_golden_lineage output missing {required}: {lineage_cols:?}"
             );
+        }
+    }
+
+    #[test]
+    fn valid_person_and_account_group_tokens_plan_in_lineage_sql() {
+        for (account, fields, token) in [
+            (false, ["given_name", "family_name"], "full_name"),
+            (true, ["company_name", "domain"], "company_domain"),
+        ] {
+            let mut config = if account {
+                acct_config()
+            } else {
+                er_config::load_config_str(TEST_CONFIG).unwrap()
+            };
+            for field in fields {
+                config.survivorship.remove(field);
+            }
+            config.survivorship.insert(
+                token.to_string(),
+                vec!["recency".to_string(), "record_key ASC".to_string()],
+            );
+            config.survivorship_groups.insert(
+                token.to_string(),
+                er_config::SurvivorshipGroup {
+                    fields: fields.map(str::to_string).to_vec(),
+                    controlling: None,
+                },
+            );
+            let sql = if account {
+                er_golden::acct_golden_lineage_sql(
+                    &config,
+                    "lake.main.int_std_records",
+                    "lake.main.entity_membership",
+                    "lake.main.entities",
+                    "2000-01-01 00:00:00",
+                )
+            } else {
+                er_golden::golden_lineage_sql(
+                    &config,
+                    "lake.main.int_std_records",
+                    "lake.main.entity_membership",
+                    "lake.main.entities",
+                    "2000-01-01 00:00:00",
+                )
+            }
+            .unwrap();
+            assert!(sql.contains(&format!("attr_{token}")));
+            let catalog = build_lake_stage_catalog(&entities_catalog(), account);
+            let columns = plan_stage(&catalog, &sql);
+            assert!(columns.contains(&"attribute".to_string()));
         }
     }
 }

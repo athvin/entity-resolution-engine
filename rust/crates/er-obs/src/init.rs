@@ -390,17 +390,15 @@ pub fn init(role: Role) -> Guard {
     // about them has to become a layer of it — so the failure path can simply
     // log, and does not need `Outcome`'s report-it-later dance.
     //
-    // Same endpoint as the spans: the collector's `otlp` receiver serves all
-    // signals on 4318, and the plan's one-store decision means there is nothing
-    // to point elsewhere.
-    let meters = match crate::traces_endpoint() {
+    // Resolve metrics independently so a custom traces URL is never used for
+    // metric batches. The general OTLP base still defaults both to one receiver.
+    let meters = match crate::otlp::metrics_endpoint() {
         Some(endpoint) => {
-            let signal = endpoint.replace("/v1/traces", "/v1/metrics");
-            match crate::otlp::meter_provider_for(role, &signal, crate::flush_timeout()) {
+            match crate::otlp::meter_provider_for(role, &endpoint, crate::flush_timeout()) {
                 Ok(provider) => {
                     opentelemetry::global::set_meter_provider(provider.clone());
                     crate::metrics::install_from_global();
-                    tracing::debug!(endpoint = %signal, role = role.as_str(), "OTLP metric export installed");
+                    tracing::debug!(endpoint = %endpoint, role = role.as_str(), "OTLP metric export installed");
                     Some(provider)
                 }
                 Err(error) => {

@@ -53,3 +53,30 @@ fn acct_standardization_normalizes_company_domain_phone() {
     assert_eq!(rows[1][1], "beta", "company_name_norm strips ', LLC'");
     assert_eq!(rows[1][2], "beta.io");
 }
+
+#[test]
+fn account_standardization_rejects_invalid_record_id() {
+    let config = load_config_str(ACCT_CONFIG).unwrap();
+    for record_id in ["", "a:b"] {
+        let session = Session::open_in_memory(SessionOptions::deterministic()).unwrap();
+        session
+            .execute_batch(&format!(
+                "create table raw as select * from (values \
+                 ('crm', '{record_id}', '{{}}'::json, 'h1', 'b1', timestamp '2026-01-01 00:00:00') \
+                 ) as t(source_system, source_record_id, payload, content_hash, ingest_batch_id, ingested_at)"
+            ))
+            .unwrap();
+        let error = build_acct_int_std_records(
+            &session,
+            &config,
+            "raw",
+            "acct_int_std",
+            "2026-01-01 00:00:00",
+        )
+        .unwrap_err();
+        assert!(
+            format!("{error:#}").contains("source_system and source_record_id must be nonempty"),
+            "{record_id:?}: {error:#}"
+        );
+    }
+}

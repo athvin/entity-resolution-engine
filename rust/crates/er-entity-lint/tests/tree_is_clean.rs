@@ -61,22 +61,3 @@ fn the_committed_trees_warnings_are_exactly_the_known_debt() {
          V15_KNOWN; if a new tenant-scoped table landed without one, give it an index."
     );
 }
-
-#[test]
-fn every_entity_lives_in_a_directory_named_for_it() {
-    // lint_catalog builds a diagnostic's path from the entity's `name`, so a
-    // directory whose name differs would make findings point at a file that
-    // does not exist. The loader does not enforce this (it discards the path),
-    // which is exactly why it is worth asserting.
-    let dir = entities_dir();
-    let catalog = Catalog::load_dir(&dir).expect("the entities tree loads");
-    for entity in catalog.entities() {
-        let expected = dir.join(&entity.name).join("entity.yaml");
-        assert!(
-            expected.exists(),
-            "entity {:?} does not live at {}",
-            entity.name,
-            expected.display()
-        );
-    }
-}

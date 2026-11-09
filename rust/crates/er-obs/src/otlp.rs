@@ -157,6 +157,17 @@ pub fn traces_endpoint() -> Option<String> {
     )
 }
 
+/// The metrics endpoint, resolved independently from the traces endpoint.
+/// A signal-specific URL is used verbatim; otherwise the metrics path is
+/// appended to the general OTLP base.
+#[must_use]
+pub fn metrics_endpoint() -> Option<String> {
+    resolve_metrics_endpoint(
+        non_empty("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT").as_deref(),
+        non_empty("OTEL_EXPORTER_OTLP_ENDPOINT").as_deref(),
+    )
+}
+
 /// The endpoint rule, separated from the environment so it can be tested.
 ///
 /// The workspace denies `unsafe_code` and `std::env::set_var` is unsafe as of
@@ -165,10 +176,18 @@ pub fn traces_endpoint() -> Option<String> {
 /// that mutates process-wide state is a test whose result depends on what ran
 /// beside it.
 fn resolve_traces_endpoint(signal: Option<&str>, base: Option<&str>) -> Option<String> {
+    resolve_endpoint(signal, base, "traces")
+}
+
+fn resolve_metrics_endpoint(signal: Option<&str>, base: Option<&str>) -> Option<String> {
+    resolve_endpoint(signal, base, "metrics")
+}
+
+fn resolve_endpoint(signal: Option<&str>, base: Option<&str>, path: &str) -> Option<String> {
     if let Some(signal) = signal {
         return Some(signal.to_string());
     }
-    Some(format!("{}/v1/traces", base?.trim_end_matches('/')))
+    Some(format!("{}/v1/{path}", base?.trim_end_matches('/')))
 }
 
 /// A variable's value, with blank treated as absent.
@@ -518,7 +537,10 @@ pub(crate) fn tracer(provider: &SdkTracerProvider) -> opentelemetry_sdk::trace::
 
 #[cfg(test)]
 mod tests {
-    use super::{CountingExporter, CountingProcessor, clean, parse_secs, resolve_traces_endpoint};
+    use super::{
+        CountingExporter, CountingProcessor, clean, parse_secs, resolve_metrics_endpoint,
+        resolve_traces_endpoint,
+    };
 
     /// A `SpanExporter` that never leaves the test: it counts the spans it
     /// was handed and answers with the configured outcome.
@@ -689,6 +711,10 @@ mod tests {
             resolve_traces_endpoint(None, Some("http://collector:4318")).as_deref(),
             Some("http://collector:4318/v1/traces")
         );
+        assert_eq!(
+            resolve_metrics_endpoint(None, Some("http://collector:4318")).as_deref(),
+            Some("http://collector:4318/v1/metrics")
+        );
     }
 
     #[test]
@@ -710,6 +736,13 @@ mod tests {
                 .as_deref(),
             Some("http://other:4318/custom")
         );
+        assert_eq!(
+            resolve_metrics_endpoint(Some("http://metrics:4318/custom"), Some("http://base:4318"))
+                .as_deref(),
+            Some("http://metrics:4318/custom")
+        );
+        // A traces-only override supplies no metrics endpoint.
+        assert_eq!(resolve_metrics_endpoint(None, None), None);
     }
 
     #[test]

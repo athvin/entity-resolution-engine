@@ -137,3 +137,38 @@ fn base_10_std_hashes_match_fixture() {
             .join("\n")
     );
 }
+
+#[test]
+fn direct_standardization_rejects_colliding_record_key_components() {
+    let mut config = load_config_str(include_str!("fixtures/test.yaml")).unwrap();
+    let spec = config.sources["crm"].clone();
+    config.sources.clear();
+    config.sources.insert("a:b".to_string(), spec.clone());
+    config.sources.insert("a".to_string(), spec);
+    assert_eq!(format!("{}:{}", "a:b", "c"), format!("{}:{}", "a", "b:c"));
+
+    let session = Session::open_in_memory(SessionOptions::deterministic()).unwrap();
+    session
+        .execute_batch(
+            "create table raw as select * from (values \
+             ('a:b', 'c', '{}'::json, 'h1', 'b1', timestamp '2026-01-01 00:00:00'), \
+             ('a', 'b:c', '{}'::json, 'h2', 'b1', timestamp '2026-01-01 00:00:00') \
+             ) as t(source_system, source_record_id, payload, content_hash, ingest_batch_id, ingested_at); \
+             create table nickname_variants(variant_a varchar, variant_b varchar, active boolean)",
+        )
+        .unwrap();
+
+    let error = build_int_std_records(
+        &session,
+        &config,
+        "raw",
+        "nickname_variants",
+        "int_std",
+        "2026-01-01 00:00:00",
+    )
+    .unwrap_err();
+    assert!(
+        format!("{error:#}").contains("source_system and source_record_id must be nonempty"),
+        "{error:#}"
+    );
+}

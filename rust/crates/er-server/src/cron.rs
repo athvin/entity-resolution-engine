@@ -107,19 +107,23 @@ fn parse_field(spec: &str, field: &'static str, min: u32, max: u32) -> Result<Fi
             let v: u32 = range_part.parse().map_err(|_| bad())?;
             (v, v)
         };
-        // Sunday is both 0 and 7 in cron; fold 7 down so the mask stays 0-6.
-        let (lo, hi) = if field == "day-of-week" {
-            (if lo == 7 { 0 } else { lo }, if hi == 7 { 0 } else { hi })
-        } else {
-            (lo, hi)
-        };
-        if lo < min || hi > max {
+        // Expand ranges before folding 7 to Sunday, or `1-7` loses its end.
+        let highest = if field == "day-of-week" { 7 } else { max };
+        if lo < min || hi > highest {
             return Err(out_of_range());
         }
         let mut v = lo;
-        while v <= hi {
-            mask |= 1u64 << (v - min);
-            v += step;
+        loop {
+            let day = if field == "day-of-week" && v == 7 {
+                0
+            } else {
+                v
+            };
+            mask |= 1u64 << (day - min);
+            match v.checked_add(step) {
+                Some(next) if next <= hi => v = next,
+                _ => break,
+            }
         }
     }
     if mask == 0 {
@@ -255,6 +259,34 @@ mod tests {
         let zero = Cron::parse("0 3 * * 0").unwrap();
         let seven = Cron::parse("0 3 * * 7").unwrap();
         assert_eq!(zero, seven, "7 must fold to Sunday");
+
+        let all_days = Cron::parse("0 3 * * 0-7").unwrap();
+        let monday_through_sunday = Cron::parse("0 3 * * 1-7").unwrap();
+        for day in 0..=6 {
+            assert!(all_days.matches(0, 3, 2, 11, day), "weekday {day}");
+            assert!(
+                monday_through_sunday.matches(0, 3, 2, 11, day),
+                "weekday {day}"
+            );
+        }
+
+        let alternate_days = Cron::parse("0 3 * * 1-7/2").unwrap();
+        for day in [0, 1, 3, 5] {
+            assert!(alternate_days.matches(0, 3, 2, 11, day));
+        }
+        for day in [2, 4, 6] {
+            assert!(!alternate_days.matches(0, 3, 2, 11, day));
+        }
+    }
+
+    #[test]
+    fn large_steps_terminate_without_overflow() {
+        let schedule = Cron::parse("0 0 */4294967295 * *").unwrap();
+        assert!(schedule.matches(0, 0, 1, 1, 1));
+        assert!(!schedule.matches(0, 0, 2, 1, 1));
+        let sunday = Cron::parse("0 0 * * 0-7/4294967295").unwrap();
+        assert!(sunday.matches(0, 0, 1, 1, 0));
+        assert!(!sunday.matches(0, 0, 1, 1, 1));
     }
 
     #[test]

@@ -1,5 +1,6 @@
 mod args;
 
+use std::collections::BTreeSet;
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
@@ -115,6 +116,14 @@ fn maintenance(a: MaintenanceArgs) -> Result<()> {
     if a.source.catalog.is_none() {
         bail!("maintenance requires --catalog (a DuckLake catalog)");
     }
+    let set_options: Vec<(&str, &str)> = a
+        .set_options
+        .iter()
+        .map(|kv| {
+            kv.split_once('=')
+                .with_context(|| format!("--set must be KEY=VALUE, got `{kv}`"))
+        })
+        .collect::<Result<_>>()?;
     let session = open_session(&a.source)?;
 
     if a.list_options {
@@ -125,26 +134,27 @@ fn maintenance(a: MaintenanceArgs) -> Result<()> {
     }
 
     // Apply catalog options first (they steer CHECKPOINT's expire/merge steps).
+    let mut ran: Vec<String> = Vec::new();
     if let Some(v) = &a.expire_older_than {
         session.set_lake_option("expire_older_than", v)?;
+        ran.push("set:expire_older_than".into());
     }
     if let Some(v) = &a.delete_older_than {
         session.set_lake_option("delete_older_than", v)?;
+        ran.push("set:delete_older_than".into());
     }
     if let Some(v) = &a.target_file_size {
         session.set_lake_option("target_file_size", v)?;
+        ran.push("set:target_file_size".into());
     }
-    for kv in &a.set_options {
-        let (k, v) = kv
-            .split_once('=')
-            .with_context(|| format!("--set must be KEY=VALUE, got `{kv}`"))?;
+    for (k, v) in set_options {
         session.set_lake_option(k, v)?;
+        ran.push(format!("set:{k}"));
     }
 
     let before = session.lake_table_stats()?;
 
     // Individual steps (skipped by a full checkpoint, which runs them all).
-    let mut ran: Vec<String> = Vec::new();
     if a.checkpoint {
         session.checkpoint_lake()?;
         ran.push("checkpoint".into());
@@ -179,7 +189,8 @@ fn maintenance(a: MaintenanceArgs) -> Result<()> {
         bail!(
             "no maintenance action requested; pass --checkpoint or one of \
              --flush-inlined / --merge-adjacent / --rewrite-table / \
-             --cleanup-old-files / --delete-orphaned-files (or --list-options)"
+             --cleanup-old-files / --delete-orphaned-files / --set \
+             (or --list-options)"
         );
     }
 
@@ -293,11 +304,11 @@ fn resolve_inputs(session: &Session, source: &InputSource) -> Result<Vec<(TableH
             String::new(),
         )]);
     }
-    let mut out = Vec::new();
-    for (i, spec) in source.datasets.iter().enumerate() {
-        let (name, reference) = spec
-            .split_once('=')
-            .with_context(|| format!("--dataset must be NAME=REF, got `{spec}`"))?;
+    // Check all names before registering any input. Reusing a name makes
+    // overlapping source IDs collapse into one composite record identity.
+    let datasets = parse_dataset_specs(&source.datasets)?;
+    let mut out = Vec::with_capacity(datasets.len());
+    for (i, (name, reference)) in datasets.into_iter().enumerate() {
         let handle = register_ref(
             session,
             reference,
@@ -307,6 +318,25 @@ fn resolve_inputs(session: &Session, source: &InputSource) -> Result<Vec<(TableH
         out.push((handle, name.to_string()));
     }
     Ok(out)
+}
+
+fn parse_dataset_specs(specs: &[String]) -> Result<Vec<(&str, &str)>> {
+    let mut names = BTreeSet::new();
+    specs
+        .iter()
+        .map(|spec| {
+            let (name, reference) = spec
+                .split_once('=')
+                .with_context(|| format!("--dataset must be NAME=REF, got `{spec}`"))?;
+            if name.trim().is_empty() {
+                bail!("--dataset name must not be empty in `{spec}`");
+            }
+            if !names.insert(name) {
+                bail!("duplicate --dataset name `{name}`; each input needs a distinct name");
+            }
+            Ok((name, reference))
+        })
+        .collect()
 }
 
 fn build_linker<'a>(
@@ -677,4 +707,41 @@ fn write_parquet(session: &Session, table: &TableHandle, path: &str) -> Result<(
         table.physical
     ))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_dataset_specs;
+
+    #[test]
+    fn dataset_names_are_nonempty_and_unique_before_registration() {
+        for specs in [
+            vec!["=first.csv".to_string()],
+            vec!["  =first.csv".to_string()],
+        ] {
+            let error = parse_dataset_specs(&specs).unwrap_err();
+            assert!(error.to_string().contains("name must not be empty"));
+        }
+        // Both inputs can carry the same source record ID. Reusing the name
+        // would make their composite IDs identical even before linking.
+        let duplicate = vec![
+            "people=first.csv".to_string(),
+            "people=second.csv".to_string(),
+        ];
+        let error = parse_dataset_specs(&duplicate).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("duplicate --dataset name `people`")
+        );
+
+        let distinct = vec![
+            "people=first.csv".to_string(),
+            "orders=second.csv".to_string(),
+        ];
+        assert_eq!(
+            parse_dataset_specs(&distinct).unwrap(),
+            vec![("people", "first.csv"), ("orders", "second.csv")]
+        );
+    }
 }

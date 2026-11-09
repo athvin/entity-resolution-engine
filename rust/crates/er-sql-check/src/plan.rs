@@ -18,8 +18,11 @@ pub fn parse_and_plan(
 ) -> Result<LogicalPlan, String> {
     let mut statements =
         Parser::parse_sql(dialect, sql).map_err(|e| format!("parse error: {e}"))?;
-    if statements.is_empty() {
-        return Err("no statement parsed".to_string());
+    if statements.len() != 1 {
+        return Err(format!(
+            "expected exactly one SQL statement, parsed {}",
+            statements.len()
+        ));
     }
     let stmt = statements.remove(0);
     plan_statement(stmt, provider).map_err(|e| format!("plan error: {e}"))
@@ -60,6 +63,13 @@ mod tests {
             plan("SELECT id, given_name FROM lake.main.golden_records"),
             Ok(2)
         );
+    }
+
+    #[test]
+    fn rejects_multiple_statements_before_planning() {
+        let err = plan("SELECT id FROM lake.main.golden_records; SELECT * FROM missing_table")
+            .unwrap_err();
+        assert!(err.contains("exactly one SQL statement"), "{err}");
     }
 
     #[test]

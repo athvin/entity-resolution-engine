@@ -281,14 +281,12 @@ fn qualify(expr: &str, side: char) -> String {
         // A string literal: copy through to the closing quote, doubled quotes
         // included, without looking for identifiers inside it.
         if c == '\'' {
-            out.push(c);
+            let start = i;
             i += 1;
             while i < bytes.len() {
-                out.push(bytes[i] as char);
                 if bytes[i] == b'\'' {
                     // A doubled '' is an escaped quote, not the end.
                     if i + 1 < bytes.len() && bytes[i + 1] == b'\'' {
-                        out.push('\'');
                         i += 2;
                         continue;
                     }
@@ -297,18 +295,28 @@ fn qualify(expr: &str, side: char) -> String {
                 }
                 i += 1;
             }
+            out.push_str(&expr[start..i]);
             continue;
         }
         // A double-quoted identifier: already explicit, qualify it as one token.
         if c == '"' {
             let start = i;
             i += 1;
-            while i < bytes.len() && bytes[i] != b'"' {
+            while i < bytes.len() {
+                if bytes[i] == b'"' {
+                    if i + 1 < bytes.len() && bytes[i + 1] == b'"' {
+                        i += 2;
+                        continue;
+                    }
+                    i += 1;
+                    break;
+                }
                 i += 1;
             }
-            i = (i + 1).min(bytes.len());
-            out.push(side);
-            out.push('.');
+            if start == 0 || bytes[start - 1] != b'.' {
+                out.push(side);
+                out.push('.');
+            }
             out.push_str(&expr[start..i]);
             continue;
         }
@@ -332,7 +340,9 @@ fn qualify(expr: &str, side: char) -> String {
             let already_qualified = follows_dot || precedes_dot;
             // A function call: the next non-space character is `(`.
             let is_call = expr[i..].trim_start().starts_with('(');
-            if already_qualified
+            if precedes_dot && (word == "l" || word == "r") {
+                out.push(side);
+            } else if already_qualified
                 || is_call
                 || SQL_WORDS.contains(&word.to_ascii_lowercase().as_str())
             {
@@ -344,8 +354,9 @@ fn qualify(expr: &str, side: char) -> String {
             }
             continue;
         }
-        out.push(c);
-        i += 1;
+        let character = expr[i..].chars().next().expect("valid UTF-8 boundary");
+        out.push(character);
+        i += character.len_utf8();
     }
     out
 }
@@ -599,11 +610,11 @@ fn resolve_level_pair(
                 level: token.to_string(),
                 reason: format!("{arg:?} is not a number"),
             })?;
-            if tolerance < 0.0 {
+            if !tolerance.is_finite() || tolerance < 0.0 {
                 return Err(CompileError::BadLevelParameter {
                     column: column.to_string(),
                     level: token.to_string(),
-                    reason: "a tolerance cannot be negative".to_string(),
+                    reason: "a tolerance must be finite and nonnegative".to_string(),
                 });
             }
             Ok(Level {
@@ -1503,8 +1514,18 @@ mod tests {
         );
         // A double-quoted identifier is qualified as one token.
         assert_eq!(qualify("\"email\"", 'l'), "l.\"email\"");
-        // An already-qualified reference is left as written.
+        // A declared side alias must be rewritten for each side of the join.
         assert_eq!(qualify("l.email", 'l'), "l.email");
+        assert_eq!(qualify("l.email", 'r'), "r.email");
+        assert_eq!(blocking_predicate("l.email"), "l.email = r.email");
+        assert_eq!(
+            blocking_predicate("r.\"a\"\"b\" || 'München'"),
+            "l.\"a\"\"b\" || 'München' = r.\"a\"\"b\" || 'München'"
+        );
+        assert_eq!(
+            blocking_predicate("\"a\"\"b\" || 'München'"),
+            "l.\"a\"\"b\" || 'München' = r.\"a\"\"b\" || 'München'"
+        );
     }
 
     #[test]
@@ -1542,6 +1563,12 @@ mod tests {
 
     #[test]
     fn parameterised_levels_validate_their_argument() {
+        for tolerance in ["numeric_within:0", "numeric_within:2.5"] {
+            assert!(
+                resolve_level("amount", tolerance, "name_variants").is_ok(),
+                "{tolerance} must remain valid"
+            );
+        }
         assert!(matches!(
             resolve_level("family_name", "jaro_winkler:nope", "name_variants").unwrap_err(),
             CompileError::BadLevelParameter { .. }

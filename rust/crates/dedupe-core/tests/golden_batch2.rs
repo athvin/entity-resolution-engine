@@ -155,3 +155,46 @@ fn single_best_links_matches_golden() {
         &[],
     );
 }
+
+#[test]
+fn single_best_links_accepts_apostrophe_dataset_name() {
+    for ties_method in ["lowest_id", "drop"] {
+        let session = Session::open_in_memory(SessionOptions::deterministic()).unwrap();
+        session
+            .execute_batch(
+                "create table first (unique_id varchar); insert into first values ('1'); \
+                 create table second (unique_id varchar); insert into second values ('1'); \
+                 create table pairs (source_dataset_l varchar, unique_id_l varchar, \
+                   source_dataset_r varchar, unique_id_r varchar, match_probability double); \
+                 insert into pairs values ('O''Brien', '1', 'plain', '1', 0.99)",
+            )
+            .unwrap();
+        let first = session.register_table("first", "first_input").unwrap();
+        let second = session.register_table("second", "second_input").unwrap();
+        let predictions = session.register_table("pairs", "predictions").unwrap();
+        let settings = Settings::from_json_str(r#"{"link_type":"link_only"}"#).unwrap();
+        let concat = predict::materialize_concat_multi(
+            &session,
+            &[(&first, "O'Brien"), (&second, "plain")],
+            &settings,
+        )
+        .unwrap();
+        let clusters = cluster_using_single_best_links(
+            &session,
+            &settings,
+            &concat,
+            &predictions,
+            &["O'Brien".to_string(), "plain".to_string()],
+            0.95,
+            ties_method,
+        )
+        .unwrap();
+        let rows = session
+            .query_strings(&format!(
+                "select count(*), count(distinct cluster_id) from {}",
+                clusters.physical
+            ))
+            .unwrap();
+        assert_eq!(rows, vec![vec!["2".to_string(), "1".to_string()]]);
+    }
+}
