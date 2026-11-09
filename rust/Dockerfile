@@ -85,7 +85,7 @@ COPY --from=planner /src/recipe.json recipe.json
 RUN --mount=type=secret,id=gha_url,env=ACTIONS_RESULTS_URL \
     --mount=type=secret,id=gha_token,env=ACTIONS_RUNTIME_TOKEN \
     --mount=type=cache,target=/root/.cache/sccache \
-    if [ -n "${ACTIONS_RUNTIME_TOKEN:-}" ]; then export SCCACHE_GHA_ENABLED=on; fi; \
+    if [ -n "${ACTIONS_RUNTIME_TOKEN:-}" ]; then export SCCACHE_GHA_ENABLED=on ACTIONS_CACHE_SERVICE_V2=on; fi; \
     RUSTC_WRAPPER=sccache RUSTFLAGS="-C link-arg=-fuse-ld=mold" cargo chef cook --release --bin er-server --recipe-path recipe.json \
     && sccache --show-stats \
     && sccache --stop-server
@@ -93,7 +93,7 @@ COPY . .
 RUN --mount=type=secret,id=gha_url,env=ACTIONS_RESULTS_URL \
     --mount=type=secret,id=gha_token,env=ACTIONS_RUNTIME_TOKEN \
     --mount=type=cache,target=/root/.cache/sccache \
-    if [ -n "${ACTIONS_RUNTIME_TOKEN:-}" ]; then export SCCACHE_GHA_ENABLED=on; fi; \
+    if [ -n "${ACTIONS_RUNTIME_TOKEN:-}" ]; then export SCCACHE_GHA_ENABLED=on ACTIONS_CACHE_SERVICE_V2=on; fi; \
     RUSTC_WRAPPER=sccache RUSTFLAGS="-C link-arg=-fuse-ld=mold" cargo build --release --bin er-server \
     && sccache --show-stats \
     && sccache --stop-server

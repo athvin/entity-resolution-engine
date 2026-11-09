@@ -19,3 +19,12 @@ runs:
       run: |
         read -r -a ci_tool_names <<< "$CI_TOOL_NAMES"
         python3 "$GITHUB_WORKSPACE/scripts/ci/install-tools.py" "${ci_tool_names[@]}"
+    - name: Expose branch-scoped compiler cache credentials
+      if: contains(inputs.tools, 'sccache') && env.SCCACHE_GHA_ENABLED == 'on'
+      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      with:
+        script: |
+          if (!process.env.ACTIONS_RESULTS_URL || !process.env.ACTIONS_RUNTIME_TOKEN) throw new Error('Missing cache runtime credentials');
+          core.exportVariable('ACTIONS_CACHE_SERVICE_V2', 'on');
+          core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL);
+          core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN);

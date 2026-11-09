@@ -15,9 +15,9 @@
 # scripts/ci/pass-key.sh, which is what stops the filter and the key drifting.
 #
 # `merge_group` filters exactly like a PR: an infra-only or skills-only change
-# in the queue would otherwise pay the full backend gate there, which is what
-# it skips today on the PR. A push skips only for a proven marketing-only
-# change; other main pushes, schedules and manual runs still run everything.
+# in the queue would otherwise pay the full backend gate there. Main pushes
+# select all changes since a successful ancestor; schedules, manual runs and
+# missing history select everything.
 #
 # Inputs (env): EVENT, BASE_SHA, HEAD_SHA, PUSH_BEFORE, PUSH_AFTER, FULL_CI.
 # Outputs ($GITHUB_OUTPUT): code,

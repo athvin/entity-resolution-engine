@@ -48,27 +48,8 @@ defaults:
 # compile job (the cargo-deny job must not inherit a wrapper it never installs).
 env:
   CARGO_INCREMENTAL: "0"
-  # mold is the linker for every rustc invocation — and the seven jobs that
-  # install it REMOVE this flag rather than failing when they cannot.
-  #
-  # It is an unpinned network dependency on `azure.archive.ubuntu.com` sitting
-  # on the critical path of six required jobs. Exiting non-zero there turned an
-  # unreachable mirror into a red required check with nothing in the diff to
-  # explain it — twice on 2026-11-05 alone (`73421208`, `41691e2a`), after the
-  # retry loop had already been hardened once for the same reason.
-  #
-  # The flag is computed away rather than cleared, so a future flag added
-  # beside it survives the fallback.
-  #
-  # The cost is worth knowing: sccache keys on the compilation inputs INCLUDING
-  # RUSTFLAGS, so a fallback run gets a COLD cache as well as a slower linker,
-  # and may still exhaust its timeout. A job that might finish beats one that
-  # cannot start, and the warning says which happened.
-  #
-  # The stronger fix is to stop using apt: mold ships a static tarball on its
-  # GitHub releases — the same host the checkout already depends on — so a
-  # pinned URL plus a checksum would remove the mirror from the path entirely.
-  # Not done here, to keep a change on a required path small enough to trust.
+  # The checksum-pinned mold archive keeps the linker and compiler-cache key
+  # stable. A failed download fails setup rather than silently changing flags.
   RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
   # The Actions cache backend, not S3 — and the reason is the bill, not speed.
   # S3 egress was the single largest line item in the AWS account: measured by
@@ -170,9 +151,9 @@ env:
   # failure — the same behaviour `sccache.tf` relied on for the S3 read role.
 
 jobs:
-  # Required compile jobs skip when the diff is entirely exempt. Main pushes
-  # skip only for a proven marketing-only change; other pushes, nightly and
-  # manual runs retain the full gate. Missing push history runs everything.
+  # Required compile jobs follow affected packages. Main pushes accumulate
+  # changes since a successful ancestor; missing history, nightly and manual
+  # runs select the full gate.
   detect:
     permissions:
       contents: read
@@ -184,8 +165,8 @@ jobs:
       code: ${{ steps.decide.outputs.code }}
       # `.claude/skills/entity-framework/references/erd.md` changed: `entities` must run `er-entity verify`.
       erd: ${{ steps.filter.outputs.erd }}
-      # A generated-skill-reference input or target changed: `lint` must run the
-      # drift check, which is the only copy of it that can block a merge.
+      # Generated-skill-reference classification, also covered by the
+      # independent required skills gate.
       drift: ${{ steps.filter.outputs.drift }}
       # The PR introduces NO files at all. Read by `empty` below, and reported
       # separately from `code` because the two answers go to opposite places:
