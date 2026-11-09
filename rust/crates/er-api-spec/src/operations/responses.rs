@@ -83,7 +83,7 @@ impl Responses<'_, '_> {
                 }
             }
             Expr::MethodCall(expr) if expr.method == "into_response" => {
-                self.response(&expr.receiver)
+                self.response(&expr.receiver);
             }
             Expr::Tuple(expr) => {
                 for value in &expr.elems {
