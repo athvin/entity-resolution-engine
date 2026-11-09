@@ -33,7 +33,7 @@ pub const AUDIENCE: &str = "er-control-plane";
 const LEEWAY_SECS: u64 = 30;
 /// Re-fetch the key set this often even with no rotation observed.
 const REFRESH_AFTER: Duration = Duration::from_secs(3600);
-/// An unknown `kid` triggers at most one fetch per this window.
+/// All refresh attempts, including failures, share this minimum interval.
 const UNKNOWN_KID_FETCH_FLOOR: Duration = Duration::from_secs(60);
 
 /// What the verified token proves: the `kubernetes.io` claims the server
@@ -61,6 +61,8 @@ pub enum VerifyError {
     UnknownKid { kid: String },
     #[error("the key set could not be fetched: {0}")]
     Fetch(String),
+    #[error("the key set is unavailable; refresh is rate limited")]
+    RefreshThrottled,
     #[error("the signature, audience or validity window failed")]
     Invalid(#[source] jsonwebtoken::errors::Error),
     #[error("the token carries no pod claim (not a pod-bound token)")]
@@ -114,6 +116,8 @@ struct Cache {
     /// `kid` → decoding key, from the last good fetch.
     keys: Vec<(String, DecodingKey, Algorithm)>,
     fetched_at: Option<Instant>,
+    /// Failed fetches consume the floor without extending key freshness.
+    attempted_at: Option<Instant>,
 }
 
 /// The verifier: a lazily-refreshed key cache over one [`JwksSource`].
@@ -133,6 +137,7 @@ impl Verifier {
             cache: Mutex::new(Cache {
                 keys: Vec::new(),
                 fetched_at: None,
+                attempted_at: None,
             }),
         }
     }
@@ -178,6 +183,7 @@ impl Verifier {
     }
 
     async fn refresh(&self, cache: &mut Cache) -> Result<(), VerifyError> {
+        cache.attempted_at = Some(Instant::now());
         let body = self.source.fetch().await.map_err(VerifyError::Fetch)?;
         let set: JwkSet =
             serde_json::from_str(&body).map_err(|e| VerifyError::Fetch(e.to_string()))?;
@@ -218,17 +224,17 @@ impl Verifier {
         let stale = cache
             .fetched_at
             .is_none_or(|at| at.elapsed() >= REFRESH_AFTER);
-        if stale {
-            self.refresh(&mut cache).await?;
-        }
-        if !cache.keys.iter().any(|(k, _, _)| *k == kid) {
-            // Rotation: one fetch, floored so a stream of bad kids cannot
-            // hammer the API server.
+        if stale || !cache.keys.iter().any(|(k, _, _)| *k == kid) {
+            // Every attempt consumes the floor, including failed fetches and
+            // invalid responses. Freshness advances only on successful refresh.
             let recently = cache
-                .fetched_at
+                .attempted_at
                 .is_some_and(|at| at.elapsed() < UNKNOWN_KID_FETCH_FLOOR);
             if !recently {
                 self.refresh(&mut cache).await?;
+            } else if stale {
+                // A failed refresh must not make old keys usable in cooldown.
+                return Err(VerifyError::RefreshThrottled);
             }
         }
         let Some((_, key, alg)) = cache.keys.iter().find(|(k, _, _)| *k == kid) else {
@@ -347,6 +353,124 @@ mod tests {
             body: TEST_JWKS.to_string(),
             fetches: AtomicUsize::new(0),
         }))
+    }
+
+    struct Unavailable(std::sync::Arc<AtomicUsize>);
+
+    impl JwksSource for Unavailable {
+        fn fetch(&self) -> BoxFuture<'_, Result<String, String>> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async { Err("HTTP 503".to_string()) })
+        }
+    }
+
+    #[tokio::test]
+    async fn failed_cold_fetches_are_floored() {
+        let fetches = std::sync::Arc::new(AtomicUsize::new(0));
+        let v = Verifier::new(Box::new(Unavailable(fetches.clone())));
+        let token = mint("unknown", AUDIENCE, 600, Some(("p", "u")));
+        for _ in 0..8 {
+            assert!(v.verify(&token).await.is_err());
+        }
+        assert_eq!(
+            fetches.load(Ordering::SeqCst),
+            1,
+            "failed requests must also respect the fetch floor"
+        );
+    }
+
+    #[derive(Clone)]
+    struct Changing {
+        response: std::sync::Arc<std::sync::Mutex<Result<String, String>>>,
+        fetches: std::sync::Arc<AtomicUsize>,
+    }
+
+    impl JwksSource for Changing {
+        fn fetch(&self) -> BoxFuture<'_, Result<String, String>> {
+            self.fetches.fetch_add(1, Ordering::SeqCst);
+            let result = self.response.lock().unwrap().clone();
+            Box::pin(async move { result })
+        }
+    }
+
+    fn changing() -> (Verifier, Changing) {
+        let source = Changing {
+            response: std::sync::Arc::new(std::sync::Mutex::new(Ok(TEST_JWKS.to_string()))),
+            fetches: std::sync::Arc::new(AtomicUsize::new(0)),
+        };
+        (Verifier::new(Box::new(source.clone())), source)
+    }
+
+    #[tokio::test]
+    async fn failed_refresh_preserves_fresh_keys_but_never_trusts_stale_keys() {
+        // Both transport and parse failures must consume the fetch floor.
+        for failure in [Err("HTTP 503".to_string()), Ok("invalid JSON".to_string())] {
+            let (v, source) = changing();
+            let good = mint("test-kid-1", AUDIENCE, 600, Some(("p", "u")));
+            let unknown = mint("unknown", AUDIENCE, 600, Some(("p", "u")));
+            v.verify(&good).await.unwrap();
+            let fetched_at = v.cache.lock().await.fetched_at;
+            *source.response.lock().unwrap() = failure;
+            v.cache.lock().await.attempted_at =
+                Some(Instant::now().checked_sub(UNKNOWN_KID_FETCH_FLOOR).unwrap());
+            assert!(matches!(
+                v.verify(&unknown).await,
+                Err(VerifyError::Fetch(_))
+            ));
+            for _ in 0..8 {
+                assert!(matches!(
+                    v.verify(&unknown).await,
+                    Err(VerifyError::UnknownKid { .. })
+                ));
+                v.verify(&good)
+                    .await
+                    .expect("last good keys are still fresh");
+            }
+            assert_eq!(source.fetches.load(Ordering::SeqCst), 2);
+            assert_eq!(
+                v.cache.lock().await.fetched_at,
+                fetched_at,
+                "failure cannot extend freshness"
+            );
+
+            {
+                let mut cache = v.cache.lock().await;
+                cache.fetched_at = Some(Instant::now().checked_sub(REFRESH_AFTER).unwrap());
+                cache.attempted_at =
+                    Some(Instant::now().checked_sub(UNKNOWN_KID_FETCH_FLOOR).unwrap());
+            }
+            assert!(matches!(v.verify(&good).await, Err(VerifyError::Fetch(_))));
+            for _ in 0..8 {
+                assert!(matches!(
+                    v.verify(&good).await,
+                    Err(VerifyError::RefreshThrottled)
+                ));
+            }
+            assert_eq!(source.fetches.load(Ordering::SeqCst), 3);
+            *source.response.lock().unwrap() = Ok(TEST_JWKS.to_string());
+            v.cache.lock().await.attempted_at =
+                Some(Instant::now().checked_sub(UNKNOWN_KID_FETCH_FLOOR).unwrap());
+            v.verify(&good).await.expect("recovery after the floor");
+            assert_eq!(source.fetches.load(Ordering::SeqCst), 4);
+        }
+    }
+
+    #[tokio::test]
+    async fn periodic_refresh_removes_retired_keys_without_an_unknown_kid() {
+        let (v, source) = changing();
+        let good = mint("test-kid-1", AUDIENCE, 600, Some(("p", "u")));
+        v.verify(&good).await.unwrap();
+        *source.response.lock().unwrap() = Ok(r#"{"keys":[]}"#.to_string());
+        {
+            let mut cache = v.cache.lock().await;
+            cache.fetched_at = Some(Instant::now().checked_sub(REFRESH_AFTER).unwrap());
+            cache.attempted_at = Some(Instant::now().checked_sub(REFRESH_AFTER).unwrap());
+        }
+        assert!(matches!(
+            v.verify(&good).await,
+            Err(VerifyError::UnknownKid { .. })
+        ));
+        assert_eq!(source.fetches.load(Ordering::SeqCst), 2);
     }
 
     #[tokio::test]
