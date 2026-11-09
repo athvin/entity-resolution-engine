@@ -57,6 +57,7 @@ pub mod taskpg;
 pub mod telemetry;
 pub mod urlguard;
 pub mod webhook;
+pub mod writeback;
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};

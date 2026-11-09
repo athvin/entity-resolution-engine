@@ -114,6 +114,18 @@ The apply service (§4.3) is specified here and in backend-design.md §10 but is
 yet implemented — it is the central delta from today's read-only product and the
 reason the Salesforce connector is the first real build on this seam.
 
+The first implementation boundary is `er-server/src/writeback.rs` (#992): a
+pure, immutable proposal builder. It validates member scope and preimages,
+computes allowlisted field diffs, and fingerprints canonical content. It accepts
+an already elected master; `er-golden::master` remains the election owner, and
+the caller must restrict election to one connection/object group before passing
+it here. A cross-source export master is not necessarily eligible for writeback.
+Missing golden attributes mean no update; explicit null can propose a clear.
+The fingerprint identifies content, not authorization or current provider state.
+Persisted preview/approval (#993), delegated user authorization (#994), journaled
+apply (#995), undo (#996), review/auto-approval (#997), and upsert (#998) remain
+separate work. This helper alone enables no external writes.
+
 ## 4. The Salesforce connector (v1)
 
 Salesforce is the first concrete connector because it is the first market
