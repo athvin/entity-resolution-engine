@@ -263,7 +263,54 @@ async fn the_task_ledger_statements_hold_their_contracts() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    assert_eq!(body_json(resp).await["state"], "running");
+    let first_start = body_json(resp).await;
+    assert_eq!(first_start["state"], "running");
+
+    // Simulate losing that 200 after Postgres committed. The pod retries with
+    // its same UID; the stored identity and timestamps must not be rewritten
+    // by a changed request body.
+    let resp = app
+        .clone()
+        .oneshot(
+            bearer(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/v1/internal/attempts/{init_id}/start")),
+                token,
+            )
+            .body(Body::from(
+                json!({"k8s_job_name": job_name, "pod_uid": "pod-init", "pod_name": "changed-name", "node_name": "changed-node", "image_digest": "sha256:changed"})
+                    .to_string(),
+            ))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(body_json(resp).await, first_start, "start replay is stable");
+
+    for (job_name, pod_uid) in [
+        (job_name.as_str(), "pod-zombie"),
+        ("er-t-other-launch-l2", "pod-init"),
+    ] {
+        let resp = app
+            .clone()
+            .oneshot(
+                bearer(
+                    Request::builder()
+                        .method("POST")
+                        .uri(format!("/v1/internal/attempts/{init_id}/start")),
+                    token,
+                )
+                .body(Body::from(
+                    json!({"k8s_job_name": job_name, "pod_uid": pod_uid}).to_string(),
+                ))
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::CONFLICT, "the start fence");
+    }
 
     // A heartbeat from the wrong pod is the fence (409), the right one lands.
     let resp = app
@@ -371,10 +418,17 @@ async fn the_task_ledger_statements_hold_their_contracts() {
         .await
         .unwrap();
     let ingest_job1 = format!("er-t-{}-l1", &ingest1[..20]);
-    taskpg::claim_launch(&client, EPOCH, Some(&ingest_job1), None, 1)
-        .await
-        .unwrap()
-        .expect("ingest try 1 claims");
+    let ingest_token = "tok-ingest-1";
+    taskpg::claim_launch(
+        &client,
+        EPOCH,
+        Some(&ingest_job1),
+        Some(&pg::hash_secret(ingest_token)),
+        1,
+    )
+    .await
+    .unwrap()
+    .expect("ingest try 1 claims");
     er_entities::task_instance::update::start(
         &client,
         None,
@@ -428,6 +482,27 @@ async fn the_task_ledger_statements_hold_their_contracts() {
     assert_eq!(archived.state, "failed");
     assert!(archived.live.is_none());
     assert_eq!(archived.archived_reason.as_deref(), Some("retry"));
+    let resp = app
+        .clone()
+        .oneshot(
+            bearer(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/v1/internal/attempts/{ingest1}/start")),
+                ingest_token,
+            )
+            .body(Body::from(
+                json!({"k8s_job_name": ingest_job1, "pod_uid": "pod-i1"}).to_string(),
+            ))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::CONFLICT,
+        "archived try is fenced"
+    );
     let retry = retry.expect("within budget: a successor");
     assert_eq!(retry.try_number, 2);
     assert_eq!(retry.state, "up_for_retry");

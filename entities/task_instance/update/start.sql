@@ -1,7 +1,14 @@
 UPDATE public.task_instances
-SET state = 'running', pod_name = $pod_name, pod_uid = $pod_uid, node_name = $node_name,
-    image_digest = $image_digest, started_at = now(), heartbeat_at = now(), updated_at = now()
-WHERE id = $task_instance_id AND live IS TRUE AND state = 'queued' AND k8s_job_name = $k8s_job_name
+SET state = 'running',
+    pod_name = CASE WHEN state = 'queued' THEN $pod_name ELSE pod_name END,
+    pod_uid = CASE WHEN state = 'queued' THEN $pod_uid ELSE pod_uid END,
+    node_name = CASE WHEN state = 'queued' THEN $node_name ELSE node_name END,
+    image_digest = CASE WHEN state = 'queued' THEN $image_digest ELSE image_digest END,
+    started_at = CASE WHEN state = 'queued' THEN now() ELSE started_at END,
+    heartbeat_at = CASE WHEN state = 'queued' THEN now() ELSE heartbeat_at END,
+    updated_at = CASE WHEN state = 'queued' THEN now() ELSE updated_at END
+WHERE id = $task_instance_id AND live IS TRUE AND k8s_job_name = $k8s_job_name
+  AND (state = 'queued' OR (state = 'running' AND pod_uid = $pod_uid))
 RETURNING
   id,
   org_id,
