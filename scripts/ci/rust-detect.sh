@@ -16,18 +16,34 @@
 #
 # `merge_group` filters exactly like a PR: an infra-only or skills-only change
 # in the queue would otherwise pay the full backend gate there, which is what
-# it skips today on the PR. Every other event — push, schedule,
-# workflow_dispatch — has nothing to diff against and so runs everything,
-# which is the fail-safe direction.
+# it skips today on the PR. A push skips only for a proven marketing-only
+# change; other main pushes, schedules and manual runs still run everything.
 #
-# Inputs (env): EVENT, BASE_SHA, HEAD_SHA. Outputs ($GITHUB_OUTPUT): code,
+# Inputs (env): EVENT, BASE_SHA, HEAD_SHA, PUSH_BEFORE, PUSH_AFTER, FULL_CI.
+# Outputs ($GITHUB_OUTPUT): code,
 # erd, drift, empty.
 # Run: EVENT=.. BASE_SHA=.. HEAD_SHA=.. bash scripts/ci/rust-detect.sh
 set -euo pipefail
 
 cd "$(dirname "$0")/../.."
 
-if [ "${EVENT:-}" != "pull_request" ] && [ "${EVENT:-}" != "merge_group" ]; then
+# shellcheck source=scripts/ci/detect-paths.sh
+. scripts/ci/detect-paths.sh
+
+# Unlike PRs, main keeps its full verification for every non-marketing push.
+# An absent/unresolvable before-SHA cannot prove isolation, so falls through.
+if [ "${EVENT:-}" = push ] && [ "${FULL_CI:-false}" != true ] \
+   && [ -n "${PUSH_BEFORE:-}" ] && [ -n "${PUSH_AFTER:-}" ] \
+   && git cat-file -e "$PUSH_BEFORE^{commit}" 2>/dev/null; then
+	changed="$(git diff --no-renames --name-only "$PUSH_BEFORE..$PUSH_AFTER")"
+	outside="$(printf '%s\n' "$changed" | grep -cvE "$MARKETING_INCLUDE" || true)"
+	if [ -n "$changed" ] && [ "$outside" -eq 0 ]; then
+		printf '%s\n' "$changed" | detect_classify >> "$GITHUB_OUTPUT"
+		exit 0
+	fi
+fi
+
+if [ "${FULL_CI:-false}" = true ] || { [ "${EVENT:-}" != "pull_request" ] && [ "${EVENT:-}" != "merge_group" ]; }; then
 	{
 		echo "code=true"
 		echo "erd=true"
@@ -42,11 +58,9 @@ if [ "${EVENT:-}" != "pull_request" ] && [ "${EVENT:-}" != "merge_group" ]; then
 fi
 
 # `base...head` = what the PR (or the queue's candidate) introduces.
-changed="$(git diff --name-only "${BASE_SHA:?}...${HEAD_SHA:?}")"
+changed="$(git diff --no-renames --name-only "${BASE_SHA:?}...${HEAD_SHA:?}")"
 printf 'changed paths:\n%s\n' "$changed"
 
-# shellcheck source=scripts/ci/detect-paths.sh
-. scripts/ci/detect-paths.sh
 verdict="$(printf '%s\n' "$changed" | detect_classify)"
 printf 'verdict:\n%s\n' "$verdict"
 printf '%s\n' "$verdict" >> "$GITHUB_OUTPUT"

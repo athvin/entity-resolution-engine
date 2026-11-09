@@ -65,8 +65,12 @@ rust)
 	# pass marker earned before it changed.
 	# shellcheck source=scripts/ci/detect-paths.sh
 	. scripts/ci/detect-paths.sh
+	# awk -v unescapes backslashes, turning literal \(marketing\) into a
+	# capture group and making this filter disagree with grep. ENVIRON passes
+	# the regex bytes intact on both BSD awk (local) and mawk/gawk (CI).
 	tree="$(git ls-tree -r "$REF" |
-		awk -F'\t' -v ex="$DETECT_EXEMPT" -v co="$DETECT_COUPLED" '$2 !~ ex || $2 ~ co')"
+		GATE_EXEMPT="$DETECT_EXEMPT" GATE_COUPLED="$DETECT_COUPLED" \
+		awk -F'\t' 'BEGIN {ex=ENVIRON["GATE_EXEMPT"]; co=ENVIRON["GATE_COUPLED"]} $2 !~ ex || $2 ~ co')"
 	;;
 frontend)
 	# The mirror image: an ALLOWLIST, because the frontend gate reads a
@@ -77,7 +81,7 @@ frontend)
 	# shellcheck source=scripts/ci/frontend-paths.sh
 	. scripts/ci/frontend-paths.sh
 	tree="$(git ls-tree -r "$REF" |
-		awk -F'\t' -v re="$FRONTEND_INCLUDE" '$2 ~ re')"
+		GATE_INCLUDE="$FRONTEND_INCLUDE" awk -F'\t' '$2 ~ ENVIRON["GATE_INCLUDE"]')"
 	;;
 *)
 	echo "pass-key: unknown gate '$GATE' (expected rust or frontend)" >&2
