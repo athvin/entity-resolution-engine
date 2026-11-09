@@ -99,6 +99,21 @@ producer and transfer, were 504/416/514/432/498. The medians were 464 and
 These figures exclude runner queue contention between the concurrent pairs;
 they are an experiment comparison, not the normal PR workflow duration.
 
+Release-cache validation, [run 42582949028](https://github.com/athvin/entity-resolution-engine/actions/runs/42582949028):
+the API image job completed in **3m44** without an ECR layer cache. Dependency
+cooking took **57.15s**, with **100% compiler-cache hits** across Rust, C/C++
+and assembler, and zero read/write errors. The application build took **1m11**.
+The earlier cold attempt took **24m23** to cook dependencies and **8m56** for
+the final build, which switched compilers as described above. This is one warm
+PR-image observation, not a production rollout percentile; main must populate
+its own branch-scoped compiler cache.
+
+Two image attempts also exposed repeated HTTP 504s downloading sccache inside
+Docker. CI now supplies the verified tool archive as a named build context,
+restored in one second in the successful run. The Dockerfile rechecks its
+checksum and retains a pinned-download fallback for standalone builds. Archives
+must not use BuildKit secret mounts: those are limited to 500 KiB.
+
 Targets are sub-five-minute ordinary warm PR feedback and warm merge-to-prod.
 They are targets, not results. Gather 20 relevant runs after rollout and report
 median/p95, retry frequency and cold dependency rebuilds separately. Paid
