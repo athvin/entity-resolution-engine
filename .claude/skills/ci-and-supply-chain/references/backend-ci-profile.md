@@ -10,6 +10,7 @@ Local experiments precede pushing the implementation.
 - [Changes under test](#changes-under-test)
 - [Local method](#local-method)
 - [Initial paired results](#initial-paired-results)
+- [First hosted result](#first-hosted-result)
 - [Local validation](#local-validation)
 - [Free runner experiment](#free-runner-experiment)
 - [Other options and coverage decisions](#other-options-and-coverage-decisions)
@@ -154,6 +155,37 @@ has `opt_level=0`, line-table debug info, `debug_assertions=true` and
 and overflow checks are also still enabled. The old and selected executables'
 complete integration-test identity lists match exactly.
 
+## First hosted result
+
+[PR run 42706135674](https://github.com/athvin/entity-resolution-engine/actions/runs/42706135674)
+passed the complete backend gate in **4m42s**, creation to final job completion.
+Against 8m11s–8m33s, this is **42.6–45.0% less elapsed time**. This is one full
+run, not a p95 or a guarantee for future cold dependency changes.
+
+- All measured native C/C++ compilations were cache hits; the nightly cache
+  did carry the optimized objects into the read-only PR run.
+- Lake shard 3: 196 seconds wall, 73 compilation, 66.892 execution. Its slow
+  incremental-equivalence test took 41.005 seconds rather than 218–226.
+- The other lake shards executed in 41.596 / 25.817 / 16.152 seconds.
+- Matching: 65 seconds compiling, 13.15 executing, versus about 104 / 94.89.
+- Rest tests: 195 seconds wall, one 152-second build, about 32 seconds executing.
+- The new critical path was Postgres m–z: 256 seconds wall, 105 compilation,
+  122.55 execution, all 34 selected tests passing.
+
+The token-rotation integration test deliberately waits **61 real seconds**
+while testing a 60-second production refresh floor across real HTTP requests.
+Its unit tests manipulate internal timestamps, but this integration test proves
+the actual clock/network behavior. Keep that coverage and the production
+interval. A blanket test timeout reduction or deleting its sleep would change
+what it verifies. Better scheduling can overlap it with other work; a faster
+runner can reduce compilation, but cannot eliminate this real-time floor.
+
+The server-rest job still compiles two distinct package feature graphs (69 and
+88 seconds). Combining them requires preserving package-specific filters and
+doctests; blindly applying `--skip pg_` to every package is unsafe. It was not
+the critical job in this run. Archive distribution and hardware comparisons
+will determine whether more build orchestration is worthwhile.
+
 ## Local validation
 
 After rebasing onto `8453c27d`, `make check` and `make check-e2e` passed.
@@ -177,6 +209,8 @@ The optional `ci-runner-experiment.yml` compares three independent machines
 per architecture. It is manual, main-only, and never a required check.
 Production PR gates retain their current runner until measurements justify a
 change and the remaining real-service tiers have passed on that architecture.
+Require at least a 15% median improvement before considering a migration;
+production images remain amd64, so Linux amd64 compatibility must stay covered.
 
 Each machine primes the protected compiler cache with the actual selected
 rest-suite runner, deletes only its disposable checkout's `rust/target`, then
