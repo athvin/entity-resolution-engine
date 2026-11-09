@@ -18,10 +18,9 @@
 //! ## The cardinality rule, with the arithmetic that motivates it
 //!
 //! Under `awsemf` every distinct dimension set becomes a CloudWatch custom
-//! metric at roughly $0.30/month. The statement name space has 247 members, so
-//! `statement_name` as a dimension would be 247 × 2 outcomes = **494 series ≈
-//! $148/month for one histogram**, in the dev namespace, for one developer —
-//! and it would grow silently with every new `.sql` file. That is D-OTEL's
+//! metric at roughly $0.30/month. Pairing each declared statement with two
+//! outcomes would create hundreds of series for one histogram, and the count
+//! would grow silently with every new `.sql` file. That is D-OTEL's
 //! stated failure mode for `tenant`, reached by a different route.
 //!
 //! Hence [`FORBIDDEN_DIMENSIONS`]: statement identity, tenancy and record
@@ -93,7 +92,7 @@ pub struct Metric {
 /// anyone choosing to grow them. They are all available on spans, which is
 /// where high-cardinality identity belongs.
 pub const FORBIDDEN_DIMENSIONS: &[&str] = &[
-    // 247 members and counting — one per declared statement.
+    // One member per declared statement; the entity tree defines the count.
     "statement",
     "statement_name",
     "er.statement",
@@ -246,8 +245,8 @@ pub fn reference() -> String {
         "Each is unbounded or tenant-scoped, and each would turn one metric into\n\
          hundreds of billable series that grow without anyone choosing to grow them.\n\
          Under `awsemf` a distinct dimension set is a CloudWatch custom metric at\n\
-         roughly $0.30/month: `statement_name` alone is 247 statements x 2 outcomes =\n\
-         494 series, about $148/month, for one histogram in one developer's dev\n\
+         roughly $0.30/month: pairing each declared statement with two outcomes\n\
+         creates hundreds of series for one histogram in one developer's dev\n\
          namespace.\n\n\
          All of them are available on spans, which is where high-cardinality identity\n\
          belongs. `tests/cardinality.rs` enforces this.\n\n",

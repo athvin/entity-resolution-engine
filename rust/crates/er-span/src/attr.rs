@@ -113,9 +113,9 @@ pub const OUTCOME: &str = "er.outcome";
 pub const ATTRIBUTES: &[Attr] = &[
     Attr {
         name: STATEMENT,
-        description: "The declared statement's identity, `<entity>.<operation>.<name>` — the same triple that names its .sql file. Bounded by the entity catalog, but deliberately NOT a metric dimension: 218 statements x 2 outcomes is 436 CloudWatch custom metrics for one histogram, and the count grows with every new .sql file.",
+        description: "The declared statement's identity, `<entity>.<operation>.<name>` — the same triple that names its .sql file. Bounded by the entity catalog, but deliberately NOT a metric dimension: pairing each statement with two outcomes would create hundreds of CloudWatch custom metrics for one histogram, and the count grows with every new .sql file.",
         pii: Pii::Config,
-        cardinality: bounded(218, "entities/*/*/*.sql, one per declared statement"),
+        cardinality: bounded(264, "entities/*/*/*.sql, one per declared statement"),
     },
     Attr {
         name: GENERATOR,
@@ -127,7 +127,7 @@ pub const ATTRIBUTES: &[Attr] = &[
         name: RELATION,
         description: "The relation a statement reads or writes, from the entity declaration.",
         pii: Pii::Config,
-        cardinality: bounded(42, "entities/*/entity.yaml"),
+        cardinality: bounded(51, "distinct relation names in entities/*/entity.yaml"),
     },
     Attr {
         name: DB_SYSTEM,
@@ -208,6 +208,58 @@ pub const ATTRIBUTES: &[Attr] = &[
 #[cfg(test)]
 mod tests {
     use super::{ATTRIBUTES, Cardinality, Pii};
+
+    #[test]
+    fn catalog_bounds_match_declared_sql_and_distinct_relations() {
+        use std::collections::BTreeSet;
+        use std::fs;
+        use std::path::Path;
+
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../entities");
+        let mut statements = 0;
+        let mut relations = BTreeSet::new();
+        for entry in fs::read_dir(root).expect("entity directory") {
+            let entity_dir = entry.expect("entity directory entry").path();
+            if !entity_dir.is_dir() {
+                continue;
+            }
+            let yaml = entity_dir.join("entity.yaml");
+            if !yaml.exists() {
+                continue;
+            }
+            let document = fs::read_to_string(yaml).expect("entity YAML");
+            let relation = document
+                .lines()
+                .find_map(|line| line.strip_prefix("relation: "))
+                .expect("top-level relation declaration");
+            relations.insert(relation.to_string());
+            for operation in ["create", "read", "update", "delete"] {
+                let dir = entity_dir.join(operation);
+                if !dir.exists() {
+                    continue;
+                }
+                statements += fs::read_dir(dir)
+                    .expect("statement directory")
+                    .map(|entry| entry.expect("statement directory entry").path())
+                    .filter(|path| path.extension().is_some_and(|ext| ext == "sql"))
+                    .count();
+            }
+        }
+
+        for (name, actual) in [
+            (super::STATEMENT, statements),
+            (super::RELATION, relations.len()),
+        ] {
+            let attr = ATTRIBUTES
+                .iter()
+                .find(|attr| attr.name == name)
+                .expect("attribute");
+            let Cardinality::Bounded { values, .. } = attr.cardinality else {
+                panic!("{name} must have a catalog bound");
+            };
+            assert_eq!(values, actual, "{name} bound drifted from entities/");
+        }
+    }
 
     #[test]
     fn every_attribute_is_unique_and_documents_itself() {

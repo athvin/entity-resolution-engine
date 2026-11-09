@@ -9,13 +9,13 @@
 //!
 //! ## Why a crate rather than `tracing` directly in the generated code
 //!
-//! `er-entities` is generated and committed — 42 of its 46 modules carry query
-//! functions, ~19.7k lines. If the generated text called `tracing::info_span!`
+//! `er-entities` is generated and committed, with query functions across its
+//! modules. If the generated text called `tracing::info_span!`
 //! with inline attribute literals, then renaming one attribute would regenerate
 //! and churn all 19.7k lines, and `er-entity verify` byte-compares every one of
 //! them. Behind this crate it is a one-file change. The same indirection is
-//! what lets [`sql_text_enabled`] read its environment variable once instead of
-//! 218 times, and what gives the [`attr`] vocabulary somewhere to be a value.
+//! what lets [`sql_text_enabled`] read its environment variable once per process,
+//! and what gives the [`attr`] vocabulary somewhere to be a value.
 //!
 //! ## The PII boundary, enforced by the signature
 //!

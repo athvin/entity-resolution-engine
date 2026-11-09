@@ -5,7 +5,7 @@
 //! The plan called for a `fn`-pointer `OnceLock` sink in `er-span` that this
 //! module would fill in during `init`, so generated code could reach a meter
 //! without `er-span` depending on `er-obs` (which would cycle, and would pull
-//! `opentelemetry_sdk` into the compile of 42 generated files).
+//! `opentelemetry_sdk` into the compile of every generated query module).
 //!
 //! That mechanism turned out to be unnecessary. [`crate::executions`] is
 //! already a `tracing_subscriber::Layer` installed on every process, and by the
@@ -23,7 +23,7 @@
 //!
 //! One `er.db.query.duration` dimensioned by store and outcome: four series.
 //! The arithmetic ruling out `statement_name` as a dimension is in
-//! [`crate::registry`]; the short version is ~$148/month for one histogram.
+//! [`crate::registry`]; the series count grows with every declared statement.
 //! Statement identity lives on the span, where it is free and groupable.
 
 use std::sync::OnceLock;

@@ -7,8 +7,8 @@
 //! cardinality with every other dimension on the same metric, and a dimension
 //! drawn from an *open* set has no bound at all:
 //!
-//! - `statement_name`: 247 declared statements × 2 outcomes = **494 series ≈
-//!   $148/month** for one histogram, in the dev namespace, for one developer —
+//! - `statement_name`: each declared statement × 2 outcomes becomes a billable
+//!   series for one histogram, in the dev namespace, for one developer —
 //!   growing silently with every new `.sql` file.
 //! - `org` / `dataset`: D-OTEL names tenancy as the stated failure mode, and
 //!   the datasets work makes it worse by multiplying one org into several.
@@ -45,8 +45,8 @@ fn no_declared_metric_carries_a_forbidden_dimension() {
         offenders.is_empty(),
         "a metric may not carry an unbounded or tenant-scoped dimension:\n\n{}\n\n\
          Under `awsemf` each distinct dimension set is a billable CloudWatch custom \
-         metric at ~$0.30/month, so `statement_name` alone is 247 statements x 2 \
-         outcomes = 494 series, about $148/month, for ONE histogram.\n\n\
+         metric at ~$0.30/month, so `statement_name` times two outcomes creates \
+         hundreds of series for ONE histogram.\n\n\
          All of these are available on SPANS, where they cost nothing and the store \
          can group by them. If a per-dimension aggregate is genuinely wanted, add a \
          `spanmetrics` connector to the collector's values file — a YAML edit, \

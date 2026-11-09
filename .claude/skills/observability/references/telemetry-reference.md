@@ -41,8 +41,8 @@ Export batches that failed — the collector refused the POST or the network did
 Each is unbounded or tenant-scoped, and each would turn one metric into
 hundreds of billable series that grow without anyone choosing to grow them.
 Under `awsemf` a distinct dimension set is a CloudWatch custom metric at
-roughly $0.30/month: `statement_name` alone is 247 statements x 2 outcomes =
-494 series, about $148/month, for one histogram in one developer's dev
+roughly $0.30/month: pairing each declared statement with two outcomes
+creates hundreds of series for one histogram in one developer's dev
 namespace.
 
 All of them are available on spans, which is where high-cardinality identity
