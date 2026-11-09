@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Check the shared Terraform/Helm tenant registry against rendered identities."""
+import argparse
 import hashlib
 import json
 from pathlib import Path
 import subprocess
 import sys
 
-import yaml
 
 CHART = Path("infra/k8s/charts/er-platform")
 
@@ -36,10 +36,34 @@ def errors_for(docs, orgs):
     return errors
 
 
+def check_docs(docs, orgs, label):
+    errors = errors_for(docs, orgs)
+    if errors:
+        raise ValueError(f"{label}: {errors}")
+    print(f"tenant runners: {label}: {len(orgs)} enrolled; no runner Kubernetes RBAC in supplied bindings")
+
+
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--live-json", type=Path)
+    parser.add_argument("--environment")
+    parser.add_argument("--namespace")
+    args = parser.parse_args()
     registry = json.loads((CHART / "tenant-runners.json").read_text())
     if set(registry) != {"dev", "prod"}:
         raise ValueError("registry environments must be dev and prod")
+    if args.live_json:
+        if not args.environment or not args.namespace:
+            parser.error("--live-json requires --environment and --namespace")
+        orgs = registry.get(args.environment, {}).get(args.namespace, {})
+        if not orgs:
+            raise ValueError("live acceptance requires an enrolled namespace")
+        docs = json.loads(args.live_json.read_text())["items"]
+        check_docs(docs, orgs, f"deployed {args.environment}/{args.namespace}")
+        return 0
+    # Only Helm-render mode needs PyYAML; the live workflow uses stdlib alone.
+    import yaml
+
     profiles = [(env, ns, orgs) for env, namespaces in registry.items() for ns, orgs in namespaces.items()]
     profiles += [("kind", "ci", {}), ("dev", "unenrolled-namespace", {})]
     for env, namespace, orgs in profiles:
@@ -49,10 +73,7 @@ def main():
             "--set", "efs.accessPointId=fsap-0",
         ], text=True)
         docs = [d for d in yaml.safe_load_all(rendered) if d]
-        errors = errors_for(docs, orgs)
-        if errors:
-            raise ValueError(f"{env}/{namespace}: {errors}")
-        print(f"tenant runners: {env}/{namespace}: {len(orgs)} enrolled; no runner Kubernetes RBAC")
+        check_docs(docs, orgs, f"{env}/{namespace}")
     return 0
 
 

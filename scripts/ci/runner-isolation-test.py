@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Prove the live probe rejects allowed foreign access and credential failures."""
+import copy
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -66,3 +68,37 @@ with tempfile.TemporaryDirectory() as directory:
     result, calls = run('correct-policy', 'customer/', '_isolation/probe-b/')
     assert result.returncode == 2 and not calls, result
 print('isolation probe: positive controls, five permission leaks, network/credential failure and prefix guard pass')
+
+# Exercise the live-input mode with actual chart output, then stale/unsafe objects.
+# CI installs Helm and PyYAML before this script; the live workflow needs neither.
+import yaml
+
+rendered = subprocess.check_output([
+    "helm", "template", "er-platform", "infra/k8s/charts/er-platform", "--namespace", "ci",
+    "--set", "environment=dev", "--set", "efs.fileSystemId=fs-0", "--set", "efs.accessPointId=fsap-0",
+], text=True)
+docs = [d for d in yaml.safe_load_all(rendered) if d]
+with tempfile.TemporaryDirectory() as directory:
+    state = Path(directory) / "live.json"
+    def check_live(items):
+        state.write_text(json.dumps({"items": items}))
+        return subprocess.run([
+            sys.executable, "-S", str(PROBE.with_name("tenant-runners-check.py")),
+            "--live-json", str(state), "--environment", "dev", "--namespace", "ci",
+        ], text=True, capture_output=True)
+    result = check_live(docs)
+    assert result.returncode == 0, result.stderr
+    stale = copy.deepcopy(docs)
+    dispatcher = next(d for d in stale if d.get("kind") == "Deployment" and d["metadata"]["name"] == "er-dispatcher")
+    env = dispatcher["spec"]["template"]["spec"]["containers"][0]["env"]
+    next(v for v in env if v["name"] == "ER_TENANT_RUNNER_ORGS")["value"] = "[]"
+    result = check_live(stale)
+    assert result.returncode != 0 and "enrollment disagrees" in result.stderr, result
+    account = next(d["metadata"]["name"] for d in docs if d.get("kind") == "ServiceAccount" and d["metadata"]["name"].startswith("er-runner-"))
+    missing = [d for d in docs if not (d.get("kind") == "ServiceAccount" and d["metadata"]["name"] == account)]
+    result = check_live(missing)
+    assert result.returncode != 0 and "accounts disagree" in result.stderr, result
+    bound = docs + [{"kind": "RoleBinding", "subjects": [{"kind": "ServiceAccount", "name": account}]}]
+    result = check_live(bound)
+    assert result.returncode != 0 and "runner has Kubernetes RBAC" in result.stderr, result
+print("live enrollment: rendered objects pass; stale dispatcher, missing account and runner RBAC are refused")

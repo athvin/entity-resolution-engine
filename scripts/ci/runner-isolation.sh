@@ -12,12 +12,20 @@ cd "$(dirname "$0")/../.."
 [ "${GITHUB_REF:-}" = refs/heads/main ] || { echo 'main ref required' >&2; exit 2; }
 probe_name="er-runner-isolation-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
 export PROBE_NAME="$probe_name"
+probe_state="$(mktemp)"
 kube=(kubectl --context "$CLUSTER" --namespace "$CI_NAMESPACE")
 cleanup() {
+    rm -f "$probe_state"
     "${kube[@]}" delete job "$probe_name-a" "$probe_name-b" --ignore-not-found --wait=false
     "${kube[@]}" delete configmap "$probe_name" --ignore-not-found
 }
 trap cleanup EXIT
+# Reuse the chart's enrollment check against the actual rolled-out objects.
+# IAM-only fixture success must not hide a stale dispatcher registry.
+"${kube[@]}" rollout status deployment/er-dispatcher --timeout=300s
+"${kube[@]}" get serviceaccounts,deployments,rolebindings -o json > "$probe_state"
+python3 scripts/ci/tenant-runners-check.py --live-json "$probe_state" \
+    --environment "$DEPLOY_ENV" --namespace "$CI_NAMESPACE"
 "${kube[@]}" create configmap "$probe_name" \
     --from-file=probe.sh=scripts/ci/runner-isolation-pod.sh --dry-run=client -o json |
     "${kube[@]}" apply -f -
