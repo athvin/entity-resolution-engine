@@ -280,6 +280,29 @@ fn a_filter_rule_has_no_block_breakdown_and_says_so() {
 }
 
 #[test]
+fn largest_blocks_quotes_embedded_quotes_in_key_names() {
+    let session = Session::open_in_memory(SessionOptions::deterministic()).unwrap();
+    session
+        .execute_batch(
+            r#"CREATE TEMP TABLE quoted ("a""b" VARCHAR);
+               INSERT INTO quoted VALUES ('x'), ('x'), ('y');"#,
+        )
+        .unwrap();
+    let settings = Settings::from_json_str(&load_golden_text("model_final.json")).unwrap();
+    let concat = TableHandle {
+        templated: "quoted".into(),
+        physical: "quoted".into(),
+        columns: vec!["a\"b".into()],
+    };
+    let blocks = n_largest_blocks(&session, &settings, &concat, r#"l."a""b" = r."a""b""#, 2)
+        .unwrap()
+        .unwrap();
+    assert_eq!(blocks[0].key_values, vec!["x"]);
+    assert_eq!((blocks[0].count_l, blocks[0].count_r), (2, 2));
+    assert_eq!(blocks[0].block_count, 4);
+}
+
+#[test]
 fn the_dedupe_block_pair_count_reconciles_with_the_pair_total() {
     let (session, settings, concat) = fixture();
 
