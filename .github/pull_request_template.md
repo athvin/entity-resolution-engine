@@ -56,14 +56,15 @@ block at the bottom, where a reader opens it only if they want it.
 **Closed by:** _unclosed_
 
 <!-- Replace that with who closed it, WHICH SESSION, on WHICH MACHINE, and when:
+       session_ref="${CLAUDE_CODE_SESSION_ID:+Claude Code:$CLAUDE_CODE_SESSION_ID}"
+       session_ref="${session_ref:-${CODEX_SESSION_ID:+Codex:$CODEX_SESSION_ID}}"
+       session_ref="${session_ref:-unavailable}"
        printf 'agent · session `%s` on `%s` · %s\n' \
-         "$CLAUDE_CODE_SESSION_ID" "$(hostname -s)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-     The machine is not decoration. A transcript lives at
-     `~/.claude/projects/<slug>/<session-id>.jsonl` on the host that ran it, so
-     an id with no host is unresolvable once more than one machine is in play.
-     `claude --resume <id>` reopens it there; `claude --from-pr <n>` is the
-     shortcut when the link still exists, and this line is the fallback for when
-     it does not. -->
+         "$session_ref" "$(hostname -s)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+     Use CLAUDE_CODE_SESSION_ID in Claude Code and CODEX_SESSION_ID in Codex.
+     The transcript lives on that host. Reopen it with `claude --resume <id>`
+     or `codex resume <id>`, respectively. If neither id is available, record
+     `unavailable` rather than inventing one. -->
 
 
 - [ ] **`main` is green with this change on it** — the merge SHA, and the run

@@ -317,19 +317,21 @@ Then set the **Closed by** line to the session that did the work, the machine it
 ran on, and the UTC time:
 
 ```bash
+session_ref="${CLAUDE_CODE_SESSION_ID:+Claude Code:$CLAUDE_CODE_SESSION_ID}"
+session_ref="${session_ref:-${CODEX_SESSION_ID:+Codex:$CODEX_SESSION_ID}}"
+session_ref="${session_ref:-unavailable}"
 printf 'agent · session `%s` on `%s` · %s\n' \
-  "$CLAUDE_CODE_SESSION_ID" "$(hostname -s)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  "$session_ref" "$(hostname -s)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ```
 
-**Record the host, not just the id.** A transcript is a local file —
-`~/.claude/projects/<slug>/<session-id>.jsonl` on the machine that ran it — so
-an id with no host cannot be resolved once more than one machine is in play.
-With both, `claude --resume <id>` reopens the reasoning behind a tick months
-later; `claude --from-pr <n>` is the shortcut while that link survives, and this
-line is what remains when it does not. `CLAUDE_CODE_SESSION_ID` is the
-authoritative id and it is in the environment — do not infer one from a
-scratchpad path, which may carry the parent's id when
-`CLAUDE_CODE_CHILD_SESSION=1`.
+**Record the agent and host with the id.** A transcript lives on the machine
+that ran it, so an id without a host cannot be resolved across machines. Use
+`CLAUDE_CODE_SESSION_ID` for Claude Code and `CODEX_SESSION_ID` for Codex; on
+that host, reopen the session with `claude --resume <id>` or `codex resume <id>`.
+Claude Code also has `claude --from-pr <n>` while that link survives. Do not
+infer a Claude Code id from a scratchpad path, which may carry the parent's id
+when `CLAUDE_CODE_CHILD_SESSION=1`. If neither variable is available, record
+`unavailable` rather than inventing an id.
 
 **Exit** when the ledger has no empty box that is not annotated `blocked`. A
 body edit fires `pull_request edited`, so `pull request contract` re-runs on the

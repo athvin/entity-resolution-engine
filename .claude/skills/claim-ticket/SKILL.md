@@ -74,9 +74,12 @@ which is what makes `tail -n +2` the whole substitution:
 git commit --allow-empty -m "wip: claim #<n> — <short title>"
 git push -u origin "$(git branch --show-current)"   # never push -q
 
+session_ref="${CLAUDE_CODE_SESSION_ID:+Claude Code:$CLAUDE_CODE_SESSION_ID}"
+session_ref="${session_ref:-${CODEX_SESSION_ID:+Codex:$CODEX_SESSION_ID}}"
+session_ref="${session_ref:-unavailable}"
 { printf 'Closes #%s\n\n' "<n>"
   printf '> 🚧 **Claimed by an agent session** — %s, session `%s` on `%s`.\n' \
-    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$CLAUDE_CODE_SESSION_ID" "$(hostname -s)"
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$session_ref" "$(hostname -s)"
   printf '> The claim is this open draft PR: closing it releases the ticket.\n'
   tail -n +2 .github/pull_request_template.md
 } > /tmp/claim-<n>-body.md
@@ -91,9 +94,11 @@ work.** CLAUDE.md's worktree audit cannot reliably tell which session owns a
 worktree — `lsof` misses the dominant pattern, a session whose cwd is the
 primary checkout driving the tree with `git -C` — and a claim PR naming its
 session and machine answers that from GitHub instead of from the process table.
-`CLAUDE_CODE_SESSION_ID` is the authoritative id; `claude --resume <id>` reopens
-it on that host, and `claude --from-pr <n>` is the shortcut while the link
-survives.
+Use `CLAUDE_CODE_SESSION_ID` in Claude Code and `CODEX_SESSION_ID` in Codex.
+On that host, reopen the recorded id with `claude --resume <id>` or
+`codex resume <id>`, respectively. Claude Code also has `claude --from-pr <n>`
+while that link survives. If neither environment variable is present, record
+`unavailable` rather than inventing an id.
 
 Capture the URL `gh pr create` prints — **never predict a PR number.** Then
 the other two marks:
