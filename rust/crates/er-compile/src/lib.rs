@@ -599,11 +599,11 @@ fn resolve_level_pair(
                 level: token.to_string(),
                 reason: format!("{arg:?} is not a number"),
             })?;
-            if tolerance < 0.0 {
+            if !tolerance.is_finite() || tolerance < 0.0 {
                 return Err(CompileError::BadLevelParameter {
                     column: column.to_string(),
                     level: token.to_string(),
-                    reason: "a tolerance cannot be negative".to_string(),
+                    reason: "a tolerance must be finite and nonnegative".to_string(),
                 });
             }
             Ok(Level {
@@ -1542,6 +1542,12 @@ mod tests {
 
     #[test]
     fn parameterised_levels_validate_their_argument() {
+        for tolerance in ["numeric_within:0", "numeric_within:2.5"] {
+            assert!(
+                resolve_level("amount", tolerance, "name_variants").is_ok(),
+                "{tolerance} must remain valid"
+            );
+        }
         assert!(matches!(
             resolve_level("family_name", "jaro_winkler:nope", "name_variants").unwrap_err(),
             CompileError::BadLevelParameter { .. }

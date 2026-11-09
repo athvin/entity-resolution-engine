@@ -358,6 +358,8 @@ fn a_bad_comparator_parameter_is_refused_at_compile_time() {
     for token in [
         "date_within_days:soon",
         "numeric_within:-1",
+        "numeric_within:NaN",
+        "numeric_within:inf",
         "numeric_within_pct:150",
         "numeric_within_pct:abc",
         "datetime_within_hours:soon",
