@@ -3961,7 +3961,7 @@ const server = http.createServer((req, res) => {
         "sources",
         "comparisons",
         "standardization",
-        "entity_type",
+        "comparison_groups",
         "transforms",
         "replacement_dictionaries",
       ].filter(blockChanged);
