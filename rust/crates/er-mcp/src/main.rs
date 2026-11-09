@@ -151,11 +151,15 @@ async fn call(
     let (text, failed) = match response {
         Ok(r) => {
             let status = r.status();
-            let body = r.text().await.unwrap_or_default();
-            if status.is_success() {
-                (body, false)
-            } else {
-                (format!("{status}: {body}"), true)
+            match r.text().await {
+                Ok(body) if status.is_success() => (body, false),
+                Ok(body) => (format!("{status}: {body}"), true),
+                // The body error can include the request URL and its tenant
+                // identifiers, so only the status and failure class go to MCP.
+                Err(_) => (
+                    format!("{status}: could not read er-server response body"),
+                    true,
+                ),
             }
         }
         // The URL is not echoed: it carries the tenant's own identifiers and
@@ -170,4 +174,76 @@ async fn call(
             "isError": failed,
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+
+    use super::call;
+
+    fn mock_response(response: &'static [u8]) -> (String, std::thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            loop {
+                let mut chunk = [0u8; 512];
+                let count = stream.read(&mut chunk).unwrap();
+                assert!(count > 0, "client closed before sending request headers");
+                request.extend_from_slice(&chunk[..count]);
+                if request.windows(4).any(|w| w == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            stream.write_all(response).unwrap();
+        });
+        (base, server)
+    }
+
+    #[tokio::test]
+    async fn incomplete_upstream_body_is_a_tool_error() {
+        let (base, server) = mock_response(
+            b"HTTP/1.1 200 OK\r\nContent-Length: 12\r\nConnection: close\r\n\r\nshort",
+        );
+        let reply = call(
+            &reqwest::Client::new(),
+            &base,
+            "test-key",
+            &serde_json::json!(1),
+            "GET",
+            "/v1/test",
+            None,
+        )
+        .await;
+        server.join().unwrap();
+        assert_eq!(reply["result"]["isError"], true);
+        assert!(
+            reply["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("could not read er-server response body")
+        );
+    }
+
+    #[tokio::test]
+    async fn complete_upstream_body_is_successful_content() {
+        let (base, server) =
+            mock_response(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok");
+        let reply = call(
+            &reqwest::Client::new(),
+            &base,
+            "test-key",
+            &serde_json::json!(1),
+            "GET",
+            "/v1/test",
+            None,
+        )
+        .await;
+        server.join().unwrap();
+        assert_eq!(reply["result"]["isError"], false);
+        assert_eq!(reply["result"]["content"][0]["text"], "ok");
+    }
 }
