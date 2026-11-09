@@ -90,8 +90,13 @@ and accessibility in both themes. Linux visual baselines cover the hero,
 decision dialog, core principles, provenance, unmerge and closing CTA.
 
 The decision dialog explicitly focuses its heading without scrolling, preventing
-mobile autofocus from skipping the beginning of the evidence. Final gate results
-are reported with the implementation. The production build
+mobile autofocus from skipping the beginning of the evidence. The physical-record test brings the matching stage into view before targeting a
+visible matched mark; an input card alone can be visible while its outgoing route
+is below the phone viewport. Pause assertions await `Animation.ready`, since
+WebKit can report a paused play state before its pending pause task settles.
+The unmerge section screenshot hides the unrelated sticky header during capture,
+preventing viewport-dependent navigation from obscuring that section. Screenshot
+tolerance is unchanged. Final gate results are reported with the implementation. The production build
 must retain static prerendering for `/`.
 
 ## Maintenance

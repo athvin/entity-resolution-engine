@@ -277,6 +277,10 @@ test.describe("interactive marketing", () => {
     await page.goto("/");
     const review = page.getByTestId("marketing-review-flow");
     await review.getByRole("button", { name: "Unmerge sample record" }).click();
+    // Keep the unrelated viewport header out of this tall section-only capture.
+    await page.addStyleTag({
+      content: '[data-testid="marketing-header"] { visibility: hidden; }',
+    });
     await expect(review).toHaveScreenshot("marketing-unmerge.png");
   });
 });
