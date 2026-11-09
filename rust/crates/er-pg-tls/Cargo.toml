@@ -14,7 +14,6 @@ tokio-postgres-rustls = { workspace = true }
 # MakeTlsConnect impl exists when this crate is built standalone.
 tokio-postgres = { workspace = true }
 url = "2.5.8"
-rustls-pemfile = "2.2.0"
 thiserror.workspace = true
 tokio = { workspace = true, features = ["rt"] }
 

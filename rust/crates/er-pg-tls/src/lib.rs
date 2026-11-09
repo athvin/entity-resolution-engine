@@ -25,6 +25,7 @@ use rustls::DigitallySignedStruct;
 use rustls::SignatureScheme;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::crypto::{CryptoProvider, ring, verify_tls12_signature, verify_tls13_signature};
+use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 
 /// Everything connect needs that tokio-postgres cannot parse itself.
@@ -90,7 +91,7 @@ pub enum Error {
         /// The path `sslrootcert` named.
         path: PathBuf,
         /// The PEM decoding failure.
-        source: std::io::Error,
+        source: rustls::pki_types::pem::Error,
     },
     /// The connect itself failed.
     #[error("connecting to Postgres")]
@@ -273,7 +274,7 @@ fn verified_config(rootcert: &std::path::Path) -> Result<ClientConfig, Error> {
         path: rootcert.to_path_buf(),
         source,
     })?;
-    let certs: Vec<CertificateDer<'static>> = rustls_pemfile::certs(&mut pem.as_slice())
+    let certs: Vec<CertificateDer<'static>> = CertificateDer::pem_slice_iter(&pem)
         .collect::<Result<_, _>>()
         .map_err(|source| Error::RootcertParse {
             path: rootcert.to_path_buf(),
