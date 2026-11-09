@@ -8,15 +8,17 @@
 #   .tools/bin/cargo-agents   the binary      (gitignored; `symposium install`)
 #   .symposium/config.toml    the config      (committed)
 #   .symposium/{cache,logs,state.toml}        (gitignored)
-#   rust/.claude/skills/      installed skills
+#   rust/.claude/skills/      installed Claude Code skills
+#   rust/.agents/skills/      installed Codex skills
 #
 # It does that with two environment variables and a cd:
 #   SYMPOSIUM_HOME  redirects config/cache/logs away from ~/.symposium. It
 #                   takes precedence over the XDG variables.
 #   PATH            prepends .tools/bin so `cargo agents …` resolves the
 #                   repo-local binary, and so the hook command that symposium
-#                   registers (the bare string `cargo-agents hook claude …`)
-#                   finds it too.
+#                   registers (the bare string `cargo-agents hook <agent> …`)
+#                   finds it too. The repo-root hook bridges use this binary's
+#                   absolute path, so they work without modifying the user PATH.
 #   cd rust         symposium locates the project via `cargo metadata`, and the
 #                   cargo workspace is rust/, not the repo root. Run from the
 #                   root it would just report "not in a Rust workspace".

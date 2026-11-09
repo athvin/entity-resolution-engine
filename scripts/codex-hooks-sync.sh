@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# codex-hooks-sync — install this repo's PreToolUse guard into Codex.
+# codex-hooks-sync — install this repo's guard and Symposium startup into Codex.
 #
 # `.claude/settings.json` wires `scripts/hooks/aws-write-guard.sh` as a
 # `PreToolUse` hook and carries a `permissions.deny` list. Neither reaches
@@ -9,8 +9,12 @@
 # inside its Claude-Code *migration* reader, which is what makes them look
 # repo-scoped).
 #
-# So, like the MCP servers, this is per-developer state and the repo's job is
-# to derive it rather than to document it:
+# Symposium's root SessionStart command is also Claude-specific. Derive its
+# Codex equivalent from that command, using the same repo-local binary and
+# config, so dependency-matched Rust skills sync for both agents.
+#
+# Like the MCP servers, these hooks are per-developer state and the repo's job
+# is to derive them rather than to document them:
 #
 #   scripts/codex-hooks-sync.sh              # install into $CODEX_HOME/hooks.json
 #   scripts/codex-hooks-sync.sh --dry-run    # print the resulting file, write nothing
@@ -27,8 +31,8 @@
 #     it; or
 #   * pass `--dangerously-bypass-hook-trust` on every invocation.
 #
-# This script prints that instruction after installing, because an installed
-# hook that never runs is worse than no hook: it reads as protection.
+# This script prints that instruction after installing, because installed
+# hooks that never run read as protection and synchronization that do not exist.
 #
 # The guard is effective where it matters: a `deny` blocks the call even under
 # `--dangerously-bypass-approvals-and-sandbox`, which is the invocation this
@@ -85,12 +89,28 @@ deny_count=$(jq -r '[.permissions.deny[]? | select(startswith("Bash("))] | lengt
 [ "${deny_count:-0}" -gt 0 ] ||
 	die "no Bash(...) entries under .permissions.deny in $settings — the deny list would be empty, which is not a guard"
 
+# There must be exactly one Claude Code Symposium startup command to translate.
+# A missing or duplicated command is drift, not a successful empty sync.
+symposium_template=$(jq -r '[.hooks.SessionStart[]?.hooks[]?.command // empty | select(contains("hook claude session-start"))] | if length == 1 then .[0] else empty end' "$settings")
+[ -n "$symposium_template" ] || die "expected one Symposium SessionStart command in $settings"
+[[ "$symposium_template" == *'$CLAUDE_PROJECT_DIR'* ]] ||
+	die "Symposium SessionStart no longer uses CLAUDE_PROJECT_DIR — update the Codex derivation"
+symposium_command="${symposium_template//\$CLAUDE_PROJECT_DIR/$root}"
+symposium_command="${symposium_command/hook claude session-start/hook codex session-start}"
+
 # The marker is how this script finds its own entry again on a re-run or a
 # --remove, without disturbing hooks a developer added by hand.
 marker="er-codex-pretooluse-guard"
 entry=$(jq -n --arg cmd "ER_REPO_ROOT=$root bash $guard" --arg m "$marker" '{
   type: "command",
   timeout: 20,
+  command: $cmd,
+  description: $m
+}')
+symposium_marker="er-codex-symposium-session-start"
+symposium_entry=$(jq -n --arg cmd "$symposium_command" --arg m "$symposium_marker" '{
+  type: "command",
+  timeout: 30,
   command: $cmd,
   description: $m
 }')
@@ -103,7 +123,7 @@ fi
 
 # Drop any previous copy of ours, keep everything else, then append if
 # installing. Idempotent by construction: install twice, one entry.
-updated=$(printf '%s' "$existing" | jq --argjson e "$entry" --arg m "$marker" --arg mode "$mode" '
+updated=$(printf '%s' "$existing" | jq --argjson e "$entry" --arg m "$marker" --argjson se "$symposium_entry" --arg sm "$symposium_marker" --arg mode "$mode" '
   (.hooks //= {})
   | (.hooks.PreToolUse //= [])
   | .hooks.PreToolUse = [
@@ -116,6 +136,17 @@ updated=$(printf '%s' "$existing" | jq --argjson e "$entry" --arg m "$marker" --
       .hooks.PreToolUse += [ { hooks: [ $e ] } ]
     end
   | if (.hooks.PreToolUse | length) == 0 then del(.hooks.PreToolUse) else . end
+  | (.hooks.SessionStart //= [])
+  | .hooks.SessionStart = [
+      .hooks.SessionStart[]
+      | (.hooks //= [])
+      | .hooks |= map(select((.description // "") != $sm))
+    ]
+  | .hooks.SessionStart = [ .hooks.SessionStart[] | select((.hooks | length) > 0) ]
+  | if $mode == "remove" then . else
+      .hooks.SessionStart += [ { hooks: [ $se ] } ]
+    end
+  | if (.hooks.SessionStart | length) == 0 then del(.hooks.SessionStart) else . end
 ')
 
 if [ "$mode" = dry ]; then
@@ -129,21 +160,21 @@ mkdir -p "$codex_home"
 printf '%s\n' "$updated" >"$hooks_file"
 
 if [ "$mode" = remove ]; then
-	printf 'codex-hooks-sync: removed the guard from %s\n' "$hooks_file"
+	printf 'codex-hooks-sync: removed the guard and Symposium startup from %s\n' "$hooks_file"
 	exit 0
 fi
 
-printf 'codex-hooks-sync: installed into %s (%d deny-list pattern(s) derived)\n' "$hooks_file" "$deny_count"
+printf 'codex-hooks-sync: installed guard and Symposium startup into %s (%d deny-list pattern(s) derived)\n' "$hooks_file" "$deny_count"
 cat <<'EOF'
 
-A hook Codex has not trusted is SKIPPED SILENTLY. Do one of these or you have
+Hooks Codex has not trusted are SKIPPED SILENTLY. Do one of these or you have
 installed nothing:
 
-  1. Run `codex` interactively once and approve the hook when prompted. That
-     writes the trusted_hash to $CODEX_HOME/config.toml and every later run,
-     `codex exec` included, honours it.
+  1. Run `codex` interactively once and approve both hooks when prompted. That
+     writes trusted_hash entries to $CODEX_HOME/config.toml and every later
+     run, `codex exec` included, honours them.
   2. Or pass --dangerously-bypass-hook-trust on every invocation.
 
-Confirm it is live by asking a session to run a denied command; the refusal
-reads `Command blocked by PreToolUse hook: …`.
+Confirm the guard is live by asking a session to run a denied command; the
+refusal reads `Command blocked by PreToolUse hook: …`.
 EOF

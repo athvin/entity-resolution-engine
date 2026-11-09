@@ -357,12 +357,13 @@ clean tree.
 
 `make symposium` installs the repo-local [Symposium](https://github.com/symposium-dev/symposium)
 toolchain: the `cargo-agents` binary into `.tools/bin`, its config/cache into
-`.symposium`, and dependency-matched skills into `rust/.claude/skills/`. Nothing
-is written to `~`. Those nested skills load lazily — only once a file under
-`rust/` is read or edited — and the hooks symposium writes to
-`rust/.claude/settings.json` are inert, because Claude Code reads settings only
-from the repository root. The root `.claude/settings.json` carries the one
-bridging hook that actually runs.
+`.symposium`, and dependency-matched skills into `rust/.claude/skills/` for
+Claude Code and `rust/.agents/skills/` for Codex. Nothing is written to `~` by
+Symposium. Those nested skills load lazily — only once work enters `rust/` —
+and the hooks Symposium writes under `rust/` are inert. The root
+`.claude/settings.json` carries Claude Code's active SessionStart hook;
+`scripts/codex-hooks-sync.sh` derives the Codex SessionStart hook from it and
+installs that beside the Codex guard in `$CODEX_HOME/hooks.json`.
 
 ### Other agents read this repo, and they read different filenames
 
@@ -403,7 +404,7 @@ read changes:
 
 ```sh
 scripts/codex-mcp-sync.sh     # .mcp.json            -> codex mcp add
-scripts/codex-hooks-sync.sh   # the PreToolUse guard  -> $CODEX_HOME/hooks.json
+scripts/codex-hooks-sync.sh   # guard + Symposium SessionStart -> $CODEX_HOME/hooks.json
 scripts/kimi-mcp-sync.sh      # .mcp.json            -> $KIMI_CODE_HOME/mcp.json
 scripts/kimi-hooks-sync.sh    # the PreToolUse guard  -> $KIMI_CODE_HOME/config.toml
 ```
