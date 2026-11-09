@@ -84,6 +84,11 @@ pub async fn run_loop(
             if let Err(e) = crate::ops::snapshot(client).await {
                 tracing::warn!(error = %e, "the operational queue snapshot failed");
             }
+            if let Some(ex) = executor.as_ref()
+                && let Err(e) = ex.operational_snapshot().await
+            {
+                tracing::warn!(error = %crate::errfmt::chain(&e), "the operational pod snapshot failed");
+            }
         }
         // Schedules fire from here. Cheap (one query when nothing is due) and
         // rate-limited, so it rides the job loop rather than owning a task: one

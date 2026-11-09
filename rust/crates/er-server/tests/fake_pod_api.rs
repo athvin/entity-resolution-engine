@@ -92,6 +92,7 @@ impl FakePodApi {
             labels: job.labels.clone(),
             annotations: job.annotations.clone(),
             phase: PodPhase::Pending,
+            created_at_unix_seconds: None,
             waiting_reason: None,
             terminated_exit_code: None,
             terminated_reason: None,

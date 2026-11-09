@@ -337,6 +337,7 @@ mod tests {
             labels: std::collections::BTreeMap::new(),
             annotations: std::collections::BTreeMap::new(),
             phase,
+            created_at_unix_seconds: None,
             waiting_reason: None,
             terminated_exit_code: None,
             terminated_reason: None,

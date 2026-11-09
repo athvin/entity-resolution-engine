@@ -1,6 +1,18 @@
 # Operational metrics have closed dimensions in er-obs/src/registry.rs. OTelLib
 # is injected by awsemf even with NoDimensionRollup; every query includes it.
 locals {
+  age_signals = {
+    queue   = { metric = "er.jobs.queue.oldest_age", threshold = 900, name = "queue-oldest", title = "Oldest queued job (seconds, includes backoff)", action = "Inspect dispatcher readiness, job backoff, concurrency and runner capacity." }
+    pending = { metric = "er.pods.pending.oldest_age", threshold = 600, name = "pod-pending", title = "Oldest Pending runner pod (seconds)", action = "Inspect pod scheduling, image pulls, node capacity and account vCPU quotas." }
+  }
+  age_widgets = [for index, key in ["queue", "pending"] : {
+    type = "metric", x = index * 12, y = 46, width = 12, height = 6
+    properties = {
+      title   = local.age_signals[key].title, region = var.region, view = "timeSeries", period = 60, stat = "Maximum"
+      metrics = [[var.metric_namespace, local.age_signals[key].metric, "OTelLib", "er-obs"]]
+    }
+  }]
+
   classes = ["S", "M", "L", "other"]
   stages  = ["init", "ingest", "standardize", "match", "reconcile", "assemble", "finish", "apply_staged", "write_back_scan", "reconcile_schema", "profile", "maintain", "extract", "train", "lake_init", "other"]
   panels = [
@@ -43,7 +55,7 @@ locals {
 resource "aws_cloudwatch_dashboard" "operations" {
   dashboard_name = "er-${var.environment}-operations"
   dashboard_body = jsonencode({ widgets = concat(
-    [{ type = "text", x = 0, y = 0, width = 24, height = 4, properties = { markdown = "# ER ${var.environment} operations (shared deployment)\nAPI errors are the 5xx response series. Queue and concurrency are current gauges; the snapshot heartbeat below must be present before an empty chart means idle. Counters are interval deltas, so rates divide Sum by the period. Duration charts use means, not percentiles.\n\nPer-tenant data quality remains in the authenticated dataset dashboard (`/{org}/{dataset}/dashboard`) and dataset `/metrics` API, backed by durable lake data. Tenant and dataset identifiers never become CloudWatch dimensions. Task counters are operational observations, not an accounting ledger." } }],
+    [{ type = "text", x = 0, y = 0, width = 24, height = 4, properties = { markdown = "# ER ${var.environment} operations (shared deployment)\nAPI errors are the 5xx response series. Queue and concurrency are current gauges; the database and managed-pod snapshot heartbeats must be present before an empty age chart means idle. A missing or zero pod heartbeat means Kubernetes observations are unavailable even if database snapshots continue. Counters are interval deltas, so rates divide Sum by the period. Duration charts use means, not percentiles.\n\nPer-tenant data quality remains in the authenticated dataset dashboard (`/{org}/{dataset}/dashboard`) and dataset `/metrics` API, backed by durable lake data. Tenant and dataset identifiers never become CloudWatch dimensions. Task counters are operational observations, not an accounting ledger." } }],
     local.base_widgets,
     [{ type = "metric", x = 12, y = 16, width = 12, height = 6, properties = {
       title   = "Successful queue snapshots / minute (expected about 2)", region = var.region, view = "timeSeries", period = 60, stat = "Sum"
@@ -56,6 +68,11 @@ resource "aws_cloudwatch_dashboard" "operations" {
       metrics = flatten([for class in local.classes : [for reason in ["oom", "evicted"] : {
         row = [var.metric_namespace, "er.pods.failures", "resource_class", class, "reason", reason, "OTelLib", "er-obs", { label = "${class} ${reason}" }]
       }]])[*].row
+    } }],
+    local.age_widgets,
+    [{ type = "metric", x = 0, y = 52, width = 24, height = 6, properties = {
+      title   = "Successful managed-pod snapshots / minute (expected about 2)", region = var.region, view = "timeSeries", period = 60, stat = "Sum"
+      metrics = [[var.metric_namespace, "er.pods.snapshots", "OTelLib", "er-obs"]]
     } }]
   ) })
 }
@@ -112,6 +129,42 @@ resource "aws_cloudwatch_metric_alarm" "snapshot_missing" {
   alarm_description   = "No successful queue/concurrency snapshots for three minutes. Check dispatcher process, database reads and the metric export pipeline; empty queue charts are not evidence of idle until this recovers."
   namespace           = var.metric_namespace
   metric_name         = "er.ops.snapshots"
+  dimensions          = { OTelLib = "er-obs" }
+  statistic           = "Sum"
+  period              = 60
+  comparison_operator = "LessThanThreshold"
+  threshold           = 1
+  evaluation_periods  = 3
+  datapoints_to_alarm = 3
+  treat_missing_data  = "breaching"
+  alarm_actions       = [var.alerts_topic_arn]
+  ok_actions          = [var.alerts_topic_arn]
+}
+
+
+resource "aws_cloudwatch_metric_alarm" "age" {
+  for_each            = local.age_signals
+  alarm_name          = "er-${var.environment}-${each.value.name}"
+  alarm_description   = "${each.value.title} exceeds ${each.value.threshold} seconds. ${each.value.action} Require the matching snapshot heartbeat before treating a quiet chart as healthy."
+  namespace           = var.metric_namespace
+  metric_name         = each.value.metric
+  dimensions          = { OTelLib = "er-obs" }
+  statistic           = "Maximum"
+  period              = 60
+  comparison_operator = "GreaterThanThreshold"
+  threshold           = each.value.threshold
+  evaluation_periods  = 1
+  datapoints_to_alarm = 1
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = [var.alerts_topic_arn]
+  ok_actions          = [var.alerts_topic_arn]
+}
+
+resource "aws_cloudwatch_metric_alarm" "pod_snapshot_missing" {
+  alarm_name          = "er-${var.environment}-pod-snapshot-missing"
+  alarm_description   = "No successful managed-pod snapshots for three minutes. Inspect Kubernetes API access, dispatcher readiness and metric export; the pending-age gauge is stale until this recovers. Database snapshots are independent."
+  namespace           = var.metric_namespace
+  metric_name         = "er.pods.snapshots"
   dimensions          = { OTelLib = "er-obs" }
   statistic           = "Sum"
   period              = 60

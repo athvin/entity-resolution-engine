@@ -89,6 +89,8 @@ pub struct PodSnapshot {
     pub labels: BTreeMap<String, String>,
     pub annotations: BTreeMap<String, String>,
     pub phase: PodPhase,
+    /// Kubernetes creation time; unlike an observed clock, survives dispatcher restarts.
+    pub created_at_unix_seconds: Option<i64>,
     /// The task container's `waiting.reason`, while pre-start.
     pub waiting_reason: Option<String>,
     pub terminated_exit_code: Option<i32>,
@@ -184,6 +186,7 @@ impl PodSnapshot {
                 .into_iter()
                 .collect(),
             phase,
+            created_at_unix_seconds: meta.creation_timestamp.as_ref().map(|at| at.0.as_second()),
             waiting_reason,
             terminated_exit_code,
             terminated_reason,
