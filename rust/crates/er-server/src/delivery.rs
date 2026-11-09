@@ -95,7 +95,7 @@ fn digest(path: &Path) -> Result<(u64, String), DeliveryError> {
     let mut file = File::open(path)?;
     let mut hash = Sha256::new();
     let mut bytes = 0;
-    let mut buffer = [0_u8; 65536];
+    let mut buffer = vec![0_u8; 65536];
     loop {
         let n = file.read(&mut buffer)?;
         if n == 0 {

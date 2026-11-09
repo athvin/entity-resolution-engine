@@ -106,11 +106,11 @@ async fn extracts_advance_only_after_pinned_enqueue_and_both_batches_land_once()
             .await
             .is_err()
     );
-    assert!(
+    assert_eq!(
         er_entities::sf_extract_cursor::read::get(&client, &ds, "crm")
             .await
-            .unwrap()
-            .is_empty()
+            .unwrap(),
+        Vec::new()
     );
     let a = advance(&client, &order, reports[0].0.clone()).await;
     assert_eq!(

@@ -7305,7 +7305,7 @@ pub(crate) async fn finish_delivery(
     let job = match pg::enqueue(
         client,
         org_id,
-        ds.as_deref(),
+        ds,
         "run_all_incremental",
         0,
         Some(&idem),
@@ -7345,7 +7345,7 @@ pub(crate) async fn finish_delivery(
     if let Err(e) = webhook::emit(
         client,
         org_id,
-        ds.as_deref(),
+        ds,
         org,
         "import.received",
         &json!({
