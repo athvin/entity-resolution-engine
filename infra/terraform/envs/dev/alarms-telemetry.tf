@@ -28,6 +28,13 @@
 # `task` is deliberately not alarmed: an exec-task pod flushes once at exit,
 # so a long run legitimately shows ended>0 and exported==0 for its whole
 # lifetime — the same expression would page on every slow job.
+#
+# The per-role series merges every pod of that role (the cardinality rule
+# forbids a pod dimension), so `Maximum` reads the HEALTHIEST pod's counter:
+# with replicas >= 2 one wedged pod hides behind the other. Correct today
+# because dev runs one pod per colour (charts/er-platform/values.yaml) — a
+# replicas bump there disarms this alarm, and nothing connects those files.
+# If api ever scales past one, this alarm needs a per-pod signal, not a tune.
 resource "aws_cloudwatch_metric_alarm" "span_export_silence" {
   for_each = toset(["api", "dispatcher"])
 

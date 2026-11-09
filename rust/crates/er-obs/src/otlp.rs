@@ -663,8 +663,8 @@ mod tests {
         );
 
         // A refused batch: the failure counter moves and the error propagates
-        // (the batch processor logs and retries; the counter is the alarm
-        // input, the warn at the call site is the detail).
+        // (the SDK logs and DROPS the batch — no retry, which is exactly why
+        // refused exports show up as ended-minus-exported divergence).
         let provider = provider_with(FakeExporter {
             fail: true,
             resource_seen: std::sync::Arc::new(std::sync::Mutex::new(None)),
