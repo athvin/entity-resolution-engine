@@ -4,12 +4,83 @@
 
 use std::path::Path;
 
+use assert_cmd::Command;
 use dedupe_core::linker::Linker;
 use dedupe_core::session::{Session, SessionOptions, TableHandle};
 use dedupe_core::{DuckLakeConfig, LakeWriteOptions, Settings};
 
 fn enabled() -> bool {
     std::env::var("DEDUPE_E2E_DUCKLAKE").as_deref() == Ok("1")
+}
+
+#[test]
+fn option_only_maintenance_succeeds() {
+    if !enabled() {
+        eprintln!("skipping DuckLake maintenance e2e (set DEDUPE_E2E_DUCKLAKE=1 to run)");
+        return;
+    }
+
+    let tmp = std::env::temp_dir().join(format!("dedupe_option_only_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(tmp.join("data")).unwrap();
+    let catalog = tmp.join("c.ducklake").to_string_lossy().into_owned();
+    let data_path = tmp.join("data").to_string_lossy().into_owned();
+
+    Command::cargo_bin("dedupe")
+        .unwrap()
+        .args([
+            "maintenance",
+            "--catalog",
+            &catalog,
+            "--data-path",
+            &data_path,
+            "--set",
+            "target_file_size=256MB",
+        ])
+        .assert()
+        .success();
+
+    let mut session = Session::open_in_memory(SessionOptions::default()).unwrap();
+    session
+        .attach_ducklake(&DuckLakeConfig {
+            metadata: catalog.clone(),
+            data_path: Some(data_path.clone()),
+            ..Default::default()
+        })
+        .unwrap();
+    assert!(
+        session
+            .lake_options()
+            .unwrap()
+            .iter()
+            .any(|(name, value)| name == "target_file_size" && value == "256000000")
+    );
+
+    Command::cargo_bin("dedupe")
+        .unwrap()
+        .args([
+            "maintenance",
+            "--catalog",
+            &catalog,
+            "--data-path",
+            &data_path,
+            "--set",
+            "not-a-key-value",
+            "--target-file-size",
+            "512MB",
+        ])
+        .assert()
+        .failure();
+    assert!(
+        session
+            .lake_options()
+            .unwrap()
+            .iter()
+            .any(|(name, value)| name == "target_file_size" && value == "256000000")
+    );
+
+    drop(session);
+    let _ = std::fs::remove_dir_all(&tmp);
 }
 
 const FAKE_1000_SCHEMA: &[(&str, &str)] = &[

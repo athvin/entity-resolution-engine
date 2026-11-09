@@ -115,6 +115,14 @@ fn maintenance(a: MaintenanceArgs) -> Result<()> {
     if a.source.catalog.is_none() {
         bail!("maintenance requires --catalog (a DuckLake catalog)");
     }
+    let set_options: Vec<(&str, &str)> = a
+        .set_options
+        .iter()
+        .map(|kv| {
+            kv.split_once('=')
+                .with_context(|| format!("--set must be KEY=VALUE, got `{kv}`"))
+        })
+        .collect::<Result<_>>()?;
     let session = open_session(&a.source)?;
 
     if a.list_options {
@@ -125,26 +133,27 @@ fn maintenance(a: MaintenanceArgs) -> Result<()> {
     }
 
     // Apply catalog options first (they steer CHECKPOINT's expire/merge steps).
+    let mut ran: Vec<String> = Vec::new();
     if let Some(v) = &a.expire_older_than {
         session.set_lake_option("expire_older_than", v)?;
+        ran.push("set:expire_older_than".into());
     }
     if let Some(v) = &a.delete_older_than {
         session.set_lake_option("delete_older_than", v)?;
+        ran.push("set:delete_older_than".into());
     }
     if let Some(v) = &a.target_file_size {
         session.set_lake_option("target_file_size", v)?;
+        ran.push("set:target_file_size".into());
     }
-    for kv in &a.set_options {
-        let (k, v) = kv
-            .split_once('=')
-            .with_context(|| format!("--set must be KEY=VALUE, got `{kv}`"))?;
+    for (k, v) in set_options {
         session.set_lake_option(k, v)?;
+        ran.push(format!("set:{k}"));
     }
 
     let before = session.lake_table_stats()?;
 
     // Individual steps (skipped by a full checkpoint, which runs them all).
-    let mut ran: Vec<String> = Vec::new();
     if a.checkpoint {
         session.checkpoint_lake()?;
         ran.push("checkpoint".into());
@@ -179,7 +188,8 @@ fn maintenance(a: MaintenanceArgs) -> Result<()> {
         bail!(
             "no maintenance action requested; pass --checkpoint or one of \
              --flush-inlined / --merge-adjacent / --rewrite-table / \
-             --cleanup-old-files / --delete-orphaned-files (or --list-options)"
+             --cleanup-old-files / --delete-orphaned-files / --set \
+             (or --list-options)"
         );
     }
 
