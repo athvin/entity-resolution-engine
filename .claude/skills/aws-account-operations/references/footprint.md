@@ -61,10 +61,10 @@ Distinct `resource "aws_*"` blocks across `infra/terraform/`, by count:
   25  aws_iam_role
   21  aws_iam_role_policy
   12  aws_eks_pod_identity_association
+   9  aws_cloudwatch_metric_alarm
    8  aws_iam_role_policy_attachment
    8  aws_s3_bucket
    8  aws_s3_bucket_public_access_block
-   7  aws_cloudwatch_metric_alarm
    6  aws_s3_bucket_server_side_encryption_configuration
    6  aws_secretsmanager_secret
    6  aws_secretsmanager_secret_version
@@ -166,7 +166,7 @@ drops off this list on the next regeneration, so an absence here cannot rot.
 
 | Resource type | Declared |
 |---|---|
-| `aws_cloudwatch_metric_alarm` | 7 |
+| `aws_cloudwatch_metric_alarm` | 9 |
 | `aws_sns_topic` | 1 |
 | `aws_sns_topic_subscription` | 1 |
 | `aws_cloudwatch_dashboard` | 1 |
