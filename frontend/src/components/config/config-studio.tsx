@@ -16,6 +16,8 @@ import {
   tierForEdits,
   type BlockingRule,
   type ComparisonSpec,
+  type ConfigTransforms,
+  type ReplacementDictionaries,
   type StudioEdits,
   type Thresholds,
 } from "@/lib/domain/config";
@@ -39,6 +41,7 @@ import { BlockingEditor } from "./blocking-editor";
 import { ConfigAiPanel } from "./config-ai-panel";
 import { ComparisonEditor } from "./comparison-editor";
 import { SurvivorshipEditor } from "./survivorship-editor";
+import { ReplacementDictionariesEditor } from "./replacement-dictionaries-editor";
 import { ThresholdEditor } from "./threshold-editor";
 import { useDatasetSlug } from "@/lib/use-dataset-slug";
 
@@ -158,6 +161,11 @@ function VersionHistory({ org }: { org: string }) {
 
 export function ConfigStudio({ org }: { org: string }) {
   const ds = useDatasetSlug();
+  return <ConfigStudioForDataset key={`${org}:${ds}`} org={org} />;
+}
+
+function ConfigStudioForDataset({ org }: { org: string }) {
+  const ds = useDatasetSlug();
   const active = useActiveConfig(org, ds);
   const scores = useScoreSample(org, ds);
   const session = useSession();
@@ -169,6 +177,9 @@ export function ConfigStudio({ org }: { org: string }) {
   const [survivorship, setSurvivorship] = useState<Record<string, string[]> | null>(null);
   const [blocking, setBlocking] = useState<BlockingRule[] | null>(null);
   const [comparisons, setComparisons] = useState<Record<string, ComparisonSpec> | null>(null);
+  const [replacementDictionaries, setReplacementDictionaries] =
+    useState<ReplacementDictionaries | null>(null);
+  const [transforms, setTransforms] = useState<ConfigTransforms | null>(null);
   const [blockingErrorIndex, setBlockingErrorIndex] = useState<number | null>(null);
   const [publishError, setPublishError] = useState<string | null>(null);
   // V7's panel state. Kept here rather than inside the panel so the panel stays
@@ -208,6 +219,8 @@ export function ConfigStudio({ org }: { org: string }) {
       setSurvivorship(view.survivorship);
       setBlocking(view.blocking);
       setComparisons(view.comparisons);
+      setReplacementDictionaries(view.replacementDictionaries);
+      setTransforms(view.transforms);
     }
   }, [active.data, survivorship]);
 
@@ -218,7 +231,22 @@ export function ConfigStudio({ org }: { org: string }) {
       </p>
     );
   }
-  if (active.isPending || !active.data || survivorship === null) {
+  if (active.isError) {
+    return (
+      <div role="alert" className="flex flex-col items-center gap-3 py-16">
+        <p>Could not load this configuration. Retry before editing or publishing.</p>
+        <Button
+          variant="outline"
+          onClick={() => {
+            void active.refetch();
+          }}
+        >
+          Retry
+        </Button>
+      </div>
+    );
+  }
+  if (active.isPending || survivorship === null) {
     return <Skeleton className="h-96 w-full" />;
   }
 
@@ -231,6 +259,10 @@ export function ConfigStudio({ org }: { org: string }) {
     ...(changed(view.survivorship, survivorship) ? { survivorship } : {}),
     ...(blocking && changed(view.blocking, blocking) ? { blocking } : {}),
     ...(comparisons && changed(view.comparisons, comparisons) ? { comparisons } : {}),
+    ...(replacementDictionaries && changed(view.replacementDictionaries, replacementDictionaries)
+      ? { replacementDictionaries }
+      : {}),
+    ...(transforms && changed(view.transforms, transforms) ? { transforms } : {}),
   };
   const tier = tierForEdits(edits);
   const dirty = tier !== null;
@@ -506,6 +538,18 @@ export function ConfigStudio({ org }: { org: string }) {
             />
           </CardContent>
         </Card>
+      )}
+
+      {replacementDictionaries && transforms && (
+        <ReplacementDictionariesEditor
+          dictionaries={replacementDictionaries}
+          transforms={transforms}
+          entityType={view.entityType}
+          editable={isAdmin}
+          busy={createDraft.isPending || publish.isPending}
+          onDictionariesChange={setReplacementDictionaries}
+          onTransformsChange={setTransforms}
+        />
       )}
 
       <Card data-testid="survivorship-card">

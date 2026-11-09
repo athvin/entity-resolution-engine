@@ -999,6 +999,9 @@ export function initialState() {
     "wizard-dev",
     "wizard-ios",
     "wizard-android",
+    "replacement-dev",
+    "replacement-ios",
+    "replacement-android",
     "selectall-dev",
     // Scoping a run to a segment starts one, which takes the org's single
     // writer slot — it cannot share with the Runs page's Run-now test.
@@ -3954,7 +3957,15 @@ const server = http.createServer((req, res) => {
       // rebuild), anything else keeps the tier-A single-job shape.
       const previousYaml = state.configs[org]?.yaml;
       const blockChanged = (name) => topBlock(row.yaml, name) !== topBlock(previousYaml, name);
-      const tierC = blockChanged("sources") || blockChanged("comparisons");
+      const tierCBlocks = [
+        "sources",
+        "comparisons",
+        "standardization",
+        "comparison_groups",
+        "transforms",
+        "replacement_dictionaries",
+      ].filter(blockChanged);
+      const tierC = tierCBlocks.length > 0;
       const tierB = !tierC && blockChanged("blocking");
       row.state = "published";
       row.tier = tierC ? "C" : tierB ? "B" : "A";
@@ -4004,7 +4015,7 @@ const server = http.createServer((req, res) => {
           org,
           version: row.version,
           tier: "C",
-          changed_blocks: ["sources"],
+          changed_blocks: tierCBlocks,
           jobs_enqueued: enqueued.map((job) => job.id),
           published_by: "user:mock via key:mock",
           // Sent on EVERY publish arm: the field is not conditional

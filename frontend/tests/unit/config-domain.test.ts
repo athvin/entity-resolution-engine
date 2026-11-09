@@ -223,3 +223,53 @@ sources:
     );
   });
 });
+
+describe("versioned replacement dictionaries", () => {
+  it("round-trips named mappings and prior transforms while preserving other blocks", () => {
+    const initial = `${CONFIG}\ntransforms:\n  address_line:\n    - op: trim\n    - op: regex_replace\n      pattern: " +"\n      replacement: " "\n`;
+    const view = parseConfig(initial);
+    const transforms = {
+      ...view.transforms,
+      address_line: [
+        ...(view.transforms.address_line ?? []),
+        { op: "named_dictionary", dictionary: "streets", mode: "words" },
+      ],
+    };
+    const next = applyEdits(initial, {
+      replacementDictionaries: { streets: { Strasse: "Street", "O'Way": "O'Road" } },
+      transforms,
+    });
+    expect(parseConfig(next).replacementDictionaries.streets).toEqual({
+      Strasse: "Street",
+      "O'Way": "O'Road",
+    });
+    expect(parseConfig(next).transforms).toEqual(transforms);
+    expect(parseConfig(next).blocking).toEqual(view.blocking);
+    expect(next).toContain("# a load-bearing comment that must survive edits");
+    const removed = applyEdits(next, { replacementDictionaries: {}, transforms: {} });
+    expect(removed).not.toContain("replacement_dictionaries:");
+    expect(parseConfig(removed).transforms).toEqual({});
+    expect(tierForEdits({ replacementDictionaries: {} })).toBe("C");
+    expect(tierForEdits({ transforms: {} })).toBe("C");
+  });
+
+  it("handles malformed optional blocks and preserves prototype-like literal names", () => {
+    for (const value of ["null", "[]", "oops"]) {
+      const view = parseConfig(
+        `${CONFIG}\nreplacement_dictionaries: ${value}\ntransforms: ${value}\n`,
+      );
+      expect(view.replacementDictionaries).toEqual({});
+      expect(view.transforms).toEqual({});
+    }
+    const view = parseConfig(
+      `${CONFIG}\nreplacement_dictionaries:\n  bad: []\n  missing: null\n  words: {yes: 5, ok: fine}\n  __proto__: {constructor: safe}\ntransforms:\n  bad: false\n  email: [null, [], false, {op: trim}]\n`,
+    );
+    expect(view.replacementDictionaries.words).toEqual({ ok: "fine" });
+    expect(Object.hasOwn(view.replacementDictionaries, "__proto__")).toBe(true);
+    expect(
+      parseConfig(applyEdits(CONFIG, { replacementDictionaries: view.replacementDictionaries }))
+        .replacementDictionaries,
+    ).toEqual(view.replacementDictionaries);
+    expect(view.transforms).toEqual({ email: [{ op: "trim" }] });
+  });
+});

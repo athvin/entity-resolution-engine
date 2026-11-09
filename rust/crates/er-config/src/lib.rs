@@ -21,6 +21,9 @@ use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+pub mod dictionaries;
+pub use dictionaries::{DictionaryMode, ReplacementDictionaries};
+
 /// S6.1 appends this as the terminal element of every survivorship chain, making
 /// each chain a total order over an entity's records.
 pub const TERMINAL_SURVIVORSHIP_RULE: &str = "record_key ASC";
@@ -43,12 +46,13 @@ pub fn is_sql_identifier_fragment(token: &str) -> bool {
 /// length, deliberately not restated in prose (it has read "fourteen" since it
 /// held sixteen). [`Config`]'s S6 block fields MUST equal this set; the `entity_type` discriminator (added for the
 /// Account entity type) is a meta-field, not an S6 block, and is excluded.
-pub const CONFIG_BLOCKS: [&str; 21] = [
+pub const CONFIG_BLOCKS: [&str; 22] = [
     "tenant",
     "thresholds",
     "models",
     "standardization",
     "transforms",
+    "replacement_dictionaries",
     "sources",
     "features",
     "blocking",
@@ -118,6 +122,12 @@ pub enum TransformRule {
     Default { value: String },
     /// Map exact values to replacements; anything unmatched passes through.
     Dictionary { map: BTreeMap<String, String> },
+    /// Reuse a directed mapping from this configuration's named registry.
+    NamedDictionary {
+        dictionary: String,
+        #[serde(default, skip_serializing_if = "DictionaryMode::is_value")]
+        mode: DictionaryMode,
+    },
     /// Remove whole tokens named by a seeded ignore-words dictionary — the
     /// spec's second dictionary type, the stop-words list. Tokens match
     /// case-insensitively and leave verbatim otherwise:
@@ -148,6 +158,19 @@ pub const IGNORE_WORDS_RELATION: &str = "ignore_words";
 pub const IGNORE_WORDS_MACRO: &str = "er_ignore_words";
 
 impl TransformRule {
+    /// Resolve named mappings from the same versioned configuration as the rule.
+    #[must_use]
+    pub fn apply_sql_with_dictionaries(
+        &self,
+        expr: &str,
+        dictionaries: &ReplacementDictionaries,
+    ) -> String {
+        if let Self::NamedDictionary { dictionary, mode } = self {
+            return dictionaries::render(dictionaries.get(dictionary), *mode, expr);
+        }
+        self.apply_sql(expr)
+    }
+
     /// Wrap `expr` in this rule, returning a scalar SQL expression.
     ///
     /// String literals are escaped by doubling quotes — these values come from a
@@ -156,6 +179,9 @@ impl TransformRule {
     pub fn apply_sql(&self, expr: &str) -> String {
         let lit = |v: &str| format!("'{}'", v.replace('\'', "''"));
         match self {
+            Self::NamedDictionary { .. } => {
+                "error('a named dictionary must be resolved from its configuration')".into()
+            }
             Self::Lower => format!("lower({expr})"),
             Self::Upper => format!("upper({expr})"),
             Self::Trim => format!("trim({expr})"),
@@ -984,6 +1010,9 @@ pub struct Config {
     /// before transforms existed hashes identically.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub transforms: Transforms,
+    /// Reusable directed mappings. Empty is omitted to preserve older hashes.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub replacement_dictionaries: ReplacementDictionaries,
     pub sources: BTreeMap<String, SourceSpec>,
     pub blocking: Vec<BlockingRule>,
     /// Hard candidate rules. Omitted from the canonical document when empty, so
@@ -1053,6 +1082,8 @@ pub enum ConfigError {
     InvalidSourceName(String),
     #[error("survivorship_groups token {0:?} must match [A-Za-z_][A-Za-z0-9_]*")]
     InvalidSurvivorshipGroupToken(String),
+    #[error("invalid replacement dictionary: {0}")]
+    InvalidReplacementDictionary(String),
 }
 
 impl ConfigError {
@@ -1086,6 +1117,7 @@ pub fn normalize(mut config: Config) -> Config {
 /// `config_hash` is computed over. (Full V1–V16 validation is not yet ported.)
 pub fn load_config_str(yaml: &str) -> Result<Config, ConfigError> {
     let config: Config = serde_norway::from_str(yaml)?;
+    dictionaries::validate(&config).map_err(ConfigError::InvalidReplacementDictionary)?;
     if let Some(source) = config
         .sources
         .keys()
@@ -1238,9 +1270,10 @@ mod tests {
 
     #[test]
     fn blocks_and_constants() {
-        assert_eq!(CONFIG_BLOCKS.len(), 21);
+        assert_eq!(CONFIG_BLOCKS.len(), 22);
         assert_eq!(CONFIG_BLOCKS[0], "tenant");
-        assert_eq!(CONFIG_BLOCKS[20], "correction_pass");
+        assert_eq!(CONFIG_BLOCKS[21], "correction_pass");
+        assert!(CONFIG_BLOCKS.contains(&"replacement_dictionaries"));
         // `models` sits beside `thresholds` because it refines the same
         // decision — what probability merges — one threshold per member
         // instead of one for the corpus.

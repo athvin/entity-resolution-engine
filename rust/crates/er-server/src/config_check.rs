@@ -480,6 +480,9 @@ pub fn config_reference_problems(config: &Config) -> Vec<String> {
     }
 
     let mut problems = Vec::new();
+    if let Err(problem) = er_config::dictionaries::validate(config) {
+        problems.push(format!("replacement dictionaries: {problem}"));
+    }
 
     // The related-record features themselves (E11a): the prefix has to be a
     // usable column name and the target source has to exist. Checked here so

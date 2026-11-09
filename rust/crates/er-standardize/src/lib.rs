@@ -102,7 +102,9 @@ fn metadata_excluded(spec: &SourceSpec) -> Vec<String> {
 fn transformed(config: &Config, attribute: &str, expr: String) -> String {
     match config.transforms.get(attribute) {
         None => expr,
-        Some(rules) => rules.iter().fold(expr, |acc, rule| rule.apply_sql(&acc)),
+        Some(rules) => rules.iter().fold(expr, |acc, rule| {
+            rule.apply_sql_with_dictionaries(&acc, &config.replacement_dictionaries)
+        }),
     }
 }
 

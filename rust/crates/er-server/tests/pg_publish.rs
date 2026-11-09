@@ -325,5 +325,56 @@ async fn config_publish_tiers_and_authz() {
         "tier B enqueues the rebuild only, no train"
     );
 
+    // Named mappings and their references independently affect raw values.
+    // Either edit must queue the same train/full rebuild as standardization.
+    let mappings_yaml =
+        format!("{ens_yaml}\nreplacement_dictionaries:\n  street_types:\n    Street: Boulevard\n");
+    let mappings = create_version(&app, &admin_key, &mappings_yaml).await;
+    let resp = publish(&app, &admin_key, mappings).await;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let result = json_body(resp).await;
+    assert_eq!(result["tier"], "C");
+    assert_eq!(
+        result["changed_blocks"],
+        serde_json::json!(["replacement_dictionaries"])
+    );
+    assert_eq!(result["jobs_enqueued"].as_array().unwrap().len(), 2);
+
+    let referenced_yaml = format!(
+        "{mappings_yaml}\ntransforms:\n  address_line:\n    - op: named_dictionary\n      dictionary: street_types\n      mode: words\n"
+    );
+    let referenced = create_version(&app, &admin_key, &referenced_yaml).await;
+    let resp = publish(&app, &admin_key, referenced).await;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let result = json_body(resp).await;
+    assert_eq!(result["tier"], "C");
+    assert_eq!(result["changed_blocks"], serde_json::json!(["transforms"]));
+    assert_eq!(result["jobs_enqueued"].as_array().unwrap().len(), 2);
+    let persisted = std::fs::read_to_string(&config_path).unwrap();
+    let parsed = er_config::load_config_str(&persisted).unwrap();
+    assert_eq!(
+        parsed.replacement_dictionaries["street_types"]["Street"],
+        "Boulevard"
+    );
+
+    let invalid_yaml = referenced_yaml.replace("dictionary: street_types", "dictionary: missing");
+    let response = app
+        .clone()
+        .oneshot(req(
+            "POST",
+            "/v1/orgs/acme/datasets/default/config/versions",
+            &admin_key,
+            create_body(&invalid_yaml),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(
+        json_body(response).await["detail"]
+            .as_str()
+            .unwrap()
+            .contains("missing")
+    );
+
     let _ = std::fs::remove_file(&config_path);
 }

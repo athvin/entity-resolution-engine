@@ -197,7 +197,9 @@ mod tests {
                     // The lambda rewrite matches the generator's literal output,
                     // so it runs before strip_named_args eats the `key := `s.
                     let planar = crate::rewrite_map_subscript(&crate::rewrite_json_casts(
-                        &crate::strip_named_args(&crate::rewrite_metadata_lambdas(&rewritten.sql)),
+                        &crate::strip_named_args(&crate::rewrite_dictionary_lambdas(
+                            &crate::rewrite_metadata_lambdas(&rewritten.sql),
+                        )),
                     ));
                     let plan =
                         crate::parse_and_plan(&planar, &dialect, &provider).unwrap_or_else(|e| {
@@ -308,6 +310,58 @@ mod tests {
                 cols.contains(&required.to_string()),
                 "acct_int_std_records output missing {required}: {cols:?}"
             );
+        }
+    }
+
+    #[test]
+    fn named_dictionary_modes_plan_in_person_and_account_standardization() {
+        for (account, yaml) in [(false, TEST_CONFIG), (true, ACCT_STD_CONFIG)] {
+            for mode in [
+                er_config::DictionaryMode::Value,
+                er_config::DictionaryMode::Words,
+            ] {
+                let mut config = er_config::load_config_str(yaml).unwrap();
+                config.replacement_dictionaries.insert(
+                    "street_types".into(),
+                    [
+                        ("Strasse".into(), "Street".into()),
+                        ("O'Way".into(), "O'Road".into()),
+                    ]
+                    .into(),
+                );
+                config.transforms.insert(
+                    if account {
+                        "addr_street"
+                    } else {
+                        "address_line"
+                    }
+                    .into(),
+                    vec![er_config::TransformRule::NamedDictionary {
+                        dictionary: "street_types".into(),
+                        mode,
+                    }],
+                );
+                let sql = if account {
+                    er_standardize::acct_int_std_records_sql(
+                        &config,
+                        "lake.main.raw_records",
+                        "2000-01-01 00:00:00",
+                    )
+                } else {
+                    er_standardize::int_std_records_sql(
+                        &config,
+                        "lake.main.raw_records",
+                        "nickname_variants",
+                        "2000-01-01 00:00:00",
+                    )
+                };
+                assert!(
+                    sql.contains("'Strasse'"),
+                    "the selected attribute must actually render the rule"
+                );
+                let cols = plan_stage(&standardize_catalog(account), &sql);
+                assert!(cols.contains(&"addr_street".to_string()));
+            }
         }
     }
 
