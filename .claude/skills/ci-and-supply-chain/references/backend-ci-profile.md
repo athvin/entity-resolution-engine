@@ -160,8 +160,15 @@ complete integration-test identity lists match exactly.
 
 [PR run 42706135674](https://github.com/athvin/entity-resolution-engine/actions/runs/42706135674)
 passed the complete backend gate in **4m42s**, creation to final job completion.
-Against 8m11s–8m33s, this is **42.6–45.0% less elapsed time**. This is one full
-run, not a p95 or a guarantee for future cold dependency changes.
+Against 8m11s–8m33s, this is **42.6–45.0% less elapsed time**. The refreshed PR run
+[42708615045](https://github.com/athvin/entity-resolution-engine/actions/runs/42708615045)
+and merged main run
+[42709550901](https://github.com/athvin/entity-resolution-engine/actions/runs/42709550901)
+took **4m57s and 4m56s**. A fresh old-code base run
+[42706398325](https://github.com/athvin/entity-resolution-engine/actions/runs/42706398325)
+took **8m56s**. These are complete gates, not content-cache skips; they establish
+roughly 40–45% less elapsed time against the original baseline, not a p95 or a
+guarantee for future cold dependency changes.
 
 - All measured native C/C++ compilations were cache hits; the nightly cache
   did carry the optimized objects into the read-only PR run.
@@ -306,7 +313,13 @@ It does not clone initialized schemas or shorten the token refresh interval.
   A 226-second individual test sets a floor regardless of the shard count.
 - A prior compile-once/archive experiment covered 45 jobs and matched test
   identities before this native optimization. Including producer/transfer cost, its median was 498 versus
-  464 seconds (7.33% slower); retain separate cached builds. See build-cost.md.
+  464 seconds (7.33% slower). A fresh optimized comparison
+  [42713537379](https://github.com/athvin/entity-resolution-engine/actions/runs/42713537379)
+  passed all 45 jobs and matched exact test identities. Five baseline/archive
+  critical paths were 172/202, 187/221, 169/207, 178/188 and 180/178 seconds:
+  **median 178 versus 202 seconds, archive 13.48% slower**. This includes producer,
+  transfer and slowest consumer costs, excluding unrelated queue contention.
+  Retain separate cached builds. See build-cost.md.
 - Replacing every Cargo test invocation with nextest was also measured slower
   for short tests in large statically linked executables. Keep nextest where
   it supplies useful lake-test partitioning; preserve the Postgres suite's
