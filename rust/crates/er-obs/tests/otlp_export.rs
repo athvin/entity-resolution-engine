@@ -116,6 +116,18 @@ fn assert_it_looked_like_otlp(received: &Received) {
         "http-proto must post protobuf, not JSON — a wrong content-type is a \
          415 the exporter reports only in its own logs"
     );
+    // The resource is what attributes a span to its service, and the OTLP
+    // transform takes it from what the exporter was TOLD via `set_resource`,
+    // not from each span — so a wrapper that swallows that call ships spans
+    // with an empty resource: bytes arrive, nothing is attributable, and the
+    // span store reads exactly like the #941 outage. Protobuf embeds the
+    // string verbatim, so the service name is findable in the raw payload.
+    assert!(
+        received.head.contains("er-task"),
+        "the payload must carry service.name — a span that arrives \
+         unattributed is the outage this file exists to prevent; got: {:?}",
+        received.head
+    );
 }
 
 /// The CLI and pod-verb shape: no ambient tokio runtime anywhere.

@@ -50,8 +50,9 @@ use opentelemetry::trace::TracerProvider as _;
 use opentelemetry_http::{Bytes, HttpClient, HttpError, Request, Response};
 use opentelemetry_otlp::{MetricExporter, SpanExporter, WithExportConfig, WithHttpConfig};
 use opentelemetry_sdk::Resource;
+use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
-use opentelemetry_sdk::trace::{Sampler, SdkTracerProvider};
+use opentelemetry_sdk::trace::{Sampler, SdkTracerProvider, SpanData, SpanProcessor};
 
 use crate::init::Role;
 
@@ -226,6 +227,100 @@ fn parse_secs(raw: Option<&str>, default: u64) -> Duration {
     Duration::from_secs(raw.and_then(|v| v.parse().ok()).unwrap_or(default))
 }
 
+/// Counts every span that ends and enters the SDK pipeline.
+///
+/// Installed beside the batch processor rather than into it, so it keeps
+/// counting when the batch half is the thing that is broken — which is
+/// precisely the case #941 needs to see. `spans_ended` rising while
+/// `spans_exported` stays flat puts the wedge between this processor and the
+/// wire; both rising together says the pipeline is healthy and a missing span
+/// was dropped deliberately, by the collector's sampling.
+#[derive(Debug)]
+struct CountingProcessor {
+    role: Role,
+}
+
+impl SpanProcessor for CountingProcessor {
+    fn on_start(&self, _span: &mut opentelemetry_sdk::trace::Span, _cx: &opentelemetry::Context) {}
+
+    fn on_end(&self, _span: SpanData) {
+        crate::metrics::record_span_ended(self.role);
+    }
+
+    fn force_flush(&self) -> OTelSdkResult {
+        Ok(())
+    }
+
+    fn shutdown_with_timeout(&self, _timeout: Duration) -> OTelSdkResult {
+        Ok(())
+    }
+}
+
+/// Counts what the export half did with each batch, and says so out loud.
+///
+/// The SDK's own report of a failed export is easy to miss — it rides the
+/// internal-logs path at a level a deployment filter can silence, and in the
+/// #941 outage nothing was logged by anybody. Here a failed batch is both a
+/// counter (`er.telemetry.span_exports_failed`, the alarm input) and a
+/// `tracing::warn!` in the pod's own log, the channel that survives the
+/// telemetry pipeline being the broken part.
+#[derive(Debug)]
+struct CountingExporter<E> {
+    inner: E,
+    role: Role,
+}
+
+impl<E: opentelemetry_sdk::trace::SpanExporter> opentelemetry_sdk::trace::SpanExporter
+    for CountingExporter<E>
+{
+    // Every provided method is delegated, not left at its default. The one
+    // that bites is `set_resource`: the OTLP transform takes the resource
+    // from what the exporter stored, NOT from each span — a wrapper that
+    // swallows the call ships every span with an EMPTY resource, no
+    // service.name and no er.role, which is the look-installed-export-nothing
+    // outage shape self-inflicted and permanent. `shutdown` and `force_flush`
+    // are the same class: the batch processor's last flush at exit is the one
+    // that carries a run's tail.
+    fn export(
+        &self,
+        batch: Vec<SpanData>,
+    ) -> impl std::future::Future<Output = OTelSdkResult> + Send {
+        let count = batch.len() as u64;
+        async move {
+            let result = self.inner.export(batch).await;
+            match &result {
+                Ok(()) => crate::metrics::record_spans_exported(self.role, count),
+                Err(error) => {
+                    crate::metrics::record_span_export_failure(self.role);
+                    tracing::warn!(
+                        error = %error,
+                        spans = count,
+                        role = self.role.as_str(),
+                        "OTLP span export batch failed"
+                    );
+                }
+            }
+            result
+        }
+    }
+
+    fn shutdown_with_timeout(&mut self, timeout: Duration) -> OTelSdkResult {
+        self.inner.shutdown_with_timeout(timeout)
+    }
+
+    fn shutdown(&mut self) -> OTelSdkResult {
+        self.inner.shutdown()
+    }
+
+    fn force_flush(&mut self) -> OTelSdkResult {
+        self.inner.force_flush()
+    }
+
+    fn set_resource(&mut self, resource: &Resource) {
+        self.inner.set_resource(resource);
+    }
+}
+
 /// Build a provider exporting to an explicit endpoint.
 ///
 /// The endpoint is a parameter rather than read from the environment, and that
@@ -269,7 +364,11 @@ pub fn provider_for(
     // exactly the traces worth keeping, before anything knows they matter.
     Ok(SdkTracerProvider::builder()
         .with_sampler(Sampler::AlwaysOn)
-        .with_batch_exporter(exporter)
+        .with_span_processor(CountingProcessor { role })
+        .with_batch_exporter(CountingExporter {
+            inner: exporter,
+            role,
+        })
         .with_resource(
             Resource::builder()
                 .with_service_name(role.service_name())
@@ -419,7 +518,170 @@ pub(crate) fn tracer(provider: &SdkTracerProvider) -> opentelemetry_sdk::trace::
 
 #[cfg(test)]
 mod tests {
-    use super::{clean, parse_secs, resolve_traces_endpoint};
+    use super::{CountingExporter, CountingProcessor, clean, parse_secs, resolve_traces_endpoint};
+
+    /// A `SpanExporter` that never leaves the test: it counts the spans it
+    /// was handed and answers with the configured outcome.
+    ///
+    /// The counters under test are global instruments, so a fake exporter plus
+    /// the shared in-memory meter is the only way to watch them move without
+    /// a socket. The socket half of the path stays where it belongs — in
+    /// `tests/otlp_export.rs`, which exists because "the provider built" once
+    /// hid a batch-thread panic from exactly this kind of test.
+    #[derive(Debug)]
+    struct FakeExporter {
+        fail: bool,
+        resource_seen: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+    }
+
+    impl opentelemetry_sdk::trace::SpanExporter for FakeExporter {
+        fn export(
+            &self,
+            batch: Vec<opentelemetry_sdk::trace::SpanData>,
+        ) -> impl std::future::Future<Output = opentelemetry_sdk::error::OTelSdkResult> + Send
+        {
+            let fail = self.fail;
+            let n = batch.len();
+            async move {
+                if fail {
+                    Err(opentelemetry_sdk::error::OTelSdkError::InternalFailure(
+                        format!("refusing {n} spans, by arrangement"),
+                    ))
+                } else {
+                    Ok(())
+                }
+            }
+        }
+
+        fn set_resource(&mut self, resource: &opentelemetry_sdk::Resource) {
+            let named = resource
+                .iter()
+                .any(|(key, value)| key.as_str() == "service.name" && value.as_str() == "er-api");
+            *self.resource_seen.lock().expect("resource_seen") =
+                Some(if named { "er-api" } else { "other" }.to_string());
+        }
+    }
+
+    fn provider_with(fake: FakeExporter) -> opentelemetry_sdk::trace::SdkTracerProvider {
+        use opentelemetry_sdk::trace::{Sampler, SdkTracerProvider};
+        SdkTracerProvider::builder()
+            .with_sampler(Sampler::AlwaysOn)
+            .with_span_processor(CountingProcessor {
+                role: crate::Role::Api,
+            })
+            .with_batch_exporter(CountingExporter {
+                inner: fake,
+                role: crate::Role::Api,
+            })
+            .with_resource(
+                opentelemetry_sdk::Resource::builder()
+                    .with_service_name("er-api")
+                    .build(),
+            )
+            .build()
+    }
+
+    /// The provider hands its resource to every processor at build, and the
+    /// batch processor hands it to the exporter — a wrapper that lets the
+    /// trait's default no-op answer strips service.name off every exported
+    /// span. The integration assertion in `tests/otlp_export.rs` covers the
+    /// wire bytes; this pins the delegation itself.
+    #[test]
+    fn the_exporter_wrapper_delegates_set_resource() {
+        let resource_seen = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let provider = provider_with(FakeExporter {
+            fail: false,
+            resource_seen: resource_seen.clone(),
+        });
+        // The batch processor receives the resource as a channel message at
+        // build and applies it on its own thread, ahead of anything queued
+        // later — so the flush is what orders this assertion after the apply.
+        provider.force_flush().expect("flush");
+        assert_eq!(
+            resource_seen.lock().expect("resource_seen").as_deref(),
+            Some("er-api"),
+            "the provider's resource never reached the exporter through the \
+             wrapper — every span would export with an empty resource"
+        );
+    }
+
+    /// Read the accumulated export back and return the named counter's total.
+    fn counter_value(
+        metrics: &[opentelemetry_sdk::metrics::data::ResourceMetrics],
+        name: &str,
+    ) -> u64 {
+        use opentelemetry_sdk::metrics::data::AggregatedMetrics;
+        let mut total = 0;
+        for rm in metrics {
+            for sm in rm.scope_metrics() {
+                for m in sm.metrics() {
+                    if m.name() != name {
+                        continue;
+                    }
+                    if let AggregatedMetrics::U64(
+                        opentelemetry_sdk::metrics::data::MetricData::Sum(sum),
+                    ) = m.data()
+                    {
+                        total += sum
+                            .data_points()
+                            .map(opentelemetry_sdk::metrics::data::SumDataPoint::value)
+                            .sum::<u64>();
+                    }
+                }
+            }
+        }
+        total
+    }
+
+    /// The wiring #941 needs to be true: a span that ends is counted, an
+    /// accepted batch is counted, and a refused batch is counted — per role.
+    /// If any of the three stops moving, the absent-spans alarm has no input
+    /// and the next silent pod looks identical to a healthy one.
+    #[test]
+    fn the_export_counters_track_a_span_end_to_end() {
+        use opentelemetry::trace::{Tracer as _, TracerProvider as _};
+
+        let _serial = crate::metrics::test_support::metric_test_lock()
+            .lock()
+            .expect("metric test lock");
+        let (meter_provider, exporter) = crate::metrics::test_support::test_meter();
+
+        // A failure-free pass: ended and exported move, failures do not.
+        let provider = provider_with(FakeExporter {
+            fail: false,
+            resource_seen: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        });
+        provider.tracer("counter_test").in_span("one-span", |_| {});
+        provider.force_flush().expect("flush");
+
+        meter_provider.force_flush().expect("meter flush");
+        let metrics = exporter.get_finished_metrics().expect("finished metrics");
+        assert!(
+            counter_value(&metrics, "er.telemetry.spans_ended") >= 1,
+            "a span ended but spans_ended did not move — the counting processor              fell out of the pipeline"
+        );
+        assert!(
+            counter_value(&metrics, "er.telemetry.spans_exported") >= 1,
+            "a batch exported but spans_exported did not move — the counting              exporter fell out of the pipeline"
+        );
+
+        // A refused batch: the failure counter moves and the error propagates
+        // (the SDK logs and DROPS the batch — no retry, which is exactly why
+        // refused exports show up as ended-minus-exported divergence).
+        let provider = provider_with(FakeExporter {
+            fail: true,
+            resource_seen: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        });
+        provider.tracer("counter_test").in_span("one-span", |_| {});
+        let _ = provider.force_flush();
+
+        meter_provider.force_flush().expect("meter flush");
+        let metrics = exporter.get_finished_metrics().expect("finished metrics");
+        assert!(
+            counter_value(&metrics, "er.telemetry.span_exports_failed") >= 1,
+            "a batch was refused but span_exports_failed did not move"
+        );
+    }
 
     #[test]
     fn the_general_endpoint_is_a_base_and_takes_the_signal_path() {

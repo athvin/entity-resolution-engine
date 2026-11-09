@@ -14,12 +14,27 @@ of truth and this file is its output.
 | Metric | Kind | Unit | Dimensions | Series |
 |---|---|---|---|---|
 | `er.db.query.duration` | histogram | `ms` | `db.system.name`, `outcome` | 4 |
+| `er.telemetry.spans_ended` | counter | `1` | `er.role` | 4 |
+| `er.telemetry.spans_exported` | counter | `1` | `er.role` | 4 |
+| `er.telemetry.span_exports_failed` | counter | `1` | `er.role` | 4 |
 
-**4 series in total.**
+**16 series in total.**
 
 ### `er.db.query.duration`
 
 How long a SQL statement took, aggregated across every statement. Statement identity is deliberately NOT a dimension — see the module docs for the arithmetic — so this answers 'is the database slow' and not 'which statement is slow'. The second question is a span query, where `er.statement` is recorded and costs nothing.
+
+### `er.telemetry.spans_ended`
+
+Spans that ended in this process and entered the SDK's export pipeline. The upstream reference for the two export counters: this rising while `er.telemetry.spans_exported` stays flat is the wedge signature of #941 — a process whose span pipeline looks installed and exports nothing, with no error logged anywhere. The absent-spans alarm in `envs/dev/alarms-telemetry.tf` fires on exactly that divergence.
+
+### `er.telemetry.spans_exported`
+
+Spans the exporter delivered to the collector, counted as batches are accepted. The counter that flatlines when span export dies — which it did for one whole er-api pod lifetime on 2026-11-08 while every other signal from the same process kept flowing.
+
+### `er.telemetry.span_exports_failed`
+
+Export batches that failed — the collector refused the POST or the network did. Counted per batch (one rejected POST), not per span: the operationally meaningful unit is the failed delivery, and a failure also logs a warning at the call site, so the counter is the alarm input and the log line is the detail.
 
 ## Dimensions a metric may never carry
 

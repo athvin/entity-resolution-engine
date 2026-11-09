@@ -131,19 +131,60 @@ pub const FORBIDDEN_DIMENSIONS: &[&str] = &[
 /// reaching a provider without depending on it — had to be designed rather than
 /// typed. Each later metric is an entry here and a call site, not new
 /// machinery.
-pub const METRICS: &[Metric] = &[Metric {
-    name: "er.db.query.duration",
-    kind: Kind::Histogram,
-    unit: "ms",
-    description: "How long a SQL statement took, aggregated across every statement. \
-                  Statement identity is deliberately NOT a dimension — see the module \
-                  docs for the arithmetic — so this answers 'is the database slow' and \
-                  not 'which statement is slow'. The second question is a span query, \
-                  where `er.statement` is recorded and costs nothing.",
-    dimensions: &["db.system.name", "outcome"],
-    // 2 stores (duckdb, postgresql) x 2 outcomes (ok, error).
-    series: 4,
-}];
+pub const METRICS: &[Metric] = &[
+    Metric {
+        name: "er.db.query.duration",
+        kind: Kind::Histogram,
+        unit: "ms",
+        description: "How long a SQL statement took, aggregated across every statement. \
+                      Statement identity is deliberately NOT a dimension — see the module \
+                      docs for the arithmetic — so this answers 'is the database slow' and \
+                      not 'which statement is slow'. The second question is a span query, \
+                      where `er.statement` is recorded and costs nothing.",
+        dimensions: &["db.system.name", "outcome"],
+        // 2 stores (duckdb, postgresql) x 2 outcomes (ok, error).
+        series: 4,
+    },
+    Metric {
+        name: "er.telemetry.spans_ended",
+        kind: Kind::Counter,
+        unit: "1",
+        description: "Spans that ended in this process and entered the SDK's export \
+                      pipeline. The upstream reference for the two export counters: \
+                      this rising while `er.telemetry.spans_exported` stays flat is the \
+                      wedge signature of #941 — a process whose span pipeline looks \
+                      installed and exports nothing, with no error logged anywhere. \
+                      The absent-spans alarm in `envs/dev/alarms-telemetry.tf` fires on \
+                      exactly that divergence.",
+        dimensions: &["er.role"],
+        // api + dispatcher + task in-cluster; cli joins when a developer points a
+        // local run at the collector. 4 stated; the other roles ship no workload.
+        series: 4,
+    },
+    Metric {
+        name: "er.telemetry.spans_exported",
+        kind: Kind::Counter,
+        unit: "1",
+        description: "Spans the exporter delivered to the collector, counted as batches \
+                      are accepted. The counter that flatlines when span export dies — \
+                      which it did for one whole er-api pod lifetime on 2026-11-08 while \
+                      every other signal from the same process kept flowing.",
+        dimensions: &["er.role"],
+        series: 4,
+    },
+    Metric {
+        name: "er.telemetry.span_exports_failed",
+        kind: Kind::Counter,
+        unit: "1",
+        description: "Export batches that failed — the collector refused the POST or \
+                      the network did. Counted per batch (one rejected POST), not per \
+                      span: the operationally meaningful unit is the failed delivery, \
+                      and a failure also logs a warning at the call site, so \
+                      the counter is the alarm input and the log line is the detail.",
+        dimensions: &["er.role"],
+        series: 4,
+    },
+];
 
 /// Render the reference document.
 ///
