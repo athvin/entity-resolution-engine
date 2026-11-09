@@ -83,7 +83,11 @@ jobs:
           role-to-assume: ${{ matrix.role }}
           aws-region: us-east-2
       - name: kubeconfig
-        run: aws eks update-kubeconfig --name "${{ matrix.cluster }}" --region "$AWS_REGION"
+        # --alias is load-bearing: without it the context is named by the
+        # cluster ARN, and every `--context er-<env>` in the script fails
+        # "cluster unreachable". The first run of this workflow failed exactly
+        # so on both legs.
+        run: aws eks update-kubeconfig --name "${{ matrix.cluster }}" --alias "${{ matrix.cluster }}" --region "$AWS_REGION"
       - name: Install helm
         # The script installs the External Secrets Operator with it.
         run: bash scripts/ci/install-helm.sh
