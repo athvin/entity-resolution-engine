@@ -34,7 +34,7 @@ Spans the exporter delivered to the collector, counted as batches are accepted. 
 
 ### `er.telemetry.span_exports_failed`
 
-Export batches that failed — the collector refused the POST or the network did. Counted per batch (one rejected POST), not per span: the operationally meaningful unit is the failed delivery, and a failure also logs a `tracing::warn!` at the call site, so the counter is the alarm input and the log line is the detail.
+Export batches that failed — the collector refused the POST or the network did. Counted per batch (one rejected POST), not per span: the operationally meaningful unit is the failed delivery, and a failure also logs a warning at the call site, so the counter is the alarm input and the log line is the detail.
 
 ## Dimensions a metric may never carry
 

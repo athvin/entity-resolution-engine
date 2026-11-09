@@ -179,7 +179,7 @@ pub const METRICS: &[Metric] = &[
         description: "Export batches that failed — the collector refused the POST or \
                       the network did. Counted per batch (one rejected POST), not per \
                       span: the operationally meaningful unit is the failed delivery, \
-                      and a failure also logs a `tracing::warn!` at the call site, so \
+                      and a failure also logs a warning at the call site, so \
                       the counter is the alarm input and the log line is the detail.",
         dimensions: &["er.role"],
         series: 4,

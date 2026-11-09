@@ -69,6 +69,7 @@ Distinct `resource "aws_*"` blocks across `infra/terraform/`, by count:
    6  aws_secretsmanager_secret_version
    5  aws_s3_bucket_policy
    4  aws_cloudwatch_log_group
+   4  aws_cloudwatch_metric_alarm
    4  aws_eks_addon
    4  aws_kms_alias
    4  aws_kms_key
@@ -76,7 +77,6 @@ Distinct `resource "aws_*"` blocks across `infra/terraform/`, by count:
    4  aws_security_group
    4  aws_ssoadmin_account_assignment
    4  aws_ssoadmin_permission_set
-   3  aws_cloudwatch_metric_alarm
    3  aws_s3_bucket_versioning
    3  aws_ssoadmin_managed_policy_attachment
    3  aws_vpc_security_group_ingress_rule
@@ -166,7 +166,7 @@ drops off this list on the next regeneration, so an absence here cannot rot.
 
 | Resource type | Declared |
 |---|---|
-| `aws_cloudwatch_metric_alarm` | 3 |
+| `aws_cloudwatch_metric_alarm` | 4 |
 | `aws_sns_topic` | 1 |
 | `aws_sns_topic_subscription` | 1 |
 | `aws_cloudwatch_dashboard` | 0 |
