@@ -144,8 +144,15 @@ pub fn analyze_statement(
         }
         let dialect = dialect_for(store);
         match Parser::parse_sql(dialect.as_ref(), &rewritten.sql) {
-            Ok(mut stmts) if !stmts.is_empty() => {
-                diags.extend(ast_checks(stmt, entity, catalog, store, &stmts.remove(0)));
+            Ok(stmts) if stmts.len() > 1 => {
+                diags.push(Diagnostic::new(
+                    "E001",
+                    &stmt.path,
+                    "a declared SQL file must contain exactly one statement",
+                ));
+            }
+            Ok(stmts) if !stmts.is_empty() => {
+                diags.extend(ast_checks(stmt, entity, catalog, store, &stmts[0]));
             }
             _ => {
                 // Truly unparseable: the text heuristics hold the line.
@@ -170,6 +177,14 @@ pub fn analyze_statement(
     // Parse once for the structural checks, then plan.
     let dialect = dialect_for(store);
     let parsed = match Parser::parse_sql(dialect.as_ref(), &rewritten.sql) {
+        Ok(stmts) if stmts.len() > 1 => {
+            diags.push(Diagnostic::new(
+                "E001",
+                &stmt.path,
+                "a declared SQL file must contain exactly one statement",
+            ));
+            return diags;
+        }
         Ok(mut stmts) if !stmts.is_empty() => stmts.remove(0),
         Ok(_) => {
             diags.push(Diagnostic::new("E001", &stmt.path, "no statement parsed"));
@@ -1146,6 +1161,23 @@ mod tests {
         let cat = catalog();
         let diags = analyze_catalog(&entities_dir(), &cat).expect("analysis runs");
         assert!(diags.is_empty(), "unexpected diagnostics: {diags:#?}");
+    }
+
+    #[test]
+    fn a_second_statement_is_rejected_in_full_and_partial_modes() {
+        let sql = "SELECT id FROM lake.main.golden_records AT (VERSION => $snapshot); \
+                   SELECT * FROM lake.main.golden_records";
+        let mut stmt = read_stmt(sql);
+        for mode in [Mode::Full, Mode::Partial] {
+            stmt.mode = mode;
+            let diags = lake_diags(&stmt);
+            assert!(
+                diags
+                    .iter()
+                    .any(|d| d.code == "E001" && d.message.contains("exactly one")),
+                "{mode:?}: {diags:#?}"
+            );
+        }
     }
 
     /// A statement skeleton for the hand-built rule tests: a pinned, full-mode
