@@ -1,17 +1,12 @@
 import { HOW_IT_WORKS } from "@/components/marketing/content";
 
-/**
- * The three stages.
- *
- * Numbered markers are used here because the content genuinely is a sequence —
- * resolve, then review, then reconcile, in that order, with nothing applied
- * until all three have run. The design-system skill's warning about `01 / 02 /
- * 03` as a generic default applies to content that is merely a list; this is
- * not one.
- */
 export function HowItWorks() {
   return (
-    <section id="how-it-works" className="border-t" data-testid="marketing-how-it-works">
+    <section
+      id="how-it-works"
+      className="scroll-mt-20 border-t"
+      data-testid="marketing-how-it-works"
+    >
       <div className="mx-auto max-w-5xl px-6 py-20 lg:py-28">
         <div className="max-w-2xl">
           <h2 className="text-2xl font-medium tracking-tight sm:text-3xl">

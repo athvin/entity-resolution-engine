@@ -84,6 +84,7 @@
     "@vitejs/plugin-react": "^6.2.1",
     "@vitest/coverage-v8": "^5.1.0",
     "drizzle-kit": "^0.31.11",
+    "esbuild": "0.28.2",
     "eslint": "^10.14.0",
     "eslint-config-next": "16.4.5",
     "jsdom": "^31.0.0",

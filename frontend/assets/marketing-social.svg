@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+<rect width="1200" height="630" fill="#fafafa"/>
+<g font-family="Arial, sans-serif" fill="#171717">
+<text x="64" y="64" font-size="24" font-weight="600">DupeZero</text>
+<text x="64" y="172" font-size="58" font-weight="600" letter-spacing="-2">Entity resolution</text>
+<text x="64" y="240" font-size="58" font-weight="600" letter-spacing="-2" fill="#666">you can defend.</text>
+<text x="64" y="308" font-size="58" font-weight="600" letter-spacing="-2">Resolve. Review. Reconcile.</text>
+<text x="64" y="358" font-size="22" fill="#666">Any source. Any destination. Your data, your rules.</text>
+<g stroke="#d4d4d4" fill="#fff"><rect x="64" y="420" width="286" height="138" rx="12"/><rect x="457" y="420" width="286" height="138" rx="12"/><rect x="850" y="420" width="286" height="138" rx="12"/></g>
+<g font-size="16" fill="#666"><text x="88" y="454">DATABASE · FILE · API</text><text x="481" y="454">DUPEZERO</text><text x="874" y="454">YOUR DESTINATION</text></g>
+<g font-size="23" font-weight="600"><text x="88" y="497">Different records</text><text x="481" y="497">One trusted entity</text><text x="874" y="497">Ready to use</text></g>
+<g font-size="16" fill="#666"><text x="88" y="530">Across your sources</text><text x="481" y="530">With evidence and provenance</text><text x="874" y="530">In the systems you use</text></g>
+<g fill="none" stroke="#171717" stroke-width="2"><path d="M370 489h65m-10-8 10 8-10 8"/><path d="M763 489h65m-10-8 10 8-10 8"/></g>
+</g></svg>

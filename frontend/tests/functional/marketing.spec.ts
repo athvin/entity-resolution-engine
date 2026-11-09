@@ -29,6 +29,9 @@ test.describe("marketing", () => {
       "marketing-problem",
       "marketing-how-it-works",
       "marketing-proof",
+      "marketing-provenance",
+      "marketing-review-flow",
+      "marketing-connections",
       "marketing-faq",
       "marketing-cta",
       "marketing-footer",
@@ -110,8 +113,10 @@ test.describe("marketing", () => {
   });
 
   test("landing hero visual baseline @visual", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
     await page.goto("/");
     await expect(page.getByTestId("marketing-hero")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Pause pipeline" })).toBeDisabled();
     await expect(page.getByTestId("marketing-hero")).toHaveScreenshot("marketing-hero.png");
   });
 

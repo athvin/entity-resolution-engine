@@ -1,138 +1,123 @@
-/**
- * Every word on the marketing surface, in one typed module.
- *
- * Deliberately under `src/components/`, not `src/lib/` — the coverage floor
- * measures `src/lib/**` with Vitest's `all`, so a data module there that no
- * unit test imports reports 0% and spends the budget for nothing. See
- * `src/lib/site/routes.ts` for the same note from the other side.
- *
- * Copy follows the house voice (.claude/skills/frontend-design-system/references/frontend-design.md §3.3 and the
- * frontend-design-system skill): name the thing in the user's language, never
- * sell with adjectives where a number will do, and no sentence that would be
- * equally true of any other product.
- */
-
+/** Shared copy for the public, industry-independent marketing surface. */
 export const HERO = {
-  /** The positioning sentence. Set as `title.absolute` so it escapes the root
-   *  layout's `%s · DupeZero` template — "Home · DupeZero" would waste the one
-   *  line a search result shows. */
-  title: "One record per customer, and the reason why",
-  headline: "One record per customer,\nand the reason why",
+  title: "Entity resolution you can defend. | DupeZero",
+  headline: "Entity resolution\nyou can defend.",
   subhead:
-    "DupeZero resolves duplicate records into golden records you can defend — every merge shows the evidence that produced it, down to the weight of each field.",
+    "Any source. Any destination. Resolve records across your systems, review the evidence, and reconcile with confidence. Built around your data, in any industry.",
   primaryCta: "Open the app",
   secondaryCta: "See how it works",
 } as const;
 
 export const PROBLEM = {
-  heading: "The same customer, five times over",
-  body: "Records arrive from a CRM, a billing system, a spreadsheet and a form. None of them agree on a name, an address, or which one is current. Every team downstream makes a different guess, and the reconciliation happens in someone's head.",
+  heading: "Different systems. The same thing, recorded differently.",
+  body: "An organization has three names. A product has two identifiers. An asset changes hands. When each system keeps its own version, every report, workflow, and team inherits the disagreement.",
   costs: [
     {
-      term: "Nobody trusts the count",
+      term: "People & organizations",
       detail:
-        "Two systems report different customer totals and both are defensible, so the number becomes a matter of opinion.",
+        "Connect the person behind an account or the company behind several supplier records.",
     },
     {
-      term: "Merges are irreversible guesses",
+      term: "Products & catalogs",
       detail:
-        "A tool that merges on a similarity score and discards the inputs has destroyed the only evidence that would let you check it.",
+        "Bring descriptions and identifiers together across catalogs, feeds, and inventories.",
     },
     {
-      term: "The rules live in tickets",
-      detail:
-        "Which source wins for a phone number is a decision someone made once, in a thread, and nobody can find it.",
+      term: "Assets & operations",
+      detail: "Follow the same equipment or location through systems that label it differently.",
     },
   ],
 } as const;
 
 export const HOW_IT_WORKS = {
-  heading: "Resolve, review, reconcile",
+  heading: "Resolve. Review. Reconcile.",
   intro:
-    "Three stages, each one inspectable. Nothing is applied to a golden record until it has been through all three.",
+    "Three principles. One continuous flow from the data you have to the records you can trust.",
   stages: [
     {
       name: "Resolve",
-      summary: "Blocking narrows the candidates; comparison scores each pair.",
+      summary: "Find the same entity across every source.",
       detail:
-        "Fellegi–Sunter match weights, trained on your corpus rather than guessed. Term frequency is accounted for, so a shared surname counts for less than a shared rare one.",
+        "Standardize fields and compare the evidence across people, organizations, products, assets, or any records you work with.",
     },
     {
       name: "Review",
-      summary: "Everything near the threshold comes to a person, with its evidence.",
+      summary: "Set the policy. Keep the evidence.",
       detail:
-        "A pair at 0.93 against an auto-merge threshold of 0.95 is shown as exactly that — with the per-field weights that got it there and the ones that argued against.",
+        "Let clear matches flow under your configuration. Inspect close calls yourself or ask AI for a recommendation with reasons.",
     },
     {
       name: "Reconcile",
-      summary: "Survivorship rules decide which value wins, and record why.",
+      summary: "Turn decisions into records you can defend.",
       detail:
-        "Field-level rules you configure rather than infer, applied the same way every run. A rerun on unchanged input produces an identical result.",
+        "Apply your decisions, rebuild golden records, and deliver them to your destinations. Unmerge a mistaken match without losing its history.",
     },
   ],
 } as const;
 
 export const PROOF = {
-  heading: "Built to be checked",
+  heading: "A record you can trace. A decision you can check.",
   points: [
     {
-      term: "Every merge carries its evidence",
+      term: "Inspect the match",
       detail:
-        "The match weight for each compared field, which direction it pushed, and the total. Reviewable months later, not just at merge time.",
+        "See the comparisons that supported a match and the ones that argued against it. A score comes with its evidence.",
     },
     {
-      term: "Reruns are deterministic",
+      term: "Keep the source in view",
       detail:
-        "The same input and the same configuration produce the same output, so a disagreement about a result is a question with an answer.",
+        "Follow a resolved entity back to its source records. The result has a history, not just a new identifier.",
     },
     {
-      term: "Your data stays in your lake",
+      term: "Make the rules yours",
       detail:
-        "Records are resolved against object storage you control, with a catalog you can query directly. There is no copy of your corpus anywhere else.",
+        "Configure comparisons, thresholds, and field-level survivorship for the data you actually have.",
     },
     {
-      term: "Configuration is reviewable",
+      term: "Repeat a result",
       detail:
-        "Blocking rules, comparisons, thresholds and survivorship are a document you can read and diff — not settings buried in a UI.",
+        "Resolution is deterministic for unchanged inputs, configuration, and model state. Changes can be investigated rather than guessed at.",
     },
   ],
 } as const;
 
 export const FAQ = {
-  heading: "Questions worth asking first",
+  heading: "Your data does not have to fit an industry template.",
   items: [
     {
-      q: "What happens to the records that get merged?",
-      a: "They are kept. A golden record points at the source records that produced it, and the merge can be inspected or undone. A tool that discards the inputs has thrown away the evidence.",
+      q: "Is DupeZero built for a particular industry?",
+      a: "No. We configure resolution around your records and rules, whether you work with people, organizations, products, assets, or another kind of entity.",
     },
     {
-      q: "Do I have to move my data?",
-      a: "No. Resolution runs against object storage you own, with a Postgres catalog. The engine reads and writes your lake; it does not take a copy.",
+      q: "What if our source is not a standard integration?",
+      a: "We build the connection with you. That includes custom APIs, internal databases, file feeds, and business applications. The integration is scoped around your system’s access methods and data model.",
     },
     {
-      q: "How much of this is automatic?",
-      a: "As much as you choose. You set the auto-merge threshold, and everything below it is queued for review rather than guessed at. The default is deliberately cautious.",
+      q: "Where can the resolved data go?",
+      a: "Into the systems that need it: a warehouse, a business application, an API, or a file-based workflow. We implement the write path, field mapping, and output format for your destination.",
     },
     {
-      q: "What if the matching gets something wrong?",
-      a: "Record an assertion that two records are, or are not, the same entity. Assertions outrank the model and survive retraining, so a correction stays corrected.",
+      q: "Does a person need to approve every match?",
+      a: "No. You configure thresholds and review policy. Matches can be resolved automatically, while cases that need attention can be inspected with their evidence.",
     },
     {
-      q: "Can I see why a pair did not match?",
-      a: "Yes, and it is the same view as a match. The evidence waterfall shows every comparison, including the ones that argued against, with their weights.",
+      q: "What if a match is wrong?",
+      a: "Record that two records are, or are not, the same entity. These assertions guide reconciliation and remain separate from the trained model, so a correction is not simply forgotten during retraining.",
+    },
+    {
+      q: "Is the example on this page using live data?",
+      a: "No. These are interactive illustrations using fictional records. Try different datasets, inspect a flowing record, or follow a decision through an audit; connecting your own data happens in a configured DupeZero environment.",
     },
   ],
 } as const;
 
 export const CLOSING_CTA = {
-  heading: "Start with one source",
-  body: "Import a single file, run a resolution, and look at the evidence before deciding whether any of this is true.",
+  heading: "Your sources. Your rules. Your destinations.",
+  body: "Start with the records you need to trust. Bring the systems you already use.",
   cta: "Open the app",
 } as const;
 
 export const FOOTER = {
   tagline: "Entity resolution you can defend.",
-  /** No social links, no newsletter, no cookie banner. Nothing here collects
-   *  anything, which is why there is no privacy-policy link to maintain yet. */
   note: "DupeZero",
 } as const;
