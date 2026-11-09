@@ -45,7 +45,7 @@ reference — if a finding has no row here, add the row before writing the test.
 | 18 | Secrets / IaC | `infra/terraform/.../builder.tf`, `modules/eks/main.tf`, `frontend/dev/`, `.claude/settings.local.json` | **deferred to the CI layer** — documented in `secrets-iac.md`, not a Rust/TS test | (CI, later) |
 | 18a | Runner tenant S3 boundary | `er-server/src/executor.rs`, `infra/terraform/modules/tenant-runner`, `tenant-runners.json` | executor identity units + `pg_run_all_dag.rs` submitted manifest; Terraform mock-provider tests; chart enrollment check; `runner-isolation-test.py` rejects false positives. Actual AWS boundary requires main-only `runner-isolation.yml` with own-prefix controls and cross-prefix AccessDenied | unit + env-gated pg + CI + live acceptance |
 
-| 19 | Entity secrets in public schemas/bindings | column visibility, generated wire types, `er-server/src/openapi.rs` | `er-entity-lint` V19 fixtures; generator units; `openapi.rs` contract/serialization regressions; `pg_webhooks.rs` listing | lint + unit + env-gated pg |
+| 19 | Entity internal fields in public schemas, bindings and responses | column visibility, generated wire types, `er-server/src/openapi.rs`, public list handlers | `er-entity-lint` V19 fixtures; generator units; `openapi.rs` contract/serialization regressions; `pg_webhooks.rs` listing; `pg_task_instances.rs` viewer task listing with an active synthetic fallback credential | lint + unit + env-gated pg |
 
 ## How to clone each shape
 
