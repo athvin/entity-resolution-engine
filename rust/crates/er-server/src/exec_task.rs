@@ -24,6 +24,57 @@ use crate::dags::{self, JobKind};
 /// Exit 3 — `ExitCode::Precondition`: the stale-start / mismatch / unreachable
 /// family (§6.3; this repo's exit table has no `ResumeRefusal`).
 const EXIT_PRECONDITION: i32 = 3;
+const CHANNEL_RETRY_ATTEMPTS: usize = 6;
+const CHANNEL_RETRY_DELAY: Duration = Duration::from_secs(10);
+
+fn transient_channel_status(status: u16) -> bool {
+    status == 429 || (500..=599).contains(&status)
+}
+
+/// Retry transport faults and temporary HTTP responses; preserve an
+/// authoritative response so the caller can report its refusal precisely.
+fn request_with_retry(
+    operation: &'static str,
+    mut request: impl FnMut() -> Result<(u16, Value), String>,
+    mut wait: impl FnMut(),
+) -> Option<(u16, Value)> {
+    for tick in 0..CHANNEL_RETRY_ATTEMPTS {
+        match request() {
+            Ok((status, body)) if !transient_channel_status(status) => {
+                return Some((status, body));
+            }
+            Ok((status, _)) => {
+                tracing::warn!(
+                    operation,
+                    tick,
+                    http.response.status_code = status,
+                    "the attempt channel returned a transient response"
+                );
+            }
+            Err(error) => {
+                tracing::warn!(operation, tick, %error, "the attempt channel request failed");
+            }
+        }
+        if tick + 1 < CHANNEL_RETRY_ATTEMPTS {
+            wait();
+        }
+    }
+    None
+}
+
+fn heartbeat_fenced(misses: &mut u32, response: Result<(u16, Value), String>) -> bool {
+    match response {
+        Ok((200, _)) => {
+            *misses = 0;
+            false
+        }
+        Ok((status, _)) if !transient_channel_status(status) => true,
+        Ok(_) | Err(_) => {
+            *misses += 1;
+            *misses >= 3
+        }
+    }
+}
 
 /// The attempt channel's client: one current-thread runtime, one pooled
 /// connection, the per-attempt bearer.
@@ -169,42 +220,15 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
     let channel = Channel::new(base, token)?;
     let attempt = args.attempt.clone();
 
-    // Step 1: the work order, with a 60 s patience window — the API may be
-    // rolling. Unreachable → control_plane_unreachable, exit 3; the watch
-    // charges a launch, not a try.
-    let mut order_body = None;
-    for tick in 0..6 {
-        match channel.get(&format!("/v1/internal/attempts/{attempt}")) {
-            Ok((200, body)) => {
-                order_body = Some(body);
-                break;
-            }
-            Ok((status, body)) => {
-                // An authoritative refusal (401/404/409) will not improve.
-                let detail = body["detail"].as_str().unwrap_or("").to_string();
-                write_termination(&TerminalRecord {
-                    v: 1,
-                    attempt: attempt.clone(),
-                    state: TerminalState::Failed,
-                    exit: EXIT_PRECONDITION,
-                    error_class: None,
-                    termination_reason: Some("stale_start".into()),
-                    detail: Some(format!("work order refused ({status}): {detail}")),
-                    output: None,
-                    snapshot_start: None,
-                    snapshot_end: None,
-                    counters: None,
-                });
-                tracing::error!(http.response.status_code = status, detail = %detail, "the work order was refused");
-                return Ok(EXIT_PRECONDITION);
-            }
-            Err(e) => {
-                tracing::warn!(tick = tick, error = %e, "fetching the work order failed; retrying");
-                std::thread::sleep(Duration::from_secs(10));
-            }
-        }
-    }
-    let Some(order_body) = order_body else {
+    // Step 1: fetch the work order with a bounded six-attempt patience window
+    // while the API may be rolling. Unreachable → control_plane_unreachable,
+    // exit 3; the watch charges a launch, not a try.
+    let order_response = request_with_retry(
+        "work order",
+        || channel.get(&format!("/v1/internal/attempts/{attempt}")),
+        || std::thread::sleep(CHANNEL_RETRY_DELAY),
+    );
+    let Some((status, order_body)) = order_response else {
         write_termination(&TerminalRecord {
             v: 1,
             attempt: attempt.clone(),
@@ -212,7 +236,7 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
             exit: EXIT_PRECONDITION,
             error_class: None,
             termination_reason: Some("control_plane_unreachable".into()),
-            detail: Some("the control plane answered nothing for 60 s".into()),
+            detail: Some("the work order remained unavailable after six attempts".into()),
             output: None,
             snapshot_start: None,
             snapshot_end: None,
@@ -220,6 +244,24 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
         });
         return Ok(EXIT_PRECONDITION);
     };
+    if status != 200 {
+        let detail = order_body["detail"].as_str().unwrap_or("").to_string();
+        write_termination(&TerminalRecord {
+            v: 1,
+            attempt: attempt.clone(),
+            state: TerminalState::Failed,
+            exit: EXIT_PRECONDITION,
+            error_class: None,
+            termination_reason: Some("stale_start".into()),
+            detail: Some(format!("work order refused ({status}): {detail}")),
+            output: None,
+            snapshot_start: None,
+            snapshot_end: None,
+            counters: None,
+        });
+        tracing::error!(http.response.status_code = status, detail = %detail, "the work order was refused");
+        return Ok(EXIT_PRECONDITION);
+    }
 
     // Step 2: the binary's OWN registry decides the graph; nothing about the
     // pipeline crossed the wire. A stale image refuses to run a graph it does
@@ -295,9 +337,13 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
         "node_name": env_var("ER_NODE_NAME"),
         "image_digest": env_var("ER_IMAGE_DIGEST"),
     });
-    match channel.post(&format!("/v1/internal/attempts/{attempt}/start"), &start) {
-        Ok((200, _)) => {}
-        Ok((status, body)) => {
+    match request_with_retry(
+        "start",
+        || channel.post(&format!("/v1/internal/attempts/{attempt}/start"), &start),
+        || std::thread::sleep(CHANNEL_RETRY_DELAY),
+    ) {
+        Some((200, _)) => {}
+        Some((status, body)) => {
             let detail = body["detail"].as_str().unwrap_or("").to_string();
             write_termination(&TerminalRecord {
                 v: 1,
@@ -315,7 +361,22 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
             tracing::warn!(http.response.status_code = status, detail = %detail, "the start was stale");
             return Ok(EXIT_PRECONDITION);
         }
-        Err(e) => return Err(format!("start: {e}")),
+        None => {
+            write_termination(&TerminalRecord {
+                v: 1,
+                attempt: attempt.clone(),
+                state: TerminalState::Failed,
+                exit: EXIT_PRECONDITION,
+                error_class: None,
+                termination_reason: Some("control_plane_unreachable".into()),
+                detail: Some("the start remained unavailable after six attempts".into()),
+                output: None,
+                snapshot_start: None,
+                snapshot_end: None,
+                counters: None,
+            });
+            return Ok(EXIT_PRECONDITION);
+        }
     }
 
     // The fence and the heartbeat thread (§6.3 steps 3/6).
@@ -350,20 +411,14 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
                     std::thread::sleep(Duration::from_secs(1));
                 }
                 let body = json!({ "pod_uid": pod_uid, "counters": counters.snapshot() });
-                match hb.post(&format!("/v1/internal/attempts/{attempt}/heartbeat"), &body) {
-                    Ok((200, _)) => misses = 0,
-                    Ok((_conflict, _)) => {
-                        // A zero-row heartbeat IS the fence (§4.5).
-                        fence.store(true, Ordering::SeqCst);
-                        return;
-                    }
-                    Err(_) => {
-                        misses += 1;
-                        if misses >= 3 {
-                            fence.store(true, Ordering::SeqCst);
-                            return;
-                        }
-                    }
+                if heartbeat_fenced(
+                    &mut misses,
+                    hb.post(&format!("/v1/internal/attempts/{attempt}/heartbeat"), &body),
+                ) {
+                    // A 409 (or another authoritative refusal) fences now;
+                    // transient failures need three consecutive misses.
+                    fence.store(true, Ordering::SeqCst);
+                    return;
                 }
             }
         })
@@ -557,4 +612,74 @@ fn open_order_session(order: &WorkOrder) -> Result<dedupe_core::Session, String>
         })
         .map_err(|e| format!("open lake: {e:#}"))?;
     Ok(session)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn transient_channel_responses_retry_but_conflict_is_terminal() {
+        let mut responses = [
+            Ok((500, Value::Null)),
+            Ok((503, Value::Null)),
+            Ok((200, json!({ "ok": true }))),
+        ]
+        .into_iter();
+        let mut waits = 0;
+        let result = request_with_retry(
+            "test",
+            || responses.next().expect("request budget"),
+            || waits += 1,
+        );
+        assert_eq!(result, Some((200, json!({ "ok": true }))));
+        assert_eq!(waits, 2);
+
+        let mut calls = 0;
+        let result = request_with_retry(
+            "test",
+            || {
+                calls += 1;
+                Ok((409, json!({ "detail": "fenced" })))
+            },
+            || panic!("a conflict must not be retried"),
+        );
+        assert_eq!(result, Some((409, json!({ "detail": "fenced" }))));
+        assert_eq!(calls, 1);
+    }
+
+    #[test]
+    fn transient_channel_exhaustion_is_bounded() {
+        let mut calls = 0;
+        let mut waits = 0;
+        let result = request_with_retry(
+            "test",
+            || {
+                calls += 1;
+                Ok((503, Value::Null))
+            },
+            || waits += 1,
+        );
+        assert_eq!(result, None);
+        assert_eq!(calls, CHANNEL_RETRY_ATTEMPTS);
+        assert_eq!(waits, CHANNEL_RETRY_ATTEMPTS - 1);
+    }
+
+    #[test]
+    fn heartbeat_transient_misses_reset_on_success_and_conflict_fences_immediately() {
+        let mut misses = 0;
+        assert!(!heartbeat_fenced(&mut misses, Ok((500, Value::Null))));
+        assert_eq!(misses, 1);
+        assert!(!heartbeat_fenced(&mut misses, Ok((503, Value::Null))));
+        assert_eq!(misses, 2);
+        assert!(!heartbeat_fenced(&mut misses, Ok((200, Value::Null))));
+        assert_eq!(misses, 0);
+        assert!(!heartbeat_fenced(&mut misses, Err("timeout".into())));
+        assert!(!heartbeat_fenced(&mut misses, Ok((503, Value::Null))));
+        assert!(heartbeat_fenced(&mut misses, Ok((500, Value::Null))));
+
+        let mut misses = 0;
+        assert!(heartbeat_fenced(&mut misses, Ok((409, Value::Null))));
+        assert_eq!(misses, 0);
+    }
 }
