@@ -106,6 +106,8 @@ pub struct ResolveRequest<'a> {
     pub models: &'a [ActiveModelSpec],
     /// `None` refuses an ingesting run with no drop root, exactly as before.
     pub drop_root: Option<&'a str>,
+    /// Scope from the work order, not from client-supplied params.
+    pub dataset_id: Option<&'a str>,
     /// `false` for a kind that never ingests (`correct`, `lake_maintain`),
     /// which then needs no drop root at all.
     pub wants_deliveries: bool,
@@ -175,7 +177,7 @@ impl RunContext {
             .and_then(Value::as_bool)
             .unwrap_or(false);
         let deliveries = if req.wants_deliveries && !skip_ingest {
-            Self::find_deliveries(&config, req.drop_root)?
+            Self::find_deliveries(&config, req)?
         } else {
             Vec::new()
         };
@@ -232,13 +234,45 @@ impl RunContext {
     /// directory.
     fn find_deliveries(
         config: &er_config::Config,
-        drop_root: Option<&str>,
+        req: &ResolveRequest<'_>,
     ) -> Result<Vec<(String, String)>, ResolveError> {
-        let drop_root = drop_root
+        let drop_root = req
+            .drop_root
             .ok_or_else(|| ResolveError::Refused("org has no drop_root for a run_all".into()))?;
+        if let Some(value) = req.params.get("delivery") {
+            let pin: crate::delivery::DeliveryPin = serde_json::from_value(value.clone())
+                .map_err(|_| ResolveError::Refused("invalid pinned delivery".into()))?;
+            if req.params.get("source").and_then(Value::as_str) != Some(pin.source.as_str())
+                || req.params.get("delivery_id").and_then(Value::as_str)
+                    != Some(pin.delivery_id.as_str())
+            {
+                return Err(ResolveError::Refused(
+                    "delivery identity differs from job params".into(),
+                ));
+            }
+            let spec = config.sources.get(&pin.source).ok_or_else(|| {
+                ResolveError::Refused("delivery source no longer declared".into())
+            })?;
+            let dataset_id = req.dataset_id.ok_or_else(|| {
+                ResolveError::Refused("pinned delivery requires a dataset".into())
+            })?;
+            let csv = pin
+                .read(Path::new(drop_root), dataset_id, spec)
+                .map_err(|e| ResolveError::Refused(crate::errfmt::chain(&e)))?;
+            return Ok(vec![(pin.source, csv)]);
+        }
+        if req.params.get("source").is_some() || req.params.get("delivery_id").is_some() {
+            return Err(ResolveError::Refused(
+                "legacy delivery job has no immutable pin; re-deliver the original input".into(),
+            ));
+        }
+        // Explicit operator run-all without a delivery identity retains the
+        // legacy drop-directory convention. Accepted inputs are never aliases
+        // here; use skip_ingest to rebuild the already-landed corpus.
         let found: Vec<(String, String)> = config
             .sources
             .keys()
+            .filter(|source| crate::delivery::safe_source(source))
             .filter_map(|source| {
                 std::fs::read_to_string(format!("{drop_root}/{source}.csv"))
                     .ok()
@@ -464,6 +498,7 @@ mod tests {
             params,
             models,
             drop_root: None,
+            dataset_id: None,
             wants_deliveries: false,
         }
     }
@@ -531,6 +566,7 @@ mod tests {
             params: &params,
             models: &[],
             drop_root: None,
+            dataset_id: None,
             wants_deliveries: true,
         })
         .expect("resolves");
@@ -548,6 +584,7 @@ mod tests {
             params: &json!({}),
             models: &[],
             drop_root: None,
+            dataset_id: None,
             wants_deliveries: true,
         })
         .expect_err("refused");
@@ -571,12 +608,36 @@ mod tests {
             params: &json!({}),
             models: &[],
             drop_root: drop.to_str(),
+            dataset_id: None,
             wants_deliveries: true,
         })
         .expect("resolves");
         assert_eq!(ctx.deliveries.len(), 1, "only declared sources land");
         assert_eq!(ctx.deliveries[0].0, source);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn legacy_or_broken_delivery_jobs_never_read_the_latest_file() {
+        let dir = scratch("legacy-pin");
+        let env = env_for(&dir);
+        std::fs::write(dir.join("crm.csv"), "id\nlatest\n").unwrap();
+        for params in [
+            json!({"source":"crm", "delivery_id":"old-job"}),
+            json!({"delivery":null}),
+            json!({"delivery":{"version":99}}),
+        ] {
+            let result = RunContext::resolve(&ResolveRequest {
+                lake_env: &env,
+                params: &params,
+                models: &[],
+                drop_root: dir.to_str(),
+                dataset_id: Some("dataset-a"),
+                wants_deliveries: true,
+            });
+            assert!(result.is_err(), "broken pins must fail explicitly");
+        }
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
