@@ -516,7 +516,7 @@ pub fn entity_member_keys(
         Ok(rows) => Ok(rows.into_iter().map(|r| r.record_key).collect()),
         Err(e) => {
             let s = e.to_string();
-            if is_missing_table(&s) {
+            if is_missing_table(&s, "entity_membership") {
                 Ok(Vec::new())
             } else {
                 Err(s)
@@ -542,7 +542,7 @@ pub fn active_assertions(
             .collect()),
         Err(e) => {
             let s = e.to_string();
-            if is_missing_table(&s) {
+            if is_missing_table(&s, "assertions") {
                 Ok(Vec::new())
             } else {
                 Err(s)
@@ -1160,10 +1160,61 @@ pub fn records_by_key(
 /// whose review/assertion/run/ingest-tracking stages haven't populated these
 /// relations yet, in which case the reader returns an empty page rather than an
 /// error.
-fn is_missing_table(err: &str) -> bool {
-    err.contains("does not exist")
-        || err.contains("Catalog Error")
-        || err.contains("Table with name")
+fn is_missing_table(err: &str, relation: &str) -> bool {
+    err.contains(&format!(
+        "Catalog Error: Table with name {relation} does not exist"
+    ))
+}
+
+fn active_protect_overlay(session: &Session) -> Result<bool, String> {
+    match er_entities::record_overlay::read::any_active_protect(session.connection()) {
+        Ok(rows) => Ok(!rows.is_empty()),
+        Err(e) => {
+            let error = e.to_string();
+            if is_missing_table(&error, "record_overlays") {
+                Ok(false)
+            } else {
+                Err(error)
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod missing_relation_tests {
+    use super::*;
+
+    #[test]
+    fn only_the_expected_missing_relation_is_optional() {
+        let absent = "Catalog Error: Table with name entity_membership does not exist!";
+        assert!(is_missing_table(absent, "entity_membership"));
+        assert!(!is_missing_table(absent, "review_queue"));
+        assert!(!is_missing_table(
+            "Catalog Error: Scalar Function with name missing_fn does not exist!",
+            "entity_membership"
+        ));
+        assert!(!is_missing_table(
+            "Binder Error: Catalog \"lake\" does not exist!",
+            "entity_membership"
+        ));
+    }
+
+    #[test]
+    fn optional_overlay_keeps_absent_relation_empty_but_propagates_catalog_faults() {
+        let session = Session::open_in_memory(SessionOptions::deterministic()).unwrap();
+        session.execute_batch("ATTACH ':memory:' AS lake").unwrap();
+        assert_eq!(active_protect_overlay(&session), Ok(false));
+
+        session
+            .execute_batch(
+                "CREATE TABLE \"lake\".\"main\".\"dependency\" (id VARCHAR); \
+                 CREATE VIEW \"lake\".\"main\".\"record_overlays\" AS SELECT * FROM \"lake\".\"main\".\"dependency\"; \
+                 DROP TABLE \"lake\".\"main\".\"dependency\";",
+            )
+            .unwrap();
+        let error = active_protect_overlay(&session).unwrap_err();
+        assert!(error.contains("dependency"), "{error}");
+    }
 }
 
 /// Page typed statement rows fetched with `limit + 1`: serialize the kept page,
@@ -1229,7 +1280,7 @@ pub fn reviews_list(
         }
         Err(e) => {
             let s = e.to_string();
-            if is_missing_table(&s) {
+            if is_missing_table(&s, "review_queue") {
                 Ok((Vec::new(), None))
             } else {
                 Err(s)
@@ -1255,7 +1306,7 @@ pub fn review_get(
         }
         Err(e) => {
             let s = e.to_string();
-            if is_missing_table(&s) {
+            if is_missing_table(&s, "review_queue") {
                 Ok(None)
             } else {
                 Err(s)
@@ -1298,7 +1349,7 @@ pub fn merge_group(
         Ok(rows) => rows,
         Err(e) => {
             let s = e.to_string();
-            if is_missing_table(&s) {
+            if is_missing_table(&s, "review_queue") {
                 return Ok(None);
             }
             return Err(s);
@@ -1371,7 +1422,7 @@ pub fn assertions_list(
         Ok(rows) => Ok(typed_page(&rows, snapshot, limit, |r| &r.id)),
         Err(e) => {
             let s = e.to_string();
-            if is_missing_table(&s) {
+            if is_missing_table(&s, "assertions") {
                 Ok((Vec::new(), None))
             } else {
                 Err(s)
@@ -1405,7 +1456,7 @@ pub fn imports_recent(
         Ok(rows) => Ok(rows_to_values(&rows)),
         Err(e) => {
             let s = e.to_string();
-            if is_missing_table(&s) {
+            if is_missing_table(&s, "ingest_batches") {
                 Ok(Vec::new())
             } else {
                 Err(s)
@@ -1438,7 +1489,7 @@ pub fn imports_list(
         Ok(rows) => Ok(typed_page(&rows, snapshot, limit, |r| &r.id)),
         Err(e) => {
             let s = e.to_string();
-            if is_missing_table(&s) {
+            if is_missing_table(&s, "ingest_batches") {
                 Ok((Vec::new(), None))
             } else {
                 Err(s)
@@ -1462,7 +1513,7 @@ pub fn runs_list(
         Ok(rows) => rows_to_values(&rows),
         Err(e) => {
             let s = e.to_string();
-            return if is_missing_table(&s) {
+            return if is_missing_table(&s, "runs") {
                 Ok(Vec::new())
             } else {
                 Err(s)
@@ -1511,7 +1562,7 @@ fn run_auto_merge_counts(
             .collect()),
         Err(e) => {
             let s = e.to_string();
-            if is_missing_table(&s) {
+            if is_missing_table(&s, "match_scores") {
                 Ok(std::collections::BTreeMap::new())
             } else {
                 Err(s)
@@ -1550,17 +1601,7 @@ pub fn merge_plans(
     // election. Gated on the overlay table existing AND holding at least one
     // active protect row, so when no records are protected the generator emits
     // today's exact single-CTE masters topology.
-    let protect_active = match er_entities::record_overlay::read::any_active_protect(conn) {
-        Ok(rows) => !rows.is_empty(),
-        Err(e) => {
-            let s = e.to_string();
-            if is_missing_table(&s) {
-                false
-            } else {
-                return Err(s);
-            }
-        }
-    };
+    let protect_active = active_protect_overlay(session)?;
 
     // The governed generator (plan-vector-tested in er-sql-check): one flat row
     // per member, ordered by (entity_id, record_key); grouped here.
@@ -1993,7 +2034,7 @@ pub fn entity_events_by_run(
         }
         Err(e) => {
             let s = e.to_string();
-            if is_missing_table(&s) {
+            if is_missing_table(&s, "entity_events") {
                 Ok((Vec::new(), None))
             } else {
                 Err(s)
@@ -2024,7 +2065,7 @@ pub fn entity_of_record_key(
         Ok(rows) => Ok(rows.into_iter().next().map(|r| r.entity_id)),
         Err(e) => {
             let s = e.to_string();
-            if is_missing_table(&s) {
+            if is_missing_table(&s, "entity_membership") {
                 Ok(None)
             } else {
                 Err(s)
@@ -2048,7 +2089,11 @@ pub fn unscored_open_reviews(session: &Session, snapshot: i64) -> Result<i64, St
         Ok(rows) => Ok(rows.first().and_then(|r| r.n).unwrap_or(0)),
         Err(e) => {
             let s = e.to_string();
-            if is_missing_table(&s) { Ok(0) } else { Err(s) }
+            if is_missing_table(&s, "review_queue") {
+                Ok(0)
+            } else {
+                Err(s)
+            }
         }
     }
 }
@@ -2096,7 +2141,7 @@ pub fn insight_sources(
             .collect()),
         Err(e) => {
             let s = e.to_string();
-            if is_missing_table(&s) {
+            if is_missing_table(&s, "metric_snapshot_sources") {
                 Ok(Vec::new())
             } else {
                 Err(s)
