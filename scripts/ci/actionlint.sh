@@ -43,6 +43,7 @@ WORKFLOW_DIR="${1:-.github/workflows}"
 # prefix it prepends; anchoring past it is what keeps `^` meaningful.
 LINE='^[0-9]+:'
 PINNED="${LINE}[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]+[A-Za-z0-9._-]+/[A-Za-z0-9._/-]+@[0-9a-f]{40}[[:space:]]+#[[:space:]]*v[0-9][A-Za-z0-9._-]*[[:space:]]*$"
+LOCAL="${LINE}[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]+\\./\\.github/actions/[a-zA-Z0-9_-]+[[:space:]]*$"
 ANY='^[[:space:]]*(-[[:space:]]+)?uses:'
 
 if [[ ! -d "$WORKFLOW_DIR" ]]; then
@@ -63,17 +64,25 @@ if [[ ${#WORKFLOWS[@]} -eq 0 ]]; then
     exit 2
 fi
 
+# Local composite actions are code in this commit. Their external actions
+# must obey the same pin policy; never exclude their contents from S9.
+PIN_FILES=("${WORKFLOWS[@]}")
+if [ "$WORKFLOW_DIR" = .github/workflows ] && [ -d .github/actions ]; then
+    while IFS= read -r action; do PIN_FILES+=("$action"); done < <(
+        find .github/actions -type f \( -name action.yml -o -name action.yaml \) | sort
+    )
+fi
 status=0
 offenders=""
 examined=0
 
-for wf in "${WORKFLOWS[@]}"; do
+for wf in "${PIN_FILES[@]}"; do
     n_uses=$(grep -cE "$ANY" "$wf" || true)
     examined=$((examined + ${n_uses:-0}))
     while IFS= read -r finding; do
         [[ -z "$finding" ]] && continue
         offenders="${offenders}${wf}:${finding}"$'\n'
-    done < <(grep -nE "$ANY" "$wf" | grep -vE "$PINNED")
+    done < <(grep -nE "$ANY" "$wf" | grep -vE "$PINNED|$LOCAL")
 done
 
 # A GATE MUST NOT BE ABLE TO PASS BY EXAMINING NOTHING. If the `uses:` pattern

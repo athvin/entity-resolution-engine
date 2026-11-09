@@ -41,10 +41,24 @@
 # must not fail the job it was called from. `rm -rf` is idempotent anyway.
 #
 # Run: bash scripts/ci/reclaim-disk.sh
-set -uo pipefail
+set -euo pipefail
 
+# Test jobs currently consume ~5-10 GiB, with ~88 GiB initially free. Keep
+# 40 GiB for cold builds; image builders can request a larger reserve.
+minimum="${CI_MIN_FREE_GIB:-40}"
+case "$minimum" in ''|*[!0-9]*) echo "invalid CI_MIN_FREE_GIB" >&2; exit 2 ;; esac
+available="$(df -Pk / | awk 'END {print $4}')"
 df -h / | tail -1
+if [ "$available" -ge "$((minimum * 1024 * 1024))" ]; then
+    echo "disk cleanup skipped: at least $minimum GiB available"
+    exit 0
+fi
 sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
-	/usr/local/share/boost /usr/share/swift \
-	/opt/hostedtoolcache
+    /usr/local/share/boost /usr/share/swift
+# Preserve hostedtoolcache: other steps may already have restored tools there.
 df -h / | tail -1
+available="$(df -Pk / | awk 'END {print $4}')"
+if [ "$available" -lt "$((minimum * 1024 * 1024))" ]; then
+    echo "::error::less than $minimum GiB available after cleanup"
+    exit 1
+fi

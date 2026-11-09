@@ -1,0 +1,21 @@
+name: Pinned CI tools
+description: Restore and verify tool archives, with bounded downloads on misses.
+inputs:
+  tools:
+    description: Space-separated tool names from scripts/ci/tools.json
+    required: false
+    default: mold sccache
+runs:
+  using: composite
+  steps:
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.cache/er-ci-tools/archives
+        key: ci-tools-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.tools }}-${{ hashFiles('scripts/ci/tools.json') }}
+    - name: Verify and install tools
+      shell: bash
+      env:
+        CI_TOOL_NAMES: ${{ inputs.tools }}
+      run: |
+        read -r -a ci_tool_names <<< "$CI_TOOL_NAMES"
+        python3 "$GITHUB_WORKSPACE/scripts/ci/install-tools.py" "${ci_tool_names[@]}"
