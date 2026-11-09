@@ -122,10 +122,16 @@ The operation contract is generated and gated, with deliberate limits:
   from that same derivation; it has no separate route allowlist. TypeScript still
   uses the complete internal document. OpenAPI 3.1 permits
   role names in a non-OAuth security requirement.
-- **Responses remain envelope-level.** Success uses `2XX`; bare and typed JSON
-  values stay unconstrained rather than guessing arrays from variable names.
+- **Responses remain envelope-level.** Success uses `2XX`; bare and unresolved
+  typed JSON values stay unconstrained rather than guessing arrays from variable names.
   Object envelopes name observed properties, pages describe items/cursor, and
-  Arrow uses its actual media type. Local response helpers contribute write
+  Arrow uses its actual media type. Immediate `Json(LocalStruct { ... })`
+  constructors resolve fields through `struct_fields` using enclosing source;
+  declaration order determines the keys. This supports that parser's plain
+  multiline local structs. Known local declarations with unsupported syntax,
+  serialization attributes or conditional fields fail generation; variables,
+  helper-produced values and external types remain unresolved. Resolving keys
+  does not type their payloads. Local response helpers contribute write
   envelopes. Typed payloads and query parameters remain later work; neither a
   generated path nor its TypeScript type proves those details are complete.
   The detail-shaped application error is documented separately from framework
