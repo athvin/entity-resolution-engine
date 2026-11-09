@@ -64,6 +64,7 @@ Every stack in the tree is reached by at least one tier.
 | `network-policy-controller.yaml` | `.github/workflows/cluster-objects.yml`, `scripts/cluster_objects.sh` |
 | `nodepools` | `.github/workflows/cluster-objects.yml`, `scripts/cluster_objects.sh`, `scripts/measure_runner_startup.sh` |
 | `observability` | `Makefile`, `scripts/ci/deploy-observability.py`, `scripts/obs_up.sh`, `scripts/otel-pii-allowlist-probe.sh` |
+| `observability-prod` | `scripts/ci/deploy-observability.py` |
 | `priorityclasses` | `.github/workflows/cluster-objects.yml`, `scripts/cluster_objects.sh`, `scripts/kind_env.sh` |
 | `secrets` | `.github/workflows/cluster-objects.yml`, `scripts/cluster_objects.sh` |
 | `storage` | `Makefile`, `scripts/ci/deploy-namespace-chart.sh` |

@@ -1,0 +1,2 @@
+cloudWatchLogs:
+  logGroupName: /er/prod/containers
