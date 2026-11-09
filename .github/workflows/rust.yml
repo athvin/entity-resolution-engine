@@ -811,6 +811,14 @@ jobs:
       # is the publish rename. The `coverage` job keeps rust-cache and repairs
       # the tree instead — its step carries the full mechanism. See also this
       # file's header.
+      - name: Cache DuckDB extensions
+        if: matrix.slice == 'rest' && needs.detect.outputs.extensions == 'true'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.duckdb/extensions
+          key: duckdb-extensions-${{ hashFiles('rust/Cargo.lock') }}
+          restore-keys: |
+            duckdb-extensions-
       - name: Run the test suite
         # `cargo test`, not nextest, and that is a measured choice. nextest runs
         # each test in its own PROCESS; with 586 tests across ~147 binaries that
@@ -825,27 +833,9 @@ jobs:
         # `--exclude er-match` runs everyone else's.
         env:
           SELECTED_PACKAGES: ${{ toJSON(matrix.packages) }}
+          # Only the already-built dedupe-core binary gets the extension env.
+          RUN_EXTENSIONS: ${{ matrix.slice == 'rest' && needs.detect.outputs.extensions == 'true' }}
         run: python3 ../scripts/ci/run-selected-tests.py
-      - name: Cache DuckDB extensions
-        if: matrix.slice == 'rest' && needs.detect.outputs.extensions == 'true'
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.duckdb/extensions
-          key: duckdb-extensions-${{ hashFiles('rust/Cargo.lock') }}
-          restore-keys: |
-            duckdb-extensions-
-      - name: Extension loading (splink_udfs) and the engine version label
-        # Moved here from the e2e tier: `cargo test --workspace` above already
-        # BUILT and ran dedupe-core's one test binary, so re-invoking it with
-        # the filter is run-only (~seconds) — where in the e2e rest leg the
-        # same step paid its own 2m15s tree build. The env is STEP-scoped on
-        # purpose: er-compile and er-sql-check also gate tests behind
-        # DEDUPE_E2E_EXTENSIONS, and a job-level env would silently start
-        # running those on every PR.
-        if: matrix.slice == 'rest' && needs.detect.outputs.extensions == 'true'
-        env:
-          DEDUPE_E2E_EXTENSIONS: "1"
-        run: cargo test -p dedupe-core --test main extensions
       - name: Build cost (sccache stats, target size)
         # Diagnostics, never a gate. What the numbers are for, and why nothing
         # in them can fail the job, is in scripts/ci/build-cost.sh.

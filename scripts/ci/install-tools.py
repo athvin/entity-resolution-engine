@@ -52,10 +52,15 @@ def verify(path, expected):
         raise ValueError(f"checksum mismatch: {path.name}; refusing to install")
 
 
+def specifications(system, machine):
+    filenames = {("Linux", "x86_64"): "tools.json", ("Linux", "aarch64"): "tools-arm64.json"}
+    if (system, machine) not in filenames:
+        raise ValueError("CI tool pins support Linux x86_64 and aarch64 only")
+    return json.loads(Path(__file__).with_name(filenames[system, machine]).read_text())
+
+
 def main():
-    if (platform.system(), platform.machine()) != ("Linux", "x86_64"):
-        raise ValueError("CI tool pins support Linux x86_64 only")
-    specs = json.loads(Path(__file__).with_name("tools.json").read_text())
+    specs = specifications(platform.system(), platform.machine())
     root = Path(os.environ.get("CI_TOOLS_CACHE", str(Path.home() / ".cache/er-ci-tools")))
     for name in sys.argv[1:]:
         install(name, specs[name], root / "archives", root / "bin")

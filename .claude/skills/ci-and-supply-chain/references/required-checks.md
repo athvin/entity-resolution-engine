@@ -57,6 +57,12 @@ job instead — `terraform plan` is the worked example.
 | `baseline` | baseline (${{ matrix.pair }}, ${{ matrix.partition }}) | 45 | `github.event_name == 'workflow_dispatch' \|\| contains(github.event.pull_request.labels.*. …` |
 | `archive` | archive consumer (${{ matrix.pair }}, ${{ matrix.partition }}) | 45 | `github.event_name == 'workflow_dispatch' \|\| contains(github.event.pull_request.labels.*. …` |
 
+### `ci-runner-experiment.yml`
+
+| Job | Status-check context | Timeout | Condition |
+|---|---|---|---|
+| `compare` | runner (${{ matrix.runner }}, ${{ matrix.sample }}) | 60 | `github.ref == 'refs/heads/main'` |
+
 ### `cluster-objects.yml`
 
 | Job | Status-check context | Timeout | Condition |
