@@ -73,7 +73,7 @@ jobs by their workflow key; the status-check *context* a job reports under is
 often a different string, and the generated map between the two is
 `ci-and-supply-chain/references/required-checks.md`.
 
-## Registration is manual, and the test named after it does not check it
+## Registration is manual; catalog guards enforce the decision
 
 `ApiDoc` references the generated JSON wire structs' `ToSchema` **directly**, so a
 registered schema follows `entities/` with no hand-written duplicate. That is
@@ -96,12 +96,15 @@ the difference to equal the `JSON_WIRE_WITHOUT_SCHEMA` backlog in that file. So
 a **new** `wire: [json]` entity fails the Rust test job until someone either
 registers its `ToSchema` or adds it to that list with a reason.
 
-Two things follow. The backlog is real and visible — a sizeable set of entities
-declare the JSON wire today with no schema describing them — and registering one
-is a public-API decision rather than a formality, because it becomes a
-documented schema that `er-openapi-check` then tracks for breaking changes. A
-sibling test holds the other direction: nothing may be registered that does not
-declare `wire: [json]`.
+The founding backlog was registered in #900; #862 records the
+[per-entity decisions and response-projection caveats](references/schema-registration-decisions.md).
+Read `JSON_WIRE_WITHOUT_SCHEMA` and the catalog guards for the current gaps.
+Registration is a public-API decision rather than a formality, because the
+component becomes a documented schema that `er-openapi-check` then tracks for
+breaking changes. A sibling test holds the other direction: nothing may be
+registered that does not declare `wire: [json]`. Neither guard proves that a
+handler returns the complete entity wire shape or that an operation references
+that component.
 
 ## What is generated and not yet consumed
 
