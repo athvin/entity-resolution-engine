@@ -153,7 +153,9 @@ test.describe("interactive marketing", () => {
   test("record evidence is keyboard accessible @visual", async ({ page }) => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.goto("/#flow");
-    await page.getByRole("button", { name: "Inspect a record" }).focus();
+    const inspect = page.getByRole("button", { name: "Inspect a record" });
+    await expect(inspect).toBeEnabled();
+    await inspect.focus();
     await page.keyboard.press("Enter");
     const dialog = page.getByRole("dialog");
     await expect(dialog).toContainText("ACCT-042");

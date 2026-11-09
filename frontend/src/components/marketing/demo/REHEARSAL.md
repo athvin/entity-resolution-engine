@@ -31,21 +31,32 @@ November 9 review artifacts (local, not shipped):
 
 - `/tmp/dz-story-gold.png`: gold reference.
 - `/tmp/dz-connected-{flow,dataset,dedupe,egress}-{1440,390}.png`: section views.
-- `/tmp/dz-connected-audit-{wide,phone}.png`: complete 26-frame contact sheets.
-- `/tmp/dz-connected-audit-{wide,phone}.json`: instrumentation reports.
+- `/tmp/dz-audit-final-{wide,phone}.png`: complete 26-frame contact sheets.
+- `/tmp/dz-audit-final-{wide,phone}.json`: instrumentation reports.
 
 Both width runs of `film.mjs --gate` end:
 
 > rehearsal passed (necessary, not sufficient: references/verify.md and the fresh eye in review.md still stand)
 
 Motion sampling remains inconclusive across gaps: the wide capture's largest was
-27.3 ms and the phone capture's was 125.7 ms. Those intervals were not judged by
+34.7 ms and the phone capture's was 42.1 ms. Those intervals were not judged by
 the automated watcher. The entire contact sheets were inspected visually.
 
 The scratch film adapter waits for hydration before adding instrumentation, keeps
 the viewport fixed for viewport-height panels, and recognizes the vendored
 `stageshow` CSS layer inside Next's combined stylesheet. It does not exempt
 product CSS or change the committed skill or vendor bundle.
+
+## Independent review
+
+The fresh-eye reviewer found a discontinuous red-to-green handoff, the audit
+heading at a different gutter, and generic entity labels. The red now remains
+visible until the greens emerge at the same branch point. The heading and audit
+controls align with the earlier panels, and the results identify Meridian US and
+Meridian UK. A second review of the final sheets confirmed the handoff and main
+alignment fixes. The diagram remains deliberately open and sparse for this
+scroll-story foundation; its small caption follows the wider figure gutter.
+The reviewer did not establish frame-by-frame quality between samples.
 
 ## Validation and limits
 

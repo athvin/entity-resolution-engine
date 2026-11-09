@@ -76,7 +76,7 @@ export function AuditStory({ onRunning }: { onRunning: (running: boolean) => voi
         `[data-track="${dot.dataset.auditPacket ?? ""}"]`,
       );
       if (!path) return;
-      const begin = dot.dataset.auditPacket === "flag" ? 0.04 : 0.5;
+      const begin = dot.dataset.auditPacket === "flag" ? 0.04 : 0.46;
       const end = dot.dataset.auditPacket === "flag" ? 0.25 : 0.88;
       const length = path.getTotalLength();
       const first = path.getPointAtLength(0),
@@ -101,8 +101,14 @@ export function AuditStory({ onRunning }: { onRunning: (running: boolean) => voi
           transform: `translate(${String(p.x)}px, ${String(p.y)}px)`,
         });
       }
+      if (dot.dataset.auditPacket === "flag")
+        frames.push({
+          offset: 0.46,
+          opacity: 1,
+          transform: `translate(${String(last.x)}px, ${String(last.y)}px)`,
+        });
       frames.push({
-        offset: dot.dataset.auditPacket === "flag" ? 0.48 : 1,
+        offset: dot.dataset.auditPacket === "flag" ? 0.5 : 1,
         opacity: dot.dataset.auditPacket === "flag" ? 0 : 1,
         transform: `translate(${String(last.x)}px, ${String(last.y)}px)`,
       });
@@ -190,7 +196,7 @@ export function AuditStory({ onRunning }: { onRunning: (running: boolean) => voi
         <span className="trail-audit-entry" data-audit-entry aria-hidden="true" />
         <span className="trail-audit-exit" data-audit-exit aria-hidden="true" />
         {[false, true].map((phone) => {
-          const flag = phone ? "M179 54 V126" : "M90 120 H350";
+          const flag = phone ? "M179 54 V212" : "M90 120 H510";
           const a = phone ? "M179 212 C179 260 110 255 110 368" : "M510 120 C590 120 610 72 810 72";
           const b = phone
             ? "M179 212 C179 260 248 255 248 368"
@@ -235,29 +241,29 @@ export function AuditStory({ onRunning }: { onRunning: (running: boolean) => voi
               <text x={phone ? 179 : 90} y={phone ? 24 : 80} textAnchor="middle">
                 Flagged match
               </text>
-              <text x={phone ? 179 : 430} y={phone ? 152 : 80} textAnchor="middle">
+              <text x={phone ? 276 : 510} y={phone ? 152 : 80} textAnchor="middle">
                 Review the evidence
               </text>
               <text x={phone ? 110 : 810} y={phone ? 400 : 45} textAnchor="middle">
-                Entity A
+                Meridian US
               </text>
               <text x={phone ? 248 : 810} y={phone ? 400 : 202} textAnchor="middle">
-                Entity B
+                Meridian UK
               </text>
               <text x={phone ? 179 : 620} y={phone ? 305 : 230} textAnchor="middle">
                 {phone ? "Reconcile" : "Back through reconciliation"}
               </text>
               <rect
-                x={phone ? 123 : 374}
-                y={phone ? 166 : 104}
+                x={phone ? 220 : 454}
+                y={166}
                 width="112"
                 height="32"
                 rx="16"
                 className="story-audit-evidence"
               />
               <text
-                x={phone ? 179 : 430}
-                y={phone ? 187 : 125}
+                x={phone ? 276 : 510}
+                y={187}
                 textAnchor="middle"
                 className="story-audit-evidence-text"
               >

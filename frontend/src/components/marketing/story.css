@@ -1248,3 +1248,11 @@ html:has(.marketing-story) {
   scroll-margin-top: 80px;
   scroll-margin-bottom: 24px;
 }
+
+.story-audit > .story-section-heading,
+.story-audit-bottom,
+.story-audit > .story-audit-note,
+.story-audit > .story-next {
+  width: min(100%, 960px);
+  margin-inline: auto;
+}
