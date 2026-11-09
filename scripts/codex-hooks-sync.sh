@@ -10,8 +10,8 @@
 # repo-scoped).
 #
 # Symposium's root SessionStart command is also Claude-specific. Derive its
-# Codex equivalent from that command, using the same repo-local binary and
-# config, so dependency-matched Rust skills sync for both agents.
+# Codex equivalent from that command, using the same shared wrapper, so
+# dependency-matched Rust skills sync for both agents.
 #
 # Like the MCP servers, these hooks are per-developer state and the repo's job
 # is to derive them rather than to document them:
@@ -91,12 +91,14 @@ deny_count=$(jq -r '[.permissions.deny[]? | select(startswith("Bash("))] | lengt
 
 # There must be exactly one Claude Code Symposium startup command to translate.
 # A missing or duplicated command is drift, not a successful empty sync.
-symposium_template=$(jq -r '[.hooks.SessionStart[]?.hooks[]?.command // empty | select(contains("hook claude session-start"))] | if length == 1 then .[0] else empty end' "$settings")
+symposium_template=$(jq -r '[.hooks.SessionStart[]?.hooks[]?.command // empty | select(contains("scripts/hooks/symposium-session-start.sh"))] | if length == 1 then .[0] else empty end' "$settings")
 [ -n "$symposium_template" ] || die "expected one Symposium SessionStart command in $settings"
 [[ "$symposium_template" == *'$CLAUDE_PROJECT_DIR'* ]] ||
 	die "Symposium SessionStart no longer uses CLAUDE_PROJECT_DIR — update the Codex derivation"
+[[ "$symposium_template" == *' claude' ]] ||
+	die "Symposium SessionStart no longer selects claude — update the Codex derivation"
 symposium_command="${symposium_template//\$CLAUDE_PROJECT_DIR/$root}"
-symposium_command="${symposium_command/hook claude session-start/hook codex session-start}"
+symposium_command="${symposium_command/% claude/ codex}"
 
 # The marker is how this script finds its own entry again on a re-run or a
 # --remove, without disturbing hooks a developer added by hand.

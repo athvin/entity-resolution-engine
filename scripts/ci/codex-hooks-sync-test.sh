@@ -28,8 +28,9 @@ guard="$root/scripts/hooks/agent-pretooluse-guard.sh"
 aws_guard="$root/scripts/hooks/aws-write-guard.sh"
 settings="$root/.claude/settings.json"
 sync="$root/scripts/codex-hooks-sync.sh"
+symposium_start="$root/scripts/hooks/symposium-session-start.sh"
 
-for f in "$guard" "$aws_guard" "$settings" "$sync"; do
+for f in "$guard" "$aws_guard" "$settings" "$sync" "$symposium_start"; do
 	[ -f "$f" ] || {
 		printf 'codex-hooks-sync-test: %s is missing (renamed?)\n' "$f" >&2
 		exit 2
@@ -128,7 +129,7 @@ fi
 # And the installer refuses to install against an empty one, rather than
 # installing a guard that protects less than it says.
 mkdir -p "$work/fakerepo/scripts/hooks" "$work/fakerepo/.claude"
-cp "$guard" "$aws_guard" "$work/fakerepo/scripts/hooks/"
+cp "$guard" "$aws_guard" "$symposium_start" "$work/fakerepo/scripts/hooks/"
 printf '{"permissions":{"deny":[]}}\n' >"$work/fakerepo/.claude/settings.json"
 if out=$(bash "$sync" --dry-run --root "$work/fakerepo" --codex-home "$work/home" 2>&1); then
 	no "the installer accepted an empty deny list" "$out"
@@ -173,16 +174,30 @@ mkdir -p "$work/fakerepo/.tools/bin" "$work/fakerepo/rust" "$work/fakerepo/.symp
 cp "$settings" "$work/fakerepo/.claude/settings.json"
 cat >"$work/fakerepo/.tools/bin/cargo-agents" <<'EOF'
 #!/usr/bin/env bash
-printf '%s|%s|%s\n' "$SYMPOSIUM_HOME" "$*" "$PWD"
+payload=$(cat)
+jq -nc --arg home "$SYMPOSIUM_HOME" --arg args "$*" --arg pwd "$PWD" --argjson payload "$payload" \
+	'{home:$home,args:$args,pwd:$pwd,payload:$payload}'
 EOF
 chmod +x "$work/fakerepo/.tools/bin/cargo-agents"
 bash "$sync" --root "$work/fakerepo" --codex-home "$work/fakehome" >/dev/null 2>&1
 startup=$(jq -r '.hooks.SessionStart[]?.hooks[]? | select(.description=="er-codex-symposium-session-start") | .command' "$work/fakehome/hooks.json")
-got=$(bash -c "$startup")
-want="$work/fakerepo/.symposium|hook codex session-start|$work/fakerepo/rust"
-[ "$got" = "$want" ] &&
-	ok "Symposium startup uses the repo-local binary, config, and Codex event" ||
-	no "Symposium startup is not derived correctly" "got '$got'; wanted '$want'"
+payload=$(jq -nc --arg cwd "$work/fakerepo" '{hook_event_name:"SessionStart",session_id:"root-session",cwd:$cwd,source:"startup"}')
+got=$(printf '%s\n' "$payload" | bash -c "$startup")
+if printf '%s\n' "$got" | jq -e --arg root "$work/fakerepo" \
+	'.home == ($root + "/.symposium") and .args == "hook codex session-start" and .pwd == ($root + "/rust") and .payload.cwd == ($root + "/rust") and .payload.session_id == "root-session" and .payload.source == "startup"' >/dev/null; then
+	ok "Codex startup rewrites a repo-root payload to the Rust workspace"
+else
+	no "Codex startup did not use the Rust workspace" "got '$got'"
+fi
+
+claude_startup=$(jq -r '[.hooks.SessionStart[]?.hooks[]?.command // empty | select(contains("scripts/hooks/symposium-session-start.sh"))] | .[0]' "$work/fakerepo/.claude/settings.json")
+got=$(printf '%s\n' "$payload" | CLAUDE_PROJECT_DIR="$work/fakerepo" bash -c "$claude_startup")
+if printf '%s\n' "$got" | jq -e --arg root "$work/fakerepo" \
+	'.home == ($root + "/.symposium") and .args == "hook claude session-start" and .pwd == ($root + "/rust") and .payload.cwd == ($root + "/rust") and .payload.session_id == "root-session" and .payload.source == "startup"' >/dev/null; then
+	ok "Claude startup rewrites a repo-root payload to the Rust workspace"
+else
+	no "Claude startup did not use the Rust workspace" "got '$got'"
+fi
 
 jq 'del(.hooks.SessionStart)' "$settings" >"$work/fakerepo/.claude/settings.json"
 if out=$(bash "$sync" --dry-run --root "$work/fakerepo" --codex-home "$work/fakehome" 2>&1); then

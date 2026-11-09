@@ -363,7 +363,10 @@ Symposium. Those nested skills load lazily — only once work enters `rust/` —
 and the hooks Symposium writes under `rust/` are inert. The root
 `.claude/settings.json` carries Claude Code's active SessionStart hook;
 `scripts/codex-hooks-sync.sh` derives the Codex SessionStart hook from it and
-installs that beside the Codex guard in `$CODEX_HOME/hooks.json`.
+installs that beside the Codex guard in `$CODEX_HOME/hooks.json`. Both call
+`scripts/hooks/symposium-session-start.sh`, which points the hook payload's
+`cwd` at `rust/`; changing only the shell directory leaves Symposium looking
+at the repo root and silently skips its automatic sync.
 
 ### Other agents read this repo, and they read different filenames
 
