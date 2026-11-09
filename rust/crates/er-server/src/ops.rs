@@ -54,6 +54,11 @@ pub fn task_completed(row: &TaskInstance) {
         .zip(row.finished_at)
         .and_then(|(start, end)| (end - start).to_std().ok());
     let class = Class::from_value(row.resource_class.as_deref());
-    operational::task_completed(class, &row.task_id, outcome, elapsed);
-    operational::pod_failed(class, row.termination_reason.as_deref());
+    operational::task_completed(
+        class,
+        &row.task_id,
+        outcome,
+        elapsed,
+        row.termination_reason.as_deref(),
+    );
 }

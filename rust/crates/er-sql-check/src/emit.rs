@@ -502,7 +502,7 @@ fn emit_control_fn(entity: &Entity, stmt: &LoadedStatement) -> String {
     ));
     if fallible {
         out.push_str(&format!(
-            "        rows.iter().map(|row| Ok({row_type} {{\n{field_map}\n        }})).collect()\n"
+            "        let decoded = rows.iter().map(|row| Ok({row_type} {{\n{field_map}\n        }})).collect();\n        ::er_span::check(&__span, decoded)\n"
         ));
     } else {
         out.push_str(&format!(

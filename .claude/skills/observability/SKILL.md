@@ -71,7 +71,8 @@ zeros for empty classes only after both reads succeed. `er.ops.snapshots` is the
 freshness signal; an empty queue chart without that heartbeat is not idle.
 The backlog alarm uses the simultaneous total queue gauge with `Minimum`, never
 the sum of independent per-class maxima. Task outcome counters follow committed,
-guarded writes: a duplicate terminal report emits nothing. A process death between
+guarded writes: a duplicate terminal report emits nothing. Successful relaunches
+do not reinterpret a retained termination reason as a new pod failure. A process death between
 commit and export can lose an observation, so these are not accounting counters.
 
 The Terraform `operational-observability` module provides the dashboard and
@@ -150,8 +151,10 @@ failure modes above.
 
 CloudWatch queries for these counters need both `er.role` and
 `OTelLib=er-obs`: the collector injects the latter even with
-`NoDimensionRollup`. It also converts cumulative counters to interval deltas,
-so use `Sum` over the period, not `RATE`. The absent-export alarm fills missing
+`NoDimensionRollup`. The SDK exports native interval deltas, so use `Sum` over
+the period, not `RATE`. Cumulative counters lose their first sample to awsemf's
+baseline conversion; retaining that baseline instead would replay lifetime counts
+after a collector restart. Native deltas avoid both errors. The absent-export alarm fills missing
 exported data with zero because a never-successful exporter has no series yet.
 An `OK` alarm whose inputs have no data proves nothing about export health.
 

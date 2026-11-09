@@ -55,7 +55,9 @@ workspace = true
 [dev-dependencies]
 er-span = { path = "../er-span" }
 opentelemetry = "0.31"
+opentelemetry-proto = { version = "0.31.0", default-features = false, features = ["gen-tonic-messages", "metrics"] }
 opentelemetry_sdk = { version = "0.31", features = ["testing"] }
+prost = "0.14.4"
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 
 

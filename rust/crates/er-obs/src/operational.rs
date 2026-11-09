@@ -159,7 +159,13 @@ impl Outcome {
 
 /// A task execution ended. Stage labels come from this closed vocabulary, never
 /// from arbitrary tenant configuration. Unknown compiled tasks share `other`.
-pub fn task_completed(class: Class, task: &str, outcome: Outcome, elapsed: Option<Duration>) {
+pub fn task_completed(
+    class: Class,
+    task: &str,
+    outcome: Outcome,
+    elapsed: Option<Duration>,
+    failure_reason: Option<&str>,
+) {
     let Some(i) = INSTRUMENTS.get() else { return };
     let stage = match task {
         "init" => "init",
@@ -179,6 +185,11 @@ pub fn task_completed(class: Class, task: &str, outcome: Outcome, elapsed: Optio
         "lake_init" => "lake_init",
         _ => "other",
     };
+    // A relaunched task retains its previous infrastructure reason in the
+    // durable row. A successful completion must not replay that old incident.
+    if matches!(outcome, Outcome::Failed) {
+        pod_failed(class, failure_reason);
+    }
     i.task_completed.add(
         1,
         &[
@@ -245,9 +256,13 @@ mod tests {
             "customer@example.invalid",
             Outcome::NoOp,
             Some(Duration::from_secs(3)),
+            Some("EvictionByEvictionAPI"),
         );
         task_retried(unknown);
-        pod_failed(unknown, Some("OOMKilled"));
+        task_completed(unknown, "train", Outcome::Failed, None, Some("OOMKilled"));
+        // The original requeue emits once; successful completion above must
+        // not turn its retained reason into a second eviction.
+
         pod_failed(unknown, Some("EvictionByEvictionAPI"));
         pod_failed(unknown, Some("customer@example.invalid"));
         provider.force_flush().unwrap();

@@ -1053,14 +1053,16 @@ GROUP BY resource_class
         let __entered = __span.enter();
         let rows = ::er_span::check(&__span, __result)?;
         ::er_span::rows(&__span, rows.len() as u64);
-        rows.iter()
+        let decoded = rows
+            .iter()
             .map(|row| {
                 Ok(OperationalActiveRow {
                     resource_class: row.try_get("resource_class")?,
                     active: row.try_get("active")?,
                 })
             })
-            .collect()
+            .collect();
+        ::er_span::check(&__span, decoded)
     }
 
     /// The current try plus its archived retry predecessors, walked back contiguously to the first cleared/restarted row or try 1: the lineage whose committed run_stages rows the ledger probe may report from. A cleared predecessor is a lineage boundary, so a clear still re-runs (§4.4).

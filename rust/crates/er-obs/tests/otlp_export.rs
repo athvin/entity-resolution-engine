@@ -47,6 +47,7 @@ use opentelemetry::trace::{Tracer, TracerProvider};
 struct Received {
     bytes: usize,
     head: String,
+    body: Vec<u8>,
 }
 
 /// Accept exactly one request, answer 200, and report what arrived.
@@ -62,16 +63,42 @@ fn one_shot_collector() -> (u16, std::thread::JoinHandle<Received>) {
 
     let handle = std::thread::spawn(move || {
         let (mut stream, _) = listener.accept().expect("accepting the export");
-        // One read is enough: the assertions only need the request line, the
-        // headers and a non-zero body length, and the payload for one span is
-        // far below this buffer.
-        let mut buf = vec![0u8; 64 * 1024];
-        let bytes = stream.read(&mut buf).unwrap_or(0);
+        stream
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let mut data = Vec::new();
+        let header_end = loop {
+            let mut chunk = [0u8; 4096];
+            let n = stream.read(&mut chunk).expect("reading OTLP request");
+            assert!(n > 0, "request ended before its headers");
+            data.extend_from_slice(&chunk[..n]);
+            if let Some(pos) = data.windows(4).position(|w| w == b"\r\n\r\n") {
+                break pos + 4;
+            }
+            assert!(data.len() < 64 * 1024, "unexpectedly large headers");
+        };
+        let headers = String::from_utf8_lossy(&data[..header_end]);
+        let length: usize = headers
+            .lines()
+            .find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                name.eq_ignore_ascii_case("content-length")
+                    .then(|| value.trim().parse().unwrap())
+            })
+            .expect("content length");
+        let mut body = data[header_end..].to_vec();
+        let present = body.len();
+        assert!(present <= length);
+        body.resize(length, 0);
+        stream
+            .read_exact(&mut body[present..])
+            .expect("complete OTLP payload");
         let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
         let _ = stream.flush();
         Received {
-            bytes,
-            head: String::from_utf8_lossy(&buf[..bytes]).to_string(),
+            bytes: header_end + body.len(),
+            head: format!("{}{}", headers, String::from_utf8_lossy(&body)),
+            body,
         }
     });
 
@@ -171,5 +198,88 @@ fn no_endpoint_configured_means_no_exporter() {
         && std::env::var_os("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT").is_none()
     {
         assert_eq!(er_obs::traces_endpoint(), None);
+    }
+}
+
+/// A first rare failure must reach awsemf as an interval count, not become its
+/// cumulative baseline. Decode real protobuf, including the histogram's interval
+/// statistics and a gauge that must remain a current value.
+#[test]
+fn first_metric_export_contains_native_deltas() {
+    use opentelemetry::KeyValue;
+    use opentelemetry::metrics::MeterProvider as _;
+    use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
+    use opentelemetry_proto::tonic::metrics::v1::{
+        AggregationTemporality, metric, number_data_point,
+    };
+    use prost::Message as _;
+
+    let (port, collector) = one_shot_collector();
+    let provider = er_obs::otlp::meter_provider_for(
+        Role::Dispatcher,
+        &format!("http://127.0.0.1:{port}/v1/metrics"),
+        Duration::from_secs(10),
+    )
+    .unwrap();
+    let meter = provider.meter("er-obs");
+    meter.u64_counter("er.pods.failures").build().add(
+        1,
+        &[
+            KeyValue::new("resource_class", "S"),
+            KeyValue::new("reason", "oom"),
+        ],
+    );
+    meter
+        .f64_histogram("er.http.duration")
+        .build()
+        .record(25.0, &[]);
+    meter
+        .u64_gauge("er.jobs.queue.total")
+        .build()
+        .record(7, &[]);
+    provider.force_flush().unwrap();
+    let received = collector.join().unwrap();
+    let _ = provider.shutdown();
+    assert!(received.head.starts_with("POST /v1/metrics "));
+    let request = ExportMetricsServiceRequest::decode(received.body.as_slice()).unwrap();
+    let metrics: Vec<_> = request
+        .resource_metrics
+        .into_iter()
+        .flat_map(|r| r.scope_metrics)
+        .flat_map(|s| s.metrics)
+        .collect();
+    assert_eq!(metrics.len(), 3);
+    for metric in metrics {
+        match metric.data.unwrap() {
+            metric::Data::Sum(sum) => {
+                assert_eq!(metric.name, "er.pods.failures");
+                assert_eq!(
+                    sum.aggregation_temporality,
+                    AggregationTemporality::Delta as i32
+                );
+                assert!(sum.is_monotonic);
+                assert_eq!(
+                    sum.data_points[0].value,
+                    Some(number_data_point::Value::AsInt(1))
+                );
+            }
+            metric::Data::Histogram(histogram) => {
+                assert_eq!(metric.name, "er.http.duration");
+                assert_eq!(
+                    histogram.aggregation_temporality,
+                    AggregationTemporality::Delta as i32
+                );
+                assert_eq!(histogram.data_points[0].count, 1);
+                assert_eq!(histogram.data_points[0].sum, Some(25.0));
+            }
+            metric::Data::Gauge(gauge) => {
+                assert_eq!(metric.name, "er.jobs.queue.total");
+                assert_eq!(
+                    gauge.data_points[0].value,
+                    Some(number_data_point::Value::AsInt(7))
+                );
+            }
+            other => panic!("unexpected metric: {other:?}"),
+        }
     }
 }

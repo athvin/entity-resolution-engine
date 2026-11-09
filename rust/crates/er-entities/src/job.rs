@@ -798,14 +798,16 @@ GROUP BY resource_class
         let __entered = __span.enter();
         let rows = ::er_span::check(&__span, __result)?;
         ::er_span::rows(&__span, rows.len() as u64);
-        rows.iter()
+        let decoded = rows
+            .iter()
             .map(|row| {
                 Ok(OperationalQueueRow {
                     resource_class: row.try_get("resource_class")?,
                     depth: row.try_get("depth")?,
                 })
             })
-            .collect()
+            .collect();
+        ::er_span::check(&__span, decoded)
     }
 }
 
