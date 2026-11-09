@@ -273,6 +273,14 @@ struct CountingExporter<E> {
 impl<E: opentelemetry_sdk::trace::SpanExporter> opentelemetry_sdk::trace::SpanExporter
     for CountingExporter<E>
 {
+    // Every provided method is delegated, not left at its default. The one
+    // that bites is `set_resource`: the OTLP transform takes the resource
+    // from what the exporter stored, NOT from each span — a wrapper that
+    // swallows the call ships every span with an EMPTY resource, no
+    // service.name and no er.role, which is the look-installed-export-nothing
+    // outage shape self-inflicted and permanent. `shutdown` and `force_flush`
+    // are the same class: the batch processor's last flush at exit is the one
+    // that carries a run's tail.
     fn export(
         &self,
         batch: Vec<SpanData>,
@@ -294,6 +302,22 @@ impl<E: opentelemetry_sdk::trace::SpanExporter> opentelemetry_sdk::trace::SpanEx
             }
             result
         }
+    }
+
+    fn shutdown_with_timeout(&mut self, timeout: Duration) -> OTelSdkResult {
+        self.inner.shutdown_with_timeout(timeout)
+    }
+
+    fn shutdown(&mut self) -> OTelSdkResult {
+        self.inner.shutdown()
+    }
+
+    fn force_flush(&mut self) -> OTelSdkResult {
+        self.inner.force_flush()
+    }
+
+    fn set_resource(&mut self, resource: &Resource) {
+        self.inner.set_resource(resource);
     }
 }
 
@@ -507,6 +531,7 @@ mod tests {
     #[derive(Debug)]
     struct FakeExporter {
         fail: bool,
+        resource_seen: std::sync::Arc<std::sync::Mutex<Option<String>>>,
     }
 
     impl opentelemetry_sdk::trace::SpanExporter for FakeExporter {
@@ -527,6 +552,14 @@ mod tests {
                 }
             }
         }
+
+        fn set_resource(&mut self, resource: &opentelemetry_sdk::Resource) {
+            let named = resource
+                .iter()
+                .any(|(key, value)| key.as_str() == "service.name" && value.as_str() == "er-api");
+            *self.resource_seen.lock().expect("resource_seen") =
+                Some(if named { "er-api" } else { "other" }.to_string());
+        }
     }
 
     fn provider_with(fake: FakeExporter) -> opentelemetry_sdk::trace::SdkTracerProvider {
@@ -540,7 +573,36 @@ mod tests {
                 inner: fake,
                 role: crate::Role::Api,
             })
+            .with_resource(
+                opentelemetry_sdk::Resource::builder()
+                    .with_service_name("er-api")
+                    .build(),
+            )
             .build()
+    }
+
+    /// The provider hands its resource to every processor at build, and the
+    /// batch processor hands it to the exporter — a wrapper that lets the
+    /// trait's default no-op answer strips service.name off every exported
+    /// span. The integration assertion in `tests/otlp_export.rs` covers the
+    /// wire bytes; this pins the delegation itself.
+    #[test]
+    fn the_exporter_wrapper_delegates_set_resource() {
+        let resource_seen = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let provider = provider_with(FakeExporter {
+            fail: false,
+            resource_seen: resource_seen.clone(),
+        });
+        // The batch processor receives the resource as a channel message at
+        // build and applies it on its own thread, ahead of anything queued
+        // later — so the flush is what orders this assertion after the apply.
+        provider.force_flush().expect("flush");
+        assert_eq!(
+            resource_seen.lock().expect("resource_seen").as_deref(),
+            Some("er-api"),
+            "the provider's resource never reached the exporter through the \
+             wrapper — every span would export with an empty resource"
+        );
     }
 
     /// Read the accumulated export back and return the named counter's total.
@@ -582,7 +644,10 @@ mod tests {
         let (meter_provider, exporter) = crate::metrics::test_support::test_meter();
 
         // A failure-free pass: ended and exported move, failures do not.
-        let provider = provider_with(FakeExporter { fail: false });
+        let provider = provider_with(FakeExporter {
+            fail: false,
+            resource_seen: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        });
         provider.tracer("counter_test").in_span("one-span", |_| {});
         provider.force_flush().expect("flush");
 
@@ -600,7 +665,10 @@ mod tests {
         // A refused batch: the failure counter moves and the error propagates
         // (the batch processor logs and retries; the counter is the alarm
         // input, the warn at the call site is the detail).
-        let provider = provider_with(FakeExporter { fail: true });
+        let provider = provider_with(FakeExporter {
+            fail: true,
+            resource_seen: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        });
         provider.tracer("counter_test").in_span("one-span", |_| {});
         let _ = provider.force_flush();
 
