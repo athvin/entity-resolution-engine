@@ -125,6 +125,13 @@ puts it on the collector or the network, and
 span goes missing, read those counters before re-deriving any of the six
 failure modes above.
 
+CloudWatch queries for these counters need both `er.role` and
+`OTelLib=er-obs`: the collector injects the latter even with
+`NoDimensionRollup`. It also converts cumulative counters to interval deltas,
+so use `Sum` over the period, not `RATE`. The absent-export alarm fills missing
+exported data with zero because a never-successful exporter has no series yet.
+An `OK` alarm whose inputs have no data proves nothing about export health.
+
 ## Adding a metric
 
 A metric is the expensive option, so it is also the one with a registry. Each
