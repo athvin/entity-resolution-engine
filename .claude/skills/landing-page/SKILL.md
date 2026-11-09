@@ -125,9 +125,12 @@ Measured paths connect actual exit and entry ports across section boundaries;
 resize and dataset/source changes must preserve their alignment. The
 header links Home and Docs; pricing lives on Home without invented rates.
 Section links are ordinary anchors with native mandatory scroll snapping scoped
-to Home. Every section, including the closing FAQ, needs a snap area so content
-cannot become unreachable. Oversized sections scroll within their area; reduced
-motion disables snapping. Do not intercept wheel or touch events.
+to Home. Every chapter, including the closing FAQ, needs reachable snap targets so
+content cannot become unreachable. Mobile trail headings and diagrams use
+separate targets without an overlapping parent snap area. The footer is an
+end-aligned snap target. Next-step links supply reachable end stops. Oversized
+sections scroll within their area; reduced motion disables snapping. Do not
+intercept wheel or touch events.
 
 `/docs` is a static workflow guide and operation reference. Its committed
 `operations.json` is generated from the MCP route manifest and response-envelope

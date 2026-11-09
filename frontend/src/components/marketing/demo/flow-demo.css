@@ -124,3 +124,80 @@
     gap: 4px;
   }
 }
+
+/* SVG paths stay still; small HTML sprites move on composited layers. */
+.dz-packet-origin {
+  overflow: visible;
+  pointer-events: none;
+}
+.dz-packet-sprite {
+  position: absolute;
+  inset: 0 auto auto 0;
+  display: block;
+  width: 36px;
+  height: 36px;
+  margin: -18px;
+  pointer-events: none;
+  will-change: transform, opacity;
+}
+.dz-packet-sprite[role="button"] {
+  pointer-events: auto;
+  cursor: pointer;
+}
+.dz-packet-glow {
+  width: 72px;
+  height: 72px;
+  margin: -36px;
+}
+.dz-packet-glow::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  opacity: var(--story-glow-opacity);
+  border-radius: 50%;
+  background: radial-gradient(
+    circle closest-side,
+    var(--story-light) 0%,
+    color-mix(in srgb, var(--story-light) 55%, transparent) 28%,
+    color-mix(in srgb, var(--story-light) 12%, transparent) 60%,
+    transparent 100%
+  );
+}
+.dz-packet-sprite:not(.dz-packet-glow)::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  opacity: 0.2;
+  border-radius: 50%;
+  background: radial-gradient(circle closest-side, currentColor 0%, transparent 100%);
+}
+.dz-packet-sprite > svg {
+  position: relative;
+}
+.dz-packet-viewport {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+.dz-packet-origin-clipped,
+.dz-packet-origin-clipped > .dz-packet-viewport {
+  overflow: hidden;
+}
+/* Keep promoted particles entirely in HTML. Mobile Safari can misplace
+   composited descendants of SVG foreignObject during touch scrolling. */
+.dz-html-flow,
+.dz-html-flow > svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.dz-html-flow > svg {
+  overflow: visible;
+}
+.dz-html-flow > .dz-packet-origin,
+.dz-flow-visibility {
+  position: absolute;
+  pointer-events: none;
+}

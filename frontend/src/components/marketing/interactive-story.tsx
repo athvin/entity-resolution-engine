@@ -2,11 +2,19 @@
 
 import Link from "next/link";
 import { useRef, useState } from "react";
+import { VolumeControl } from "./demo/volume-control";
 import { TrailBridges } from "./demo/trail-bridges";
 import { StoryFlow } from "./demo/story-flow";
 import { UsageStream } from "./demo/usage-stream";
 import { AuditStory } from "./demo/audit-story";
-import { DEMO_DATASETS, SOURCE_NAMES, VOLUMES, volumeLabel } from "./demo/story-model";
+import {
+  DEMO_DATASETS,
+  SOURCE_NAMES,
+  DEFAULT_VOLUME_POSITION,
+  packetCount,
+  volumeAtPosition,
+  volumeLabel,
+} from "./demo/story-model";
 
 export function InteractiveStory() {
   const story = useRef<HTMLDivElement>(null);
@@ -14,12 +22,13 @@ export function InteractiveStory() {
   const [assignments, setAssignments] = useState<number[][]>(
     DEMO_DATASETS.map((d) => [...d.sources]),
   );
-  const [volumeStep, setVolumeStep] = useState(2);
+  const [volumePosition, setVolumePosition] = useState(DEFAULT_VOLUME_POSITION);
   const [paused, setPaused] = useState(false);
   const [auditing, setAuditing] = useState(false);
   const sources = assignments[dataset] ?? [];
   const active = DEMO_DATASETS[dataset] ?? DEMO_DATASETS[0];
-  const volume = VOLUMES[volumeStep] ?? VOLUMES[2];
+  const volume = volumeAtPosition(volumePosition);
+  const count = packetCount(volumePosition);
   const controls = (id: string) => (
     <fieldset className="story-controls" disabled={auditing}>
       <legend className="sr-only">Configure the {id === "flow" ? "flow" : "usage"} example</legend>
@@ -68,27 +77,7 @@ export function InteractiveStory() {
         </div>
         <p>* ZoomInfo is a proposed custom integration.</p>
       </div>
-      <div className="story-volume-control">
-        <label htmlFor={`${id}-volume`}>
-          Records per run <output htmlFor={`${id}-volume`}>{volumeLabel(volume)}</output>
-        </label>
-        <input
-          id={`${id}-volume`}
-          type="range"
-          min="0"
-          max="4"
-          step="1"
-          value={volumeStep}
-          aria-valuetext={`${volumeLabel(volume)} records per run`}
-          onChange={(e) => {
-            setVolumeStep(Number(e.target.value));
-          }}
-        />
-        <div className="story-range-labels">
-          <span>1 thousand</span>
-          <span>10 million</span>
-        </div>
-      </div>
+      <VolumeControl id={`${id}-volume`} position={volumePosition} onChange={setVolumePosition} />
       <p role="status" style={{ visibility: auditing ? "visible" : "hidden" }}>
         Configuration is held while the audit plays.
       </p>
@@ -100,17 +89,17 @@ export function InteractiveStory() {
         story={story}
         revision={`${String(dataset)}-${sources.join(",")}`}
         paused={paused}
-        count={sources.length ? 2 + volumeStep : 0}
+        count={sources.length ? count : 0}
       />
       <StoryFlow
         dataset={dataset}
         sources={sources}
-        volumeStep={volumeStep}
+        volumePosition={volumePosition}
         locked={auditing}
         paused={paused}
         onPause={setPaused}
         onDataset={setDataset}
-        onVolume={setVolumeStep}
+        onVolume={setVolumePosition}
         onSource={(i) => {
           setAssignments((all) =>
             all.map((set, index) =>
@@ -153,7 +142,7 @@ export function InteractiveStory() {
           sourceCount={sources.length}
           dataset={active.name}
           volume={volume}
-          volumeStep={volumeStep}
+          volumePosition={volumePosition}
         />
         <div className="story-pricing-note">
           <h3>Pricing follows the work.</h3>

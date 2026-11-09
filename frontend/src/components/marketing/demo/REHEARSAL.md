@@ -81,3 +81,106 @@ review results are recorded in the pull request.
 and declarations. Product code remains under strict TypeScript and ESLint.
 `node scripts/gen-developer-reference.mjs --check` checks the committed operation
 reference against the manifest and response-envelope contract.
+
+## Local mobile interaction revision
+
+The preview is a local production build, served on port 3217. Test the actual
+Tailscale origin as well as localhost: the development server's rejected HMR
+connection left WebKit's interactive UI unhydrated over the remote HTTP address.
+The page looked loaded while its toggle remained disabled and its records never
+animated. The production preview hydrates and runs the same bundle on both origins.
+
+The volume controls now share a continuous quadratic position, from 1,000 to
+10,000,000 records. Changes retain the flow clock. On a phone the source controls
+are a horizontally scrollable row, the slider precedes the diagram, and the
+slider's touch handle is larger. A zero minimum inline size on the fieldset is
+necessary in Chromium; without it, its min-content width expands the viewport.
+
+Desktop chapter snapping uses one area per section and an end-aligned footer.
+On mobile, trail headings and diagrams supply separate stops without an
+overlapping parent snap area. Next links supply reachable end stops. Tall chapters remain
+scrollable; reduced motion disables snapping and packet animations. The header
+is opaque because WebKit showed sharp underlying text through its backdrop blur.
+The dark default respects a saved theme, and the header names the destination
+mode. Direct touchscreen taps preserve scroll position. Playwright locator.click
+can itself scroll a sticky header before clicking; the scroll regression uses
+screen coordinates to reproduce the visitor's action.
+
+A diffuse gradient follows the record's real path inside each processing
+surface. Material, light, and text occupy separate layers. Every flow surface,
+including the selected dataset, is translucent; bridge records continue through
+the destination. Text uses foreground contrast above the transmitted light.
+It remains an illustration, not a throughput measurement.
+
+Reviewed artifacts are local under `/tmp/landing-approved-*`,
+`/tmp/landing-mobile-final-loop.png`, and
+`/tmp/landing-desktop-final-loop.png`. The fresh-eye review caught the light
+washing out text, Chrome's horizontal overflow, and WebKit's transparent header;
+all were corrected. A reported theme jump was reproduced as locator-driven
+scrolling and withdrawn after a direct touchscreen tap preserved the viewport.
+Rehearsal motion sampling contains gaps; the sheets cannot establish physical
+phone frame delivery or exhaustive frame-by-frame smoothness.
+
+## Composited flow motion
+
+The live story holds small HTML sprites beside stationary SVG paths; native
+animations change only transform and opacity. SVG foreignObjects are no longer
+used for the live story. Gradients replace blur filters, and HTML viewports clip
+transmitted light. Coordinates remain local to each SVG viewport, independent
+of document scrolling. Normal records and their diffuse echoes share a clock,
+including pause and changes in volume. An observer pauses individual offscreen
+paths, and rounded bridge bends remove abrupt right-angle direction changes.
+
+A five-second Chromium mobile-emulation trace at 4× CPU throttling recorded
+1,505 paint events and 301 layout events before this revision, versus zero of
+each after it. Active animations at the dedupe section fell from 32 to 16. Both
+traces delivered approximately 60 animation frames per second on this machine;
+these measurements establish less rendering work, not physical-phone frame rate.
+Functional checks cover offscreen pausing and matching record/echo clocks and
+positions on Chromium and WebKit.
+
+The fresh-eye review caught a visible circular edge on the glow. Explicit
+`circle closest-side` gradients now reach zero alpha before the rounded sprite
+edge. It also measured a 21px native select in WebKit despite its 44px minimum;
+explicit height now gives both dataset selectors a 44px touch target, verified
+in the interaction suite.
+
+Final local sheets: `/tmp/landing-smooth-{phone,desktop}-loop.png`. Both film
+gates passed. The phone watcher had a 29.7ms maximum sampling gap and desktop
+62.9ms, so motion between those samples remains inconclusive. Every captured
+frame was inspected; gradients stay within the surfaces and text stays readable.
+The updated production preview passed 111 marketing checks across desktop
+Chromium, mobile Chromium and mobile WebKit. The unit/component coverage run
+passed all 922 tests with three workers; an unrestricted concurrent run had
+timed out in the unchanged mock-fabrication scanner.
+
+All 27 Linux marketing visual baselines were regenerated and passed comparison.
+The final production trace again recorded zero paint/layout events during flow.
+
+## Mobile touch repair
+
+A short native touch swipe was dispatched through Chromium's input protocol,
+not simulated with scrollTo. Before the repair it left the processing diagram
+at 102px; the updated layout settles it at the 64px header edge. The 320px
+viewport also reproduced a 333px document caused by the header; tighter header
+spacing fixes it. Both regressions were observed failing against the previous
+production preview, then passing against the new build. WebKit tests check
+actual packet bounding-box movement as well as animation clocks. Straight paths
+use nonzero HTML visibility markers instead of observing zero-width SVG paths.
+
+The independent reviewer watched iPhone 15 and SE at both themes. Light-theme
+transmission was too faint, so its foreground-tinted gradient now preserves
+contrast beneath pale surfaces. Paired frames confirmed the correction.
+
+The phone and desktop `/tmp/mobile-repair-*-loop.png` sheets were inspected.
+Both gates passed; clipped glow reports are intentional masking at processing
+surface boundaries, visible in the sheets. Sampling gaps (83.4ms phone, 150.2ms
+desktop under concurrent checks) remain inconclusive for motion between frames.
+No physical iPhone was connected, so these checks do not establish the user's
+device behavior or frame delivery.
+
+Final production validation: 61 interaction checks passed; two CDP-only touch
+cases were explicitly skipped outside mobile Chromium. All 27 existing Linux
+visual baselines passed unchanged. Build, targeted lint/format, and skills-check
+passed. A final throttled Chromium trace retained zero Paint/Layout events and
+300 sampled frames in five seconds; physical-device timing remains unmeasured.
