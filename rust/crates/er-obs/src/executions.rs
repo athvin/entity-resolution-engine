@@ -463,16 +463,15 @@ mod tests {
     /// honest guarantee either way.
     #[test]
     fn a_statement_span_records_a_metric_with_buffering_off() {
-        use opentelemetry::metrics::MeterProvider as _;
-        use opentelemetry_sdk::metrics::InMemoryMetricExporter;
-        use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
         use tracing_subscriber::layer::SubscriberExt as _;
 
-        let exporter = InMemoryMetricExporter::default();
-        let provider = SdkMeterProvider::builder()
-            .with_reader(PeriodicReader::builder(exporter.clone()).build())
-            .build();
-        crate::metrics::install(&provider.meter("test"));
+        // The shared test meter: installing a second one would lose the
+        // `INSTRUMENTS` OnceLock race to whichever test ran first, and reading
+        // without the lock races other tests' drains. See metrics::test_support.
+        let _serial = crate::metrics::test_support::metric_test_lock()
+            .lock()
+            .expect("metric test lock");
+        let (provider, exporter) = crate::metrics::test_support::test_meter();
 
         // The configuration that was broken: no per-run buffering.
         disable();
@@ -500,6 +499,8 @@ mod tests {
 
         provider.force_flush().expect("flush");
         let metrics = exporter.get_finished_metrics().expect("finished metrics");
+        // The drain returns every series recorded so far, not just this
+        // test's — hence `any`, and the lock above rather than an exact match.
         let found = metrics.iter().any(|rm| {
             rm.scope_metrics()
                 .any(|sm| sm.metrics().any(|m| m.name() == "er.db.query.duration"))

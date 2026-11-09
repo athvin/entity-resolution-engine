@@ -113,6 +113,18 @@ telemetry with `…-00`, invisibly. `otlp.rs` states `Sampler::AlwaysOn`; leave 
 stated. Sampling belongs to the collector's `tail_sampling`, which can see a
 trace's outcome before judging it.
 
+**7. A process can look installed and export nothing.** Observed live (#941):
+an er-api pod logged `OTLP span export installed`, recorded request spans,
+exported **zero spans for 40 minutes** — and its metric pipeline flowed to the
+same collector the whole time. Nothing paged, because nothing watched span
+volume. The `er.telemetry.spans_ended` / `spans_exported` /
+`span_exports_failed` counters now make the process testify against itself:
+ended rising while exported is flat puts the wedge in-process, failures rising
+puts it on the collector or the network, and
+`infra/terraform/envs/dev/alarms-telemetry.tf` fires on the divergence. When a
+span goes missing, read those counters before re-deriving any of the six
+failure modes above.
+
 ## Adding a metric
 
 A metric is the expensive option, so it is also the one with a registry. Each
