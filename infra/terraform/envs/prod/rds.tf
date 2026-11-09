@@ -42,6 +42,22 @@ resource "random_password" "db" {
   special = false
 }
 
+# DuckLake snapshot expiry can drop many inlined-data tables in one transaction.
+# Match the local/dev lock budget; the engine default of 64 is insufficient.
+# This static setting requires rebooting the instances after association, then
+# confirming SHOW max_locks_per_transaction before the maintenance probe.
+resource "aws_rds_cluster_parameter_group" "prod" {
+  name        = "er-prod"
+  family      = data.aws_rds_engine_version.aurora_pg.parameter_group_family
+  description = "Prod Aurora parameters for DuckLake maintenance"
+
+  parameter {
+    name         = "max_locks_per_transaction"
+    value        = "1024"
+    apply_method = "pending-reboot"
+  }
+}
+
 resource "aws_rds_cluster" "prod" {
   cluster_identifier = "er-prod"
   engine             = "aurora-postgresql"
@@ -52,9 +68,10 @@ resource "aws_rds_cluster" "prod" {
   master_username = "er"
   master_password = random_password.db.result
 
-  db_subnet_group_name   = aws_db_subnet_group.prod.name
-  vpc_security_group_ids = [aws_security_group.db.id]
-  storage_encrypted      = true
+  db_subnet_group_name            = aws_db_subnet_group.prod.name
+  db_cluster_parameter_group_name = aws_rds_cluster_parameter_group.prod.name
+  vpc_security_group_ids          = [aws_security_group.db.id]
+  storage_encrypted               = true
 
   backup_retention_period   = 14 # Owner-confirmed production retention; #553.
   deletion_protection       = true
