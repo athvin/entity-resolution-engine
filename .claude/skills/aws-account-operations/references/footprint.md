@@ -58,9 +58,9 @@ creating two sets of real resources.
 Distinct `resource "aws_*"` blocks across `infra/terraform/`, by count:
 
 ```
-  22  aws_iam_role
-  17  aws_iam_role_policy
-   9  aws_eks_pod_identity_association
+  24  aws_iam_role
+  20  aws_iam_role_policy
+  11  aws_eks_pod_identity_association
    8  aws_iam_role_policy_attachment
    8  aws_s3_bucket
    8  aws_s3_bucket_public_access_block
@@ -68,6 +68,7 @@ Distinct `resource "aws_*"` blocks across `infra/terraform/`, by count:
    6  aws_secretsmanager_secret
    6  aws_secretsmanager_secret_version
    5  aws_s3_bucket_policy
+   4  aws_cloudwatch_log_group
    4  aws_eks_addon
    4  aws_kms_alias
    4  aws_kms_key
@@ -80,7 +81,6 @@ Distinct `resource "aws_*"` blocks across `infra/terraform/`, by count:
    3  aws_ssoadmin_managed_policy_attachment
    3  aws_vpc_security_group_ingress_rule
    2  aws_budgets_budget
-   2  aws_cloudwatch_log_group
    2  aws_db_subnet_group
    2  aws_ecr_lifecycle_policy
    2  aws_ecr_repository
@@ -172,7 +172,7 @@ drops off this list on the next regeneration, so an absence here cannot rot.
 | `aws_cloudwatch_dashboard` | 0 |
 | `aws_cloudwatch_log_metric_filter` | 0 |
 | `aws_budgets_budget` | 2 |
-| `aws_cloudwatch_log_group` | 2 |
+| `aws_cloudwatch_log_group` | 4 |
 
 ### Identity Center permission sets
 
@@ -223,7 +223,7 @@ cannot reach AWS:
 
 | Mechanism | Count |
 |---|---|
-| `aws_eks_pod_identity_association` blocks | 9 |
+| `aws_eks_pod_identity_association` blocks | 11 |
 | `aws_iam_user` blocks (should be the lake key and the builder key only) | 1 |
 | `aws_iam_openid_connect_provider` blocks (GitHub Actions only; never for workloads) | 1 |
 <!-- END GENERATED: aws-footprint -->

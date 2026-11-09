@@ -48,16 +48,14 @@ resource "aws_eks_pod_identity_association" "er_api" {
   role_arn        = aws_iam_role.er_api_pod.arn
 }
 
-# This role deliberately carries NO policy yet, and that is not an oversight.
-#
-# The two capabilities dev attaches here are SES send and Bedrock invoke, and
-# neither exists in prod: there is no envs/prod/ses.tf (so no identity to send
-# as) and no Bedrock enablement. The association above is the part that must
-# exist before the first pod starts — it is what makes the ServiceAccount's
-# credential resolvable at all — and a role with no permissions is the correct
-# state for a pod whose only AWS need is arriving later. A policy-less role is
-# visible in the console as such; an absent association is a pod that fails to
-# start with a credential error that reads like a bug.
+# This role's policy set is intentionally minimal, and the association above
+# is the part that had to exist first: it is what makes the ServiceAccount's
+# credential resolvable at all, and an absent association is a pod that fails
+# to start with a credential error that reads like a bug. Capabilities then
+# land as POLICIES on this one role, because Pod Identity binds one role per
+# (cluster, namespace, ServiceAccount) triple. The first is ses.tf's
+# send-transactional-mail; Bedrock remains unattached, there being no prod
+# enablement.
 #
 # The dispatcher shares this ServiceAccount (deployment-dispatcher.yaml) and
 # needs no AWS access of its own — it talks to Postgres and the Kubernetes API.
