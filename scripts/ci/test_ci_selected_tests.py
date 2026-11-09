@@ -37,7 +37,9 @@ else:
     if mode == "ambiguous":
         artifact["executable"] += "-other"
         print(json.dumps(artifact))
-    print("test ordinary_suite ... ok")
+    print("Running current target", file=sys.stderr, flush=True)
+    print("test ordinary_suite ... ok", flush=True)
+    print("Running next target", file=sys.stderr, flush=True)
     sys.exit(1 if mode == "suite-fails" else 0)
 ''')
             (root / "core-test").write_text('''#!/usr/bin/env python3
@@ -72,6 +74,10 @@ else:
         self.assertEqual(builds[0][-4:], ["-p", "dedupe-core", "-p", "er-sql-check"])
         self.assertEqual([env for _, env in calls], [None, None, None, "1"])
         self.assertIn("test ordinary_suite ... ok", result.stdout)
+        self.assertLess(result.stdout.index("Running current target"),
+                        result.stdout.index("test ordinary_suite ... ok"))
+        self.assertLess(result.stdout.index("test ordinary_suite ... ok"),
+                        result.stdout.index("Running next target"))
 
     def test_unselected_extension_gate_needs_no_metadata_or_binary(self):
         result, calls = self.run_gate(extensions=False, packages=["er-match"])

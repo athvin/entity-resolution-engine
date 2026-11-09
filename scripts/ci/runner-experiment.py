@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def identities(log, artifacts, packages):
     """Attribute libtest names to Cargo targets, including repeated extension tests."""
+    log = re.sub(r"\x1b\[[0-9;]*m", "", log)
     targets = {}
     for event in artifacts:
         if (event.get("reason") == "compiler-artifact" and event.get("executable")
@@ -77,10 +78,15 @@ def main():
             or Path(os.environ["GITHUB_WORKSPACE"]).resolve() != ROOT):
         raise ValueError("full experiment requires its own GitHub-hosted checkout")
     runner_temp = Path(os.environ["RUNNER_TEMP"])
-    target = Path(os.environ["CARGO_TARGET_DIR"])
+    if os.environ.get("CARGO_TARGET_DIR") or os.environ.get("CARGO_TERM_COLOR"):
+        raise ValueError("use normal CI's Cargo environment for comparable cache keys")
+    target = ROOT / "rust/target"
     output = runner_temp / "runner-results"
     output.mkdir(exist_ok=True)
-    env = {**os.environ, "RUN_EXTENSIONS": "true", "CARGO_TERM_COLOR": "never", "RUST_TEST_THREADS": "4"}
+    # sccache hashes CARGO_* environment variables even when the resulting
+    # target path is unchanged. Do not create a separate Rust cache namespace
+    # merely to choose the default target or disable terminal colours.
+    env = {**os.environ, "RUN_EXTENSIONS": "true", "RUST_TEST_THREADS": "4"}
     metadata = json.loads(subprocess.check_output(
         ["cargo", "metadata", "--locked", "--no-deps", "--format-version=1"], cwd=ROOT / "rust", text=True))
     package_names = {p["id"]: p["name"] for p in metadata["packages"]}

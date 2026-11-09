@@ -25,7 +25,10 @@ def run(packages, extensions=False):
     command = ["cargo", "test", "--locked", "--message-format=json-render-diagnostics",
                *[arg for p in packages for arg in ("-p", p)]]
     binaries = set()
-    with subprocess.Popen(command, stdout=subprocess.PIPE, text=True) as process:
+    # Cargo's target headings use stderr, libtest results use stdout. Merge
+    # them before relaying, or the next heading can overtake buffered results
+    # and attribute tests to the wrong binary in timing/coverage reports.
+    with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True) as process:
         for line in process.stdout:
             try:
                 event = json.loads(line)
