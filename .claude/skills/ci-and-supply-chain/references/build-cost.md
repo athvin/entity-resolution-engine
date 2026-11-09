@@ -81,6 +81,11 @@ The implemented policy:
 - Observability reconciliation skips only with a matching configuration and
   secret-version fingerprint plus healthy releases/workloads. A missing marker,
   changed input, rotation or unhealthy workload reconciles and verifies again.
+  The installed AWS Fluent Bit chart labels its workload instance
+  `fluent-bit-aws-for-fluent-bit`, although Helm names the release `fluent-bit`.
+  Health detection accepts both labels and still requires every rollout to be
+  complete; `test_ci_observability.py` uses the observed chart label. Checking
+  only the release name incorrectly rejects the healthy deployed stack.
 
 `ci-build-experiment.yml` is opt-in (`workflow_dispatch`, or the
 `ci:archive-experiment` label on its implementation PR). It compares five
