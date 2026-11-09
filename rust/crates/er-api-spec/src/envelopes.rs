@@ -208,13 +208,7 @@ pub fn classify_envelope(body: &str, source: &str) -> Result<Envelope, String> {
 /// Resolve only an immediate named constructor. A variable or helper call needs
 /// data-flow information this classifier does not have, so it stays unresolved.
 fn typed_object(body: &str, source: &str) -> Result<Option<Envelope>, String> {
-    let Some(start) = find_call(body, "Json(") else {
-        return Ok(None);
-    };
-    let Some(close) = balanced_close(body, start - 1) else {
-        return Ok(None);
-    };
-    let Ok(syn::Expr::Struct(value)) = syn::parse_str(&body[start..close]) else {
+    let Some(syn::Expr::Struct(value)) = body.parse().ok().and_then(json_argument) else {
         return Ok(None);
     };
     let Some(name) = value.path.get_ident() else {
@@ -256,6 +250,28 @@ fn typed_object(body: &str, source: &str) -> Result<Option<Envelope>, String> {
             .map(|field| field.name.trim_start_matches("r#").to_string())
             .collect(),
     )))
+}
+
+/// Token groups keep parentheses inside quoted/raw strings out of the delimiter
+/// count. The enclosing body can be a source fragment rather than a valid block.
+fn json_argument(tokens: proc_macro2::TokenStream) -> Option<syn::Expr> {
+    use proc_macro2::{Delimiter, TokenTree};
+    let mut tokens = tokens.into_iter().peekable();
+    while let Some(token) = tokens.next() {
+        if let TokenTree::Ident(name) = &token
+            && name == "Json"
+            && let Some(TokenTree::Group(group)) = tokens.peek()
+            && group.delimiter() == Delimiter::Parenthesis
+        {
+            return syn::parse2(group.stream()).ok();
+        }
+        if let TokenTree::Group(group) = token
+            && let Some(value) = json_argument(group.stream())
+        {
+            return Some(value);
+        }
+    }
+    None
 }
 
 /// Every **top-level** key of a `Json(json!({ … }))` body, in source order.
@@ -382,6 +398,10 @@ struct EmptyResponse {
         assert_eq!(
             classify_envelope("{ Json(OrgResponse { name: o.name, id: o.id }) }"),
             classify_envelope("{ Json(json!({ \"id\": o.id, \"name\": o.name })) }")
+        );
+        assert_eq!(
+            classify_envelope(r#"{ Json(OrgResponse { id: ")".into(), name: name }) }"#),
+            Ok(Envelope::Object(vec!["id".into(), "name".into()]))
         );
         assert_eq!(
             classify_envelope("{ Json(EmptyResponse {}) }"),
