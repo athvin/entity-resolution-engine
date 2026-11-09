@@ -1256,3 +1256,11 @@ html:has(.marketing-story) {
   width: min(100%, 960px);
   margin-inline: auto;
 }
+
+/* Touch scrolling already has native momentum. Avoid a second smooth-scroll
+   animation racing snap settlement when a phone user taps a playback control. */
+@media (hover: none) {
+  html:has(.marketing-story) {
+    scroll-behavior: auto;
+  }
+}

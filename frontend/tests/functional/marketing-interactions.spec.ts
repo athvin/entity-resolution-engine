@@ -131,6 +131,8 @@ test.describe("interactive marketing", () => {
     const audit = page.getByTestId("marketing-audit");
     await expect(audit).toHaveAttribute("data-running", "true");
     await audit.getByRole("button", { name: "Pause audit" }).click();
+    await expect(audit.getByRole("button", { name: "Resume audit" })).toBeVisible();
+    await expect(page).toHaveURL(/#audit$/);
     const clock = () =>
       audit
         .locator(".story-audit-clock")
