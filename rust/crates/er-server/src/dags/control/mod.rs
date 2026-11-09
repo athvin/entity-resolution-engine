@@ -47,7 +47,7 @@ pub struct AdvanceSfCursor;
 
 impl ControlTask<PgClient> for AdvanceSfCursor {
     const NAME: &'static str = "advance_sf_cursor";
-    const VERSION: u32 = 1;
+    const VERSION: u32 = 2;
     type Input = (Plan<ExtractReport>,);
     type Output = Plan<SfCursorAdvanced>;
 
@@ -71,6 +71,20 @@ impl ControlTask<PgClient> for AdvanceSfCursor {
             )));
         };
 
+        let pin = report.delivery.as_ref().ok_or_else(|| {
+            TaskError::Failed(er_errors::ErError::precondition(
+                "extract report has no immutable delivery; re-extract before advancing the cursor",
+            ))
+        })?;
+        if pin.dataset_id != dataset_id
+            || pin.source != report.source
+            || pin.delivery_id != report.delivery_id
+            || pin.version != 1
+        {
+            return Err(TaskError::Failed(er_errors::ErError::precondition(
+                "extract report delivery scope does not match the job",
+            )));
+        }
         let idem = format!("extract:{}", report.delivery_id);
         let job = crate::pg::enqueue(
             ctx.client,
@@ -79,10 +93,7 @@ impl ControlTask<PgClient> for AdvanceSfCursor {
             "run_all_incremental",
             0,
             Some(&idem),
-            Some(&serde_json::json!({
-                "source": report.source,
-                "delivery_id": report.delivery_id,
-            })),
+            Some(&pin.params()),
             crate::pg::Provenance::actor(SF_EXTRACT_ACTOR),
         )
         .await

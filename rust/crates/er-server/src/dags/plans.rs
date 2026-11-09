@@ -266,6 +266,10 @@ impl PlanDoc for StagedApproved {
 /// Salesforce, and rows under a skipped mark never arrive again.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExtractReport {
+    /// Absent on old reports and empty pulls; nonempty pulls must carry a pin
+    /// before their cursor may advance.
+    #[serde(default)]
+    pub delivery: Option<crate::delivery::DeliveryPin>,
     pub connection_id: String,
     pub source: String,
     pub object: String,

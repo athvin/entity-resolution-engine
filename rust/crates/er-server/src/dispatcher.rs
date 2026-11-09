@@ -276,7 +276,7 @@ pub async fn s3_poll_tick(
             // reader.
             // The poller is org-driven; its deliveries land in the org's one
             // converged dataset, by the name the sweep guarantees.
-            let (_, _, _, drop_root) =
+            let (_, delivery_dataset, delivery_config, drop_root) =
                 match crate::delivery_preconditions(client, &org_name, "default", source).await {
                     Ok(t) => t,
                     Err(refusal) => {
@@ -329,8 +329,9 @@ pub async fn s3_poll_tick(
                     org_id: &org_id,
                     source,
                     delivery_id: &delivery_id,
-                    dataset_id: org_dataset.as_deref(),
-                    temp_path: &part.to_string_lossy(),
+                    dataset_id: &delivery_dataset.id,
+                    drop_root: &drop_root,
+                    spec: &delivery_config.sources[source],
                     bytes,
                     action: "import.s3",
                 },

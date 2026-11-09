@@ -99,15 +99,14 @@ pub fn classify(key: &str, size: i64, prefix: &str) -> Result<Drop, Skipped> {
     })
 }
 
-/// Where the bytes are written before `finish_delivery` renames them into
-/// place.
+/// Where bytes are staged before immutable publication by `finish_delivery`.
 ///
 /// The name matches the upload path's own — `.{source}.{delivery_id}.csv.part`
 /// — rather than inventing a second convention. Two things depend on it: the
 /// leading dot keeps a half-written file from looking like a source, and the
 /// delivery id keeps two concurrent deliveries of one source from writing over
-/// each other. `finish_delivery` derives the final name from this path's
-/// directory, so getting the shape right is what makes the rename land.
+/// each other. The shared publisher derives this same name from the validated
+/// source and delivery identity.
 ///
 /// Returns `None` when the source name would escape `drop_root` — a key like
 /// `../../etc/crm/x.csv` classifies with source `..`, and joining that
@@ -439,16 +438,13 @@ mod tests {
 
     #[test]
     fn stages_under_the_upload_paths_own_naming() {
-        // The shape is not cosmetic: `finish_delivery` derives the final name
-        // from this path's directory, the leading dot keeps a half-written file
-        // from looking like a source, and the delivery id keeps two concurrent
-        // deliveries of one source off each other's bytes.
+        // The publisher derives this same staging name. The leading dot keeps
+        // partial files out of legacy runs; ids isolate concurrent deliveries.
         let part = staging_path(Path::new("/var/drop/acme"), "crm", "d1").unwrap();
         assert_eq!(
             part,
             Path::new("/var/drop/acme/.crm.d1.csv.part"),
-            "the staging name must match the upload path's, or the rename lands \
-             somewhere nothing reads"
+            "the staging name must match the shared publisher"
         );
         let other = staging_path(Path::new("/var/drop/acme"), "crm", "d2").unwrap();
         assert_ne!(part, other, "two deliveries of one source must not collide");

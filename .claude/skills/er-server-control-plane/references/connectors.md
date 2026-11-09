@@ -82,14 +82,51 @@ generic ingress endpoint every connector targets:
 - The `source` is validated against the org's **published** config before any byte
   lands on disk — a draft-only source `422`s with "publish a config version
   containing `sources.<name>` first", rather than failing later as the run's exit-2.
-- The delivery is written to `{drop_root}/{source}/{delivery_id}.{ext}` and an
-  incremental run is enqueued. The runner's `adapter_for` reads the same source
-  config the import validated against.
+- Upload, JSON push, S3 polling and Salesforce extraction publish closed staging
+  files through `er-server::delivery::publish`. Each accepted input lives at
+  `{drop_root}/deliveries/{delivery_id}.csv`, accompanied by a versioned JSON
+  manifest. Files and directory entries are flushed before enqueue. Publication
+  never replaces an existing identity; a conflicting retry is refused.
+- The queued job carries that manifest in `params.delivery`, alongside `source`
+  and `delivery_id`. It pins the dataset, byte length/digest and source mapping
+  digest (including column order). The runner reads only that input and refuses
+  missing bytes, altered bytes, changed mappings or a mismatched dataset.
+  Accepting B cannot change the bytes read by queued A.
 - A size ceiling (`MAX_IMPORT_BYTES`) guards the push path; bulk history is synced
   into the drop dir directly rather than through the HTTP upload.
 
 A connector's ingress is therefore "authenticate, extract, map to a `sources:`
 entry, push files (or write them to the drop dir), enqueue." No engine change.
+
+#### Replay, old jobs and retention
+
+Accepted files are retained after success and failure; this change introduces no
+cleanup policy. Do not remove them while a queued job, retry or operator replay
+can still need them. The Salesforce/S3 cursor advances only after publication
+and durable enqueue. An enqueue failure leaves the manifest and CSV intact;
+retrying publication under the same identity is safe. To recover an orphaned
+upload, first check whether its consumer exists, then re-upload the retained CSV
+under the original source mapping. The original manifest records the mapping
+digest for this check. Salesforce and S3 can retry without advancing the cursor.
+
+Ingest retries use the existing §9.1 pre-image queries: delete only this run's
+raw rows and receipts in one lake transaction, then replay its pinned delivery
+set. This keeps a lost completion report from creating duplicate rows/receipts.
+The separate per-delivery append/tombstone transaction work is tracked in #957;
+immutable inputs and pre-imaging do not replace that atomicity requirement.
+
+An old delivery job carrying `source`/`delivery_id` without `params.delivery` is
+refused: its original bytes cannot be inferred from a mutable legacy source file.
+Re-deliver its original input or re-extract from the last known safe watermark;
+do not retry it against the newest file and assume it was the same delivery.
+A nonempty old Salesforce extract report also refuses cursor advancement.
+
+An operator run-all **without a delivery identity** retains the explicit legacy
+`{source}.csv` directory convention; it does not discover accepted manifests or
+choose the newest accepted input. A publish-triggered rebuild uses `skip_ingest`
+to operate on the already-landed corpus. The CLI's explicit `--drop` convention
+is unchanged. Rolling back to an older binary while pinned jobs remain queued
+would lose this guarantee; drain them or stop dispatch before rollback.
 
 ### 3.2 Egress — signed webhooks
 

@@ -10,7 +10,7 @@
 //! This is the path that the BFF, its mock and the new-source wizard all drove
 //! while the server registered only `get(imports_list)` and had no multipart
 //! support at all — green in every tier, 405 in a real deployment. These tests
-//! exercise the real thing: the delivery lands at `<drop_root>/<source>.csv`,
+//! exercise the real thing: each delivery gets an immutable file and manifest,
 //! a run is enqueued for it, and each documented refusal is produced rather
 //! than assumed. `tests/mock_contract.rs` keeps the mock from drifting ahead of
 //! the router again.
@@ -214,8 +214,51 @@ async fn deliveries_arrive_as_a_file_or_as_json_and_enqueue_their_run() {
     let job_id = accepted["job"]["id"].as_str().unwrap().to_string();
     assert_ne!(accepted["delivery_id"].as_str().unwrap(), "");
 
+    // Accept B before A's consumer starts. A must still resolve its own bytes.
+    let csv_b = "crm_id,first_name,last_name\nC3,grace,hopper\n";
+    let (ct, body) = multipart_body("crm.csv", csv_b);
+    let response_b = app
+        .clone()
+        .oneshot(upload_req(
+            "/v1/orgs/acme/datasets/default/imports?source=crm",
+            &steward_key,
+            &ct,
+            body,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response_b.status(), StatusCode::ACCEPTED);
+    let accepted_b = json_body(response_b).await;
+    let model_path = tmp.join("resolver-model.json");
+    std::fs::write(&model_path, "{}").unwrap();
+    let resolver_env = serde_json::json!({
+        "ER_CONFIG_PATH": config_path,
+        "ER_MODEL_PATH": model_path,
+        "ER_TF_PATH": tmp.join("tf.csv"),
+    });
+    for (delivery, expected) in [(&accepted, csv), (&accepted_b, csv_b), (&accepted, csv)] {
+        let resolved = er_server::runctx::RunContext::resolve(&er_server::runctx::ResolveRequest {
+            lake_env: &resolver_env,
+            params: &delivery["job"]["params"],
+            models: &[],
+            drop_root: Some(&drop_root),
+            wants_deliveries: true,
+            dataset_id: delivery["job"]["dataset_id"].as_str(),
+        })
+        .unwrap();
+        assert_eq!(
+            resolved.deliveries,
+            vec![("crm".to_string(), expected.to_string())],
+            "each queued delivery, including a retry, must retain its exact bytes"
+        );
+    }
+
     // The delivery is where the dispatcher looks for it, byte-for-byte.
-    let landed = std::fs::read_to_string(format!("{drop_root}/crm.csv")).unwrap();
+    let landed = std::fs::read_to_string(format!(
+        "{drop_root}/deliveries/{}.csv",
+        accepted["delivery_id"].as_str().unwrap()
+    ))
+    .unwrap();
     assert_eq!(landed, csv, "the delivery must land verbatim");
 
     // Nothing half-written is left behind.
@@ -270,9 +313,13 @@ async fn deliveries_arrive_as_a_file_or_as_json_and_enqueue_their_run() {
         "re-uploading a source must enqueue another run"
     );
     assert_eq!(
-        std::fs::read_to_string(format!("{drop_root}/crm.csv")).unwrap(),
+        std::fs::read_to_string(format!(
+            "{drop_root}/deliveries/{}.csv",
+            second["delivery_id"].as_str().unwrap()
+        ))
+        .unwrap(),
         "crm_id,first_name\nC3,grace\n",
-        "the newest delivery replaces the previous one"
+        "each delivery has its own immutable bytes"
     );
 
     // ---- refusals ----
@@ -356,7 +403,11 @@ async fn deliveries_arrive_as_a_file_or_as_json_and_enqueue_their_run() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::PAYLOAD_TOO_LARGE);
     assert_eq!(
-        std::fs::read_to_string(format!("{drop_root}/crm.csv")).unwrap(),
+        std::fs::read_to_string(format!(
+            "{drop_root}/deliveries/{}.csv",
+            second["delivery_id"].as_str().unwrap()
+        ))
+        .unwrap(),
         "crm_id,first_name\nC3,grace\n",
         "a rejected oversize upload must not disturb the landed delivery"
     );
@@ -453,7 +504,11 @@ async fn deliveries_arrive_as_a_file_or_as_json_and_enqueue_their_run() {
     // DECLARED columns, not of whatever keys the record happened to carry, so a
     // record that omits a column lands as an empty cell rather than shifting
     // every later one.
-    let landed = std::fs::read_to_string(format!("{drop_root}/crm.csv")).unwrap();
+    let landed = std::fs::read_to_string(format!(
+        "{drop_root}/deliveries/{}.csv",
+        pushed["delivery_id"].as_str().unwrap()
+    ))
+    .unwrap();
     let mut lines = landed.lines();
     let header: Vec<&str> = lines.next().unwrap().split(',').collect();
     assert!(
@@ -499,7 +554,12 @@ async fn deliveries_arrive_as_a_file_or_as_json_and_enqueue_their_run() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::ACCEPTED);
-    let landed = std::fs::read_to_string(format!("{drop_root}/crm.csv")).unwrap();
+    let tricky_delivery = json_body(resp).await;
+    let landed = std::fs::read_to_string(format!(
+        "{drop_root}/deliveries/{}.csv",
+        tricky_delivery["delivery_id"].as_str().unwrap()
+    ))
+    .unwrap();
     assert!(
         landed.contains("\"O\"\"Hara, Jr\""),
         "a comma and a quote must be CSV-escaped: {landed}"

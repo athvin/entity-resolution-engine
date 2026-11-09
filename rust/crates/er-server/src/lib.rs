@@ -33,6 +33,7 @@
 pub mod config_check;
 pub mod cron;
 pub mod dags;
+pub mod delivery;
 pub mod dispatcher;
 pub mod dispatcher_bin;
 pub mod errfmt;
@@ -7246,22 +7247,15 @@ pub(crate) async fn delivery_preconditions(
     Ok((org_row, d, config, drop_root))
 }
 
-/// Publish a staged delivery and enqueue the run that reads it.
-///
-/// The rename is the point, and it is why both delivery paths end here: the
-/// dispatcher reads `<drop_root>/<source>.csv` directly, so a run claimed
-/// mid-write must never see a half-written file. Until the rename succeeds there
-/// is no delivery at all.
+/// Publish immutable bytes and their manifest before enqueueing their consumer.
 pub(crate) struct StagedDelivery<'a> {
     pub(crate) org: &'a str,
     pub(crate) org_id: &'a str,
     pub(crate) source: &'a str,
     pub(crate) delivery_id: &'a str,
-    /// The dataset the delivery lands in (its run and events are stamped with
-    /// it). `None` only for the org-driven S3 poller falling back pre-converge.
-    pub(crate) dataset_id: Option<&'a str>,
-    /// Where the bytes are now. Renamed into place by `finish_delivery`.
-    pub(crate) temp_path: &'a str,
+    pub(crate) dataset_id: &'a str,
+    pub(crate) drop_root: &'a str,
+    pub(crate) spec: &'a er_config::SourceSpec,
     pub(crate) bytes: u64,
     /// The audit action naming how it arrived (`import.upload` / `import.push`
     /// / `import.s3`).
@@ -7280,32 +7274,42 @@ pub(crate) async fn finish_delivery(
         source,
         delivery_id,
         dataset_id,
-        temp_path,
+        drop_root,
+        spec,
         bytes,
         action,
     } = *d;
-    let final_path = format!(
-        "{}/{source}.csv",
-        temp_path.rsplit_once('/').map_or("", |(d, _)| d)
-    );
-    if let Err(e) = tokio::fs::rename(temp_path, &final_path).await {
-        let _ = tokio::fs::remove_file(temp_path).await;
-        return detail_err(
-            StatusCode::SERVICE_UNAVAILABLE,
-            format!("cannot publish the delivery: {e}"),
-        );
-    }
-    // No idempotency key: two deliveries of the same source are two deliveries
-    // and must run twice, so an upsert on a per-source key would be wrong.
-    let ds = dataset_id.map(str::to_string);
+    let root = std::path::PathBuf::from(drop_root);
+    let dataset = dataset_id.to_owned();
+    let source_name = source.to_owned();
+    let id = delivery_id.to_owned();
+    let spec = spec.clone();
+    let pin = match er_obs::spawn_blocking_in_span(move || {
+        delivery::publish(&root, &dataset, &source_name, &id, &spec)
+    })
+    .await
+    {
+        Ok(Ok(pin)) => pin,
+        result => {
+            tracing::warn!(error = ?result, "delivery publication failed; retained files permit recovery");
+            return detail_err(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "cannot publish the delivery",
+            );
+        }
+    };
+    // One stable key per accepted delivery, never per source. An enqueue retry
+    // re-finds this consumer without collapsing distinct accepted deliveries.
+    let idem = format!("delivery:{delivery_id}");
+    let ds = Some(dataset_id);
     let job = match pg::enqueue(
         client,
         org_id,
-        ds.as_deref(),
+        ds,
         "run_all_incremental",
         0,
-        None,
-        Some(&json!({ "source": source, "delivery_id": delivery_id })),
+        Some(&idem),
+        Some(&pin.params()),
         pg::Provenance {
             created_by: Some(actor),
             trace_context,
@@ -7341,7 +7345,7 @@ pub(crate) async fn finish_delivery(
     if let Err(e) = webhook::emit(
         client,
         org_id,
-        ds.as_deref(),
+        ds,
         org,
         "import.received",
         &json!({
@@ -7484,8 +7488,9 @@ async fn push_records(
             org_id: &org_row.id,
             source: &body.source,
             delivery_id: &delivery_id,
-            dataset_id: Some(&d.id),
-            temp_path: &temp_path,
+            dataset_id: &d.id,
+            drop_root: &drop_root,
+            spec,
             bytes,
             action: "import.push",
         },
@@ -7517,10 +7522,9 @@ const MAX_PUSHED_RECORDS: usize = 10_000;
 /// (`POST /v1/orgs/{org}/datasets/{ds}/imports?source=<source>`), then enqueue the run that
 /// picks it up.
 ///
-/// This is the HTTP half of ingest. The dispatcher reads each configured
-/// source's delivery from `<drop_root>/<source>.csv`, so an upload lands the file
-/// there under a temp name and renames it into place — atomic, so a dispatcher
-/// that claims the run mid-upload cannot read a half-written CSV.
+/// This is the HTTP half of ingest. Bytes are staged under a private name,
+/// then `finish_delivery` publishes an immutable file and manifest before it
+/// queues the exact consumer. Concurrent deliveries cannot replace its input.
 ///
 /// The response mirrors what the BFF and its mock already consume:
 /// `202 {"delivery_id": …, "job": {…}}`.
@@ -7556,7 +7560,7 @@ async fn upload_import(
         Ok(c) => c,
         Err(r) => return *r,
     };
-    let (org_row, d, _config, drop_root) =
+    let (org_row, d, config, drop_root) =
         match delivery_preconditions(&client, &org, &ds, source).await {
             Ok(t) => t,
             Err(r) => return r.into_response(),
@@ -7653,8 +7657,9 @@ async fn upload_import(
             org_id: &org_row.id,
             source,
             delivery_id: &delivery_id,
-            dataset_id: Some(&d.id),
-            temp_path: &temp_path,
+            dataset_id: &d.id,
+            drop_root: &drop_root,
+            spec: &config.sources[source],
             bytes: bytes_written,
             action: "import.upload",
         },

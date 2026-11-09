@@ -53,6 +53,7 @@ fn context(
         params: &ctx.order.params,
         models: &models,
         drop_root: ctx.order.drop_root.as_deref(),
+        dataset_id: ctx.order.dataset_id.as_deref(),
         wants_deliveries,
     })
     .map_err(|e| {
@@ -252,7 +253,7 @@ pub struct Ingest;
 
 impl Task<Session> for Ingest {
     const NAME: &'static str = "ingest";
-    const VERSION: u32 = 1;
+    const VERSION: u32 = 2;
     type Input = (Plan<RunPlan>,);
     type Output = LakeRef<Landed>;
     const WRITES_LAKE: bool = true;
@@ -1030,9 +1031,9 @@ impl Task<Session> for Maintain {
 /// instead; the Postgres half (`advance_sf_cursor`) stays with the dispatcher.
 ///
 /// The delivery lands exactly the way an upload or the S3 poller lands one —
-/// staged as `.{source}.{delivery_id}.csv.part`, renamed to `{source}.csv` —
-/// so the downstream `run_all_incremental` the control half enqueues ingests
-/// it with zero new code. Bulk API results are already CSV; each page is
+/// staged as `.{source}.{delivery_id}.csv.part`, published with an immutable
+/// manifest — so the downstream `run_all_incremental` reads precisely these
+/// bytes even if another extract completes before its ingest begins. Bulk API results are already CSV; each page is
 /// re-emitted in the source's declared column order (the same
 /// record-id/updated-at/mapped order `push_records` renders), which also
 /// strips the per-page header repeats.
@@ -1041,7 +1042,7 @@ pub struct ExtractPull;
 
 impl Task<Session> for ExtractPull {
     const NAME: &'static str = "extract";
-    const VERSION: u32 = 1;
+    const VERSION: u32 = 2;
     type Input = ();
     type Output = Plan<ExtractReport>;
     const WRITES_LAKE: bool = false;
@@ -1152,7 +1153,7 @@ impl Task<Session> for ExtractPull {
         drop(file);
 
         let rows = i64::try_from(outcome.rows).unwrap_or(i64::MAX);
-        let report = ExtractReport {
+        let mut report = ExtractReport {
             connection_id: request.connection_id.clone(),
             source: request.source.clone(),
             object: request.object.clone(),
@@ -1164,6 +1165,7 @@ impl Task<Session> for ExtractPull {
             rows,
             bytes,
             watermark: outcome.max_updated,
+            delivery: None,
         };
         if outcome.rows == 0 {
             // Nothing changed upstream. The empty page set is a SUCCESS — a
@@ -1173,9 +1175,21 @@ impl Task<Session> for ExtractPull {
             let _ = std::fs::remove_file(&part);
             return Ok(Outcome::NoOp(Plan(report)));
         }
-        let live = std::path::Path::new(drop_root).join(format!("{}.csv", request.source));
-        std::fs::rename(&part, &live)
-            .map_err(|e| engine_error(&format!("i/o error publishing the delivery: {e}")))?;
+        let dataset_id = ctx.order.dataset_id.as_deref().ok_or_else(|| {
+            TaskError::Failed(er_errors::ErError::precondition(
+                "extract requires a dataset",
+            ))
+        })?;
+        report.delivery = Some(
+            crate::delivery::publish(
+                std::path::Path::new(drop_root),
+                dataset_id,
+                &request.source,
+                &delivery_id,
+                spec,
+            )
+            .map_err(|e| engine_error(&crate::errfmt::chain(&e)))?,
+        );
         Ok(Outcome::Done(
             Plan(report),
             er_dag::Counters(serde_json::json!({ "rows": rows, "bytes": bytes })),

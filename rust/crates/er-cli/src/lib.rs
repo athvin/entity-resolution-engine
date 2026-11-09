@@ -4274,6 +4274,17 @@ pub fn stage_init(
 /// Propagates the first delivery's ingest or batch write. NOT the profile —
 /// see below.
 pub fn stage_ingest(session: &Session, config: &Config, inputs: &PipelineInputs<'_>) -> Result<()> {
+    if !inputs.deliveries.is_empty() {
+        // §9.1: retry the whole run's delivery set from its pre-image. The
+        // immutable job inputs make this replay reproducible; blindly appending
+        // them again would duplicate rows after a lost completion report.
+        create_ddl_table(session, "raw_records")?;
+        create_ddl_table(session, "ingest_batches")?;
+        let tx = session.connection().unchecked_transaction()?;
+        er_entities::raw_record::delete::by_batch(&tx, inputs.run_id)?;
+        er_entities::ingest_batch::delete::by_run(&tx, inputs.run_id)?;
+        tx.commit()?;
+    }
     for (source, csv) in inputs.deliveries {
         run_ingest(
             session,
