@@ -222,5 +222,33 @@ resource "aws_cloudtrail" "org" {
   include_global_service_events = true
   enable_log_file_validation    = true
 
+  # §3.2: data events, scoped to the prod lake prefix and READ-only — a read
+  # on the prod prefix produces an event, a write does not, and a read on any
+  # other bucket does not. The scope is the exfiltration signal on the tenant
+  # data plane; write events would record the engine's steady-state parquet
+  # churn (every run rewrites it — modules/lake/main.tf) at per-100k data-event
+  # pricing for no signal. Read volume is near-zero until the engine's s3://
+  # lake path lands (envs/prod/pod_identity.tf records that gap), so the cost
+  # starts at nothing; §3.2 is where to revisit if that changes.
+  #
+  # The ARN is CONSTRUCTED, not referenced: core cannot name an envs/prod
+  # resource, and a string is plan-safe where a reference would make core's
+  # plan depend on prod's apply. The same trade dev's observability.tf records
+  # for the openobserve role — a wrong or missing bucket surfaces here only as
+  # "no events arrive", which is what the §3.2 probes then catch.
+  #
+  # `include_management_events = true` is stated, not defaulted: this block is
+  # the trail's first selector, and management coverage must not be able to
+  # change by omission while gaining the data scope.
+  event_selector {
+    read_write_type           = "ReadOnly"
+    include_management_events = true
+
+    data_resource {
+      type   = "AWS::S3::Object"
+      values = ["arn:aws:s3:::er-prod-lake-${local.mgmt_account_id}/"]
+    }
+  }
+
   depends_on = [aws_s3_bucket_policy.audit]
 }
