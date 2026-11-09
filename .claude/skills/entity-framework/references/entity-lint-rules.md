@@ -24,7 +24,7 @@ in `er-sql-check`.
 | [V11](#v11) | error | a DuckLake entity declares no default, reference, `accepted_values`, `serial` or index |
 | [V12](#v12) | error | an entity with an arrow or json `wire` also generates for `rust` |
 | [V13](#v13) | error | `history: true` appears only on an entity with a `postgres` store |
-| [V14](#v14) | error | no declared relation collides with a `history: true` entity's `<relation>_history` companion |
+| [V14](#v14) | error | no Postgres relation collides with a `history: true` entity's `<relation>_history` companion |
 | [V15](#v15) | warning | a control-plane entity with an `org_id` column declares a non-partial index leading with `org_id` |
 | [V16](#v16) | error | an entity generating for `typescript` declares an arrow or json `wire` |
 | [V17](#v17) | warning | a control-plane entity with a `dataset_id` column references `datasets(id)`, keeps `org_id` beside it, and declares a non-partial index leading with `dataset_id` |
@@ -375,23 +375,23 @@ generate:
 
 ## V14
 
-no declared relation collides with a `history: true` entity's `<relation>_history` companion
+no Postgres relation collides with a `history: true` entity's `<relation>_history` companion
 
-`history: true` makes the generator emit a `<relation>_history` table and a trigger that writes row images into it. If some other entity already declares that relation, the two definitions of the same table fight: whichever DDL applies last wins, and the row images land in a shape nothing expects. Catching the name collision in the catalog is the only place it is still cheap.
+`history: true` makes the generator emit a `<relation>_history` table and a trigger that writes row images into it. If some other entity already declares that Postgres relation, the two definitions of the same table fight: whichever DDL applies last wins, and the row images land in a shape nothing expects. Catching the name collision in the catalog is the only place it is still cheap.
 
 Severity: **error**
 
 Conforming:
 
 ```yaml
-# orgs declares `history: true`, and nothing else declares `orgs_history`.
+# orgs declares Postgres `history: true`; a lake-only entity may use `orgs_history`.
 ```
 
 Violating:
 
 ```yaml
-# orgs declares `history: true`, and some other entity declares
-# `relation: orgs_history`.
+# orgs declares Postgres `history: true`, and another Postgres entity
+# declares `relation: orgs_history`.
 ```
 
 ## V15

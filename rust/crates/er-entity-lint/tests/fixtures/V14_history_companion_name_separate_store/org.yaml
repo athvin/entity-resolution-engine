@@ -1,0 +1,27 @@
+kind: entity
+version: 1
+name: org
+relation: orgs
+description: "A Postgres entity with a history companion."
+key: [id]
+generate:
+  stores: [postgres]
+  languages: [rust]
+  history: true
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "The entity id."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the row was created."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the row was updated."

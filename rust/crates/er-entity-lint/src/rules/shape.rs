@@ -20,11 +20,11 @@ const V10_GOOD: &str = r"natural_key: [org_id, source_name]
 const V10_BAD: &str = r"natural_key: [created_at]
 ";
 
-const V14_GOOD: &str = r"# orgs declares `history: true`, and nothing else declares `orgs_history`.
+const V14_GOOD: &str = r"# orgs declares Postgres `history: true`; a lake-only entity may use `orgs_history`.
 ";
 
-const V14_BAD: &str = r"# orgs declares `history: true`, and some other entity declares
-# `relation: orgs_history`.
+const V14_BAD: &str = r"# orgs declares Postgres `history: true`, and another Postgres entity
+# declares `relation: orgs_history`.
 ";
 
 /// V9 — every reference resolves to a declared Postgres relation and column.
@@ -144,11 +144,11 @@ impl CatalogRule for HistoryCompanionNameIsFree {
     fn info(&self) -> RuleInfo {
         RuleInfo {
             code: Code("V14"),
-            title: "no declared relation collides with a `history: true` entity's \
+            title: "no Postgres relation collides with a `history: true` entity's \
                     `<relation>_history` companion",
             explain: "`history: true` makes the generator emit a `<relation>_history` table and a \
                       trigger that writes row images into it. If some other entity already \
-                      declares that relation, the two definitions of the same table fight: \
+                      declares that Postgres relation, the two definitions of the same table fight: \
                       whichever DDL applies last wins, and the row images land in a shape nothing \
                       expects. Catching the name collision in the catalog is the only place it is \
                       still cheap.",
@@ -165,11 +165,9 @@ impl CatalogRule for HistoryCompanionNameIsFree {
                 continue;
             }
             let companion = format!("{}_history", entity.relation);
-            if catalog
-                .entities()
-                .iter()
-                .any(|candidate| candidate.relation == companion)
-            {
+            if catalog.entities().iter().any(|candidate| {
+                candidate.has_store(Store::Postgres) && candidate.relation == companion
+            }) {
                 out.push(Violation::new(
                     &entity.name,
                     format!("history companion {companion:?} collides with a declared relation"),
