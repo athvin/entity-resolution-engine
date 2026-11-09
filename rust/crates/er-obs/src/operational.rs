@@ -52,6 +52,9 @@ struct Instruments {
     http_duration: Histogram<f64>,
     queue_depth: Gauge<u64>,
     queue_total: Gauge<u64>,
+    queue_oldest_age: Gauge<u64>,
+    pending_oldest_age: Gauge<u64>,
+    pod_snapshot: Counter<u64>,
     active_tasks: Gauge<u64>,
     snapshot: Counter<u64>,
     dispatch_duration: Histogram<f64>,
@@ -72,6 +75,18 @@ pub(crate) fn install(meter: &Meter) {
             .build(),
         queue_total: meter
             .u64_gauge("er.jobs.queue.total")
+            .with_unit("1")
+            .build(),
+        queue_oldest_age: meter
+            .u64_gauge("er.jobs.queue.oldest_age")
+            .with_unit("s")
+            .build(),
+        pending_oldest_age: meter
+            .u64_gauge("er.pods.pending.oldest_age")
+            .with_unit("s")
+            .build(),
+        pod_snapshot: meter
+            .u64_counter("er.pods.snapshots")
             .with_unit("1")
             .build(),
         queue_depth: meter
@@ -122,10 +137,19 @@ pub fn queue_snapshot(class: Class, depth: u64, active: u64) {
 }
 
 /// The queue/concurrency read succeeded; missing samples must not look idle.
-pub fn snapshot_succeeded(total_depth: u64) {
+pub fn snapshot_succeeded(total_depth: u64, oldest_age_seconds: u64) {
     if let Some(i) = INSTRUMENTS.get() {
         i.queue_total.record(total_depth, &[]);
+        i.queue_oldest_age.record(oldest_age_seconds, &[]);
         i.snapshot.add(1, &[]);
+    }
+}
+
+/// A successful complete managed-pod LIST, including an empty one.
+pub fn pod_snapshot_succeeded(oldest_pending_age_seconds: u64) {
+    if let Some(i) = INSTRUMENTS.get() {
+        i.pending_oldest_age.record(oldest_pending_age_seconds, &[]);
+        i.pod_snapshot.add(1, &[]);
     }
 }
 
@@ -239,6 +263,51 @@ mod tests {
     use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
 
     #[test]
+    fn age_gauges_export_current_values_and_clear_when_empty() {
+        let _serial = crate::metrics::test_support::metric_test_lock()
+            .lock()
+            .unwrap();
+        let (provider, exporter) = crate::metrics::test_support::test_meter();
+        for (queue, pending) in [(901, 601), (0, 0)] {
+            exporter.reset();
+            snapshot_succeeded(0, queue);
+            pod_snapshot_succeeded(pending);
+            provider.force_flush().unwrap();
+            let collected = exporter.get_finished_metrics().unwrap();
+            let mut seen = std::collections::BTreeSet::new();
+            for resource in &collected {
+                for scope in resource.scope_metrics() {
+                    for metric in scope.metrics() {
+                        let expected = match metric.name() {
+                            "er.jobs.queue.oldest_age" => queue,
+                            "er.pods.pending.oldest_age" => pending,
+                            _ => continue,
+                        };
+                        let AggregatedMetrics::U64(MetricData::Gauge(gauge)) = metric.data() else {
+                            panic!("age must be a gauge")
+                        };
+                        for point in gauge.data_points() {
+                            assert_eq!(point.value(), expected);
+                            assert_eq!(
+                                point.attributes().count(),
+                                0,
+                                "identities never become metric dimensions"
+                            );
+                            seen.insert(metric.name().to_string());
+                        }
+                    }
+                }
+            }
+            assert_eq!(
+                seen.len(),
+                2,
+                "both age instruments must reach the exporter"
+            );
+        }
+        exporter.reset();
+    }
+
+    #[test]
     fn exports_bounded_observations_and_clears_an_empty_queue() {
         let _serial = crate::metrics::test_support::metric_test_lock()
             .lock()
@@ -249,7 +318,8 @@ mod tests {
         assert_eq!(unknown, Class::Other);
         queue_snapshot(unknown, 12, 3);
         queue_snapshot(unknown, 0, 0);
-        snapshot_succeeded(0);
+        snapshot_succeeded(0, 0);
+        pod_snapshot_succeeded(0);
         job_dispatched(unknown, Duration::from_secs(2));
         task_completed(
             unknown,
@@ -321,6 +391,9 @@ mod tests {
             "er.http.duration",
             "er.jobs.queue.depth",
             "er.jobs.queue.total",
+            "er.jobs.queue.oldest_age",
+            "er.pods.pending.oldest_age",
+            "er.pods.snapshots",
             "er.tasks.active",
             "er.ops.snapshots",
             "er.jobs.dispatch.duration",

@@ -776,12 +776,14 @@ FOR UPDATE
     pub struct OperationalQueueRow {
         pub resource_class: Option<String>,
         pub depth: Option<i64>,
+        pub oldest_created_at: Option<::chrono::DateTime<::chrono::Utc>>,
     }
 
     pub async fn operational_queue(
         client: &impl ::tokio_postgres::GenericClient,
     ) -> ::std::result::Result<Vec<OperationalQueueRow>, ::tokio_postgres::Error> {
-        const SQL: &str = "SELECT resource_class, count(*) AS depth
+        const SQL: &str =
+            "SELECT resource_class, count(*) AS depth, min(created_at) AS oldest_created_at
 FROM public.jobs
 WHERE state = 'queued'
 GROUP BY resource_class
@@ -804,6 +806,7 @@ GROUP BY resource_class
                 Ok(OperationalQueueRow {
                     resource_class: row.try_get("resource_class")?,
                     depth: row.try_get("depth")?,
+                    oldest_created_at: row.try_get("oldest_created_at")?,
                 })
             })
             .collect();

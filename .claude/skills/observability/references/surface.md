@@ -20,11 +20,12 @@ cannot drift from what is emitted. It is reached from the skill body.
 <!-- BEGIN GENERATED: obs-surface -->
 ### Which side of the split each crate is on
 
-**Depend on `er-span` — they emit and collect nothing.** Instrumenting
-one of these must not reach for `er-obs`:
+**Depend on `er-span` — they use the emission helpers.** Only the
+entry-point crates listed below may also depend on `er-obs`:
 
 - `dedupe-core`
 - `er-entities`
+- `er-server`
 
 **Depend on `er-obs` — they own an entry point and install the
 subscriber.** Note this is not the same as "binary crates": some of
@@ -96,6 +97,7 @@ be grouped, filtered by target, or joined to a trace.
 - `er-server/src/lib.rs`
 - `er-server/src/mail.rs`
 - `er-server/src/main.rs`
+- `er-server/src/ops.rs`
 - `er-server/src/pg.rs`
 - `er-server/src/satoken.rs`
 - `er-server/src/shutdown.rs`

@@ -18,6 +18,9 @@ of truth and this file is its output.
 
 | Metric | Kind | Unit | Dimensions | Series |
 |---|---|---|---|---|
+| `er.jobs.queue.oldest_age` | gauge | `s` |  | 1 |
+| `er.pods.pending.oldest_age` | gauge | `s` |  | 1 |
+| `er.pods.snapshots` | counter | `1` |  | 1 |
 | `er.jobs.queue.total` | gauge | `1` |  | 1 |
 | `er.http.requests` | counter | `1` | `status_class` | 6 |
 | `er.http.duration` | histogram | `ms` | `status_class` | 6 |
@@ -34,7 +37,19 @@ of truth and this file is its output.
 | `er.telemetry.spans_exported` | counter | `1` | `er.role` | 4 |
 | `er.telemetry.span_exports_failed` | counter | `1` | `er.role` | 4 |
 
-**134 series in total.**
+**137 series in total.**
+
+### `er.jobs.queue.oldest_age`
+
+Age since creation of the oldest currently queued job, including backoff. Healthy empty snapshots emit zero; require er.ops.snapshots before treating the gauge as current.
+
+### `er.pods.pending.oldest_age`
+
+Maximum age since Kubernetes creation among current managed Pending pods. Healthy empty snapshots emit zero; require er.pods.snapshots before treating the gauge as current. Launch intentions without a pod do not count.
+
+### `er.pods.snapshots`
+
+Successful complete managed-pod observations with usable Pending-pod creation timestamps. Zero or absent samples mean the Kubernetes read, dispatcher or export path needs attention; independent of the database snapshot heartbeat.
 
 ### `er.jobs.queue.total`
 

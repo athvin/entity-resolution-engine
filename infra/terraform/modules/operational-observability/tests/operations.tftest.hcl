@@ -38,12 +38,42 @@ run "operational_signal_contract" {
     error_message = "Both pod failure alarms must cover all classes, ignore genuinely quiet periods, and notify the existing topic."
   }
   assert {
+    condition = (
+      aws_cloudwatch_metric_alarm.age["queue"].threshold == 900 &&
+      aws_cloudwatch_metric_alarm.age["queue"].metric_name == "er.jobs.queue.oldest_age" &&
+      aws_cloudwatch_metric_alarm.age["pending"].threshold == 600 &&
+      aws_cloudwatch_metric_alarm.age["pending"].metric_name == "er.pods.pending.oldest_age" &&
+      alltrue([for alarm in aws_cloudwatch_metric_alarm.age :
+        alarm.comparison_operator == "GreaterThanThreshold" && alarm.statistic == "Maximum" &&
+        alarm.period == 60 && alarm.evaluation_periods == 1 && alarm.datapoints_to_alarm == 1 &&
+        alarm.treat_missing_data == "notBreaching" &&
+        alarm.dimensions == tomap({ OTelLib = "er-obs" }) &&
+        alarm.alarm_actions == toset([var.alerts_topic_arn]) && alarm.ok_actions == toset([var.alerts_topic_arn])
+      ])
+    )
+    error_message = "Age alerts must compare current second-valued maxima against the required bounds and notify the existing topic."
+  }
+  assert {
+    condition = (
+      aws_cloudwatch_metric_alarm.pod_snapshot_missing.metric_name == "er.pods.snapshots" &&
+      aws_cloudwatch_metric_alarm.pod_snapshot_missing.dimensions == tomap({ OTelLib = "er-obs" }) &&
+      aws_cloudwatch_metric_alarm.pod_snapshot_missing.threshold == 1 &&
+      aws_cloudwatch_metric_alarm.pod_snapshot_missing.statistic == "Sum" &&
+      aws_cloudwatch_metric_alarm.pod_snapshot_missing.period == 60 &&
+      aws_cloudwatch_metric_alarm.pod_snapshot_missing.evaluation_periods == 3 &&
+      aws_cloudwatch_metric_alarm.pod_snapshot_missing.datapoints_to_alarm == 3 &&
+      aws_cloudwatch_metric_alarm.pod_snapshot_missing.treat_missing_data == "breaching" &&
+      aws_cloudwatch_metric_alarm.pod_snapshot_missing.alarm_actions == toset([var.alerts_topic_arn])
+    )
+    error_message = "A failed pod observation must page independently of healthy database snapshots."
+  }
+  assert {
     condition = alltrue(flatten([
       for widget in jsondecode(aws_cloudwatch_dashboard.operations.dashboard_body).widgets : [
         for row in try(widget.properties.metrics, []) :
         can(row[0].expression) ? true : (
           contains(row, "OTelLib") && contains(row, "er-obs") &&
-          contains(["er.http.requests", "er.http.duration", "er.jobs.queue.depth", "er.tasks.active", "er.jobs.dispatch.duration", "er.ops.snapshots", "er.tasks.duration", "er.tasks.retries", "er.tasks.completed", "er.pods.failures"], row[1])
+          contains(["er.http.requests", "er.http.duration", "er.jobs.queue.depth", "er.tasks.active", "er.jobs.dispatch.duration", "er.ops.snapshots", "er.tasks.duration", "er.tasks.retries", "er.tasks.completed", "er.pods.failures", "er.jobs.queue.oldest_age", "er.pods.pending.oldest_age", "er.pods.snapshots"], row[1])
         )
       ]
     ]))

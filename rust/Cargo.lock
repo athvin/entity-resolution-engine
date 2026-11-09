@@ -2394,6 +2394,7 @@ dependencies = [
  "er-pg-tls",
  "er-reconcile",
  "er-schema",
+ "er-span",
  "er-std",
  "er-versions",
  "futures",

@@ -132,6 +132,30 @@ pub const FORBIDDEN_DIMENSIONS: &[&str] = &[
 /// machinery.
 pub const METRICS: &[Metric] = &[
     Metric {
+        name: "er.jobs.queue.oldest_age",
+        kind: Kind::Gauge,
+        unit: "s",
+        description: "Age since creation of the oldest currently queued job, including backoff. Healthy empty snapshots emit zero; require er.ops.snapshots before treating the gauge as current.",
+        dimensions: &[],
+        series: 1,
+    },
+    Metric {
+        name: "er.pods.pending.oldest_age",
+        kind: Kind::Gauge,
+        unit: "s",
+        description: "Maximum age since Kubernetes creation among current managed Pending pods. Healthy empty snapshots emit zero; require er.pods.snapshots before treating the gauge as current. Launch intentions without a pod do not count.",
+        dimensions: &[],
+        series: 1,
+    },
+    Metric {
+        name: "er.pods.snapshots",
+        kind: Kind::Counter,
+        unit: "1",
+        description: "Successful complete managed-pod observations with usable Pending-pod creation timestamps. Zero or absent samples mean the Kubernetes read, dispatcher or export path needs attention; independent of the database snapshot heartbeat.",
+        dimensions: &[],
+        series: 1,
+    },
+    Metric {
         name: "er.jobs.queue.total",
         kind: Kind::Gauge,
         unit: "1",

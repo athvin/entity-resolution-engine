@@ -11,6 +11,7 @@ async fn snapshots_count_live_pod_claims_and_queued_jobs() {
     };
     let mut client = pg::connect(db.dsn()).await.unwrap();
     pg::ensure_schema(&mut client).await.unwrap();
+    let old = chrono::DateTime::from_timestamp(chrono::Utc::now().timestamp() - 1000, 0).unwrap();
     let cases = [
         ("queued", "pod", Some(true)),
         ("running", "pod", Some(true)),
@@ -45,6 +46,9 @@ async fn snapshots_count_live_pod_claims_and_queued_jobs() {
             )
             .await
             .unwrap();
+        if index == 0 {
+            client.execute("UPDATE jobs SET created_at = $1, not_before = now() + interval '1 day' WHERE id = $2", &[&old, &job.id]).await.unwrap();
+        }
         client.execute(
             "INSERT INTO task_instances (id, org_id, job_id, task_id, seq, state, kind, live, resource_class) VALUES ($1, $2, $3, 'train', 0, $4, $5, $6, 'S')",
             &[&format!("task-{index}"), &org, &job.id, &state, &kind, &live],
@@ -56,6 +60,11 @@ async fn snapshots_count_live_pod_claims_and_queued_jobs() {
     assert_eq!(queued.len(), 1);
     assert_eq!(queued[0].resource_class.as_deref(), Some("S"));
     assert_eq!(queued[0].depth, Some(7));
+    assert_eq!(
+        queued[0].oldest_created_at,
+        Some(old),
+        "delayed jobs remain part of queue age"
+    );
     let active = er_entities::task_instance::read::operational_active(&client)
         .await
         .unwrap();
@@ -85,4 +94,16 @@ async fn snapshots_count_live_pod_claims_and_queued_jobs() {
         0
     );
     er_server::ops::snapshot(&client).await.unwrap();
+    client
+        .execute("ALTER TABLE jobs RENAME TO jobs_unavailable", &[])
+        .await
+        .unwrap();
+    assert!(
+        er_server::ops::snapshot(&client).await.is_err(),
+        "a failed read cannot publish a healthy empty queue"
+    );
+    client
+        .execute("ALTER TABLE jobs_unavailable RENAME TO jobs", &[])
+        .await
+        .unwrap();
 }

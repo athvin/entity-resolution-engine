@@ -200,6 +200,14 @@ impl Executor {
         })
     }
 
+    /// Observe current Pending pod age using the existing namespace-scoped client.
+    ///
+    /// # Errors
+    /// A failed/timed-out observation or a Pending pod with no creation timestamp.
+    pub async fn operational_snapshot(&self) -> Result<(), crate::ops::PodSnapshotError> {
+        crate::ops::pod_snapshot(self.api.as_ref(), chrono::Utc::now().timestamp()).await
+    }
+
     /// Adoption (§6.6): the new process owns every live row; the watch's first
     /// `Resync` frame then reconciles against the listing.
     pub async fn adopt(&mut self) {

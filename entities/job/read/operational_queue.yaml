@@ -5,3 +5,4 @@ params: []
 returns:
   - { name: resource_class, type: varchar }
   - { name: depth, type: bigint }
+  - { name: oldest_created_at, type: timestamp }

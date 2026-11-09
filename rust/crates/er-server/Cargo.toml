@@ -140,6 +140,7 @@ tracing.workspace = true
 tower-http = { version = "0.7.1", default-features = false, features = ["trace", "request-id"] }
 ring = "0.17"
 csv = "1"
+er-span = { version = "0.1.0", path = "../er-span" }
 
 [lints]
 workspace = true
