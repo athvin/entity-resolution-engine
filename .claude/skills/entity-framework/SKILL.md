@@ -127,6 +127,12 @@ Two shapes:
   columns come back as `serde_json::Value`; timestamps serialize in DuckDB's
   text form.
 
+Control-plane aggregate reads can also declare typed return columns. They emit
+an async `Vec<NameRow>` query under the same statement governance and span;
+use this for bounded operational counts rather than loading every entity row.
+Typed projections are read-only; control writes retain `returns: entity` or
+`returns: none`.
+
 Every lake read carries `AT (VERSION => $snapshot)` (E006). The writer's own
 in-transaction reads instead declare `pin: live` with a mandatory `pin_reason`
 — and must then NOT carry the pin. Field-level detail and real examples:

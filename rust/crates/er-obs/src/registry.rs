@@ -132,6 +132,94 @@ pub const FORBIDDEN_DIMENSIONS: &[&str] = &[
 /// machinery.
 pub const METRICS: &[Metric] = &[
     Metric {
+        name: "er.jobs.queue.total",
+        kind: Kind::Gauge,
+        unit: "1",
+        description: "Total queued jobs in the same snapshot as the per-class gauges. The backlog alarm uses Minimum over each period so separate class peaks cannot manufacture a sustained backlog.",
+        dimensions: &[],
+        series: 1,
+    },
+    Metric {
+        name: "er.http.requests",
+        kind: Kind::Counter,
+        unit: "1",
+        description: "Non-probe API responses by status class; 5xx counts server errors.",
+        dimensions: &["status_class"],
+        series: 6,
+    },
+    Metric {
+        name: "er.http.duration",
+        kind: Kind::Histogram,
+        unit: "ms",
+        description: "Time to an API response, excluding health probes. Histograms include every observed response before trace sampling.",
+        dimensions: &["status_class"],
+        series: 6,
+    },
+    Metric {
+        name: "er.jobs.queue.depth",
+        kind: Kind::Gauge,
+        unit: "1",
+        description: "Current queued jobs including delayed jobs. Zero is emitted for empty classes; pair with er.ops.snapshots to distinguish silence from idle.",
+        dimensions: &["resource_class"],
+        series: 4,
+    },
+    Metric {
+        name: "er.tasks.active",
+        kind: Kind::Gauge,
+        unit: "1",
+        description: "Live pod-task claims, including queued, running, restarting and canceling. These are claims, not a count of ready Kubernetes pods.",
+        dimensions: &["resource_class"],
+        series: 4,
+    },
+    Metric {
+        name: "er.ops.snapshots",
+        kind: Kind::Counter,
+        unit: "1",
+        description: "Successful complete queue/concurrency snapshots. Missing samples mean that the dispatcher, database read or export path needs attention.",
+        dimensions: &[],
+        series: 1,
+    },
+    Metric {
+        name: "er.jobs.dispatch.duration",
+        kind: Kind::Histogram,
+        unit: "ms",
+        description: "Elapsed enqueue-to-claim time including backoff, recorded after a successful claim.",
+        dimensions: &["resource_class"],
+        series: 4,
+    },
+    Metric {
+        name: "er.tasks.duration",
+        kind: Kind::Histogram,
+        unit: "ms",
+        description: "Committed pod-task execution durations by bounded stage and class, from durable start/finish timestamps. Includes failed executions; excludes tasks without a start timestamp.",
+        dimensions: &["resource_class", "stage"],
+        series: 64,
+    },
+    Metric {
+        name: "er.tasks.completed",
+        kind: Kind::Counter,
+        unit: "1",
+        description: "Observed committed pod-task outcomes: done, no_op, failed or skipped. A stale terminal report does not increment it. Operational observations can be lost on process death; use the task ledger for accounting.",
+        dimensions: &["resource_class", "outcome"],
+        series: 16,
+    },
+    Metric {
+        name: "er.tasks.retries",
+        kind: Kind::Counter,
+        unit: "1",
+        description: "Committed successor tries after execution failures. Infrastructure relaunches within a try and operator clears are not retries.",
+        dimensions: &["resource_class"],
+        series: 4,
+    },
+    Metric {
+        name: "er.pods.failures",
+        kind: Kind::Counter,
+        unit: "1",
+        description: "Confirmed OOM kills and evictions observed through guarded task transitions. Free-text terminal reasons cannot become dimensions.",
+        dimensions: &["resource_class", "reason"],
+        series: 8,
+    },
+    Metric {
         name: "er.db.query.duration",
         kind: Kind::Histogram,
         unit: "ms",
@@ -214,6 +302,7 @@ pub fn reference() -> String {
          of truth and this file is its output.\n\n",
     );
 
+    out.push_str("## Contents\n\n- [Metrics](#metrics)\n- [Dimensions a metric may never carry](#dimensions-a-metric-may-never-carry)\n\n");
     out.push_str("## Metrics\n\n");
     out.push_str("| Metric | Kind | Unit | Dimensions | Series |\n");
     out.push_str("|---|---|---|---|---|\n");

@@ -59,6 +59,29 @@ directive pins the noisy third-party targets, and that pinning is a cost control
 `kube` have all been emitting into a void, and CloudWatch bills by the gigabyte.
 Dropping one from the directive holds it at `info` on the next deploy.
 
+## Operational dashboards and alerts
+
+`er-obs::operational` owns API RED, queue/concurrency, dispatch and task duration,
+retry/no-op, and runner OOM/eviction instruments. The registry remains the source
+of metric names, dimensions and series budgets. Labels are closed at the emitter;
+unknown task names and resource classes collapse to `other`.
+
+The dispatcher reads declared aggregate queries every 30 seconds, publishing
+zeros for empty classes only after both reads succeed. `er.ops.snapshots` is the
+freshness signal; an empty queue chart without that heartbeat is not idle.
+The backlog alarm uses the simultaneous total queue gauge with `Minimum`, never
+the sum of independent per-class maxima. Task outcome counters follow committed,
+guarded writes: a duplicate terminal report emits nothing. A process death between
+commit and export can lose an observation, so these are not accounting counters.
+
+The Terraform `operational-observability` module provides the dashboard and
+SNS-backed backlog, snapshot-silence, OOM and eviction alarms. Dev is wired to
+`ER/Dev` for the shared `ci` deployment. The chart sets
+`ER_OPERATIONAL_METRICS=true` only in dev/ci and prod/app; local and developer
+databases cannot overwrite those gauges. Production wiring waits for the collector topology in #944. Per-tenant
+data quality remains in the authenticated dataset dashboard and `/metrics` read
+path, rather than generating a billed time series per tenant.
+
 ## The silent failures
 
 Every one of these produces correct-looking code, a green build and a green

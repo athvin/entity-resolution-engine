@@ -236,6 +236,14 @@ pub async fn fail_or_retry_task(
         _ => None,
     };
     tx.commit().await?;
+    if let Some(row) = &archived {
+        crate::ops::task_completed(row);
+        if successor.is_some() && row.kind == "pod" {
+            er_obs::operational::task_retried(er_obs::operational::Class::from_value(
+                row.resource_class.as_deref(),
+            ));
+        }
+    }
     Ok((archived, successor))
 }
 
@@ -401,6 +409,9 @@ pub async fn finish_and_advance(
         _ => None,
     };
     tx.commit().await?;
+    if let Some(row) = &finished {
+        crate::ops::task_completed(row);
+    }
     Ok((finished, advanced))
 }
 

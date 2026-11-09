@@ -102,6 +102,10 @@ er.dupezero.com/color: {{ . }}
   value: {{ .Values.otel.endpoint | quote }}
 - name: OTEL_SERVICE_NAMESPACE
   value: "er"
+# Only the shared deployment publishes dashboard metrics: developer databases
+# otherwise overwrite the same dimensionless queue gauges in ER/Dev.
+- name: ER_OPERATIONAL_METRICS
+  value: {{ or (and (eq .Values.environment "dev") (eq .Release.Namespace "ci")) (and (eq .Values.environment "prod") (eq .Release.Namespace "app")) | quote }}
 - name: ERSERVER_ENV
   value: {{ .Values.environment | quote }}
 - name: ERSERVER_CONFIG_ROOT

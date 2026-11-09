@@ -1,0 +1,7 @@
+kind: statement
+operation: read
+description: "The dispatcher's operational queue gauge, aggregated across tenants; no tenant identity leaves this query. Includes delayed jobs because they still occupy the waiting queue."
+params: []
+returns:
+  - { name: resource_class, type: varchar }
+  - { name: depth, type: bigint }

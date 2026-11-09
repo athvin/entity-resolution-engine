@@ -26,3 +26,7 @@ done
 # Mock-provider plans exercise tenant trust/prefix boundaries without AWS.
 terraform -chdir=infra/terraform/modules/tenant-runner init -backend=false -input=false
 terraform -chdir=infra/terraform/modules/tenant-runner test -no-color
+
+# Operational alarm semantics are exercised against a mock provider as well.
+terraform -chdir=infra/terraform/modules/operational-observability init -backend=false -input=false
+terraform -chdir=infra/terraform/modules/operational-observability test -no-color

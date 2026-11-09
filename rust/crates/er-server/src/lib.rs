@@ -44,6 +44,7 @@ pub(crate) mod fixups;
 pub mod mail;
 pub mod migrate_plan;
 pub mod openapi;
+pub mod ops;
 pub mod pg;
 pub mod profile_params;
 pub mod provision;
@@ -5041,6 +5042,7 @@ async fn attempt_finish(
                         )
                     },
                     |row| {
+                        ops::task_completed(&row);
                         // The pod holds no control-plane credential (§6.4), so
                         // a reconcile_schema task's tenant-state report lands
                         // here, from its output document.

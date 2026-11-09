@@ -75,9 +75,16 @@ pub async fn run_loop(
     let mut next_schedule_tick = tokio::time::Instant::now();
     let mut next_s3_poll = tokio::time::Instant::now();
     let mut next_retention_sweep = tokio::time::Instant::now();
+    let mut next_ops_snapshot = tokio::time::Instant::now();
     // Built lazily: see the poll tick below.
     let mut s3: Option<crate::s3_ingest::Watcher> = None;
     while !term.load(Ordering::SeqCst) {
+        if tokio::time::Instant::now() >= next_ops_snapshot {
+            next_ops_snapshot = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
+            if let Err(e) = crate::ops::snapshot(client).await {
+                tracing::warn!(error = %e, "the operational queue snapshot failed");
+            }
+        }
         // Schedules fire from here. Cheap (one query when nothing is due) and
         // rate-limited, so it rides the job loop rather than owning a task: one
         // loop means one place that stops on SIGTERM.
@@ -488,6 +495,15 @@ pub async fn dispatch_once(
     let Some(job) = pg::claim(client, pg::org_job_cap()).await? else {
         return Ok(false);
     };
+    if let Some(elapsed) = job
+        .started_at
+        .and_then(|at| (at - job.created_at).to_std().ok())
+    {
+        er_obs::operational::job_dispatched(
+            er_obs::operational::Class::from_value(job.resource_class.as_deref()),
+            elapsed,
+        );
+    }
     ex.plan_claimed(&job).await;
     Ok(true)
 }

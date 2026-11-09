@@ -454,7 +454,6 @@ fn emit_control_fn(entity: &Entity, stmt: &LoadedStatement) -> String {
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("query");
-    let struct_name = to_pascal_case(&entity.name);
     let bound: Vec<&StatementParam> = stmt.params.iter().collect();
     let template = build_sql_template(&stmt.sql, None, &bound);
     let escaped = rust_string_escape(&template);
@@ -492,26 +491,67 @@ fn emit_control_fn(entity: &Entity, stmt: &LoadedStatement) -> String {
         return out;
     }
 
-    let field_map = entity
-        .columns
-        .iter()
-        .map(|c| format!("                {}: row.get(\"{}\"),", c.name, c.name))
-        .collect::<Vec<_>>()
-        .join("\n");
+    let (row_type, field_map, fallible) = control_result(entity, stmt, &mut out);
     out.push_str(&format!(
-        "    pub async fn {fn_name}(\n{args}    ) -> ::std::result::Result<Vec<super::{struct_name}>, ::tokio_postgres::Error> {{\n"
+        "    pub async fn {fn_name}(\n{args}    ) -> ::std::result::Result<Vec<{row_type}>, ::tokio_postgres::Error> {{\n"
     ));
     out.push_str(&format!("        const SQL: &str = \"{escaped}\";\n"));
     push_statement_span(&mut out, "Control", stmt, &entity.relation);
     out.push_str(&format!(
         "        let __result = ::er_span::instrument(&__span, client.query(SQL, &[{bind_list}])).await;\n        let __entered = __span.enter();\n        let rows = ::er_span::check(&__span, __result)?;\n        ::er_span::rows(&__span, rows.len() as u64);\n"
     ));
-    out.push_str("        Ok(rows\n            .iter()\n            .map(|row| super::");
-    out.push_str(&format!(
-        "{struct_name} {{\n{field_map}\n            }})\n            .collect())\n"
-    ));
+    if fallible {
+        out.push_str(&format!(
+            "        rows.iter().map(|row| Ok({row_type} {{\n{field_map}\n        }})).collect()\n"
+        ));
+    } else {
+        out.push_str(&format!(
+            "        Ok(rows.iter().map(|row| {row_type} {{\n{field_map}\n        }}).collect())\n"
+        ));
+    }
     out.push_str("    }\n");
     out
+}
+
+/// Result shape for a control statement, sharing parameter binding and spans.
+fn control_result(
+    entity: &Entity,
+    stmt: &LoadedStatement,
+    out: &mut String,
+) -> (String, String, bool) {
+    if let Returns::Columns(cols) = &stmt.returns {
+        let stem = stmt
+            .path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("query");
+        let name = format!("{}Row", to_pascal_case(stem));
+        out.push_str("    #[derive(Debug, Clone, PartialEq, ::serde::Serialize)]\n");
+        out.push_str(&format!("    pub struct {name} {{\n"));
+        for col in cols {
+            out.push_str(&format!(
+                "        pub {}: {},\n",
+                col.name,
+                row_field_type(col)
+            ));
+        }
+        out.push_str("    }\n\n");
+        let fields = cols
+            .iter()
+            .map(|c| format!("                {}: row.try_get(\"{}\")?,", c.name, c.name))
+            .collect::<Vec<_>>()
+            .join("\n");
+        (name, fields, true)
+    } else {
+        let name = format!("super::{}", to_pascal_case(&entity.name));
+        let fields = entity
+            .columns
+            .iter()
+            .map(|c| format!("                {}: row.get(\"{}\"),", c.name, c.name))
+            .collect::<Vec<_>>()
+            .join("\n");
+        (name, fields, false)
+    }
 }
 
 /// Emit the `pub mod <op> { .. }` query modules for an entity, grouping its read
@@ -549,11 +589,10 @@ pub fn emit_query_modules(entity: &Entity, statements: &[LoadedStatement]) -> Op
             }
         } else if entity.has_store(Store::Postgres) {
             // Control: reads and writes (create/update/delete), including
-            // RETURNING. `returns: columns` is lake-read-only in this phase (the
-            // E012 diagnostic says so first; this is the backstop).
+            // RETURNING. Typed projections are supported for reads only.
             assert!(
-                !matches!(stmt.returns, Returns::Columns(_)),
-                "{}: returns: columns is lake-read-only in this phase; a control read declares `returns: entity`",
+                stmt.operation == Operation::Read || !matches!(stmt.returns, Returns::Columns(_)),
+                "{}: typed columns are supported only for reads",
                 stmt.path.display()
             );
             emit_control_fn(entity, stmt)

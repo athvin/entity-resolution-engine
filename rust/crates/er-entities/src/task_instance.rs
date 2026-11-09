@@ -1025,6 +1025,44 @@ ORDER BY job_id, seq
             .collect())
     }
 
+    /// Current live pod-task claims by resource class, including launch and cancellation waits. Archived tries and dispatcher-local control tasks do not occupy runner capacity.
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize)]
+    pub struct OperationalActiveRow {
+        pub resource_class: Option<String>,
+        pub active: Option<i64>,
+    }
+
+    pub async fn operational_active(
+        client: &impl ::tokio_postgres::GenericClient,
+    ) -> ::std::result::Result<Vec<OperationalActiveRow>, ::tokio_postgres::Error> {
+        const SQL: &str = "SELECT resource_class, count(*) AS active
+FROM public.task_instances
+WHERE live IS TRUE AND kind = 'pod'
+  AND state IN ('queued', 'running', 'restarting', 'canceling')
+GROUP BY resource_class
+";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "task_instance",
+            "read",
+            "operational_active",
+            "task_instances",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.query(SQL, &[])).await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
+        rows.iter()
+            .map(|row| {
+                Ok(OperationalActiveRow {
+                    resource_class: row.try_get("resource_class")?,
+                    active: row.try_get("active")?,
+                })
+            })
+            .collect()
+    }
+
     /// The current try plus its archived retry predecessors, walked back contiguously to the first cleared/restarted row or try 1: the lineage whose committed run_stages rows the ledger probe may report from. A cleared predecessor is a lineage boundary, so a clear still re-runs (§4.4).
     pub async fn retry_lineage(
         client: &impl ::tokio_postgres::GenericClient,

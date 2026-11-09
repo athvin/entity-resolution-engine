@@ -20,6 +20,7 @@ pub mod identity;
 pub mod init;
 pub mod logging;
 pub mod metrics;
+pub mod operational;
 pub mod otlp;
 pub mod propagate;
 pub mod registry;
