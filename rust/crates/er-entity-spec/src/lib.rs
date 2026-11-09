@@ -104,6 +104,43 @@ columns:
     }
 
     #[test]
+    fn duplicate_entity_names_fail_even_when_relations_differ() {
+        let first = parse(GOLDEN).unwrap();
+        let mut second = first.clone();
+        second.relation = "different_records".to_string();
+        let err = Catalog::from_entities(vec![first, second]).unwrap_err();
+        assert!(matches!(
+            err,
+            SpecError::DuplicateEntityName { name } if name == "golden_record"
+        ));
+    }
+
+    #[test]
+    fn loaded_entity_name_must_match_its_directory() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root =
+            std::env::temp_dir().join(format!("er-entity-name-{}-{unique}", std::process::id()));
+        let directory = root.join("not_golden_record");
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("entity.yaml");
+        std::fs::write(&path, GOLDEN).unwrap();
+
+        let err = Catalog::load_dir(&root).unwrap_err();
+        assert!(matches!(
+            err,
+            SpecError::NameDirectoryMismatch {
+                path: actual,
+                name,
+                directory: actual_directory,
+            } if actual == path && name == "golden_record" && actual_directory == directory
+        ));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn a_ninth_type_is_a_spec_error() {
         let yaml = GOLDEN.replace(
             "type: varchar\n    nullable: false",

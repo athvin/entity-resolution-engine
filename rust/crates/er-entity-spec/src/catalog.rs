@@ -51,6 +51,16 @@ pub enum SpecError {
     /// An entity failed a validation rule.
     #[error("{entity}: {message}")]
     Invalid { entity: String, message: String },
+    /// Two entity definitions use the same generated module identity.
+    #[error("duplicate entity name {name:?}")]
+    DuplicateEntityName { name: String },
+    /// A definition's name does not match its source directory.
+    #[error("{path:?}: entity name {name:?} does not match directory {directory:?}")]
+    NameDirectoryMismatch {
+        path: PathBuf,
+        name: String,
+        directory: PathBuf,
+    },
     /// Two entities claim the same store-qualified relation.
     #[error("duplicate relation {qualified:?} declared by {first} and {second}")]
     DuplicateRelation {
@@ -77,10 +87,16 @@ pub struct Catalog {
 
 impl Catalog {
     /// Build a catalog from already-parsed entities, validating each and checking
-    /// for duplicate store-qualified relations across the set.
+    /// for duplicate entity names and store-qualified relations across the set.
     pub fn from_entities(entities: Vec<Entity>) -> Result<Self, SpecError> {
+        let mut names = std::collections::BTreeSet::new();
         for entity in &entities {
             validate(entity)?;
+            if !names.insert(entity.name.as_str()) {
+                return Err(SpecError::DuplicateEntityName {
+                    name: entity.name.clone(),
+                });
+            }
         }
         // No two entities may own the same store-qualified relation.
         let mut seen: BTreeMap<String, &str> = BTreeMap::new();
@@ -141,6 +157,13 @@ impl Catalog {
                     path: file.clone(),
                     source,
                 })?;
+            if dir.file_name() != Some(std::ffi::OsStr::new(&entity.name)) {
+                return Err(SpecError::NameDirectoryMismatch {
+                    path: file,
+                    name: entity.name,
+                    directory: dir,
+                });
+            }
             sources.insert(entity.name.clone(), text);
             entities.push(entity);
         }
