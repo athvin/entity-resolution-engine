@@ -141,12 +141,12 @@ tower-http = { version = "0.7.1", default-features = false, features = ["trace",
 ring = "0.17"
 csv = "1"
 er-span = { version = "0.1.0", path = "../er-span" }
+er-api-spec = { version = "0.1.0", path = "../er-api-spec" }
 
 [lints]
 workspace = true
 
 [dev-dependencies]
-er-api-spec = { path = "../er-api-spec" }
 er-entity-gen = { path = "../er-entity-gen" }
 er-entity-spec = { path = "../er-entity-spec" }
 er-obs = { path = "../er-obs", features = ["test-support"] }

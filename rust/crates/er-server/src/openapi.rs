@@ -6,8 +6,8 @@
 //!
 //! The component schemas are the contract this pins; a Rust snapshot test holds
 //! `openapi.json` byte-stable and `openapi-typescript` pins `schema.d.ts` from it.
-//! (Per-path operation docs ride on top later; the type contract is what the
-//! split backend/frontend most needed.)
+//! Operations are derived from the router, handler signatures and response
+//! constructors through `er-api-spec`, with no parallel route annotation table.
 
 use utoipa::OpenApi;
 
@@ -56,11 +56,175 @@ pub struct ApiDoc;
 /// `frontend/src/lib/api/openapi.json` and pinned by the snapshot test.
 #[must_use]
 pub fn openapi_json() -> String {
-    let mut json = ApiDoc::openapi()
+    let mut doc = ApiDoc::openapi();
+    add_operations(&mut doc);
+    let mut json = doc
         .to_pretty_json()
         .expect("serialize the OpenAPI document");
     json.push('\n');
     json
+}
+
+fn add_operations(doc: &mut utoipa::openapi::OpenApi) {
+    use utoipa::openapi::{
+        Required,
+        path::{
+            HttpMethod, OperationBuilder, ParameterBuilder, ParameterIn, PathItem, PathsBuilder,
+        },
+        request_body::RequestBodyBuilder,
+        security::{HttpAuthScheme, HttpBuilder, SecurityRequirement, SecurityScheme},
+    };
+    let components = doc.components.as_mut().expect("registered entity schemas");
+    components.add_security_scheme("bearerAuth", SecurityScheme::Http(
+        HttpBuilder::new().scheme(HttpAuthScheme::Bearer)
+            .description(Some("Tenant API key erk_{key_id}_{secret}, scoped to its organization and role. Operator operations require the separately configured operator bearer token; tenant keys cannot grant operator access. Roles form viewer < steward < admin < operator."))
+            .build(),
+    ));
+    let schemas = components.schemas.keys().cloned().collect();
+    let operations = er_api_spec::operations(
+        include_str!("lib.rs"),
+        &[("mail", include_str!("mail.rs"))],
+        &schemas,
+    )
+    .unwrap_or_else(|e| panic!("derive OpenAPI operations: {e}"));
+    let mut paths = PathsBuilder::new();
+    for derived in operations {
+        let mut operation = OperationBuilder::new()
+            .operation_id(Some(&derived.name))
+            .summary(Some(&derived.summary))
+            .securities(Some(if derived.role == "public" {
+                vec![]
+            } else {
+                // OpenAPI 3.1 permits role names for non-OAuth security schemes.
+                vec![SecurityRequirement::new("bearerAuth", [&derived.role])]
+            }))
+            .responses(operation_responses(&derived.responses));
+        for param in derived.params {
+            operation = operation.parameter(
+                ParameterBuilder::new()
+                    .name(param.name)
+                    .parameter_in(ParameterIn::Path)
+                    .required(Required::True)
+                    .schema(Some(json_schema(param.schema)))
+                    .build(),
+            );
+        }
+        if let Some(request) = derived.request {
+            operation = operation.request_body(Some(
+                RequestBodyBuilder::new()
+                    .required(Some(if request.required {
+                        Required::True
+                    } else {
+                        Required::False
+                    }))
+                    .content(request.media_type, json_content(request.schema))
+                    .build(),
+            ));
+        }
+        let method = match derived.method.as_str() {
+            "GET" => HttpMethod::Get,
+            "POST" => HttpMethod::Post,
+            "PUT" => HttpMethod::Put,
+            "PATCH" => HttpMethod::Patch,
+            "DELETE" => HttpMethod::Delete,
+            other => panic!("unsupported derived method {other}"),
+        };
+        paths = paths.path(derived.path, PathItem::new(method, operation.build()));
+    }
+    doc.paths = paths.build();
+}
+
+fn json_schema(mut value: serde_json::Value) -> utoipa::openapi::RefOr<utoipa::openapi::Schema> {
+    prepare_utoipa_schema(&mut value);
+    serde_json::from_value(value.clone())
+        .unwrap_or_else(|e| panic!("derived JSON Schema {value} is unsupported by utoipa: {e}"))
+}
+
+/// utoipa deserializes its typeless SchemaType::AnyValue from null, although
+/// serialization correctly omits `type`. Fill that representation only at schema
+/// nodes; a properties map is not itself a schema. Published JSON never has it.
+fn prepare_utoipa_schema(value: &mut serde_json::Value) {
+    let Some(schema) = value.as_object_mut() else {
+        return;
+    };
+    if schema.contains_key("$ref") {
+        return;
+    }
+    schema.entry("type").or_insert(serde_json::Value::Null);
+    if let Some(properties) = schema
+        .get_mut("properties")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        for property in properties.values_mut() {
+            prepare_utoipa_schema(property);
+        }
+    }
+    for key in ["items", "additionalProperties"] {
+        if let Some(child) = schema.get_mut(key) {
+            prepare_utoipa_schema(child);
+        }
+    }
+    for key in ["anyOf", "oneOf", "allOf"] {
+        if let Some(children) = schema
+            .get_mut(key)
+            .and_then(serde_json::Value::as_array_mut)
+        {
+            for child in children {
+                prepare_utoipa_schema(child);
+            }
+        }
+    }
+}
+
+fn json_content(value: serde_json::Value) -> utoipa::openapi::Content {
+    utoipa::openapi::Content::new(Some(json_schema(value)))
+}
+
+fn operation_responses(
+    envelopes: &[er_api_spec::Envelope],
+) -> utoipa::openapi::response::Responses {
+    use er_api_spec::Envelope;
+    use serde_json::json;
+    use utoipa::openapi::response::{ResponseBuilder, ResponsesBuilder};
+    let mut response = ResponseBuilder::new().description(
+        "Successful response. Payload types are described only at envelope granularity.",
+    );
+    let mut schemas = Vec::new();
+    for envelope in envelopes {
+        let schema = match envelope {
+            // A bare or typed JSON value can be an array, object or scalar. Do
+            // not guess a payload type from the variable's name.
+            Envelope::Bare | Envelope::Scalar => json!({}),
+            Envelope::Object(keys) => json!({"type":"object", "properties": keys.iter()
+                .map(|key|(key.clone(), json!({}))).collect::<serde_json::Map<_,_>>()}),
+            Envelope::Page => json!({"type":"object", "properties":{
+                "items":{"type":"array","items":{}},
+                "next_cursor":{"type":["string","null"]}}, "required":["items","next_cursor"]}),
+            Envelope::Arrow => {
+                response = response.content(
+                    "application/vnd.apache.arrow.stream",
+                    json_content(json!({"type":"string","format":"binary"})),
+                );
+                continue;
+            }
+        };
+        if !schemas.contains(&schema) {
+            schemas.push(schema);
+        }
+    }
+    if !schemas.is_empty() {
+        let schema = if schemas.len() == 1 {
+            schemas.remove(0)
+        } else {
+            json!({"anyOf":schemas})
+        };
+        response = response.content("application/json", json_content(schema));
+    }
+    ResponsesBuilder::new().response("2XX", response.build())
+        .response("default", ResponseBuilder::new()
+            .description("Application error. Request-extractor or infrastructure rejections may use a different body.")
+            .content("application/json", json_content(json!({"type":"object", "properties":{"detail":{"type":"string"}}, "required":["detail"]})))
+            .build()).build()
 }
 
 /// The component-schema map of an OpenAPI document (`components.schemas`), empty
@@ -146,6 +310,146 @@ mod tests {
     use super::*;
 
     const COMMITTED: &str = include_str!("../../../../frontend/src/lib/api/openapi.json");
+
+    #[test]
+    fn operations_cover_the_router_and_generate_typescript_paths() {
+        let doc: serde_json::Value = serde_json::from_str(&openapi_json()).unwrap();
+        let paths = doc["paths"].as_object().unwrap();
+        assert!(paths.len() > 80, "operation derivation lost the router");
+        for route in er_api_spec::routes(include_str!("lib.rs")) {
+            if route.path.starts_with("/v1/internal/") {
+                continue;
+            }
+            for method in er_api_spec::verbs_in(route.handlers) {
+                let operation = &paths[route.path][method.to_lowercase()];
+                assert!(operation.is_object(), "missing {method} {}", route.path);
+                assert!(operation["summary"].as_str().is_some_and(|s| !s.is_empty()));
+                for param in er_api_spec::path_params(route.path) {
+                    assert!(operation["parameters"].as_array().unwrap().iter().any(|p| {
+                        p["name"] == param && p["in"] == "path" && p["required"] == true
+                    }));
+                }
+            }
+        }
+        let types = include_str!("../../../../frontend/src/lib/api/schema.d.ts");
+        assert!(!types.contains("export type paths = Record<string, never>"));
+        assert!(types.contains("\"/v1/orgs/{org}/datasets/{ds}/jobs\""));
+    }
+
+    #[test]
+    fn bearer_security_describes_roles_and_public_health_stays_public() {
+        let doc: serde_json::Value = serde_json::from_str(&openapi_json()).unwrap();
+        let scheme = &doc["components"]["securitySchemes"]["bearerAuth"];
+        assert_eq!(scheme["type"], "http");
+        assert_eq!(scheme["scheme"], "bearer");
+        assert!(scheme["description"].as_str().unwrap().contains("erk_"));
+        for tool in er_api_spec::derive_tools(include_str!("lib.rs")) {
+            let path = crate::rewrite_action_path(&tool.path).unwrap_or_else(|| tool.path.clone());
+            let operation = &doc["paths"][&path][tool.method.to_lowercase()];
+            if tool.role == "public" {
+                assert_eq!(operation["security"], serde_json::json!([]));
+            } else {
+                assert_eq!(
+                    operation["security"],
+                    serde_json::json!([{"bearerAuth": [tool.role]}])
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn get_responses_agree_with_every_committed_envelope_class() {
+        let doc: serde_json::Value = serde_json::from_str(&openapi_json()).unwrap();
+        let ledger: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../frontend/src/lib/api/envelopes.json"
+        ))
+        .unwrap();
+        let mut classes = std::collections::BTreeSet::new();
+        for (route, envelope) in ledger.as_object().unwrap() {
+            let path = route.strip_prefix("GET ").unwrap();
+            if path.starts_with("/v1/internal/") {
+                continue;
+            }
+            let content = &doc["paths"][path]["get"]["responses"]["2XX"]["content"];
+            let schema = &content["application/json"]["schema"];
+            let class = envelope["envelope"].as_str().unwrap();
+            classes.insert(class);
+            match class {
+                "bare" | "scalar" => assert_eq!(schema, &serde_json::json!({}), "{route}"),
+                "wrapped" => assert!(
+                    schema["properties"]
+                        .get(envelope["key"].as_str().unwrap())
+                        .is_some(),
+                    "{route}"
+                ),
+                "record" => {
+                    for key in envelope["keys"].as_array().unwrap() {
+                        assert!(
+                            schema["properties"].get(key.as_str().unwrap()).is_some(),
+                            "{route}"
+                        );
+                    }
+                }
+                "page" => {
+                    assert_eq!(schema["properties"]["items"]["type"], "array");
+                    assert_eq!(
+                        schema["properties"]["next_cursor"]["type"],
+                        serde_json::json!(["string", "null"])
+                    );
+                }
+                "arrow" => {
+                    assert!(content.get("application/json").is_none());
+                    assert_eq!(
+                        content["application/vnd.apache.arrow.stream"]["schema"]["format"],
+                        "binary"
+                    );
+                }
+                other => panic!("unsupported ledger class {other}"),
+            }
+        }
+        assert_eq!(
+            classes,
+            std::collections::BTreeSet::from([
+                "bare", "wrapped", "record", "page", "scalar", "arrow"
+            ])
+        );
+    }
+
+    #[test]
+    fn upload_optional_body_and_delegated_write_are_described() {
+        let doc: serde_json::Value = serde_json::from_str(&openapi_json()).unwrap();
+        let paths = &doc["paths"];
+        let upload = &paths["/v1/orgs/{org}/datasets/{ds}/imports"]["post"];
+        assert!(
+            upload["requestBody"]["content"]
+                .get("application/json")
+                .is_none()
+        );
+        assert_eq!(
+            upload["requestBody"]["content"]["multipart/form-data"]["schema"]["required"],
+            serde_json::json!(["file"])
+        );
+        assert!(
+            upload["responses"]["2XX"]["content"]["application/json"]["schema"]["properties"]
+                .get("delivery_id")
+                .is_some()
+        );
+        let clear =
+            &paths["/v1/orgs/{org}/datasets/{ds}/jobs/{job_id}/tasks/{task_id}/clear"]["post"];
+        assert_eq!(clear["requestBody"]["required"], false);
+        assert_eq!(
+            clear["responses"]["default"]["content"]["application/json"]["schema"]["properties"]["detail"]
+                ["type"],
+            "string"
+        );
+        let suspend = &paths["/v1/orgs/{org}/suspend"]["post"];
+        assert!(suspend["requestBody"].is_null());
+        assert!(
+            suspend["responses"]["2XX"]["content"]["application/json"]["schema"]["properties"]
+                .get("state")
+                .is_some()
+        );
+    }
 
     #[test]
     fn secret_columns_are_absent_from_public_contracts() {

@@ -7,7 +7,9 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+proc-macro2 = { version = "1", features = ["span-locations"] }
 serde_json.workspace = true
+syn = { version = "2", features = ["full", "visit"] }
 
 [lints]
 workspace = true

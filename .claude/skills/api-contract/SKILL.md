@@ -14,8 +14,8 @@ commercial adapter; SFTP and other transports must reuse the same contracts.
 For product prioritization use `project-board`.
 
 This is the intended boundary. The generated document currently pins component
-schemas between the Rust backend and TypeScript frontend; the missing operations
-and consumer coverage below remain real gaps. A schema snapshot passing does not
+schemas and source-derived operations between the Rust backend and TypeScript
+frontend; typed responses, query parameters and consumer coverage remain gaps. A schema snapshot passing does not
 prove that an external client can configure a dataset or transfer data. Changes
 to the public surface owe documented auth, errors, retry semantics and an
 executable customer workflow, as well as generated types.
@@ -101,13 +101,24 @@ declare `wire: [json]`.
 
 ## What is generated and not yet consumed
 
-Two gaps are easy to mistake for working machinery, because the artifacts around
-them really are generated and gated:
+The operation contract is generated and gated, with deliberate limits:
 
-- **No path is described.** `ApiDoc` declares no `paths(...)` group, so the
-  document carries `"paths": {}` and `schema.d.ts` opens with
-  `export type paths = Record<string, never>`. The type contract was what a
-  split backend/frontend most needed; operations ride on top later.
+- **Paths and operations come from source.** `openapi.rs` builds utoipa paths
+  from `er_api_spec::operations`: the shared router walk, adjacent handler docs,
+  signatures and response constructors. Every non-internal registration must
+  resolve; unsupported request types or unclassifiable responses fail generation.
+  Path parameters, summaries, role requirements and body media/schema are emitted.
+  HTTP bearer auth documents tenant `erk_` keys and the separate operator token;
+  public health operations have no security requirement. OpenAPI 3.1 permits
+  role names in a non-OAuth security requirement.
+- **Responses remain envelope-level.** Success uses `2XX`; bare and typed JSON
+  values stay unconstrained rather than guessing arrays from variable names.
+  Object envelopes name observed properties, pages describe items/cursor, and
+  Arrow uses its actual media type. Local response helpers contribute write
+  envelopes. Typed payloads and query parameters remain later work; neither a
+  generated path nor its TypeScript type proves those details are complete.
+  The detail-shaped application error is documented separately from framework
+  request-extractor and infrastructure rejections.
 - **No frontend module imports `schema.d.ts`.** `openapi-fetch` sits in
   `package.json` with no call sites. The backend types that do reach the
   frontend come from `er-entity gen`'s `src/lib/entities/bindings/`, imported by
@@ -119,11 +130,12 @@ They prove nothing about whether frontend code agrees with either. Do not cite a
 green `schema.d.ts` check as evidence that a call site is type-safe against the
 backend.
 
-## A route move is invisible to this gate
+## Route moves change the generated contract
 
-When the tenant surface moved under `/v1/orgs/{org}/datasets/{ds}/…`,
-`openapi.json` did not change by a single byte — it carries no paths. What pins
-the route shape is elsewhere, and the four are not equally strong:
+The document uses actual router paths (including the slash forms behind action
+aliases), so a route move changes both OpenAPI and generated TypeScript. The
+operation floor and per-registration coverage gate reject an empty or partial
+walk. The older adapters still pin complementary views:
 
 | What | Pinned by |
 |---|---|
@@ -132,8 +144,7 @@ the route shape is elsewhere, and the four are not equally strong:
 | `frontend/src/lib/api/envelopes.json` | `er-server/tests/response_envelopes.rs`: derived from the handlers and byte-compared |
 | the mock in `frontend/tests/mock-erserver/server.mjs` | `er-server/tests/mock_contract.rs`, **one direction only**: the mock may serve no route the router lacks. A router route the mock does not serve passes |
 
-Do not read a clean `openapi.json` diff as evidence that a path change is
-contained.
+The mock gate remains one-directional; generated paths do not prove mock coverage.
 
 The source derivation lives in `er-api-spec`: one balanced router walk plus
 handler-doc/request-body and success-envelope classifiers. Its functions take
@@ -143,8 +154,12 @@ failures and byte-for-byte artifact checks. Their views intentionally differ:
 the MCP gate checks described methods, the envelope gate classifies GET handlers,
 and the mock gate erases parameter names and uses the server's action-path
 normalizer. Extend the shared derivation when adding a supported source shape;
-do not restore a private router scanner in a consumer. This extraction does not
-add OpenAPI operations or broaden the classifier's supported types.
+do not restore a private router scanner in a consumer. OpenAPI also parses Rust
+syntax for function boundaries, qualified request structs and local response
+helpers, with module sources supplied explicitly by the caller. It preserves
+serde field defaults, optionality and unknown-field policy. Existing MCP and GET
+ledger bytes retain their established parser views; their limitations do not
+justify guessing a new OpenAPI request schema.
 
 ## Breaking changes
 
