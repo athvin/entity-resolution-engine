@@ -84,11 +84,11 @@ test.describe("interactive marketing", () => {
     await page.emulateMedia({ reducedMotion: "no-preference" });
     await page.goto("/");
     const demo = page.getByTestId("pipeline-demo");
-    await demo.locator(".dz-source-0").scrollIntoViewIfNeeded();
+    await demo.locator(".dz-resolve-node").scrollIntoViewIfNeeded();
     const findRecord = () =>
       page.evaluate(() => {
         for (const node of document.querySelectorAll<SVGGElement>(
-          '[data-testid="pipeline-demo"] [data-packet][role="button"]',
+          '[data-testid="pipeline-demo"] [data-packet][data-kind="matched"][role="button"]',
         )) {
           const r = node.getBoundingClientRect();
           if (
