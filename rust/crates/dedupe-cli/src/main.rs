@@ -1,5 +1,6 @@
 mod args;
 
+use std::collections::BTreeSet;
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
@@ -303,11 +304,11 @@ fn resolve_inputs(session: &Session, source: &InputSource) -> Result<Vec<(TableH
             String::new(),
         )]);
     }
-    let mut out = Vec::new();
-    for (i, spec) in source.datasets.iter().enumerate() {
-        let (name, reference) = spec
-            .split_once('=')
-            .with_context(|| format!("--dataset must be NAME=REF, got `{spec}`"))?;
+    // Check all names before registering any input. Reusing a name makes
+    // overlapping source IDs collapse into one composite record identity.
+    let datasets = parse_dataset_specs(&source.datasets)?;
+    let mut out = Vec::with_capacity(datasets.len());
+    for (i, (name, reference)) in datasets.into_iter().enumerate() {
         let handle = register_ref(
             session,
             reference,
@@ -317,6 +318,25 @@ fn resolve_inputs(session: &Session, source: &InputSource) -> Result<Vec<(TableH
         out.push((handle, name.to_string()));
     }
     Ok(out)
+}
+
+fn parse_dataset_specs(specs: &[String]) -> Result<Vec<(&str, &str)>> {
+    let mut names = BTreeSet::new();
+    specs
+        .iter()
+        .map(|spec| {
+            let (name, reference) = spec
+                .split_once('=')
+                .with_context(|| format!("--dataset must be NAME=REF, got `{spec}`"))?;
+            if name.trim().is_empty() {
+                bail!("--dataset name must not be empty in `{spec}`");
+            }
+            if !names.insert(name) {
+                bail!("duplicate --dataset name `{name}`; each input needs a distinct name");
+            }
+            Ok((name, reference))
+        })
+        .collect()
 }
 
 fn build_linker<'a>(
@@ -687,4 +707,41 @@ fn write_parquet(session: &Session, table: &TableHandle, path: &str) -> Result<(
         table.physical
     ))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_dataset_specs;
+
+    #[test]
+    fn dataset_names_are_nonempty_and_unique_before_registration() {
+        for specs in [
+            vec!["=first.csv".to_string()],
+            vec!["  =first.csv".to_string()],
+        ] {
+            let error = parse_dataset_specs(&specs).unwrap_err();
+            assert!(error.to_string().contains("name must not be empty"));
+        }
+        // Both inputs can carry the same source record ID. Reusing the name
+        // would make their composite IDs identical even before linking.
+        let duplicate = vec![
+            "people=first.csv".to_string(),
+            "people=second.csv".to_string(),
+        ];
+        let error = parse_dataset_specs(&duplicate).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("duplicate --dataset name `people`")
+        );
+
+        let distinct = vec![
+            "people=first.csv".to_string(),
+            "orders=second.csv".to_string(),
+        ];
+        assert_eq!(
+            parse_dataset_specs(&distinct).unwrap(),
+            vec![("people", "first.csv"), ("orders", "second.csv")]
+        );
+    }
 }

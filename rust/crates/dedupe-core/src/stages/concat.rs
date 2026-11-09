@@ -39,6 +39,7 @@ pub fn concat_sql_union(inputs: &[(&TableHandle, &str)], source_dataset_column: 
             if has_source_col {
                 format!("select\n    {cols}\nfrom {}", handle.physical)
             } else {
+                let display_name = display_name.replace('\'', "''");
                 format!(
                     "select\n    '{display_name}' as {source_dataset_column},\n    {cols}\nfrom {}",
                     handle.physical
@@ -47,4 +48,42 @@ pub fn concat_sql_union(inputs: &[(&TableHandle, &str)], source_dataset_column: 
         })
         .collect();
     arms.join("\n\nUNION ALL\n\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::session::{Session, SessionOptions, TableHandle};
+
+    use super::concat_sql_union;
+
+    #[test]
+    fn dataset_names_are_sql_values_and_keep_composite_ids_distinct() {
+        let session = Session::open_in_memory(SessionOptions::deterministic()).unwrap();
+        session
+            .execute_batch("create table first (unique_id varchar); insert into first values ('1'); create table second (unique_id varchar); insert into second values ('1')")
+            .unwrap();
+        let first = TableHandle {
+            templated: "first".to_string(),
+            physical: "first".to_string(),
+            columns: vec!["unique_id".to_string()],
+        };
+        let second = TableHandle {
+            templated: "second".to_string(),
+            physical: "second".to_string(),
+            columns: vec!["unique_id".to_string()],
+        };
+        let sql = concat_sql_union(&[(&first, "O'Brien"), (&second, "plain")], "source_dataset");
+        let rows = session
+            .query_strings(&format!(
+                "select source_dataset, source_dataset || '-__-' || unique_id from ({sql}) order by source_dataset"
+            ))
+            .unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                vec!["O'Brien".to_string(), "O'Brien-__-1".to_string()],
+                vec!["plain".to_string(), "plain-__-1".to_string()],
+            ]
+        );
+    }
 }
