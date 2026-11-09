@@ -122,7 +122,7 @@ does not.
 - Edition 2024 makes `std::env::set_var` **`unsafe`**, and `unsafe_code` is
   denied — so a test cannot write the process environment. Code that reads env
   needs an injectable seam (a lookup closure, a thread-local overlay) to be
-  testable. `er-env` has the overlay; newer code takes a lookup function.
+  testable. The current readers use lookup functions or inject values directly.
 
 ## TLS and AWS feature pins
 

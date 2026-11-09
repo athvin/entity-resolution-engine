@@ -87,8 +87,8 @@ Must:
 - Recognise that edition 2024 makes `std::env::set_var` **`unsafe`**, and
   `unsafe_code = "deny"` is workspace-wide — so the test cannot write process
   env.
-- Use an injectable seam instead (a lookup closure, or the thread-local overlay
-  in `er-env`).
+- Use an injectable seam instead (a lookup closure or an explicit value passed
+  into the code under test).
 
 Must not:
 

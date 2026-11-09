@@ -144,7 +144,7 @@ Classification: **ENGINE** (exists, needs an API veneer) · **EXT** (engine exte
 
 **Why a k8s Job per run, not long-lived workers:**
 
-- The engine's tenant seam is process-scoped: `er-env` is the single reader of the `ER_*` env set. One pod per (tenant, run) makes env injection the isolation mechanism instead of a hazard.
+- The engine's tenant seam is process-scoped: task entry points and lake-session setup read their required `ER_*` values, with lookup closures where tests need injected values. One pod per (tenant, run) makes env injection the isolation mechanism instead of a hazard.
 - **This changed shape.** The design expected a session-scoped advisory lock holding a dedicated Postgres connection for the run's lifetime. What shipped is a declared **partial unique index** (`jobs_one_active_per_dataset`, `entities/job/entity.yaml`), so Postgres enforces one active job per dataset and there is no connection to hold. The crash-safety argument still lands, by a different route: a dead pod's job is reaped to a terminal state, which lifts the constraint. The property the engine already documents. Long-lived workers multiplexing tenants would have to reimplement that care.
 - Bin-packing: pods sized per tenant tier are the only sane answer to a workload that scales on vCPU and local NVMe spill (hundreds of GiB) while memory stays a near-constant floor; idle tier-sized workers are dead money, and a pod failure's blast radius is one tenant's one resumable run.
 - The `er-pipeline` image is already described in `docker/Dockerfile` as "later the k8s job image" — this is the intended landing.
@@ -304,12 +304,12 @@ The engine merges entities *in the lake*; Cloudingo merges records *in Salesforc
 > it lives. Item 1 became `er-dag`'s compiled DAG rather than a service facade — the
 > typed-errors-instead-of-exit-codes intent survived as `er-errors`' `ExitCode`
 > mapping. Item 2's settings object became four explicit `ER_LAKE_*` variables read
-> by `er-env`. Item 4's read API is the `.../golden-records`, `.../records`,
+> at the lake-session boundary. Item 4's read API is the `.../golden-records`, `.../records`,
 > `.../duplicates` and `.../match-scores` routes, with keyset pagination and snapshot
 > pinning as designed. Item 7's score-only mode shipped as `.../match-preview`.
 
 1. **`er/service.py` facade** — planned as an extraction of `src/er/cli.py`'s orchestration sequence into `execute_chain(settings, config, chain, run_id, resume_id=None, hooks=None) → RunOutcome` with typed error classes instead of exit codes. **Landed differently:** the orchestration is `er-dag`'s compiled DAG, and the typed-errors intent survived as `er-errors`' `ExitCode` mapping. The name `er/service.py` never existed in the Rust tree.
-2. **`LakeSettings` parameterization** of `src/er/lake/env.py` — planned as an explicit settings object accepted by `connect()` / `invocation_session()` / `tenant_lock()`, env as fallback. **Landed differently:** four explicit `ER_LAKE_*` variables read through `er-env`, whose overlay guard is what lets one process serve two tenants safely.
+2. **`LakeSettings` parameterization** of `src/er/lake/env.py` — planned as an explicit settings object accepted by `connect()` / `invocation_session()` / `tenant_lock()`, env as fallback. **Landed differently:** four explicit `ER_LAKE_*` variables are read at the lake-session boundary, with injected lookup functions used by tests.
 3. **Progress + cancellation hooks:** `RunContext` accepts a stage-transition callback and a `should_cancel()` checked between stages; the runner wires heartbeats and SIGTERM to them.
 4. **`er/readapi/` module:** registry-typed queries, keyset pagination, snapshot pinning, `AT (VERSION …)`.
 5. **Steward write facade:** thin lock+connect wrappers over `open_reviews` / `resolve_review` / `add_assertion` / `retract_assertion` taking `LakeSettings` (primitives exist).
@@ -380,7 +380,7 @@ quietly repointed.
 | Seam | Named as | Owner now | Used by |
 |---|---|---|---|
 | CLI orchestration sequence | `src/er/cli.py`, to be extracted as `er/service.py` | **Not a service facade.** It became `er-dag`'s compiled DAG — a task is a pipeline stage, a DAG is a job kind, and wiring, arity, cycles and trigger-rule misuse all fail at `cargo build`. `er-cli` carries the subcommands. | runner (§12) |
-| `ER_*` env reader | `src/er/lake/env.py`, to be parameterized as `LakeSettings` | `er-env`; the lake layout is four explicit variables (`ER_LAKE_CATALOG`, `ER_LAKE_CATALOG_SCHEMA`, `ER_LAKE_DATA_PATH`, `ER_LAKE_METADATA_SCHEMA`) rather than a settings object | API read path, runner (§12) |
+| `ER_*` env reader | `src/er/lake/env.py`, to be parameterized as `LakeSettings` | The lake-session entry points read four explicit variables (`ER_LAKE_CATALOG`, `ER_LAKE_CATALOG_SCHEMA`, `ER_LAKE_DATA_PATH`, `ER_LAKE_METADATA_SCHEMA`) rather than a settings object | API read path, runner (§12) |
 | Session/connection + snapshot machinery | `src/er/lake/ducklake.py` | `dedupe-core/src/session/ducklake.rs` | read path (§8) |
 | Per-tenant advisory writer lock | `src/er/lake/catalog.py` | **Not a lock held in code, and no longer per-tenant.** It is a declared **partial unique index** — `jobs_one_active_per_dataset` on `dataset_id WHERE state IN ('dispatching','running','canceling')` in `entities/job/entity.yaml`, with `jobs_one_active_org_level` for org-level jobs. Postgres enforces it; the lake is the thing being written and each dataset is its own lake. | dispatcher, steward writes (§5, §16) |
 | Relation registry (authoritative schema map) | `src/er/lake/model.py` | `rust/crates/er-schema/src/model.rs` together with the `entities/` catalog — architecture.md names both as the authorities | read-API validation (§8) |
