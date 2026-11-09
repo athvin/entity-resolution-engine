@@ -88,6 +88,9 @@ export const UI_ACTIONS = [
 
   // --- configuration ----------------------------------------------------
   "config.publish",
+  // Saving preprocessing inputs starts a rebuild; retain the initiating action
+  // on the browser-to-request trace without exporting any dictionary values.
+  "config.dictionary.save",
 
   // --- tenancy ----------------------------------------------------------
   "dataset.create",

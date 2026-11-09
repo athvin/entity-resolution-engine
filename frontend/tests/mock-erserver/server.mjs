@@ -3824,6 +3824,57 @@ const server = http.createServer((req, res) => {
       const config = state.configs[match[1]];
       return config ? send(res, 200, config) : send(res, 404, { detail: "no active config" });
     }
+    // The real API stores named word sets and returns canonical rows plus an
+    // apply job. Storage is currently org-shared, matching the backend CSV path.
+    if ((match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/ignore-words$/.exec(path))) {
+      const org = match[1];
+      const defaults = [
+        "co",
+        "company",
+        "corp",
+        "corporation",
+        "gmbh",
+        "inc",
+        "incorporated",
+        "limited",
+        "llc",
+        "llp",
+        "lp",
+        "ltd",
+        "plc",
+      ].map((word) => ({ word, dictionary: "legal_suffixes" }));
+      if (req.method === "GET")
+        return send(res, 200, { rows: (state.ignoreWords ??= {})[org] ?? defaults });
+      if (req.method === "PUT") {
+        const body = await readBody(req);
+        const input = body.rows ?? [];
+        if (
+          input.some(
+            (row) =>
+              !row.word?.trim() ||
+              !row.dictionary?.trim() ||
+              /[\s,]/.test(row.word.trim()) ||
+              row.dictionary.includes(","),
+          )
+        ) {
+          return send(res, 422, { detail: "one word and a dictionary name required" });
+        }
+        const unique = new Map(
+          input.map((row) => {
+            const normalized = {
+              word: row.word.trim().toLowerCase(),
+              dictionary: row.dictionary.trim().toLowerCase(),
+            };
+            return [JSON.stringify(normalized), normalized];
+          }),
+        );
+        const rows = [...unique.values()].sort(
+          (a, b) => a.word.localeCompare(b.word) || a.dictionary.localeCompare(b.dictionary),
+        );
+        (state.ignoreWords ??= {})[org] = rows;
+        return send(res, 200, { rows, apply_job: "job_mockdictionary" });
+      }
+    }
     if (
       (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/lexicon$/.exec(path)) &&
       req.method === "GET"

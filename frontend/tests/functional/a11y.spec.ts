@@ -117,6 +117,7 @@ const SCREENS: {
     path: `/${ORG}/${DS}/settings/config`,
     ready: async (page) => {
       await expect(page.getByTestId("threshold-editor")).toBeVisible();
+      await expect(page.getByTestId("ignore-words-ready")).toBeVisible();
     },
   },
   {
