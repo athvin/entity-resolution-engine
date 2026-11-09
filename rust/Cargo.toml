@@ -201,6 +201,15 @@ utoipa = { version = "6", features = ["chrono"] }
 [profile.dev.package."*"]
 debug = false
 
+# cc-rs inherits OPT_LEVEL: without this, every test executes an unoptimized
+# database engine. Optimize only bundled DuckDB; our Rust code keeps the dev/
+# test assertions, overflow checks and symbols. `test` inherits this override.
+# Level 3 matches the native objects already cached by the nightly benchmark
+# job. Rust's debug/test checks remain enabled; this is not a release test run.
+# Local/hosted measurements: ci-and-supply-chain/references/backend-ci-profile.md.
+[profile.dev.package.libduckdb-sys]
+opt-level = 3
+
 [profile.test]
 debug = "line-tables-only"
 

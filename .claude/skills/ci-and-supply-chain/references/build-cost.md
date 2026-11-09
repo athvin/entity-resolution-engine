@@ -32,6 +32,12 @@ get older as you scroll, and the first ones are not the live ones.
 
 ## Where it stands now
 
+The follow-up investigation of the full backend gate is recorded in
+[backend-ci-profile.md](backend-ci-profile.md). It separates native-engine
+execution cost from redundant compilation and retains the correctness suites.
+The constraint for this work is **standard, free GitHub-hosted public-repository
+runners**; paid or self-hosted runners are out of scope.
+
 The November 9 investigation separated setup, compilation, execution and retries.
 Run `python3 scripts/ci/ci-timings.py --workflow rust.yml --limit 20 --logs`
 for attempt-specific JSON. The end-to-end number includes human rerun delay;
@@ -121,8 +127,9 @@ must not use BuildKit secret mounts: those are limited to 500 KiB.
 
 Targets are sub-five-minute ordinary warm PR feedback and warm merge-to-prod.
 They are targets, not results. Gather 20 relevant runs after rollout and report
-median/p95, retry frequency and cold dependency rebuilds separately. Paid
-runner selection is a follow-up only if current-runner improvements miss them.
+median/p95, retry frequency and cold dependency rebuilds separately. Improve
+execution and scheduling within the free-runner constraint before changing
+capacity assumptions.
 
 ## Incident: rust-cache restored a partial target and broke main (2026-11-03)
 
