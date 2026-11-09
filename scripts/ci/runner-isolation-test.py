@@ -22,17 +22,26 @@ label = 'bucket-root-list' if key is None and prefix is None else 'cross-prefix-
 with open(os.environ['CALL_LOG'], 'a') as log:
     log.write(action + ':' + str(own) + '\n')
 mode = os.environ['STUB_MODE']
+store = pathlib.Path(os.environ['STUB_STORE'])
+object_file = store / key if key else None
 if mode == 'no-credentials':
     print('Unable to locate credentials', file=sys.stderr)
     sys.exit(1)
 if not own:
     if mode == label:
+        # S3 can conceal a missing key behind AccessDenied without ListBucket.
+        if action == 'get-object' and not object_file.exists():
+            print('(AccessDenied)', file=sys.stderr)
+            sys.exit(1)
         sys.exit(0)
     error = 'EndpointConnectionError' if mode == 'network-error' else '(AccessDenied)'
     print(error, file=sys.stderr)
     sys.exit(1)
+if action == 'put-object':
+    object_file.parent.mkdir(parents=True, exist_ok=True)
+    object_file.write_bytes(pathlib.Path(args[args.index('--body') + 1]).read_bytes())
 if action == 'get-object':
-    pathlib.Path(args[-1]).write_text('tenant-isolation-positive-control')
+    pathlib.Path(args[-1]).write_bytes(object_file.read_bytes())
 '''
 
 with tempfile.TemporaryDirectory() as directory:
@@ -40,21 +49,31 @@ with tempfile.TemporaryDirectory() as directory:
     cli = root / 'aws-stub'
     cli.write_text('#!' + sys.executable + '\n' + STUB)
     cli.chmod(0o755)
-    def run(mode, own='_isolation/probe-a/', other='_isolation/probe-b/'):
+    def run(mode, own='_isolation/probe-a/', other='_isolation/probe-b/', phase='verify'):
         calls = root / 'calls'
         calls.write_text('')
         env = dict(os.environ, AWS_CLI=str(cli), STUB_MODE=mode, CALL_LOG=str(calls),
-                   PROBE_BUCKET='fixture', OWN_PREFIX=own, OTHER_PREFIX=other, TMPDIR=str(root))
+                   PROBE_BUCKET='fixture', OWN_PREFIX=own, OTHER_PREFIX=other, TMPDIR=str(root),
+                   PROBE_PHASE=phase, STUB_STORE=str(root / 'objects'))
         result = subprocess.run(['bash', str(PROBE)], env=env, text=True, capture_output=True)
         return result, calls.read_text()
 
+    # The orchestrator prepares BOTH fixtures before either verify phase.
+    for own, other in [('_isolation/probe-a/', '_isolation/probe-b/'),
+                       ('_isolation/probe-b/', '_isolation/probe-a/')]:
+        result, calls = run('correct-policy', own, other, phase='prepare')
+        assert result.returncode == 0 and 'fixture marker prepared' in result.stdout, result
+        assert ':False' not in calls, calls
     for own, other in [('_isolation/probe-a/', '_isolation/probe-b/'),
                        ('_isolation/probe-b/', '_isolation/probe-a/')]:
         result, calls = run('correct-policy', own, other)
         assert result.returncode == 0, result.stderr
         assert 'PASS: tenant S3 isolation' in result.stdout
         assert calls.count('get-object:True') == 1 and calls.count('put-object:True') == 1
-        assert calls.endswith('delete-object:True\n'), calls
+        assert 'delete-object:True' not in calls, calls
+        assert (root / 'objects' / other / 'boundary-marker').exists()
+    result, calls = run('correct-policy', phase='unknown')
+    assert result.returncode == 2 and not calls, result
     for operation in ['put', 'get', 'list', 'delete']:
         label = 'cross-prefix-' + operation
         result, _ = run(label)

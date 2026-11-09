@@ -60,10 +60,12 @@ success and cross-prefix AccessDenied using these actual ServiceAccounts; a
 mocked policy test alone does not establish the AWS boundary. After the matching
 Terraform apply and platform deploy succeed on main, dispatch
 `runner-isolation.yml` on main. It runs bounded Jobs in dev/ci and prod/app,
-requires own-prefix put/get/list success and explicit AccessDenied for foreign
+prepares both fixture markers before either cross-prefix probe, then requires
+own-prefix put/get/list success and explicit AccessDenied for foreign
 put/get/list/delete and root listing, then removes its Jobs and ConfigMaps.
-Only synthetic markers are written; deleted versions expire through the lake
-bucket’s existing noncurrent-version lifecycle. Record the run in the PR ledger.
+Only fixed synthetic markers are written. They remain present so a faster probe
+cannot make a foreign object disappear and disguise a read grant as AccessDenied;
+overwritten versions expire through the lake’s noncurrent-version lifecycle. Record the run in the PR ledger.
 
 ## EKS Auto Mode — there are no node groups
 

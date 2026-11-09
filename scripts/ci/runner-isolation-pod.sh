@@ -5,6 +5,11 @@ set -euo pipefail
 : "${PROBE_BUCKET:?}"
 : "${OWN_PREFIX:?}"
 : "${OTHER_PREFIX:?}"
+: "${PROBE_PHASE:?}"
+case "$PROBE_PHASE" in
+    prepare|verify) ;;
+    *) echo 'unknown probe phase' >&2; exit 2 ;;
+esac
 case "$OWN_PREFIX:$OTHER_PREFIX" in
     _isolation/probe-a/:_isolation/probe-b/|_isolation/probe-b/:_isolation/probe-a/) ;;
     *) echo 'refusing non-fixture prefixes' >&2; exit 2 ;;
@@ -14,15 +19,12 @@ probe_key="${OWN_PREFIX}boundary-marker"
 probe_tmp="$(mktemp -d)"
 marker=tenant-isolation-positive-control
 printf '%s' "$marker" > "$probe_tmp/marker"
-cleanup() {
-    local result=$?
-    "$probe_cli" s3api delete-object --bucket "$PROBE_BUCKET" --key "$probe_key" >/dev/null || result=1
-    rm -rf "$probe_tmp"
-    exit "$result"
-}
-# The tiny marker's noncurrent version follows the lake's 30-day lifecycle.
-# The runner deliberately has no DeleteObjectVersion capability.
-trap cleanup EXIT
+# Both fixture markers must remain present while either tenant is probed.
+# Otherwise an allowed GetObject on a missing foreign key can return AccessDenied
+# because ListBucket is restricted, disguising a cross-tenant read grant.
+# These fixed synthetic markers remain; overwritten versions follow the lake's
+# existing noncurrent-version lifecycle. Only local scratch is removed here.
+trap 'rm -rf "$probe_tmp"' EXIT
 
 expect_denied() {
     local label="$1"
@@ -43,6 +45,10 @@ expect_denied() {
 [ "$(cat "$probe_tmp/read")" = "$marker" ]
 "$probe_cli" s3api list-objects-v2 --bucket "$PROBE_BUCKET" --prefix "$OWN_PREFIX" --max-keys 1 >/dev/null
 echo 'PASS: own-prefix put/get/list'
+if [ "$PROBE_PHASE" = prepare ]; then
+    echo 'PASS: fixture marker prepared'
+    exit 0
+fi
 expect_denied cross-prefix-put s3api put-object --bucket "$PROBE_BUCKET" --key "${OTHER_PREFIX}boundary-marker" --body "$probe_tmp/marker"
 expect_denied cross-prefix-get s3api get-object --bucket "$PROBE_BUCKET" --key "${OTHER_PREFIX}boundary-marker" "$probe_tmp/other"
 expect_denied cross-prefix-list s3api list-objects-v2 --bucket "$PROBE_BUCKET" --prefix "$OTHER_PREFIX" --max-keys 1

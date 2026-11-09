@@ -16,7 +16,8 @@ probe_state="$(mktemp)"
 kube=(kubectl --context "$CLUSTER" --namespace "$CI_NAMESPACE")
 cleanup() {
     rm -f "$probe_state"
-    "${kube[@]}" delete job "$probe_name-a" "$probe_name-b" --ignore-not-found --wait=false
+    "${kube[@]}" delete job "$probe_name-prepare-a" "$probe_name-prepare-b" \
+        "$probe_name-verify-a" "$probe_name-verify-b" --ignore-not-found --wait=false
     "${kube[@]}" delete configmap "$probe_name" --ignore-not-found
 }
 trap cleanup EXIT
@@ -29,7 +30,9 @@ python3 scripts/ci/tenant-runners-check.py --live-json "$probe_state" \
 "${kube[@]}" create configmap "$probe_name" \
     --from-file=probe.sh=scripts/ci/runner-isolation-pod.sh --dry-run=client -o json |
     "${kube[@]}" apply -f -
-python3 - <<'PY' | "${kube[@]}" apply -f -
+run_phase() {
+local phase="$1"
+PROBE_PHASE="$phase" python3 - <<'PY' | "${kube[@]}" apply -f -
 import hashlib
 import json
 import os
@@ -44,8 +47,8 @@ for suffix, other in [('a', 'b'), ('b', 'a')]:
     other_prefix = orgs['isolation-probe-' + other]
     assert own_prefix == '_isolation/probe-' + suffix + '/'
     assert other_prefix == '_isolation/probe-' + other + '/'
-    name = os.environ['PROBE_NAME'] + '-' + suffix
-    env = {'PROBE_BUCKET': os.environ['LAKE_BUCKET'], 'OWN_PREFIX': own_prefix,
+    name = os.environ['PROBE_NAME'] + '-' + os.environ['PROBE_PHASE'] + '-' + suffix
+    env = {'PROBE_PHASE': os.environ['PROBE_PHASE'], 'PROBE_BUCKET': os.environ['LAKE_BUCKET'], 'OWN_PREFIX': own_prefix,
            'OTHER_PREFIX': other_prefix, 'AWS_REGION': 'us-east-2', 'AWS_PAGER': '',
            'AWS_EC2_METADATA_DISABLED': 'true', 'AWS_MAX_ATTEMPTS': '3'}
     items.append({'apiVersion': 'batch/v1', 'kind': 'Job', 'metadata': {'name': name}, 'spec': {
@@ -68,8 +71,13 @@ for suffix, other in [('a', 'b'), ('b', 'a')]:
                         {'name': 'tmp', 'emptyDir': {}}]}}}})
 print(json.dumps({'apiVersion': 'v1', 'kind': 'List', 'items': items}))
 PY
-result=0
-"${kube[@]}" wait --for=condition=complete --timeout=330s "job/$probe_name-a" "job/$probe_name-b" || result=$?
-"${kube[@]}" logs "job/$probe_name-a" --all-containers=true || result=1
-"${kube[@]}" logs "job/$probe_name-b" --all-containers=true || result=1
-exit "$result"
+local result=0
+"${kube[@]}" wait --for=condition=complete --timeout=330s "job/$probe_name-$phase-a" "job/$probe_name-$phase-b" || result=$?
+"${kube[@]}" logs "job/$probe_name-$phase-a" --all-containers=true || result=1
+"${kube[@]}" logs "job/$probe_name-$phase-b" --all-containers=true || result=1
+return "$result"
+}
+# Complete both own-prefix controls before either cross-prefix read. Neither
+# verification pod removes its marker, so a faster pod cannot erase the proof.
+run_phase prepare
+run_phase verify
