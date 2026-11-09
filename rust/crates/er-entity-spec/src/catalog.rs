@@ -111,8 +111,16 @@ impl Catalog {
                 path: root.to_path_buf(),
                 source,
             })?
-            .filter_map(Result::ok)
-            .map(|e| e.path())
+            .map(|entry| {
+                entry
+                    .map(|entry| entry.path())
+                    .map_err(|source| SpecError::ReadRoot {
+                        path: root.to_path_buf(),
+                        source,
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
             .filter(|p| p.is_dir())
             .collect();
         dirs.sort();

@@ -226,19 +226,40 @@ pub fn load_statements(
             if !dir.is_dir() {
                 continue;
             }
-            let mut yaml_paths: Vec<PathBuf> = fs::read_dir(&dir)
+            let mut paths: Vec<PathBuf> = fs::read_dir(&dir)
                 .map_err(|source| StmtError::Read {
                     path: dir.clone(),
                     source,
                 })?
-                .filter_map(Result::ok)
-                .map(|entry| entry.path())
-                .filter(|p| p.extension().is_some_and(|ext| ext == "yaml"))
-                .collect();
-            yaml_paths.sort();
+                .map(|entry| {
+                    entry
+                        .map(|entry| entry.path())
+                        .map_err(|source| StmtError::Read {
+                            path: dir.clone(),
+                            source,
+                        })
+                })
+                .collect::<Result<_, _>>()?;
+            paths.sort();
 
-            for yaml_path in yaml_paths {
-                let sql_path = yaml_path.with_extension("sql");
+            for path in paths {
+                let extension = path.extension().and_then(|ext| ext.to_str());
+                let partner = match extension {
+                    Some("yaml") => path.with_extension("sql"),
+                    Some("sql") => path.with_extension("yaml"),
+                    _ => continue,
+                };
+                if !partner.is_file() {
+                    return Err(invalid(
+                        &path,
+                        format!("missing paired {}", partner.display()),
+                    ));
+                }
+                if extension != Some("yaml") {
+                    continue;
+                }
+                let yaml_path = path;
+                let sql_path = partner;
                 let spec = load_spec(&yaml_path)?;
                 let sql = fs::read_to_string(&sql_path).map_err(|source| StmtError::Read {
                     path: sql_path.clone(),
@@ -382,6 +403,45 @@ pub fn operation_for_folder(name: &str) -> Option<Operation> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn statement_discovery_requires_both_files() {
+        let entity: er_entity_spec::Entity = serde_norway::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../entities/golden_record/entity.yaml"
+        )))
+        .unwrap();
+        let catalog = Catalog::from_entities(vec![entity]).unwrap();
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root =
+            std::env::temp_dir().join(format!("er-sql-pairs-{}-{unique}", std::process::id()));
+        let dir = root.join("golden_record/read");
+        fs::create_dir_all(&dir).unwrap();
+        let sql = dir.join("probe.sql");
+        let yaml = dir.join("probe.yaml");
+
+        fs::write(&sql, "SELECT id FROM lake.main.golden_records").unwrap();
+        let err = load_statements(&root, &catalog).unwrap_err();
+        assert!(matches!(err, StmtError::Invalid { path, .. } if path == sql));
+
+        fs::remove_file(&sql).unwrap();
+        fs::write(
+            &yaml,
+            "kind: statement\noperation: read\ndescription: test\nreturns: entity\n",
+        )
+        .unwrap();
+        let err = load_statements(&root, &catalog).unwrap_err();
+        assert!(matches!(err, StmtError::Invalid { path, .. } if path == yaml));
+
+        fs::write(&sql, "SELECT id FROM lake.main.golden_records").unwrap();
+        let loaded = load_statements(&root, &catalog).unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].path, sql);
+        fs::remove_dir_all(root).unwrap();
+    }
 
     fn build(yaml: &str, op: Operation) -> Result<LoadedStatement, StmtError> {
         let spec: StatementSpec = serde_norway::from_str(yaml).expect("spec parses");
