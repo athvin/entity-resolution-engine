@@ -298,6 +298,19 @@ This removes the second server-rest build while keeping `dedupe-cli` and
 `er-entity-diff` unfiltered: their database tests do not all have `pg_` names.
 It does not clone initialized schemas or shorten the token refresh interval.
 
+The first full hosted follow-up run
+[42715632742](https://github.com/athvin/entity-resolution-engine/actions/runs/42715632742)
+passed in **3m51s**, versus the preceding merged 4m56s (22.0% less elapsed time).
+Against the original 8m11s–8m33s, this is 53.0–55.0% less elapsed time. Server
+job walls were 184 / 201 / 112 seconds for early / late / rest, versus
+208 / 267 / 208 on the preceding main run. Early and late compilation took
+83 / 89 seconds; execution took 69.604 / 77.573. Both server builds reported
+100% compiler-cache hits. All 137 integration results remained covered.
+This is one full hosted follow-up run; confirm on main and keep cold dependency
+changes separate. Final merged runs and the corrected hardware comparison are
+recorded in the post-merge ledger of
+[PR #1072](https://github.com/athvin/entity-resolution-engine/pull/1072).
+
 ## Other options and coverage decisions
 
 - Package selection already follows reverse Cargo dependencies, with full
