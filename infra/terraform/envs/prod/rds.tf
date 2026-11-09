@@ -56,7 +56,7 @@ resource "aws_rds_cluster" "prod" {
   vpc_security_group_ids = [aws_security_group.db.id]
   storage_encrypted      = true
 
-  backup_retention_period   = 14
+  backup_retention_period   = 14 # Owner-confirmed production retention; #553.
   deletion_protection       = true
   skip_final_snapshot       = false
   final_snapshot_identifier = "er-prod-final"

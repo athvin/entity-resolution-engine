@@ -26,6 +26,7 @@ RUN pnpm build
 
 # ---- runtime ----
 FROM node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392 AS runtime
+ADD --checksum=sha256:90a6f1a7978a1b1b096dca6c57511ca48d3b8cf052f8e704baf358f34ea2f21b --chmod=644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /etc/ssl/rds/global-bundle.pem
 ENV NODE_ENV=production \
     PORT=3000 \
     HOSTNAME=0.0.0.0

@@ -324,7 +324,7 @@ against a dev namespace, and the negative tests (no invite, email collision) bot
 - [ ] **3.1 Prod network + EKS + Aurora** (§5, §7.1)
   - Aurora Serverless v2 multi-AZ with the cluster parameter group; `er lake maintain` against Aurora succeeds (the `max_locks` proof, again — different mechanism than dev's `-c` flag).
   - Every DSN carries `sslmode=verify-full` and connects — which first requires the CA bundle in the images (§18.15; expect an image change).
-  - 35-day PITR confirmed on, from the API.
+  - 14-day PITR confirmed on, from the API (owner confirmed this retention on 2026-11-08 in #553's production build-out).
 - [ ] **3.2 Prod lake + scoped CloudTrail** (§7.3)
   - SSE-KMS under the prod CMK; TLS-only bucket policy (plain HTTP probe fails).
   - Data events: a read on the prod prefix produces an event; a write does not; a nonprod-bucket read does not. Probe all three.

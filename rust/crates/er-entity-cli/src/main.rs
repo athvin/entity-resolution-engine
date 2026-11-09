@@ -593,10 +593,9 @@ fn run_diff(
                 .build()
                 .context("building the tokio runtime")?;
             runtime.block_on(async {
-                let (client, connection) = tokio_postgres::connect(&dsn, er_pg_tls::make_tls())
+                let (client, handle) = er_pg_tls::connect(&dsn)
                     .await
                     .context("connecting to Postgres")?;
-                let handle = tokio::spawn(connection);
                 let live = er_entity_diff::read_postgres_columns(&client, &relations)
                     .await
                     .context("reading the live schema")?;
@@ -713,10 +712,9 @@ fn run_migrate(
                 .build()
                 .context("building the tokio runtime")?;
             runtime.block_on(async {
-                let (mut client, connection) = tokio_postgres::connect(&dsn, er_pg_tls::make_tls())
+                let (mut client, handle) = er_pg_tls::connect(&dsn)
                     .await
                     .context("connecting to Postgres")?;
-                let handle = tokio::spawn(connection);
                 let outcome = if apply {
                     match er_entity_diff::reconcile_postgres(&mut client, &catalog, &applied_by)
                         .await

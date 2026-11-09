@@ -144,7 +144,7 @@ pub async fn from_env(
     match Executor::connect(dsn, api, cfg).await {
         Ok(ex) => (Some(ex), Some(rx)),
         Err(e) => {
-            tracing::warn!(error = %e, "the executor is disabled: connecting to the control plane failed");
+            tracing::warn!(error = %crate::errfmt::chain(&e), "the executor is disabled: connecting to the control plane failed");
             (None, None)
         }
     }
@@ -175,7 +175,7 @@ impl Executor {
         dsn: &str,
         api: Arc<dyn PodApi>,
         cfg: ExecutorConfig,
-    ) -> Result<Self, tokio_postgres::Error> {
+    ) -> Result<Self, er_pg_tls::Error> {
         let client = pg::connect(dsn).await?;
         let _ = pg::set_actor(&client, "executor").await;
         Ok(Executor {
