@@ -1,0 +1,91 @@
+# Apply the infra/k8s cluster-scoped objects to both clusters (#927).
+#
+# WHY THIS IS NOT A JOB IN deploy.yml. deploy.yml fires when an `images` run
+# completes — a trigger about container builds, which cluster objects do not
+# depend on. The gap that motivated this file was never a wrong trigger, it
+# was NO trigger: deploy.yml's push paths already covered infra/k8s/** and it
+# never applied these, so er-prod was born without NodePools, PriorityClasses
+# or the CNI ConfigMap and NetworkPolicy failed open with nothing reporting
+# it. This workflow is the road a change to those files has to the clusters.
+#
+# The `paths:` filter is ALLOWED here — the house ban on path filters applies
+# to REQUIRED checks, because a skipped required check blocks every unrelated
+# PR forever. This workflow is not and MUST NOT become a required check; if it
+# ever is, the paths list has to go with that change, not after.
+#
+# Why pushes still see results without requirement: a red run on `main`
+# notifies, and the script's post-apply report is written for the run log and
+# the annotations — a missing CNI ConfigMap fails the run rather than
+# converging silently past it.
+#
+# `workflow_dispatch` is the born-without hatch: a NEW cluster (rebuilt prod,
+# a future third environment) has no infra/k8s commit pending, so no push
+# fires for it — dispatch this by hand after the cluster exists.
+#
+# The identity is each environment's CI DEPLOY role, not a new one: the access
+# entries already exist (envs/dev/eks.tf's ci_deploy, envs/prod/eks.tf's after
+# #930), the OIDC trust is pinned to `main`, and applying cluster objects is
+# the same privilege class as deploying the platform — one role per
+# environment keeps the access-entry list short enough to audit.
+
+name: cluster-objects
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "infra/k8s/nodepools/**"
+      - "infra/k8s/priorityclasses/**"
+      - "infra/k8s/network-policy-controller.yaml"
+      - "infra/k8s/secrets/**"
+      - "scripts/cluster_objects.sh"
+      - ".github/workflows/cluster-objects.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Applying cluster objects is a mutation; two runs racing an apply and its
+  # drift report would make the report unreadable. Queue, never cancel — the
+  # deploy.yml argument.
+  group: cluster-objects
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    name: apply + report (${{ matrix.env }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write # OIDC exchange for the environment's deploy role
+    strategy:
+      # A prod failure must not block dev's report (fail-fast off), and the
+      # two clusters are independent by construction.
+      fail-fast: false
+      matrix:
+        include:
+          - env: dev
+            cluster: er-dev
+            role: arn:aws:iam::797781631727:role/er-ci-deploy-dev
+          - env: prod
+            cluster: er-prod
+            # Exists only once #930 has merged and applied; before that this
+            # leg fails at the assume-role, which is the correct loud failure.
+            role: arn:aws:iam::797781631727:role/er-ci-deploy-prod
+    env:
+      AWS_REGION: us-east-2
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
+        with:
+          role-to-assume: ${{ matrix.role }}
+          aws-region: us-east-2
+      - name: kubeconfig
+        run: aws eks update-kubeconfig --name "${{ matrix.cluster }}" --region "$AWS_REGION"
+      - name: Install helm
+        # The script installs the External Secrets Operator with it.
+        run: bash scripts/ci/install-helm.sh
+      - name: Apply the cluster objects, then report
+        run: bash scripts/cluster_objects.sh ${{ matrix.env }} ${{ matrix.cluster }}

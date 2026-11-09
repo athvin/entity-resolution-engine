@@ -49,6 +49,12 @@ job instead — `terraform plan` is the worked example.
 | `agent` | agent | 100 | `always` |
 | `publish` | publish | 10 | `always() && needs.agent.outputs.task_id != ''` |
 
+### `cluster-objects.yml`
+
+| Job | Status-check context | Timeout | Condition |
+|---|---|---|---|
+| `apply` | apply + report (${{ matrix.env }}) | 10 | `always` |
+
 ### `deploy.yml`
 
 | Job | Status-check context | Timeout | Condition |
