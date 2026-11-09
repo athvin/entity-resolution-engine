@@ -99,7 +99,9 @@ RUN strip target/release/er-server || true
 RUN ./target/release/er-server install-extensions --dir /opt/duckdb/extensions
 
 FROM debian:bookworm-slim AS runtime
-ADD --checksum=sha256:90a6f1a7978a1b1b096dca6c57511ca48d3b8cf052f8e704baf358f34ea2f21b --chmod=644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /etc/ssl/rds/global-bundle.pem
+ADD --checksum=sha256:90a6f1a7978a1b1b096dca6c57511ca48d3b8cf052f8e704baf358f34ea2f21b https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /etc/ssl/rds/global-bundle.pem
+# Set the file mode separately: ADD --chmod also changes created parent directories.
+RUN chmod 644 /etc/ssl/rds/global-bundle.pem
 # ca-certificates for outbound HTTPS: webhook delivery and the SES API. The
 # DuckDB extension fetch is deliberately no longer in this list.
 RUN apt-get update \
@@ -132,4 +134,5 @@ EXPOSE 8000
 RUN useradd --system --uid 1001 --create-home --home-dir /app er
 WORKDIR /app
 USER 1001
+RUN test -r /etc/ssl/rds/global-bundle.pem
 CMD ["er-server"]
