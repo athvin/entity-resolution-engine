@@ -109,7 +109,7 @@ pub fn build_lake_stage_catalog(entities: &Catalog, account: bool) -> SchemaCata
 mod tests {
     use super::*;
     use ff_analysis::sqlparser::dialect::DuckDbDialect;
-    use ff_analysis::{FeatherFlowProvider, FunctionRegistry};
+    use ff_analysis::{FeatherFlowProvider, FunctionRegistry, UserFunctionStub};
     use std::path::PathBuf;
 
     fn entities_catalog() -> Catalog {
@@ -183,7 +183,14 @@ mod tests {
             std::thread::Builder::new()
                 .stack_size(16 * 1024 * 1024)
                 .spawn_scoped(scope, || {
-                    let registry = FunctionRegistry::new();
+                    // DuckDB's `error(varchar)` makes invalid record-key
+                    // components fail during standardization. Feather-Flow's
+                    // built-in function catalog does not model it yet; this
+                    // plan-only stub preserves its varchar expression shape.
+                    let error =
+                        UserFunctionStub::new("error", vec!["VARCHAR".to_string()], "VARCHAR")
+                            .expect("nonempty function name");
+                    let registry = FunctionRegistry::with_user_functions(&[error], &[]);
                     let provider = FeatherFlowProvider::new(catalog, &registry);
                     let dialect = DuckDbDialect {};
                     let rewritten = crate::rewrite_lake(sql);

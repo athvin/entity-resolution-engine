@@ -248,3 +248,17 @@ fn direct_config_hash_rejects_nonfinite_numbers() {
     config.thresholds.auto_merge = f64::NAN;
     let _ = config_hash(&config);
 }
+
+#[test]
+fn source_names_must_be_record_key_components() {
+    let original = fixture("default.yaml");
+    for source in ["\"\"", "\"a:b\""] {
+        let yaml = original.replace("  crm:\n", &format!("  {source}:\n"));
+        let error = load_config_str(&yaml).unwrap_err();
+        assert!(
+            error.to_string().contains("source name") && error.to_string().contains("':'"),
+            "{source}: {error}"
+        );
+    }
+    assert!(load_config_str(original).is_ok());
+}

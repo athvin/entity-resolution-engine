@@ -1039,6 +1039,8 @@ pub enum ConfigError {
     Parse(#[from] serde_norway::Error),
     #[error("{0} must be a finite number")]
     NonFiniteNumber(String),
+    #[error("source name {0:?} must be nonempty and contain no ':'")]
+    InvalidSourceName(String),
 }
 
 impl ConfigError {
@@ -1072,6 +1074,13 @@ pub fn normalize(mut config: Config) -> Config {
 /// `config_hash` is computed over. (Full V1–V16 validation is not yet ported.)
 pub fn load_config_str(yaml: &str) -> Result<Config, ConfigError> {
     let config: Config = serde_norway::from_str(yaml)?;
+    if let Some(source) = config
+        .sources
+        .keys()
+        .find(|source| source.is_empty() || source.contains(':'))
+    {
+        return Err(ConfigError::InvalidSourceName(source.clone()));
+    }
     if let Some(field) = nonfinite_number_field(&config) {
         return Err(ConfigError::NonFiniteNumber(field));
     }

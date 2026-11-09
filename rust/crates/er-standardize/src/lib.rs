@@ -52,6 +52,16 @@ fn single_quote(value: &str) -> String {
     value.replace('\'', "''")
 }
 
+/// Both standardization projections construct `source:id` after supersession.
+/// Reject invalid components here as well as at ingest, because callers can
+/// populate a raw relation directly and would otherwise create colliding keys.
+fn checked_record_key_sql() -> &'static str {
+    "case when source_system is null or source_system = '' or source_system like '%:%' \
+     or source_record_id is null or source_record_id = '' or source_record_id like '%:%' \
+     then error('source_system and source_record_id must be nonempty and contain no colon') \
+     else source_system || ':' || source_record_id end"
+}
+
 /// `json_extract_string(payload, '<col>')` — a VARCHAR accessor into the JSON
 /// payload. The named-function spelling of `payload ->> '<col>'` (value-identical
 /// in DuckDB), so the analyser's plan-vector tests resolve it through the ff
@@ -172,13 +182,14 @@ pub fn int_std_records_sql(
     let payload = STD_PAYLOAD.join(", ");
     let stg = stg_records_sql(config, raw_table, lexicon);
     let run_at = single_quote(run_at);
+    let record_key = checked_record_key_sql();
     format!(
         "with versions as (\n{stg}\n),\n\
          current_version as (\n  select {payload} from versions\n  \
          qualify row_number() over (partition by source_system, source_record_id \
          order by ingested_at desc, ingest_batch_id desc) = 1\n)\n\
          select sha256('int_std_records:' || source_system || ':' || source_record_id) as id,\n  \
-         source_system || ':' || source_record_id as record_key, {payload},\n  \
+         {record_key} as record_key, {payload},\n  \
          cast('{run_at}' as timestamp) as created_at,\n  \
          cast('{run_at}' as timestamp) as updated_at\n\
          from current_version\nwhere content_hash <> '{TOMBSTONE_CONTENT_HASH}'"
@@ -300,13 +311,14 @@ pub fn acct_int_std_records_sql(config: &Config, raw_table: &str, run_at: &str) 
     let payload = ACCT_STD_PAYLOAD.join(", ");
     let stg = acct_stg_records_sql(config, raw_table);
     let run_at = single_quote(run_at);
+    let record_key = checked_record_key_sql();
     format!(
         "with versions as (\n{stg}\n),\n\
          current_version as (\n  select {payload} from versions\n  \
          qualify row_number() over (partition by source_system, source_record_id \
          order by ingested_at desc, ingest_batch_id desc) = 1\n)\n\
          select sha256('acct_int_std_records:' || source_system || ':' || source_record_id) as id,\n  \
-         source_system || ':' || source_record_id as record_key, {payload},\n  \
+         {record_key} as record_key, {payload},\n  \
          cast('{run_at}' as timestamp) as created_at,\n  \
          cast('{run_at}' as timestamp) as updated_at\n\
          from current_version\nwhere content_hash <> '{TOMBSTONE_CONTENT_HASH}'"

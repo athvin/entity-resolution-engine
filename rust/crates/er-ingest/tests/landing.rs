@@ -250,3 +250,46 @@ fn failed_full_refresh_tombstone_rolls_back_delivery_and_retries_cleanly() {
     );
     assert_eq!(session.count("lake.main.raw_records").unwrap(), 5);
 }
+
+#[test]
+fn invalid_record_key_components_never_land() {
+    let config = load_config_str(include_str!("fixtures/default.yaml")).unwrap();
+    let spec = &config.sources["crm"];
+    let session = Session::open_in_memory(SessionOptions::deterministic()).unwrap();
+    session.execute_batch("ATTACH ':memory:' AS lake;").unwrap();
+    session
+        .execute_batch(&create_raw_records_sql("lake.main.raw_records"))
+        .unwrap();
+
+    for (source, csv) in [
+        ("", "crm_id,first_name\nC1,Alice\n"),
+        ("a:b", "crm_id,first_name\nC1,Alice\n"),
+        ("crm", "crm_id,first_name\n,Alice\n"),
+        ("crm", "crm_id,first_name\nA:B,Alice\n"),
+    ] {
+        let error =
+            land_base_delivery(&session, source, spec, csv, "bad", "2026-01-01").unwrap_err();
+        assert!(
+            format!("{error:#}").contains("must not"),
+            "{source:?}: {error:#}"
+        );
+        assert_eq!(session.count("lake.main.raw_records").unwrap(), 0);
+    }
+
+    assert_eq!(
+        land_base_delivery(
+            &session,
+            "crm",
+            spec,
+            "crm_id,first_name\nC1,Alice\n",
+            "valid",
+            "2026-01-01",
+        )
+        .unwrap(),
+        1
+    );
+    let keys = session
+        .query_strings("select source_system, source_record_id from lake.main.raw_records")
+        .unwrap();
+    assert_eq!(keys, vec![vec!["crm".to_string(), "C1".to_string()]]);
+}

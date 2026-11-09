@@ -119,6 +119,9 @@ fn append_base_delivery(
     ingest_batch_id: &str,
     ingested_at: &str,
 ) -> anyhow::Result<usize> {
+    // A direct caller can supply a source without passing through config
+    // parsing. Check it even for an empty delivery, before any row is landed.
+    er_ids::record_key(source, "probe")?;
     let mut reader = csv::Reader::from_reader(csv_text.as_bytes());
     let headers: Vec<String> = reader.headers()?.iter().map(str::to_string).collect();
     let mut seen_headers = BTreeSet::new();
@@ -146,6 +149,7 @@ fn append_base_delivery(
                 anyhow::anyhow!("row missing record-id column {}", spec.record_id_column)
             })?
             .to_string();
+        er_ids::record_key(source, &source_record_id)?;
         let content_hash = row_content_hash(&payload, spec);
         let json_map: serde_json::Map<String, serde_json::Value> = payload
             .iter()
@@ -229,6 +233,7 @@ pub fn land_full_refresh(
     if !omitted.is_empty() {
         let mut rows = Vec::with_capacity(APPEND_BATCH_ROWS);
         for r in omitted {
+            er_ids::record_key(source, &r.source_record_id)?;
             rows.push(er_entities::raw_record::AppendRow {
                 id: er_ids::natural_id(
                     "raw_records",
