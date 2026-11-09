@@ -1,0 +1,59 @@
+# Opt-in hardware comparison. Both labels are standard free public-repo runners.
+# Prime the protected cache, then time the actual rest gate with an empty target.
+name: free runner experiment
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: free-runner-experiment-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  compare:
+    if: github.ref == 'refs/heads/main'
+    name: runner (${{ matrix.runner }}, ${{ matrix.sample }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    environment: sccache-write
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+        sample: [1, 2, 3]
+    env:
+      CARGO_INCREMENTAL: "0"
+      RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
+      RUSTC_WRAPPER: sccache
+      SCCACHE_BUCKET: er-ci-sccache
+      SCCACHE_ENDPOINT: https://9eefbe6bc92d11b2bb4e962494765a4c.r2.cloudflarestorage.com
+      SCCACHE_REGION: auto
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_WRITE_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_WRITE_SECRET_ACCESS_KEY }}
+      EXPERIMENT_RUNNER: ${{ matrix.runner }}
+      LC_ALL: C
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Reclaim runner disk
+        run: bash scripts/ci/reclaim-disk.sh
+      - name: Install stable toolchain
+        run: bash scripts/ci/install-rust.sh
+      - uses: ./.github/actions/ci-tools
+      - name: Cache DuckDB extensions by architecture
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.duckdb/extensions
+          key: duckdb-extensions-${{ runner.arch }}-${{ hashFiles('rust/Cargo.lock') }}
+          restore-keys: |
+            duckdb-extensions-${{ runner.arch }}-
+      - name: Prime and measure with identical test identities
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/rust/target
+          EXPERIMENT_HOSTED: ${{ runner.environment }}
+        run: python3 scripts/ci/runner-experiment.py
+      - name: Preserve measurements and failure logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: runner-${{ matrix.runner }}-${{ matrix.sample }}
+          path: ${{ runner.temp }}/runner-results
+          retention-days: 7

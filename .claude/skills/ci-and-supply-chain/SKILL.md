@@ -297,6 +297,8 @@ no eviction class. The Actions cache still holds rust-cache and buildkit layers,
 so the prune job survives. Where the time actually goes, what the caches cost,
 and the decision log for changes against them:
 [references/build-cost.md](references/build-cost.md).
+The full-gate native-engine profiling and optimization trials are in
+[references/backend-ci-profile.md](references/backend-ci-profile.md).
 
 ## Pinned actions
 

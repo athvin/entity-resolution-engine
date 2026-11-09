@@ -50,6 +50,19 @@ class Tools(unittest.TestCase):
             self.assertRegex(pin['sha256'], '^[a-f0-9]{64}$')
             self.assertTrue(pin['url'].startswith('https://github.com/'))
 
+    def test_architecture_pins_are_complete_and_never_fall_back(self):
+        x64 = installer.specifications('Linux', 'x86_64')
+        arm = installer.specifications('Linux', 'aarch64')
+        self.assertEqual(set(x64), set(arm))
+        for name in x64:
+            self.assertEqual(x64[name]['version'], arm[name]['version'])
+            self.assertRegex(arm[name]['sha256'], '^[a-f0-9]{64}$')
+            self.assertNotEqual(x64[name]['sha256'], arm[name]['sha256'])
+            self.assertRegex(arm[name]['url'], 'aarch64|arm64')
+        for system, machine in [('Linux', 'riscv64'), ('Darwin', 'arm64')]:
+            with self.assertRaisesRegex(ValueError, 'support Linux'):
+                installer.specifications(system, machine)
+
 
 class Disk(unittest.TestCase):
     def check_disk(self, gib, minimum='40'):

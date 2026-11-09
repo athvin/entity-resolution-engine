@@ -33,7 +33,7 @@ get older as you scroll, and the first ones are not the live ones.
 ## Where it stands now
 
 The follow-up investigation of the full backend gate is recorded in
-[backend-ci-profile.md](backend-ci-profile.md). It separates native-engine
+`backend-ci-profile.md` (linked from the skill). It separates native-engine
 execution cost from redundant compilation and retains the correctness suites.
 The constraint for this work is **standard, free GitHub-hosted public-repository
 runners**; paid or self-hosted runners are out of scope.

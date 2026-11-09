@@ -4,6 +4,16 @@ Constraint: the standard GitHub-hosted runners that are free for public
 repositories. No paid runners, self-hosting, or weakened correctness gates.
 Local experiments precede pushing the implementation.
 
+## Contents
+
+- [Hosted baseline](#hosted-baseline)
+- [Changes under test](#changes-under-test)
+- [Local method](#local-method)
+- [Initial paired results](#initial-paired-results)
+- [Local validation](#local-validation)
+- [Free runner experiment](#free-runner-experiment)
+- [Other options and coverage decisions](#other-options-and-coverage-decisions)
+
 ## Hosted baseline
 
 Two successful full runs after the setup/cache improvements:
@@ -130,6 +140,60 @@ ignored. The selected level-3 integration executable is about 99 MiB.
 DEDUPE_E2E_DUCKLAKE=1 <saved-test-executable> lake_e2e:: --test-threads=4
 ```
 
+The selected level-3 Samply capture attributes approximately 11.4 CPU seconds
+to the pipeline and 5.9 to corpus profiling, consistent with level 2. Full
+captures, symbol sidecars, CPU-weighted folded stacks, and interactive SVG
+flame graphs were retained locally under `/tmp/er-backend-profile-evidence`.
+The SVGs focus on 28 pipeline stack levels and cap long labels; the Samply
+captures retain the full stacks. The renderer is Brendan Gregg's FlameGraph
+at `41fee1f99f9276008b7cd112fca19dc3ea84ac32`.
+
+Cargo's emitted artifact metadata confirms the distinction: the er-cli test
+has `opt_level=0`, line-table debug info, `debug_assertions=true` and
+`overflow_checks=true`; only libduckdb-sys has `opt_level=3`. Its Rust assertions
+and overflow checks are also still enabled. The old and selected executables'
+complete integration-test identity lists match exactly.
+
+## Local validation
+
+After rebasing onto `8453c27d`, `make check` and `make check-e2e` passed.
+The latter used isolated Postgres 16 and RustFS containers with the real lake,
+Postgres, extension and S3 gates enabled. The revised selected-package runner
+also passed the complete rest suite and all five extension tests using one
+Cargo build. Its real output yielded 1,042 attributed test results; an identical
+`--no-run` metadata pass reported every artifact fresh.
+
+All 46 CI helper tests passed, including refusal of missing/ambiguous extension
+artifacts, failed suites, changed experiment coverage, cold/broken native
+caches, and unsafe target cleanup. The ARM64 release archives were checked
+against their pinned SHA-256 values and all four executables ran in a local
+Ubuntu 24.04 ARM64 container.
+
+## Free runner experiment
+
+GitHub lists `ubuntu-latest` and `ubuntu-24.04-arm` among its
+[standard free public-repository runners](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
+The optional `ci-runner-experiment.yml` compares three independent machines
+per architecture. It is manual, main-only, and never a required check.
+Production PR gates retain their current runner until measurements justify a
+change and the remaining real-service tiers have passed on that architecture.
+
+Each machine primes the protected compiler cache with the actual selected
+rest-suite runner, deletes only its disposable checkout's `rust/target`, then
+times the same gate with a fresh target. Both phases include compilation, unit
+and doc tests, and community-extension loading. The sample must have native
+cache hits, zero native misses/cache errors, and exactly the priming phase's
+attributed test identities. Artifact discovery occurs after timing and must
+rebuild nothing. Compare compiler versions, commits, coverage digests, medians
+and ranges across all six successful jobs before drawing a hardware conclusion.
+
+The normal checkout path is deliberate: moving the target into a different
+temporary directory changes native compiler-cache keys. Cleanup refuses local
+or self-hosted execution and any target other than the checkout's Rust target.
+Logs, `/usr/bin/time -v` resources, CPU/image metadata and raw cache statistics
+are preserved as workflow artifacts. Tool and extension caches separate
+architectures; unsupported platforms fail instead of falling back to x86 tools.
+
 ## Other options and coverage decisions
 
 - Package selection already follows reverse Cargo dependencies, with full
@@ -144,7 +208,7 @@ DEDUPE_E2E_DUCKLAKE=1 <saved-test-executable> lake_e2e:: --test-threads=4
 - More shards duplicate compilation and consume the same account concurrency.
   A 226-second individual test sets a floor regardless of the shard count.
 - A prior compile-once/archive experiment covered 45 jobs and matched test
-  identities. Including producer/transfer cost, its median was 498 versus
+  identities before this native optimization. Including producer/transfer cost, its median was 498 versus
   464 seconds (7.33% slower); retain separate cached builds. See build-cost.md.
 - Replacing every Cargo test invocation with nextest was also measured slower
   for short tests in large statically linked executables. Keep nextest where
@@ -153,10 +217,9 @@ DEDUPE_E2E_DUCKLAKE=1 <saved-test-executable> lake_e2e:: --test-threads=4
 - Do not clone a preinitialized database for all Postgres tests: that would
   stop exercising bootstrap. A temporary filesystem can be measured without
   disabling fsync, synchronous commit, or full-page writes.
-- Free Linux ARM64 runners are another platform, not a drop-in label change:
-  the current verified tool installer explicitly supports Linux x86-64 only,
-  and compiler/extension caches are architecture-specific. This investigation
-  keeps the established runner architecture while addressing measured costs.
+- Free ARM64 is measured by the opt-in experiment above. macOS/Windows would
+  also change the platform and service-container support; neither is a
+  substitute for the Linux deployment compatibility gate.
 
 Cold native compilation and warm execution are separate outcomes. A profile
 change invalidates native compiler-cache entries; PRs must not gain write access

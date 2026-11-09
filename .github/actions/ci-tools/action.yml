@@ -15,7 +15,7 @@ runs:
     - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ~/.cache/er-ci-tools/archives
-        key: ci-tools-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.tools }}-${{ hashFiles('scripts/ci/tools.json') }}
+        key: ci-tools-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.tools }}-${{ hashFiles('scripts/ci/tools*.json') }}
     - name: Verify and install tools
       id: install
       shell: bash
