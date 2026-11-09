@@ -142,3 +142,109 @@ fn a_blank_approval_tag_is_no_approval_workflow() {
     .expect("a blank approval tag parses");
     assert!(blank.approval.is_empty());
 }
+
+#[test]
+fn nonfinite_yaml_numbers_cannot_be_hashed_or_published() {
+    let original = fixture("default.yaml");
+    let finite = load_config_str(original).unwrap();
+    let finite_hash = config_hash(&finite);
+
+    for (number, path) in [
+        (".nan", "thresholds.auto_merge"),
+        (".inf", "thresholds.auto_merge"),
+        ("-.inf", "thresholds.auto_merge"),
+    ] {
+        let yaml = original.replace("auto_merge: 0.95", &format!("auto_merge: {number}"));
+        let error = load_config_str(&yaml).unwrap_err();
+        assert!(error.to_string().contains(path), "{number}: {error}");
+    }
+
+    // Previously all three nonfinite values serialised as JSON null, so they
+    // produced the same hash even though the config values were distinct.
+    assert_eq!(
+        config_hash(&load_config_str(original).unwrap()),
+        finite_hash
+    );
+
+    for (yaml, path) in [
+        (
+            original.replace("review_low: 0.60", "review_low: .nan"),
+            "thresholds.review_low",
+        ),
+        (
+            original.replace(
+                "review_low: 0.60",
+                "review_low: 0.60\n  full_agreement_bits: .inf",
+            ),
+            "thresholds.full_agreement_bits",
+        ),
+        (
+            original.replace(
+                "review_low: 0.60",
+                "review_low: 0.60\n  disagreement_ratio: -.inf",
+            ),
+            "thresholds.disagreement_ratio",
+        ),
+        (
+            format!("{original}\nmodels:\n  - {{name: main, threshold: .nan}}\n"),
+            "models[0].threshold",
+        ),
+        (
+            original.replace(
+                "addr_postal: { levels: [exact, null] }",
+                "addr_postal: { levels: [exact, null], weight: .inf }",
+            ),
+            "comparisons.addr_postal.weight",
+        ),
+        (
+            format!(
+                "{original}\ncomparison_groups:\n  phones:\n    attributes: [phone, phone_e164]\n    levels: [exact]\n    weight: .nan\n"
+            ),
+            "comparison_groups.phones.weight",
+        ),
+        (
+            original.replace("recall: 0.85", "recall: -.inf"),
+            "training.recall",
+        ),
+        (
+            original.replace(
+                "cut_protect_probability: 1.0",
+                "cut_protect_probability: .inf",
+            ),
+            "clustering.cut_protect_probability",
+        ),
+        (
+            format!("{original}\ndata_quality:\n  completeness: {{email: .nan}}\n"),
+            "data_quality.completeness.email",
+        ),
+        (
+            format!(
+                "{original}\ndata_quality:\n  completeness: {{email: 1.0}}\n  weights:\n    completeness: .inf\n    validity: 1.0\n    freshness: 1.0\n"
+            ),
+            "data_quality.weights.completeness",
+        ),
+        (
+            format!(
+                "{original}\ndata_quality:\n  completeness: {{email: 1.0}}\n  weights:\n    completeness: 1.0\n    validity: -.inf\n    freshness: 1.0\n"
+            ),
+            "data_quality.weights.validity",
+        ),
+        (
+            format!(
+                "{original}\ndata_quality:\n  completeness: {{email: 1.0}}\n  weights:\n    completeness: 1.0\n    validity: 1.0\n    freshness: .nan\n"
+            ),
+            "data_quality.weights.freshness",
+        ),
+    ] {
+        let error = load_config_str(&yaml).unwrap_err();
+        assert!(error.to_string().contains(path), "{path}: {error}");
+    }
+}
+
+#[test]
+#[should_panic(expected = "config contains a nonfinite numeric field")]
+fn direct_config_hash_rejects_nonfinite_numbers() {
+    let mut config = load_config_str(fixture("default.yaml")).unwrap();
+    config.thresholds.auto_merge = f64::NAN;
+    let _ = config_hash(&config);
+}
