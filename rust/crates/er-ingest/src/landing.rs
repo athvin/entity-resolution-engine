@@ -92,6 +92,29 @@ pub fn land_base_delivery(
     ingest_batch_id: &str,
     ingested_at: &str,
 ) -> anyhow::Result<usize> {
+    // A generated append issues one INSERT per chunk. Keep all of a delivery
+    // inside one lake transaction so a later chunk cannot leave earlier rows.
+    let tx = session.connection().unchecked_transaction()?;
+    let landed = append_base_delivery(
+        session,
+        source,
+        spec,
+        csv_text,
+        ingest_batch_id,
+        ingested_at,
+    )?;
+    tx.commit()?;
+    Ok(landed)
+}
+
+fn append_base_delivery(
+    session: &Session,
+    source: &str,
+    spec: &SourceSpec,
+    csv_text: &str,
+    ingest_batch_id: &str,
+    ingested_at: &str,
+) -> anyhow::Result<usize> {
     let mut reader = csv::Reader::from_reader(csv_text.as_bytes());
     let headers: Vec<String> = reader.headers()?.iter().map(str::to_string).collect();
 
@@ -164,7 +187,10 @@ pub fn land_full_refresh(
     ingest_batch_id: &str,
     ingested_at: &str,
 ) -> anyhow::Result<usize> {
-    let landed = land_base_delivery(
+    // Omitted-key discovery must see this delivery's rows, and the resulting
+    // tombstones must commit with them. A failure in either phase rolls back.
+    let tx = session.connection().unchecked_transaction()?;
+    let landed = append_base_delivery(
         session,
         source,
         spec,
@@ -209,6 +235,7 @@ pub fn land_full_refresh(
         er_entities::raw_record::append_rows(session.connection(), &rows)
             .map_err(|e| anyhow::anyhow!("append tombstones into raw_records: {e}"))?;
     }
+    tx.commit()?;
     Ok(landed)
 }
 

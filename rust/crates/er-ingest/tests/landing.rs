@@ -4,7 +4,7 @@
 
 use dedupe_core::session::{Session, SessionOptions};
 use er_config::load_config_str;
-use er_ingest::landing::{create_raw_records_sql, land_base_delivery};
+use er_ingest::landing::{create_raw_records_sql, land_base_delivery, land_full_refresh};
 
 #[test]
 fn lands_base_10_into_raw_records() {
@@ -58,4 +58,101 @@ fn lands_base_10_into_raw_records() {
         .unwrap();
     assert_eq!(got.len(), 1);
     assert_eq!(got[0][0], want, "landed content_hash for crm:C001 differs");
+}
+
+#[test]
+fn failed_second_append_chunk_rolls_back_first_chunk_and_retries_cleanly() {
+    let config = load_config_str(include_str!("fixtures/default.yaml")).unwrap();
+    let session = Session::open_in_memory(SessionOptions::deterministic()).unwrap();
+    let ddl = create_raw_records_sql("lake.main.raw_records").replace(
+        "updated_at timestamp)",
+        "updated_at timestamp, PRIMARY KEY(id))",
+    );
+    session.execute_batch("ATTACH ':memory:' AS lake;").unwrap();
+    session.execute_batch(&ddl).unwrap();
+
+    let mut csv = String::from("crm_id,first_name\n");
+    for i in 0..500 {
+        csv.push_str(&format!("C{i:03},Name{i}\n"));
+    }
+    let valid_csv = csv.clone();
+    // The duplicate id lands in the second 500-row INSERT and fails there.
+    csv.push_str("C000,Name0\n");
+    assert!(
+        land_base_delivery(
+            &session,
+            "crm",
+            &config.sources["crm"],
+            &csv,
+            "failed-batch",
+            "2026-01-01",
+        )
+        .is_err()
+    );
+    assert_eq!(session.count("lake.main.raw_records").unwrap(), 0);
+
+    assert_eq!(
+        land_base_delivery(
+            &session,
+            "crm",
+            &config.sources["crm"],
+            &valid_csv,
+            "failed-batch",
+            "2026-01-01",
+        )
+        .unwrap(),
+        500
+    );
+    assert_eq!(session.count("lake.main.raw_records").unwrap(), 500);
+}
+
+#[test]
+fn failed_full_refresh_tombstone_rolls_back_delivery_and_retries_cleanly() {
+    let config = load_config_str(include_str!("fixtures/default.yaml")).unwrap();
+    let session = Session::open_in_memory(SessionOptions::deterministic()).unwrap();
+    let ddl = create_raw_records_sql("lake.main.raw_records").replace(
+        "updated_at timestamp)",
+        "updated_at timestamp, CHECK (is_deleted = false))",
+    );
+    session.execute_batch("ATTACH ':memory:' AS lake;").unwrap();
+    session.execute_batch(&ddl).unwrap();
+
+    let base = "crm_id,first_name\nA,Alice\nB,Bob\n";
+    land_base_delivery(
+        &session,
+        "crm",
+        &config.sources["crm"],
+        base,
+        "base",
+        "2026-01-01",
+    )
+    .unwrap();
+    let incomplete = "crm_id,first_name\nC,Carol\n";
+    assert!(
+        land_full_refresh(
+            &session,
+            "crm",
+            &config.sources["crm"],
+            incomplete,
+            "refresh",
+            "2026-01-02",
+        )
+        .is_err()
+    );
+    assert_eq!(session.count("lake.main.raw_records").unwrap(), 2);
+
+    let complete = "crm_id,first_name\nA,Alice\nB,Bob\nC,Carol\n";
+    assert_eq!(
+        land_full_refresh(
+            &session,
+            "crm",
+            &config.sources["crm"],
+            complete,
+            "refresh",
+            "2026-01-02",
+        )
+        .unwrap(),
+        3
+    );
+    assert_eq!(session.count("lake.main.raw_records").unwrap(), 5);
 }
