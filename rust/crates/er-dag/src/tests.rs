@@ -5,7 +5,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::assembly::AssemblyError;
-use crate::builder::DagBuilder;
+use crate::builder::{DagBuilder, NodeId};
 use crate::policy::{Backoff, ClassRule, NodePolicy, ResourceClass, TriggerRule};
 use crate::readiness::{PassAction, SettleVerdict, TaskState, Verdict, evaluate, pass, settle};
 use crate::resume::clear_closure;
@@ -239,6 +239,68 @@ fn assembly_refusals() {
     assert_eq!(
         d.build().unwrap_err(),
         AssemblyError::SegmentNotContiguous { segment: "s1" }
+    );
+}
+
+#[test]
+fn foreign_handles_are_rejected_even_when_the_index_exists() {
+    let mut first: DagBuilder<(), ()> = DagBuilder::new("first");
+    let local = first.source::<Init>();
+    let mut second: DagBuilder<(), ()> = DagBuilder::new("second");
+    let foreign = second.source::<Init>();
+    assert_eq!(local.id().index(), foreign.id().index());
+    let _ = first.then::<Ingest>((foreign,));
+    assert_eq!(
+        first.build().unwrap_err(),
+        AssemblyError::ForeignUpstream { task_id: "ingest" }
+    );
+
+    let mut first: DagBuilder<(), ()> = DagBuilder::new("first_control");
+    let _ = first.source::<Init>();
+    let _ = first.control::<Register>((foreign,));
+    assert_eq!(
+        first.build().unwrap_err(),
+        AssemblyError::ForeignUpstream {
+            task_id: "register"
+        }
+    );
+
+    let mut first: DagBuilder<(), ()> = DagBuilder::new("first_epilogue");
+    let _ = first.source::<Init>();
+    let _ = first.epilogue::<Finish>(&[foreign.id()], TriggerRule::AllTerminal);
+    assert_eq!(
+        first.build().unwrap_err(),
+        AssemblyError::ForeignUpstream { task_id: "finish" }
+    );
+}
+
+#[test]
+fn invalid_upstream_indices_are_rejected_before_readiness() {
+    let dag = linear_dag();
+    let mut nodes = dag.nodes;
+    let owner = nodes[1].upstream[0].builder_id;
+    let out_of_range = nodes.len();
+    nodes[1].upstream[0] = NodeId {
+        index: out_of_range,
+        builder_id: owner,
+    };
+    assert_eq!(
+        crate::assembly::assemble("out_of_range".into(), nodes).unwrap_err(),
+        AssemblyError::InvalidUpstream {
+            task_id: "ingest",
+            upstream: 5
+        }
+    );
+
+    let dag = linear_dag();
+    let mut nodes = dag.nodes;
+    nodes[1].upstream[0].index = 1;
+    assert_eq!(
+        crate::assembly::assemble("self_edge".into(), nodes).unwrap_err(),
+        AssemblyError::InvalidUpstream {
+            task_id: "ingest",
+            upstream: 1
+        }
     );
 }
 
