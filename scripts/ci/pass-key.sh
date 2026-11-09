@@ -97,8 +97,7 @@ esac
 # would block every PR on a diagnostic, and emitting a key over an empty tree
 # would be the one outcome that must never happen — every PR colliding on one
 # hash and skipping the gate on each other's green.
-n="$(printf '%s\n' "$tree"
-	printf '%s\n' "selection-v2:${SELECTION_KEY:-full}" | grep -c . || true)"
+n="$(printf '%s\n' "$tree" | grep -c . || true)"
 printf 'keyed paths: %s\n' "$n"
 if [ "${n:-0}" -eq 0 ]; then
 	echo "::warning::pass-key: $GATE matched no paths — emitting no key, so the gate runs"

@@ -152,12 +152,21 @@ keyat() { # <gate> <ref> -> the key pass-key.sh emits for that tree
 	sed -n 's/^key=//p' "$tmp/k"
 }
 
+# An empty keyed tree must never receive a reusable pass marker.
+empty_tree="$(git hash-object -t tree -w --stdin < /dev/null)"
+check 'key: empty Rust tree emits no key' '' "$(keyat rust "$empty_tree")"
+check 'key: empty frontend tree emits no key' '' "$(keyat frontend "$empty_tree")"
+
 differs() {
 	local name=$1 a=$2 b=$3
 	if [ -n "$a" ] && [ -n "$b" ] && [ "$a" != "$b" ]; then ok "$name"; else
 		no "$name" "two different non-empty keys" "$a / $b"
 	fi
 }
+
+differs 'key: selected packages participate in Rust key' \
+    "$(SELECTION_KEY='["er-match"]' keyfor rust)" \
+    "$(SELECTION_KEY='["er-server"]' keyfor rust)"
 
 # A path the Rust gate reads must move the rust key — and must not move the
 # frontend one.
