@@ -13,6 +13,7 @@ Local experiments precede pushing the implementation.
 - [First hosted result](#first-hosted-result)
 - [Local validation](#local-validation)
 - [Free runner experiment](#free-runner-experiment)
+- [Server scheduling follow-up](#server-scheduling-follow-up)
 - [Other options and coverage decisions](#other-options-and-coverage-decisions)
 
 ## Hosted baseline
@@ -159,8 +160,15 @@ complete integration-test identity lists match exactly.
 
 [PR run 42706135674](https://github.com/athvin/entity-resolution-engine/actions/runs/42706135674)
 passed the complete backend gate in **4m42s**, creation to final job completion.
-Against 8m11s–8m33s, this is **42.6–45.0% less elapsed time**. This is one full
-run, not a p95 or a guarantee for future cold dependency changes.
+Against 8m11s–8m33s, this is **42.6–45.0% less elapsed time**. The refreshed PR run
+[42708615045](https://github.com/athvin/entity-resolution-engine/actions/runs/42708615045)
+and merged main run
+[42709550901](https://github.com/athvin/entity-resolution-engine/actions/runs/42709550901)
+took **4m57s and 4m56s**. A fresh old-code base run
+[42706398325](https://github.com/athvin/entity-resolution-engine/actions/runs/42706398325)
+took **8m56s**. These are complete gates, not content-cache skips; they establish
+roughly 40–45% less elapsed time against the original baseline, not a p95 or a
+guarantee for future cold dependency changes.
 
 - All measured native C/C++ compilations were cache hits; the nightly cache
   did carry the optimized objects into the read-only PR run.
@@ -228,6 +236,81 @@ Logs, `/usr/bin/time -v` resources, CPU/image metadata and raw cache statistics
 are preserved as workflow artifacts. Tool and extension caches separate
 architectures; unsupported platforms fail instead of falling back to x86 tools.
 
+The first hardware comparison uses a separate Rust cache namespace because
+`CARGO_TARGET_DIR` and `CARGO_TERM_COLOR` were explicitly set. The target path
+was correct and native keys matched, but
+[sccache 0.19.0 hashes nearly every `CARGO_*` variable](https://github.com/mozilla/sccache/blob/v0.19.0/src/compiler/rust.rs#L1839).
+The three x86 priming phases consequently had 458 Rust misses; all three timed
+samples had 492 Rust hits, 322 native hits and zero misses. Their warm timings
+were 123.852 / 126.751 / 139.453 seconds for 1,051 identical test results.
+This remains a valid warm hardware comparison, but the priming cost is not the
+normal CI cache's cold cost. The follow-up removes both extra Cargo variables,
+keeps the same default target path, strips terminal colour only when parsing
+results, and rejects a nonstandard Cargo environment before building.
+
+All six machines passed their tests, but two ARM jobs correctly refused to
+publish a verdict because target identities differed between phases. Cargo's
+stderr target headings had overtaken stdout results relayed by the selected
+runner, assigning some `er-compile` results to its other target. Merging Cargo's
+stdout and stderr before relaying fixes the ordering at its source; a subprocess
+regression checks headings and test results stay ordered. This affects the
+measurement attribution, not test execution or failure propagation.
+
+The initial ARM samples were 136.819 / 141.176 / 143.661 seconds, with all native
+and Rust compilations cache hits. These preliminary values show no advantage
+over x86, but the failed identity checks mean this is not an accepted six-job
+comparison. Repeat after the ordering and Cargo-environment fixes; retain x86
+unless the complete comparison meets the stated improvement threshold.
+
+## Server scheduling follow-up
+
+The original server-rest job built `dedupe-cli`/`er-entity-diff`, then changed
+the feature graph to build `er-server` again. Its server lib/bin/doc tests were
+also already covered by the ordinary selected-package gate. The real-service
+coverage unique to its integration binary was the non-Postgres Account read
+case; every integration case can instead share the two server jobs that already
+build that binary.
+
+The follow-up runner discovers the complete integration test list from Cargo's
+exact server artifact. Non-Postgres cases and a–l go to the early slice; the
+complement goes to the late slice. The real token-rotation case starts in a
+separate process alongside the early slice, retaining its database, real HTTP
+requests, 61-second sleep, production interval and assertions. It owns its
+Postgres database and dynamic HTTP listeners and shares no lake fixtures with
+the other process. Other tests stay together to preserve their process-local
+coordination. Every listed test belongs to exactly one group; a missing rotation
+anchor, invalid list, missing artifact, unavailable services or failed process
+fails the gate. Complete output lines are relayed per process so concurrent
+libtest output cannot split a test identity.
+
+Local original slices passed: a–l 61.523s, m–z 154.354s, non-Postgres 10.290s.
+The proposed early slice passed in 138.807s on the busy workstation and 62.825s
+on a repeat, with the rotation test's own 62.81s duration intact. The late slice
+passed in 77.383s. These changing host loads do not establish a stable speedup;
+hosted full-gate timing remains the acceptance measurement. Coverage remains
+135 passed and the same two existing ignored tests across the 137 integration
+identities. After complete-line relaying, both real slices passed again in
+62.863s / 50.842s and their exact executed name/status lists matched the original
+137 results. The helper's subprocess test also proves that both groups start
+before either waits; compile, artifact and child failures are exercised.
+
+This removes the second server-rest build while keeping `dedupe-cli` and
+`er-entity-diff` unfiltered: their database tests do not all have `pg_` names.
+It does not clone initialized schemas or shorten the token refresh interval.
+
+The first full hosted follow-up run
+[42715632742](https://github.com/athvin/entity-resolution-engine/actions/runs/42715632742)
+passed in **3m51s**, versus the preceding merged 4m56s (22.0% less elapsed time).
+Against the original 8m11s–8m33s, this is 53.0–55.0% less elapsed time. Server
+job walls were 184 / 201 / 112 seconds for early / late / rest, versus
+208 / 267 / 208 on the preceding main run. Early and late compilation took
+83 / 89 seconds; execution took 69.604 / 77.573. Both server builds reported
+100% compiler-cache hits. All 137 integration results remained covered.
+This is one full hosted follow-up run; confirm on main and keep cold dependency
+changes separate. Final merged runs and the corrected hardware comparison are
+recorded in the post-merge ledger of
+[PR #1072](https://github.com/athvin/entity-resolution-engine/pull/1072).
+
 ## Other options and coverage decisions
 
 - Package selection already follows reverse Cargo dependencies, with full
@@ -243,7 +326,13 @@ architectures; unsupported platforms fail instead of falling back to x86 tools.
   A 226-second individual test sets a floor regardless of the shard count.
 - A prior compile-once/archive experiment covered 45 jobs and matched test
   identities before this native optimization. Including producer/transfer cost, its median was 498 versus
-  464 seconds (7.33% slower); retain separate cached builds. See build-cost.md.
+  464 seconds (7.33% slower). A fresh optimized comparison
+  [42713537379](https://github.com/athvin/entity-resolution-engine/actions/runs/42713537379)
+  passed all 45 jobs and matched exact test identities. Five baseline/archive
+  critical paths were 172/202, 187/221, 169/207, 178/188 and 180/178 seconds:
+  **median 178 versus 202 seconds, archive 13.48% slower**. This includes producer,
+  transfer and slowest consumer costs, excluding unrelated queue contention.
+  Retain separate cached builds. See build-cost.md.
 - Replacing every Cargo test invocation with nextest was also measured slower
   for short tests in large statically linked executables. Keep nextest where
   it supplies useful lake-test partitioning; preserve the Postgres suite's

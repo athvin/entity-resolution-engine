@@ -47,7 +47,6 @@ jobs:
             duckdb-extensions-${{ runner.arch }}-
       - name: Prime and measure with identical test identities
         env:
-          CARGO_TARGET_DIR: ${{ github.workspace }}/rust/target
           EXPERIMENT_HOSTED: ${{ runner.environment }}
         run: python3 scripts/ci/runner-experiment.py
       - name: Preserve measurements and failure logs
