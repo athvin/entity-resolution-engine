@@ -81,6 +81,9 @@ env:
 jobs:
   refresh:
     name: drift (${{ matrix.key }})
+    # The account-scoped R2 token is available only in this main-protected
+    # Environment. Other stacks keep their ref-based OIDC subject.
+    environment: ${{ matrix.key == 'core' && 'infra-apply-core' || '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -108,6 +111,13 @@ jobs:
         with:
           aws-region: us-east-2
           role-to-assume: arn:aws:iam::797781631727:role/er-ci-tf-drift
+      - name: cloudflare token
+        if: matrix.key == 'core' || matrix.key == 'prod'
+        env:
+          CF_TOKEN_FROM_ENVIRONMENT: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        # Same bounded credential sources as apply: account R2 token for core,
+        # zone DNS token from Secrets Manager for prod. No TF_VAR or plan value.
+        run: bash scripts/ci/tf-cloudflare-token.sh
       - name: terraform plan -refresh-only
         env:
           DIR: ${{ matrix.dir }}

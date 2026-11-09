@@ -453,7 +453,12 @@ data "aws_iam_policy_document" "ci_tf_drift_trust" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["${local.ci_tf_repo}:ref:refs/heads/main"]
+      # Core reads its R2 credential from a main-protected Environment; its
+      # subject changes, but the exact main-only workflow pin below still holds.
+      values = [
+        "${local.ci_tf_repo}:ref:refs/heads/main",
+        "${local.ci_tf_repo}:environment:infra-apply-core",
+      ]
     }
 
     condition {
