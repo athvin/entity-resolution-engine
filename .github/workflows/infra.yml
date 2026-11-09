@@ -124,6 +124,11 @@ concurrency:
 env:
   TF_IN_AUTOMATION: "1"
   AWS_REGION: us-east-2
+  # Public account identity must agree at plan and apply. With this set only
+  # on apply, the PR preview disables R2's count and proposes deleting the
+  # existing cache bucket. The non-refreshing R2 plan needs no API token.
+  # Stacks that do not declare this variable ignore the TF_VAR_ value.
+  TF_VAR_cloudflare_account_id: 9eefbe6bc92d11b2bb4e962494765a4c
 
 jobs:
   # Did this change touch Terraform, this workflow, or the scripts it calls?
@@ -505,19 +510,6 @@ jobs:
     # variable (a variable would land in the plan file and in state). So the
     # credential has to be present at plan AND at apply, and the only way the
     # two cannot drift is to set it once for the job.
-    env:
-      # The Cloudflare account that owns the R2 sccache bucket. NOT a secret —
-      # it appears in every dashboard URL and the S3-API endpoint is derived
-      # from it — so it belongs in the tree, exactly as `rust.yml` carries the
-      # AWS account id inside `SCCACHE_BUCKET`.
-      #
-      # Set unconditionally rather than per-leg: only `envs/core` declares this
-      # variable, and Terraform silently ignores a `TF_VAR_` for an undeclared
-      # one (unlike `-var`, which errors). A `matrix.key == 'core' && … || ''`
-      # expression would be worse than useless — it yields the empty STRING on
-      # the other legs, and `"" != null`, so `local.r2_enabled` would flip true
-      # with no account id to use.
-      TF_VAR_cloudflare_account_id: 9eefbe6bc92d11b2bb4e962494765a4c
       # `CLOUDFLARE_API_TOKEN` is DELIBERATELY NOT SET HERE, and that is a
       # correction rather than an omission — see the `cloudflare token` step.
       #

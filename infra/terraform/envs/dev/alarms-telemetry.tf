@@ -18,20 +18,24 @@
 # and look identical to a healthy pod until somebody queries for spans that
 # are not there.
 #
-# The alarm is SELF-REFERENCING on purpose: `spans_ended` rises whenever the
-# process does anything, `spans_exported` must then rise within seconds. A
+# The alarm is SELF-REFERENCING on purpose: spans ending must be followed by
+# exported spans within seconds. A
 # process doing nothing is quiet on both and does not page; a process whose
 # exports are wedged diverges, and that divergence is the only shape this
-# failure has. `RATE` over `Maximum` reads the cumulative counters the
-# PeriodicReader publishes every ~30s.
+# failure has. The SDK exports cumulative counters, but awsemf converts them
+# to interval deltas. Sum those deltas over the alarm period; RATE would
+# differentiate the throughput, not measure whether any spans were exported.
+# awsemf also injects OTelLib even with NoDimensionRollup, so both dimensions
+# must match the emitted series. Missing exported data means zero successes
+# (the instrument may never have recorded), not a reason to suppress detection.
 #
 # `task` is deliberately not alarmed: an exec-task pod flushes once at exit,
 # so a long run legitimately shows ended>0 and exported==0 for its whole
 # lifetime — the same expression would page on every slow job.
 #
 # The per-role series merges every pod of that role (the cardinality rule
-# forbids a pod dimension), so `Maximum` reads the HEALTHIEST pod's counter:
-# with replicas >= 2 one wedged pod hides behind the other. Correct today
+# forbids a pod dimension), so with replicas >= 2 one wedged pod can hide
+# behind another pod's successful exports. Correct today
 # because dev runs one pod per colour (charts/er-platform/values.yaml) — a
 # replicas bump there disarms this alarm, and nothing connects those files.
 # If api ever scales past one, this alarm needs a per-pod signal, not a tune.
@@ -54,9 +58,9 @@ resource "aws_cloudwatch_metric_alarm" "span_export_silence" {
     metric {
       namespace   = "ER/Dev"
       metric_name = "er.telemetry.spans_ended"
-      dimensions  = { "er.role" = each.key }
+      dimensions  = { "er.role" = each.key, OTelLib = "er-obs" }
       period      = 300
-      stat        = "Maximum"
+      stat        = "Sum"
     }
   }
 
@@ -65,15 +69,15 @@ resource "aws_cloudwatch_metric_alarm" "span_export_silence" {
     metric {
       namespace   = "ER/Dev"
       metric_name = "er.telemetry.spans_exported"
-      dimensions  = { "er.role" = each.key }
+      dimensions  = { "er.role" = each.key, OTelLib = "er-obs" }
       period      = 300
-      stat        = "Maximum"
+      stat        = "Sum"
     }
   }
 
   metric_query {
     id          = "silence"
-    expression  = "IF(RATE(ended)>0 AND RATE(exported)==0, 1, 0)"
+    expression  = "IF(ended>0 AND FILL(exported,0)==0, 1, 0)"
     label       = "spans ending but none exported"
     return_data = true
   }
