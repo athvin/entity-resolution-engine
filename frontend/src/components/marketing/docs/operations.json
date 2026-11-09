@@ -1,0 +1,1520 @@
+[
+  {
+    "id": "delete_orgs_by_org_api_keys_by_key_id",
+    "method": "DELETE",
+    "path": "/v1/orgs/{org}/api-keys/{key_id}",
+    "role": "operator",
+    "params": ["org", "key_id"],
+    "body": null,
+    "needs_body": false,
+    "summary": "revoke an API key, org-scoped and idempotent",
+    "response": null
+  },
+  {
+    "id": "delete_orgs_by_org_connections_by_connection_id",
+    "method": "DELETE",
+    "path": "/v1/orgs/{org}/connections/{connection_id}",
+    "role": "admin",
+    "params": ["org", "connection_id"],
+    "body": null,
+    "needs_body": false,
+    "summary": "retire a Salesforce connection",
+    "response": null
+  },
+  {
+    "id": "delete_orgs_by_org_datasets_by_ds_assertions_by_assertion_id",
+    "method": "DELETE",
+    "path": "/v1/orgs/{org}/datasets/{ds}/assertions/{assertion_id}",
+    "role": "steward",
+    "params": ["org", "ds", "assertion_id"],
+    "body": null,
+    "needs_body": false,
+    "summary": "stage an assertion retraction",
+    "response": null
+  },
+  {
+    "id": "delete_orgs_by_org_datasets_by_ds_entity_links_by_link_id",
+    "method": "DELETE",
+    "path": "/v1/orgs/{org}/datasets/{ds}/entity-links/{link_id}",
+    "role": "steward",
+    "params": ["org", "ds", "link_id"],
+    "body": null,
+    "needs_body": false,
+    "summary": "remove a link",
+    "response": null
+  },
+  {
+    "id": "delete_orgs_by_org_datasets_by_ds_schedules_by_schedule_id",
+    "method": "DELETE",
+    "path": "/v1/orgs/{org}/datasets/{ds}/schedules/{schedule_id}",
+    "role": "admin",
+    "params": ["org", "ds", "schedule_id"],
+    "body": null,
+    "needs_body": false,
+    "summary": "delete a schedule",
+    "response": null
+  },
+  {
+    "id": "delete_orgs_by_org_tags_by_tag_id",
+    "method": "DELETE",
+    "path": "/v1/orgs/{org}/tags/{tag_id}",
+    "role": "admin",
+    "params": ["org", "tag_id"],
+    "body": null,
+    "needs_body": false,
+    "summary": "retire a tag",
+    "response": null
+  },
+  {
+    "id": "delete_orgs_by_org_webhooks_by_webhook_id",
+    "method": "DELETE",
+    "path": "/v1/orgs/{org}/webhooks/{webhook_id}",
+    "role": "admin",
+    "params": ["org", "webhook_id"],
+    "body": null,
+    "needs_body": false,
+    "summary": "delete a webhook",
+    "response": null
+  },
+  {
+    "id": "get_healthz",
+    "method": "GET",
+    "path": "/healthz",
+    "role": "public",
+    "params": [],
+    "body": null,
+    "needs_body": false,
+    "summary": "liveness",
+    "response": { "envelope": "wrapped", "key": "status" }
+  },
+  {
+    "id": "get_readyz",
+    "method": "GET",
+    "path": "/readyz",
+    "role": "public",
+    "params": [],
+    "body": null,
+    "needs_body": false,
+    "summary": "readiness",
+    "response": { "envelope": "record", "keys": ["ready", "store", "reason"] }
+  },
+  {
+    "id": "get_audit",
+    "method": "GET",
+    "path": "/v1/audit",
+    "role": "operator",
+    "params": [],
+    "body": null,
+    "needs_body": false,
+    "summary": "the cross-tenant audit feed",
+    "response": { "envelope": "bare" }
+  },
+  {
+    "id": "get_jobs",
+    "method": "GET",
+    "path": "/v1/jobs",
+    "role": "operator",
+    "params": [],
+    "body": null,
+    "needs_body": false,
+    "summary": "the cross-org queue view",
+    "response": { "envelope": "bare" }
+  },
+  {
+    "id": "get_orgs",
+    "method": "GET",
+    "path": "/v1/orgs",
+    "role": "operator",
+    "params": [],
+    "body": null,
+    "needs_body": false,
+    "summary": "list all orgs",
+    "response": { "envelope": "bare" }
+  },
+  {
+    "id": "get_orgs_by_org",
+    "method": "GET",
+    "path": "/v1/orgs/{org}",
+    "role": "viewer",
+    "params": ["org"],
+    "body": null,
+    "needs_body": false,
+    "summary": "an org's detail",
+    "response": {
+      "envelope": "record",
+      "keys": ["id", "name", "state", "active_config_version", "drop_root", "resources"]
+    }
+  },
+  {
+    "id": "get_orgs_by_org_audit",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/audit",
+    "role": "admin",
+    "params": ["org"],
+    "body": null,
+    "needs_body": false,
+    "summary": "an org's audit feed",
+    "response": { "envelope": "bare" }
+  },
+  {
+    "id": "get_orgs_by_org_connections",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/connections",
+    "role": "viewer",
+    "params": ["org"],
+    "body": null,
+    "needs_body": false,
+    "summary": "list an org's active Salesforce connections",
+    "response": { "envelope": "bare" }
+  },
+  {
+    "id": "get_orgs_by_org_datasets",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets",
+    "role": "viewer",
+    "params": ["org"],
+    "body": null,
+    "needs_body": false,
+    "summary": "an org's datasets",
+    "response": { "envelope": "bare" }
+  },
+  {
+    "id": "get_orgs_by_org_datasets_by_ds",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}",
+    "role": "viewer",
+    "params": ["org", "ds"],
+    "body": null,
+    "needs_body": false,
+    "summary": "one dataset's detail",
+    "response": { "envelope": "scalar" }
+  },
+  {
+    "id": "get_orgs_by_org_datasets_by_ds_assertions",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}/assertions",
+    "role": "viewer",
+    "params": ["org", "ds"],
+    "body": null,
+    "needs_body": false,
+    "summary": "the assertion ledger",
+    "response": { "envelope": "page", "key": "items" }
+  },
+  {
+    "id": "get_orgs_by_org_datasets_by_ds_assertions_contradictions",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}/assertions:contradictions",
+    "role": "viewer",
+    "params": ["org", "ds"],
+    "body": null,
+    "needs_body": false,
+    "summary": "the unsatisfiable rule sets",
+    "response": { "envelope": "wrapped", "key": "contradictions" }
+  },
+  {
+    "id": "get_orgs_by_org_datasets_by_ds_blocking_estimate",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}/blocking-estimate",
+    "role": "viewer",
+    "params": ["org", "ds"],
+    "body": null,
+    "needs_body": false,
+    "summary": "what a run would cost before it runs",
+    "response": { "envelope": "scalar" }
+  },
+  {
+    "id": "get_orgs_by_org_datasets_by_ds_config",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}/config",
+    "role": "viewer",
+    "params": ["org", "ds"],
+    "body": null,
+    "needs_body": false,
+    "summary": "the org's active (published) config",
+    "response": { "envelope": "scalar" }
+  },
+  {
+    "id": "get_orgs_by_org_datasets_by_ds_config_versions",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}/config/versions",
+    "role": "viewer",
+    "params": ["org", "ds"],
+    "body": null,
+    "needs_body": false,
+    "summary": "list an org's config versions, newest first",
+    "response": { "envelope": "bare" }
+  },
+  {
+    "id": "get_orgs_by_org_datasets_by_ds_config_versions_by_version",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}/config/versions/{version}",
+    "role": "viewer",
+    "params": ["org", "ds", "version"],
+    "body": null,
+    "needs_body": false,
+    "summary": "one config version with its `yaml`",
+    "response": { "envelope": "scalar" }
+  },
+  {
+    "id": "get_orgs_by_org_datasets_by_ds_data_quality",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}/data-quality",
+    "role": "viewer",
+    "params": ["org", "ds"],
+    "body": null,
+    "needs_body": false,
+    "summary": "data-quality scores over the org's lake",
+    "response": { "envelope": "scalar" }
+  },
+  {
+    "id": "get_orgs_by_org_datasets_by_ds_duplicates",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}/duplicates",
+    "role": "viewer",
+    "params": ["org", "ds"],
+    "body": null,
+    "needs_body": false,
+    "summary": "duplicate groups (entities with >=2 members)",
+    "response": { "envelope": "record", "keys": ["items", "snapshot", "next_cursor"] }
+  },
+  {
+    "id": "get_orgs_by_org_datasets_by_ds_entities_by_entity_id_links",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}/entities/{entity_id}/links",
+    "role": "viewer",
+    "params": ["org", "ds", "entity_id"],
+    "body": null,
+    "needs_body": false,
+    "summary": "every link touching one entity, from either side",
+    "response": { "envelope": "wrapped", "key": "items" }
+  },
+  {
+    "id": "get_orgs_by_org_datasets_by_ds_golden_records",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}/golden-records",
+    "role": "viewer",
+    "params": ["org", "ds"],
+    "body": null,
+    "needs_body": false,
+    "summary": "a keyset page of the org's golden (resolved) records",
+    "response": { "envelope": "arrow", "cursor_in": "headers" }
+  },
+  {
+    "id": "get_orgs_by_org_datasets_by_ds_golden_records_by_entity_id",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}/golden-records/{entity_id}",
+    "role": "viewer",
+    "params": ["org", "ds", "entity_id"],
+    "body": null,
+    "needs_body": false,
+    "summary": "one resolved entity with members/lineage/events",
+    "response": { "envelope": "scalar" }
+  },
+  {
+    "id": "get_orgs_by_org_datasets_by_ds_ignore_words",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}/ignore-words",
+    "role": "viewer",
+    "params": ["org", "ds"],
+    "body": null,
+    "needs_body": false,
+    "summary": "the org's ignore-words dictionary",
+    "response": { "envelope": "wrapped", "key": "rows" }
+  },
+  {
+    "id": "get_orgs_by_org_datasets_by_ds_imports",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}/imports",
+    "role": "viewer",
+    "params": ["org", "ds"],
+    "body": null,
+    "needs_body": false,
+    "summary": "ingest-batch receipts",
+    "response": { "envelope": "page", "key": "items" }
+  },
+  {
+    "id": "get_orgs_by_org_datasets_by_ds_imports_recent",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}/imports/recent",
+    "role": "viewer",
+    "params": ["org", "ds"],
+    "body": null,
+    "needs_body": false,
+    "summary": "the most recent ingest-batch receipts",
+    "response": { "envelope": "bare" }
+  },
+  {
+    "id": "get_orgs_by_org_datasets_by_ds_insights",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}/insights",
+    "role": "viewer",
+    "params": ["org", "ds"],
+    "body": null,
+    "needs_body": false,
+    "summary": "the resolution metrics over time",
+    "response": { "envelope": "record", "keys": ["snapshot", "series"] }
+  },
+  {
+    "id": "get_orgs_by_org_datasets_by_ds_insights_sources",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}/insights/sources",
+    "role": "viewer",
+    "params": ["org", "ds"],
+    "body": null,
+    "needs_body": false,
+    "summary": "one run's per-source duplicate attribution",
+    "response": { "envelope": "record", "keys": ["snapshot", "run_id", "sources"] }
+  },
+  {
+    "id": "get_orgs_by_org_datasets_by_ds_jobs",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}/jobs",
+    "role": "viewer",
+    "params": ["org", "ds"],
+    "body": null,
+    "needs_body": false,
+    "summary": "list an org's jobs, newest first",
+    "response": { "envelope": "wrapped", "key": "jobs" }
+  },
+  {
+    "id": "get_orgs_by_org_datasets_by_ds_jobs_by_job_id",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}/jobs/{job_id}",
+    "role": "viewer",
+    "params": ["org", "ds", "job_id"],
+    "body": null,
+    "needs_body": false,
+    "summary": "one job by id",
+    "response": { "envelope": "bare" }
+  },
+  {
+    "id": "get_orgs_by_org_datasets_by_ds_jobs_by_job_id_tasks",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}/jobs/{job_id}/tasks",
+    "role": "viewer",
+    "params": ["org", "ds", "job_id"],
+    "body": null,
+    "needs_body": false,
+    "summary": "every try of every task of one job, in topological then try order, archived tries included",
+    "response": { "envelope": "wrapped", "key": "tasks" }
+  },
+  {
+    "id": "get_orgs_by_org_datasets_by_ds_labeling_next",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}/labeling/next",
+    "role": "viewer",
+    "params": ["org", "ds"],
+    "body": null,
+    "needs_body": false,
+    "summary": "what to label next",
+    "response": {
+      "envelope": "record",
+      "keys": ["items", "snapshot", "threshold", "band", "coverage"]
+    }
+  },
+  {
+    "id": "get_orgs_by_org_datasets_by_ds_labels",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}/labels",
+    "role": "viewer",
+    "params": ["org", "ds"],
+    "body": null,
+    "needs_body": false,
+    "summary": "the labels a tenant has recorded",
+    "response": { "envelope": "wrapped", "key": "labels" }
+  },
+  {
+    "id": "get_orgs_by_org_datasets_by_ds_lexicon",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}/lexicon",
+    "role": "viewer",
+    "params": ["org", "ds"],
+    "body": null,
+    "needs_body": false,
+    "summary": "the org's nickname lexicon",
+    "response": { "envelope": "wrapped", "key": "pairs" }
+  },
+  {
+    "id": "get_orgs_by_org_datasets_by_ds_match_preview",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}/match-preview",
+    "role": "steward",
+    "params": ["org", "ds"],
+    "body": null,
+    "needs_body": false,
+    "summary": "a READ-ONLY score-only match preview (frontend §7.16, `GET /v1/orgs/{org}/datasets/{ds}/match-preview`)",
+    "response": { "envelope": "scalar" }
+  },
+  {
+    "id": "get_orgs_by_org_datasets_by_ds_match_scores",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}/match-scores",
+    "role": "viewer",
+    "params": ["org", "ds"],
+    "body": null,
+    "needs_body": false,
+    "summary": "active pairwise match scores",
+    "response": { "envelope": "record", "keys": ["items", "snapshot", "next_cursor"] }
+  },
+  {
+    "id": "get_orgs_by_org_datasets_by_ds_merge_plans",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}/merge-plans",
+    "role": "viewer",
+    "params": ["org", "ds"],
+    "body": null,
+    "needs_body": false,
+    "summary": "merge plans for entities touched by a merge/member-add",
+    "response": { "envelope": "wrapped", "key": "items" }
+  },
+  {
+    "id": "get_orgs_by_org_datasets_by_ds_metrics",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}/metrics",
+    "role": "viewer",
+    "params": ["org", "ds"],
+    "body": null,
+    "needs_body": false,
+    "summary": "dashboard counters over the org's lake",
+    "response": { "envelope": "scalar" }
+  },
+  {
+    "id": "get_orgs_by_org_datasets_by_ds_models",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}/models",
+    "role": "viewer",
+    "params": ["org", "ds"],
+    "body": null,
+    "needs_body": false,
+    "summary": "the tenant's model versions",
+    "response": { "envelope": "record", "keys": ["items", "active"] }
+  },
+  {
+    "id": "get_orgs_by_org_datasets_by_ds_models_by_name_versions_by_version",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}/models/{name}/versions/{version}",
+    "role": "viewer",
+    "params": ["org", "ds", "name", "version"],
+    "body": null,
+    "needs_body": false,
+    "summary": "one model version with its document and weights",
+    "response": { "envelope": "scalar" }
+  },
+  {
+    "id": "get_orgs_by_org_datasets_by_ds_models_by_name_versions_by_version_evaluation",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}/models/{name}/versions/{version}/evaluation",
+    "role": "viewer",
+    "params": ["org", "ds", "name", "version"],
+    "body": null,
+    "needs_body": false,
+    "summary": "how a model version scored against its own labels",
+    "response": { "envelope": "scalar" }
+  },
+  {
+    "id": "get_orgs_by_org_datasets_by_ds_profile",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}/profile",
+    "role": "viewer",
+    "params": ["org", "ds"],
+    "body": null,
+    "needs_body": false,
+    "summary": "a corpus stage's profile",
+    "response": { "envelope": "scalar" }
+  },
+  {
+    "id": "get_orgs_by_org_datasets_by_ds_quality",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}/quality",
+    "role": "viewer",
+    "params": ["org", "ds"],
+    "body": null,
+    "needs_body": false,
+    "summary": "the corpus's data-quality picture",
+    "response": { "envelope": "scalar" }
+  },
+  {
+    "id": "get_orgs_by_org_datasets_by_ds_records",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}/records",
+    "role": "viewer",
+    "params": ["org", "ds"],
+    "body": null,
+    "needs_body": false,
+    "summary": "standardized source records by `record_key`",
+    "response": { "envelope": "record", "keys": ["items", "snapshot"] }
+  },
+  {
+    "id": "get_orgs_by_org_datasets_by_ds_reviews",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}/reviews",
+    "role": "viewer",
+    "params": ["org", "ds"],
+    "body": null,
+    "needs_body": false,
+    "summary": "the open-review queue",
+    "response": {
+      "envelope": "record",
+      "keys": ["items", "snapshot", "next_cursor", "unscored_hidden"]
+    }
+  },
+  {
+    "id": "get_orgs_by_org_datasets_by_ds_reviews_by_review_id",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}/reviews/{review_id}",
+    "role": "viewer",
+    "params": ["org", "ds", "review_id"],
+    "body": null,
+    "needs_body": false,
+    "summary": "one review by id",
+    "response": { "envelope": "scalar" }
+  },
+  {
+    "id": "get_orgs_by_org_datasets_by_ds_reviews_by_review_id_merge_group",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}/reviews/{review_id}/merge-group",
+    "role": "viewer",
+    "params": ["org", "ds", "review_id"],
+    "body": null,
+    "needs_body": false,
+    "summary": "the review merge dialog's group",
+    "response": { "envelope": "record", "keys": ["items", "total", "snapshot"] }
+  },
+  {
+    "id": "get_orgs_by_org_datasets_by_ds_runs",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}/runs",
+    "role": "viewer",
+    "params": ["org", "ds"],
+    "body": null,
+    "needs_body": false,
+    "summary": "the 20 most recent runs",
+    "response": { "envelope": "bare" }
+  },
+  {
+    "id": "get_orgs_by_org_datasets_by_ds_runs_by_run_id_entity_events",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}/runs/{run_id}/entity-events",
+    "role": "viewer",
+    "params": ["org", "ds", "run_id"],
+    "body": null,
+    "needs_body": false,
+    "summary": "one run's entity events",
+    "response": { "envelope": "record", "keys": ["items", "run_id", "snapshot", "next_cursor"] }
+  },
+  {
+    "id": "get_orgs_by_org_datasets_by_ds_s3_ingest",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}/s3-ingest",
+    "role": "viewer",
+    "params": ["org", "ds"],
+    "body": null,
+    "needs_body": false,
+    "summary": "this tenant's auto-ingest state",
+    "response": { "envelope": "record", "keys": ["bucket", "prefix", "sources"] }
+  },
+  {
+    "id": "get_orgs_by_org_datasets_by_ds_schedules",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}/schedules",
+    "role": "viewer",
+    "params": ["org", "ds"],
+    "body": null,
+    "needs_body": false,
+    "summary": "list an org's schedules",
+    "response": { "envelope": "bare" }
+  },
+  {
+    "id": "get_orgs_by_org_datasets_by_ds_segments",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}/segments",
+    "role": "viewer",
+    "params": ["org", "ds"],
+    "body": null,
+    "needs_body": false,
+    "summary": "the segments the active config declares",
+    "response": { "envelope": "wrapped", "key": "segments" }
+  },
+  {
+    "id": "get_orgs_by_org_datasets_by_ds_staged",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}/staged",
+    "role": "viewer",
+    "params": ["org", "ds"],
+    "body": null,
+    "needs_body": false,
+    "summary": "how many steward actions await the next reconcile",
+    "response": { "envelope": "wrapped", "key": "pending_count" }
+  },
+  {
+    "id": "get_orgs_by_org_datasets_by_ds_taggings",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}/taggings",
+    "role": "viewer",
+    "params": ["org", "ds"],
+    "body": null,
+    "needs_body": false,
+    "summary": "every tagging of one subject kind in one dataset",
+    "response": { "envelope": "record", "keys": ["taggings", "truncated"] }
+  },
+  {
+    "id": "get_orgs_by_org_datasets_by_ds_tags_by_tag_id_subjects",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}/tags/{tag_id}/subjects",
+    "role": "viewer",
+    "params": ["org", "ds", "tag_id"],
+    "body": null,
+    "needs_body": false,
+    "summary": "what carries a tag",
+    "response": { "envelope": "wrapped", "key": "subjects" }
+  },
+  {
+    "id": "get_orgs_by_org_tags",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/tags",
+    "role": "viewer",
+    "params": ["org"],
+    "body": null,
+    "needs_body": false,
+    "summary": "the tenant's tag vocabulary, or the tags on one subject",
+    "response": { "envelope": "wrapped", "key": "tags" }
+  },
+  {
+    "id": "get_orgs_by_org_webhooks",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/webhooks",
+    "role": "viewer",
+    "params": ["org"],
+    "body": null,
+    "needs_body": false,
+    "summary": "list an org's active webhooks",
+    "response": { "envelope": "bare" }
+  },
+  {
+    "id": "get_orgs_by_org_webhooks_deliveries",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/webhooks/deliveries",
+    "role": "viewer",
+    "params": ["org"],
+    "body": null,
+    "needs_body": false,
+    "summary": "the delivery log",
+    "response": { "envelope": "wrapped", "key": "deliveries" }
+  },
+  {
+    "id": "get_orgs_by_org_webhooks_events",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/webhooks/events",
+    "role": "viewer",
+    "params": ["org"],
+    "body": null,
+    "needs_body": false,
+    "summary": "the event types this system can emit",
+    "response": { "envelope": "wrapped", "key": "events" }
+  },
+  {
+    "id": "patch_orgs_by_org_datasets_by_ds",
+    "method": "PATCH",
+    "path": "/v1/orgs/{org}/datasets/{ds}",
+    "role": "admin",
+    "params": ["org", "ds"],
+    "body": {
+      "type": "object",
+      "properties": { "display_name": { "type": "string" } },
+      "required": [],
+      "additionalProperties": false
+    },
+    "needs_body": false,
+    "summary": "update a dataset's display fields",
+    "response": null
+  },
+  {
+    "id": "patch_orgs_by_org_datasets_by_ds_schedules_by_schedule_id",
+    "method": "PATCH",
+    "path": "/v1/orgs/{org}/datasets/{ds}/schedules/{schedule_id}",
+    "role": "admin",
+    "params": ["org", "ds", "schedule_id"],
+    "body": {
+      "type": "object",
+      "properties": { "enabled": { "type": "boolean" } },
+      "required": ["enabled"],
+      "additionalProperties": false
+    },
+    "needs_body": false,
+    "summary": "enable/disable a schedule",
+    "response": null
+  },
+  {
+    "id": "patch_orgs_by_org_resources",
+    "method": "PATCH",
+    "path": "/v1/orgs/{org}/resources",
+    "role": "operator",
+    "params": ["org"],
+    "body": {
+      "type": "object",
+      "properties": {
+        "duckdb_threads": { "type": "integer" },
+        "duckdb_memory_limit": { "type": "string" }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "needs_body": false,
+    "summary": "set an org's DuckDB parallelism knobs",
+    "response": null
+  },
+  {
+    "id": "post_email",
+    "method": "POST",
+    "path": "/v1/email",
+    "role": "operator",
+    "params": [],
+    "body": { "type": "object" },
+    "needs_body": false,
+    "summary": "send one transactional email",
+    "response": null
+  },
+  {
+    "id": "post_orgs",
+    "method": "POST",
+    "path": "/v1/orgs",
+    "role": "operator",
+    "params": [],
+    "body": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "config_path": { "type": "string" },
+        "env": { "type": "object", "additionalProperties": { "type": "string" } },
+        "drop_root": { "type": "string" },
+        "s3_ingest_bucket": { "type": "string" },
+        "s3_ingest_prefix": { "type": "string" }
+      },
+      "required": ["name"],
+      "additionalProperties": false
+    },
+    "needs_body": false,
+    "summary": "create an org",
+    "response": null
+  },
+  {
+    "id": "post_orgs_by_org_api_keys",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/api-keys",
+    "role": "operator",
+    "params": ["org"],
+    "body": {
+      "type": "object",
+      "properties": { "role": { "type": "string" } },
+      "required": ["role"],
+      "additionalProperties": false
+    },
+    "needs_body": false,
+    "summary": "mint an API key for an org, returning the plaintext ONCE",
+    "response": null
+  },
+  {
+    "id": "post_orgs_by_org_connections",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/connections",
+    "role": "admin",
+    "params": ["org"],
+    "body": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "instance_url": { "type": "string" },
+        "client_id": { "type": "string" },
+        "client_secret": { "type": "string" },
+        "auth_kind": { "type": "string" },
+        "api_version": { "type": "string" }
+      },
+      "required": ["name", "instance_url", "client_id", "client_secret"],
+      "additionalProperties": false
+    },
+    "needs_body": false,
+    "summary": "register a Salesforce connection",
+    "response": null
+  },
+  {
+    "id": "post_orgs_by_org_datasets",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/datasets",
+    "role": "operator",
+    "params": ["org"],
+    "body": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "display_name": { "type": "string" },
+        "entity_type": { "type": "string" },
+        "config_path": { "type": "string" },
+        "env": { "type": "object", "additionalProperties": { "type": "string" } },
+        "drop_root": { "type": "string" },
+        "s3_ingest_bucket": { "type": "string" },
+        "s3_ingest_prefix": { "type": "string" }
+      },
+      "required": ["name"],
+      "additionalProperties": false
+    },
+    "needs_body": false,
+    "summary": "create a dataset",
+    "response": null
+  },
+  {
+    "id": "post_orgs_by_org_datasets_by_ds_assertions",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/datasets/{ds}/assertions",
+    "role": "steward",
+    "params": ["org", "ds"],
+    "body": {
+      "type": "object",
+      "properties": {
+        "kind": { "type": "string" },
+        "a": { "type": "string" },
+        "b": { "type": "string" },
+        "note": { "type": "string" },
+        "apply_now": { "type": "boolean" }
+      },
+      "required": ["kind", "a", "b"],
+      "additionalProperties": false
+    },
+    "needs_body": false,
+    "summary": "stage an always/never assertion on a pair",
+    "response": null
+  },
+  {
+    "id": "post_orgs_by_org_datasets_by_ds_config_versions",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/datasets/{ds}/config/versions",
+    "role": "admin",
+    "params": ["org", "ds"],
+    "body": {
+      "type": "object",
+      "properties": { "yaml": { "type": "string" } },
+      "required": ["yaml"],
+      "additionalProperties": false
+    },
+    "needs_body": false,
+    "summary": "create a draft config version",
+    "response": null
+  },
+  {
+    "id": "post_orgs_by_org_datasets_by_ds_config_versions_by_version_publish",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/datasets/{ds}/config/versions/{version}/publish",
+    "role": "admin",
+    "params": ["org", "ds", "version"],
+    "body": null,
+    "needs_body": false,
+    "summary": "publish a draft config version",
+    "response": null
+  },
+  {
+    "id": "post_orgs_by_org_datasets_by_ds_entity_links",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/datasets/{ds}/entity-links",
+    "role": "steward",
+    "params": ["org", "ds"],
+    "body": {
+      "type": "object",
+      "properties": {
+        "parent_entity_id": { "type": "string" },
+        "child_entity_id": { "type": "string" },
+        "kind": { "type": "string" },
+        "note": { "type": "string" }
+      },
+      "required": ["parent_entity_id", "child_entity_id", "kind"],
+      "additionalProperties": false
+    },
+    "needs_body": false,
+    "summary": "link two entities WITHOUT merging them",
+    "response": null
+  },
+  {
+    "id": "post_orgs_by_org_datasets_by_ds_extract",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/datasets/{ds}/extract",
+    "role": "steward",
+    "params": ["org", "ds"],
+    "body": { "type": "object" },
+    "needs_body": false,
+    "summary": "pull an sObject from Salesforce into this dataset",
+    "response": null
+  },
+  {
+    "id": "post_orgs_by_org_datasets_by_ds_golden_records_by_entity_id_unmerge",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/datasets/{ds}/golden-records/{entity_id}/unmerge",
+    "role": "steward",
+    "params": ["org", "ds", "entity_id"],
+    "body": {
+      "type": "object",
+      "properties": {
+        "records": { "type": "array", "items": { "type": "string" } },
+        "apply_now": { "type": "boolean" }
+      },
+      "required": ["records"],
+      "additionalProperties": false
+    },
+    "needs_body": false,
+    "summary": "split members out of a resolved entity",
+    "response": null
+  },
+  {
+    "id": "post_orgs_by_org_datasets_by_ds_imports",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/datasets/{ds}/imports",
+    "role": "steward",
+    "params": ["org", "ds"],
+    "body": null,
+    "needs_body": false,
+    "summary": "upload one source's delivery",
+    "response": null
+  },
+  {
+    "id": "post_orgs_by_org_datasets_by_ds_jobs",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/datasets/{ds}/jobs",
+    "role": "steward",
+    "params": ["org", "ds"],
+    "body": {
+      "type": "object",
+      "properties": {
+        "kind": { "type": "string" },
+        "priority": { "type": "integer" },
+        "segment": { "type": "string" }
+      },
+      "required": ["kind"],
+      "additionalProperties": false
+    },
+    "needs_body": false,
+    "summary": "enqueue a job for an org",
+    "response": null
+  },
+  {
+    "id": "post_orgs_by_org_datasets_by_ds_jobs_by_job_id_cancel",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/datasets/{ds}/jobs/{job_id}/cancel",
+    "role": "steward",
+    "params": ["org", "ds", "job_id"],
+    "body": null,
+    "needs_body": false,
+    "summary": "cancel a job",
+    "response": null
+  },
+  {
+    "id": "post_orgs_by_org_datasets_by_ds_jobs_by_job_id_resume",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/datasets/{ds}/jobs/{job_id}/resume",
+    "role": "steward",
+    "params": ["org", "ds", "job_id"],
+    "body": null,
+    "needs_body": false,
+    "summary": "requeue a failed/canceled job",
+    "response": null
+  },
+  {
+    "id": "post_orgs_by_org_datasets_by_ds_jobs_by_job_id_tasks_by_task_id_clear",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/datasets/{ds}/jobs/{job_id}/tasks/{task_id}/clear",
+    "role": "steward",
+    "params": ["org", "ds", "job_id", "task_id"],
+    "body": {
+      "type": "object",
+      "properties": { "retries": { "type": "integer" }, "resource_class": { "type": "string" } },
+      "required": [],
+      "additionalProperties": false
+    },
+    "needs_body": false,
+    "summary": "clear one task and everything downstream of it, so it re-runs WITHOUT re-running the whole job",
+    "response": null
+  },
+  {
+    "id": "post_orgs_by_org_datasets_by_ds_labels",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/datasets/{ds}/labels",
+    "role": "steward",
+    "params": ["org", "ds"],
+    "body": {
+      "type": "object",
+      "properties": {
+        "rec_a_key": { "type": "string" },
+        "rec_b_key": { "type": "string" },
+        "verdict": { "type": "string" },
+        "note": { "type": "string" },
+        "model_version": { "type": "string" },
+        "score_at_label": { "type": "number" }
+      },
+      "required": ["rec_a_key", "rec_b_key", "verdict"],
+      "additionalProperties": false
+    },
+    "needs_body": false,
+    "summary": "record a verdict on a pair",
+    "response": null
+  },
+  {
+    "id": "post_orgs_by_org_datasets_by_ds_mass_update",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/datasets/{ds}/mass-update",
+    "role": "steward",
+    "params": ["org", "ds"],
+    "body": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "entity_id": { "type": "string" },
+              "attribute": { "type": "string" },
+              "value": { "type": "string" },
+              "clear": { "type": "boolean" }
+            },
+            "required": ["entity_id", "attribute"],
+            "additionalProperties": false
+          }
+        },
+        "apply_now": { "type": "boolean" }
+      },
+      "required": ["items"],
+      "additionalProperties": false
+    },
+    "needs_body": false,
+    "summary": "stage golden field overrides across many entities in one window",
+    "response": null
+  },
+  {
+    "id": "post_orgs_by_org_datasets_by_ds_merges",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/datasets/{ds}/merges",
+    "role": "steward",
+    "params": ["org", "ds"],
+    "body": {
+      "type": "object",
+      "properties": {
+        "records": { "type": "array", "items": { "type": "string" } },
+        "master": { "type": "string" },
+        "overrides": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "attribute": { "type": "string" },
+              "value": { "type": "string" },
+              "clear": { "type": "boolean" }
+            },
+            "required": ["attribute"],
+            "additionalProperties": false
+          }
+        },
+        "review_id": { "type": "string" },
+        "apply_now": { "type": "boolean" }
+      },
+      "required": ["records", "master"],
+      "additionalProperties": false
+    },
+    "needs_body": false,
+    "summary": "merge a GROUP of records from the review dialog",
+    "response": null
+  },
+  {
+    "id": "post_orgs_by_org_datasets_by_ds_models_versions",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/datasets/{ds}/models/versions",
+    "role": "admin",
+    "params": ["org", "ds"],
+    "body": {
+      "type": "object",
+      "properties": {
+        "model_json": { "type": "string" },
+        "model_version_label": { "type": "string" },
+        "name": { "type": "string" },
+        "tf_snapshot_id": { "type": "string" },
+        "provenance": {}
+      },
+      "required": ["model_json", "model_version_label"],
+      "additionalProperties": false
+    },
+    "needs_body": false,
+    "summary": "mint a new model version",
+    "response": null
+  },
+  {
+    "id": "post_orgs_by_org_datasets_by_ds_models_by_name_versions_by_version_activate",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/datasets/{ds}/models/{name}/versions/{version}/activate",
+    "role": "admin",
+    "params": ["org", "ds", "name", "version"],
+    "body": null,
+    "needs_body": false,
+    "summary": "activate a model version",
+    "response": null
+  },
+  {
+    "id": "post_orgs_by_org_datasets_by_ds_models_compile",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/datasets/{ds}/models:compile",
+    "role": "admin",
+    "params": ["org", "ds"],
+    "body": null,
+    "needs_body": false,
+    "summary": "compile the org's ACTIVE config into a new draft model version",
+    "response": null
+  },
+  {
+    "id": "post_orgs_by_org_datasets_by_ds_profile",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/datasets/{ds}/profile",
+    "role": "steward",
+    "params": ["org", "ds"],
+    "body": { "type": "object" },
+    "needs_body": false,
+    "summary": "profile a corpus stage",
+    "response": null
+  },
+  {
+    "id": "post_orgs_by_org_datasets_by_ds_records_protect",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/datasets/{ds}/records/protect",
+    "role": "steward",
+    "params": ["org", "ds"],
+    "body": {
+      "type": "object",
+      "properties": {
+        "record_key": { "type": "string" },
+        "record_keys": { "type": "array", "items": { "type": "string" } },
+        "apply_now": { "type": "boolean" }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "needs_body": false,
+    "summary": "pin a record master for its entity",
+    "response": null
+  },
+  {
+    "id": "post_orgs_by_org_datasets_by_ds_records_suppress",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/datasets/{ds}/records/suppress",
+    "role": "steward",
+    "params": ["org", "ds"],
+    "body": {
+      "type": "object",
+      "properties": {
+        "record_key": { "type": "string" },
+        "record_keys": { "type": "array", "items": { "type": "string" } },
+        "apply_now": { "type": "boolean" }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "needs_body": false,
+    "summary": "exclude a record from golden assembly",
+    "response": null
+  },
+  {
+    "id": "post_orgs_by_org_datasets_by_ds_records_unprotect",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/datasets/{ds}/records/unprotect",
+    "role": "steward",
+    "params": ["org", "ds"],
+    "body": {
+      "type": "object",
+      "properties": {
+        "record_key": { "type": "string" },
+        "record_keys": { "type": "array", "items": { "type": "string" } },
+        "apply_now": { "type": "boolean" }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "needs_body": false,
+    "summary": "retract a record protection",
+    "response": null
+  },
+  {
+    "id": "post_orgs_by_org_datasets_by_ds_records_unsuppress",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/datasets/{ds}/records/unsuppress",
+    "role": "steward",
+    "params": ["org", "ds"],
+    "body": {
+      "type": "object",
+      "properties": {
+        "record_key": { "type": "string" },
+        "record_keys": { "type": "array", "items": { "type": "string" } },
+        "apply_now": { "type": "boolean" }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "needs_body": false,
+    "summary": "retract a record suppression",
+    "response": null
+  },
+  {
+    "id": "post_orgs_by_org_datasets_by_ds_records_ingest",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/datasets/{ds}/records:ingest",
+    "role": "steward",
+    "params": ["org", "ds"],
+    "body": {
+      "type": "object",
+      "properties": { "source": { "type": "string" }, "records": { "type": "array", "items": {} } },
+      "required": ["source", "records"],
+      "additionalProperties": false
+    },
+    "needs_body": false,
+    "summary": "push records as JSON",
+    "response": null
+  },
+  {
+    "id": "post_orgs_by_org_datasets_by_ds_resolve",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/datasets/{ds}/resolve",
+    "role": "viewer",
+    "params": ["org", "ds"],
+    "body": {
+      "type": "object",
+      "properties": {
+        "source": { "type": "string" },
+        "record": {},
+        "limit": { "type": "integer" }
+      },
+      "required": ["source", "record"],
+      "additionalProperties": false
+    },
+    "needs_body": false,
+    "summary": "resolve an UNSAVED record against the corpus",
+    "response": null
+  },
+  {
+    "id": "post_orgs_by_org_datasets_by_ds_resume",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/datasets/{ds}/resume",
+    "role": "admin",
+    "params": ["org", "ds"],
+    "body": null,
+    "needs_body": false,
+    "summary": "resume a suspended dataset",
+    "response": null
+  },
+  {
+    "id": "post_orgs_by_org_datasets_by_ds_reviews_bulk_resolve",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/datasets/{ds}/reviews/bulk-resolve",
+    "role": "steward",
+    "params": ["org", "ds"],
+    "body": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": { "review_id": { "type": "string" }, "resolution": { "type": "string" } },
+            "required": ["review_id", "resolution"],
+            "additionalProperties": false
+          }
+        },
+        "apply_now": { "type": "boolean" }
+      },
+      "required": ["items"],
+      "additionalProperties": false
+    },
+    "needs_body": false,
+    "summary": "stage many review resolutions in one window",
+    "response": null
+  },
+  {
+    "id": "post_orgs_by_org_datasets_by_ds_reviews_by_review_id_resolve",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/datasets/{ds}/reviews/{review_id}/resolve",
+    "role": "steward",
+    "params": ["org", "ds", "review_id"],
+    "body": {
+      "type": "object",
+      "properties": { "resolution": { "type": "string" } },
+      "required": ["resolution"],
+      "additionalProperties": false
+    },
+    "needs_body": false,
+    "summary": "stage a review resolution",
+    "response": null
+  },
+  {
+    "id": "post_orgs_by_org_datasets_by_ds_schedules",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/datasets/{ds}/schedules",
+    "role": "admin",
+    "params": ["org", "ds"],
+    "body": {
+      "type": "object",
+      "properties": { "kind": { "type": "string" }, "cron": { "type": "string" }, "params": {} },
+      "required": ["kind", "cron"],
+      "additionalProperties": false
+    },
+    "needs_body": false,
+    "summary": "create an API-sourced schedule",
+    "response": null
+  },
+  {
+    "id": "post_orgs_by_org_datasets_by_ds_suspend",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/datasets/{ds}/suspend",
+    "role": "admin",
+    "params": ["org", "ds"],
+    "body": null,
+    "needs_body": false,
+    "summary": "suspend an active dataset",
+    "response": null
+  },
+  {
+    "id": "post_orgs_by_org_datasets_by_ds_tags_by_tag_id_apply",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/datasets/{ds}/tags/{tag_id}/apply",
+    "role": "steward",
+    "params": ["org", "ds", "tag_id"],
+    "body": {
+      "type": "object",
+      "properties": { "subject_type": { "type": "string" }, "subject_id": { "type": "string" } },
+      "required": ["subject_type", "subject_id"],
+      "additionalProperties": false
+    },
+    "needs_body": false,
+    "summary": "apply or remove a tag",
+    "response": null
+  },
+  {
+    "id": "post_orgs_by_org_datasets_by_ds_tags_by_tag_id_unapply",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/datasets/{ds}/tags/{tag_id}/unapply",
+    "role": "steward",
+    "params": ["org", "ds", "tag_id"],
+    "body": {
+      "type": "object",
+      "properties": { "subject_type": { "type": "string" }, "subject_id": { "type": "string" } },
+      "required": ["subject_type", "subject_id"],
+      "additionalProperties": false
+    },
+    "needs_body": false,
+    "summary": "remove a tag from a subject",
+    "response": null
+  },
+  {
+    "id": "post_orgs_by_org_resume",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/resume",
+    "role": "operator",
+    "params": ["org"],
+    "body": null,
+    "needs_body": false,
+    "summary": "resume a suspended org",
+    "response": null
+  },
+  {
+    "id": "post_orgs_by_org_suspend",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/suspend",
+    "role": "operator",
+    "params": ["org"],
+    "body": null,
+    "needs_body": false,
+    "summary": "suspend an active org",
+    "response": null
+  },
+  {
+    "id": "post_orgs_by_org_tags",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/tags",
+    "role": "steward",
+    "params": ["org"],
+    "body": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "apply_min_role": { "type": "string" }
+      },
+      "required": ["name"],
+      "additionalProperties": false
+    },
+    "needs_body": false,
+    "summary": "add a label to the vocabulary",
+    "response": null
+  },
+  {
+    "id": "post_orgs_by_org_webhooks",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/webhooks",
+    "role": "admin",
+    "params": ["org"],
+    "body": {
+      "type": "object",
+      "properties": {
+        "url": { "type": "string" },
+        "events": { "type": "array", "items": { "type": "string" } },
+        "secret": { "type": "string" }
+      },
+      "required": ["url"],
+      "additionalProperties": false
+    },
+    "needs_body": false,
+    "summary": "register an outbound webhook",
+    "response": null
+  },
+  {
+    "id": "put_orgs_by_org_datasets_by_ds_ignore_words",
+    "method": "PUT",
+    "path": "/v1/orgs/{org}/datasets/{ds}/ignore-words",
+    "role": "steward",
+    "params": ["org", "ds"],
+    "body": {
+      "type": "object",
+      "properties": {
+        "rows": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": { "word": { "type": "string" }, "dictionary": { "type": "string" } },
+            "required": ["word", "dictionary"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["rows"],
+      "additionalProperties": false
+    },
+    "needs_body": false,
+    "summary": "replace the org's ignore-words dictionary",
+    "response": null
+  },
+  {
+    "id": "put_orgs_by_org_datasets_by_ds_lexicon",
+    "method": "PUT",
+    "path": "/v1/orgs/{org}/datasets/{ds}/lexicon",
+    "role": "steward",
+    "params": ["org", "ds"],
+    "body": {
+      "type": "object",
+      "properties": {
+        "pairs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": { "variant_a": { "type": "string" }, "variant_b": { "type": "string" } },
+            "required": ["variant_a", "variant_b"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["pairs"],
+      "additionalProperties": false
+    },
+    "needs_body": false,
+    "summary": "replace the org's nickname lexicon",
+    "response": null
+  }
+]

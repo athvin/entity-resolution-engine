@@ -12,6 +12,10 @@ that claim rather than on decoration. Its defining property:
 > badges, no palette. Hierarchy comes from type scale, weight, spacing and
 > motion. ([references/frontend-design.md](references/frontend-design.md) §3.3)
 
+The marketing audit demonstration has an explicit user-requested exception:
+scoped red and green state tokens, paired with labels and shapes. See
+`landing-page`; no app palette or general utility exception follows from it.
+
 This is a standing constraint on every surface and component, not a launch-phase
 simplification — and it is **ESLint-enforced**, because for a while it was
 enforced by nothing and component files drifted into emerald, red and amber to

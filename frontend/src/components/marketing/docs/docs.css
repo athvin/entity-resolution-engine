@@ -1,0 +1,234 @@
+.developer-docs {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 820px);
+  gap: 70px;
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 64px 32px 100px;
+}
+.docs-sidebar {
+  position: sticky;
+  top: 96px;
+  align-self: start;
+  max-height: calc(100svh - 120px);
+  overflow: auto;
+}
+.docs-sidebar nav {
+  display: flex;
+  flex-direction: column;
+  margin-top: 20px;
+}
+.docs-sidebar a,
+.docs-mobile-contents a {
+  font-size: 13px;
+  color: var(--muted-foreground);
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 8px 4px;
+}
+.docs-sidebar a:hover,
+.docs-mobile-contents a:hover {
+  color: var(--foreground);
+}
+.docs-mobile-contents {
+  display: none;
+}
+.docs-article {
+  min-width: 0;
+}
+.docs-article section {
+  scroll-margin-top: 100px;
+  padding-bottom: 48px;
+  margin-bottom: 48px;
+  border-bottom: 1px solid var(--border);
+}
+.docs-article h1 {
+  font-size: clamp(40px, 5vw, 64px);
+  font-weight: 500;
+  letter-spacing: -0.05em;
+  line-height: 1.1;
+  margin: 24px 0;
+}
+.docs-article h2 {
+  font-size: 30px;
+  letter-spacing: -0.035em;
+  line-height: 1.2;
+  font-weight: 500;
+  margin: 24px 0;
+}
+.docs-article h3 {
+  font-size: 18px;
+  font-weight: 500;
+  margin: 16px 0;
+}
+.docs-article p,
+.docs-article li {
+  font-size: 15px;
+  line-height: 1.85;
+  color: var(--muted-foreground);
+  margin: 16px 0;
+}
+.docs-article .docs-lead {
+  font-size: 21px;
+  line-height: 1.6;
+  color: var(--foreground);
+}
+.docs-article strong {
+  color: var(--foreground);
+  font-weight: 500;
+}
+.docs-article code {
+  font-size: 0.85em;
+  overflow-wrap: anywhere;
+  color: var(--foreground);
+}
+.docs-article ol {
+  list-style: decimal;
+  padding-left: 22px;
+  margin: 24px 0;
+}
+.docs-article li {
+  padding-left: 8px;
+  margin: 8px 0;
+}
+.docs-article table {
+  width: 100%;
+  font-size: 13px;
+  border-collapse: collapse;
+  margin: 24px 0;
+}
+.docs-article th,
+.docs-article td {
+  text-align: left;
+  padding: 14px 12px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+  line-height: 1.6;
+}
+.docs-article th {
+  font-weight: 500;
+}
+.docs-article td {
+  color: var(--muted-foreground);
+}
+.docs-code {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin: 24px 0;
+  overflow: hidden;
+}
+.docs-code-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  background: var(--muted);
+  padding: 8px 12px;
+  font-size: 11px;
+}
+.docs-code-bar > span {
+  overflow-wrap: anywhere;
+}
+.docs-code-bar button {
+  flex: none;
+  min-height: 44px;
+}
+.docs-code pre {
+  padding: 18px;
+  font-size: 13px;
+  line-height: 1.8;
+  overflow: auto;
+  max-height: 550px;
+}
+.docs-code pre code {
+  font-size: inherit;
+}
+.docs-endpoints {
+  border-top: 1px solid var(--border);
+}
+.docs-endpoints details,
+.docs-schema {
+  border-bottom: 1px solid var(--border);
+  scroll-margin-top: 100px;
+}
+.docs-endpoints summary {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  cursor: pointer;
+  padding: 18px 0;
+  min-height: 56px;
+}
+.docs-endpoints summary code {
+  flex: 1;
+  min-width: 0;
+  line-height: 1.8;
+  font-size: 12px;
+}
+.docs-method {
+  width: 48px;
+  flex: none;
+  font-size: 10px;
+  font-weight: 600;
+}
+.docs-role {
+  font-size: 10px;
+  color: var(--muted-foreground);
+}
+.docs-endpoint-body {
+  padding: 0 0 24px;
+}
+.docs-endpoint-body dl {
+  font-size: 13px;
+  line-height: 1.7;
+}
+.docs-endpoint-body dt {
+  margin-top: 16px;
+  font-weight: 500;
+}
+.docs-endpoint-body dd {
+  color: var(--muted-foreground);
+}
+.docs-schema summary {
+  cursor: pointer;
+  padding: 16px 0;
+  font-size: 14px;
+  min-height: 44px;
+}
+@media (max-width: 800px) {
+  .developer-docs {
+    display: block;
+    padding: 24px 20px 64px;
+  }
+  .docs-sidebar {
+    display: none;
+  }
+  .docs-mobile-contents {
+    display: block;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 48px;
+  }
+  .docs-mobile-contents summary {
+    min-height: 48px;
+    cursor: pointer;
+    font-size: 14px;
+  }
+  .docs-mobile-contents nav {
+    padding-bottom: 16px;
+  }
+  .docs-article h2 {
+    font-size: 26px;
+  }
+  .docs-role {
+    display: none;
+  }
+  .docs-code pre {
+    font-size: 11px;
+    padding: 12px;
+  }
+  .docs-article th,
+  .docs-article td {
+    padding: 12px 8px;
+  }
+}

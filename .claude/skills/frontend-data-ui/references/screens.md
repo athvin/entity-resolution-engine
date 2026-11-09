@@ -84,6 +84,7 @@ false the moment a screen renders different markup below `lg`.
 - `/admin/tenants/new`
 - `/datasets-dev/datasets`
 - `/datasets-dev/datasets/new`
+- `/docs`
 - `/login`
 - `/reset`
 

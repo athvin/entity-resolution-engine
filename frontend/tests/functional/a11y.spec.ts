@@ -38,6 +38,14 @@ const SCREENS: {
     },
   },
   {
+    name: "developer-docs",
+    path: "/docs",
+    anonymous: true,
+    ready: async (page) => {
+      await expect(page.getByTestId("developer-docs")).toBeVisible();
+    },
+  },
+  {
     name: "dashboard",
     path: `/${ORG}/${DS}/dashboard`,
     ready: async (page) => {
@@ -292,7 +300,10 @@ const SCREENS: {
 test.describe("accessibility", () => {
   for (const screen of SCREENS) {
     test(`${screen.name} has no serious axe violations`, async ({ page, isMobile }) => {
-      test.skip(isMobile, "one axe pass per screen; the desktop DOM is a superset");
+      test.skip(
+        isMobile && !screen.anonymous,
+        "app screens share their desktop DOM; marketing also checks phone composition",
+      );
       // Reduced motion, for two reasons that happen to agree.
       //
       // The correctness one: an accessibility audit should scan the state a

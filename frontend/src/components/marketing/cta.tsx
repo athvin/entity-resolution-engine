@@ -16,6 +16,9 @@ export function ClosingCta() {
               {CLOSING_CTA.cta}
             </Link>
           </Button>
+          <Link href="/docs" className="story-text-link ml-6">
+            Read the developer docs →
+          </Link>
         </div>
       </div>
     </section>

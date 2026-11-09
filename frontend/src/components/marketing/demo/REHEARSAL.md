@@ -1,107 +1,83 @@
-# DupeZero flow illustrations
+# Rehearsal: connected entity-resolution story
 
-## Story and framing
+Gold: Stageshow `payout-flow`. Retained cursorless overlapping arrivals, visible
+relationships and a persistent payoff. Replaced the payment UI with open system
+diagrams at the user's request. The clean hero leads into stacked ingress,
+dataset, dedupe and egress panels. Actual node bounds determine the internal
+wires and the paths connecting adjacent panels across their boundaries.
 
-The headline remains **Entity resolution you can defend.** Resolve, Review,
-Reconcile are the core principles. The hero demonstrates a complete system:
-Google Sheets, Salesforce, SFTP, S3, Shopify and a custom API feed configurable
-datasets; standardization and evidence-based matching produce consolidated or
-independent entities; golden records fan out to destinations.
+The organization owns independent example datasets. Source selections persist per
+dataset and volume controls update the illustrative stream. ZoomInfo is labelled
+a proposed custom integration in both directions. No price or throughput estimate
+is claimed. The separate static Docs route describes the committed contracts and
+their gaps.
 
-Ingress, Northstar and egress have separate visual boundaries. Northstar is the
-example organization containing DupeZero and its datasets. Commerce, Operations
-and Shared index demonstrate overlapping source assignments and independent
-matching rules. Dataset selection highlights the relevant routes without
-reframing or scrolling the page. The separate review illustration demonstrates
-configuration, AI-assisted review, human approval and unmerge.
+## Motion
 
-The Stageshow choreography reference is `payout-flow`: overlapping arrivals,
-visible relationships and a persistent payoff. These are open system diagrams
-at the user's request. Desktop uses a horizontal graph; compact uses a vertical
-layout with reserved geometry. Kit text treatments, existing Lucide icons and
-product buttons inherit the application's grayscale tokens.
+Pipeline marks follow six-second native Web Animation timelines; inter-panel
+trails use ten seconds. Shapes distinguish dirty, standardized, matched and
+resolved records. Pause, offscreen visibility and hidden tabs hold the timeline.
+No per-frame React updates are needed for these paths.
 
-## Motion and interaction
+The explicit audit action starts a twelve-second sequence: red flagged match,
+evidence, split into two green entities, reconciliation, retained correction.
+Labels and particles share one native clock; replay is an explicit action. The
+red and green are a user-requested exception scoped to marketing. The static
+poster, reduced-motion mode and no-JavaScript rendering retain the explanation.
 
-The main flow repeats on six-second timelines, with eight or twelve staggered
-marks on the busiest routes. Shape carries state: dashed diamond for dirty,
-outline circle for standardized, linked circles for matched, filled circle for
-deduped and outline square for alone. Matching branches visibly converge; the
-unmatched branch stays separate. A persistent key explains all five states.
+## Captures and gate
 
-SVG path geometry is sampled once into native Web Animations keyframes. There
-are no per-frame React updates. Invisible packets cannot intercept pointer
-input. Hover holds the streams, double-click opens the record decision, and tap
-provides the equivalent touch action. The legend and toolbar provide stable
-keyboard-accessible inspection controls. A dismissible dialog shows the selected
-dataset, before/after values and decision evidence.
+November 9 review artifacts (local, not shipped):
 
-Audit diverts a consolidated record, separates it into two marks and returns
-them to reconciliation. The example retains the correction and its explanation.
-An explicit audit action scrolls its branch into view. Review policy examples
-remain in the separate review flow: configuration proceeds automatically,
-AI-assisted review requires accepting a recommendation, and human review waits
-for approval. These are illustrative decisions, not live integrations or
-measured performance claims.
+- `/tmp/dz-story-gold.png`: gold reference.
+- `/tmp/dz-connected-{flow,dataset,dedupe,egress}-{1440,390}.png`: section views.
+- `/tmp/dz-audit-final-{wide,phone}.png`: complete 26-frame contact sheets.
+- `/tmp/dz-audit-final-{wide,phone}.json`: instrumentation reports.
 
-Pause, offscreen visibility and background tabs pause native timelines. Reduced
-motion and no-JavaScript rendering preserve a complete static diagram. Audit
-phase timers use reduced-motion shortcuts; the normal audit narrative uses a
-separate timer from packet visibility.
+Both width runs of `film.mjs --gate` end:
 
-## Review evidence
+> rehearsal passed (necessary, not sufficient: references/verify.md and the fresh eye in review.md still stand)
 
-Artifacts from the November 8 revision are local review evidence:
+Motion sampling remains inconclusive across gaps: the wide capture's largest was
+34.7 ms and the phone capture's was 42.1 ms. Those intervals were not judged by
+the automated watcher. The entire contact sheets were inspected visually.
 
-- `/tmp/dz-final-pipeline-chromium-{1440,390}.png`: desktop/phone composition.
-- `/tmp/dz-final-dialog-{chromium,webkit}-390.png`: phone inspection dialog.
-- `/tmp/dz-record-film-{wide,phone}.png`: motion contact sheets.
-- `/tmp/dz-record-final-phone.png`: compact polish contact sheet.
-- `/tmp/dz-record-continuity.json`: deterministic timeline sampling.
+The scratch film adapter waits for hydration before adding instrumentation, keeps
+the viewport fixed for viewport-height panels, and recognizes the vendored
+`stageshow` CSS layer inside Next's combined stylesheet. It does not exempt
+product CSS or change the committed skill or vendor bundle.
 
-The independent reviewer exercised dataset selection, physical double-click and
-touch on moving/paused records, decision evidence and the audit return. Two
-findings were fixed: invisible packets intercepted clicks, and phone microcopy
-was too small. Phone captions now use at least 10px.
+## Independent review
 
-The film instrumentation has sampling gaps under screenshot load, so its motion
-judgment is inconclusive. Its zone-padding warning treats the organization
-boundary as a small card; its egress-stack warning ignores the record marks
-between title and caption. These intentional diagram structures were checked
-visually. Transparent hit circles and invisible timeline endpoints contributed
-to earlier clipped-glyph reports; endpoints now remain on their actual path.
-Actual source, processing and audit padding findings were corrected. The final
-desktop film reports only the organization-boundary padding heuristic; the phone
-film also reports the intentional egress title/marks/caption stack. Deterministic
-16ms sampling across two cycles found no path-speed discontinuities or invisible
-click targets among 232 rendered packets at either width.
+The fresh-eye reviewer found a discontinuous red-to-green handoff, the audit
+heading at a different gutter, and generic entity labels. The red now remains
+visible until the greens emerge at the same branch point. The heading and audit
+controls align with the earlier panels, and the results identify Meridian US and
+Meridian UK. A second review of the final sheets confirmed the handoff and main
+alignment fixes. The diagram remains deliberately open and sparse for this
+scroll-story foundation; its small caption follows the wider figure gutter.
+The reviewer did not establish frame-by-frame quality between samples.
 
-Rehearsal uses a scratch adapter, without editing the vendored skill. It recognizes
-the upstream CSS layer in Next's combined stylesheet and waits for hydration
-before attaching instrumentation. Physical-device frame delivery, live source
-connections and production deployment were not tested.
+## Validation and limits
 
-## Validation
+Functional tests cover per-dataset source assignments, synchronized volume,
+measured node alignment, empty streams, pause/resume, keyboard record inspection,
+audit completion, every next-section link, no JavaScript and reduced motion.
+Both themes are covered by axe. Linux visual baselines cover each pipeline
+section, audit poster, hero, decision dialog, closing CTA and developer docs.
 
-Functional coverage includes dataset/source routing, stable geometry, dense
-streams and pause/resume, physical record inspection, keyboard dialog access,
-audit diversion/return, review approval and unmerge, reduced motion, no JavaScript,
-and accessibility in both themes. Linux visual baselines cover the hero,
-decision dialog, core principles, provenance, unmerge and closing CTA.
+Native scroll snapping must include the closing FAQ and reachable end stops for
+tall panels. The audit status reserves its space: inserting it while scrolling
+caused WebKit to jump to an earlier snap target. Both failures were reproduced
+before fixing them and are exercised by the navigation test.
 
-The decision dialog explicitly focuses its heading without scrolling, preventing
-mobile autofocus from skipping the beginning of the evidence. The physical-record test brings the matching stage into view before targeting a
-visible matched mark; an input card alone can be visible while its outgoing route
-is below the phone viewport. Pause assertions await `Animation.ready`, since
-WebKit can report a paused play state before its pending pause task settles.
-The unmerge section screenshot hides the unrelated sticky header during capture,
-preventing viewport-dependent navigation from obscuring that section. Screenshot
-tolerance is unchanged. Final gate results are reported with the implementation. The production build
-must retain static prerendering for `/`.
+Physical-device frame delivery and live connector traffic were not tested.
+The source icons, pipeline and audit are illustrative. Final gate and independent
+review results are recorded in the pull request.
 
 ## Maintenance
 
 `node scripts/build-stageshow.mjs` from `frontend/` regenerates the MIT kit bundle
-and declarations. Product code remains under strict TypeScript and ESLint. The
-social card source is `frontend/assets/marketing-social.svg`; its committed PNG
-is `frontend/src/app/opengraph-image.png`.
+and declarations. Product code remains under strict TypeScript and ESLint.
+`node scripts/gen-developer-reference.mjs --check` checks the committed operation
+reference against the manifest and response-envelope contract.
