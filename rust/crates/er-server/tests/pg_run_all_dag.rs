@@ -84,6 +84,7 @@ async fn lake_maintain_runs_end_to_end_through_the_executor() {
         profile: Ok(None),
         in_flight_cap: 2,
         template: er_k8s::manifest::REFERENCE_TEMPLATE.to_string(),
+        runner_orgs: [org_id.clone()].into_iter().collect(),
         image_digest: Some("sha256:test".into()),
     };
     let mut executor = Executor::connect(&dsn, Arc::clone(&api) as Arc<dyn er_k8s::PodApi>, cfg)
@@ -99,7 +100,7 @@ async fn lake_maintain_runs_end_to_end_through_the_executor() {
         "lake_maintain",
         0,
         None,
-        None,
+        Some(&serde_json::json!({"service_account": "er-api", "org_id": "tenant-b"})),
         pg::Provenance::default(),
     )
     .await
@@ -128,6 +129,11 @@ async fn lake_maintain_runs_end_to_end_through_the_executor() {
         .unwrap();
     for row in &rows {
         assert_eq!(row.state, "succeeded", "task {}", row.task_id);
+        assert_eq!(
+            api.service_account(row.k8s_job_name.as_deref().unwrap()),
+            Some(format!("er-runner-{}", &pg::hash_secret(&org_id)[..20])),
+            "the launch must use the ledger org, ignoring spoofed params"
+        );
         assert!(
             row.k8s_job_name
                 .as_deref()

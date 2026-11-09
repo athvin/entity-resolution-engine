@@ -186,3 +186,13 @@ capabilities:
       "digest" (default $base.digest $pin.digest) -}}
 {{- include "er-platform.image" (dict "root" .root "image" $image) -}}
 {{- end }}
+
+{{/* One registry feeds both Terraform identities and this chart. Unknown
+     namespaces have no AWS-enrolled runner orgs. The fallback er-runner has
+     no lake data grants. An operator enrolls an org by review, not by a job
+     parameter or a user-controlled environment value. */}}
+{{- define "er-platform.tenantRunners" -}}
+{{- $registry := .Files.Get "tenant-runners.json" | mustFromJson -}}
+{{- $environment := index $registry .Values.environment | default dict -}}
+{{- index $environment .Release.Namespace | default dict | toJson -}}
+{{- end -}}

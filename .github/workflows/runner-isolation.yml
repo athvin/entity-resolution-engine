@@ -1,0 +1,51 @@
+name: runner isolation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: runner-isolation
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    if: github.ref == 'refs/heads/main'
+    name: tenant S3 boundary (${{ matrix.env }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - env: dev
+            namespace: ci
+            cluster: er-dev
+            role: arn:aws:iam::797781631727:role/er-ci-deploy-dev
+            bucket: er-dev-lake-797781631727
+          - env: prod
+            namespace: app
+            cluster: er-prod
+            role: arn:aws:iam::797781631727:role/er-ci-deploy-prod
+            bucket: er-prod-lake-797781631727
+    env:
+      AWS_REGION: us-east-2
+      DEPLOY_ENV: ${{ matrix.env }}
+      CI_NAMESPACE: ${{ matrix.namespace }}
+      CLUSTER: ${{ matrix.cluster }}
+      LAKE_BUCKET: ${{ matrix.bucket }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
+        with:
+          role-to-assume: ${{ matrix.role }}
+          aws-region: us-east-2
+      - name: Read cluster credentials
+        run: aws eks update-kubeconfig --name "$CLUSTER" --alias "$CLUSTER" --region "$AWS_REGION"
+      - name: Prove tenant S3 isolation with positive controls
+        run: bash scripts/ci/runner-isolation.sh

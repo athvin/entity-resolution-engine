@@ -175,6 +175,11 @@ events a correction pass produced. All four live on the executor's settle; three
 of them were once only on the in-process arm, and each was silently not
 happening for as long as that was true.
 
+- Runner AWS identity is selected from the task row's `org_id` and the
+  chart-provided `ER_TENANT_RUNNER_ORGS` enrollment. The executor overwrites the
+  template ServiceAccount and disables Kubernetes credential automount.
+  Unenrolled orgs use `er-runner`, which has no lake data grants. Malformed
+  enrollment disables the executor with an error; it does not broaden access.
 - The provisioning profile comes from `ExecutorConfig`, not the environment. A
   Postgres-tier test cannot set an environment variable (`set_var` is `unsafe`
   under edition 2024 and the workspace denies `unsafe_code`), so a control task

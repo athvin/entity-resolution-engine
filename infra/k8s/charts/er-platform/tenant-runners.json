@@ -1,0 +1,14 @@
+{
+  "dev": {
+    "ci": {
+      "isolation-probe-a": "_isolation/probe-a/",
+      "isolation-probe-b": "_isolation/probe-b/"
+    }
+  },
+  "prod": {
+    "app": {
+      "isolation-probe-a": "_isolation/probe-a/",
+      "isolation-probe-b": "_isolation/probe-b/"
+    }
+  }
+}

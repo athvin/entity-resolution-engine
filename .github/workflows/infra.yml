@@ -246,6 +246,10 @@ jobs:
         # weeks. Cross-chart by necessity, since the policy and the pod it
         # selects are in different charts.
         run: python3 scripts/ci/charts-check.py
+      - name: Tenant runner identities agree with the shared registry
+        run: python3 scripts/ci/tenant-runners-check.py
+      - name: Check isolation probe failure detection
+        run: python3 scripts/ci/runner-isolation-test.py
 
   validate:
     name: fmt + validate (credential-free)

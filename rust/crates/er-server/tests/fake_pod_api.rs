@@ -33,6 +33,7 @@ pub struct FakePodApi {
     /// Where termination records land, per attempt.
     pub scratch: std::path::PathBuf,
     jobs: Mutex<BTreeMap<String, JobSnapshot>>,
+    service_accounts: Mutex<BTreeMap<String, String>>,
     frames: tokio::sync::mpsc::UnboundedSender<WatchFrame>,
     /// task_instance_id → script override.
     #[expect(
@@ -58,12 +59,18 @@ impl FakePodApi {
                 control_url,
                 scratch,
                 jobs: Mutex::new(BTreeMap::new()),
+                service_accounts: Mutex::new(BTreeMap::new()),
                 frames: tx,
                 scripts: Mutex::new(BTreeMap::new()),
                 counter: std::sync::atomic::AtomicU64::new(0),
             },
             rx,
         )
+    }
+
+    /// The identity on the actual submitted manifest, not the task params.
+    pub fn service_account(&self, job_name: &str) -> Option<String> {
+        self.service_accounts.lock().unwrap().get(job_name).cloned()
     }
 
     pub fn script(&self, task_instance_id: &str, script: Script) {
@@ -100,6 +107,16 @@ impl FakePodApi {
 
 impl PodApi for FakePodApi {
     fn create_job(&self, job: &Job) -> BoxFuture<'_, Result<(), ApiError>> {
+        let account = job
+            .spec
+            .as_ref()
+            .and_then(|s| s.template.spec.as_ref())
+            .and_then(|p| p.service_account_name.clone())
+            .unwrap_or_default();
+        self.service_accounts
+            .lock()
+            .unwrap()
+            .insert(job.metadata.name.clone().unwrap_or_default(), account);
         let snapshot = JobSnapshot::from_job(job);
         let name = snapshot.name.clone();
         {

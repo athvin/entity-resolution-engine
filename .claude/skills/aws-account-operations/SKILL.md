@@ -149,6 +149,12 @@ missing policy. Note also that the IMDS hop limit makes node-role fallback
 unreachable, so there is no silent degradation to a broader credential — the
 call just fails, which is the desired behaviour.
 
+Runner enrollments live in `infra/k8s/charts/er-platform/tenant-runners.json`.
+Each org binding has its own prefix-scoped role and ServiceAccount; the shared
+`er-runner` fallback has no object access. Follow the infra-platform skill for
+enrollment and the main-only `runner isolation` acceptance workflow. Its reserved
+fixture prefixes must never contain customer data.
+
 ## What is and is not alarmed
 
 **Read the counts off the generated alerting-surface table in

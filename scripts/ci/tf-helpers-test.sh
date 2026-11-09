@@ -418,6 +418,8 @@ case "$boundary" in
 *) no "names only the settable attribute as drift" "output: $boundary" ;;
 esac
 
+expect_exit "registry changes trigger IAM and chart gates" 0 bash scripts/ci/infra-detect-test.sh
+
 # --- verdict ----------------------------------------------------------------
 
 printf '\ntf-helpers-test: %s passed, %s failed\n' "$pass" "$fail"
