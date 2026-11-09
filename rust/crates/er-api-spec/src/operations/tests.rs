@@ -3,6 +3,63 @@ use serde_json::json;
 use std::collections::BTreeSet;
 
 #[test]
+fn typed_responses_reach_both_contract_adapters() {
+    let src = r#"
+fn router() { Router::new().route("/jobs", get(read).post(write)); }
+struct JobsResponse {
+    jobs: Vec<Job>,
+}
+
+struct CreatedResponse {
+    id: String,
+    created: bool,
+}
+/// Viewer: read jobs (`GET /jobs`).
+async fn read() { Json(JobsResponse { jobs }) }
+/// Steward: create a job (`POST /jobs`).
+async fn write() { Json(CreatedResponse { id, created: true }) }
+"#;
+    let ops = operations(src, &[], &BTreeSet::new()).unwrap();
+    assert_eq!(ops[0].responses, [Envelope::Object(vec!["jobs".into()])]);
+    assert_eq!(
+        ops[1].responses,
+        [Envelope::Object(vec!["id".into(), "created".into()])]
+    );
+    assert_eq!(
+        crate::envelope_ledger(src).unwrap(),
+        "{\n  \"GET /jobs\": { \"envelope\": \"wrapped\", \"key\": \"jobs\" }\n}\n"
+    );
+}
+
+#[test]
+fn unsupported_typed_responses_fail_even_beside_a_readable_write_branch() {
+    let src = r#"
+fn router() { Router::new().route("/jobs", post(write)); }
+struct Reply {
+    #[serde(rename = "items")]
+    jobs: Vec<Job>,
+}
+/// Steward: write jobs (`POST /jobs`).
+async fn write() {
+    if cached { Json(json!({"cached": true})) }
+    else { Json(Reply { jobs }) }
+}
+"#;
+    let error = operations(src, &[], &BTreeSet::new()).err().unwrap();
+    assert!(error.contains("response struct Reply"), "{error}");
+    let read = src
+        .replace("post(write)", "get(write)")
+        .replace("POST /jobs", "GET /jobs");
+    // The GET adapter and ledger must also reject an unreadable typed-only response.
+    let read = read.replace(
+        "if cached { Json(json!({\"cached\": true})) }\n    else { Json(Reply { jobs }) }",
+        "Json(Reply { jobs })",
+    );
+    assert!(operations(&read, &[], &BTreeSet::new()).is_err());
+    assert!(crate::envelope_ledger(&read).is_err());
+}
+
+#[test]
 fn chained_routes_keep_their_own_bodies_and_serde_policy() {
     let src = r#"
 fn router() { Router::new().route("/things/{id}", get(read).patch(write)); }

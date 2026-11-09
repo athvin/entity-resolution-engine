@@ -1,6 +1,6 @@
 //! Success-envelope classification and deterministic ledger rendering.
 
-use crate::get_routes;
+use crate::{get_routes, struct_fields};
 use std::collections::BTreeMap;
 
 /// How a successful list/detail response is shaped.
@@ -15,7 +15,7 @@ pub enum Envelope {
     /// unwrap. Whether the payload is a list follows from the resource, which
     /// the consumer already knows.
     Bare,
-    /// A JSON object literal, carrying **all** its top-level keys. The key
+    /// A JSON object literal or resolved local struct, carrying **all** its top-level keys. The key
     /// count is what separates the two cases the first draft of this test
     /// conflated: one key is a *wrapper* around a payload
     /// (`{"jobs": […]}`), several keys is a *record* built inline
@@ -25,7 +25,7 @@ pub enum Envelope {
     Object(Vec<String>),
     /// The shared keyset-page helper: `{items, next_cursor}`.
     Page,
-    /// A single JSON object from a typed value: `Json(typed)`.
+    /// A JSON value whose shape is unresolved: `Json(typed)`.
     Scalar,
     /// Not JSON at all: an Arrow IPC stream, whose snapshot and next cursor
     /// travel in response **headers** rather than in an envelope. A consumer
@@ -174,8 +174,10 @@ fn balanced_close(src: &str, open: usize) -> Option<usize> {
     None
 }
 
-/// Classify a handler's success envelope, or return why it could not be read.
-pub fn classify_envelope(body: &str) -> Result<Envelope, String> {
+/// Classify a handler's success envelope, using its enclosing source to resolve
+/// local struct constructors. Unknown values retain the scalar classification;
+/// a known local representation that cannot be read is an error.
+pub fn classify_envelope(body: &str, source: &str) -> Result<Envelope, String> {
     let src = success_only(body);
     // Checked before the JSON forms: an Arrow handler still calls `Json(...)`
     // on its error paths, and the body is not JSON.
@@ -194,10 +196,66 @@ pub fn classify_envelope(body: &str) -> Result<Envelope, String> {
     if find_call(&src, "Json(json!(").is_some() {
         return Ok(Envelope::Bare);
     }
+    if let Some(envelope) = typed_object(&src, source)? {
+        return Ok(envelope);
+    }
     if src.contains("Json(") {
         return Ok(Envelope::Scalar);
     }
     Err("no Json(...), page_envelope(...) or object literal found".to_string())
+}
+
+/// Resolve only an immediate named constructor. A variable or helper call needs
+/// data-flow information this classifier does not have, so it stays unresolved.
+fn typed_object(body: &str, source: &str) -> Result<Option<Envelope>, String> {
+    let Some(start) = find_call(body, "Json(") else {
+        return Ok(None);
+    };
+    let Some(close) = balanced_close(body, start - 1) else {
+        return Ok(None);
+    };
+    let Ok(syn::Expr::Struct(value)) = syn::parse_str(&body[start..close]) else {
+        return Ok(None);
+    };
+    let Some(name) = value.path.get_ident() else {
+        return Ok(None);
+    };
+    let file = syn::parse_file(source).map_err(|e| format!("parse response declarations: {e}"))?;
+    let Some(declaration) = file.items.iter().find_map(|item| match item {
+        syn::Item::Struct(item) if item.ident == *name => Some(item),
+        _ => None,
+    }) else {
+        return Ok(None);
+    };
+    // struct_fields deliberately reads Rust names. Serialization transforms or
+    // conditional fields would make those names an incorrect wire contract.
+    if declaration
+        .attrs
+        .iter()
+        .chain(declaration.fields.iter().flat_map(|field| &field.attrs))
+        .any(|attr| {
+            ["serde", "cfg", "cfg_attr"]
+                .iter()
+                .any(|name| attr.path().is_ident(name))
+        })
+    {
+        return Err(format!(
+            "response struct {name} has unsupported serialization or conditional attributes"
+        ));
+    }
+    if declaration.fields.is_empty() {
+        // An empty json! object also has no wrapper keys.
+        return Ok(Some(Envelope::Bare));
+    }
+    let fields = struct_fields(source, &name.to_string()).ok_or_else(|| {
+        format!("response struct {name} is outside the supported local field syntax")
+    })?;
+    Ok(Some(Envelope::Object(
+        fields
+            .into_iter()
+            .map(|field| field.name.trim_start_matches("r#").to_string())
+            .collect(),
+    )))
 }
 
 /// Every **top-level** key of a `Json(json!({ … }))` body, in source order.
@@ -274,7 +332,7 @@ pub fn envelope_ledger(src: &str) -> Result<String, Vec<String>> {
             ));
             continue;
         };
-        match classify_envelope(body) {
+        match classify_envelope(body, src) {
             Ok(env) => lines.push(format!("  \"GET {path}\": {}", env.as_json())),
             Err(why) => failures.push(format!(
                 "GET {path} [{handler}]: {why}. Classify it rather than skipping it — a gate \
@@ -293,6 +351,18 @@ mod tests {
     use super::*;
     #[test]
     fn the_classifier_reads_each_form() {
+        let source = r"
+struct JobsResponse {
+    jobs: Vec<Job>,
+}
+struct OrgResponse {
+    id: String,
+    name: String,
+}
+struct EmptyResponse {
+}
+";
+        let classify_envelope = |body| super::classify_envelope(body, source);
         // Each arm, against the shapes the handlers actually use. Without this the
         // classifier's branches are only exercised through whichever form happens
         // to appear first in lib.rs.
@@ -303,6 +373,30 @@ mod tests {
         assert_eq!(
             classify_envelope("{ Json(json!({ \"jobs\": jobs })).into_response() }"),
             Ok(Envelope::Object(vec!["jobs".to_string()]))
+        );
+        assert_eq!(
+            classify_envelope("{ Json(JobsResponse { jobs }).into_response() }"),
+            classify_envelope("{ Json(json!({ \"jobs\": jobs })).into_response() }")
+        );
+        // Serialize follows the declaration, even when the constructor is reordered.
+        assert_eq!(
+            classify_envelope("{ Json(OrgResponse { name: o.name, id: o.id }) }"),
+            classify_envelope("{ Json(json!({ \"id\": o.id, \"name\": o.name })) }")
+        );
+        assert_eq!(
+            classify_envelope("{ Json(EmptyResponse {}) }"),
+            classify_envelope("{ Json(json!({})) }")
+        );
+        assert_eq!(
+            classify_envelope(
+                "{ match r { Ok(jobs) => Json(JobsResponse { jobs }), \
+                 Err(e) => detail_err(StatusCode::NOT_FOUND, \"no\") } }"
+            ),
+            Ok(Envelope::Object(vec!["jobs".into()]))
+        );
+        assert_eq!(
+            classify_envelope("{ Json(ExternalResponse { jobs }) }"),
+            Ok(Envelope::Scalar)
         );
         // Several keys is a record, not a wrapper named by the first of them.
         assert_eq!(
@@ -349,5 +443,22 @@ mod tests {
         // An error-only handler has no success envelope to read.
         assert!(classify_envelope("{ detail_err(StatusCode::NOT_FOUND, \"no\") }").is_err());
         assert!(classify_envelope("{ StatusCode::NO_CONTENT.into_response() }").is_err());
+    }
+
+    #[test]
+    fn unsupported_local_representations_are_not_silently_scalar() {
+        for source in [
+            "\n#[serde(rename_all = \"camelCase\")]\nstruct Reply {\n    job_ids: Vec<Job>,\n}\n",
+            "\nstruct Reply {\n    #[serde(rename = \"items\")]\n    jobs: Vec<Job>,\n}\n",
+            "\nstruct Reply {\n    #[serde(flatten)]\n    jobs: Vec<Job>,\n}\n",
+            "\nstruct Reply {\n    #[serde(skip_serializing)]\n    jobs: Vec<Job>,\n}\n",
+            "\nstruct Reply {\n    #[cfg(feature = \"extra\")]\n    jobs: Vec<Job>,\n}\n",
+            "struct Reply { jobs: Vec<Job> }",
+        ] {
+            assert!(
+                classify_envelope("{ Json(Reply { jobs }) }", source).is_err(),
+                "unreadable local declaration must fail: {source}"
+            );
+        }
     }
 }

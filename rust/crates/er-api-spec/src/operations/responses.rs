@@ -16,14 +16,18 @@ pub(super) fn derive(
         .get(name)
         .ok_or_else(|| format!("missing response helper {name}"))?;
     if method == "GET" {
-        return classify_envelope(source.snippet(&function.block)).map(|e| vec![e]);
+        return classify_envelope(source.snippet(&function.block), source.text).map(|e| vec![e]);
     }
     let mut collector = Responses {
         source,
         seen: BTreeSet::new(),
         envelopes: Vec::new(),
+        error: None,
     };
     collector.function(name);
+    if let Some(error) = collector.error {
+        return Err(error);
+    }
     if collector.envelopes.is_empty() {
         return Err(format!("unclassifiable success response in {name}"));
     }
@@ -34,6 +38,7 @@ struct Responses<'a, 's> {
     source: &'a Source<'s>,
     seen: BTreeSet<String>,
     envelopes: Vec<Envelope>,
+    error: Option<String>,
 }
 
 impl Responses<'_, '_> {
@@ -114,10 +119,13 @@ impl Responses<'_, '_> {
         let name = name.to_string();
         if name == "Json" {
             let snippet = self.source.snippet(call);
-            if !object_keys(snippet).iter().any(|key| key == "detail")
-                && let Ok(envelope) = classify_envelope(snippet)
-            {
-                self.push(envelope);
+            if !object_keys(snippet).iter().any(|key| key == "detail") {
+                match classify_envelope(snippet, self.source.text) {
+                    Ok(envelope) => self.push(envelope),
+                    Err(error) => {
+                        self.error.get_or_insert(error);
+                    }
+                }
             }
             return;
         }
