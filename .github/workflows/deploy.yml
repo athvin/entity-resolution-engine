@@ -340,9 +340,12 @@ jobs:
         # rationale and the failure modes are in the script.
         id: env
         run: bash scripts/ci/deploy-provision-namespace.sh
-      # NO obs_up.sh here, deliberately: prod has no observability stack yet
-      # (envs/prod/observability.tf is the queue item after #556), and the
-      # chart's otel.endpoint is inert until the exporter lands.
+      # NO obs_up.sh here yet, deliberately. The AWS substrate exists
+      # (envs/prod/observability.tf), but the installer is one script whose
+      # span-store half prod cannot run: the store's metadata DSN is dev
+      # Aurora and prod's VPC has no route there. The store-topology decision
+      # and the prod shipper values land in #944; the chart's otel.endpoint
+      # stays inert until the exporter does.
       - name: Say what was deployed
         env:
           API_REUSED: ${{ steps.digests.outputs.reused_er_api }}
