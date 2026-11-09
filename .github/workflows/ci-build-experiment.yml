@@ -1,0 +1,141 @@
+# Opt-in only. Compare complete CLI suites over five paired runs; do not adopt
+# archive distribution unless end-to-end time (including producer + transfer)
+# improves by 15% without losing tests or adding failures.
+name: rust build experiment
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/ci-build-experiment.yml
+      - scripts/ci/archive-experiment.sh
+permissions:
+  contents: read
+concurrency:
+  group: archive-experiment-${{ github.ref }}
+  cancel-in-progress: true
+defaults:
+  run:
+    working-directory: rust
+env:
+  CARGO_INCREMENTAL: "0"
+  RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
+  RUSTC_WRAPPER: sccache
+  SCCACHE_BUCKET: er-ci-sccache
+  SCCACHE_ENDPOINT: https://9eefbe6bc92d11b2bb4e962494765a4c.r2.cloudflarestorage.com
+  SCCACHE_REGION: auto
+  AWS_ACCESS_KEY_ID: ${{ secrets.R2_READ_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_READ_SECRET_ACCESS_KEY }}
+jobs:
+  build:
+    name: archive producer (${{ matrix.pair }})
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'ci:archive-experiment')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        pair: [1, 2, 3, 4, 5]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/ci-tools
+        with:
+          tools: mold sccache cargo-nextest
+      - name: Build archive
+        env:
+          EXPERIMENT_MODE: build
+        run: bash ../scripts/ci/archive-experiment.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: er-cli-tests-${{ matrix.pair }}
+          path: ${{ runner.temp }}/er-cli-tests.tar.zst
+          compression-level: 0
+          retention-days: 2
+  baseline:
+    name: baseline (${{ matrix.pair }}, ${{ matrix.partition }})
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'ci:archive-experiment')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        pair: [1, 2, 3, 4, 5]
+        partition: [1/4, 2/4, 3/4, 4/4]
+    services:
+      rustfs:
+        image: rustfs/rustfs:latest
+        env:
+          RUSTFS_ACCESS_KEY: minio
+          RUSTFS_SECRET_KEY: minio123
+        ports: [9000:9000]
+        options: >-
+          --health-cmd "curl -sf http://localhost:9000/health"
+          --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      DEDUPE_E2E_DUCKLAKE: "1"
+      ER_TEST_S3_ENDPOINT: localhost:9000
+      ER_TEST_S3_KEY_ID: minio
+      ER_TEST_S3_SECRET: minio123
+      ER_LAKE_S3_ENDPOINT: localhost:9000
+      ER_LAKE_S3_KEY_ID: minio
+      ER_LAKE_S3_SECRET: minio123
+      ER_LAKE_S3_URL_STYLE: path
+      ER_LAKE_S3_USE_SSL: "false"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/ci-tools
+        with:
+          tools: mold sccache cargo-nextest
+      - name: Create test bucket
+        run: AWS_ACCESS_KEY_ID=minio AWS_SECRET_ACCESS_KEY=minio123 aws --endpoint-url http://localhost:9000 s3 mb s3://er-lake-e2e
+      - name: Compile and execute
+        env:
+          EXPERIMENT_MODE: baseline
+          PARTITION: ${{ matrix.partition }}
+        run: bash ../scripts/ci/archive-experiment.sh
+  archive:
+    needs: build
+    name: archive consumer (${{ matrix.pair }}, ${{ matrix.partition }})
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'ci:archive-experiment')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        pair: [1, 2, 3, 4, 5]
+        partition: [1/4, 2/4, 3/4, 4/4]
+    services:
+      rustfs:
+        image: rustfs/rustfs:latest
+        env:
+          RUSTFS_ACCESS_KEY: minio
+          RUSTFS_SECRET_KEY: minio123
+        ports: [9000:9000]
+        options: >-
+          --health-cmd "curl -sf http://localhost:9000/health"
+          --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      DEDUPE_E2E_DUCKLAKE: "1"
+      ER_TEST_S3_ENDPOINT: localhost:9000
+      ER_TEST_S3_KEY_ID: minio
+      ER_TEST_S3_SECRET: minio123
+      ER_LAKE_S3_ENDPOINT: localhost:9000
+      ER_LAKE_S3_KEY_ID: minio
+      ER_LAKE_S3_SECRET: minio123
+      ER_LAKE_S3_URL_STYLE: path
+      ER_LAKE_S3_USE_SSL: "false"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/ci-tools
+        with:
+          tools: mold sccache cargo-nextest
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: er-cli-tests-${{ matrix.pair }}
+          path: ${{ runner.temp }}
+      - name: Create test bucket
+        run: AWS_ACCESS_KEY_ID=minio AWS_SECRET_ACCESS_KEY=minio123 aws --endpoint-url http://localhost:9000 s3 mb s3://er-lake-e2e
+      - name: Execute archive
+        env:
+          EXPERIMENT_MODE: archive
+          PARTITION: ${{ matrix.partition }}
+        run: bash ../scripts/ci/archive-experiment.sh

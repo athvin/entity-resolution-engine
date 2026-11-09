@@ -185,7 +185,7 @@ jobs:
         # Deliberately NOT `continue-on-error`: a telemetry stack that silently
         # fails to install is worse than a red deploy, because the absence of
         # spans reads as "nothing happened" rather than as a broken deploy.
-        run: bash scripts/obs_up.sh
+        run: python3 scripts/ci/deploy-observability.py
       - name: Say what was deployed
         # The summary is the artifact someone reads a week later when asking
         # "was that change actually out?" — see the script.

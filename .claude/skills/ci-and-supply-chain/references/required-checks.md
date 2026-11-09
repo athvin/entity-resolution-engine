@@ -49,6 +49,14 @@ job instead — `terraform plan` is the worked example.
 | `agent` | agent | 100 | `always` |
 | `publish` | publish | 10 | `always() && needs.agent.outputs.task_id != ''` |
 
+### `ci-build-experiment.yml`
+
+| Job | Status-check context | Timeout | Condition |
+|---|---|---|---|
+| `build` | archive producer (${{ matrix.pair }}) | 45 | `github.event_name == 'workflow_dispatch' \|\| contains(github.event.pull_request.labels.*. …` |
+| `baseline` | baseline (${{ matrix.pair }}, ${{ matrix.partition }}) | 45 | `github.event_name == 'workflow_dispatch' \|\| contains(github.event.pull_request.labels.*. …` |
+| `archive` | archive consumer (${{ matrix.pair }}, ${{ matrix.partition }}) | 45 | `github.event_name == 'workflow_dispatch' \|\| contains(github.event.pull_request.labels.*. …` |
+
 ### `cluster-objects.yml`
 
 | Job | Status-check context | Timeout | Condition |
@@ -88,7 +96,7 @@ job instead — `terraform plan` is the worked example.
 | `detect` | detect changes | 5 | `always` |
 | `check` | lint + types + unit | 15 | `needs.detect.outputs.frontend == 'true'` |
 | `e2e` | playwright e2e (${{ matrix.leg }}) | 30 | `needs.detect.outputs.frontend == 'true'` |
-| `e2e-gate` | playwright functional tier | 5 | `${{ !cancelled() && needs.detect.outputs.frontend == 'true' }}` |
+| `e2e-gate` | playwright functional tier | 5 | `${{ always() }}` |
 | `driver` | postgres.js driver contract | 10 | `needs.detect.outputs.frontend == 'true' && needs.detect.outputs.marketing_only != 'true'` |
 | `audit` | pnpm audit + licenses | 10 | `needs.detect.outputs.frontend == 'true'` |
 | `semgrep` | semgrep (static analysis) | 15 | `needs.detect.outputs.frontend == 'true'` |
@@ -144,16 +152,16 @@ job instead — `terraform plan` is the worked example.
 | `empty` | empty pull request | 5 | `github.event_name == 'pull_request' && needs.detect.outputs.empty == 'true'` |
 | `skills` | agent skills (lint + drift) | 5 | `always` |
 | `workflow-pins` | workflow pins (S9) | 5 | `always` |
-| `lint` | fmt + clippy + docs | 45 | `needs.detect.outputs.code == 'true' \|\| needs.detect.outputs.drift == 'true'` |
+| `lint` | fmt + clippy + docs | 45 | `needs.detect.outputs.code == 'true'` |
 | `entities` | entities | 45 | `needs.detect.outputs.code == 'true' \|\| needs.detect.outputs.erd == 'true'` |
 | `test-shard` | test shard (${{ matrix.slice }}) | 45 | `needs.detect.outputs.code == 'true'` |
-| `test-gate` | test | 5 | `${{ !cancelled() && needs.detect.outputs.code == 'true' }}` |
+| `test-gate` | test | 5 | `${{ always() }}` |
 | `security` | cargo-deny (advisories + licenses + bans) | 10 | `needs.detect.outputs.code == 'true'` |
-| `lake-e2e` | DuckLake e2e shard (${{ matrix.partition }}) | 45 | `needs.detect.outputs.code == 'true'` |
-| `ducklake-e2e` | DuckLake e2e server (${{ matrix.slice }}) | 45 | `needs.detect.outputs.code == 'true'` |
-| `ducklake-gate` | DuckLake + extensions e2e | 5 | `${{ !cancelled() && needs.detect.outputs.code == 'true' }}` |
-| `bench-compile` | benchmarks (compile) | 30 | `needs.detect.outputs.code == 'true' && github.event_name != 'pull_request' && github.event …` |
-| `scale-tests` | scale golden (50k) | 30 | `needs.detect.outputs.code == 'true' && github.event_name != 'pull_request' && github.event …` |
+| `lake-e2e` | DuckLake e2e shard (${{ matrix.partition }}) | 45 | `needs.detect.outputs.code == 'true' && needs.detect.outputs.lake == 'true'` |
+| `ducklake-e2e` | DuckLake e2e server (${{ matrix.slice }}) | 45 | `needs.detect.outputs.code == 'true' && needs.detect.outputs.server == 'true'` |
+| `ducklake-gate` | DuckLake + extensions e2e | 5 | `${{ always() }}` |
+| `bench-compile` | benchmarks (compile) | 30 | `github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch'` |
+| `scale-tests` | scale golden (50k) | 30 | `github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch'` |
 | `coverage` | coverage (llvm-cov) | 60 | `github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch'` |
 | `cache-prune` | prune the Actions cache to budget | 30 | `github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch'` |
 | `record-pass` | record pass marker | 5 | `${{ !cancelled() && github.event_name == 'pull_request' && needs.detect.outputs.code == 't …` |

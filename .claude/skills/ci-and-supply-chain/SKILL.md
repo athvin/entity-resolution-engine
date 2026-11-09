@@ -152,8 +152,8 @@ are re-admitted **by name**:
   `skill-writer/references/agent-skills.md` and `CLAUDE.md` through
   `DETECT_DRIFT`.
 
-Those set `erd`/`drift`, never `code`, so they wake `entities` and `lint` alone
-rather than the compile tier. Re-admitting by name instead of punching holes in
+Those set `erd`/`drift`, never `code`: `entities` verifies ERD changes and
+the independently required `skills` job checks drift without compiling clippy. Re-admitting by name instead of punching holes in
 the exempt pattern is deliberate, because the four do not all belong to the same
 job. The consequence to plan around: **a new generated artifact placed under
 `.claude/` is unchecked until it is named in one of those two patterns** — and
@@ -219,17 +219,18 @@ written: each `detect` diffs `merge_group.base_sha...head_sha` with its usual
 filter, `rust.yml`'s `bench-compile`/`scale-tests` exclude the event, and
 `infra.yml`'s `plan` skips there (accepted by `plan-gate`).
 
-On a PR, `rust` and `frontend` `detect` also compute a **pass key**: a hash of
-the tested tree over every path the gate reads (Rust: the whole tree minus the
-filter's own exempt regex; frontend: the filter's own allowlist) plus the ISO
-week. A `ci-pass-*` cache hit means that content already went green on this PR,
-so the gate skips — the usual case being a rebase over a main that moved only
-through paths the gate ignores. `record-pass` writes the marker after every
-required job succeeds. Markers are PR-ref-scoped (a PR can only skip on its own
-result), are never consulted on `push` or `merge_group`, and expire weekly to
-bound floating inputs (stable rustc, advisory DBs). The `ci:full` label forces
-a full run. If the key and the filter ever disagree about what a gate reads,
-fix the filter's regex — the key reuses it verbatim.
+Rust tests select changed packages and their transitive workspace dependents,
+including dev/build dependencies from Cargo metadata. Manifest/lockfile,
+unclassified shared inputs, nightly/manual runs and `ci:full` select everything.
+Frontend contracts embedded by Rust tests and entity artifacts are explicitly
+re-admitted. Main diffs from the last successful workflow ancestor; missing or
+untrusted history runs everything. `make ci-speed-check` exercises these rules.
+
+PR pass markers hash the tested input tree, ISO week and selected package set.
+They are PR-scoped and never consulted on pushes or merge groups. Updating the
+classifier and updating the key's input boundary are one change. Required test
+aggregates always run, reject failed classification and check whether each
+upstream job was selected before accepting its success or intentional skip.
 
 ## Why a job fails when your diff is innocent
 
