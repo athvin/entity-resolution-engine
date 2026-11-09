@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 /// One membership row per record (S4.4): which resolved entity the record's current version belongs to.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EntityMembership {
     /// Content-derived row id: sha256('entity_membership:' || source_system || ':' || source_record_id).
     pub id: String,

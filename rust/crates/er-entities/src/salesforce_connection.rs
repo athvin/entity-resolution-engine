@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 /// A tenant's Salesforce org credential: the instance URL and the OAuth client-credentials pair the extract job authenticates with. Org-scoped — one connection is one Salesforce org (connectors.md §4.1), and a credential is a tenant-level fact that several datasets may extract through. Deliberately NOT history: true — the history trigger copies whole rows as jsonb into an append-only companion, which would duplicate the client secret into a table nothing ever deletes from.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SalesforceConnection {
     /// UUIDv7, minted by the application.
     pub id: String,

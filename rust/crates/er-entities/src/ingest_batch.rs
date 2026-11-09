@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 /// One delivery receipt (S4.1): per-source landing counts for a batch, including tombstones and resurrections.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct IngestBatch {
     /// The delivery batch's unique id (caller-supplied per delivery).
     pub id: String,
@@ -38,6 +38,67 @@ pub struct IngestBatch {
     pub created_at: ::chrono::DateTime<::chrono::Utc>,
     /// Run-logical last-write time. Receipts were written once until E9b; the screening pass now updates the row after the match stage, because the verdicts do not exist until the run has scored.
     pub updated_at: ::chrono::DateTime<::chrono::Utc>,
+}
+
+/// One delivery receipt (S4.1): per-source landing counts for a batch, including tombstones and resurrections.
+#[derive(Debug, Clone, PartialEq, Serialize, ::utoipa::ToSchema)]
+#[schema(as = IngestBatch)]
+pub struct IngestBatchWire {
+    /// The delivery batch's unique id (caller-supplied per delivery).
+    pub id: String,
+    /// The run that wrote this row.
+    pub run_id: String,
+    /// The delivering source system.
+    pub source_system: String,
+    /// The delivered file's path.
+    pub path: String,
+    /// Rows landing a brand-new key.
+    pub new_count: i64,
+    /// Rows superseding a key with new content.
+    pub changed_count: i64,
+    /// Rows matching the key's current content.
+    pub unchanged_count: i64,
+    /// Keys tombstoned by a full refresh.
+    pub tombstone_count: i64,
+    /// Previously tombstoned keys that returned.
+    pub resurrected_count: i64,
+    /// Whether the delivery tombstoned omitted keys.
+    pub full_refresh_keys: bool,
+    /// Screening (E9b): delivered records that joined an existing entity — their best active score reached `thresholds.auto_merge`. NULL means the delivery was never screened, which is the honest answer for a run that scored nothing (a correction pass, or a rebuild with `skip_ingest`); 0 means it was screened and nothing matched.
+    pub matched_count: Option<i64>,
+    /// Screening (E9b): delivered records whose best active score landed in the gray band — at or above `review_low` but below `auto_merge`. These are the ones a steward has to decide.
+    pub review_count: Option<i64>,
+    /// Screening (E9b): delivered records with no active score reaching `review_low` — genuinely new as far as the model can tell.
+    pub unmatched_count: Option<i64>,
+    /// When the delivery was screened, NULL if it was not. Separate from the counts so that `screened with everything unmatched` (counts 0/0/N) is distinguishable from `never screened` (all NULL) without reading three columns.
+    pub screened_at: Option<::chrono::DateTime<::chrono::Utc>>,
+    /// Creation stamp (the run's logical timestamp).
+    pub created_at: ::chrono::DateTime<::chrono::Utc>,
+    /// Run-logical last-write time. Receipts were written once until E9b; the screening pass now updates the row after the match stage, because the verdicts do not exist until the run has scored.
+    pub updated_at: ::chrono::DateTime<::chrono::Utc>,
+}
+
+impl From<&IngestBatch> for IngestBatchWire {
+    fn from(row: &IngestBatch) -> Self {
+        Self {
+            id: row.id.clone(),
+            run_id: row.run_id.clone(),
+            source_system: row.source_system.clone(),
+            path: row.path.clone(),
+            new_count: row.new_count,
+            changed_count: row.changed_count,
+            unchanged_count: row.unchanged_count,
+            tombstone_count: row.tombstone_count,
+            resurrected_count: row.resurrected_count,
+            full_refresh_keys: row.full_refresh_keys,
+            matched_count: row.matched_count,
+            review_count: row.review_count,
+            unmatched_count: row.unmatched_count,
+            screened_at: row.screened_at,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        }
+    }
 }
 
 impl IngestBatch {

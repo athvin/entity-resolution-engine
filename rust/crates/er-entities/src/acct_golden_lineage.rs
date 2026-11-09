@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Per-attribute survivorship provenance for a resolved account: which record each surviving value came from.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AcctGoldenLineage {
     /// Content-derived row id: sha256('acct_golden_lineage:' || entity_id || ':' || attribute).
     pub id: String,
@@ -26,6 +26,49 @@ pub struct AcctGoldenLineage {
     pub created_at: ::chrono::DateTime<::chrono::Utc>,
     /// Run-logical last-write time (equals created_at; the mart is rebuilt whole).
     pub updated_at: ::chrono::DateTime<::chrono::Utc>,
+}
+
+/// Per-attribute survivorship provenance for a resolved account: which record each surviving value came from.
+#[derive(Debug, Clone, PartialEq, Serialize, ::utoipa::ToSchema)]
+#[schema(as = AcctGoldenLineage)]
+pub struct AcctGoldenLineageWire {
+    /// Content-derived row id: sha256('acct_golden_lineage:' || entity_id || ':' || attribute).
+    pub id: String,
+    /// The resolved account this attribute decision belongs to.
+    pub entity_id: String,
+    /// The survivable attribute decided (e.g. company_name, domain, address).
+    pub attribute: String,
+    /// The source record that won the attribute.
+    pub record_key: String,
+    /// Source system of the winning record.
+    pub source_system: String,
+    /// Source-native id of the winning record.
+    pub source_record_id: String,
+    /// The survivorship rule that selected this value.
+    pub rule: String,
+    /// Survivorship policy version that produced this row.
+    pub survivorship_version: String,
+    /// Run-logical creation time (the assembling run's clock; the mart is rebuilt whole).
+    pub created_at: ::chrono::DateTime<::chrono::Utc>,
+    /// Run-logical last-write time (equals created_at; the mart is rebuilt whole).
+    pub updated_at: ::chrono::DateTime<::chrono::Utc>,
+}
+
+impl From<&AcctGoldenLineage> for AcctGoldenLineageWire {
+    fn from(row: &AcctGoldenLineage) -> Self {
+        Self {
+            id: row.id.clone(),
+            entity_id: row.entity_id.clone(),
+            attribute: row.attribute.clone(),
+            record_key: row.record_key.clone(),
+            source_system: row.source_system.clone(),
+            source_record_id: row.source_record_id.clone(),
+            rule: row.rule.clone(),
+            survivorship_version: row.survivorship_version.clone(),
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        }
+    }
 }
 
 impl AcctGoldenLineage {

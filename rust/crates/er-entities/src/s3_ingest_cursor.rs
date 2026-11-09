@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 /// What the auto-ingest poller has already read, one row per (org, source). The poller runs on every dispatcher tick and the newest object under a prefix stays the newest until a new one arrives, so without this row the same CSV would be re-ingested every few seconds forever — an unbounded run loop over the tenant's own lake. An upsert rather than a log: the question it answers is 'what is already in', not 'what has ever been in', and the audit log already answers the second.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct S3IngestCursor {
     /// UUIDv7, minted by the application.
     pub id: String,
@@ -26,6 +26,49 @@ pub struct S3IngestCursor {
     pub created_at: ::chrono::DateTime<::chrono::Utc>,
     /// When it was last auto-ingested.
     pub updated_at: ::chrono::DateTime<::chrono::Utc>,
+}
+
+/// What the auto-ingest poller has already read, one row per (org, source). The poller runs on every dispatcher tick and the newest object under a prefix stays the newest until a new one arrives, so without this row the same CSV would be re-ingested every few seconds forever — an unbounded run loop over the tenant's own lake. An upsert rather than a log: the question it answers is 'what is already in', not 'what has ever been in', and the audit log already answers the second.
+#[derive(Debug, Clone, PartialEq, Serialize, ::utoipa::ToSchema)]
+#[schema(as = S3IngestCursor)]
+pub struct S3IngestCursorWire {
+    /// UUIDv7, minted by the application.
+    pub id: String,
+    /// The tenant whose prefix was polled; every read is scoped by it.
+    pub org_id: String,
+    /// The dataset the polled source lands in.
+    pub dataset_id: String,
+    /// The config source this object landed as — the first path segment under the tenant's prefix.
+    pub source: String,
+    /// The full S3 key of the object last ingested, kept whole so a tenant asking 'which file produced this run' gets the answer rather than a reconstruction.
+    pub object_key: String,
+    /// The object's ETag when it was read. The reason this column exists: a tenant who overwrites `crm/daily.csv` with new content leaves the key identical, so a key-only cursor would never read the new rows. Nullable because a listing can omit it.
+    pub etag: Option<String>,
+    /// The object's size at ingest, so a later shrink is visible as one.
+    pub size_bytes: i64,
+    /// The delivery this object became, tying the cursor to the audit row and the run it enqueued.
+    pub delivery_id: String,
+    /// When this source was first auto-ingested.
+    pub created_at: ::chrono::DateTime<::chrono::Utc>,
+    /// When it was last auto-ingested.
+    pub updated_at: ::chrono::DateTime<::chrono::Utc>,
+}
+
+impl From<&S3IngestCursor> for S3IngestCursorWire {
+    fn from(row: &S3IngestCursor) -> Self {
+        Self {
+            id: row.id.clone(),
+            org_id: row.org_id.clone(),
+            dataset_id: row.dataset_id.clone(),
+            source: row.source.clone(),
+            object_key: row.object_key.clone(),
+            etag: row.etag.clone(),
+            size_bytes: row.size_bytes,
+            delivery_id: row.delivery_id.clone(),
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        }
+    }
 }
 
 impl S3IngestCursor {

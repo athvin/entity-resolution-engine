@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 /// One open question for a steward (S4.4.3): a gray-band pair, an unsatisfiable never, or a coherence flag, with its resolution.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Review {
     /// Content-derived review id: sha256('review_queue:' || rec_a_key || ':' || rec_b_key || ':' || reason).
     pub id: String,

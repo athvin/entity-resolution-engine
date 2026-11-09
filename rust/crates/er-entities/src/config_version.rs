@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 /// A versioned config document for a tenant: its YAML, hash and publish state.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ConfigVersion {
     /// The version row's unique id (UUIDv7, minted at draft).
     pub id: String,
@@ -30,6 +30,55 @@ pub struct ConfigVersion {
     pub published_at: Option<::chrono::DateTime<::chrono::Utc>>,
     /// Wall-clock last-write time (database default; advanced by mutations once the entity migrates).
     pub updated_at: ::chrono::DateTime<::chrono::Utc>,
+}
+
+/// A versioned config document for a tenant: its YAML, hash and publish state.
+#[derive(Debug, Clone, PartialEq, Serialize, ::utoipa::ToSchema)]
+#[schema(as = ConfigVersion)]
+pub struct ConfigVersionWire {
+    /// The version row's unique id (UUIDv7, minted at draft).
+    pub id: String,
+    /// The tenant this config version belongs to.
+    pub org_id: String,
+    /// The dataset this config version belongs to. Part of the natural key: rows belong to a dataset, not to the org at large.
+    pub dataset_id: String,
+    /// The monotonic version number within the tenant.
+    pub version: i64,
+    /// The config document source.
+    pub yaml: String,
+    /// Hash of the canonicalized config.
+    pub config_hash: String,
+    /// Whether the version is a draft or published.
+    pub state: String,
+    /// Optional service tier label.
+    pub tier: Option<String>,
+    /// Principal that created the version.
+    pub created_by: String,
+    /// When the version was created.
+    pub created_at: ::chrono::DateTime<::chrono::Utc>,
+    /// When the version was published, if it has been.
+    pub published_at: Option<::chrono::DateTime<::chrono::Utc>>,
+    /// Wall-clock last-write time (database default; advanced by mutations once the entity migrates).
+    pub updated_at: ::chrono::DateTime<::chrono::Utc>,
+}
+
+impl From<&ConfigVersion> for ConfigVersionWire {
+    fn from(row: &ConfigVersion) -> Self {
+        Self {
+            id: row.id.clone(),
+            org_id: row.org_id.clone(),
+            dataset_id: row.dataset_id.clone(),
+            version: row.version,
+            yaml: row.yaml.clone(),
+            config_hash: row.config_hash.clone(),
+            state: row.state.clone(),
+            tier: row.tier.clone(),
+            created_by: row.created_by.clone(),
+            created_at: row.created_at,
+            published_at: row.published_at,
+            updated_at: row.updated_at,
+        }
+    }
 }
 
 impl ConfigVersion {

@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 /// The append-only audit ledger: one row per authenticated mutation (actor, action, optional org scope, and structured detail). Append-only constrains writes, not lifetime: rows past the deployment retention window (ER_AUDIT_RETENTION_DAYS, floor 400 days per the infra D-RETENTION decision) are retired by the dispatcher's retention sweep through delete/purge_expired.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AuditLog {
     /// Monotonic ledger id (bigserial); the primary key.
     pub id: i64,
@@ -26,6 +26,49 @@ pub struct AuditLog {
     pub created_at: ::chrono::DateTime<::chrono::Utc>,
     /// Wall-clock last-write time (equals created_at; audit rows are append-only).
     pub updated_at: ::chrono::DateTime<::chrono::Utc>,
+}
+
+/// The append-only audit ledger: one row per authenticated mutation (actor, action, optional org scope, and structured detail). Append-only constrains writes, not lifetime: rows past the deployment retention window (ER_AUDIT_RETENTION_DAYS, floor 400 days per the infra D-RETENTION decision) are retired by the dispatcher's retention sweep through delete/purge_expired.
+#[derive(Debug, Clone, PartialEq, Serialize, ::utoipa::ToSchema)]
+#[schema(as = AuditLog)]
+pub struct AuditLogWire {
+    /// Monotonic ledger id (bigserial); the primary key.
+    pub id: i64,
+    /// When the audited action occurred.
+    pub at: ::chrono::DateTime<::chrono::Utc>,
+    /// The principal that performed the action (the signed-in user's email, or an API key id).
+    pub actor: String,
+    /// The tenant the action applies to, if the action is org-scoped.
+    pub org: Option<String>,
+    /// The dataset the action concerned, by name, when it concerned one — context, like `org`, not a foreign key (this ledger outlives both).
+    pub dataset: Option<String>,
+    /// The action name (e.g. steward.mass_update).
+    pub action: String,
+    /// The W3C trace id (32 lowercase hex) of the request that caused this row, when the caller sent one. The JOIN KEY to the span store: spans carry `trace_id`, so this is what turns `which rows did this session write` into `and here is every SQL statement each one ran`. Stored as the bare id rather than the full `traceparent`, because the parent span id is per-hop and would not join. NULL for an unpropagated or non-HTTP caller — a CLI, the dispatcher's own bookkeeping — which is a real and permanent case, not a gap to backfill.
+    pub trace_id: Option<String>,
+    /// Structured detail for the action.
+    pub detail: ::serde_json::Value,
+    /// Wall-clock creation time (database default; `at` remains the domain event stamp).
+    pub created_at: ::chrono::DateTime<::chrono::Utc>,
+    /// Wall-clock last-write time (equals created_at; audit rows are append-only).
+    pub updated_at: ::chrono::DateTime<::chrono::Utc>,
+}
+
+impl From<&AuditLog> for AuditLogWire {
+    fn from(row: &AuditLog) -> Self {
+        Self {
+            id: row.id,
+            at: row.at,
+            actor: row.actor.clone(),
+            org: row.org.clone(),
+            dataset: row.dataset.clone(),
+            action: row.action.clone(),
+            trace_id: row.trace_id.clone(),
+            detail: row.detail.clone(),
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        }
+    }
 }
 
 impl AuditLog {

@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 /// One steward golden-field override (latest-wins per entity and attribute); a NULL value means the steward cleared the field.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GoldenOverride {
     /// Content-derived row id: sha256('golden_overrides:' || entity_id || ':' || attribute).
     pub id: String,

@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 /// A tenant webhook endpoint: its URL, subscribed events and signing secret.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Webhook {
     /// The webhook's unique id.
     pub id: String,
@@ -24,6 +24,43 @@ pub struct Webhook {
     pub created_at: ::chrono::DateTime<::chrono::Utc>,
     /// Wall-clock last-write time (database default; advanced by mutations once the entity migrates).
     pub updated_at: ::chrono::DateTime<::chrono::Utc>,
+}
+
+/// A tenant webhook endpoint: its URL, subscribed events and signing secret.
+#[derive(Debug, Clone, PartialEq, Serialize, ::utoipa::ToSchema)]
+#[schema(as = Webhook)]
+pub struct WebhookWire {
+    /// The webhook's unique id.
+    pub id: String,
+    /// The tenant that owns the webhook.
+    pub org_id: String,
+    /// Optional dataset filter: NULL subscribes to every dataset's events.
+    pub dataset_id: Option<String>,
+    /// The delivery URL.
+    pub url: String,
+    /// The subscribed event types.
+    pub events: ::serde_json::Value,
+    /// Whether the webhook is active.
+    pub active: bool,
+    /// When the webhook was registered.
+    pub created_at: ::chrono::DateTime<::chrono::Utc>,
+    /// Wall-clock last-write time (database default; advanced by mutations once the entity migrates).
+    pub updated_at: ::chrono::DateTime<::chrono::Utc>,
+}
+
+impl From<&Webhook> for WebhookWire {
+    fn from(row: &Webhook) -> Self {
+        Self {
+            id: row.id.clone(),
+            org_id: row.org_id.clone(),
+            dataset_id: row.dataset_id.clone(),
+            url: row.url.clone(),
+            events: row.events.clone(),
+            active: row.active,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        }
+    }
 }
 
 impl Webhook {

@@ -3,7 +3,7 @@
 
 use serde::Deserialize;
 
-use crate::types::{ColumnType, Language, Store, Wire};
+use crate::types::{ColumnType, Language, Store, Visibility, Wire};
 
 /// The `generate` block: which stores get DDL, which languages get readers, and
 /// which wires get a schema. There is no default — an entity with no block is a
@@ -59,6 +59,9 @@ pub struct Column {
     pub nullable: bool,
     /// Required prose: this tree is also the documentation of every column.
     pub description: String,
+    /// Exposure in the generated JSON wire type; storage retains every column.
+    #[serde(default)]
+    pub visibility: Visibility,
     /// A volatile column (e.g. an assembly timestamp) excluded from determinism
     /// comparisons. It is still part of the entity's shape.
     #[serde(default)]

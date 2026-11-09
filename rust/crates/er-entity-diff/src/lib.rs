@@ -491,6 +491,7 @@ mod tests {
             col_type: er_entity_spec::ColumnType::Varchar,
             nullable,
             description: "a probe column".to_string(),
+            visibility: er_entity_spec::Visibility::Public,
             volatile: false,
             default: default.map(str::to_string),
             serial: false,

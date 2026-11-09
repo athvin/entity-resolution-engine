@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 /// One steward record overlay (protect/suppress): a flag on a record key, retractable, applied at assembly.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RecordOverlay {
     /// Content-derived row id: sha256('record_overlays:' || record_key || ':' || kind).
     pub id: String,

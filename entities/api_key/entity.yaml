@@ -25,6 +25,7 @@ columns:
     accepted_values: [admin, steward, viewer]
     description: "The role the key grants."
   - name: key_hash
+    visibility: internal
     type: varchar
     nullable: false
     description: "SHA-256 hash of the secret (never the plaintext)."

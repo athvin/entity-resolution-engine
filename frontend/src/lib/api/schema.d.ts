@@ -78,8 +78,6 @@ export interface components {
             created_at: string;
             /** @description The key's unique id (UUIDv7, minted at issue). */
             id: string;
-            /** @description SHA-256 hash of the secret (never the plaintext). */
-            key_hash: string;
             /** @description The tenant the key authenticates. */
             org_id: string;
             /**
@@ -1309,8 +1307,6 @@ export interface components {
             teardown: boolean;
             /** @description Platform evidence, distinct from error_class, free text: OOMKilled, Evicted, DeadlineExceeded, Unschedulable, no_pod_created, vanished, quota, sigterm, sigkill, fenced, stale_start, structural_mismatch, build_skew, control_plane_unreachable, no_terminal_record, heartbeat_timeout, dispatcher_restart, revoked, and kin. */
             termination_reason?: string | null;
-            /** @description The fallback credential only (§6.4): SHA-256 of the per-attempt token, compared with ct_eq; NULL under the projected-token path; nulled at finish. */
-            token_hash?: string | null;
             /** @description traceparent of this try's span, a child of jobs.trace_context. */
             trace_context?: string | null;
             /** @description Copied from the compiled graph at planning so the UI can explain propagation; the graph is the authority. */
@@ -1345,8 +1341,6 @@ export interface components {
             id: string;
             /** @description The tenant that owns the webhook. */
             org_id: string;
-            /** @description HMAC signing secret for deliveries. */
-            secret: string;
             /**
              * Format: date-time
              * @description Wall-clock last-write time (database default; advanced by mutations once the entity migrates).

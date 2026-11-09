@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 /// The control-plane fixup ledger: one row per named, idempotent data/constraint fixup ensure_schema has applied. Fixups are what the declarative reconciler deliberately never does — backfills, constraint swaps, natural-key changes, NOT NULL tightening — expressed as ordered Rust steps that run semantics-once between the baseline replay and the reconcile pass.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Fixup {
     /// The ledger row's unique id (UUIDv7, minted when the fixup runs).
     pub id: String,

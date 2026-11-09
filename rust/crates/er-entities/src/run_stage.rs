@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 /// The lake-side stage ledger (S5.2): one row per try of one stage of one run; the durable reference a pod probes before it executes (batch-orchestration-design §4.3).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunStage {
     /// er_ids::natural_id('run_stages', [run_id, stage, try_number]).
     pub id: String,

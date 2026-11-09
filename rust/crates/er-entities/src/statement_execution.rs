@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 /// One row per SQL execution in a pipeline run: which statement, how long, how many rows, and whether it succeeded. The spans answer this already but they are sampled and retained for weeks; this is the durable, unsampled copy, queryable with SQL forever — the thing you join against the CUR to say what a statement cost, and the thing a regression test can assert on. Deliberately carries NO statement text and no bind values: the identity is the `<entity>.<folder>.<stem>` triple for a declared statement, or the engine seam's name for one assembled at runtime.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StatementExecution {
     /// Content-derived row id: sha256('statement_executions:' || run_id || ':' || stage || ':' || seq). Deterministic, so a replayed fixture produces the same rows and a re-run overwrites rather than double-counting.
     pub id: String,

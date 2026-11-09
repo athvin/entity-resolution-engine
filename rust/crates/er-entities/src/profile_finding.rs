@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 /// One coded observation a profile made about a corpus — a column mostly null, a blocking key dominated by one value, a record id that is not unique. Stored rather than derived at read time because the thresholds that produced a finding belong to the run that applied them: re-deriving later against changed thresholds would silently rewrite history, and a finding is the part of a profile a user is most likely to act on.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProfileFinding {
     /// Content-derived row id: sha256('profile_findings:' || profile_run_id || ':' || code || ':' || column_name).
     pub id: String,
@@ -24,6 +24,46 @@ pub struct ProfileFinding {
     pub created_at: ::chrono::DateTime<::chrono::Utc>,
     /// Run-logical last-write time.
     pub updated_at: ::chrono::DateTime<::chrono::Utc>,
+}
+
+/// One coded observation a profile made about a corpus — a column mostly null, a blocking key dominated by one value, a record id that is not unique. Stored rather than derived at read time because the thresholds that produced a finding belong to the run that applied them: re-deriving later against changed thresholds would silently rewrite history, and a finding is the part of a profile a user is most likely to act on.
+#[derive(Debug, Clone, PartialEq, Serialize, ::utoipa::ToSchema)]
+#[schema(as = ProfileFinding)]
+pub struct ProfileFindingWire {
+    /// Content-derived row id: sha256('profile_findings:' || profile_run_id || ':' || code || ':' || column_name).
+    pub id: String,
+    /// The profile run that produced this finding. Named for the relation it points at, per the foreign-key convention; no `references` is declared because DuckLake enforces no foreign keys (V11).
+    pub profile_run_id: String,
+    /// The finding's registry code (P001, P002, …). Codes are append-only and a retired rule keeps its code, so a stored finding stays interpretable after the rule that made it is gone — which is the point of coding them rather than storing only prose.
+    pub code: String,
+    /// The column the finding is about, or the empty string for a dataset-level finding (a duplicate row rate, a schema change). A sentinel rather than NULL because this column is in the natural key, and a NULL key column never matches in a MERGE's ON clause — every re-profile would insert a second copy of the same finding.
+    pub column_name: String,
+    /// How much the finding should interrupt: `error`, `warning` or `info`. Carried on the row rather than looked up from the registry so that a severity reclassification does not retroactively change what a past profile reported.
+    pub severity: String,
+    /// The finding in one human sentence, with its numbers already in it. Rendered rather than templated at read time because the numbers are what make it actionable, and a message assembled later could be assembled against different data than the one that triggered it.
+    pub message: String,
+    /// The measurements behind the message — the shares, counts and thresholds — so a consumer can chart or re-check a finding without re-reading the column profile. NULL for a finding whose message is already complete.
+    pub detail: Option<::serde_json::Value>,
+    /// Run-logical creation time.
+    pub created_at: ::chrono::DateTime<::chrono::Utc>,
+    /// Run-logical last-write time.
+    pub updated_at: ::chrono::DateTime<::chrono::Utc>,
+}
+
+impl From<&ProfileFinding> for ProfileFindingWire {
+    fn from(row: &ProfileFinding) -> Self {
+        Self {
+            id: row.id.clone(),
+            profile_run_id: row.profile_run_id.clone(),
+            code: row.code.clone(),
+            column_name: row.column_name.clone(),
+            severity: row.severity.clone(),
+            message: row.message.clone(),
+            detail: row.detail.clone(),
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        }
+    }
 }
 
 impl ProfileFinding {

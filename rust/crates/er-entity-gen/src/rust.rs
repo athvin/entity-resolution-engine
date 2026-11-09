@@ -3,7 +3,7 @@
 //! constant, `columns()`, and `arrow_schema()` built from the one type map. It
 //! emits source text; it links neither `arrow` nor `serde`.
 
-use er_entity_spec::{ColumnType, Entity, Store, Wire};
+use er_entity_spec::{ColumnType, Entity, Store, Visibility, Wire};
 
 use crate::ConvertError;
 use crate::casing::to_pascal_case;
@@ -57,9 +57,7 @@ pub fn emit_module(entity: &Entity) -> Result<String, ConvertError> {
 
     // The struct.
     out.push_str(&doc_line("", &entity.description));
-    out.push_str(
-        "#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]\n",
-    );
+    out.push_str("#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]\n");
     out.push_str(&format!("pub struct {struct_name} {{\n"));
     for column in &entity.columns {
         out.push_str(&doc_line("    ", &column.description));
@@ -70,6 +68,10 @@ pub fn emit_module(entity: &Entity) -> Result<String, ConvertError> {
         ));
     }
     out.push_str("}\n\n");
+
+    if entity.has_wire(Wire::Json) {
+        emit_wire(&mut out, entity, &struct_name);
+    }
 
     // The impl: constants + columns() + arrow_schema().
     out.push_str(&format!("impl {struct_name} {{\n"));
@@ -129,6 +131,44 @@ pub fn emit_module(entity: &Entity) -> Result<String, ConvertError> {
     }
 
     Ok(out)
+}
+
+/// Emit the public JSON projection; schema naming remains stable as rows evolve.
+fn emit_wire(out: &mut String, entity: &Entity, struct_name: &str) {
+    out.push_str(&doc_line("", &entity.description));
+    out.push_str("#[derive(Debug, Clone, PartialEq, Serialize, ::utoipa::ToSchema)]\n");
+    out.push_str(&format!(
+        "#[schema(as = {struct_name})]\npub struct {struct_name}Wire {{\n"
+    ));
+    for column in entity
+        .columns
+        .iter()
+        .filter(|c| c.visibility == Visibility::Public)
+    {
+        out.push_str(&doc_line("    ", &column.description));
+        out.push_str(&format!(
+            "    pub {}: {},\n",
+            column.name,
+            rust_field_type(column.col_type, column.nullable)
+        ));
+    }
+    out.push_str("}\n\n");
+    out.push_str(&format!("impl From<&{struct_name}> for {struct_name}Wire {{\n    fn from(row: &{struct_name}) -> Self {{\n        Self {{\n"));
+    for column in entity
+        .columns
+        .iter()
+        .filter(|c| c.visibility == Visibility::Public)
+    {
+        let suffix = match column.col_type {
+            ColumnType::Varchar | ColumnType::Json | ColumnType::ListVarchar => ".clone()",
+            _ => "",
+        };
+        out.push_str(&format!(
+            "            {name}: row.{name}{suffix},\n",
+            name = column.name
+        ));
+    }
+    out.push_str("        }\n    }\n}\n\n");
 }
 
 /// The append transport type for a column: timestamps, dates and JSON cross as

@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 /// One tag applied to one subject: the attachment, kept apart from the tag so retiring a tag does not rewrite what it was applied to.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Tagging {
     /// The tagging's unique id (UUIDv7, minted by the application).
     pub id: String,
@@ -24,6 +24,46 @@ pub struct Tagging {
     pub created_at: ::chrono::DateTime<::chrono::Utc>,
     /// Wall-clock last-write time.
     pub updated_at: ::chrono::DateTime<::chrono::Utc>,
+}
+
+/// One tag applied to one subject: the attachment, kept apart from the tag so retiring a tag does not rewrite what it was applied to.
+#[derive(Debug, Clone, PartialEq, Serialize, ::utoipa::ToSchema)]
+#[schema(as = Tagging)]
+pub struct TaggingWire {
+    /// The tagging's unique id (UUIDv7, minted by the application).
+    pub id: String,
+    /// The tenant. Denormalised from the tag so every read is scoped by one predicate rather than a join — the same reason every other tenant-scoped relation carries it.
+    pub org_id: String,
+    /// The dataset whose subject this tag is applied to — subject ids are lake-local.
+    pub dataset_id: String,
+    /// The tag applied.
+    pub tag_id: String,
+    /// What was tagged: `entity` (a resolved cluster, by its entity id) or `review` (an open review item). Two kinds rather than two tables, because a filter and a bulk action want one list of 'things tagged X' and a union of two relations would make every such read a join.
+    pub subject_type: String,
+    /// The entity id or review id. Deliberately NOT a foreign key: an entity lives in the lake and a review is rebuilt by every reconcile, so a database-level reference would be to a row this store does not own. A tagging whose subject has gone is harmless — it reads as absent and is cleaned up by nothing, which is the honest cost of tagging something another store owns.
+    pub subject_id: String,
+    /// The actor that applied the tag. Kept because tagging is how work is assigned, so who claimed it matters.
+    pub created_by: String,
+    /// When the tag was applied.
+    pub created_at: ::chrono::DateTime<::chrono::Utc>,
+    /// Wall-clock last-write time.
+    pub updated_at: ::chrono::DateTime<::chrono::Utc>,
+}
+
+impl From<&Tagging> for TaggingWire {
+    fn from(row: &Tagging) -> Self {
+        Self {
+            id: row.id.clone(),
+            org_id: row.org_id.clone(),
+            dataset_id: row.dataset_id.clone(),
+            tag_id: row.tag_id.clone(),
+            subject_type: row.subject_type.clone(),
+            subject_id: row.subject_id.clone(),
+            created_by: row.created_by.clone(),
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        }
+    }
 }
 
 impl Tagging {

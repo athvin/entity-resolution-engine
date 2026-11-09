@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 /// One current standardized account record per record key: the account standardization stage's output (supersession applied, tombstones excluded) and the matching stage's input.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AcctIntStdRecord {
     /// Content-derived row id: sha256('acct_int_std_records:' || record_key).
     pub id: String,

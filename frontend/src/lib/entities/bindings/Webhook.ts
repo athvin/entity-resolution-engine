@@ -13,8 +13,6 @@ export interface Webhook {
   url: string;
   /** The subscribed event types. */
   events: unknown;
-  /** HMAC signing secret for deliveries. */
-  secret: string;
   /** Whether the webhook is active. */
   active: boolean;
   /** When the webhook was registered. */

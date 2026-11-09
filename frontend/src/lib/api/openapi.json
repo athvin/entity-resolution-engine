@@ -167,7 +167,6 @@
           "id",
           "org_id",
           "role",
-          "key_hash",
           "created_at",
           "updated_at"
         ],
@@ -180,10 +179,6 @@
           "id": {
             "type": "string",
             "description": "The key's unique id (UUIDv7, minted at issue)."
-          },
-          "key_hash": {
-            "type": "string",
-            "description": "SHA-256 hash of the secret (never the plaintext)."
           },
           "org_id": {
             "type": "string",
@@ -2497,13 +2492,6 @@
             ],
             "description": "Platform evidence, distinct from error_class, free text: OOMKilled, Evicted, DeadlineExceeded, Unschedulable, no_pod_created, vanished, quota, sigterm, sigkill, fenced, stale_start, structural_mismatch, build_skew, control_plane_unreachable, no_terminal_record, heartbeat_timeout, dispatcher_restart, revoked, and kin."
           },
-          "token_hash": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "The fallback credential only (§6.4): SHA-256 of the per-attempt token, compared with ct_eq; NULL under the projected-token path; nulled at finish."
-          },
           "trace_context": {
             "type": [
               "string",
@@ -2538,7 +2526,6 @@
           "org_id",
           "url",
           "events",
-          "secret",
           "active",
           "created_at",
           "updated_at"
@@ -2570,10 +2557,6 @@
           "org_id": {
             "type": "string",
             "description": "The tenant that owns the webhook."
-          },
-          "secret": {
-            "type": "string",
-            "description": "HMAC signing secret for deliveries."
           },
           "updated_at": {
             "type": "string",

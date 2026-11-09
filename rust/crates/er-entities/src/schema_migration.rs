@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 /// The control-plane schema ledger: one row per DDL statement the reconciler applied to public.*, plus one `verified` row each time a new catalog version found the live schema already current. The latest row's catalog_hash is the version the database is at.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SchemaMigration {
     /// The ledger row's unique id (UUIDv7, minted by the reconciler).
     pub id: String,

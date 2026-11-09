@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 /// The DDL ledger: one row per DDL command executed against the control database, captured by the er_ddl_audit event triggers (migrations, operator DDL — boot replays are suppressed).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DdlLog {
     /// Monotonic ledger id (bigserial); the primary key. Database-minted — the ledger is written by an event trigger.
     pub id: i64,

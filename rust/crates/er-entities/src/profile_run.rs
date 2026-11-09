@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 /// One execution of the dataset profiler over one corpus stage, and the cache key for its result. A profile exists to be looked at repeatedly and compared against the previous delivery, so recomputing it on every view would make the cheap tier expensive for no new information.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProfileRun {
     /// Content-derived row id: sha256('profile_runs:' || subject || ':' || source_system || ':' || corpus_digest || ':' || tier).
     pub id: String,
@@ -42,6 +42,73 @@ pub struct ProfileRun {
     pub created_at: ::chrono::DateTime<::chrono::Utc>,
     /// Run-logical last-write time. A re-profile of an unchanged snapshot rewrites the row in place rather than appending, so this moves while the rest of the row does not.
     pub updated_at: ::chrono::DateTime<::chrono::Utc>,
+}
+
+/// One execution of the dataset profiler over one corpus stage, and the cache key for its result. A profile exists to be looked at repeatedly and compared against the previous delivery, so recomputing it on every view would make the cheap tier expensive for no new information.
+#[derive(Debug, Clone, PartialEq, Serialize, ::utoipa::ToSchema)]
+#[schema(as = ProfileRun)]
+pub struct ProfileRunWire {
+    /// Content-derived row id: sha256('profile_runs:' || subject || ':' || source_system || ':' || corpus_digest || ':' || tier).
+    pub id: String,
+    /// Which stage of the corpus was profiled: `raw` (as delivered, per source), `standardized` (the canonical attributes), or `golden` (post-resolution). The same aggregates run over all three, which is why a post-resolution profile costs no new machinery. Not an accepted_values list because DuckLake enforces no CHECK constraints (V11) and declaring one would promise a guarantee no layer provides.
+    pub subject: String,
+    /// The source whose delivered rows were profiled, or `*` when the subject is not source-scoped. A sentinel rather than NULL because this column is part of the natural key, and NULL never equals NULL in a MERGE's ON clause — a nullable key column would miss every match and insert a duplicate profile on each run.
+    pub source_system: String,
+    /// The DuckLake snapshot version the profile was computed against — informational provenance, deliberately NOT the cache key. It cannot be: the snapshot counter is per-catalog and this profile's own write advances it, so keying on it means every profile invalidates itself and the stored result grows a duplicate on every view instead of being reused. Found by the e2e test that asserts two profiles of unchanged data are one row.
+    pub snapshot: i64,
+    /// Profiling depth: 1 shape (one aggregate pass), 2 entity-resolution readiness (blocking cost, skew, coverage), 3 model readiness (agreement rates, u-probability pre-flight). Kept in the key so a cheap profile is never mistaken for a deep one, and so asking for tier 3 does not read a tier 1 row and report it as complete.
+    pub tier: i64,
+    /// For a `raw` subject profiled automatically as a delivery lands, the delivery it describes — which lets drift be read between two consecutive batches. Provenance and ONLY provenance: this described itself as the per-delivery cache key until the auto-profile was built, and it was neither, because the key is `corpus_digest` and nothing populated this column at all. The digest is the better key anyway — two deliveries carrying identical content share it, where keying on the batch recomputes the same answer for every redelivery of an unchanged file. NULL for the standardized and golden subjects, which describe the whole corpus rather than one landing, and NULL for a profile an operator or a schedule asked for, which describes whatever is landed now rather than one batch.
+    pub ingest_batch_id: Option<String>,
+    /// A content digest of the rows profiled, and the actual cache key: one hash per row over all its columns, summed (so row order does not matter) and folded together with the row count. Equal digest means equal data, which is the question a cache has to answer — unlike the lake snapshot, which also moves when something unrelated is written, including this profile itself. Computed in one extra scan, which is cheap beside the distinct counts and top-k the profile already pays for.
+    pub corpus_digest: String,
+    /// Rows the profile actually read, which is the sampled count when sampling was on. Named row_count rather than rows because `rows` is reserved in DuckDB and a column called that cannot be selected unquoted.
+    pub row_count: i64,
+    /// Columns profiled. Read with row_count it says how wide the scan was, which is the only honest predictor of what a re-profile will cost.
+    pub column_count: i64,
+    /// The config version in force when the profile ran, so a finding about a blocking rule can be traced to the rule set it was judged against. NULL for a profile that predates any published config — the common case for a first delivery, which is exactly when profiling is most useful.
+    pub config_hash: Option<String>,
+    /// The model whose rules a tier-2 or tier-3 profile measured, when one existed. NULL is the normal case for a new corpus and is not a defect: the candidate-key estimates are deliberately computable without a model.
+    pub model_version: Option<String>,
+    /// Whether the figures come from a sample. Stored as its own flag rather than inferred from sample_proportion, because a consumer rendering a number has to know whether it is exact before it decides how to label it.
+    pub sampled: bool,
+    /// The sampled share of rows, NULL when the whole corpus was read.
+    pub sample_proportion: Option<f64>,
+    /// The salt the deterministic sample was drawn with, NULL when unsampled. Recorded because the sample is reproducible only if the seed is known, and a profile nobody can redraw cannot be compared against its successor.
+    pub sample_seed: Option<i64>,
+    /// Wall-clock cost of the profile, kept so the decision to run a deeper tier can be made from a measurement rather than a guess.
+    pub duration_ms: i64,
+    /// The run's logical clock, not wall time — so a replayed fixture produces the same row.
+    pub captured_at: ::chrono::DateTime<::chrono::Utc>,
+    /// Run-logical creation time.
+    pub created_at: ::chrono::DateTime<::chrono::Utc>,
+    /// Run-logical last-write time. A re-profile of an unchanged snapshot rewrites the row in place rather than appending, so this moves while the rest of the row does not.
+    pub updated_at: ::chrono::DateTime<::chrono::Utc>,
+}
+
+impl From<&ProfileRun> for ProfileRunWire {
+    fn from(row: &ProfileRun) -> Self {
+        Self {
+            id: row.id.clone(),
+            subject: row.subject.clone(),
+            source_system: row.source_system.clone(),
+            snapshot: row.snapshot,
+            tier: row.tier,
+            ingest_batch_id: row.ingest_batch_id.clone(),
+            corpus_digest: row.corpus_digest.clone(),
+            row_count: row.row_count,
+            column_count: row.column_count,
+            config_hash: row.config_hash.clone(),
+            model_version: row.model_version.clone(),
+            sampled: row.sampled,
+            sample_proportion: row.sample_proportion,
+            sample_seed: row.sample_seed,
+            duration_ms: row.duration_ms,
+            captured_at: row.captured_at,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        }
+    }
 }
 
 impl ProfileRun {

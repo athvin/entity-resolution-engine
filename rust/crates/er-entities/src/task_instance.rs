@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 /// One try of one task of one job (Airflow's task_instance shape): the live try has live = TRUE, archived tries have live NULL and stay in the table as history (batch-orchestration-design §4.2).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TaskInstance {
     /// er_ids::natural_id('task_instances', [job_id, task_id, try_number]): a pure function of the attempt key, so the Job name is one too.
     pub id: String,
@@ -100,6 +100,157 @@ pub struct TaskInstance {
     pub created_at: ::chrono::DateTime<::chrono::Utc>,
     /// Row updated.
     pub updated_at: ::chrono::DateTime<::chrono::Utc>,
+}
+
+/// One try of one task of one job (Airflow's task_instance shape): the live try has live = TRUE, archived tries have live NULL and stay in the table as history (batch-orchestration-design §4.2).
+#[derive(Debug, Clone, PartialEq, Serialize, ::utoipa::ToSchema)]
+#[schema(as = TaskInstance)]
+pub struct TaskInstanceWire {
+    /// er_ids::natural_id('task_instances', [job_id, task_id, try_number]): a pure function of the attempt key, so the Job name is one too.
+    pub id: String,
+    /// Tenant.
+    pub org_id: String,
+    /// Copied from the job at planning (NULL for org-level jobs); the per-dataset pod lock keys on it once the executor is re-scoped.
+    pub dataset_id: Option<String>,
+    /// The run (jobs.id == run_id).
+    pub job_id: String,
+    /// Task::NAME, stable across renames.
+    pub task_id: String,
+    /// Topological position from assembly; display and claim order.
+    pub seq: i64,
+    /// 1-based try. A new row per try.
+    pub try_number: i64,
+    /// TRUE on the live try, NULL once archived (NULLs are distinct, so the partial unique index admits one live row per coordinate).
+    pub live: Option<bool>,
+    /// Why the row stopped being live; NULL while live. retry = archive_try, cleared = a terminal row rotated by clear, restarted = a clear-while-live rotation (complete_restart). Pending rows reset by a clear are not archived (no try was consumed).
+    pub archived_reason: Option<String>,
+    /// Where the body runs: a Kubernetes Job, or a dispatcher-local body under the control-task contract (§3.6).
+    pub kind: String,
+    /// Closed state set (§5). restarting and canceling are the write-ahead markers for clear and cancel of a live row.
+    pub state: String,
+    /// Copied from the compiled graph at planning so the UI can explain propagation; the graph is the authority.
+    pub trigger_rule: String,
+    /// Upstream task_ids, a UI projection of the compiled edges.
+    pub upstream: ::serde_json::Value,
+    /// Claimable while the job is canceling (finish).
+    pub teardown: bool,
+    /// Fusion segment id resolved at planning; NULL for a task that runs alone.
+    pub segment: Option<String>,
+    /// Class this try runs at; NULL for a control task. OOM escalation writes a larger class on the next try.
+    pub resource_class: Option<String>,
+    /// Operator override recorded by clear on a restarting row; complete_restart applies it to the successor.
+    pub next_resource_class: Option<String>,
+    /// Class of the OOMKilled predecessor try, so a mixed-class run is legible.
+    pub escalated_from: Option<String>,
+    /// Cumulative try budget (Airflow max_tries): retries at planning; previous_try_number + retries after a clear. Eligible to retry while try_number <= max_tries.
+    pub max_tries: i64,
+    /// Infrastructure budget consumed by this try: Job creates whose pod never ran user code, plus disruptions while running; 1 for a member advanced inside a running segment pod.
+    pub launches: i64,
+    /// Infrastructure budget per try.
+    pub max_launches: i64,
+    /// Backoff deadline for up_for_retry; a short capacity wait for scheduled.
+    pub not_before: Option<::chrono::DateTime<::chrono::Utc>>,
+    /// The work order: pinned upstream references, the RunPlan, params. Written whole by mark_scheduled at every readiness verdict (never merged), by advance_segment for a fused member, and copied by the retry insert; NULL on a none row.
+    pub input: Option<::serde_json::Value>,
+    /// The serialized DurableOutput (a LakeRef or Plan), written at finish.
+    pub output: Option<::serde_json::Value>,
+    /// Success flavour; no_op is exit 10.
+    pub outcome: Option<String>,
+    /// Container exit code: the pod's own on finish, the watch's observation on record_evidence. Evidence for the row, never a classifier input (§6.5).
+    pub exit_code: Option<i64>,
+    /// Platform evidence, distinct from error_class, free text: OOMKilled, Evicted, DeadlineExceeded, Unschedulable, no_pod_created, vanished, quota, sigterm, sigkill, fenced, stale_start, structural_mismatch, build_skew, control_plane_unreachable, no_terminal_record, heartbeat_timeout, dispatcher_restart, revoked, and kin.
+    pub termination_reason: Option<String>,
+    /// er-errors' seven classes plus the executor's four.
+    pub error_class: Option<String>,
+    /// Chain-flattened text (errfmt::chain), truncated to 2000 chars.
+    pub error_detail: Option<String>,
+    /// The dispatcher process epoch (UUIDv7 minted at start) that claimed the launch; adoption rewrites it.
+    pub owner_epoch: Option<String>,
+    /// batch/v1 Job name, `er-t-{20 hex of id}-l{launches}`, of the Job that ran this try; for a fused non-head member, the segment head's Job (advance_segment copies it).
+    pub k8s_job_name: Option<String>,
+    /// Pod that ran this try, from the pod's bound token on first contact; cross-checked by the watch.
+    pub pod_name: Option<String>,
+    /// Pod UID, recorded from the token's claim; the watch confirms it.
+    pub pod_uid: Option<String>,
+    /// Node the pod landed on.
+    pub node_name: Option<String>,
+    /// Image digest this try ran, so a deploy mid-run is legible.
+    pub image_digest: Option<String>,
+    /// Lake snapshot before the task's first commit.
+    pub snapshot_start: Option<i64>,
+    /// Lake snapshot of the task's last commit: the durable reference downstream pins to.
+    pub snapshot_end: Option<i64>,
+    /// Progress counters, replaced on every heartbeat and at finish.
+    pub counters: Option<::serde_json::Value>,
+    /// traceparent of this try's span, a child of jobs.trace_context.
+    pub trace_context: Option<String>,
+    /// Readiness fired.
+    pub scheduled_at: Option<::chrono::DateTime<::chrono::Utc>>,
+    /// Launch claimed (write-ahead, before the create).
+    pub queued_at: Option<::chrono::DateTime<::chrono::Utc>>,
+    /// Pod reported start.
+    pub started_at: Option<::chrono::DateTime<::chrono::Utc>>,
+    /// Last heartbeat.
+    pub heartbeat_at: Option<::chrono::DateTime<::chrono::Utc>>,
+    /// Terminal state recorded.
+    pub finished_at: Option<::chrono::DateTime<::chrono::Utc>>,
+    /// Row created.
+    pub created_at: ::chrono::DateTime<::chrono::Utc>,
+    /// Row updated.
+    pub updated_at: ::chrono::DateTime<::chrono::Utc>,
+}
+
+impl From<&TaskInstance> for TaskInstanceWire {
+    fn from(row: &TaskInstance) -> Self {
+        Self {
+            id: row.id.clone(),
+            org_id: row.org_id.clone(),
+            dataset_id: row.dataset_id.clone(),
+            job_id: row.job_id.clone(),
+            task_id: row.task_id.clone(),
+            seq: row.seq,
+            try_number: row.try_number,
+            live: row.live,
+            archived_reason: row.archived_reason.clone(),
+            kind: row.kind.clone(),
+            state: row.state.clone(),
+            trigger_rule: row.trigger_rule.clone(),
+            upstream: row.upstream.clone(),
+            teardown: row.teardown,
+            segment: row.segment.clone(),
+            resource_class: row.resource_class.clone(),
+            next_resource_class: row.next_resource_class.clone(),
+            escalated_from: row.escalated_from.clone(),
+            max_tries: row.max_tries,
+            launches: row.launches,
+            max_launches: row.max_launches,
+            not_before: row.not_before,
+            input: row.input.clone(),
+            output: row.output.clone(),
+            outcome: row.outcome.clone(),
+            exit_code: row.exit_code,
+            termination_reason: row.termination_reason.clone(),
+            error_class: row.error_class.clone(),
+            error_detail: row.error_detail.clone(),
+            owner_epoch: row.owner_epoch.clone(),
+            k8s_job_name: row.k8s_job_name.clone(),
+            pod_name: row.pod_name.clone(),
+            pod_uid: row.pod_uid.clone(),
+            node_name: row.node_name.clone(),
+            image_digest: row.image_digest.clone(),
+            snapshot_start: row.snapshot_start,
+            snapshot_end: row.snapshot_end,
+            counters: row.counters.clone(),
+            trace_context: row.trace_context.clone(),
+            scheduled_at: row.scheduled_at,
+            queued_at: row.queued_at,
+            started_at: row.started_at,
+            heartbeat_at: row.heartbeat_at,
+            finished_at: row.finished_at,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        }
+    }
 }
 
 impl TaskInstance {

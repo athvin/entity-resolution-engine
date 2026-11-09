@@ -21,7 +21,7 @@ workspace root.
 - [ ] 2. cd rust && cargo run -q -p er-entity-cli -- gen --root ..
 - [ ] 3. cd rust && cargo run -q -p er-entity-cli -- verify --root ..
 - [ ] 4. For a NEW entity declaring `wire: [json]`: either register its
-         ToSchema in rust/crates/er-server/src/openapi.rs, or add it to
+         <Name>Wire ToSchema in rust/crates/er-server/src/openapi.rs, or add it to
          JSON_WIRE_WITHOUT_SCHEMA there. The Rust test job fails until one
          of the two is true
 - [ ] 5. cd rust && cargo run -q -p er-server --bin er-openapi \

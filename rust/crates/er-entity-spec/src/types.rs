@@ -192,12 +192,22 @@ pub enum Language {
 pub enum Wire {
     /// Arrow IPC — `arrow_schema()` and the TypeScript reader are emitted.
     Arrow,
-    /// JSON — the entity's payloads cross the JSON wire, which qualifies it for
-    /// an OpenAPI component schema.
+    /// JSON — emit a public-column wire type with a stable OpenAPI schema name.
     ///
-    /// It does not emit one. Registration is a hand-written list in
+    /// It does not register that schema. Registration is a hand-written list in
     /// `er-server`'s `openapi.rs`, and declaring `json` here does not add to it;
     /// `every_json_wire_entity_has_a_schema_or_a_declared_gap` is what forces
     /// the two to be reconciled.
     Json,
+}
+
+/// Whether a column belongs in an entity's public JSON representation.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Visibility {
+    /// Included in generated JSON wire types and bindings.
+    #[default]
+    Public,
+    /// Storage-only for JSON consumers; omitted from wire types and bindings.
+    Internal,
 }

@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 /// One column's shape within one profile run: how full it is, how many distinct values it holds, how long its values are, what types they parse as, and its most frequent values. One row per column rather than per value, because the lake schema language cannot express a partition (there is no partition_by field) and a per-value table would grow with the corpus instead of with the schema.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ColumnProfile {
     /// Content-derived row id: sha256('column_profiles:' || profile_run_id || ':' || column_name).
     pub id: String,
@@ -66,6 +66,109 @@ pub struct ColumnProfile {
     pub created_at: ::chrono::DateTime<::chrono::Utc>,
     /// Run-logical last-write time.
     pub updated_at: ::chrono::DateTime<::chrono::Utc>,
+}
+
+/// One column's shape within one profile run: how full it is, how many distinct values it holds, how long its values are, what types they parse as, and its most frequent values. One row per column rather than per value, because the lake schema language cannot express a partition (there is no partition_by field) and a per-value table would grow with the corpus instead of with the schema.
+#[derive(Debug, Clone, PartialEq, Serialize, ::utoipa::ToSchema)]
+#[schema(as = ColumnProfile)]
+pub struct ColumnProfileWire {
+    /// Content-derived row id: sha256('column_profiles:' || profile_run_id || ':' || column_name).
+    pub id: String,
+    /// The profile run this column belongs to. Named for the relation it points at, per the foreign-key convention, but no `references` is declared because DuckLake enforces no foreign keys (V11) and declaring one would claim a guarantee the lake does not provide.
+    pub profile_run_id: String,
+    /// The profiled column, as named in the corpus stage.
+    pub column_name: String,
+    /// Rows read for this column (the sampled count when sampling was on).
+    pub row_count: i64,
+    /// Rows in the corpus whether or not they were sampled, so a sampled figure can be scaled and labelled honestly.
+    pub total_row_count: i64,
+    /// Rows where the column is not NULL.
+    pub non_null_count: i64,
+    /// Rows where the column is present but empty once trimmed. Counted apart from NULL because ingest lands every delivered value as a JSON string, so an empty cell arrives as '' and is not NULL — a fill rate treating the two alike reports a column as populated when every value in it is blank.
+    pub blank_count: i64,
+    /// HyperLogLog estimate of distinct values. Always present because it is cheap, and always approximate: measured on a fixture of 1000 genuinely distinct ids it returns 978, so it is wrong in both directions and must never settle a uniqueness question on its own.
+    pub distinct_approx: i64,
+    /// Exact distinct count, NULL when it was not requested. The expensive one (a per-column sort), and the only one a uniqueness verdict may be read from.
+    pub distinct_exact: Option<i64>,
+    /// Exact distinct count after lowercasing, trimming and collapsing internal whitespace; NULL when not requested. Materially below distinct_exact is the signal that a column needs standardizing before it is compared, which is otherwise invisible — the raw count looks healthy precisely because the variants are counted as distinct values.
+    pub distinct_normalized: Option<i64>,
+    /// Shortest trimmed value length. NULL for an all-NULL column, where a length has no meaning.
+    pub len_min: Option<i64>,
+    /// Longest trimmed value length. A value at a round number here is the signature of upstream truncation.
+    pub len_max: Option<i64>,
+    /// Mean trimmed value length.
+    pub len_avg: Option<f64>,
+    /// Approximate median trimmed length.
+    pub len_p50: Option<i64>,
+    /// Approximate 95th-percentile trimmed length. Read against len_max it separates a long tail from a single outlier.
+    pub len_p95: Option<i64>,
+    /// Lexically smallest trimmed value.
+    pub lex_min: Option<String>,
+    /// Lexically largest trimmed value.
+    pub lex_max: Option<String>,
+    /// Smallest value that parses as a number, NULL when none does.
+    pub num_min: Option<f64>,
+    /// Largest value that parses as a number, NULL when none does.
+    pub num_max: Option<f64>,
+    /// Mean of the values that parse as numbers.
+    pub num_avg: Option<f64>,
+    /// Sample standard deviation of the values that parse as numbers. NULL for fewer than two such values, where it is undefined rather than zero.
+    pub num_std: Option<f64>,
+    /// Non-null values that parse as an integer.
+    pub cast_bigint: i64,
+    /// Non-null values that parse as a double.
+    pub cast_double: i64,
+    /// Non-null values that parse as a date. This is the whole of type detection here: ingest stores every delivered value as text, so the declared type says nothing about content and conformance is the only evidence of what a column actually holds.
+    pub cast_date: i64,
+    /// Non-null values that parse as a timestamp.
+    pub cast_timestamp: i64,
+    /// Non-null values that parse as a boolean.
+    pub cast_boolean: i64,
+    /// Shannon entropy of the value distribution, in bits. Reported in bits so it is directly comparable with the compiler's match-weight scale, which is also in bits — one unit across both halves of the system. A low value means one or two values dominate, which makes the column a poor blocking key however full it is.
+    pub entropy_bits: Option<f64>,
+    /// The most frequent values with their counts and shares, bounded to a small k. Bounded because this is a per-column row: an unbounded list would put the corpus inside the profile. NOTE for consumers: these are REAL VALUES — live emails and phone numbers — so they are the one field here that carries personal data and must be role-gated before display and never sent to a model.
+    pub top_values: Option<::serde_json::Value>,
+    /// Run-logical creation time.
+    pub created_at: ::chrono::DateTime<::chrono::Utc>,
+    /// Run-logical last-write time.
+    pub updated_at: ::chrono::DateTime<::chrono::Utc>,
+}
+
+impl From<&ColumnProfile> for ColumnProfileWire {
+    fn from(row: &ColumnProfile) -> Self {
+        Self {
+            id: row.id.clone(),
+            profile_run_id: row.profile_run_id.clone(),
+            column_name: row.column_name.clone(),
+            row_count: row.row_count,
+            total_row_count: row.total_row_count,
+            non_null_count: row.non_null_count,
+            blank_count: row.blank_count,
+            distinct_approx: row.distinct_approx,
+            distinct_exact: row.distinct_exact,
+            distinct_normalized: row.distinct_normalized,
+            len_min: row.len_min,
+            len_max: row.len_max,
+            len_avg: row.len_avg,
+            len_p50: row.len_p50,
+            len_p95: row.len_p95,
+            lex_min: row.lex_min.clone(),
+            lex_max: row.lex_max.clone(),
+            num_min: row.num_min,
+            num_max: row.num_max,
+            num_avg: row.num_avg,
+            num_std: row.num_std,
+            cast_bigint: row.cast_bigint,
+            cast_double: row.cast_double,
+            cast_date: row.cast_date,
+            cast_timestamp: row.cast_timestamp,
+            cast_boolean: row.cast_boolean,
+            entropy_bits: row.entropy_bits,
+            top_values: row.top_values.clone(),
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        }
+    }
 }
 
 impl ColumnProfile {

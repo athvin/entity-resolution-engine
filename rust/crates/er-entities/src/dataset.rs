@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 /// One of a tenant's resolution domains: its own lake location, config pointer, entity type and lifecycle state. The lake env points at a DuckLake catalog of its own (a METADATA_SCHEMA inside the org's metadata database, or a file catalog locally), so two datasets never share tables.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Dataset {
     /// The dataset's unique id (UUIDv7, minted at creation).
     pub id: String,
@@ -34,6 +34,61 @@ pub struct Dataset {
     pub created_at: ::chrono::DateTime<::chrono::Utc>,
     /// Wall-clock last-write time (database default; advanced by mutations once the entity migrates).
     pub updated_at: ::chrono::DateTime<::chrono::Utc>,
+}
+
+/// One of a tenant's resolution domains: its own lake location, config pointer, entity type and lifecycle state. The lake env points at a DuckLake catalog of its own (a METADATA_SCHEMA inside the org's metadata database, or a file catalog locally), so two datasets never share tables.
+#[derive(Debug, Clone, PartialEq, Serialize, ::utoipa::ToSchema)]
+#[schema(as = Dataset)]
+pub struct DatasetWire {
+    /// The dataset's unique id (UUIDv7, minted at creation).
+    pub id: String,
+    /// The tenant this dataset belongs to.
+    pub org_id: String,
+    /// The dataset's name, unique within its org (the routing handle; URLs are name-based, same slug grammar as an org name). The migration sweep names every existing org's one dataset `default`.
+    pub name: String,
+    /// Optional human label; the name stays the stable routing handle.
+    pub display_name: Option<String>,
+    /// The one entity type this dataset's lake resolves. Fixed at creation: the lake's std/golden tables are per-type, so changing it would orphan the corpus. Publish refuses a config whose entity_type differs.
+    pub entity_type: String,
+    /// Path to the dataset's config document.
+    pub config_path: String,
+    /// Lake connection env (catalog, catalog schema, data path, config/model/TF/lexicon paths). Handed to the engine verbatim; the derived location keys always win over operator extras.
+    pub env: ::serde_json::Value,
+    /// Delivery landing directory; one `<source>.csv` per config source.
+    pub drop_root: Option<String>,
+    /// Bucket the auto-ingest poller watches for this dataset. Null means auto-ingest is off — the feature has to be opted into, because a poller that starts reading a bucket nobody pointed at it would be ingesting data on its own initiative.
+    pub s3_ingest_bucket: Option<String>,
+    /// Key prefix under `s3_ingest_bucket`, with one directory per config source beneath it. A column rather than a key in `env` deliberately, for the same reason as the org's: `env` is handed to the engine subprocess, while this is read by the control plane itself.
+    pub s3_ingest_prefix: Option<String>,
+    /// The currently published config version, if any.
+    pub active_config_version: Option<i64>,
+    /// Dataset lifecycle state. The org's own state gates the whole tenant above this.
+    pub state: String,
+    /// When the dataset was created.
+    pub created_at: ::chrono::DateTime<::chrono::Utc>,
+    /// Wall-clock last-write time (database default; advanced by mutations once the entity migrates).
+    pub updated_at: ::chrono::DateTime<::chrono::Utc>,
+}
+
+impl From<&Dataset> for DatasetWire {
+    fn from(row: &Dataset) -> Self {
+        Self {
+            id: row.id.clone(),
+            org_id: row.org_id.clone(),
+            name: row.name.clone(),
+            display_name: row.display_name.clone(),
+            entity_type: row.entity_type.clone(),
+            config_path: row.config_path.clone(),
+            env: row.env.clone(),
+            drop_root: row.drop_root.clone(),
+            s3_ingest_bucket: row.s3_ingest_bucket.clone(),
+            s3_ingest_prefix: row.s3_ingest_prefix.clone(),
+            active_config_version: row.active_config_version,
+            state: row.state.clone(),
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        }
+    }
 }
 
 impl Dataset {

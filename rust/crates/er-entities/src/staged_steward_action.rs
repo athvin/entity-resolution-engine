@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 /// A steward action staged for review/apply: its payload, state and outcome.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StagedStewardAction {
     /// The staged action's unique id.
     pub id: String,
@@ -26,6 +26,49 @@ pub struct StagedStewardAction {
     pub applied_at: Option<::chrono::DateTime<::chrono::Utc>>,
     /// Wall-clock last-write time (database default; advanced by mutations once the entity migrates).
     pub updated_at: ::chrono::DateTime<::chrono::Utc>,
+}
+
+/// A steward action staged for review/apply: its payload, state and outcome.
+#[derive(Debug, Clone, PartialEq, Serialize, ::utoipa::ToSchema)]
+#[schema(as = StagedStewardAction)]
+pub struct StagedStewardActionWire {
+    /// The staged action's unique id.
+    pub id: String,
+    /// The tenant the action applies to.
+    pub org_id: String,
+    /// The dataset whose lake this action drains into.
+    pub dataset_id: String,
+    /// The action payload.
+    pub action: ::serde_json::Value,
+    /// Whether the action is pending, applied or failed.
+    pub state: String,
+    /// The failure reason, if the action failed.
+    pub error: Option<String>,
+    /// Principal that staged the action.
+    pub created_by: String,
+    /// When the action was staged.
+    pub created_at: ::chrono::DateTime<::chrono::Utc>,
+    /// When the action was applied, if it has been.
+    pub applied_at: Option<::chrono::DateTime<::chrono::Utc>>,
+    /// Wall-clock last-write time (database default; advanced by mutations once the entity migrates).
+    pub updated_at: ::chrono::DateTime<::chrono::Utc>,
+}
+
+impl From<&StagedStewardAction> for StagedStewardActionWire {
+    fn from(row: &StagedStewardAction) -> Self {
+        Self {
+            id: row.id.clone(),
+            org_id: row.org_id.clone(),
+            dataset_id: row.dataset_id.clone(),
+            action: row.action.clone(),
+            state: row.state.clone(),
+            error: row.error.clone(),
+            created_by: row.created_by.clone(),
+            created_at: row.created_at,
+            applied_at: row.applied_at,
+            updated_at: row.updated_at,
+        }
+    }
 }
 
 impl StagedStewardAction {
