@@ -72,3 +72,17 @@ class Disk(unittest.TestCase):
 
     def test_bad_threshold_refused_without_deletion(self):
         self.assertEqual(self.check_disk(88, 'garbage'), (2, False))
+
+
+class GeneratedReferences(unittest.TestCase):
+    def test_python_bytecode_does_not_enter_infrastructure_references(self):
+        import re
+        source = (HERE.parent/'skills-check.sh').read_text()
+        function = re.search(r'^infra_references\(\) \{.*?^\}', source, re.M | re.S).group()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root/'scripts/__pycache__').mkdir(parents=True)
+            (root/'scripts/direct.py').write_text('infra/k8s/probe')
+            (root/'scripts/__pycache__/direct.pyc').write_bytes(b'\0infra/k8s/probe\0')
+            output = subprocess.check_output(['bash', '-c', function+'\ninfra_references infra/k8s/probe'], cwd=root, text=True)
+            self.assertEqual(output.strip(), 'scripts/direct.py')

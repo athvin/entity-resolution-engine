@@ -97,10 +97,12 @@ class GreenBase(unittest.TestCase):
             return dict(id=i, head_sha=str(i)*40, conclusion='success', event='push', head_branch='main', **kw)
         runs = [run(1), run(2), run(3)]
         runs[0]['conclusion'] = 'failure'
-        with patch.object(baseline.subprocess, 'run', return_value=subprocess.CompletedProcess([], 1)):
+        with patch.object(baseline, 'same_policy', return_value=True), patch.object(baseline.subprocess, 'run', return_value=subprocess.CompletedProcess([], 1)):
             self.assertEqual(baseline.find_base(runs, 'head', '3'), '')
-        with patch.object(baseline.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0)):
+        with patch.object(baseline, 'same_policy', return_value=True), patch.object(baseline.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0)):
             self.assertEqual(baseline.find_base(runs, 'head', '2'), '3'*40)
+        with patch.object(baseline, 'same_policy', return_value=False):
+            self.assertEqual(baseline.find_base(runs, 'head', '2'), '')
 
 
 if __name__ == '__main__':

@@ -2,8 +2,19 @@
 """Find a green ancestor for push selection; uncertainty means full CI."""
 import json
 import os
+from pathlib import Path
 import re
 import subprocess
+
+
+def same_policy(sha):
+    # Bootstrap conservatively: old workflows may have marked an unrelated
+    # push green after an earlier failing run, before cumulative selection.
+    try:
+        previous = subprocess.check_output(['git', 'show', sha + ':scripts/ci/successful-base.py'], stderr=subprocess.DEVNULL)
+        return previous == Path(__file__).read_bytes()
+    except subprocess.CalledProcessError:
+        return False
 
 
 def find_base(runs, head, current_run):
@@ -11,7 +22,7 @@ def find_base(runs, head, current_run):
         sha = run["head_sha"]
         if (str(run["id"]) == current_run or run["conclusion"] != "success"
                 or run["head_branch"] != "main" or run["event"] != "push"
-                or not re.fullmatch(r"[a-f0-9]{40}", sha)):
+                or not re.fullmatch(r"[a-f0-9]{40}", sha) or not same_policy(sha)):
             continue
         # Equality is valid: a re-run may verify an already green tree.
         if subprocess.run(["git", "merge-base", "--is-ancestor", sha, head],
