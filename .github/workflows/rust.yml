@@ -89,14 +89,14 @@
 # rust-toolchain selects the channel through its ref (`@stable`), which cannot
 # also carry the S9 `@<sha> # vTAG` pin the repo requires of every `uses:`.
 #
-# SPEED: every compile job shares an sccache compilation cache (the Actions
-# cache backend — see the env block for why it is not S3) and links with mold, so the jobs stop re-compiling
-# the same crate-units cold and the DuckDB static link is far cheaper. The heavy perf jobs (bench compile,
+# SPEED: every compile job uses sccache (R2 for human PRs/main; GitHub Actions
+# cache for Dependabot PRs) and links with mold, so jobs stop re-compiling the
+# same crate-units cold and the DuckDB static link is far cheaper. The heavy perf jobs (bench compile,
 # 50k scale) run only on main + nightly, not on every PR — the PR gate is
 # lint + test + the DuckLake integration e2e + cargo-deny.
 #
-# The two caches are a SHARED, CAPPED resource — 10 GB per repository, LRU-evicted
-# past it — and they fail differently, which is why both exist. rust-cache keys on
+# The GitHub Actions cache has a per-repository eviction limit; R2 has its own
+# lifecycle. They fail differently, which is why both exist. rust-cache keys on
 # `Cargo.lock` and so misses wholesale on any dependency change; sccache is
 # content-addressed per compilation unit and still hits for every crate a bump did
 # not touch. Three rules follow, each load-bearing:
@@ -243,7 +243,11 @@ env:
   # the `.us.` endpoint answers `NoSuchBucket`. Measured both ways.
   #
   # Bucket + lifecycle are infra/terraform/envs/core/r2.tf.
-  SCCACHE_BUCKET: er-ci-sccache
+  # Dependabot PRs cannot read Actions secrets. Use GitHub's branch-scoped
+  # cache for them, while human PRs and main keep the measured R2 path. An
+  # empty bucket disables sccache's S3 backend (config.rs ignores empty vars).
+  SCCACHE_GHA_ENABLED: ${{ github.event_name == 'pull_request' && github.event.pull_request.user.login == 'dependabot[bot]' && 'on' || 'off' }}
+  SCCACHE_BUCKET: ${{ (github.event_name != 'pull_request' || github.event.pull_request.user.login != 'dependabot[bot]') && 'er-ci-sccache' || '' }}
   SCCACHE_ENDPOINT: https://9eefbe6bc92d11b2bb4e962494765a4c.r2.cloudflarestorage.com
   SCCACHE_REGION: auto
   #
@@ -694,6 +698,13 @@ jobs:
         # The script lives at the repo root; this workflow defaults `run` to rust/.
         working-directory: ${{ github.workspace }}
         run: bash scripts/ci/install-mold.sh
+      - name: Export GitHub cache credentials for Dependabot
+        if: env.SCCACHE_GHA_ENABLED == 'on'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       # No rust-cache. A restored `target/` carries a populated
       # `duckdb-sources/<key>/` with its `.complete` sentinel stripped, so
@@ -787,6 +798,13 @@ jobs:
         # The script lives at the repo root; this workflow defaults `run` to rust/.
         working-directory: ${{ github.workspace }}
         run: bash scripts/ci/install-mold.sh
+      - name: Export GitHub cache credentials for Dependabot
+        if: env.SCCACHE_GHA_ENABLED == 'on'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       # No rust-cache. A restored `target/` carries a populated
       # `duckdb-sources/<key>/` with its `.complete` sentinel stripped, so
@@ -919,6 +937,13 @@ jobs:
         # The script lives at the repo root; this workflow defaults `run` to rust/.
         working-directory: ${{ github.workspace }}
         run: bash scripts/ci/install-mold.sh
+      - name: Export GitHub cache credentials for Dependabot
+        if: env.SCCACHE_GHA_ENABLED == 'on'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       # No rust-cache. A restored `target/` carries a populated
       # `duckdb-sources/<key>/` with its `.complete` sentinel stripped, so
@@ -1139,6 +1164,13 @@ jobs:
         # The script lives at the repo root; this workflow defaults `run` to rust/.
         working-directory: ${{ github.workspace }}
         run: bash scripts/ci/install-mold.sh
+      - name: Export GitHub cache credentials for Dependabot
+        if: env.SCCACHE_GHA_ENABLED == 'on'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       # No rust-cache. A restored `target/` carries a populated
       # `duckdb-sources/<key>/` with its `.complete` sentinel stripped, so
@@ -1266,6 +1298,13 @@ jobs:
         # The script lives at the repo root; this workflow defaults `run` to rust/.
         working-directory: ${{ github.workspace }}
         run: bash scripts/ci/install-mold.sh
+      - name: Export GitHub cache credentials for Dependabot
+        if: env.SCCACHE_GHA_ENABLED == 'on'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       # No rust-cache. A restored `target/` carries a populated
       # `duckdb-sources/<key>/` with its `.complete` sentinel stripped, so
@@ -1398,6 +1437,13 @@ jobs:
         # The script lives at the repo root; this workflow defaults `run` to rust/.
         working-directory: ${{ github.workspace }}
         run: bash scripts/ci/install-mold.sh
+      - name: Export GitHub cache credentials for Dependabot
+        if: env.SCCACHE_GHA_ENABLED == 'on'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       # No rust-cache. A restored `target/` carries a populated
       # `duckdb-sources/<key>/` with its `.complete` sentinel stripped, so
@@ -1449,6 +1495,13 @@ jobs:
         # The script lives at the repo root; this workflow defaults `run` to rust/.
         working-directory: ${{ github.workspace }}
         run: bash scripts/ci/install-mold.sh
+      - name: Export GitHub cache credentials for Dependabot
+        if: env.SCCACHE_GHA_ENABLED == 'on'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       # No rust-cache. A restored `target/` carries a populated
       # `duckdb-sources/<key>/` with its `.complete` sentinel stripped, so
