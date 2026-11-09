@@ -2443,8 +2443,8 @@ gen_obs_surface() {
 
 	echo "### Which side of the split each crate is on"
 	echo
-	echo "**Depend on \`er-span\` — they emit and collect nothing.** Instrumenting"
-	echo "one of these must not reach for \`er-obs\`:"
+	echo "**Depend on \`er-span\` — they use the emission helpers.** Only the"
+	echo "entry-point crates listed below may also depend on \`er-obs\`:"
 	echo
 	bullets "$emitters" "**None**, which would mean nothing in the engine is instrumented."
 	echo

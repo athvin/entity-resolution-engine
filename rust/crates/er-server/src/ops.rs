@@ -76,14 +76,24 @@ fn oldest_pending_age(pods: &[er_k8s::PodSnapshot], now: i64) -> Result<u64, Pod
 /// # Errors
 /// A failed/timed-out LIST, or a Pending pod without its creation timestamp.
 pub async fn pod_snapshot(api: &dyn er_k8s::PodApi, now: i64) -> Result<(), PodSnapshotError> {
-    let listing = tokio::time::timeout(
-        std::time::Duration::from_secs(10),
-        api.list(&er_k8s::Selector(crate::executor::MANAGED_SELECTOR.into())),
-    )
-    .await??;
-    let age = oldest_pending_age(&listing.pods, now)?;
-    operational::pod_snapshot_succeeded(age);
-    Ok(())
+    let span = tracing::info_span!(
+        "ops.pod_snapshot",
+        er.outcome = tracing::field::Empty,
+        otel.status_code = tracing::field::Empty,
+    );
+    let result = er_span::instrument(&span, async {
+        let listing = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            api.list(&er_k8s::Selector(crate::executor::MANAGED_SELECTOR.into())),
+        )
+        .await??;
+        let age = oldest_pending_age(&listing.pods, now)?;
+        operational::pod_snapshot_succeeded(age);
+        Ok(())
+    })
+    .await;
+    er_span::outcome(&span, result.is_ok());
+    result
 }
 
 /// Record the returned row of a committed terminal write, never a pre-write row.
