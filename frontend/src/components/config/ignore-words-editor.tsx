@@ -24,10 +24,11 @@ function WordList({
   initialRows: IgnoreWord[];
   canEdit: boolean;
 }) {
-  const [rows, setRows] = useState(initialRows);
+  const [draft, setDraft] = useState<IgnoreWord[] | null>(null);
+  const rows = draft ?? initialRows;
   const [word, setWord] = useState("");
   const [dictionary, setDictionary] = useState("legal_suffixes");
-  const [dirty, setDirty] = useState(false);
+  const dirty = draft !== null;
   const [validation, setValidation] = useState<string | null>(null);
   const [page, setPage] = useState(0);
   const save = useSaveIgnoreWords(org, ds);
@@ -35,8 +36,7 @@ function WordList({
   const currentPage = Math.min(page, lastPage);
 
   function change(next: IgnoreWord[]) {
-    setRows(next);
-    setDirty(true);
+    setDraft(next);
     setValidation(null);
     save.reset();
   }
@@ -68,9 +68,9 @@ function WordList({
 
   async function persist() {
     try {
-      const result = await save.mutateAsync(rows);
-      setRows(result.rows);
-      setDirty(false);
+      setValidation(null);
+      await save.mutateAsync(rows);
+      setDraft(null);
     } catch {
       // The mutation retains the error; keep the draft available for retry.
     }
@@ -229,6 +229,7 @@ function WordList({
             onClick={() => void persist()}
             disabled={!dirty || save.isPending}
             data-testid="ignore-words-save"
+            data-er-action="config.dictionary.save"
           >
             {save.isPending ? "Saving…" : "Save dictionaries"}
           </Button>
@@ -253,23 +254,30 @@ export function IgnoreWordsEditor({ org }: { org: string }) {
       <CardContent className="p-4 pt-2 lg:p-6 lg:pt-2">
         {query.isPending ? (
           <Skeleton className="h-32 w-full" aria-label="Loading dictionaries" />
-        ) : query.isError ? (
-          <div className="flex flex-col items-start gap-2">
-            <p role="alert" className="text-sm font-medium">
-              couldn't load the dictionaries — retry before editing
-            </p>
-            <Button variant="outline" onClick={() => void query.refetch()}>
-              Retry
-            </Button>
-          </div>
         ) : (
-          <WordList
-            key={`${org}/${ds}`}
-            org={org}
-            ds={ds}
-            initialRows={query.data.rows}
-            canEdit={role === "admin" || role === "steward"}
-          />
+          <>
+            {query.isError && (
+              <div className="mb-3 flex flex-col items-start gap-2">
+                <p role="alert" className="text-sm font-medium">
+                  {query.data
+                    ? "couldn't refresh the dictionaries — your draft is kept"
+                    : "couldn't load the dictionaries — retry before editing"}
+                </p>
+                <Button variant="outline" onClick={() => void query.refetch()}>
+                  Retry
+                </Button>
+              </div>
+            )}
+            {query.data && (
+              <WordList
+                key={`${org}/${ds}`}
+                org={org}
+                ds={ds}
+                initialRows={query.data.rows}
+                canEdit={role === "admin" || role === "steward"}
+              />
+            )}
+          </>
         )}
       </CardContent>
     </Card>

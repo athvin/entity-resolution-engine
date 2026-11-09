@@ -5,6 +5,7 @@ import { IgnoreWordsEditor } from "@/components/config/ignore-words-editor";
 
 const state = vi.hoisted(() => ({
   ds: "first",
+  error: false,
   rows: [] as { word: string; dictionary: string }[],
   save: vi.fn(),
 }));
@@ -14,7 +15,7 @@ vi.mock("@/lib/query/hooks", () => ({
   effectiveRole: () => "steward",
 }));
 vi.mock("@/lib/query/dictionaries", () => ({
-  useIgnoreWords: () => ({ isPending: false, isError: false, data: { rows: state.rows } }),
+  useIgnoreWords: () => ({ isPending: false, isError: state.error, data: { rows: state.rows } }),
   useSaveIgnoreWords: () => ({
     isPending: false,
     isSuccess: false,
@@ -27,6 +28,7 @@ vi.mock("@/lib/query/dictionaries", () => ({
 describe("IgnoreWordsEditor", () => {
   beforeEach(() => {
     state.ds = "first";
+    state.error = false;
     state.rows = Array.from({ length: 101 }, (_, i) => ({
       word: `word${String(i)}`,
       dictionary: "terms",
@@ -44,6 +46,22 @@ describe("IgnoreWordsEditor", () => {
     expect(screen.getByText("word100")).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "Previous" }));
     expect(screen.getByText("word0")).toBeDefined();
+  });
+
+  it("refreshes an untouched list but retains a draft across background errors", () => {
+    state.rows = [{ word: "inc", dictionary: "legal" }];
+    const view = render(<IgnoreWordsEditor org="acme" />);
+    state.rows = [{ word: "ltd", dictionary: "legal" }];
+    view.rerender(<IgnoreWordsEditor org="acme" />);
+    expect(screen.getByText("ltd")).toBeDefined();
+    expect(screen.queryByText("inc")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Remove ltd from legal" }));
+    state.rows = [{ word: "llc", dictionary: "legal" }];
+    state.error = true;
+    view.rerender(<IgnoreWordsEditor org="acme" />);
+    expect(screen.queryByText("llc")).toBeNull();
+    expect(screen.getByRole("button", { name: "Save dictionaries" })).toBeEnabled();
+    expect(screen.getByText(/No ignore words yet/)).toBeDefined();
   });
 
   it("discards another dataset's unsaved draft when the route changes", () => {
