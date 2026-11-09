@@ -113,12 +113,9 @@ resource "aws_secretsmanager_secret_version" "erserver" {
     # exist here for no isolation gain — there is nothing to be isolated FROM.
     # Tenant separation in prod is DuckLake catalogs (§7.3), not Postgres roles.
     #
-    # KNOWN GAP, tracked by #553: `sslmode=require` encrypts but does not verify
-    # the server certificate, so it does not satisfy §3.1's `verify-full` probe.
-    # Moving it needs the RDS CA bundle in the images first — an image change,
-    # deliberately not smuggled into a Terraform PR. rds.tf's
-    # `er/prod/shared/postgres` carries the same `require` for the same reason.
-    ERSERVER_DSN = "postgresql://er:${random_password.db.result}@${aws_rds_cluster.prod.endpoint}:5432/er?sslmode=require"
+    # Requires the verified-TLS connector and RDS bundle shipped by #988.
+    # Land only after those images have deployed to production.
+    ERSERVER_DSN = "postgresql://er:${random_password.db.result}@${aws_rds_cluster.prod.endpoint}:5432/er?sslmode=verify-full&sslrootcert=/etc/ssl/rds/global-bundle.pem"
 
     ERSERVER_OPERATOR_TOKEN = random_bytes.operator_token.hex
 
@@ -160,7 +157,7 @@ resource "aws_secretsmanager_secret_version" "erweb" {
   secret_id = aws_secretsmanager_secret.erweb.id
 
   secret_string = jsonencode({
-    ERWEB_DATABASE_URL   = "postgresql://er:${random_password.db.result}@${aws_rds_cluster.prod.endpoint}:5432/er?sslmode=require"
+    ERWEB_DATABASE_URL   = "postgresql://er:${random_password.db.result}@${aws_rds_cluster.prod.endpoint}:5432/er?sslmode=verify-full&sslrootcert=/etc/ssl/rds/global-bundle.pem"
     ERWEB_SESSION_SECRET = random_bytes.web_session_secret.hex
     ERWEB_CREDENTIAL_KEY = random_bytes.web_credential_key.base64
     # Set out of band — a model key is not Terraform's to mint, and an empty

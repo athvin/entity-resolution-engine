@@ -98,7 +98,7 @@ resource "aws_secretsmanager_secret_version" "db" {
     ER_PG_USER     = "er"
     ER_PG_PASSWORD = random_password.db.result
     ER_PG_DBNAME   = "er"
-    ERSERVER_DSN   = "host=${aws_rds_cluster.prod.endpoint} port=5432 user=er password=${random_password.db.result} dbname=er sslmode=require"
+    ERSERVER_DSN   = "postgresql://er:${random_password.db.result}@${aws_rds_cluster.prod.endpoint}:5432/er?sslmode=verify-full&sslrootcert=/etc/ssl/rds/global-bundle.pem"
   })
 }
 
