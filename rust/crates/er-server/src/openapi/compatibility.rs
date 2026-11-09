@@ -197,7 +197,7 @@ mod tests {
         for method in ["get", "post"] {
             new["paths"]["/things/{id}"][method]["parameters"] = params.clone();
         }
-        assert!(operation_changes(&base, &new).is_empty());
+        assert_eq!(operation_changes(&base, &new), Vec::<String>::new());
     }
 
     #[test]
@@ -234,7 +234,7 @@ mod tests {
         new = base.clone();
         new["components"]["requestBodies"]["Input"]["content"]["application/xml"] =
             json!({"schema":{"required":["new_representation"]}});
-        assert!(operation_changes(&base, &new).is_empty());
+        assert_eq!(operation_changes(&base, &new), Vec::<String>::new());
     }
 
     #[test]
@@ -245,7 +245,7 @@ mod tests {
         new["components"]["schemas"]["Input"]["required"] = json!([]);
         new["components"]["schemas"]["Input"]["properties"]["optional"] =
             json!({"type":"object","required":["inner"]});
-        assert!(operation_changes(&base, &new).is_empty());
-        assert!(operation_changes(&base, &base).is_empty());
+        assert_eq!(operation_changes(&base, &new), Vec::<String>::new());
+        assert_eq!(operation_changes(&base, &base), Vec::<String>::new());
     }
 }

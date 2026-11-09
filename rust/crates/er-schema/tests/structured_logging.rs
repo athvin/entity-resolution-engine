@@ -42,9 +42,9 @@ const ALLOWED: &[(&str, usize, &str)] = &[
     ),
     (
         "er-openapi-check.rs",
-        5,
-        "a CI helper binary, not the server: it prints a usage line and a \
-         human-readable list of breaking schema changes for whoever is reading \
+        4,
+        "a CI helper binary, not the server: it prints file-read errors and a \
+         human-readable list of breaking API changes for whoever is reading \
          the job log, and it exits before any subscriber exists",
     ),
     (

@@ -53,11 +53,11 @@ cargo run -q -p er-server --bin er-openapi -- --audience internal > ../frontend/
 cargo run -q -p er-server --bin er-openapi -- --audience public > ../frontend/src/lib/api/openapi.public.json
 
 # 2. document → the TypeScript types
-cd frontend && pnpm gen:api
+cd ../frontend && pnpm gen:api
 ```
 
-Both documents and the internal TypeScript output are **committed**, and both belong in the same commit as the entity
-change. Never hand-edit either, and never edit `schema.d.ts` to make the
+Both documents and the internal TypeScript output are **committed** together
+with the entity change. Never hand-edit these artifacts, and never edit `schema.d.ts` to make the
 frontend compile — that silently decouples the two sides, which is the exact
 failure the contract exists to prevent.
 
