@@ -85,6 +85,14 @@ all corresponding test identities match and every leg succeeds. Run
 `python3 scripts/ci/archive-verdict.py <run-id>` to compute that verdict. Never share an
 archive across commits or workflow runs.
 
+The November 9 trial, [run 42575743751](https://github.com/athvin/entity-resolution-engine/actions/runs/42575743751),
+passed all 45 jobs with identical corresponding test identities. Baseline pair
+critical paths were 473/375/482/452/464 seconds; archive paths, including the
+producer and transfer, were 504/416/514/432/498. The medians were 464 and
+498 seconds: archive reuse was **7.33% slower**, so it was **not adopted**.
+These figures exclude runner queue contention between the concurrent pairs;
+they are an experiment comparison, not the normal PR workflow duration.
+
 Targets are sub-five-minute ordinary warm PR feedback and warm merge-to-prod.
 They are targets, not results. Gather 20 relevant runs after rollout and report
 median/p95, retry frequency and cold dependency rebuilds separately. Paid
