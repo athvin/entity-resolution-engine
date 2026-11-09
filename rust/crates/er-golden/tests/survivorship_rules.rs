@@ -282,6 +282,32 @@ fn a_declared_group_claims_its_fields_from_the_scalar_list() {
 }
 
 #[test]
+fn both_lineage_generators_refuse_unsafe_group_tokens() {
+    // Direct callers can construct a Config without load_config_str. Before
+    // this guard, `full-name` was emitted unquoted as `attr_full-name`.
+    let config = with_groups(&[("full-name", &["given_name", "family_name"], None)]);
+    for result in [
+        er_golden::golden_lineage_sql(
+            &config,
+            "std",
+            "membership",
+            "entities",
+            "2026-01-01 00:00:00",
+        ),
+        er_golden::acct_golden_lineage_sql(
+            &config,
+            "std",
+            "membership",
+            "entities",
+            "2026-01-01 00:00:00",
+        ),
+    ] {
+        let error = result.unwrap_err();
+        assert!(error.to_string().contains("full-name"), "{error}");
+    }
+}
+
+#[test]
 fn naming_address_overrides_the_builtin_rather_than_duplicating_it() {
     // Otherwise two relations called `attr_address` would be generated — the
     // config would be accepted and the SQL would not compile.

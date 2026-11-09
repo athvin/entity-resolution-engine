@@ -29,6 +29,16 @@ pub const TERMINAL_SURVIVORSHIP_RULE: &str = "record_key ASC";
 /// sources and rejected in a user document (S6.1 V11).
 pub const RESERVED_SOURCE_PREFIX: &str = "_";
 
+/// Group tokens are interpolated into generated SQL identifiers such as
+/// `attr_<token>` and `_token_composite`. A safe fragment starts with an ASCII
+/// letter or underscore and continues with ASCII letters, digits, or underscores.
+#[must_use]
+pub fn is_sql_identifier_fragment(token: &str) -> bool {
+    let mut bytes = token.bytes();
+    matches!(bytes.next(), Some(b'a'..=b'z' | b'A'..=b'Z' | b'_'))
+        && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+}
+
 /// The top-level blocks of S6, in document order — the count is the array's own
 /// length, deliberately not restated in prose (it has read "fourteen" since it
 /// held sixteen). [`Config`]'s S6 block fields MUST equal this set; the `entity_type` discriminator (added for the
@@ -1041,6 +1051,8 @@ pub enum ConfigError {
     NonFiniteNumber(String),
     #[error("source name {0:?} must be nonempty and contain no ':'")]
     InvalidSourceName(String),
+    #[error("survivorship_groups token {0:?} must match [A-Za-z_][A-Za-z0-9_]*")]
+    InvalidSurvivorshipGroupToken(String),
 }
 
 impl ConfigError {
@@ -1080,6 +1092,13 @@ pub fn load_config_str(yaml: &str) -> Result<Config, ConfigError> {
         .find(|source| source.is_empty() || source.contains(':'))
     {
         return Err(ConfigError::InvalidSourceName(source.clone()));
+    }
+    if let Some(token) = config
+        .survivorship_groups
+        .keys()
+        .find(|token| !is_sql_identifier_fragment(token))
+    {
+        return Err(ConfigError::InvalidSurvivorshipGroupToken(token.clone()));
     }
     if let Some(field) = nonfinite_number_field(&config) {
         return Err(ConfigError::NonFiniteNumber(field));

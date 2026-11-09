@@ -471,4 +471,54 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn valid_person_and_account_group_tokens_plan_in_lineage_sql() {
+        for (account, fields, token) in [
+            (false, ["given_name", "family_name"], "full_name"),
+            (true, ["company_name", "domain"], "company_domain"),
+        ] {
+            let mut config = if account {
+                acct_config()
+            } else {
+                er_config::load_config_str(TEST_CONFIG).unwrap()
+            };
+            for field in fields {
+                config.survivorship.remove(field);
+            }
+            config.survivorship.insert(
+                token.to_string(),
+                vec!["recency".to_string(), "record_key ASC".to_string()],
+            );
+            config.survivorship_groups.insert(
+                token.to_string(),
+                er_config::SurvivorshipGroup {
+                    fields: fields.map(str::to_string).to_vec(),
+                    controlling: None,
+                },
+            );
+            let sql = if account {
+                er_golden::acct_golden_lineage_sql(
+                    &config,
+                    "lake.main.int_std_records",
+                    "lake.main.entity_membership",
+                    "lake.main.entities",
+                    "2000-01-01 00:00:00",
+                )
+            } else {
+                er_golden::golden_lineage_sql(
+                    &config,
+                    "lake.main.int_std_records",
+                    "lake.main.entity_membership",
+                    "lake.main.entities",
+                    "2000-01-01 00:00:00",
+                )
+            }
+            .unwrap();
+            assert!(sql.contains(&format!("attr_{token}")));
+            let catalog = build_lake_stage_catalog(&entities_catalog(), account);
+            let columns = plan_stage(&catalog, &sql);
+            assert!(columns.contains(&"attribute".to_string()));
+        }
+    }
 }

@@ -154,6 +154,16 @@ fn sources_map(config: &Config) -> String {
     format!("MAP {{ {} }}", entries.join(", "))
 }
 
+fn validate_group_tokens(config: &Config) -> Result<()> {
+    for token in config.survivorship_groups.keys() {
+        anyhow::ensure!(
+            er_config::is_sql_identifier_fragment(token),
+            "survivorship_groups token {token:?} must match [A-Za-z_][A-Za-z0-9_]*"
+        );
+    }
+    Ok(())
+}
+
 /// The `golden_lineage` SELECT over `std_table` (int_std_records),
 /// `membership_table` (entity_membership) and `entities_table` (entities). Reads
 /// the per-attribute survivorship chains from `config`.
@@ -164,6 +174,7 @@ pub fn golden_lineage_sql(
     entities_table: &str,
     run_at: &str,
 ) -> Result<String> {
+    validate_group_tokens(config)?;
     let version = config.versions.survivorship_version.replace('\'', "''");
     let run_at = run_at.replace('\'', "''");
 
@@ -304,6 +315,7 @@ pub fn acct_golden_lineage_sql(
     entities_table: &str,
     run_at: &str,
 ) -> Result<String> {
+    validate_group_tokens(config)?;
     let version = config.versions.survivorship_version.replace('\'', "''");
     let run_at = run_at.replace('\'', "''");
 

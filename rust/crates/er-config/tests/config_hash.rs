@@ -262,3 +262,23 @@ fn source_names_must_be_record_key_components() {
     }
     assert!(load_config_str(original).is_ok());
 }
+
+#[test]
+fn survivorship_group_tokens_must_be_sql_identifier_fragments() {
+    let original = fixture("default.yaml");
+    for token in ["full-name", "full name", "full\"name", "1name", ""] {
+        let yaml = format!(
+            "{original}\nsurvivorship_groups:\n  '{token}':\n    fields: [given_name, family_name]\n"
+        );
+        let error = load_config_str(&yaml).unwrap_err();
+        assert!(
+            error.to_string().contains("survivorship_groups token")
+                && error.to_string().contains("[A-Za-z_][A-Za-z0-9_]*"),
+            "{token:?}: {error}"
+        );
+    }
+    let valid = format!(
+        "{original}\nsurvivorship_groups:\n  full_name2:\n    fields: [given_name, family_name]\n"
+    );
+    assert!(load_config_str(&valid).is_ok());
+}
