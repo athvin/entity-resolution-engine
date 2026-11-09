@@ -541,6 +541,7 @@ test.describe("assistant", () => {
     // check has to name every async region the shot contains, not the first one
     // that happens to be convenient.
     await expect(page.getByTestId("version-history")).toContainText("published");
+    await expect(page.getByTestId("ignore-words-ready")).toBeVisible();
     await expect(page).toHaveScreenshot("config-studio.png", { fullPage: true });
   });
 });

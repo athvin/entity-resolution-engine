@@ -14,6 +14,61 @@ Pass `--config PATH` after a command or set `ER_CONFIG` to select a file.
 - [Runtime environment](#runtime-environment)
 - [Training large corpora](#training-large-corpora)
 - [Changing rules](#changing-rules)
+- [Dictionaries and preprocessing](#dictionaries-and-preprocessing)
+
+## Dictionaries and preprocessing
+
+Preprocessing runs before the field normalizers. Rules under `transforms` run
+in their declared order; an absent block leaves the existing pipeline alone.
+The current dictionary capabilities are distinct:
+
+| Capability | Managed through | Meaning |
+|---|---|---|
+| Nickname synonyms | Config studio's nickname editor; `GET`/`PUT …/lexicon` | Symmetric name pairs used in `name_variants`, not directed replacements |
+| Named ignore-word lists | Config studio's ignore-word editor; `GET`/`PUT …/ignore-words` | Remove whole space-separated tokens, ignoring letter case, when a field's `ignore_words` rule names the list |
+| Exact-value replacements | The published configuration's `dictionary` transform | Inline mappings; unmatched values pass through |
+
+Both API suffixes live under `/v1/orgs/{org}/datasets/{ds}`. Viewers may read;
+stewards and admins may replace dictionary contents. A successful save queues a
+full rebuild for the addressed dataset with ingestion skipped. It is a queued
+change, not proof that new match results are already available. Nickname and
+ignore-word identities join the run fingerprint, so dictionary drift cannot
+silently extend a corpus standardized with older inputs.
+
+For an account dataset, a named list containing `pty` can be used like this:
+
+```yaml
+transforms:
+  company_name:
+    - op: trim
+    - op: ignore_words
+      dictionary: legal_suffixes
+```
+
+List names are stored lowercase; use that spelling in the transform. Saving a
+list does not add a transform to a configuration. Publish the field rule through
+the configuration API or Config studio's reviewed draft flow. Punctuation is
+not removed by `ignore_words`: `inc` and `inc.` are different tokens; put any
+needed cleansing before this rule. An empty saved list is an intentional empty
+set. A failed initial read must not be treated as an empty set ready to save.
+
+Storage currently uses configured CSV inputs (`ER_LEXICON_PATH` and
+`ER_IGNORE_WORDS_PATH`), which can be shared across an organization's datasets.
+The default path derivation propagates the org path to its datasets. The
+dataset URL therefore does not promise separate dictionary storage, and saving
+only queues a rebuild for the addressed dataset. Coordinate other affected
+dataset rebuilds when those inputs are shared.
+
+Reusable named directed replacement lists (for example, a street-type map
+referenced by multiple fields) are not implemented. Inline replacement maps
+and the address parser do not imply that capability. The original #522 coverage
+percentage predates #799's ignore-word backend and is not a current estimate.
+The engine check `ignore_words_dictionary_decides_an_account_pair` in
+`er-cli/tests/acct_e2e.rs` proves that `Acme PTY` and `Acme` cluster together
+only when the custom list is loaded; `pg_ignore_words.rs` proves the API's
+canonicalization, validation and queued rebuild. The frontend dictionary
+journey checks read-only access, editing, failed reads/saves and empty-list
+persistence through the real BFF.
 
 ## Source data
 
