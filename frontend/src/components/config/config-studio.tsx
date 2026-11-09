@@ -234,7 +234,7 @@ function ConfigStudioForDataset({ org }: { org: string }) {
   if (active.isError) {
     return (
       <div role="alert" className="flex flex-col items-center gap-3 py-16">
-        <p>Could not load this configuration. Your edits have not been published.</p>
+        <p>Could not load this configuration. Retry before editing or publishing.</p>
         <Button
           variant="outline"
           onClick={() => {
