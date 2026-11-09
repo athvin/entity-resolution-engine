@@ -112,6 +112,21 @@ expect_pass 'an unrelated command' 'echo hello'
 expect_pass 'a tool call with no command at all' ''
 expect_pass 'a read past a pipe' 'kubectl get pods | grep Running'
 
+# A local client-side manifest check must not be mistaken for a create.
+expect_pass 'local kubectl client dry run' 'kubectl create --dry-run=client --validate=false -f manifest.json -o name'
+expect_pass 'client dry run with global options and reordered flags' 'kubectl --context er-prod -n app create -o json -f ./manifest.yaml --validate=false --dry-run=client'
+expect_pass 'client dry run with equals-form file and output' 'kubectl create --filename=./manifest.yaml --output=yaml --dry-run=client --validate=false'
+expect_deny 'real kubectl create remains guarded' 'kubectl create --validate=false -f manifest.json -o name'
+expect_deny 'server dry run remains guarded' 'kubectl create --dry-run=server --validate=false -f manifest.json'
+expect_deny 'conflicting dry-run flags are not exempt' 'kubectl create --dry-run=client --dry-run=none --validate=false -f manifest.json'
+expect_deny 'duplicate dry-run flags are not exempt' 'kubectl create --dry-run=client --dry-run=client --validate=false -f manifest.json'
+expect_deny 'dry-run text as a filename is not a flag' 'kubectl create -f --dry-run=client --validate=false'
+expect_deny 'a local check does not exempt a following write' 'kubectl create --dry-run=client --validate=false -f x.json; kubectl create -f y.json'
+expect_deny 'client check with an unknown option is not exempt' 'kubectl create --dry-run=client --validate=false --raw=/api/v1/namespaces -f x.json'
+expect_deny 'quoted dry-run data is not an option' "kubectl create configmap x --from-literal='example=--dry-run=client' --validate=false"
+expect_deny 'substitutions are not exempt' 'kubectl create --dry-run=client --validate=false -f $(echo manifest.json)'
+
+
 # The measured false positive: a PR body is data. Assembled so this file never
 # holds a runnable destructive command, same as the deny cases above.
 heredoc_with_delete=$(printf 'gh pr create --body "$(cat <<'"'"'EOF'"'"'\n%s\nEOF\n)"' "kubectl ""delete pod x")
