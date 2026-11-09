@@ -14,7 +14,7 @@ def state():
     workloads = {'items': [dict(kind='Deployment', metadata=dict(name=name, generation=2, labels={'app.kubernetes.io/instance': name}),
                               spec=dict(replicas=1), status=dict(observedGeneration=2, availableReplicas=1, updatedReplicas=1))
                            for name in ['openobserve', 'otel-collector', 'otel-operator']]}
-    workloads['items'].append(dict(kind='DaemonSet', metadata=dict(name='fluent-bit', generation=1, labels={'app.kubernetes.io/instance':'fluent-bit'}),
+    workloads['items'].append(dict(kind='DaemonSet', metadata=dict(name='fluent-bit-aws-for-fluent-bit', generation=1, labels={'app.kubernetes.io/instance':'fluent-bit-aws-for-fluent-bit'}),
                                    spec={}, status=dict(observedGeneration=1, desiredNumberScheduled=2, numberReady=2, updatedNumberScheduled=2)))
     return releases, workloads
 
@@ -22,6 +22,16 @@ def state():
 class Health(unittest.TestCase):
     def test_healthy(self):
         self.assertTrue(obs.healthy(*state()))
+
+    def test_helm_release_instance_label(self):
+        releases, workloads = state()
+        workloads['items'][-1]['metadata']['labels']['app.kubernetes.io/instance'] = 'fluent-bit'
+        self.assertTrue(obs.healthy(releases, workloads))
+
+    def test_unrelated_daemonset_does_not_replace_fluent_bit(self):
+        releases, workloads = state()
+        workloads['items'][-1]['metadata']['labels']['app.kubernetes.io/instance'] = 'unrelated'
+        self.assertFalse(obs.healthy(releases, workloads))
 
     def test_missing_release_or_workload(self):
         releases, workloads = state()

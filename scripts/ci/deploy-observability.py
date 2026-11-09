@@ -24,7 +24,9 @@ def healthy(releases, workloads):
     if not {'openobserve', 'otel-collector'} <= names:
         return False
     instances = {w['metadata'].get('labels', {}).get('app.kubernetes.io/instance') for w in items}
-    if not {'fluent-bit', 'otel-operator'} <= instances:
+    # aws-for-fluent-bit labels its instance with the chart fullname; other
+    # installations use the Helm release name. Both still require a healthy rollout.
+    if 'otel-operator' not in instances or not {'fluent-bit', 'fluent-bit-aws-for-fluent-bit'} & instances:
         return False
     for item in items:
         spec, status = item['spec'], item.get('status', {})
