@@ -1063,20 +1063,13 @@ jobs:
       # A flaky leg can be re-run alone; its sibling's green stands.
       fail-fast: false
       matrix:
-        # Three slices. The pg suite measured 423.8s on one leg (run
-        # 41484769012) — the tier's floor — so it splits at the alphabetic
-        # midpoint its module START TIMES put near pg_l/pg_m (~216s vs ~208s).
-        # The split stays complementary BY CONSTRUCTION: `pg a-l` names the
-        # twelve `pg_<letter>` prefix tokens explicitly, and `pg m-z` runs the
-        # full `pg_` filter with `--skip` of EXACTLY those twelve tokens — so
-        # a new pg_* module lands in one slice or the other by its name, never
-        # in neither, and a test matching both boundaries runs exactly once.
-        # er-entity-diff's Postgres tests (whose FN names carry no `pg_` —
-        # they are `postgres_diff_*`/`the_control_database_*` in the separate
-        # pg_diff / pg_reconcile binaries) run UNFILTERED in the rest slice,
-        # so no name filter can silently drop them. All slices keep the
-        # postgres service: non-pg_ er-server tests (db_per_test and friends)
-        # still reach the DSN.
+        # Three slices. run-server-tests.py discovers every server integration
+        # case and partitions the complete list: non-pg_ and pg_a through pg_l
+        # in the early slice, the complement in the late slice. The real token
+        # rotation test starts separately beside the early slice so its clock
+        # wait overlaps useful work. Every case still belongs to one group.
+        # dedupe-cli and er-entity-diff stay unfiltered in rest: their database
+        # test names do not all contain pg_. All slices keep real Postgres.
         #
         # The extensions step that used to ride the rest slice now rides the
         # `test` tier's rest leg, where dedupe-core's binary is already built —
