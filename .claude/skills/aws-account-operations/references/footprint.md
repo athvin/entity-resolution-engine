@@ -128,6 +128,7 @@ Distinct `resource "aws_*"` blocks across `infra/terraform/`, by count:
    1  aws_nat_gateway
    1  aws_organizations_account
    1  aws_organizations_organization
+   1  aws_rds_cluster_parameter_group
    1  aws_s3_bucket_object_lock_configuration
    1  aws_sesv2_configuration_set
    1  aws_sesv2_email_identity
