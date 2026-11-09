@@ -316,12 +316,26 @@ resource "aws_lb_listener" "http_redirect" {
 #   - invites          — sends email too, but only plausibly in bursts by a real
 #                        admin onboarding a team.
 #
-# NO MANAGED RULE GROUPS YET, deliberately. `AWSManagedRulesCommonRuleSet`
-# inspects request bodies and this is a JSON API that legitimately carries
-# SQL-shaped configuration and arbitrary customer column names — exactly the
-# payloads its SQLi and XSS rules match on. Adding it blind would reject real
-# requests, and with zero traffic there is nothing to tune the exclusions
-# against. It belongs in a follow-up, in COUNT mode first.
+# Managed rule groups (#921), in two grades:
+#
+#   - The IP reputation list BLOCKS, ahead of the rate rules (priority 1 <
+#     10/20/30). It inspects no bodies, its false-positive rate is the lowest
+#     of the managed groups, and the scanners that found this hostname within
+#     minutes of the DNS record existing are exactly its population. Blocking
+#     known-bad sources first also keeps them out of the rate rules' counts.
+#
+#   - The two body-inspecting groups COUNT, after the rate rules (40, 50), so
+#     their CountedRequests measure exactly the population that would reach
+#     the app — the tuning set for the flip. `AWSManagedRulesCommonRuleSet`'s
+#     SQLi and XSS rules match payloads this JSON API legitimately carries
+#     (SQL-shaped blocking configuration, arbitrary customer column names),
+#     so a blind block would reject real requests with a bare 403 at the edge
+#     and nothing in the application logs. The flip waits on a week of
+#     CountedRequests per rule and exclusions written for every rule that
+#     fired on a legitimate request, per #921's acceptance.
+#
+# Capacity: the ACL's 1500 WCU default ceiling against 25 (IP reputation) +
+# 700 (Common) + 200 (KnownBadInputs) + 2 apiece for the rate rules = 931.
 
 locals {
   # One shape for all three rules; only name, path and limit vary.
@@ -418,6 +432,80 @@ resource "aws_wafv2_web_acl" "edge" {
         # no password.
         sampled_requests_enabled = true
       }
+    }
+  }
+
+  # The managed groups from the header comment. Static blocks rather than
+  # entries in the locals map: the three differ in action (block vs count) and
+  # one is enough of a policy statement that reading it as data would hide it.
+
+  rule {
+    name     = "managed-ip-reputation"
+    priority = 1
+
+    # `none` keeps the group's own action, which for the reputation list is
+    # block. This is the one managed group that goes straight to blocking.
+    override_action {
+      none {}
+    }
+
+    statement {
+      managed_rule_group_statement {
+        name        = "AWSManagedRulesAmazonIpReputationList"
+        vendor_name = "AWS"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "er-prod-edge-ip-reputation"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  rule {
+    name     = "managed-common-ruleset"
+    priority = 40
+
+    # COUNT, per the header comment. `count {}` overrides every rule in the
+    # group, so matches increment CountedRequests without blocking anything.
+    override_action {
+      count {}
+    }
+
+    statement {
+      managed_rule_group_statement {
+        name        = "AWSManagedRulesCommonRuleSet"
+        vendor_name = "AWS"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "er-prod-edge-common-ruleset"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  rule {
+    name     = "managed-known-bad-inputs"
+    priority = 50
+
+    override_action {
+      count {}
+    }
+
+    statement {
+      managed_rule_group_statement {
+        name        = "AWSManagedRulesKnownBadInputsRuleSet"
+        vendor_name = "AWS"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "er-prod-edge-known-bad-inputs"
+      sampled_requests_enabled   = true
     }
   }
 
