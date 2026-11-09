@@ -3,6 +3,7 @@
 //! `er` contract (ingest / standardize / match / reconcile / golden / run-all);
 //! each opens the lake and calls the parity-gated stage functions in `er_cli`.
 
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
@@ -202,23 +203,61 @@ fn load_config(path: &PathBuf) -> Result<Config> {
 }
 
 fn load_lexicon(path: &PathBuf) -> Result<Vec<(String, String)>> {
-    let text =
-        std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
-    Ok(text
-        .lines()
-        .skip(1)
-        .filter(|l| !l.is_empty())
-        .filter_map(|l| {
-            l.split_once(',')
-                .map(|(a, b)| (a.to_string(), b.to_string()))
-        })
-        .collect())
+    load_dictionary_rows(path, false)
 }
 
 /// Read an ignore-words CSV (`word,dictionary` with a header row) the way the
 /// dispatcher's loader does.
 fn load_ignore_words(path: &PathBuf) -> Result<Vec<(String, String)>> {
-    load_lexicon(path)
+    load_dictionary_rows(path, true)
+}
+
+fn load_dictionary_rows(path: &PathBuf, ignore_words: bool) -> Result<Vec<(String, String)>> {
+    let text =
+        std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+    for (line, raw) in text.lines().enumerate().skip(1) {
+        anyhow::ensure!(
+            !raw.trim().is_empty(),
+            "{} row {}: blank dictionary row",
+            path.display(),
+            line + 1
+        );
+    }
+    let mut reader = csv::ReaderBuilder::new()
+        .has_headers(true)
+        .from_reader(text.as_bytes());
+    let mut rows = BTreeSet::new();
+    for (index, record) in reader.records().enumerate() {
+        let row = index + 2;
+        let record = record.with_context(|| format!("{} row {row}", path.display()))?;
+        anyhow::ensure!(
+            record.len() == 2,
+            "{} row {row}: expected exactly two fields",
+            path.display()
+        );
+        let (a, b) = (&record[0], &record[1]);
+        anyhow::ensure!(
+            [a, b]
+                .iter()
+                .all(|value| !value.contains(',') && !value.chars().any(char::is_control)),
+            "{} row {row}: dictionary fields must not contain commas or control characters",
+            path.display()
+        );
+        let pair = if ignore_words {
+            anyhow::ensure!(
+                a.split_whitespace().count() == 1,
+                "{} row {row}: ignore word must be a single token",
+                path.display()
+            );
+            er_std::ignore_words::canonical_row(a, b)
+                .map_err(|error| anyhow::anyhow!("{} row {row}: {error}", path.display()))?
+        } else {
+            er_std::lexicon::canonical_pair(a, b)
+                .map_err(|error| anyhow::anyhow!("{} row {row}: {error}", path.display()))?
+        };
+        rows.insert(pair);
+    }
+    Ok(rows.into_iter().collect())
 }
 
 pub fn run() -> Result<()> {
@@ -534,4 +573,68 @@ pub fn run() -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn with_dictionary(text: &str, check_rows: impl FnOnce(&PathBuf)) {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "er-cli-dictionary-{}-{nonce}.csv",
+            std::process::id()
+        ));
+        std::fs::write(&path, text).unwrap();
+        check_rows(&path);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn dictionary_rows_match_server_canonical_forms_and_hashes() {
+        with_dictionary(
+            "variant_a,variant_b\n Robert , BOB \nBob,Robert\n",
+            |path| {
+                let rows = load_lexicon(path).unwrap();
+                assert_eq!(rows, vec![("bob".into(), "robert".into())]);
+                assert_eq!(
+                    er_std::lexicon::lexicon_hash(rows.clone()),
+                    er_std::lexicon::lexicon_hash([("bob", "robert")])
+                );
+            },
+        );
+        with_dictionary("word,dictionary\n Inc , Legal \ninc,legal\n", |path| {
+            let rows = load_ignore_words(path).unwrap();
+            assert_eq!(rows, vec![("inc".into(), "legal".into())]);
+            assert_eq!(
+                er_std::ignore_words::ignore_words_hash(rows.clone()),
+                er_std::ignore_words::ignore_words_hash([("inc", "legal")])
+            );
+        });
+    }
+
+    #[test]
+    fn malformed_dictionary_rows_name_the_file_and_row() {
+        for text in [
+            "a,b\nonly-one\n",
+            "a,b\n\n",
+            "a,b\n\"a,b\",c\n",
+            "a,b\na\u{1e}b,c\n",
+            "a,b\na,b\u{1f}c\n",
+            "a,b\na,a\n",
+        ] {
+            with_dictionary(text, |path| {
+                let error = load_lexicon(path).unwrap_err().to_string();
+                assert!(error.contains(&path.display().to_string()), "{error}");
+                assert!(error.contains("row 2"), "{error}");
+            });
+        }
+        with_dictionary("word,dictionary\ntwo words,legal\n", |path| {
+            let error = load_ignore_words(path).unwrap_err().to_string();
+            assert!(error.contains("row 2"), "{error}");
+        });
+    }
 }

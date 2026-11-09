@@ -2052,6 +2052,7 @@ dependencies = [
  "assert_cmd",
  "chrono",
  "clap",
+ "csv",
  "dedupe-core",
  "er-compile",
  "er-config",
