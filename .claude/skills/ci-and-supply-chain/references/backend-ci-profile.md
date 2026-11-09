@@ -249,8 +249,13 @@ architectures; unsupported platforms fail instead of falling back to x86 tools.
   it supplies useful lake-test partitioning; preserve the Postgres suite's
   in-process coordination.
 - Do not clone a preinitialized database for all Postgres tests: that would
-  stop exercising bootstrap. A temporary filesystem can be measured without
-  disabling fsync, synchronous commit, or full-page writes.
+  stop exercising bootstrap. A local ABBA comparison recreated Postgres 16
+  before each arm and ran all 64 `pg_` tests with four workers. Every arm
+  passed, with fsync, synchronous commit and full-page writes all on.
+  Disk / tmpfs / tmpfs / disk took 269.874 / 283.605 / 124.707 / 168.182 seconds.
+  Concurrent work made the host load vary substantially; tmpfs did not show
+  a repeatable benefit. Retain ordinary storage rather than adopting a change
+  from this noisy comparison.
 - Free ARM64 is measured by the opt-in experiment above. macOS/Windows would
   also change the platform and service-container support; neither is a
   substitute for the Linux deployment compatibility gate.
