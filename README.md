@@ -1,11 +1,19 @@
 # Entity Resolution Engine
 
-A multi-tenant SaaS that cleans customer data, finds duplicate records across
-sources, and maintains a golden record for each resolved person. One shared web
-application and control plane serve every tenant (a tenant is a client); each
-tenant's data is resolved and stored in isolation. The long-term moat is a
-source-agnostic resolution engine; the first market is Salesforce deduplication,
-where it competes directly with Cloudingo.
+A configurable deduplication platform delivered through APIs. Customers define
+datasets and source mappings, configure matching and survivorship, send records,
+and retrieve duplicate groups, golden records and lineage. One shared web
+application and control plane serve every organization; each dataset's resolution
+work and data are isolated.
+
+OpenAPI is the integration contract we are building for this customer workflow.
+Salesforce is the first commercial integration and our initial route to revenue.
+File, object-storage and planned SFTP integrations use the same core capabilities.
+The product must be useful to a customer who has no Salesforce account. See the
+[product direction](.claude/skills/project-board/references/product-direction.md)
+for prioritization principles and the [live roadmap](https://github.com/users/athvin/projects/2)
+for delivery status; this is the intended product, not a claim that its public API
+workflow is already complete.
 
 The engine resolves:
 

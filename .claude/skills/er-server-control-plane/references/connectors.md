@@ -38,9 +38,13 @@ accommodate it:
 > *proposals for external action, governed by writeback policy*. This split is what
 > keeps the core CRM-agnostic and the blast radius of any one connector contained.
 
-"Salesforce-first" (the market) does not mean "Salesforce-coupled" (the
-architecture). Salesforce is the first implementation of a contract that Marketo,
-generic file/S3, and future systems implement the same way.
+The product is configurable deduplication through APIs. Customers must be able
+to configure a dataset, submit records and retrieve useful resolution results
+without a Salesforce account. Salesforce is the first commercial integration;
+file/S3 and SFTP use the same dataset, configuration and delivery contracts.
+OpenAPI is the intended customer-facing description of those contracts, with
+its current coverage tracked by the api-contract skill. A connector's external
+mutations remain separate from computing or exporting resolution results.
 
 ## 2. The connector contract
 
@@ -71,8 +75,10 @@ same.
 
 ## 3. The seams that already exist
 
-Two halves of the seam are built and running in the control plane
-(`server/`); the Salesforce-specific capabilities (§4) are the work that remains.
+Ingress and webhook seams exist in the Rust control plane (`rust/crates/er-server`).
+Their existence does not establish a complete public integration contract:
+documented configuration, transfer/replay semantics, results and an executable
+external-client workflow are product work alongside the Salesforce capabilities.
 
 ### 3.1 Ingress — the drop-dir push seam
 
@@ -128,9 +134,8 @@ separate work. This helper alone enables no external writes.
 
 ## 4. The Salesforce connector (v1)
 
-Salesforce is the first concrete connector because it is the first market
-(research-cloudingo.md). v1 proves the whole contract end
-to end.
+Salesforce is the first commercial integration. Its initial delivery proves the
+provider-specific extraction and action boundary against the shared API product.
 
 > **Salesforce as a login provider is a separate thing.** Human SSO via Salesforce
 > OIDC (frontend-design §2.4) authenticates *users*; the Salesforce *connector*
@@ -160,11 +165,12 @@ the cursor, publish-then-advance like the S3 poller.
   work-order resolver calls), and the credential reaches the pod on the work
   order, resolved per attempt with the instance URL re-checked against the
   outbound-URL guard.
-- **Objects: Lead and Contact first** — both map cleanly onto the person schema
-  (Lead's `Company` carried as metadata). Account is second, blocked on the
-  organization entity type (backend-design.md §13). The extract itself takes
-  any queryable sObject name; `IsConverted = false` is applied to Lead by
-  default (spec 1.26).
+- **Objects: Lead and Contact first** — both map onto the person schema
+  (Lead's `Company` carried as metadata). Account model code exists; verify
+  the full configuration, resolution and result path before promising Account
+  or arbitrary custom-object support. Model breadth is tracked on the live
+  board. The extract itself takes any queryable sObject name;
+  `IsConverted = false` is applied to Lead by default (spec 1.26).
 - **Initial sync:** Bulk API 2.0, extracting **only mapped fields** (this minimizes
   our data footprint and is part of the security answer). Each object becomes one
   engine source (`sf_contact`, `sf_lead`) with `record_id_column = Id`,
@@ -236,10 +242,14 @@ connector.
 
 | Phase | Scope |
 |---|---|
-| **Insights (ingress only)** | Salesforce OAuth + Bulk sync + polling; Lead/Contact; merge-plan **export** as the action bridge. Zero write risk. |
-| **Writeback** | The apply service (§4.3): preview → approve → apply, journal, staleness guard; manual/mass/auto tiers; undo/restore. |
-| **Continuous** | 1–5 min micro-batch polling marketed as near-real-time (latency stated honestly). |
-| **Breadth** | Marketo (same contract; SF↔Marketo cross-system dedupe falls out of the engine's multi-source model); generic file/S3 as first-class; custom objects once the entity-type generalization lands (backend-design.md §13). |
+| **API product** | Public configuration, durable JSON/file delivery, jobs and usable results, with an executable customer workflow and compatibility checks. File/S3 is part of this foundation. |
+| **Salesforce commercial integration** | Extraction, mapping and polling through the shared workflow; external writeback separately requires preview → approve → apply, authorization, journal, staleness checks and recovery. |
+| **SFTP transport expansion** | Scheduled pulls from customer-operated servers into the shared delivery contract; outbound result delivery is separate work. A hosted SFTP endpoint requires its own product decision. |
+| **Further expansion** | Additional connectors, lower-latency capture, provider-native UI and resolution-model generalization, prioritized from customer evidence. |
+
+These are product boundaries, not current delivery status or a frozen schedule.
+Use the live project board for stack rank and dependencies. AppExchange work
+belongs to Salesforce distribution and does not gate the generic API product.
 
 ## References
 

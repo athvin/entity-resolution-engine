@@ -173,15 +173,48 @@ are left?"
 
 Must:
 
-- Say `In progress` on this board means **part-built** — an epic whose
-  foundation already exists in the engine — and that the ordinary reading
-  ("someone is on it this week") is wrong here.
+- Say `In progress` is the active queue, not proof that someone has claimed
+  the work. Older epics may still use it to mean part-built; inspect claims.
 - Count the cards whose `Estimate` is unset before quoting any total, and
   present the total as a floor: a `null` contributes nothing to the sum.
 - Take assignment from the issues' assignees rather than from `Status`.
 
 Must not:
 
-- Report the `In progress` column as this week's active work.
+- Report every `In progress` card as assigned work without checking its claim.
 - Quote a week total as though it covered every MVP card.
 - Reach for `Size`, which is left empty on this board.
+
+## 9. Product purpose versus the first integration
+
+**Query:** "Rank the next product work. Should generic ingestion wait until
+AppExchange is done?"
+
+Must:
+
+- Read the live board and the product-direction reference.
+- Prioritize a complete configurable API workflow and distinguish Salesforce
+  commercial integration from the core product's release boundary.
+- Separate shared transfer/results from provider-specific actions, preserve
+  existing claims and use current code to check alleged gaps.
+
+Must not:
+
+- Use historical parity ranks or `post-appexchange` as the ordering authority.
+- Assert Salesforce will be easy revenue without customer evidence.
+
+## 10. SFTP scope and shared contracts
+
+**Query:** "Build out and rank SFTP integration tickets."
+
+Must:
+
+- Check existing tickets before creating work; scope customer-server polling
+  and outbound result delivery separately, with explicit shared dependencies.
+- Include complete-file detection, immutable acceptance, replay/checkpoint
+  behavior, credentials, host verification and tenant isolation in acceptance.
+
+Must not:
+
+- Silently choose a hosted SFTP service or create a parallel resolution engine.
+- Treat source independence as proof that arbitrary entity schemas work.
