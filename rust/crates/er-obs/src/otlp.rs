@@ -622,7 +622,10 @@ mod tests {
                         opentelemetry_sdk::metrics::data::MetricData::Sum(sum),
                     ) = m.data()
                     {
-                        total += sum.data_points().map(|dp| dp.value()).sum::<u64>();
+                        total += sum
+                            .data_points()
+                            .map(opentelemetry_sdk::metrics::data::SumDataPoint::value)
+                            .sum::<u64>();
                     }
                 }
             }
