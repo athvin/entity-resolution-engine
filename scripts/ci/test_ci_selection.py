@@ -24,7 +24,8 @@ selector = module('rust-select')
 
 def metadata():
     deps = {'core': [], 'engine': ['core'], 'er-cli': ['engine'], 'er-server': ['engine'],
-            'er-mcp': [], 'test-helper': [], 'consumer': ['test-helper'], 'builder': ['core']}
+            'er-mcp': [], 'test-helper': [], 'consumer': ['test-helper'], 'builder': ['core'],
+            'er-errors': [], 'er-schema': [], 'er-entity-gen': [], 'guard-user': ['er-schema']}
     return {'workspace_members': list(deps), 'packages': [
         {'id': name, 'name': name, 'manifest_path': str(ROOT / 'rust/crates' / name / 'Cargo.toml'),
          'dependencies': [{'name': dep, 'kind': 'dev' if name == 'consumer' else 'build' if name == 'builder' else None} for dep in dependencies]}
@@ -37,15 +38,18 @@ class Selection(unittest.TestCase):
 
     def test_reverse_transitive_dependencies(self):
         result = self.select('rust/crates/core/src/lib.rs')
-        self.assertEqual(result['packages'], ['builder', 'core', 'engine', 'er-cli', 'er-server'])
+        self.assertEqual(result['packages'], ['builder', 'core', 'engine', 'er-cli', 'er-entity-gen', 'er-errors', 'er-schema', 'er-server'])
         self.assertTrue(result['lake'] and result['server'])
 
     def test_dev_dependencies(self):
-        self.assertEqual(self.select('rust/crates/test-helper/tests/new.rs')['packages'], ['consumer', 'test-helper'])
+        self.assertEqual(self.select('rust/crates/test-helper/tests/new.rs')['packages'], ['consumer', 'er-entity-gen', 'er-errors', 'er-schema', 'test-helper'])
 
     def test_leaf(self):
         result = self.select('rust/crates/er-mcp/src/main.rs')
-        self.assertEqual(result['packages'], ['er-mcp'])
+        self.assertEqual(result['packages'], ['er-entity-gen', 'er-errors', 'er-mcp', 'er-schema'])
+        # Running repository scanners is not a change to their source: do not
+        # recursively select their consumers and accidentally run everything.
+        self.assertNotIn('guard-user', result['packages'])
         self.assertFalse(result['lake'] or result['server'])
 
     def test_global_and_unknown_inputs(self):

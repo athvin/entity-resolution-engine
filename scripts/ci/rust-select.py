@@ -38,6 +38,12 @@ def select(paths, metadata, full=False):
             if widened == selected:
                 break
             selected = widened
+    # These suites inspect other crates' source files directly. Cargo has no
+    # dependency edge for a repository scan, so retain them for every Rust
+    # change. Add them AFTER closure: executing an unchanged guard suite does
+    # not mean its consumers' implementation changed.
+    if selected and any(path.startswith("rust/") for path in paths):
+        selected |= {"er-errors", "er-schema", "er-entity-gen"}
     if not selected <= packages.keys():
         raise ValueError("selected package absent from workspace")
     names = sorted(selected)

@@ -59,7 +59,9 @@ The implemented policy:
   silently selects a different linker.
 - Frontend-only edits run frontend checks; contracts embedded in Rust and
   generated entity artifacts retain their backend gates. Rust package selection
-  uses Cargo's reverse dependencies, including dev/build edges. Unknown inputs,
+  uses Cargo's reverse dependencies, including dev/build edges. Repository-wide
+  source-scan suites (`er-errors`, `er-schema`, `er-entity-gen`) also run on every
+  Rust change; these inputs have no Cargo dependency edge. Unknown inputs,
   manifests and lockfiles force full coverage. Required aggregate contexts fail
   on failed classification, cancellations and unexpected skips.
 - Main selection starts at the last successful ancestor of that workflow, not
