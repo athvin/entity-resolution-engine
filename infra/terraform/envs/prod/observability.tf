@@ -1,24 +1,5 @@
-# §10.5/§10.6: prod's observability floor, AWS side — the mirror of
-# envs/dev/observability.tf MINUS the span store, and that subtraction is the
-# design point of this file.
-#
-# What mirrors: the two log groups and the two Pod Identity roles the shippers
-# assume. What does not: the openobserve association and the
-# er/shared/openobserve secret. The span store is one store per account by
-# design (envs/core), its metadata DSN names the DEV Aurora, and prod's VPC
-# (10.1.0.0/16) has no route to dev's (10.0.0.0/16) — an association here
-# would bind a ServiceAccount to a store its cluster cannot reach. Whether
-# prod runs its own store against the prod Aurora or the topology changes to
-# share dev's is the owner decision #944 carries, not something to guess at in
-# an env file.
-#
-# The same boundary holds on the cluster side. scripts/obs_up.sh is ONE
-# installer, and both shipper values files hardcode dev — the group names, the
-# ER/Dev metric namespace, and an openobserve destination on every pipeline —
-# so deploy.yml's prod leg keeps skipping it until #944 lands the store
-# decision and the prod values. These roles are unexercised at birth the way
-# the er-runner lake grants were: the substrate is Terraform's, the install is
-# the follow-up's.
+# Production log and metric shippers. The dedicated trace store and its
+# identity/credentials live in span-store.tf (owner decision, #944).
 
 # --- log groups -------------------------------------------------------------
 
