@@ -106,7 +106,10 @@ data "aws_iam_policy_document" "ci_deploy_prod" {
       "secretsmanager:GetSecretValue",
       "secretsmanager:DescribeSecret",
     ]
-    resources = ["arn:aws:secretsmanager:us-east-2:${data.aws_caller_identity.current.account_id}:secret:er/prod/${local.ci_prod_namespace}/*"]
+    resources = [
+      "arn:aws:secretsmanager:us-east-2:${data.aws_caller_identity.current.account_id}:secret:er/prod/${local.ci_prod_namespace}/*",
+      aws_secretsmanager_secret.openobserve.arn,
+    ]
   }
 
   # Resolve an image digest from a tag. §14.2 requires the deploy to pass a
