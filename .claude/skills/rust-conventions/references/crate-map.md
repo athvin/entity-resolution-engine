@@ -29,12 +29,13 @@ not carry: `datafusion` lives in `er-sql-check`'s manifest, not the workspace
 table, so it does not appear in the generated pin block at all.
 
 <!-- BEGIN GENERATED: crate-map -->
-**32 crates.** The cargo workspace root is `rust/`, not the repo root.
+**33 crates.** The cargo workspace root is `rust/`, not the repo root.
 
 | Crate | Purpose |
 |---|---|
 | `dedupe-cli` | CLI for dedupe-core: train/predict/cluster against a DuckLake catalog |
 | `dedupe-core` | dedupe-core: a Fellegi-Sunter probabilistic record-linkage engine, narrowly scoped to DuckDB/DuckLake execution |
+| `er-api-spec` | Pure derivation of the API contract from handler/router source text |
 | `er-cli` | `er-cli` — orchestrate the ER pipeline stages over a real DuckLake lake (P2) |
 | `er-compile` | Compile a tenant's declared `comparisons:` / `blocking:` into the settings document the engine loads |
 | `er-config` | The S6 configuration document and its `config_hash` (port of `src/er/config/{schema,hashing,loader}.py`, DesignDoc.md S6/S6.1/S5.2) |

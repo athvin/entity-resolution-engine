@@ -135,6 +135,17 @@ the route shape is elsewhere, and the four are not equally strong:
 Do not read a clean `openapi.json` diff as evidence that a path change is
 contained.
 
+The source derivation lives in `er-api-spec`: one balanced router walk plus
+handler-doc/request-body and success-envelope classifiers. Its functions take
+source strings and do not depend on `er-server` or perform I/O. The three server
+tests above supply the real source and retain their parser floors, missing-route
+failures and byte-for-byte artifact checks. Their views intentionally differ:
+the MCP gate checks described methods, the envelope gate classifies GET handlers,
+and the mock gate erases parameter names and uses the server's action-path
+normalizer. Extend the shared derivation when adding a supported source shape;
+do not restore a private router scanner in a consumer. This extraction does not
+add OpenAPI operations or broaden the classifier's supported types.
+
 ## Breaking changes
 
 `er-openapi-check` diffs the document this build emits against `main`'s and
