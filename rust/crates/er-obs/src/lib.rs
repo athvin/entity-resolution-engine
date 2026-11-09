@@ -33,5 +33,5 @@ pub use blocking::spawn_blocking_in_span;
 pub use executions::{Execution, ExecutionRecorder};
 pub use identity::current_trace_id;
 pub use init::{Guard, Role, SpansOnly, init};
-pub use otlp::{ReqwestClient, flush_timeout, provider_for, traces_endpoint};
+pub use otlp::{ReqwestClient, flush_timeout, metrics_endpoint, provider_for, traces_endpoint};
 pub use propagate::adopt_traceparent;
