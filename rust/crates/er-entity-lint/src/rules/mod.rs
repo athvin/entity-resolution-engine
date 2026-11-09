@@ -35,6 +35,7 @@ static ENTITY_RULES: &[&dyn EntityRule] = &[
     &tenancy::TenantScopeIsIndexed,
     &store::TypescriptRequiresWire,
     &tenancy::DatasetScopeIsDeclared,
+    &store::AppendHasBindableColumns,
 ];
 
 /// Rules that need the whole tree at once, in code order.

@@ -28,6 +28,7 @@ in `er-sql-check`.
 | [V15](#v15) | warning | a control-plane entity with an `org_id` column declares a non-partial index leading with `org_id` |
 | [V16](#v16) | error | an entity generating for `typescript` declares an arrow or json `wire` |
 | [V17](#v17) | warning | a control-plane entity with a `dataset_id` column references `datasets(id)`, keeps `org_id` beside it, and declares a non-partial index leading with `dataset_id` |
+| [V18](#v18) | error | a lake entity with `append: true` has no `list<varchar>` column |
 
 ## V1
 
@@ -492,4 +493,34 @@ columns:
     type: varchar
     description: "…"
 # no references, no org_id beside it, and no dataset_id-leading index
+```
+
+## V18
+
+a lake entity with `append: true` has no `list<varchar>` column
+
+The generated bulk append binds each row through duckdb-rs, which has no LIST parameter binding. A `list<varchar>` column therefore cannot be written by the generated append primitive. This rule catches the unsupported shape before the generator runs.
+
+Severity: **error**
+
+Conforming:
+
+```yaml
+generate:
+  stores: [duckdb]
+  languages: [rust]
+  append: true
+columns:
+  - { name: payload, type: json, description: 'JSON crosses as text' }
+```
+
+Violating:
+
+```yaml
+generate:
+  stores: [duckdb]
+  languages: [rust]
+  append: true
+columns:
+  - { name: tags, type: list<varchar>, description: 'LIST has no binding' }
 ```

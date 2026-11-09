@@ -5,6 +5,7 @@
 
 use er_entity_spec::{ColumnType, Entity, Store, Wire};
 
+use crate::ConvertError;
 use crate::casing::to_pascal_case;
 
 /// Flatten a description to a single doc-comment line.
@@ -41,8 +42,10 @@ fn arrow_data_type(col_type: ColumnType) -> String {
 }
 
 /// Emit the full Rust module for one entity.
-#[must_use]
-pub fn emit_module(entity: &Entity) -> String {
+///
+/// # Errors
+/// Returns an error if the generated append primitive cannot bind a column.
+pub fn emit_module(entity: &Entity) -> Result<String, ConvertError> {
     let struct_name = to_pascal_case(&entity.name);
     let mut out = String::new();
 
@@ -122,15 +125,15 @@ pub fn emit_module(entity: &Entity) -> String {
 
     // The bulk-append primitive — only for lake entities that ask for it.
     if entity.generate.append && entity.has_store(Store::Duckdb) {
-        emit_append_rows(&mut out, entity);
+        emit_append_rows(&mut out, entity)?;
     }
 
-    out
+    Ok(out)
 }
 
 /// The append transport type for a column: timestamps, dates and JSON cross as
 /// text (the lake-write convention — the cast lives in the generated SQL).
-fn append_field_type(col_type: ColumnType, nullable: bool) -> String {
+fn append_field_type(col_type: ColumnType, nullable: bool) -> Option<String> {
     let base = match col_type {
         ColumnType::Varchar | ColumnType::Timestamp | ColumnType::Date | ColumnType::Json => {
             "String"
@@ -138,14 +141,12 @@ fn append_field_type(col_type: ColumnType, nullable: bool) -> String {
         ColumnType::Bigint => "i64",
         ColumnType::Double => "f64",
         ColumnType::Boolean => "bool",
-        ColumnType::ListVarchar => {
-            panic!("an append entity cannot carry a list column (duckdb-rs has no LIST binding)")
-        }
+        ColumnType::ListVarchar => return None,
     };
     if nullable {
-        format!("Option<{base}>")
+        Some(format!("Option<{base}>"))
     } else {
-        base.to_string()
+        Some(base.to_string())
     }
 }
 
@@ -162,19 +163,21 @@ fn append_cast(col_type: ColumnType) -> &'static str {
 /// Emit the `AppendRow` transport struct + `append_rows`: variable-arity row
 /// batches as chunked, bound-parameter `INSERT .. VALUES`, the tuple shape and
 /// casts generated from the entity's columns.
-fn emit_append_rows(out: &mut String, entity: &Entity) {
+fn emit_append_rows(out: &mut String, entity: &Entity) -> Result<(), ConvertError> {
     let cols = entity.columns.len();
     out.push_str("\n/// The bulk-append transport row: timestamps/dates/JSON cross as text\n");
     out.push_str("/// with explicit casts in the generated SQL (the lake-write convention).\n");
     out.push_str("#[derive(Debug, Clone, PartialEq)]\n");
     out.push_str("pub struct AppendRow {\n");
     for column in &entity.columns {
+        let field_type = append_field_type(column.col_type, column.nullable).ok_or_else(|| {
+            ConvertError::UnsupportedAppendColumn {
+                entity: entity.name.clone(),
+                column: column.name.clone(),
+            }
+        })?;
         out.push_str(&doc_line("    ", &column.description));
-        out.push_str(&format!(
-            "    pub {}: {},\n",
-            column.name,
-            append_field_type(column.col_type, column.nullable)
-        ));
+        out.push_str(&format!("    pub {}: {},\n", column.name, field_type));
     }
     out.push_str("}\n\n");
 
@@ -237,6 +240,7 @@ fn emit_append_rows(out: &mut String, entity: &Entity) {
     out.push_str("    drop(__entered);\n");
     out.push_str("    Ok(rows.len())\n");
     out.push_str("}\n");
+    Ok(())
 }
 
 /// Emit the `arrow_schema()` function body for an Arrow-wire entity.

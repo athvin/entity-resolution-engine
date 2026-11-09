@@ -14,6 +14,9 @@ pub enum ConvertError {
     /// The entity is not generated for the requested store.
     #[error("{entity} is not generated for the {store:?} store")]
     WrongStore { entity: String, store: Store },
+    /// The generated lake append cannot bind this column's type.
+    #[error("{entity}: append cannot bind list<varchar> column {column:?}")]
+    UnsupportedAppendColumn { entity: String, column: String },
     /// `er-schema` rejected a column or spec.
     #[error(transparent)]
     Schema(#[from] SchemaError),
