@@ -2,7 +2,7 @@
 
 import { Suspense, useState } from "react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -18,7 +18,6 @@ function errorFromParam(param: string | null): string | null {
 }
 
 function LoginForm() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const [error, setError] = useState<string | null>(() =>
     errorFromParam(searchParams.get("error")),
@@ -30,15 +29,19 @@ function LoginForm() {
     const form = new FormData(event.currentTarget);
     setPending(true);
     setError(null);
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => {
+      controller.abort();
+    }, 15_000);
     try {
       const result = await bffFetch<{ ok: boolean; redirect: string }>("/api/auth/login", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ email: form.get("email"), password: form.get("password") }),
+        signal: controller.signal,
       });
-      // `next` is attacker-controllable, and `router.push` will happily leave the
-      // origin. Anything that is not a same-origin path falls back to the
-      // redirect the BFF chose, which is ours.
+      // `next` is attacker-controllable. Anything that is not a same-origin
+      // path falls back to the redirect the BFF chose, which is ours.
       const target =
         safeNextPath(searchParams.get("next"), window.location.origin) ?? result.redirect;
       // A redirect back to /login means the session is live but there is
@@ -51,13 +54,21 @@ function LoginForm() {
         setPending(false);
         return;
       }
-      router.push(target);
-      router.refresh();
+      // Cross the authentication boundary with a fresh document request. A
+      // client-router transition can reuse signed-out state or stall, leaving
+      // a valid session behind the disabled sign-in button.
+      window.location.assign(target);
     } catch (cause) {
       setError(
-        cause instanceof BffRequestError ? cause.message : "something went wrong — try again",
+        controller.signal.aborted
+          ? "sign-in timed out — try again"
+          : cause instanceof BffRequestError
+            ? cause.message
+            : "something went wrong — try again",
       );
       setPending(false);
+    } finally {
+      window.clearTimeout(timeout);
     }
   }
 

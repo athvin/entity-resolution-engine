@@ -21,6 +21,46 @@ test.describe("authentication", () => {
     await expect(page.getByTestId("dashboard")).toBeVisible();
   });
 
+  test("sign-in reaches the portal even when client navigation is stalled", async ({ page }) => {
+    await page.goto("/login?next=%2Fapp");
+    // Hold only the portal's client-router request. A document navigation can
+    // still reach it with the newly issued session cookie.
+    await page.route("**/app?*", (route) => {
+      if (route.request().headers()["rsc"] === "1") return;
+      return route.continue();
+    });
+    await page.getByLabel("Email").fill(USERS.steward);
+    await page.getByLabel("Password").fill(PASSWORD);
+    const response = page.waitForResponse("**/api/auth/login");
+    await page.getByTestId("login-submit").click();
+    expect((await response).status()).toBe(200);
+    await expect(page).toHaveURL(new RegExp(`/${ORG}/${DS}/dashboard$`));
+    await expect(page.getByTestId("dashboard")).toBeVisible();
+  });
+
+  test("a stalled sign-in times out and lets the user retry", async ({ page }) => {
+    await page.goto("/login");
+    await page.clock.install();
+    let attempts = 0;
+    await page.route("**/api/auth/login", (route) => {
+      attempts += 1;
+      if (attempts === 1) return;
+      return route.continue();
+    });
+    await page.getByLabel("Email").fill(USERS.steward);
+    await page.getByLabel("Password").fill(PASSWORD);
+    const request = page.waitForRequest("**/api/auth/login");
+    await page.getByTestId("login-submit").click();
+    await request;
+    await expect(page.getByTestId("login-submit")).toHaveText("Signing in…");
+    await page.clock.fastForward(15_001);
+    await expect(page.getByTestId("login-error")).toHaveText("sign-in timed out — try again");
+    await expect(page.getByTestId("login-submit")).toBeEnabled();
+    await page.clock.resume();
+    await page.getByTestId("login-submit").click();
+    await expect(page).toHaveURL(new RegExp(`/${ORG}/${DS}/dashboard$`));
+  });
+
   test("signing out ends the session and re-locks the app", async ({ page }) => {
     await login(page, USERS.steward);
     await page.goto(`/${ORG}/${DS}/dashboard`);
