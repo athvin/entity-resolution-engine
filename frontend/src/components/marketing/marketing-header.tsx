@@ -5,7 +5,7 @@ import { PORTAL_ENTRY_PATH } from "@/lib/site/routes";
 
 /**
  * The marketing header. A server component with no `"use client"` and no
- * interactivity, so the landing page ships no JavaScript of its own.
+ * interactivity, so navigation works independently of the interactive demos.
  *
  * One CTA, and it is correct for both signed-in and signed-out visitors without
  * knowing which it is talking to: PORTAL_ENTRY_PATH is behind the proxy's
@@ -24,11 +24,11 @@ export function MarketingHeader() {
       className="bg-background/80 sticky top-0 z-10 border-b backdrop-blur"
       data-testid="marketing-header"
     >
-      <div className="mx-auto flex h-16 max-w-5xl items-center justify-between gap-4 px-6">
+      <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-4 px-6">
         <Link href="/" className="text-base font-medium tracking-tight">
           DupeZero
         </Link>
-        <Button asChild size="sm">
+        <Button asChild size="sm" variant="outline">
           <Link href={PORTAL_ENTRY_PATH} data-testid="marketing-cta-header">
             Open the app
           </Link>

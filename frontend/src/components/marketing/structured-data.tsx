@@ -43,7 +43,7 @@ const STRUCTURED_DATA = {
       "@id": `${CANONICAL_ORIGIN}/#organization`,
       name: "DupeZero",
       url: CANONICAL_ORIGIN,
-      description: "Entity resolution you can defend.",
+      description: "Trusted records, wherever you need them.",
     },
     {
       "@type": "SoftwareApplication",
@@ -54,7 +54,7 @@ const STRUCTURED_DATA = {
       url: canonicalUrl("/"),
       publisher: { "@id": `${CANONICAL_ORIGIN}/#organization` },
       description:
-        "Resolves duplicate customer records into golden records, with the match evidence that produced each one.",
+        "Resolves duplicate entity records across sources, with inspectable match evidence and integrations for your destinations.",
     },
   ],
 } as const;

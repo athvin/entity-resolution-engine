@@ -2,6 +2,9 @@ import type { Metadata } from "next";
 
 import { ClosingCta } from "@/components/marketing/cta";
 import { Faq } from "@/components/marketing/faq";
+import { Connections } from "@/components/marketing/connections";
+import { ProvenanceExplorer } from "@/components/marketing/provenance-explorer";
+import { ReviewFlow } from "@/components/marketing/demo/review-flow";
 import { Hero } from "@/components/marketing/hero";
 import { HowItWorks } from "@/components/marketing/how-it-works";
 import { Problem } from "@/components/marketing/problem";
@@ -44,6 +47,9 @@ export default function LandingPage() {
       <Hero />
       <Problem />
       <HowItWorks />
+      <ReviewFlow />
+      <ProvenanceExplorer />
+      <Connections />
       <Proof />
       <Faq />
       <ClosingCta />

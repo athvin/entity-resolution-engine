@@ -13,3 +13,6 @@ src/lib/api/schema.d.ts
 src/lib/api/envelopes.json
 src/lib/entities/
 tests/functional/*-snapshots/
+
+# Generated from the repo-owned Stageshow kit; rebuild with build-stageshow.mjs.
+src/components/marketing/demo/vendor/
