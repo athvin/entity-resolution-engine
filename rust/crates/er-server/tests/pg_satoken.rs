@@ -19,6 +19,8 @@ use er_server::{AppState, app, pg, taskpg};
 
 use crate::common;
 
+mod rotation;
+
 const EPOCH: &str = "epoch-sat";
 const TEST_PEM: &str = include_str!("../testdata/sa_token_test_rsa.pem");
 const TEST_JWKS: &str = include_str!("../testdata/sa_token_test_jwks.json");
@@ -32,12 +34,16 @@ impl JwksSource for FixedJwks {
 }
 
 fn mint(pod_name: &str, pod_uid: &str) -> String {
+    mint_with_key(pod_name, pod_uid, "test-kid-1", TEST_PEM)
+}
+
+fn mint_with_key(pod_name: &str, pod_uid: &str, kid: &str, pem: &str) -> String {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs();
     let mut header = Header::new(Algorithm::RS256);
-    header.kid = Some("test-kid-1".to_string());
+    header.kid = Some(kid.to_string());
     let claims = json!({
         "aud": [AUDIENCE],
         "exp": now + 600,
@@ -53,7 +59,7 @@ fn mint(pod_name: &str, pod_uid: &str) -> String {
     encode(
         &header,
         &claims,
-        &EncodingKey::from_rsa_pem(TEST_PEM.as_bytes()).expect("test key"),
+        &EncodingKey::from_rsa_pem(pem.as_bytes()).expect("test key"),
     )
     .expect("mint")
 }
@@ -129,6 +135,8 @@ async fn the_projected_token_binds_overrides_and_refuses() {
     let verified = app(AppState::with_pg("op-secret".to_string(), dsn.clone())
         .with_sa_verifier(Some(Verifier::new(Box::new(FixedJwks)))));
     let keyless = app(AppState::with_pg("op-secret".to_string(), dsn.clone()));
+
+    rotation::exercise(&dsn, &schema_row, &job_name).await;
 
     // ---- phase 1: a bound pod token works, and its claims win ------------
     let pod_token = mint(&format!("{job_name}-x7b2k"), "uid-from-claims");
