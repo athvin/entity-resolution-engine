@@ -96,11 +96,25 @@ expect_deny 'kubectl deletion' "kubectl ""delete pod x"
 expect_deny 'a terraform apply' "terraform ""apply -auto-approve"
 expect_deny 'the mutating sweep (was ask)' "kubectl ""patch pod x -p '{}'"
 
+# #926: the two invocation shapes that bypassed the first-word anchor, the
+# multi-line shape whose read prefix used to exempt a later mutation, and the
+# heredoc false positive that came of matching substrings instead of commands.
+expect_deny 'a guarded call past a pipe' "echo yaml | kubectl ""apply -f -"
+expect_deny 'a heredoc piped into kubectl' "cat <<YAML | kubectl ""apply -f -"
+expect_deny 'make cluster-objects' "make cluster-objects ""ER_ENV=prod"
+expect_deny 'a mutation on the second line' "$(printf 'kubectl get pods\nkubectl %s-f x.yaml' 'apply')"
+
 expect_pass 'an aws read' 'aws eks describe-cluster --name er-dev'
 expect_pass 'a terraform plan' 'terraform plan'
 expect_pass 'an sts call' 'aws sts get-caller-identity'
 expect_pass 'an unrelated command' 'echo hello'
 expect_pass 'a tool call with no command at all' ''
+expect_pass 'a read past a pipe' 'kubectl get pods | grep Running'
+
+# The measured false positive: a PR body is data. Assembled so this file never
+# holds a runnable destructive command, same as the deny cases above.
+heredoc_with_delete=$(printf 'gh pr create --body "$(cat <<'"'"'EOF'"'"'\n%s\nEOF\n)"' "kubectl ""delete pod x")
+expect_pass 'a deny-list string inside a heredoc body' "$heredoc_with_delete"
 
 # --- 2. the derivation is not empty ----------------------------------------
 n=$(jq -r '[.permissions.deny[]? | select(startswith("Bash("))] | length' "$settings")
@@ -136,6 +150,17 @@ codex_side=$(decision "$aws_guard" "$mid" ER_GUARD_ASK_AS_DENY=1)
 [ "$codex_side" = deny ] &&
 	ok "Codex gets 'deny' for the same command" ||
 	no "Codex does not get 'deny'" "got '$codex_side' — on Codex 'ask' is logged Failed and the command RUNS"
+
+# The #926 graded shapes keep the same mapping: ask on Claude Code, deny on
+# Codex. Driving aws-write-guard directly, because the mapping lives there.
+for graded in "make cluster-objects ""ER_ENV=prod" "echo yaml | kubectl ""apply -f -"; do
+	[ "$(decision "$aws_guard" "$graded")" = ask ] &&
+		ok "Claude Code gets 'ask' for a graded shape" ||
+		no "Claude Code no longer gets 'ask' for a graded shape" "got '$(decision "$aws_guard" "$graded")' for: $graded"
+	[ "$(decision "$aws_guard" "$graded" ER_GUARD_ASK_AS_DENY=1)" = deny ] &&
+		ok "Codex gets 'deny' for the same shape" ||
+		no "Codex does not get 'deny' for a graded shape" "got '$(decision "$aws_guard" "$graded" ER_GUARD_ASK_AS_DENY=1)' for: $graded"
+done
 
 # A hard deny must not be softened by the flag in either direction.
 hard="aws s3 ""rb s3://some-bucket"
