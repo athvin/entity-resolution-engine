@@ -49,7 +49,7 @@ the same fix.
 <!-- BEGIN GENERATED: skill-inventory -->
 | Skill | Covers |
 |---|---|
-| `api-contract` | the utoipa `ApiDoc` whose component schemas come from the generated entity structs |
+| `api-contract` | entity schemas, OpenAPI emission, TypeScript generation, drift checks and breaking-change detection — for the configurable deduplication API and its frontend |
 | `aws-account-operations` | the single-account model where environments are separated by name prefix and permission set |
 | `ci-and-supply-chain` | the `detect`-job pattern that lets a required check skip without blocking a PR |
 | `claim-ticket` | selects the most important unclaimed card in the board's In progress queue (or takes a given issue number) |
@@ -70,7 +70,7 @@ the same fix.
 | `observability` | the `er-span`/`er-obs` split where library crates carry only `tracing` while a binary installs the subscriber |
 | `pentest` | a Strix-style run that does recon over the attack surface, fans out a tester subagent per vulnerability category (user-invoked only) |
 | `pr-review` | reviewing a pull request, a branch or the working diff before merge (user-invoked only) |
-| `project-board` | the `gh project` surface for user-owned project number 2 and the `project` scope it needs |
+| `project-board` | the configurable deduplication API product direction, Salesforce as the first commercial integration |
 | `rust-conventions` | that `make check` (not the bare cargo trio) is the finish line |
 | `security` | the attack surface (internet-facing Next.js BFF in front of the privileged Rust er-server control plane) |
 | `skill-audit` | the judgment half of the skill standard the gate cannot mechanise — whether a sentence survives the economy test |
@@ -360,7 +360,6 @@ can still accept a routing clause.
 |   40 | `frontend-bff` | 984 |
 |   41 | `er-server-control-plane` | 983 |
 |   42 | `aws-account-operations` | 982 |
-|   45 | `project-board` | 979 |
 |   60 | `skill-audit` | 964 |
 |   62 | `rust-conventions` | 962 |
 |   63 | `observability` | 961 |
@@ -379,12 +378,13 @@ can still accept a routing clause.
 |  104 | `ducklake-performance` | 920 |
 |  127 | `skill-writer` | 897 |
 |  129 | `pr-review` | 895 |
-|  177 | `api-contract` | 847 |
 |  193 | `sql-analysis` | 831 |
+|  326 | `project-board` | 698 |
 |  342 | `pentest` | 682 |
+|  375 | `api-contract` | 649 |
 |  412 | `stageshow` | 612 |
 
-The median routing clause here is **56 characters**. Skills with less
+The median routing clause here is **53 characters**. Skills with less
 headroom than that cannot take another one — adding routing to any of them
 means trimming its **what** clause first, which is the documented fix:
 
@@ -393,7 +393,6 @@ means trimming its **what** clause first, which is the documented fix:
 - `frontend-bff` — 40 characters free
 - `er-server-control-plane` — 41 characters free
 - `aws-account-operations` — 42 characters free
-- `project-board` — 45 characters free
 
 A second cap applies that this repo does not set: **Codex truncates
 each description at ~648 characters** in its skill listing. The question
@@ -402,7 +401,6 @@ measured harmless, lost trigger vocabulary measured as a misroute.
 
 | Skill | What is cut | Chars past the cut |
 |---|---|---:|
-| `project-board` | TRIGGER TEXT | 331 |
 | `skill-audit` | TRIGGER TEXT | 316 |
 | `observability` | TRIGGER TEXT | 313 |
 | `entity-framework` | TRIGGER TEXT | 307 |
@@ -427,8 +425,9 @@ measured harmless, lost trigger vocabulary measured as a misroute.
 | `infra-platform` | tail only | 304 |
 | `ducklake-lakehouse` | tail only | 296 |
 | `ducklake-performance` | tail only | 272 |
-| `api-contract` | tail only | 199 |
+| `project-board` | tail only | 50 |
 | `pentest` | tail only | 34 |
+| `api-contract` | tail only | 1 |
 
 `TRIGGER TEXT` is the row to act on, and only when the lost words are
 a term a neighbouring skill also uses — see the Codex bridge section for

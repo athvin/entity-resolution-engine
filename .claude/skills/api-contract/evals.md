@@ -56,8 +56,9 @@ Must:
 - Say no — "a property no longer required" is one of the four things
   `er-openapi-check` reports, because a consumer that relied on the field being
   present must now handle its absence.
-- Note the detector is **advisory, blocking once an external org key exists**,
-  so the warning should be acted on rather than ignored.
+- Note the detector is currently **advisory**; blocking compatibility must be
+  ready before the first external production org key is issued, so the warning
+  should be acted on rather than ignored.
 
 Credit for mentioning the entity `version` bump rule, and that lake changes
 must be additive.
@@ -128,3 +129,21 @@ Must not:
 Credit for noting that registering is a public-API decision — the schema becomes
 one `er-openapi-check` tracks for breaking changes — which is why the gate forces
 the choice instead of making it.
+
+## 7. The contract serves external customers
+
+**Query:** "The OpenAPI schemas regenerate and the docs viewer works. Is the
+deduplication API ready for customers?"
+
+Must:
+
+- Inspect actual operations and consumer coverage before claiming readiness.
+- Require a documented customer workflow through dataset configuration,
+  ingestion, jobs and result retrieval, including auth, errors and replay.
+- Treat Salesforce as the first commercial integration and keep generic API
+  readiness independent of AppExchange or a managed package.
+
+Must not:
+
+- Equate schema drift checks or a viewer with an executable integration.
+- Claim intended public operations are already implemented from product prose.

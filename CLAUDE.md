@@ -1,5 +1,22 @@
 # Working in this repo
 
+## Product purpose
+
+We build a configurable deduplication API. A customer should be able to define a
+dataset and its source mappings, configure matching and survivorship, submit
+records, run resolution, and retrieve results through a documented API. OpenAPI
+is the customer integration contract for that workflow. Salesforce is our first
+commercial integration; its appeal as an initial revenue channel is a hypothesis
+to validate with customers. It does not define the core data model or the release
+boundary for the API product. File, object-storage and SFTP integrations reuse the
+same dataset, configuration, ingestion and result contracts.
+
+Prioritize a complete customer API workflow before connector breadth. Separate
+shared capabilities from provider-specific actions such as Salesforce writeback
+and AppExchange distribution. For roadmap decisions, use `project-board` and its
+[product direction](.claude/skills/project-board/references/product-direction.md);
+read the live board for ordering and delivery status.
+
 ## The gate is `make check`, not raw cargo
 
 Before calling backend work done, run **`make check`** from the repo root. It is
@@ -489,7 +506,7 @@ The table below is **generated** from each skill's frontmatter by
 | adding a span, metric, counter, gauge, log line or trace attribute | `observability` |
 | invoking /pentest, /pentest <category>, /pentest live (user-invoked only) | `pentest` |
 | reviewing a pull request, a branch or the working diff before merge (user-invoked only) | `pr-review` |
-| asked what is on the board or to add, triage or move a card | `project-board` |
+| asked to prioritize roadmap tickets or inspect the board | `project-board` |
 | authoring or reviewing any Rust in this repo | `rust-conventions` |
 | reviewing an endpoint or handler for SSRF/injection/tenant-isolation/auth/business-logic abuse | `security` |
 | reviewing a skill before or after a change | `skill-audit` |

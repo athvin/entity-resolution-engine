@@ -1,6 +1,6 @@
 ---
 name: project-board
-description: Explains how to read and write this project's GitHub Projects board — the `gh project` surface for user-owned project number 2 and the `project` scope it needs, the five ID namespaces none of which may be hard-coded, the built-in automations that move cards unasked and the one that can close an issue, `item-list`'s filter and JSON key shapes, the one-field-per-invocation rule for `item-edit`, and the read-after-write staleness that makes a successful write look failed. Use when asked what is on the board or to add, triage or move a card, when sizing or scheduling work into an iteration, when reconciling the board against issues or pull requests, or when a `gh project` command fails on a scope or an ID. For required checks, the merge bus and stale greens see `ci-and-supply-chain`; for driving a pull request to green see `land-pr`; for claiming a card and starting work see `claim-ticket`; for the health sweep that files cards from live telemetry see `health-sweep`.
+description: Explains how to read, rebuild and prioritize this project's GitHub Projects board — the configurable deduplication API product direction, Salesforce as the first commercial integration, release labels, stack ranks, ID discovery, automations and stale reads. Use when asked to prioritize roadmap tickets or inspect the board, rebuild or move cards, plan API or connector work, size an iteration, reconcile issues and pull requests, or debug gh project scopes and IDs. For required checks and the merge bus see ci-and-supply-chain; for driving a PR to green see land-pr; for claiming work see claim-ticket; for API generation see api-contract; for filing cards from live telemetry see health-sweep.
 ---
 
 # The project board
@@ -19,8 +19,15 @@ docs do not apply.
 
 ## The board is live state, not a checked-in artifact
 
-Nothing in this repository references the board: no workflow adds to it, no
-generator derives from it, and `make skills-check` never contacts it. That is
+For product priorities, apply
+[references/product-direction.md](references/product-direction.md): configurable
+deduplication through APIs, with Salesforce as the first commercial integration.
+The direction is a standing product decision; ranks, dependencies, release
+labels and delivery status come from the live board. Competitor parity is input
+to discovery, not the ordering rule.
+
+No repository workflow adds to the board, no generator derives from it, and
+`make skills-check` never contacts it. That is
 deliberate — every generator in `scripts/skills-check.sh` is grep/awk/sed over
 committed files so the gate runs in a bare container with no network, and a
 board-derived reference would break that property.
@@ -283,8 +290,8 @@ carrying one **class** label:
 
 | Class | What it is | Also carries |
 |---|---|---|
-| `epic` | a DataGroomr parity epic, titled `E<n> — <name>` | `mvp` or `post-appexchange` |
-| `docs-backlog` | open work found in a design record (now under `.claude/skills/*/references/`) and verified against the code | `mvp` or `post-appexchange` |
+| `epic` | a product outcome spanning implementation tickets; older `E<n>` titles retain their historical identity | a release label when scheduled |
+| `docs-backlog` | open work found in a design record (now under `.claude/skills/*/references/`) and verified against the code | a release label when scheduled |
 | `ci-backlog` | CI, runner and merge-bus work | — |
 | `obs-backlog` | observability work | — |
 | `followup` | a small operational follow-up an investigation surfaced; not an epic and not a design-record finding | a release flag only when it gates one |
@@ -344,9 +351,16 @@ edit this section as it changes.
   the issue and work in `gh issue list --label mvp`; a board field would be
   invisible outside the board. The cost is that board views can filter on it
   but not group by it.
-- **Stack rank lives in the issue body** (`stack rank N of 30`), not in a
-  field. Issues were created in rank order so the default board order matches,
-  but nothing enforces that — the body is the record.
+  `mvp` means the usable API product; `salesforce-launch` means the initial
+  commercial integration; `post-mvp` is expansion after the core workflow.
+  `post-appexchange` is a historical label, not a prerequisite for generic
+  capabilities. Verify the live labels before writing.
+- **Stack rank lives in the issue body**, not in a field. State its scope
+  (product outcomes versus implementation children) and link the live roadmap
+  index. Parent ranks express product value; child dependency order governs
+  take-up. Default card order is not authoritative. Do not count a parent's
+  estimate again when summing its children, or copy a parity estimate onto a
+  substantially changed scope.
 - **`Iteration`** is a 14-day cycle starting Monday. The *current* iteration is
   the first entry of the field's `iterations` array — completed ones move to a
   separate `completedIterations` array, so index 0 is not a guess.

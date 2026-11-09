@@ -1,12 +1,26 @@
 ---
 name: api-contract
-description: Explains the typed API contract between the Rust control plane and the Next.js frontend — the utoipa `ApiDoc` whose component schemas come from the generated entity structs, the `er-openapi` binary that emits `openapi.json`, the Rust snapshot test that pins it, `openapi-typescript` regenerating `schema.d.ts`, the CI drift gate on both, and the `er-openapi-check` breaking-change detector. Use when adding or changing an endpoint's request or response shape, when the OpenAPI document or the generated TypeScript types are stale in CI, when a frontend type does not match the backend, or when deciding whether a schema change is breaking. For declaring the entity behind a schema see entity-framework; for handler and auth mechanics see er-server-control-plane; for which client a module may import and the browser/server line see frontend-bff.
+description: Explains the generated API contract and its gaps — entity schemas, OpenAPI emission, TypeScript generation, drift checks and breaking-change detection — for the configurable deduplication API and its frontend. Use when adding or changing an endpoint's request or response shape, documenting external-client data transfer, checking public API readiness, fixing stale OpenAPI or TypeScript artifacts, or deciding whether a schema change is breaking. For product priorities see project-board; for entity declarations see entity-framework; for handler and auth mechanics see er-server-control-plane; for the browser/server boundary see frontend-bff.
 ---
 
 # The API contract
 
-One document is the contract between the Rust backend and the TypeScript
-frontend, and **no part of it is hand-written**:
+## Product intent and current coverage
+
+OpenAPI is the customer integration contract for configurable deduplication:
+dataset configuration, data submission, execution and result retrieval. Design
+those operations for a customer using their own systems. Salesforce is the first
+commercial adapter; SFTP and other transports must reuse the same contracts.
+For product prioritization use `project-board`.
+
+This is the intended boundary. The generated document currently pins component
+schemas between the Rust backend and TypeScript frontend; the missing operations
+and consumer coverage below remain real gaps. A schema snapshot passing does not
+prove that an external client can configure a dataset or transfer data. Changes
+to the public surface owe documented auth, errors, retry semantics and an
+executable customer workflow, as well as generated types.
+
+The current generation chain is:
 
 ```
 entities/*/entity.yaml
@@ -132,9 +146,10 @@ It is a step in the Rust `entities` job, on **pull requests only** (it diffs
 against `origin/main`, so a push to `main` has no base and it examines nothing),
 and it is **advisory**: every stage is `|| true` or `|| exit 0`, so it cannot
 fail the job. The
-stated intent is that it becomes **blocking once the first external org key
-exists**, at which point the release pipeline runs it with `--strict`. Pass
-`--strict` to enforce it locally.
+product requirement is to have **blocking compatibility checks ready before the
+first external production org key is issued**. The deployed-baseline work is
+tracked on the live board; this requirement does not claim it has shipped.
+Pass `--strict` to enforce the detector's current coverage locally.
 
 So an advisory warning here is not noise to be ignored — it is a preview of what
 will block later, and the right time to decide whether the change is really

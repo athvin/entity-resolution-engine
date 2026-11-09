@@ -5,6 +5,13 @@ description: Explains this repo's Rust control plane (`er-server`) — how route
 
 # The control plane
 
+The product is configurable deduplication through APIs. Dataset configuration,
+ingestion, jobs and results are customer capabilities shared by the UI and
+connectors. Salesforce is the first commercial integration; its auth, object
+semantics and writeback belong at the connector boundary. File and SFTP delivery
+reuse the same ingestion contract. Use `project-board` for product priorities
+and `api-contract` for the public contract's current coverage and generation.
+
 `er-server` is an axum service: the orgs / jobs / config / read-path HTTP
 surface, plus a dispatcher that runs pipeline work. It is a port of a Python
 FastAPI app, which explains several shapes that would otherwise look odd — most

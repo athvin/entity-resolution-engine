@@ -32,6 +32,15 @@ This document is the sole specification. It is self-contained: every algorithm, 
 <a id="s1"></a>
 ## 1. Scope & Goals
 
+**Product purpose.** The engine powers a configurable deduplication API:
+customers configure their datasets, submit data and consume resolution results
+without requiring a particular source system. OpenAPI describes the customer
+integration contract. Salesforce is the first commercial integration; SFTP and
+other transports reuse the same contracts. This product direction does not
+claim support for arbitrary entity schemas: supported resolution models and
+their limitations must be explicit. The serving contract and roadmap sit
+outside the numbered engine invariants below.
+
 Build the entity resolution and golden record pipeline as a testable, benchmarkable codebase:
 
 - **G1 — Correctness under test.** Every pipeline stage has automated tests that run in CI on every PR, against realistic fixtures, inside Docker Compose.
