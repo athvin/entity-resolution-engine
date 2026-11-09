@@ -2,20 +2,25 @@
    exception to the product's grayscale design; they never enter app tokens. */
 .marketing-site {
   --story-flag: #b42318;
+  --story-light: var(--foreground);
+  --story-glow-opacity: 0.18;
+  --story-surface: color-mix(in oklch, var(--muted) 76%, transparent);
+  --story-container-surface: color-mix(in oklch, var(--muted) 30%, transparent);
   --story-corrected: #087443;
 }
 .dark .marketing-site {
+  --story-glow-opacity: 0.22;
   --story-flag: #ff9b91;
   --story-corrected: #79dfac;
 }
 html:has(.marketing-story) {
-  scroll-snap-type: y proximity;
-  scroll-padding-top: 80px;
+  scroll-snap-type: y mandatory;
+  scroll-padding-top: 64px;
   scroll-behavior: smooth;
 }
 .story-section {
   scroll-snap-align: start;
-  scroll-margin-top: 80px;
+  scroll-margin-top: 0;
   padding: 64px max(24px, calc((100vw - 1280px) / 2));
   border-bottom: 1px solid var(--border);
 }
@@ -310,6 +315,7 @@ html:has(.marketing-story) {
 }
 .story-controls select {
   width: 100%;
+  height: 44px;
   min-height: 44px;
   border: 1px solid var(--border);
   background: var(--background);
@@ -421,7 +427,7 @@ html:has(.marketing-story) {
   font-size: 11px;
 }
 .story-audit-evidence {
-  fill: var(--background);
+  fill: var(--story-surface);
   stroke: var(--border);
 }
 .story-audit-flag {
@@ -749,7 +755,7 @@ html:has(.marketing-story) {
   color: var(--muted-foreground);
   font-size: 12px;
 }
-.story-usage-stream > svg {
+.story-usage-paths {
   display: block;
   width: 100%;
   height: 120px;
@@ -772,7 +778,7 @@ html:has(.marketing-story) {
     flex-direction: row;
     align-items: center;
   }
-  .story-usage-stream > svg {
+  .story-usage-paths {
     height: 72px;
   }
 }
@@ -788,7 +794,7 @@ html:has(.marketing-story) {
 }
 .marketing-story .story-section {
   scroll-margin-top: 0;
-  scroll-snap-stop: always;
+  scroll-snap-stop: normal;
 }
 .trail-panel {
   min-height: calc(100svh - 112px);
@@ -819,6 +825,7 @@ html:has(.marketing-story) {
   line-height: 1.7;
 }
 .trail-source-picker {
+  min-inline-size: 0;
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
@@ -940,9 +947,11 @@ html:has(.marketing-story) {
   cursor: pointer;
 }
 .trail-dataset-choices button[aria-pressed="true"] {
-  background: var(--foreground);
-  color: var(--background);
   border-color: var(--foreground);
+  box-shadow: inset 0 0 0 1px var(--foreground);
+}
+.trail-dataset-choices button[aria-pressed="true"] strong {
+  font-weight: 600;
 }
 .trail-dataset-choices button span {
   font-size: 11px;
@@ -971,6 +980,7 @@ html:has(.marketing-story) {
 }
 .trail-dataset-detail select {
   width: 100%;
+  height: 44px;
   min-height: 44px;
   padding: 0 12px;
   background: var(--background);
@@ -1044,13 +1054,21 @@ html:has(.marketing-story) {
   line-height: 1.6;
 }
 .trail-step-example {
-  display: flex;
-  flex-direction: column;
-  align-items: start;
-  gap: 5px;
+  display: grid;
+  grid-template-columns: 12px 1fr;
+  align-items: center;
+  column-gap: 8px;
+  row-gap: 4px;
   font-size: 12px;
   padding-left: 24px;
   border-left: 1px solid var(--border);
+}
+.trail-step-example > :not(svg) {
+  grid-column: 2;
+}
+.trail-step-example > svg {
+  grid-column: 1;
+  grid-row: 1 / 3;
 }
 .trail-step-example > span {
   color: var(--muted-foreground);
@@ -1146,6 +1164,7 @@ html:has(.marketing-story) {
     font-size: 16px;
   }
   .trail-step-example {
+    display: flex;
     flex-direction: row;
     align-items: center;
     gap: 8px;
@@ -1188,15 +1207,18 @@ html:has(.marketing-story) {
   isolation: isolate;
 }
 .trail-bridges {
+  container-type: normal;
   position: absolute;
   inset: 0;
   pointer-events: none;
-  z-index: 1;
 }
-.trail-bridges > svg {
+.trail-bridges > .story-wires {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
   width: 100%;
   height: 100%;
-  overflow: visible;
+  overflow: hidden;
 }
 .trail-bridges .dz-flow-wire {
   fill: none;
@@ -1239,14 +1261,12 @@ html:has(.marketing-story) {
    remain reachable after the last story panel, including without JavaScript. */
 .story-close {
   scroll-snap-align: start;
-  scroll-snap-stop: always;
+  scroll-snap-stop: normal;
 }
 
-/* Give WebKit a reachable end stop for panels taller than its snapport. */
-.story-next {
+/* The footer is the final stop, so the bottom never resolves to an earlier chapter. */
+html:has(.marketing-story) [data-testid="marketing-footer"] {
   scroll-snap-align: end;
-  scroll-margin-top: 80px;
-  scroll-margin-bottom: 24px;
 }
 
 .story-audit > .story-section-heading,
@@ -1262,5 +1282,245 @@ html:has(.marketing-story) {
 @media (hover: none) {
   html:has(.marketing-story) {
     scroll-behavior: auto;
+  }
+}
+
+/* A broad, low-contrast echo crosses each translucent processing surface. */
+.story-transmission,
+.trail-bridges > .story-transmission {
+  z-index: 3;
+  pointer-events: none;
+}
+.story-volume-control input {
+  appearance: none;
+  background: transparent;
+  touch-action: pan-y;
+}
+.story-volume-control input::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    var(--foreground) var(--range-fill),
+    var(--border) var(--range-fill)
+  );
+}
+.story-volume-control input::-moz-range-track {
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    var(--foreground) var(--range-fill),
+    var(--border) var(--range-fill)
+  );
+}
+.story-volume-control input::-webkit-slider-thumb {
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  margin-top: -8px;
+  border: 4px solid var(--background);
+  border-radius: 50%;
+  background: var(--foreground);
+  box-shadow: 0 0 0 1px var(--foreground);
+}
+.story-volume-control input::-moz-range-thumb {
+  box-sizing: border-box;
+  width: 20px;
+  height: 20px;
+  border: 4px solid var(--background);
+  border-radius: 50%;
+  background: var(--foreground);
+  box-shadow: 0 0 0 1px var(--foreground);
+}
+.story-volume-control input:active {
+  cursor: grabbing;
+}
+.story-volume-control input:disabled {
+  cursor: not-allowed;
+}
+
+.trail-delivery,
+.trail-golden,
+.trail-steps > li,
+.trail-destinations > div {
+  background: var(--story-surface);
+}
+.story-transmission .dz-packet {
+  color: var(--story-light);
+}
+
+/* Keep the light between the translucent material and its typography. Each node's
+   material and content participate in the diagram's existing layer order. */
+.trail-delivery,
+.trail-golden,
+.trail-steps > li,
+.trail-destinations > div {
+  z-index: auto;
+  background: transparent;
+}
+.trail-delivery::before,
+.trail-golden::before,
+.trail-steps > li::before,
+.trail-destinations > div::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border-radius: inherit;
+  background: var(--story-surface);
+  pointer-events: none;
+}
+.trail-delivery > *,
+.trail-golden > *,
+.trail-steps > li > *,
+.trail-destinations > div > * {
+  position: relative;
+  z-index: 4;
+}
+@media (max-width: 800px) {
+  .trail-panel {
+    min-height: calc(100svh - 64px);
+    padding-block: 22px;
+    gap: 14px;
+  }
+  .trail-heading h2 {
+    font-size: 30px;
+    margin: 12px 0;
+  }
+  .trail-heading > p:last-child {
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  .trail-source-picker {
+    display: flex;
+    overflow-x: auto;
+    padding: 4px 2px 10px;
+    scrollbar-width: thin;
+  }
+  .trail-source-picker button {
+    flex: 0 0 auto;
+    min-width: 140px;
+    min-height: 48px;
+  }
+  .trail-volume {
+    margin-block: 0;
+  }
+  .trail-volume label {
+    font-size: 13px;
+    align-items: baseline;
+  }
+  .trail-volume output {
+    font-size: 23px;
+    font-weight: 500;
+    letter-spacing: -0.04em;
+  }
+  .trail-delivery {
+    margin-top: 30px;
+    padding: 14px 18px;
+  }
+  .trail-delivery strong {
+    margin-top: 6px;
+    font-size: 18px;
+  }
+  .trail-delivery p {
+    margin-top: 6px;
+    font-size: 11px;
+  }
+  .story-volume-control input::-webkit-slider-thumb {
+    width: 26px;
+    height: 26px;
+    margin-top: -11px;
+  }
+  .story-volume-control input::-moz-range-thumb {
+    width: 26px;
+    height: 26px;
+  }
+}
+
+/* WebKit needs an explicit reachable end stop on oversized story chapters.
+   The footer remains the document's final stop, after every chapter link. */
+@media (max-width: 800px) {
+  .marketing-story .story-next {
+    scroll-snap-align: end;
+    scroll-margin-bottom: 24px;
+  }
+}
+
+/* Every flow surface transmits the same stream. No backdrop filters: the
+   moving light is a small composited gradient, and text stays on top. */
+.trail-diagram {
+  z-index: 2;
+}
+.trail-organization,
+.story-usage-stream {
+  background: var(--story-container-surface);
+}
+.trail-source-picker button,
+.trail-dataset-choices button,
+.trail-dataset-detail select,
+.story-source-picker button {
+  background: var(--story-surface);
+}
+/* Transmitted light must not lower contrast beneath small explanatory text. */
+.trail-diagram p,
+.trail-diagram small,
+.trail-step-example > span,
+.trail-dataset-detail p span {
+  color: var(--foreground);
+}
+
+/* Short phones need intermediate reading stops inside oversized chapters. */
+@media (max-width: 800px) {
+  .marketing-story .story-section {
+    scroll-snap-stop: always;
+  }
+  .trail-organization,
+  .trail-dedupe,
+  .story-audit-stage,
+  .story-audit-bottom,
+  .story-usage .story-controls,
+  .story-usage-stream,
+  .story-pricing-note {
+    scroll-snap-align: start;
+    scroll-snap-stop: always;
+  }
+}
+@media (max-width: 800px) and (max-height: 700px) {
+  .trail-egress {
+    scroll-snap-align: start;
+    scroll-snap-stop: always;
+  }
+}
+@media (max-width: 800px) and (max-height: 600px) {
+  .trail-ingress {
+    scroll-snap-align: start;
+    scroll-snap-stop: always;
+  }
+}
+.story-usage-paths {
+  position: relative;
+}
+@media (max-width: 360px) {
+  [data-testid="marketing-header"] > div {
+    padding-inline: 10px;
+  }
+  [data-testid="marketing-header"] nav a {
+    padding-inline: 4px;
+  }
+  [data-testid="marketing-cta-header"] {
+    padding-inline: 8px;
+  }
+}
+@media (max-width: 800px) {
+  /* A tall parent snap area swallows its children's stops in touch scrolling.
+     Use the heading and diagram as separate stops, with no overlapping parent. */
+  .marketing-story .trail-panel {
+    scroll-snap-align: none;
+  }
+  .trail-heading {
+    scroll-snap-align: start;
+    scroll-snap-stop: always;
+    scroll-margin-top: 22px;
   }
 }

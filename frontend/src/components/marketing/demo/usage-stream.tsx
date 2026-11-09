@@ -4,26 +4,23 @@ import { useRef, useState } from "react";
 import { Pause, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FlowPath, useFlowMotion } from "./flow-motion";
-import { volumeLabel } from "./story-model";
+import { packetCount, volumeLabel } from "./story-model";
 
 export function UsageStream({
   sourceCount,
   dataset,
   volume,
-  volumeStep,
+  volumePosition,
 }: {
   sourceCount: number;
   dataset: string;
   volume: number;
-  volumeStep: number;
+  volumePosition: number;
 }) {
+  const count = packetCount(volumePosition);
   const host = useRef<HTMLElement>(null);
   const [paused, setPaused] = useState(false);
-  const { ready, reduced } = useFlowMotion(
-    host,
-    paused,
-    `${String(sourceCount)}-${String(volumeStep)}`,
-  );
+  const { ready, reduced } = useFlowMotion(host, paused, `${String(sourceCount)}-${String(count)}`);
   return (
     <figure
       ref={host}
@@ -59,18 +56,20 @@ export function UsageStream({
           <span>records per run</span>
         </div>
       </div>
-      <svg viewBox="0 0 600 72" aria-hidden="true">
+      <div className="story-usage-paths" aria-hidden="true">
         {Array.from({ length: sourceCount }, (_, i) => (
           <FlowPath
+            html
+            viewBox="0 0 600 72"
             key={i}
             d={`M20 ${String(12 + i * 8)} C160 ${String(12 + i * 8)} 180 36 300 36 H580`}
-            count={2 + volumeStep}
+            count={count}
             start={0}
             travel={0.98}
             duration={6000}
           />
         ))}
-      </svg>
+      </div>
       <figcaption className="story-caption">
         {sourceCount
           ? "Your source choices feed the same dataset. The total stays yours to set."

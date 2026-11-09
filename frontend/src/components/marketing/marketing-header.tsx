@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { MarketingThemeToggle } from "./theme-toggle";
 
 import { Button } from "@/components/ui/button";
 import { PORTAL_ENTRY_PATH } from "@/lib/site/routes";
@@ -20,22 +21,20 @@ import { PORTAL_ENTRY_PATH } from "@/lib/site/routes";
  */
 export function MarketingHeader() {
   return (
-    <header
-      className="bg-background/80 sticky top-0 z-10 border-b backdrop-blur"
-      data-testid="marketing-header"
-    >
-      <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-3 px-4 sm:px-6">
+    <header className="bg-background sticky top-0 z-10 border-b" data-testid="marketing-header">
+      <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-1 px-4 sm:px-6">
         <Link href="/" className="text-base font-medium tracking-tight">
           DupeZero
         </Link>
         <nav aria-label="Main navigation" className="ml-auto flex items-center gap-1 sm:gap-5">
-          <Link className="inline-flex min-h-11 items-center px-2 text-sm" href="/">
+          <Link className="hidden min-h-11 items-center px-2 text-sm sm:inline-flex" href="/">
             Home
           </Link>
           <Link className="inline-flex min-h-11 items-center px-2 text-sm" href="/docs">
             Docs
           </Link>
         </nav>
+        <MarketingThemeToggle />
         <Button asChild size="sm" variant="outline" className="min-h-11">
           <Link href={PORTAL_ENTRY_PATH} data-testid="marketing-cta-header">
             Open the app

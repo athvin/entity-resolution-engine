@@ -5,12 +5,14 @@ import { ArrowDown, Database, Pause, Play, ScanSearch } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Text } from "./vendor";
+import { FlowTransmission, type FlowSurface } from "./flow-transmission";
+import { VolumeControl } from "./volume-control";
 import { FlowPath, useFlowMotion } from "./flow-motion";
-import { DEMO_DATASETS, SOURCE_NAMES, VOLUMES, volumeLabel } from "./story-model";
+import { DEMO_DATASETS, SOURCE_NAMES, packetCount } from "./story-model";
 import "./vendor/index.css";
 import "./flow-demo.css";
 
-type Wire = { id: string; d: string; source: string };
+type Wire = { id: string; d: string; source: string; passage: string; surface: FlowSurface };
 
 /** Each panel owns its animation visibility. Nodes supply the geometry, so a
  * source change or a text-size change cannot leave a wire at an old position. */
@@ -33,7 +35,7 @@ function TrailDiagram({
   const { ready, reduced } = useFlowMotion(
     host,
     paused,
-    `${String(count)}-${wires.map((w) => w.d).join("|")}`,
+    `${String(count)}-${wires.map((w) => w.d + w.passage).join("|")}`,
   );
   useEffect(() => {
     const root = host.current;
@@ -54,6 +56,8 @@ function TrailDiagram({
         next.push({
           id: `${from}-${to}`,
           source: from,
+          passage: ` V${String(b.bottom - bounds.y)}`,
+          surface: { x: b.x - bounds.x, y: b.y - bounds.y, width: b.width, height: b.height },
           d: `M${String(x1)} ${String(y1)} C${String(x1)} ${String(mid)} ${String(x2)} ${String(mid)} ${String(x2)} ${String(y2)}`,
         });
       }
@@ -78,12 +82,14 @@ function TrailDiagram({
       data-testid={`trail-${name}`}
       data-still={!ready || reduced}
     >
-      <svg className="story-wires" aria-hidden="true">
+      <div className="story-wires" aria-hidden="true">
         {wires.map((w) => (
           <FlowPath
+            html
             key={w.id}
             source={w.source}
             d={w.d}
+            passage={w.passage}
             count={count}
             duration={6000}
             start={0}
@@ -99,8 +105,13 @@ function TrailDiagram({
             }
           />
         ))}
-      </svg>
+      </div>
       {children}
+      <FlowTransmission
+        wires={wires.map((w) => ({ id: w.id, d: w.d + w.passage, surface: w.surface }))}
+        count={count}
+        duration={6000}
+      />
     </div>
   );
 }
@@ -117,7 +128,7 @@ function TrailNext({ href, children }: { href: string; children: ReactNode }) {
 export function StoryFlow({
   dataset,
   sources,
-  volumeStep,
+  volumePosition,
   locked,
   paused,
   onPause,
@@ -127,7 +138,7 @@ export function StoryFlow({
 }: {
   dataset: number;
   sources: number[];
-  volumeStep: number;
+  volumePosition: number;
   locked: boolean;
   paused: boolean;
   onPause: (paused: boolean) => void;
@@ -139,8 +150,7 @@ export function StoryFlow({
   const [ready, setReady] = useState(false);
   const [reduced, setReduced] = useState(false);
   const active = DEMO_DATASETS[dataset] ?? DEMO_DATASETS[0];
-  const volume = VOLUMES[volumeStep] ?? VOLUMES[2];
-  const count = sources.length ? 2 + volumeStep : 0;
+  const count = sources.length ? packetCount(volumePosition) : 0;
   useEffect(() => {
     setReady(true);
     const preference = matchMedia("(prefers-reduced-motion: reduce)");
@@ -184,6 +194,13 @@ export function StoryFlow({
               </button>
             ))}
           </fieldset>
+          <VolumeControl
+            id="flow-volume"
+            className="trail-volume"
+            position={volumePosition}
+            onChange={onVolume}
+            disabled={locked}
+          />
           <TrailDiagram
             name="ingress"
             paused={paused || inspect}
@@ -205,28 +222,6 @@ export function StoryFlow({
               <p>Original values and source IDs stay attached.</p>
             </div>
           </TrailDiagram>
-          <div className="story-volume-control trail-volume">
-            <label htmlFor="flow-volume">
-              Records per run <output htmlFor="flow-volume">{volumeLabel(volume)}</output>
-            </label>
-            <input
-              id="flow-volume"
-              type="range"
-              min="0"
-              max="4"
-              step="1"
-              value={volumeStep}
-              disabled={locked}
-              aria-valuetext={`${volumeLabel(volume)} records per run`}
-              onChange={(e) => {
-                onVolume(Number(e.target.value));
-              }}
-            />
-            <div className="story-range-labels">
-              <span>1 thousand</span>
-              <span>10 million</span>
-            </div>
-          </div>
           <TrailNext href="#dataset">Next / Give the records a dataset</TrailNext>
         </section>
         <section
