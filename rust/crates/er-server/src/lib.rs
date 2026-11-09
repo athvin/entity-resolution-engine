@@ -4856,8 +4856,9 @@ struct AttemptStart {
 
 /// The pod's first report
 /// (`POST /v1/internal/attempts/{attempt_id}/start`): `queued → running`,
-/// recording the pod identity. Zero rows means a stale pod — a different
-/// launch, a finished attempt — and the caller exits 3 (§6.3 step 3).
+/// recording the pod identity. A retry from the same pod returns the running
+/// row without resetting its start time. Zero rows means a stale pod — a
+/// different launch or a finished attempt — and the caller exits 3 (§6.3 step 3).
 async fn attempt_start(
     State(state): State<AppState>,
     Path(attempt_id): Path<String>,

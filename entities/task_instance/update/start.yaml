@@ -1,7 +1,7 @@
 kind: statement
 operation: update
 mode: partial
-description: "The pod's first report (queued -> running). Zero rows means the pod is stale — a different launch, a finished attempt, a canceled one — and it exits 3 after logging why (§4.5)."
+description: "The pod's first report (queued -> running), or an idempotent retry from the same pod while running. A retry preserves the original identity and timestamps. Zero rows means the pod is stale — a different launch, a finished attempt, a canceled one — and it exits 3 after logging why (§4.5)."
 params:
   - { name: pod_name, type: varchar, nullable: true }
   - { name: pod_uid, type: varchar }

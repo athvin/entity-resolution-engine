@@ -4189,7 +4189,7 @@ RETURNING
             .collect())
     }
 
-    /// The pod's first report (queued -> running). Zero rows means the pod is stale — a different launch, a finished attempt, a canceled one — and it exits 3 after logging why (§4.5).
+    /// The pod's first report (queued -> running), or an idempotent retry from the same pod while running. A retry preserves the original identity and timestamps. Zero rows means the pod is stale — a different launch, a finished attempt, a canceled one — and it exits 3 after logging why (§4.5).
     pub async fn start(
         client: &impl ::tokio_postgres::GenericClient,
         pod_name: Option<&str>,
@@ -4200,9 +4200,16 @@ RETURNING
         k8s_job_name: &str,
     ) -> ::std::result::Result<Vec<super::TaskInstance>, ::tokio_postgres::Error> {
         const SQL: &str = "UPDATE public.task_instances
-SET state = 'running', pod_name = $1, pod_uid = $2, node_name = $3,
-    image_digest = $4, started_at = now(), heartbeat_at = now(), updated_at = now()
-WHERE id = $5 AND live IS TRUE AND state = 'queued' AND k8s_job_name = $6
+SET state = 'running',
+    pod_name = CASE WHEN state = 'queued' THEN $1 ELSE pod_name END,
+    pod_uid = CASE WHEN state = 'queued' THEN $2 ELSE pod_uid END,
+    node_name = CASE WHEN state = 'queued' THEN $3 ELSE node_name END,
+    image_digest = CASE WHEN state = 'queued' THEN $4 ELSE image_digest END,
+    started_at = CASE WHEN state = 'queued' THEN now() ELSE started_at END,
+    heartbeat_at = CASE WHEN state = 'queued' THEN now() ELSE heartbeat_at END,
+    updated_at = CASE WHEN state = 'queued' THEN now() ELSE updated_at END
+WHERE id = $5 AND live IS TRUE AND k8s_job_name = $6
+  AND (state = 'queued' OR (state = 'running' AND pod_uid = $2))
 RETURNING
   id,
   org_id,
