@@ -1,0 +1,2 @@
+[V19] probe: identity column "external_id" (key/natural_key) must remain visibility: public
+[V19] probe: identity column "id" (key/natural_key) must remain visibility: public

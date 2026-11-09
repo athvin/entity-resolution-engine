@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 /// The run ledger (S5.2): one row per pipeline run — mode, status, versions and the snapshot range it produced.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Run {
     /// The run's unique id (caller-supplied; the dispatcher passes the job's UUIDv7).
     pub id: String,

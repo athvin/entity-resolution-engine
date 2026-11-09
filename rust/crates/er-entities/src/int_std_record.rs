@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 /// One current standardized person record per record key: the standardization stage's output (supersession applied, tombstones excluded) and the matching stage's input.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct IntStdRecord {
     /// Content-derived row id: sha256('int_std_records:' || record_key).
     pub id: String,

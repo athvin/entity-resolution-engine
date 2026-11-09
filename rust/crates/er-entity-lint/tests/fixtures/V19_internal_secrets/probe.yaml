@@ -1,0 +1,23 @@
+kind: entity
+version: 1
+name: probe
+relation: probes
+description: Visibility regression.
+key: [id]
+natural_key: [external_id]
+generate:
+  stores: [postgres]
+  languages: [rust, typescript]
+  wire: [json]
+columns:
+  - { name: id, type: varchar, nullable: false, description: Identity }
+  - { name: external_id, type: varchar, nullable: false, description: Natural identity }
+  - { name: created_at, type: timestamp, nullable: false, default: 'now()', volatile: true, description: Creation }
+  - { name: updated_at, type: timestamp, nullable: false, default: 'now()', volatile: true, description: Update }
+  - { name: secret, type: varchar, description: Credential, visibility: internal }
+  - { name: webhook_secret, type: varchar, description: Credential, visibility: internal }
+  - { name: token_hash, type: varchar, description: Credential, visibility: internal }
+  - { name: key_hash, type: varchar, description: Credential, visibility: internal }
+  - { name: password, type: varchar, description: Credential, visibility: internal }
+  - { name: access_token, type: varchar, description: Credential, visibility: internal }
+  - { name: secret_count, type: bigint, description: Public count }

@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 /// One run's duplicate attribution, per source system. The corpus-wide duplicate rate says a tenant has a problem; it does not say WHERE the problem comes from, and the answer is nearly always one feed. Retained per run beside metric_snapshots for the same reason that table exists: a live number says what is true now and nothing about whether a source is getting better or worse.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MetricSnapshotSource {
     /// Content-derived row id: sha256('metric_snapshot_sources:' || run_id || ':' || source_system).
     pub id: String,
@@ -24,6 +24,46 @@ pub struct MetricSnapshotSource {
     pub created_at: ::chrono::DateTime<::chrono::Utc>,
     /// Last-update stamp; a re-run of the same run_id corrects rather than appends.
     pub updated_at: ::chrono::DateTime<::chrono::Utc>,
+}
+
+/// One run's duplicate attribution, per source system. The corpus-wide duplicate rate says a tenant has a problem; it does not say WHERE the problem comes from, and the answer is nearly always one feed. Retained per run beside metric_snapshots for the same reason that table exists: a live number says what is true now and nothing about whether a source is getting better or worse.
+#[derive(Debug, Clone, PartialEq, Serialize, ::utoipa::ToSchema)]
+#[schema(as = MetricSnapshotSource)]
+pub struct MetricSnapshotSourceWire {
+    /// Content-derived row id: sha256('metric_snapshot_sources:' || run_id || ':' || source_system).
+    pub id: String,
+    /// The run this attribution describes; shares its id with the metric_snapshots row.
+    pub run_id: String,
+    /// The delivering source system.
+    pub source_system: String,
+    /// The run's logical timestamp, duplicated here so the series is readable without joining.
+    pub captured_at: ::chrono::DateTime<::chrono::Utc>,
+    /// How many of this source's records are in the corpus.
+    pub records: i64,
+    /// How many of them share an entity with at least one other record — counted by RECORD rather than by group, the same judgement metric_snapshots made: counting groups calls a five-record cluster and a pair the same amount of duplication.
+    pub duplicate_records: i64,
+    /// How many duplicate groups contain at least one of this source's records. A source can account for few duplicate RECORDS while touching many groups, which is the signature of a feed that adds one bad row to everything rather than one bad batch.
+    pub contributed_groups: i64,
+    /// Creation stamp (the run's logical timestamp).
+    pub created_at: ::chrono::DateTime<::chrono::Utc>,
+    /// Last-update stamp; a re-run of the same run_id corrects rather than appends.
+    pub updated_at: ::chrono::DateTime<::chrono::Utc>,
+}
+
+impl From<&MetricSnapshotSource> for MetricSnapshotSourceWire {
+    fn from(row: &MetricSnapshotSource) -> Self {
+        Self {
+            id: row.id.clone(),
+            run_id: row.run_id.clone(),
+            source_system: row.source_system.clone(),
+            captured_at: row.captured_at,
+            records: row.records,
+            duplicate_records: row.duplicate_records,
+            contributed_groups: row.contributed_groups,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        }
+    }
 }
 
 impl MetricSnapshotSource {

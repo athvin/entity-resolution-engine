@@ -29,6 +29,7 @@ in `er-sql-check`.
 | [V16](#v16) | error | an entity generating for `typescript` declares an arrow or json `wire` |
 | [V17](#v17) | warning | a control-plane entity with a `dataset_id` column references `datasets(id)`, keeps `org_id` beside it, and declares a non-partial index leading with `dataset_id` |
 | [V18](#v18) | error | a lake entity with `append: true` has no `list<varchar>` column |
+| [V19](#v19) | error | JSON secrets are internal and identity columns remain public |
 
 ## V1
 
@@ -523,4 +524,34 @@ generate:
   append: true
 columns:
   - { name: tags, type: list<varchar>, description: 'LIST has no binding' }
+```
+
+## V19
+
+JSON secrets are internal and identity columns remain public
+
+A JSON wire type, its OpenAPI schema and its TypeScript binding share column visibility. Secret-shaped names (secret, *_secret, token_hash, key_hash, password, *_token) must explicitly be internal so a new credential cannot silently become a public property. A key or natural_key column must stay public: a resource cannot hide its identity. This rule applies to JSON entities; storage rows and Arrow schemas retain all columns. Names are a guard, not a classifier for arbitrary sensitive payloads: authors must also mark other sensitive JSON columns internal.
+
+Severity: **error**
+
+Conforming:
+
+```yaml
+generate:
+  wire: [json]
+key: [id]
+columns:
+  - { name: id, visibility: public }
+  - { name: secret, visibility: internal }
+```
+
+Violating:
+
+```yaml
+generate:
+  wire: [json]
+key: [id]
+columns:
+  - { name: id, visibility: internal }
+  - { name: secret }
 ```

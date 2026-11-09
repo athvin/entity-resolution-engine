@@ -81,8 +81,6 @@ export interface TaskInstance {
   counters: unknown;
   /** traceparent of this try's span, a child of jobs.trace_context. */
   trace_context: string | null;
-  /** The fallback credential only (§6.4): SHA-256 of the per-attempt token, compared with ct_eq; NULL under the projected-token path; nulled at finish. */
-  token_hash: string | null;
   /** Readiness fired. */
   scheduled_at: string | null;
   /** Launch claimed (write-ahead, before the create). */

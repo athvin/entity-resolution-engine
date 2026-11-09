@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 /// One attempt-tracked delivery of one event to one subscriber. The event is recorded here BEFORE any network call, so a subscriber that is briefly unreachable gets the event late instead of never.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WebhookDelivery {
     /// UUIDv7, minted by the application.
     pub id: String,
@@ -36,6 +36,64 @@ pub struct WebhookDelivery {
     pub created_at: ::chrono::DateTime<::chrono::Utc>,
     /// Last write.
     pub updated_at: ::chrono::DateTime<::chrono::Utc>,
+}
+
+/// One attempt-tracked delivery of one event to one subscriber. The event is recorded here BEFORE any network call, so a subscriber that is briefly unreachable gets the event late instead of never.
+#[derive(Debug, Clone, PartialEq, Serialize, ::utoipa::ToSchema)]
+#[schema(as = WebhookDelivery)]
+pub struct WebhookDeliveryWire {
+    /// UUIDv7, minted by the application.
+    pub id: String,
+    /// The tenant whose subscriber this is for; every read is scoped by it.
+    pub org_id: String,
+    /// The dataset the delivered event came from, when it has one (provenance).
+    pub dataset_id: Option<String>,
+    /// The subscription being delivered to.
+    pub webhook_id: String,
+    /// The catalogued event (webhook::EVENT_CATALOG), e.g. job.succeeded.
+    pub event_type: String,
+    /// The exact body to POST. Stored rather than rebuilt so a retry delivers the same bytes the signature was computed over, and so the log shows what was actually sent.
+    pub payload: ::serde_json::Value,
+    /// pending until a drain settles it; delivered on a 2xx; failed when retries are exhausted or the destination is refused outright.
+    pub state: String,
+    /// Attempts handed out. Counted when claimed, not when reported, so a drainer that dies still consumes one.
+    pub attempt: i64,
+    /// Attempts before giving up. Six with the backoff below spans about ten minutes.
+    pub max_attempts: i64,
+    /// When this becomes claimable. NULL means immediately; set to a backoff in the future after a retryable failure.
+    pub next_attempt_at: Option<::chrono::DateTime<::chrono::Utc>>,
+    /// The subscriber's HTTP status, when the POST completed at all.
+    pub response_code: Option<i64>,
+    /// Why the last attempt did not deliver: a transport error, or the outbound-URL guard's refusal.
+    pub error: Option<String>,
+    /// When a 2xx was received; NULL unless state is delivered.
+    pub delivered_at: Option<::chrono::DateTime<::chrono::Utc>>,
+    /// When the event was recorded, which is before any delivery was attempted.
+    pub created_at: ::chrono::DateTime<::chrono::Utc>,
+    /// Last write.
+    pub updated_at: ::chrono::DateTime<::chrono::Utc>,
+}
+
+impl From<&WebhookDelivery> for WebhookDeliveryWire {
+    fn from(row: &WebhookDelivery) -> Self {
+        Self {
+            id: row.id.clone(),
+            org_id: row.org_id.clone(),
+            dataset_id: row.dataset_id.clone(),
+            webhook_id: row.webhook_id.clone(),
+            event_type: row.event_type.clone(),
+            payload: row.payload.clone(),
+            state: row.state.clone(),
+            attempt: row.attempt,
+            max_attempts: row.max_attempts,
+            next_attempt_at: row.next_attempt_at,
+            response_code: row.response_code,
+            error: row.error.clone(),
+            delivered_at: row.delivered_at,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        }
+    }
 }
 
 impl WebhookDelivery {

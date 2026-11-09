@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 /// The extract job's high-water mark, one row per (dataset, source): the newest SystemModstamp already pulled from Salesforce, so an incremental extract asks only for what changed since. The s3_ingest_cursor shape for an API-polled provider — an upsert rather than a log, because the question is 'what is already in', and advanced only AFTER the delivery is published, so a failure re-extracts once rather than skipping rows forever.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SfExtractCursor {
     /// UUIDv7, minted by the application.
     pub id: String,

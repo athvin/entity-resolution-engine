@@ -12,7 +12,7 @@ frontend, and **no part of it is hand-written**:
 entities/*/entity.yaml
    │   er-entity gen
    ▼
-er_entities::<entity>  (derives utoipa::ToSchema)
+er_entities::<entity>::<Name>Wire  (public columns; derives utoipa::ToSchema)
    │   a hand-maintained subset is registered in openapi.rs's ApiDoc
    ▼
 cd rust && cargo run -p er-server --bin er-openapi
@@ -57,7 +57,7 @@ often a different string, and the generated map between the two is
 
 ## Registration is manual, and the test named after it does not check it
 
-`ApiDoc` references the generated entity structs' `ToSchema` **directly**, so a
+`ApiDoc` references the generated JSON wire structs' `ToSchema` **directly**, so a
 registered schema follows `entities/` with no hand-written duplicate. That is
 the part that is pinned.
 
@@ -66,8 +66,11 @@ hand in `er-server/src/openapi.rs` and covers the control-plane tables plus the
 produced golden marts rather than everything under `entities/`; the pipeline's
 intermediate entities are deliberately absent.
 
-**`wire: [json]` is the declaration that an entity qualifies for a schema, and
-it emits nothing.** Declaring it does not add the entity to `ApiDoc`. What
+**`wire: [json]` emits `<Name>Wire` with public columns only.** Its schema
+name stays `<Name>` via `#[schema(as = <Name>)]`; the storage row has no
+`ToSchema`. Convert rows through `From<&Name>`. `visibility: internal`
+governs omission from the wire type and TypeScript binding, with V19 guarding
+secret-shaped columns. Declaring JSON does not add the entity to `ApiDoc`. What
 reconciles the two is
 `every_json_wire_entity_has_a_schema_or_a_declared_gap`: it derives the
 json-wire set from the catalog, subtracts the registered schemas, and requires

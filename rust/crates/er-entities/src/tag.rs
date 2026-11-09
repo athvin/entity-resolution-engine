@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 /// A tenant's own label for entities and review groups: the vocabulary a steward sorts work by.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Tag {
     /// The tag's unique id (UUIDv7, minted by the application).
     pub id: String,
@@ -26,6 +26,49 @@ pub struct Tag {
     pub created_at: ::chrono::DateTime<::chrono::Utc>,
     /// Wall-clock last-write time.
     pub updated_at: ::chrono::DateTime<::chrono::Utc>,
+}
+
+/// A tenant's own label for entities and review groups: the vocabulary a steward sorts work by.
+#[derive(Debug, Clone, PartialEq, Serialize, ::utoipa::ToSchema)]
+#[schema(as = Tag)]
+pub struct TagWire {
+    /// The tag's unique id (UUIDv7, minted by the application).
+    pub id: String,
+    /// The tenant that owns the tag. A tag is never shared across tenants: it names one tenant's own workflow.
+    pub org_id: String,
+    /// The label a steward sees and types. Unique per tenant among active tags, because two tags with one name make a filter ambiguous and a bulk action unsafe.
+    pub name: String,
+    /// What the tag means, for the steward who inherits it. Null when nobody wrote one.
+    pub description: Option<String>,
+    /// Who the tag belongs to. `user` is the steward's vocabulary; `system` is reserved for tags the platform itself writes (merge, manual_merge, unmatch, link, split) — a system tag cannot be retired through the API, and its name cannot be taken by a user tag, so the two vocabularies can never collide.
+    pub kind: String,
+    /// The minimum role allowed to apply or unapply this tag. Null means the route default (steward). Finer than the route's role check because a tag can name a decision only an admin should be able to mark — the spec's per-tag permission.
+    pub apply_min_role: Option<String>,
+    /// Whether the tag is in use. Retiring is a soft delete: `taggings` references this row, every foreign key in this schema is NO ACTION, and a hard DELETE would therefore fail for exactly the tags that had been used — which is the bug D11 found in webhooks. Keeping the row also keeps the history legible: what a group was once marked as is part of why it was handled the way it was.
+    pub active: bool,
+    /// The actor that created the tag.
+    pub created_by: String,
+    /// When the tag was created.
+    pub created_at: ::chrono::DateTime<::chrono::Utc>,
+    /// Wall-clock last-write time.
+    pub updated_at: ::chrono::DateTime<::chrono::Utc>,
+}
+
+impl From<&Tag> for TagWire {
+    fn from(row: &Tag) -> Self {
+        Self {
+            id: row.id.clone(),
+            org_id: row.org_id.clone(),
+            name: row.name.clone(),
+            description: row.description.clone(),
+            kind: row.kind.clone(),
+            apply_min_role: row.apply_min_role.clone(),
+            active: row.active,
+            created_by: row.created_by.clone(),
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        }
+    }
 }
 
 impl Tag {

@@ -117,6 +117,7 @@ A condensed index; the full table with exact files and line hints is
 
 | Category | Prove it by | Test home |
 |---|---|---|
+| Entity secret exposure | remove a secret column’s `visibility: internal` and observe V19 refuse it; serialize generated wire types and inspect all contract layers | entity lint fixtures, generator units, `openapi.rs` and `pg_webhooks.rs` |
 | Cross-tenant lake read | two datasets made to resolve to the same `(catalog, catalog schema, data path)` triple → one reads the other | NEW `er-server/tests/pg_tenant_isolation.rs` |
 | Webhook SSRF → IMDS (**guarded**) | register `http://169.254.169.254/...`; delivery refuses it | units in `webhook.rs`, `tests/pg_webhooks.rs`, + the `tests/egress_guard.rs` posterity gate |
 | Config-as-code SQL | publish a config whose rule calls a subquery/function | `config_check.rs` unit tests |

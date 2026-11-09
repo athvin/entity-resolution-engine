@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 /// A relationship between two resolved entities that is NOT a merge: a household, a corporate hierarchy, a 'these are related but distinct' note. The product has one answer to 'these two records belong together' — merge them — and that answer is wrong for a husband and wife at one address, or a subsidiary and its parent. Merging them loses the distinction and no later run can recover it; refusing to record anything loses the relationship. A link records it without collapsing either side.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EntityLink {
     /// The link's unique id (UUIDv7, minted by the application).
     pub id: String,
@@ -28,6 +28,52 @@ pub struct EntityLink {
     pub created_at: ::chrono::DateTime<::chrono::Utc>,
     /// When it was last changed.
     pub updated_at: ::chrono::DateTime<::chrono::Utc>,
+}
+
+/// A relationship between two resolved entities that is NOT a merge: a household, a corporate hierarchy, a 'these are related but distinct' note. The product has one answer to 'these two records belong together' — merge them — and that answer is wrong for a husband and wife at one address, or a subsidiary and its parent. Merging them loses the distinction and no later run can recover it; refusing to record anything loses the relationship. A link records it without collapsing either side.
+#[derive(Debug, Clone, PartialEq, Serialize, ::utoipa::ToSchema)]
+#[schema(as = EntityLink)]
+pub struct EntityLinkWire {
+    /// The link's unique id (UUIDv7, minted by the application).
+    pub id: String,
+    /// The tenant. Every read is scoped by it.
+    pub org_id: String,
+    /// The dataset whose entities this link relates — entity ids are lake-local.
+    pub dataset_id: String,
+    /// The entity on the owning side — the household, the parent company. Deliberately NOT a foreign key, for the reason `taggings.subject_id` gives: an entity lives in the LAKE and this table is Postgres, so a database-level reference would point at a row this store does not own. The id is stable across runs because reconcile carries ids forward by membership overlap (INV-PERM) rather than re-deriving them, and an entity that loses that contest records `merged_into` — so a link survives its entity gaining members, and a merged-away side is followable rather than dangling.
+    pub parent_entity_id: String,
+    /// The entity on the member side — the person in the household, the subsidiary.
+    pub child_entity_id: String,
+    /// What the relationship is. A closed set rather than free text because the whole value of a link is that something downstream can act on it, and an export or a rule cannot act on a spelling. `related` is the deliberate escape hatch for a real relationship that is neither of the other two — it says 'these are connected, do not merge them' without claiming to know how.
+    pub kind: String,
+    /// Where the link came from. Kept apart for the reason `pair_labels.origin` is: a steward's judgement and a model's suggestion are different evidence, and a surface that cannot tell them apart will present a guess as a decision. `llm` has no producer until an adjudicator can propose a link; it is declared here because the column's accepted values are the contract that producer will be written against.
+    pub origin: String,
+    /// Optional free text — why this link exists, in the words of whoever made it.
+    pub note: Option<String>,
+    /// The actor that created the link.
+    pub created_by: String,
+    /// When the link was created.
+    pub created_at: ::chrono::DateTime<::chrono::Utc>,
+    /// When it was last changed.
+    pub updated_at: ::chrono::DateTime<::chrono::Utc>,
+}
+
+impl From<&EntityLink> for EntityLinkWire {
+    fn from(row: &EntityLink) -> Self {
+        Self {
+            id: row.id.clone(),
+            org_id: row.org_id.clone(),
+            dataset_id: row.dataset_id.clone(),
+            parent_entity_id: row.parent_entity_id.clone(),
+            child_entity_id: row.child_entity_id.clone(),
+            kind: row.kind.clone(),
+            origin: row.origin.clone(),
+            note: row.note.clone(),
+            created_by: row.created_by.clone(),
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        }
+    }
 }
 
 impl EntityLink {

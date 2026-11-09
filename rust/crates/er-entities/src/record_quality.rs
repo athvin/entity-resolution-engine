@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 /// A per-record data-quality score, 0-100, with the three dimensions kept separately. The dimensions are kept because a single number says a record is bad and not what to do about it: complete-but-invalid, valid-but-empty and simply old are three different jobs.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RecordQuality {
     /// Content-derived row id: sha256('record_qualities:' || record_key).
     pub id: String,
@@ -26,6 +26,49 @@ pub struct RecordQuality {
     pub created_at: ::chrono::DateTime<::chrono::Utc>,
     /// Run-logical last-write time.
     pub updated_at: ::chrono::DateTime<::chrono::Utc>,
+}
+
+/// A per-record data-quality score, 0-100, with the three dimensions kept separately. The dimensions are kept because a single number says a record is bad and not what to do about it: complete-but-invalid, valid-but-empty and simply old are three different jobs.
+#[derive(Debug, Clone, PartialEq, Serialize, ::utoipa::ToSchema)]
+#[schema(as = RecordQuality)]
+pub struct RecordQualityWire {
+    /// Content-derived row id: sha256('record_qualities:' || record_key).
+    pub id: String,
+    /// The standardized record scored.
+    pub record_key: String,
+    /// 0-100, the weighted mean of the dimensions that APPLY to this record. A dimension that cannot be judged is left out of the mean rather than counted as zero.
+    pub score: f64,
+    /// Weighted fraction of the configured attributes that are populated.
+    pub completeness: f64,
+    /// Fraction of the PRESENT validatable fields that passed standardization. NULL when the record has none of them — a record with no email is already penalised by completeness, and scoring its validity zero would penalise the same absence twice.
+    pub validity: Option<f64>,
+    /// 1.0 within `fresh_days` of the run, decaying to 0.0 at `stale_days`. NULL when the source carries no timestamp, because unknown age is not the same as old.
+    pub freshness: Option<f64>,
+    /// The run that scored it.
+    pub run_id: String,
+    /// That run's logical clock.
+    pub scored_at: ::chrono::DateTime<::chrono::Utc>,
+    /// Run-logical creation time.
+    pub created_at: ::chrono::DateTime<::chrono::Utc>,
+    /// Run-logical last-write time.
+    pub updated_at: ::chrono::DateTime<::chrono::Utc>,
+}
+
+impl From<&RecordQuality> for RecordQualityWire {
+    fn from(row: &RecordQuality) -> Self {
+        Self {
+            id: row.id.clone(),
+            record_key: row.record_key.clone(),
+            score: row.score,
+            completeness: row.completeness,
+            validity: row.validity,
+            freshness: row.freshness,
+            run_id: row.run_id.clone(),
+            scored_at: row.scored_at,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        }
+    }
 }
 
 impl RecordQuality {

@@ -1,11 +1,11 @@
 //! The TypeScript emitters: the binding (`bindings/<Entity>.ts`, the type) and the
 //! reader (`readers/<Entity>.ts`, an Arrow `Table` -> `Entity[]` function). Both
-//! come from the one type map, so the Arrow lane and the JSON lane yield the
-//! identical shape. The binding is emitted directly from the vocabulary rather
+//! come from the one type map. JSON entities project public columns in both
+//! the binding and the reader; storage Arrow schemas retain all columns. The binding is emitted directly from the vocabulary rather
 //! than through ts-rs, which gives `i64 -> number` without an env-var override and
 //! keeps every emitter in this one crate.
 
-use er_entity_spec::{ColumnType, Entity};
+use er_entity_spec::{ColumnType, Entity, Visibility, Wire};
 
 use crate::casing::to_pascal_case;
 
@@ -38,7 +38,11 @@ pub fn emit_binding(entity: &Entity) -> String {
     ));
     out.push_str(&jsdoc("", &entity.description));
     out.push_str(&format!("export interface {type_name} {{\n"));
-    for column in &entity.columns {
+    for column in entity
+        .columns
+        .iter()
+        .filter(|c| !entity.has_wire(Wire::Json) || c.visibility == Visibility::Public)
+    {
         out.push_str(&jsdoc("  ", &column.description));
         out.push_str(&format!(
             "  {}: {};\n",
@@ -88,7 +92,9 @@ pub fn emit_reader(entity: &Entity) -> String {
     let required: Vec<&str> = entity
         .columns
         .iter()
-        .filter(|c| !c.nullable)
+        .filter(|c| {
+            !c.nullable && (!entity.has_wire(Wire::Json) || c.visibility == Visibility::Public)
+        })
         .map(|c| c.name.as_str())
         .collect();
     let required_list = required
@@ -125,7 +131,11 @@ pub fn emit_reader(entity: &Entity) -> String {
     out.push_str(&format!("  const rows: {type_name}[] = [];\n"));
     out.push_str("  for (let i = 0; i < table.numRows; i++) {\n");
     out.push_str("    rows.push({\n");
-    for column in &entity.columns {
+    for column in entity
+        .columns
+        .iter()
+        .filter(|c| !entity.has_wire(Wire::Json) || c.visibility == Visibility::Public)
+    {
         let convert = ts_convert(column.col_type);
         // A nullable column reads `null` when the vector is absent or the value is
         // null; a required column has been proven present above.

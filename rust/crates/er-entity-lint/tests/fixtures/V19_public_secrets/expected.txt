@@ -1,0 +1,6 @@
+[V19] probe: secret-shaped column "access_token" on the JSON wire must declare visibility: internal
+[V19] probe: secret-shaped column "key_hash" on the JSON wire must declare visibility: internal
+[V19] probe: secret-shaped column "password" on the JSON wire must declare visibility: internal
+[V19] probe: secret-shaped column "secret" on the JSON wire must declare visibility: internal
+[V19] probe: secret-shaped column "token_hash" on the JSON wire must declare visibility: internal
+[V19] probe: secret-shaped column "webhook_secret" on the JSON wire must declare visibility: internal

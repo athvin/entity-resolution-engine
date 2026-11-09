@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 /// A recurring job schedule for a tenant: its kind, cron and source.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Schedule {
     /// The schedule's unique id.
     pub id: String,
@@ -28,6 +28,52 @@ pub struct Schedule {
     pub created_at: ::chrono::DateTime<::chrono::Utc>,
     /// Wall-clock last-write time (database default; advanced by mutations once the entity migrates).
     pub updated_at: ::chrono::DateTime<::chrono::Utc>,
+}
+
+/// A recurring job schedule for a tenant: its kind, cron and source.
+#[derive(Debug, Clone, PartialEq, Serialize, ::utoipa::ToSchema)]
+#[schema(as = Schedule)]
+pub struct ScheduleWire {
+    /// The schedule's unique id.
+    pub id: String,
+    /// The tenant this schedule runs for.
+    pub org_id: String,
+    /// The dataset this schedule enqueues for.
+    pub dataset_id: String,
+    /// The job kind the schedule enqueues.
+    pub kind: String,
+    /// Kind-specific parameters.
+    pub params: ::serde_json::Value,
+    /// The cron expression.
+    pub cron: String,
+    /// Whether the schedule is active.
+    pub enabled: bool,
+    /// What created the schedule (api, config:correction_pass, system:lake_maintain).
+    pub source: String,
+    /// When the schedule last enqueued a job.
+    pub last_enqueued_at: Option<::chrono::DateTime<::chrono::Utc>>,
+    /// When the schedule was created.
+    pub created_at: ::chrono::DateTime<::chrono::Utc>,
+    /// Wall-clock last-write time (database default; advanced by mutations once the entity migrates).
+    pub updated_at: ::chrono::DateTime<::chrono::Utc>,
+}
+
+impl From<&Schedule> for ScheduleWire {
+    fn from(row: &Schedule) -> Self {
+        Self {
+            id: row.id.clone(),
+            org_id: row.org_id.clone(),
+            dataset_id: row.dataset_id.clone(),
+            kind: row.kind.clone(),
+            params: row.params.clone(),
+            cron: row.cron.clone(),
+            enabled: row.enabled,
+            source: row.source.clone(),
+            last_enqueued_at: row.last_enqueued_at,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        }
+    }
 }
 
 impl Schedule {

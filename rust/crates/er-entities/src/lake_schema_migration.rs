@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 /// A tenant lake's schema ledger: one row per DDL statement the reconciler applied to lake.main.*, plus one `verified` row each time a new catalog version found the lake already current. The latest row's catalog_hash is the version this lake is at; the lake, not the control plane, is authoritative for its own position.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LakeSchemaMigration {
     /// The ledger row's unique id (UUIDv7, minted by the reconciler).
     pub id: String,

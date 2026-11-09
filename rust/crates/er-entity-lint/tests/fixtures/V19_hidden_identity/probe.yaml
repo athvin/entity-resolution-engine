@@ -1,0 +1,16 @@
+kind: entity
+version: 1
+name: probe
+relation: probes
+description: Visibility regression.
+key: [id]
+natural_key: [external_id]
+generate:
+  stores: [postgres]
+  languages: [rust, typescript]
+  wire: [json]
+columns:
+  - { name: id, visibility: internal, type: varchar, nullable: false, description: Identity }
+  - { name: external_id, visibility: internal, type: varchar, nullable: false, description: Natural identity }
+  - { name: created_at, type: timestamp, nullable: false, default: 'now()', volatile: true, description: Creation }
+  - { name: updated_at, type: timestamp, nullable: false, default: 'now()', volatile: true, description: Update }

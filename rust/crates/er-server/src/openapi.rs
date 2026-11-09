@@ -1,4 +1,4 @@
-//! The control-lane OpenAPI document. It references the generated entity structs'
+//! The control-lane OpenAPI document. It references the generated public wire structs'
 //! `utoipa::ToSchema` directly, so `openapi.json` — and the frontend's
 //! `schema.d.ts`, regenerated from it — follow the entities with no hand-written
 //! duplicate. The old document and `scripts/gen-api-types.mjs` were emitted from a
@@ -19,35 +19,35 @@ use utoipa::OpenApi;
         description = "Entity Resolution control + read API. Component schemas are generated from the entity definitions (entities/*/entity.yaml) via er-entity-gen; this document is their single serialized form.",
     ),
     components(schemas(
-        er_entities::candidate_key::CandidateKey,
-        er_entities::column_profile::ColumnProfile,
-        er_entities::entity_link::EntityLink,
-        er_entities::ingest_batch::IngestBatch,
-        er_entities::matching_model::MatchingModel,
-        er_entities::metric_snapshot::MetricSnapshot,
-        er_entities::metric_snapshot_source::MetricSnapshotSource,
-        er_entities::pair_label::PairLabel,
-        er_entities::profile_finding::ProfileFinding,
-        er_entities::profile_run::ProfileRun,
-        er_entities::record_quality::RecordQuality,
-        er_entities::s3_ingest_cursor::S3IngestCursor,
-        er_entities::tag::Tag,
-        er_entities::tagging::Tagging,
-        er_entities::webhook_delivery::WebhookDelivery,
-        er_entities::golden_record::GoldenRecord,
-        er_entities::golden_lineage::GoldenLineage,
-        er_entities::acct_golden_record::AcctGoldenRecord,
-        er_entities::acct_golden_lineage::AcctGoldenLineage,
-        er_entities::job::Job,
-        er_entities::org::Org,
-        er_entities::dataset::Dataset,
-        er_entities::api_key::ApiKey,
-        er_entities::config_version::ConfigVersion,
-        er_entities::schedule::Schedule,
-        er_entities::webhook::Webhook,
-        er_entities::staged_steward_action::StagedStewardAction,
-        er_entities::audit_log::AuditLog,
-        er_entities::task_instance::TaskInstance,
+        er_entities::candidate_key::CandidateKeyWire,
+        er_entities::column_profile::ColumnProfileWire,
+        er_entities::entity_link::EntityLinkWire,
+        er_entities::ingest_batch::IngestBatchWire,
+        er_entities::matching_model::MatchingModelWire,
+        er_entities::metric_snapshot::MetricSnapshotWire,
+        er_entities::metric_snapshot_source::MetricSnapshotSourceWire,
+        er_entities::pair_label::PairLabelWire,
+        er_entities::profile_finding::ProfileFindingWire,
+        er_entities::profile_run::ProfileRunWire,
+        er_entities::record_quality::RecordQualityWire,
+        er_entities::s3_ingest_cursor::S3IngestCursorWire,
+        er_entities::tag::TagWire,
+        er_entities::tagging::TaggingWire,
+        er_entities::webhook_delivery::WebhookDeliveryWire,
+        er_entities::golden_record::GoldenRecordWire,
+        er_entities::golden_lineage::GoldenLineageWire,
+        er_entities::acct_golden_record::AcctGoldenRecordWire,
+        er_entities::acct_golden_lineage::AcctGoldenLineageWire,
+        er_entities::job::JobWire,
+        er_entities::org::OrgWire,
+        er_entities::dataset::DatasetWire,
+        er_entities::api_key::ApiKeyWire,
+        er_entities::config_version::ConfigVersionWire,
+        er_entities::schedule::ScheduleWire,
+        er_entities::webhook::WebhookWire,
+        er_entities::staged_steward_action::StagedStewardActionWire,
+        er_entities::audit_log::AuditLogWire,
+        er_entities::task_instance::TaskInstanceWire,
     ))
 )]
 pub struct ApiDoc;
@@ -146,6 +146,133 @@ mod tests {
     use super::*;
 
     const COMMITTED: &str = include_str!("../../../../frontend/src/lib/api/openapi.json");
+
+    #[test]
+    fn secret_columns_are_absent_from_public_contracts() {
+        let doc: serde_json::Value = serde_json::from_str(&openapi_json()).unwrap();
+        for (entity, field) in [
+            ("Webhook", "secret"),
+            ("ApiKey", "key_hash"),
+            ("TaskInstance", "token_hash"),
+        ] {
+            let schema = &doc["components"]["schemas"][entity];
+            assert!(schema.is_object(), "missing {entity}");
+            assert!(
+                schema["properties"].get(field).is_none(),
+                "{entity}.{field} leaked into OpenAPI"
+            );
+            assert!(
+                !required_set(schema).contains(field),
+                "{entity}.{field} is required"
+            );
+            let root =
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../frontend/src/lib");
+            let binding =
+                std::fs::read_to_string(root.join(format!("entities/bindings/{entity}.ts")))
+                    .unwrap();
+            let types = std::fs::read_to_string(root.join("api/schema.d.ts")).unwrap();
+            // Scope this check to the entity component. Create responses may
+            // legitimately return a freshly minted secret once.
+            let component = types
+                .split_once(&format!("        {entity}: "))
+                .expect("entity component")
+                .1
+                .strip_prefix('{')
+                .expect("component object")
+                .split_once("\n        };")
+                .expect("component end")
+                .0;
+            for text in [binding.as_str(), component] {
+                assert!(
+                    !text.contains(&format!("{field}:")) && !text.contains(&format!("{field}?:")),
+                    "{entity}.{field} leaked into TypeScript"
+                );
+            }
+        }
+    }
+
+    /// Populate every storage field, including nullable secrets, so omission
+    /// cannot pass merely because a test row happened to contain no credential.
+    fn populated_row(name: &str) -> serde_json::Value {
+        use er_entity_spec::ColumnType;
+        let catalog = er_entities::catalog::catalog();
+        let entity = catalog.by_name(name).unwrap();
+        serde_json::Value::Object(
+            entity
+                .columns
+                .iter()
+                .map(|c| {
+                    let value = match c.col_type {
+                        ColumnType::Varchar => serde_json::json!(format!("sentinel-{}", c.name)),
+                        ColumnType::Json | ColumnType::ListVarchar => {
+                            serde_json::json!(["sentinel"])
+                        }
+                        ColumnType::Bigint => serde_json::json!(1),
+                        ColumnType::Double => serde_json::json!(1.25),
+                        ColumnType::Boolean => serde_json::json!(true),
+                        ColumnType::Date => serde_json::json!("2026-01-01"),
+                        ColumnType::Timestamp => serde_json::json!("2026-01-01T00:00:00Z"),
+                    };
+                    (c.name.clone(), value)
+                })
+                .collect(),
+        )
+    }
+
+    fn assert_projection<Row, Public>(name: &str, secret: &str)
+    where
+        Row: serde::de::DeserializeOwned,
+        Public: serde::Serialize + for<'a> From<&'a Row>,
+    {
+        let mut expected = populated_row(name);
+        let row: Row = serde_json::from_value(expected.clone()).unwrap();
+        assert!(expected.as_object_mut().unwrap().remove(secret).is_some());
+        let actual = serde_json::to_value(Public::from(&row)).unwrap();
+        assert_eq!(
+            actual, expected,
+            "wire conversion must retain all public values and omit {secret}"
+        );
+    }
+
+    #[test]
+    fn generated_wire_serialization_omits_secrets_and_preserves_public_values() {
+        assert_projection::<er_entities::webhook::Webhook, er_entities::webhook::WebhookWire>(
+            "webhook", "secret",
+        );
+        assert_projection::<er_entities::api_key::ApiKey, er_entities::api_key::ApiKeyWire>(
+            "api_key", "key_hash",
+        );
+        assert_projection::<
+            er_entities::task_instance::TaskInstance,
+            er_entities::task_instance::TaskInstanceWire,
+        >("task_instance", "token_hash");
+    }
+
+    #[test]
+    fn component_properties_match_public_columns_for_every_json_entity() {
+        let doc: serde_json::Value = serde_json::from_str(&openapi_json()).unwrap();
+        for entity in er_entities::catalog::catalog()
+            .entities()
+            .iter()
+            .filter(|e| e.has_wire(er_entity_spec::Wire::Json))
+        {
+            let name = er_entity_gen::casing::to_pascal_case(&entity.name);
+            let actual: std::collections::BTreeSet<_> =
+                doc["components"]["schemas"][&name]["properties"]
+                    .as_object()
+                    .unwrap_or_else(|| panic!("missing {name}"))
+                    .keys()
+                    .map(String::as_str)
+                    .collect();
+            let expected = entity
+                .columns
+                .iter()
+                .filter(|c| c.visibility == er_entity_spec::Visibility::Public)
+                .map(|c| c.name.as_str())
+                .collect();
+            assert_eq!(actual, expected, "public schema drift for {name}");
+        }
+    }
 
     #[test]
     fn openapi_json_matches_the_committed_document() {

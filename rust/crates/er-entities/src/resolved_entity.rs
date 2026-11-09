@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 /// One resolved entity (S4.4): its lifecycle status and, for merge losers, the surviving entity it merged into.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ResolvedEntity {
     /// The resolved entity's id (UUIDv7, minted deterministically by reconcile).
     pub id: String,

@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 /// One resolved person: the surviving value per attribute, at a snapshot.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GoldenRecord {
     /// Persistent entity id (deterministic UUIDv7, minted by reconcile); the survivorship key.
     pub id: String,
@@ -40,6 +40,70 @@ pub struct GoldenRecord {
     pub created_at: ::chrono::DateTime<::chrono::Utc>,
     /// Run-logical last-write time (equals created_at; the mart is rebuilt whole).
     pub updated_at: ::chrono::DateTime<::chrono::Utc>,
+}
+
+/// One resolved person: the surviving value per attribute, at a snapshot.
+#[derive(Debug, Clone, PartialEq, Serialize, ::utoipa::ToSchema)]
+#[schema(as = GoldenRecord)]
+pub struct GoldenRecordWire {
+    /// Persistent entity id (deterministic UUIDv7, minted by reconcile); the survivorship key.
+    pub id: String,
+    /// Surviving given name.
+    pub given_name: Option<String>,
+    /// Surviving family name.
+    pub family_name: Option<String>,
+    /// Surviving email address.
+    pub email: Option<String>,
+    /// Surviving phone number in E.164 form.
+    pub phone_e164: Option<String>,
+    /// Surviving street number of the address.
+    pub addr_number: Option<String>,
+    /// Surviving street name of the address.
+    pub addr_street: Option<String>,
+    /// Surviving unit/apartment of the address.
+    pub addr_unit: Option<String>,
+    /// Surviving city of the address.
+    pub addr_city: Option<String>,
+    /// Surviving region/state of the address.
+    pub addr_region: Option<String>,
+    /// Surviving postal code of the address.
+    pub addr_postal: Option<String>,
+    /// Surviving birth date.
+    pub birth_date: Option<::chrono::NaiveDate>,
+    /// Surviving opaque per-source metadata object.
+    pub metadata: Option<::serde_json::Value>,
+    /// Survivorship policy version that produced this row.
+    pub survivorship_version: String,
+    /// Assembly time of this row (volatile; excluded from determinism comparisons).
+    pub assembled_at: ::chrono::DateTime<::chrono::Utc>,
+    /// Run-logical creation time (the assembling run's clock; the mart is rebuilt whole).
+    pub created_at: ::chrono::DateTime<::chrono::Utc>,
+    /// Run-logical last-write time (equals created_at; the mart is rebuilt whole).
+    pub updated_at: ::chrono::DateTime<::chrono::Utc>,
+}
+
+impl From<&GoldenRecord> for GoldenRecordWire {
+    fn from(row: &GoldenRecord) -> Self {
+        Self {
+            id: row.id.clone(),
+            given_name: row.given_name.clone(),
+            family_name: row.family_name.clone(),
+            email: row.email.clone(),
+            phone_e164: row.phone_e164.clone(),
+            addr_number: row.addr_number.clone(),
+            addr_street: row.addr_street.clone(),
+            addr_unit: row.addr_unit.clone(),
+            addr_city: row.addr_city.clone(),
+            addr_region: row.addr_region.clone(),
+            addr_postal: row.addr_postal.clone(),
+            birth_date: row.birth_date,
+            metadata: row.metadata.clone(),
+            survivorship_version: row.survivorship_version.clone(),
+            assembled_at: row.assembled_at,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        }
+    }
 }
 
 impl GoldenRecord {

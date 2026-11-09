@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 /// One resolved account/organization: the surviving value per attribute, at a snapshot.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AcctGoldenRecord {
     /// Persistent entity id (deterministic UUIDv7, minted by reconcile); the survivorship key.
     pub id: String,
@@ -32,6 +32,58 @@ pub struct AcctGoldenRecord {
     pub created_at: ::chrono::DateTime<::chrono::Utc>,
     /// Run-logical last-write time (equals created_at; the mart is rebuilt whole).
     pub updated_at: ::chrono::DateTime<::chrono::Utc>,
+}
+
+/// One resolved account/organization: the surviving value per attribute, at a snapshot.
+#[derive(Debug, Clone, PartialEq, Serialize, ::utoipa::ToSchema)]
+#[schema(as = AcctGoldenRecord)]
+pub struct AcctGoldenRecordWire {
+    /// Persistent entity id (deterministic UUIDv7, minted by reconcile); the survivorship key.
+    pub id: String,
+    /// Surviving company name.
+    pub company_name: Option<String>,
+    /// Surviving web domain.
+    pub domain: Option<String>,
+    /// Surviving phone number in E.164 form.
+    pub phone_e164: Option<String>,
+    /// Surviving street of the address.
+    pub addr_street: Option<String>,
+    /// Surviving city of the address.
+    pub addr_city: Option<String>,
+    /// Surviving region/state of the address.
+    pub addr_region: Option<String>,
+    /// Surviving postal code of the address.
+    pub addr_postal: Option<String>,
+    /// Surviving opaque per-source metadata object.
+    pub metadata: Option<::serde_json::Value>,
+    /// Survivorship policy version that produced this row.
+    pub survivorship_version: String,
+    /// Assembly time of this row (volatile).
+    pub assembled_at: ::chrono::DateTime<::chrono::Utc>,
+    /// Run-logical creation time (the assembling run's clock; the mart is rebuilt whole).
+    pub created_at: ::chrono::DateTime<::chrono::Utc>,
+    /// Run-logical last-write time (equals created_at; the mart is rebuilt whole).
+    pub updated_at: ::chrono::DateTime<::chrono::Utc>,
+}
+
+impl From<&AcctGoldenRecord> for AcctGoldenRecordWire {
+    fn from(row: &AcctGoldenRecord) -> Self {
+        Self {
+            id: row.id.clone(),
+            company_name: row.company_name.clone(),
+            domain: row.domain.clone(),
+            phone_e164: row.phone_e164.clone(),
+            addr_street: row.addr_street.clone(),
+            addr_city: row.addr_city.clone(),
+            addr_region: row.addr_region.clone(),
+            addr_postal: row.addr_postal.clone(),
+            metadata: row.metadata.clone(),
+            survivorship_version: row.survivorship_version.clone(),
+            assembled_at: row.assembled_at,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        }
+    }
 }
 
 impl AcctGoldenRecord {

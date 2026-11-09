@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 /// An org-scoped API key: its role and the at-rest hash of the secret.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ApiKey {
     /// The key's unique id (UUIDv7, minted at issue).
     pub id: String,
@@ -20,6 +20,37 @@ pub struct ApiKey {
     pub revoked_at: Option<::chrono::DateTime<::chrono::Utc>>,
     /// Wall-clock last-write time (database default; advanced by mutations once the entity migrates).
     pub updated_at: ::chrono::DateTime<::chrono::Utc>,
+}
+
+/// An org-scoped API key: its role and the at-rest hash of the secret.
+#[derive(Debug, Clone, PartialEq, Serialize, ::utoipa::ToSchema)]
+#[schema(as = ApiKey)]
+pub struct ApiKeyWire {
+    /// The key's unique id (UUIDv7, minted at issue).
+    pub id: String,
+    /// The tenant the key authenticates.
+    pub org_id: String,
+    /// The role the key grants.
+    pub role: String,
+    /// When the key was issued.
+    pub created_at: ::chrono::DateTime<::chrono::Utc>,
+    /// When the key was revoked, if it has been.
+    pub revoked_at: Option<::chrono::DateTime<::chrono::Utc>>,
+    /// Wall-clock last-write time (database default; advanced by mutations once the entity migrates).
+    pub updated_at: ::chrono::DateTime<::chrono::Utc>,
+}
+
+impl From<&ApiKey> for ApiKeyWire {
+    fn from(row: &ApiKey) -> Self {
+        Self {
+            id: row.id.clone(),
+            org_id: row.org_id.clone(),
+            role: row.role.clone(),
+            created_at: row.created_at,
+            revoked_at: row.revoked_at,
+            updated_at: row.updated_at,
+        }
+    }
 }
 
 impl ApiKey {

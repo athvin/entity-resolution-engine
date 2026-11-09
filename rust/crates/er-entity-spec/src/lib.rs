@@ -25,7 +25,7 @@ mod types;
 
 pub use catalog::{Catalog, SpecError};
 pub use entity::{Column, Entity, GenerateBlock, Index, Reference, singular};
-pub use types::{ColumnType, Language, ParseTypeError, Store, Wire};
+pub use types::{ColumnType, Language, ParseTypeError, Store, Visibility, Wire};
 
 #[cfg(test)]
 mod tests {
@@ -90,6 +90,31 @@ columns:
             entity.qualified_name(Store::Duckdb),
             "lake.main.golden_records"
         );
+    }
+
+    #[test]
+    fn visibility_defaults_public_and_rejects_unknown_values() {
+        assert!(
+            parse(GOLDEN)
+                .unwrap()
+                .columns
+                .iter()
+                .all(|c| c.visibility == Visibility::Public)
+        );
+        let internal = GOLDEN.replace(
+            "name: given_name",
+            "name: given_name\n    visibility: internal",
+        );
+        assert_eq!(
+            parse(&internal)
+                .unwrap()
+                .column("given_name")
+                .unwrap()
+                .visibility,
+            Visibility::Internal
+        );
+        assert!(parse(&internal.replace("visibility: internal", "visibility: secret")).is_err());
+        assert!(parse(&internal.replace("visibility:", "visiblity:")).is_err());
     }
 
     #[test]

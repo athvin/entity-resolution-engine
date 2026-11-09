@@ -1801,15 +1801,6 @@ pub async fn delete_schedule(
     Ok(n == 1)
 }
 
-/// A webhook row for the API listing (`webhooks.py`); the `secret` is never
-/// listed (returned once on create, like an API key).
-pub struct WebhookRow {
-    pub id: String,
-    pub url: String,
-    pub events: serde_json::Value,
-    pub active: bool,
-}
-
 /// Register an outbound webhook (`webhooks.py` `create`); returns its id. The
 /// `secret` is the caller-chosen or generated HMAC signing key stored for
 /// delivery-time signatures.
@@ -1842,16 +1833,14 @@ pub async fn create_webhook(
 ///
 /// # Errors
 /// Propagates the query error.
-pub async fn list_webhooks(client: &Client, org_id: &str) -> Result<Vec<WebhookRow>, PgError> {
+pub async fn list_webhooks(
+    client: &Client,
+    org_id: &str,
+) -> Result<Vec<er_entities::webhook::WebhookWire>, PgError> {
     Ok(er_entities::webhook::read::list_active(client, org_id)
         .await?
-        .into_iter()
-        .map(|w| WebhookRow {
-            id: w.id,
-            url: w.url,
-            events: w.events,
-            active: w.active,
-        })
+        .iter()
+        .map(er_entities::webhook::WebhookWire::from)
         .collect())
 }
 
@@ -1916,7 +1905,7 @@ pub async fn delete_webhook(
     Ok(n == 1)
 }
 
-/// A Salesforce connection as the API lists it. Like [`WebhookRow`], a
+/// A Salesforce connection as the API lists it. Like [`er_entities::webhook::WebhookWire`], a
 /// deliberate projection: the `client_secret` is never listed — the one read
 /// that returns it is [`salesforce_connection_credential`], which only the
 /// work-order resolver calls.

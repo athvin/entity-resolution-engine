@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 /// What the last successful match pass actually scored: one row per (record, model identity) at the moment it was scored, with the content hash it was scored under. This is what makes an incremental run safe — a record is new or changed, FOR A GIVEN MODEL, precisely when the standardized corpus disagrees with that model's rows here. Keyed per identity rather than per record because an ensemble scores one record with several models (E5b-2b): a record-keyed ledger let the second member's sync overwrite the first's, so a two-member pass left a ledger claiming only the last member had scored anything — and 'member B has not scored record X' then had nowhere to be true.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ScoredRecord {
     /// Content-derived row id: sha256('scored_records:' || record_key || ':' || model_version || ':' || tf_snapshot_id). The model identity is IN the id because it is in the natural key — an id over record_key alone would collide the moment two ensemble members scored the same record.
     pub id: String,

@@ -33,6 +33,7 @@ columns:
     default: "'[]'::jsonb"
     description: "The subscribed event types."
   - name: secret
+    visibility: internal
     type: varchar
     nullable: false
     description: "HMAC signing secret for deliveries."

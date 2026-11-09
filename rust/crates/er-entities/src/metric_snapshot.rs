@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 /// One run's resolution metrics, kept so the dashboard can show a TREND rather than only a current value. The dashboard has always computed its numbers live from the lake, which means it can say what is true now and nothing about whether that is better or worse than last week — which is the question an operator actually has.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MetricSnapshot {
     /// Content-derived row id: sha256('metric_snapshots:' || run_id).
     pub id: String,
@@ -32,6 +32,58 @@ pub struct MetricSnapshot {
     pub created_at: ::chrono::DateTime<::chrono::Utc>,
     /// Run-logical last-write time.
     pub updated_at: ::chrono::DateTime<::chrono::Utc>,
+}
+
+/// One run's resolution metrics, kept so the dashboard can show a TREND rather than only a current value. The dashboard has always computed its numbers live from the lake, which means it can say what is true now and nothing about whether that is better or worse than last week — which is the question an operator actually has.
+#[derive(Debug, Clone, PartialEq, Serialize, ::utoipa::ToSchema)]
+#[schema(as = MetricSnapshot)]
+pub struct MetricSnapshotWire {
+    /// Content-derived row id: sha256('metric_snapshots:' || run_id).
+    pub id: String,
+    /// The run these metrics describe. One snapshot per run, so a re-run of the same id overwrites rather than double-counting.
+    pub run_id: String,
+    /// The run's logical clock, not wall time — so a replayed fixture produces the same snapshot.
+    pub captured_at: ::chrono::DateTime<::chrono::Utc>,
+    /// Records in the standardized corpus.
+    pub records: i64,
+    /// Entities the run resolved them into.
+    pub entities: i64,
+    /// Records sitting in an entity with more than one member — the numerator of the duplicate rate. Counting GROUPS instead would call a 5-record cluster and a 2-record cluster the same amount of duplication.
+    pub duplicate_records: i64,
+    /// Entities with more than one member.
+    pub duplicate_groups: i64,
+    /// Members in the biggest entity. A sudden jump here is the signature of an over-merge, which an average cluster size hides completely.
+    pub largest_group: i64,
+    /// Open review items after the run — the work the thresholds are handing to humans.
+    pub review_backlog: i64,
+    /// Active scores at or above the auto-merge threshold.
+    pub auto_merge_pairs: i64,
+    /// Active scores in the gray band: scored, not merged. The two together say where the thresholds are actually sitting.
+    pub review_band_pairs: i64,
+    /// Run-logical creation time.
+    pub created_at: ::chrono::DateTime<::chrono::Utc>,
+    /// Run-logical last-write time.
+    pub updated_at: ::chrono::DateTime<::chrono::Utc>,
+}
+
+impl From<&MetricSnapshot> for MetricSnapshotWire {
+    fn from(row: &MetricSnapshot) -> Self {
+        Self {
+            id: row.id.clone(),
+            run_id: row.run_id.clone(),
+            captured_at: row.captured_at,
+            records: row.records,
+            entities: row.entities,
+            duplicate_records: row.duplicate_records,
+            duplicate_groups: row.duplicate_groups,
+            largest_group: row.largest_group,
+            review_backlog: row.review_backlog,
+            auto_merge_pairs: row.auto_merge_pairs,
+            review_band_pairs: row.review_band_pairs,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        }
+    }
 }
 
 impl MetricSnapshot {

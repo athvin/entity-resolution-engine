@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 /// One landed delivery row (S4.1): the source record's payload as delivered, content-hashed; append-only, with full-refresh tombstones.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RawRecord {
     /// Batch-salted content-derived row id: sha256('raw_records:' || source_system || ':' || source_record_id || ':' || content_hash || ':' || ingest_batch_id) — unique even when identical content re-lands in a later batch.
     pub id: String,

@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 /// An immutable version of a tenant's matching model: the settings document the engine scores against, its hash, provenance and activation state.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MatchingModel {
     /// The version row's unique id (UUIDv7, minted when the version is created).
     pub id: String,
@@ -38,6 +38,67 @@ pub struct MatchingModel {
     pub created_at: ::chrono::DateTime<::chrono::Utc>,
     /// Wall-clock last-write time (database default; advanced by mutations once the entity migrates).
     pub updated_at: ::chrono::DateTime<::chrono::Utc>,
+}
+
+/// An immutable version of a tenant's matching model: the settings document the engine scores against, its hash, provenance and activation state.
+#[derive(Debug, Clone, PartialEq, Serialize, ::utoipa::ToSchema)]
+#[schema(as = MatchingModel)]
+pub struct MatchingModelWire {
+    /// The version row's unique id (UUIDv7, minted when the version is created).
+    pub id: String,
+    /// The tenant this model version belongs to.
+    pub org_id: String,
+    /// The dataset whose corpus this model was trained for.
+    pub dataset_id: String,
+    /// The model's name within the tenant; versions are monotonic within a name, so one tenant can keep several models (a classic rule model beside a trained one) and switch between them.
+    pub name: String,
+    /// The monotonic version number within (org, name). Versions are immutable: a retrain or a weight override mints the next one rather than editing this.
+    pub version: i64,
+    /// Which canonical schema the model scores against; a model cannot be activated for a lake of the other entity type.
+    pub entity_type: String,
+    /// The settings document the engine loads (comparison levels, their SQL, m/u probabilities, blocking rules). Stored as text, not jsonb, so it round-trips byte-exact — model_hash is taken over these bytes and the engine's determinism depends on them.
+    pub model_json: String,
+    /// SHA-256 of model_json, so a scored row can be tied back to the exact document that produced it.
+    pub model_hash: String,
+    /// The identity stamped onto every row this model scores (match_scores.model_version, runs.model_version). It is NOT the version number: it must equal the model_version the frozen term-frequency snapshot CSV is keyed by, because the TF lookup joins on (model_version, tf_snapshot_id) and a mismatch silently returns no term frequencies — changing a pair's score rather than failing. Seeded from the org's ER_MODEL_VERSION; required when uploading a model, for the same reason.
+    pub model_version_label: String,
+    /// The frozen term-frequency snapshot this model scores against, when it has one. Paired with model_version_label by the TF lookup.
+    pub tf_snapshot_id: Option<String>,
+    /// Draft until activated; exactly one version of a name is active at a time, and activating the next archives the previous. There is deliberately no partial unique index enforcing that: a single UPDATE that moves both rows can transiently violate a non-deferrable unique index even when the end state is legal, so activation is instead one atomic statement that cannot produce two actives, and the active read orders by version so a hypothetical second one could never be served silently.
+    pub state: String,
+    /// Where this version came from: the seeded starter file, a training run (corpus digest, args, seed), an authored upload, or the version it was derived from.
+    pub provenance: ::serde_json::Value,
+    /// Principal that created the version.
+    pub created_by: String,
+    /// When this version was activated, if it ever was.
+    pub activated_at: Option<::chrono::DateTime<::chrono::Utc>>,
+    /// When the version was created.
+    pub created_at: ::chrono::DateTime<::chrono::Utc>,
+    /// Wall-clock last-write time (database default; advanced by mutations once the entity migrates).
+    pub updated_at: ::chrono::DateTime<::chrono::Utc>,
+}
+
+impl From<&MatchingModel> for MatchingModelWire {
+    fn from(row: &MatchingModel) -> Self {
+        Self {
+            id: row.id.clone(),
+            org_id: row.org_id.clone(),
+            dataset_id: row.dataset_id.clone(),
+            name: row.name.clone(),
+            version: row.version,
+            entity_type: row.entity_type.clone(),
+            model_json: row.model_json.clone(),
+            model_hash: row.model_hash.clone(),
+            model_version_label: row.model_version_label.clone(),
+            tf_snapshot_id: row.tf_snapshot_id.clone(),
+            state: row.state.clone(),
+            provenance: row.provenance.clone(),
+            created_by: row.created_by.clone(),
+            activated_at: row.activated_at,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        }
+    }
 }
 
 impl MatchingModel {

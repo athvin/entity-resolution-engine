@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 /// The control plane's cache of each tenant lake's schema position: the catalog version the lake was last reconciled or checked against and how that went. The lake's own schema_migrations ledger is authoritative; this row is what the deploy report and the drift check read without opening every lake.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TenantSchemaState {
     /// The row's unique id (UUIDv7, minted on first write).
     pub id: String,

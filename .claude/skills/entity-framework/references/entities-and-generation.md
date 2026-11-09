@@ -30,7 +30,7 @@ The `generate` block:
 |---|---|---|
 | `stores` | `duckdb`, `postgres` | which DDL is rendered; also decides the statement store (lake vs control) |
 | `languages` | `rust`, `typescript` | which readers/bindings are emitted |
-| `wire` | `arrow`, `json` | `arrow` adds `arrow_schema()` + a TS Arrow reader; `json` emits the TS binding only |
+| `wire` | `arrow`, `json` | `arrow` adds `arrow_schema()` + a TS Arrow reader; `json` emits a public-only `<Name>Wire` Rust type and TS binding |
 | `history` | bool, default false | control-plane only: generates a `<relation>_history` jsonb row-image companion + an `er_history()` trigger (baseline prelude entry 0). Requires the `id` PK; actor from the `er.actor` GUC (session_user fallback); NOT exception-swallowed. Lake entities refuse it (DuckLake snapshots are the lake's history) |
 | `append` | bool, default false | emits the typed bulk-append primitive (`AppendRow` + `append_rows`: chunked, bound-parameter INSERT..VALUES generated from the columns) — for variable-arity row batches, never hand-built VALUES |
 
@@ -41,11 +41,14 @@ Each column:
 | `type` | required | one of the eight types |
 | `nullable` | **true** | columns default nullable; NOT NULL is explicit (the opposite of statement params) |
 | `description` | required | prose |
+| `visibility` | `public` | `internal` omits the column from JSON wire types, component schemas and JSON bindings; storage rows, DDL and Arrow schemas retain it. V19 requires internal secret-shaped columns and public key/natural-key columns |
 | `serial` | false | database-supplied value (Postgres bigserial); E004 treats it as defaulted |
 | `default` | none | control-plane SQL default expression |
 | `volatile` | false | excluded from determinism comparisons (e.g. `assembled_at`) — still part of the shape and the wire |
 | `accepted_values` | none | closed value set; rendered as a CHECK constraint and enforced on literals by E010 |
 | `references` | none | control-plane foreign key `{ relation, column }`; drives FK-ordered boot DDL |
+
+For JSON entities, `<Name>Wire` derives `Serialize` and `ToSchema` with the stable component name `<Name>`. Convert with `From<&Name>`; row structs do not implement `ToSchema`. Visibility is for secrecy, not payload-size trims. A mixed Arrow/JSON entity retains its storage Arrow columns; its TS reader projects the public binding fields.
 
 ## The eight-type map
 

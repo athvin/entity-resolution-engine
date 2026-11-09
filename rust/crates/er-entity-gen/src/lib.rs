@@ -440,6 +440,57 @@ mod tests {
     }
 
     #[test]
+    fn json_visibility_projects_wire_types_without_changing_storage() {
+        let mut entity = golden();
+        let internal = entity
+            .columns
+            .iter_mut()
+            .find(|c| c.name == "given_name")
+            .unwrap();
+        internal.visibility = er_entity_spec::Visibility::Internal;
+        let module = emit_rust_module(&entity).unwrap();
+        let (row, wire) = module
+            .split_once("pub struct GoldenRecordWire")
+            .expect("JSON wire emitted");
+        assert!(row.contains("pub given_name:"));
+        assert!(
+            !row.split("#[derive")
+                .nth(1)
+                .unwrap()
+                .split(']')
+                .next()
+                .unwrap()
+                .contains("ToSchema")
+        );
+        let wire_fields = wire.split('}').next().unwrap();
+        assert!(!wire_fields.contains("given_name"));
+        assert!(
+            wire_fields.find("pub id:").unwrap()
+                < wire_fields.find("pub survivorship_version:").unwrap()
+        );
+        assert!(module.contains("#[schema(as = GoldenRecord)]"));
+        assert!(module.contains("impl From<&GoldenRecord> for GoldenRecordWire"));
+        assert!(!module.contains("given_name: row.given_name"));
+        assert!(
+            module.contains("Field::new(\"given_name\""),
+            "Arrow storage schema retains internal columns"
+        );
+        assert!(!emit_ts_binding(&entity).contains("given_name"));
+        assert!(!emit_ts_reader(&entity).contains("given_name"));
+        let public = golden();
+        assert_eq!(
+            emit_lake_ddl(&entity).unwrap(),
+            emit_lake_ddl(&public).unwrap()
+        );
+        entity.generate.wire.retain(|w| *w != Wire::Json);
+        let storage = emit_rust_module(&entity).unwrap();
+        assert!(!storage.contains("ToSchema"));
+        assert!(!storage.contains("GoldenRecordWire"));
+        assert!(emit_ts_binding(&entity).contains("given_name"));
+        assert!(emit_ts_reader(&entity).contains("given_name"));
+    }
+
+    #[test]
     fn golden_record_columns_match_the_registry() {
         let spec = to_lake_table_spec(&golden()).expect("converts to a lake spec");
         let registry = er_schema::model::all_specs()

@@ -245,6 +245,7 @@ columns:
     accepted_values: [admin, steward, viewer]
     description: "The role the key grants."
   - name: key_hash
+    visibility: internal
     type: varchar
     nullable: false
     description: "SHA-256 hash of the secret (never the plaintext)."
@@ -3529,6 +3530,7 @@ columns:
     type: varchar
     description: "traceparent of this try's span, a child of jobs.trace_context."
   - name: token_hash
+    visibility: internal
     type: varchar
     description: "The fallback credential only (§6.4): SHA-256 of the per-attempt token, compared with ct_eq; NULL under the projected-token path; nulled at finish."
   - name: scheduled_at
@@ -3708,6 +3710,7 @@ columns:
     default: "'[]'::jsonb"
     description: "The subscribed event types."
   - name: secret
+    visibility: internal
     type: varchar
     nullable: false
     description: "HMAC signing secret for deliveries."

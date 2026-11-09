@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 /// A unit of work on the dispatcher's queue: its kind, params, lifecycle state and retry bookkeeping.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Job {
     /// The job's unique id (UUIDv7, minted at enqueue).
     pub id: String,
@@ -60,6 +60,100 @@ pub struct Job {
     pub started_at: Option<::chrono::DateTime<::chrono::Utc>>,
     /// When the job finished.
     pub finished_at: Option<::chrono::DateTime<::chrono::Utc>>,
+}
+
+/// A unit of work on the dispatcher's queue: its kind, params, lifecycle state and retry bookkeeping.
+#[derive(Debug, Clone, PartialEq, Serialize, ::utoipa::ToSchema)]
+#[schema(as = Job)]
+pub struct JobWire {
+    /// The job's unique id (UUIDv7, minted at enqueue).
+    pub id: String,
+    /// The tenant this job runs for.
+    pub org_id: String,
+    /// The dataset this job runs against. NULL only for org-level kinds (provision) — every lake-touching job carries it, and the per-dataset writer lock keys on it once the queue is re-scoped.
+    pub dataset_id: Option<String>,
+    /// The job kind (run_all, correct, maintain, train, ...).
+    pub kind: String,
+    /// Kind-specific parameters.
+    pub params: ::serde_json::Value,
+    /// Lifecycle state (queued, dispatching, running, succeeded, failed, canceling, canceled).
+    pub state: String,
+    /// Claim priority; higher runs first.
+    pub priority: i64,
+    /// Optional dedup key, unique per org.
+    pub idempotency_key: Option<String>,
+    /// The run this job produced, once dispatched.
+    pub run_id: Option<String>,
+    /// Attempts made so far.
+    pub attempt: i64,
+    /// Vestigial: no statement consults it. It bounded the job-level retry that went with the legacy in-process arm (#645); the live budget is task_instances.max_tries, per attempt.
+    pub max_attempts: i64,
+    /// Why the job failed, as a class the UI can act on: precondition (an input is missing — expected during onboarding), transient_io (worth retrying), config (the tenant config is wrong), internal (a bug). Null until a failure.
+    pub error_class: Option<String>,
+    /// The failure's human text, already chain-flattened. Kept beside error_class so a steward sees the reason without reading pod logs.
+    pub error_detail: Option<String>,
+    /// Earliest time the job may be claimed. A retry sets it to the backoff deadline.
+    pub not_before: Option<::chrono::DateTime<::chrono::Utc>>,
+    /// Principal that created the job.
+    pub created_by: Option<String>,
+    /// The schedule that enqueued the job, if any.
+    pub schedule_id: Option<String>,
+    /// Requested runner resource class.
+    pub resource_class: Option<String>,
+    /// Propagated trace context.
+    pub trace_context: Option<String>,
+    /// sha256 over the compiled DAG's shape (names, versions, edges, trigger rules), written at planning; a clear or adoption refuses on mismatch (batch-orchestration-design §3.4).
+    pub structural_fingerprint: Option<String>,
+    /// sha256 over the compiled DAG's per-node policy (retries, backoff, timeout, class, segment); a divergence proceeds with the diff logged.
+    pub policy_hash: Option<String>,
+    /// Image digest the planning dispatcher ran, so a deploy mid-run is legible.
+    pub image_digest: Option<String>,
+    /// Incremented by every clear; fences readiness verdicts composed before the clear. Read as COALESCE(clear_number, 0).
+    pub clear_number: Option<i64>,
+    /// The dispatcher process epoch that planned or adopted the run.
+    pub owner_epoch: Option<String>,
+    /// When the job was enqueued.
+    pub created_at: ::chrono::DateTime<::chrono::Utc>,
+    /// When the job row was last updated.
+    pub updated_at: ::chrono::DateTime<::chrono::Utc>,
+    /// When the job started running.
+    pub started_at: Option<::chrono::DateTime<::chrono::Utc>>,
+    /// When the job finished.
+    pub finished_at: Option<::chrono::DateTime<::chrono::Utc>>,
+}
+
+impl From<&Job> for JobWire {
+    fn from(row: &Job) -> Self {
+        Self {
+            id: row.id.clone(),
+            org_id: row.org_id.clone(),
+            dataset_id: row.dataset_id.clone(),
+            kind: row.kind.clone(),
+            params: row.params.clone(),
+            state: row.state.clone(),
+            priority: row.priority,
+            idempotency_key: row.idempotency_key.clone(),
+            run_id: row.run_id.clone(),
+            attempt: row.attempt,
+            max_attempts: row.max_attempts,
+            error_class: row.error_class.clone(),
+            error_detail: row.error_detail.clone(),
+            not_before: row.not_before,
+            created_by: row.created_by.clone(),
+            schedule_id: row.schedule_id.clone(),
+            resource_class: row.resource_class.clone(),
+            trace_context: row.trace_context.clone(),
+            structural_fingerprint: row.structural_fingerprint.clone(),
+            policy_hash: row.policy_hash.clone(),
+            image_digest: row.image_digest.clone(),
+            clear_number: row.clear_number,
+            owner_epoch: row.owner_epoch.clone(),
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+            started_at: row.started_at,
+            finished_at: row.finished_at,
+        }
+    }
 }
 
 impl Job {

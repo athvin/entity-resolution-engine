@@ -44,6 +44,8 @@ reference — if a finding has no row here, add the row before writing the test.
 | 17 | Error-message info leak | `er-server/src/lib.rs` `detail_err` callers (`format!("db: {e}")`) | **NEW** static gate: no `format!("...{e}")`-shaped error reaches a response body | static gate |
 | 18 | Secrets / IaC | `infra/terraform/.../builder.tf`, `modules/eks/main.tf`, `frontend/dev/`, `.claude/settings.local.json` | **deferred to the CI layer** — documented in `secrets-iac.md`, not a Rust/TS test | (CI, later) |
 
+| 19 | Entity secrets in public schemas/bindings | column visibility, generated wire types, `er-server/src/openapi.rs` | `er-entity-lint` V19 fixtures; generator units; `openapi.rs` contract/serialization regressions; `pg_webhooks.rs` listing | lint + unit + env-gated pg |
+
 ## How to clone each shape
 
 **Static posterity gate** (clone `freeform_sql.rs`). A plain `#[test]` that walks the workspace

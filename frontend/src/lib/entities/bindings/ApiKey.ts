@@ -9,8 +9,6 @@ export interface ApiKey {
   org_id: string;
   /** The role the key grants. */
   role: string;
-  /** SHA-256 hash of the secret (never the plaintext). */
-  key_hash: string;
   /** When the key was issued. */
   created_at: string;
   /** When the key was revoked, if it has been. */

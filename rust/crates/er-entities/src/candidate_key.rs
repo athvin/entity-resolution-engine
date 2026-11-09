@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 /// What an equi-join on one column would cost as a blocking key, measured against the corpus rather than inferred from a model. Blocking decides the entire cost of a run, and it is chosen before anything is trained — so the question has to be answerable with no model at all, which is why these numbers come from a GROUP BY over the data and not from a settings document.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CandidateKey {
     /// Content-derived row id: sha256('candidate_keys:' || profile_run_id || ':' || key_columns).
     pub id: String,
@@ -32,6 +32,58 @@ pub struct CandidateKey {
     pub created_at: ::chrono::DateTime<::chrono::Utc>,
     /// Run-logical last-write time.
     pub updated_at: ::chrono::DateTime<::chrono::Utc>,
+}
+
+/// What an equi-join on one column would cost as a blocking key, measured against the corpus rather than inferred from a model. Blocking decides the entire cost of a run, and it is chosen before anything is trained — so the question has to be answerable with no model at all, which is why these numbers come from a GROUP BY over the data and not from a settings document.
+#[derive(Debug, Clone, PartialEq, Serialize, ::utoipa::ToSchema)]
+#[schema(as = CandidateKey)]
+pub struct CandidateKeyWire {
+    /// Content-derived row id: sha256('candidate_keys:' || profile_run_id || ':' || key_columns).
+    pub id: String,
+    /// The profile run that measured this key. Named for the relation it points at, per the foreign-key convention; no `references` is declared because DuckLake enforces no foreign keys (V11).
+    pub profile_run_id: String,
+    /// The key's columns, joined by the unit-separator character (chr(31)) — one name for a single-column key, several for a composite. A delimiter rather than a list because this column is in the natural key, and DuckLake has no list equality to MERGE on; chr(31) specifically because it cannot occur in a column name.
+    pub key_columns: String,
+    /// Rows in the profiled corpus, carried so `expected_pairs` can be read as a share without a second lookup. Named row_count rather than rows because `rows` is reserved in DuckDB and a column called that cannot be selected unquoted.
+    pub row_count: i64,
+    /// Rows where every key column is non-null — the only rows this key can block, because an equality is never true of a NULL.
+    pub covered_rows: i64,
+    /// Distinct key values among the covered rows. The block count: more blocks of fewer rows each is what makes a key cheap.
+    pub distinct_values: i64,
+    /// Pairs an equi-join on this key generates, exactly: the sum of C(n, 2) over the value groups. For a rule used FIRST, with nothing preceding it to dedup against, this equals the marginal comparison count a trained model's own counter reports — which is what the engine's golden test asserts, so the cheap path cannot drift from the expensive one.
+    pub expected_pairs: i64,
+    /// Pairs contributed by the single largest block. The number that catches a key which looks affordable in total and is actually dominated by one value — the classic shape being a placeholder, where every record with a blank-but-present field lands in one enormous block.
+    pub largest_block_pairs: i64,
+    /// Rows in that largest block.
+    pub largest_block_rows: i64,
+    /// Shannon entropy of the key's value distribution, in bits. In bits so it is directly comparable with the compiler's match-weight scale, which is also in bits — one unit across both halves of the system.
+    pub entropy_bits: f64,
+    /// The share of ALL corpus pairs this key can never reach because one endpoint or the other is NULL: `1 - (covered_rows / rows)^2`. The square is the part that surprises people — a key on a column that is 60% populated reaches only 36% of pairs — and it is why a cheap key is so often cheap for the wrong reason. Stored beside the cost so the trade is visible rather than implied.
+    pub pair_loss_from_nulls: f64,
+    /// Run-logical creation time.
+    pub created_at: ::chrono::DateTime<::chrono::Utc>,
+    /// Run-logical last-write time.
+    pub updated_at: ::chrono::DateTime<::chrono::Utc>,
+}
+
+impl From<&CandidateKey> for CandidateKeyWire {
+    fn from(row: &CandidateKey) -> Self {
+        Self {
+            id: row.id.clone(),
+            profile_run_id: row.profile_run_id.clone(),
+            key_columns: row.key_columns.clone(),
+            row_count: row.row_count,
+            covered_rows: row.covered_rows,
+            distinct_values: row.distinct_values,
+            expected_pairs: row.expected_pairs,
+            largest_block_pairs: row.largest_block_pairs,
+            largest_block_rows: row.largest_block_rows,
+            entropy_bits: row.entropy_bits,
+            pair_loss_from_nulls: row.pair_loss_from_nulls,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        }
+    }
 }
 
 impl CandidateKey {

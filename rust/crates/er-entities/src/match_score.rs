@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 /// One scored candidate pair (S4.3): the frozen model's match probability with its evidence waterfall, keyed by model and TF snapshot.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MatchScore {
     /// Content-derived row id: sha256('match_scores:' || rec_a_key || ':' || rec_b_key || ':' || model_version || ':' || tf_snapshot_id).
     pub id: String,

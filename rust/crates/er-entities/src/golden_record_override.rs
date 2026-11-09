@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 /// One steward golden-field override keyed by RECORD (latest-wins per record and attribute); resolved to the record's current entity through entity_membership at golden-assembly time, so a value chosen in the review merge dialog lands on the entity the merge mints. A NULL value means the steward cleared the field.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GoldenRecordOverride {
     /// Content-derived row id: sha256('golden_record_overrides:' || record_key || ':' || attribute).
     pub id: String,

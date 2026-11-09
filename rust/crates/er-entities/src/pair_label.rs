@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 /// A human (or model) verdict on one candidate pair — the training signal the engine has always been able to learn from and never had. One row per (org, pair): a re-label corrects the previous verdict rather than stacking another.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ::utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PairLabel {
     /// UUIDv7, minted by the application.
     pub id: String,
@@ -32,6 +32,58 @@ pub struct PairLabel {
     pub created_at: ::chrono::DateTime<::chrono::Utc>,
     /// When it was last corrected.
     pub updated_at: ::chrono::DateTime<::chrono::Utc>,
+}
+
+/// A human (or model) verdict on one candidate pair — the training signal the engine has always been able to learn from and never had. One row per (org, pair): a re-label corrects the previous verdict rather than stacking another.
+#[derive(Debug, Clone, PartialEq, Serialize, ::utoipa::ToSchema)]
+#[schema(as = PairLabel)]
+pub struct PairLabelWire {
+    /// UUIDv7, minted by the application.
+    pub id: String,
+    /// The tenant whose corpus the pair belongs to; every read is scoped by it.
+    pub org_id: String,
+    /// The dataset whose record pair this verdict is about — record keys are lake-local.
+    pub dataset_id: String,
+    /// The pair's lower record key, canonical order — the same ordering match_scores uses, so a label and a score describe the same pair.
+    pub rec_a_key: String,
+    /// The pair's higher record key, canonical order.
+    pub rec_b_key: String,
+    /// Whether these two records are the same entity. Deliberately binary: a labeller who is unsure should skip rather than guess, because a guessed label trains the model on noise and is indistinguishable afterwards from a confident one.
+    pub verdict: String,
+    /// Where the verdict came from. `human` is an explicit labelling session; `reviewer` is implicit feedback from resolving a review item; `llm` is a model's suggestion. Kept apart so training can weight or exclude a source, and so an accuracy number can say whose labels it was measured against.
+    pub origin: String,
+    /// The actor that recorded the verdict.
+    pub labeled_by: String,
+    /// The model whose score prompted this label, when there was one. Null for a label recorded without a score in front of it.
+    pub model_version: Option<String>,
+    /// The match probability shown to the labeller, so a later accuracy pass can tell what the model thought at the time rather than what it thinks now.
+    pub score_at_label: Option<f64>,
+    /// Optional free text from the labeller.
+    pub note: Option<String>,
+    /// When the verdict was first recorded.
+    pub created_at: ::chrono::DateTime<::chrono::Utc>,
+    /// When it was last corrected.
+    pub updated_at: ::chrono::DateTime<::chrono::Utc>,
+}
+
+impl From<&PairLabel> for PairLabelWire {
+    fn from(row: &PairLabel) -> Self {
+        Self {
+            id: row.id.clone(),
+            org_id: row.org_id.clone(),
+            dataset_id: row.dataset_id.clone(),
+            rec_a_key: row.rec_a_key.clone(),
+            rec_b_key: row.rec_b_key.clone(),
+            verdict: row.verdict.clone(),
+            origin: row.origin.clone(),
+            labeled_by: row.labeled_by.clone(),
+            model_version: row.model_version.clone(),
+            score_at_label: row.score_at_label,
+            note: row.note.clone(),
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        }
+    }
 }
 
 impl PairLabel {
