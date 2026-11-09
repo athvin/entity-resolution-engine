@@ -133,8 +133,13 @@ data "aws_iam_policy_document" "ci_deploy_prod" {
   # staleness-refuse in deploy-resolve-digests.sh exists to catch. Not
   # resource-scopable (a Describe), and metadata only.
   statement {
-    effect    = "Allow"
-    actions   = ["elasticloadbalancing:DescribeTargetGroups"]
+    effect = "Allow"
+    actions = [
+      "elasticloadbalancing:DescribeTargetGroups",
+      # Wait for replacement pod IPs to be healthy before removing old targets.
+      # Registration remains owned by the EKS TargetGroupBinding controller.
+      "elasticloadbalancing:DescribeTargetHealth",
+    ]
     resources = ["*"]
   }
 }
