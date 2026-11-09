@@ -1,0 +1,35 @@
+name: Pinned CI tools
+description: Restore and verify tool archives, with bounded downloads on misses.
+inputs:
+  tools:
+    description: Space-separated tool names from scripts/ci/tools.json
+    required: false
+    default: mold sccache
+outputs:
+  archives_directory:
+    description: Directory containing checksum-verified tool archives
+    value: ${{ steps.install.outputs.archives_directory }}
+runs:
+  using: composite
+  steps:
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.cache/er-ci-tools/archives
+        key: ci-tools-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.tools }}-${{ hashFiles('scripts/ci/tools.json') }}
+    - name: Verify and install tools
+      id: install
+      shell: bash
+      env:
+        CI_TOOL_NAMES: ${{ inputs.tools }}
+      run: |
+        read -r -a ci_tool_names <<< "$CI_TOOL_NAMES"
+        python3 "$GITHUB_WORKSPACE/scripts/ci/install-tools.py" "${ci_tool_names[@]}"
+    - name: Expose branch-scoped compiler cache credentials
+      if: contains(inputs.tools, 'sccache') && env.SCCACHE_GHA_ENABLED == 'on'
+      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      with:
+        script: |
+          if (!process.env.ACTIONS_RESULTS_URL || !process.env.ACTIONS_RUNTIME_TOKEN) throw new Error('Missing cache runtime credentials');
+          core.exportVariable('ACTIONS_CACHE_SERVICE_V2', 'on');
+          core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL);
+          core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN);

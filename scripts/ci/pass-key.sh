@@ -106,6 +106,7 @@ fi
 
 hash="$({
 	printf '%s\n' "$tree"
+	printf '%s\n' "selection-v2:${SELECTION_KEY:-full}"
 	date -u +%G-W%V
 } | sha256sum | cut -c1-40)"
 echo "key=ci-pass-$GATE-$hash" >> "$GITHUB_OUTPUT"

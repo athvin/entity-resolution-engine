@@ -32,22 +32,92 @@ get older as you scroll, and the first ones are not the live ones.
 
 ## Where it stands now
 
-The only figures to quote without reading further. Everything below this section
-is history that each later section supersedes — kept because the *reasoning* is
-what stops a decision being re-derived, not because the numbers still hold.
+The November 9 investigation separated setup, compilation, execution and retries.
+Run `python3 scripts/ci/ci-timings.py --workflow rust.yml --limit 20 --logs`
+for attempt-specific JSON. The end-to-end number includes human rerun delay;
+never compare skipped-only runs with full backend gates. Compiler and suite
+seconds are sums, not a parallel workflow's critical-path wall time.
 
-| Thing | Where it is |
-|---|---|
-| PR wall clock | ~10m: rust ~9.8m, frontend ~6m |
-| What bounds it | the `test` tier's rest leg and the lake shards |
-| Primary cache | sccache on **S3**; a PR assumes the read role, `main` the write role |
-| Actions cache | nothing in the Rust gate writes it any more |
-| rust-cache | **removed** from every sccache-backed compile job (it broke them) |
-| buildkit layer cache | **ECR** (`er-buildcache`); `type=gha` survives as cache-FROM only |
-| `cache-prune`'s two budgets | rollback insurance, not live pressure |
+Measured before this change:
 
-The 42m38 → 8m03 → ~13.5m → ~10m progression across the sections below is that
-history in order. Read a section's own date and verdict before quoting it.
+- Rust run `42567325111`: one nextest download took 523 seconds; disk cleanup
+  took 87–218 seconds on its test legs. The longest lake leg compiled in
+  88 seconds and executed in 287 seconds, with 99% compiler cache hits.
+- Rust run `42569307029` took 27 minutes across three attempts. Initial
+  actionlint/sccache downloads returned HTTP 504. This is retry overhead, not
+  27 minutes of tests. A server shard executed for 296 seconds.
+- Image run `42559457144`: dependency cooking took 1422 seconds after a
+  manifest/lockfile change, then the application build took 121 seconds.
+- Deploy run `42571618524`: prod took 90 seconds; dev took 184, including
+  46 seconds reconciling unchanged observability releases.
+
+The implemented policy:
+
+- Keep R2 compilation caching for Rust CI. Cache checksum-pinned tool archives
+  separately; skip SDK deletion when at least 40 GiB is free. Download failures
+  are bounded, checksums are checked even on cache hits, and failure never
+  silently selects a different linker.
+- Frontend-only edits run frontend checks; contracts embedded in Rust and
+  generated entity artifacts retain their backend gates. Rust package selection
+  uses Cargo's reverse dependencies, including dev/build edges. Repository-wide
+  source-scan suites (`er-errors`, `er-schema`, `er-entity-gen`) also run on every
+  Rust change; these inputs have no Cargo dependency edge. Unknown inputs,
+  manifests and lockfiles force full coverage. Required aggregate contexts fail
+  on failed classification, cancellations and unexpected skips.
+- Main selection starts at the last successful ancestor of that workflow, not
+  the last push; missing history/API access means full verification. PR pass
+  keys include the package selection as well as the input tree and policy.
+- Bench compilation and scale goldens run nightly/manual; correctness suites
+  remain pre-merge for affected packages. `ci:full` forces the complete gate.
+- Release images retain ECR layer caching and add branch-scoped GHA compiler
+  caching through BuildKit secrets. This does not replace CI's R2 cache.
+  The builder pins `RUSTUP_TOOLCHAIN` to its base-image compiler: otherwise
+  copying `rust-toolchain.toml` switches the final build to floating stable.
+  PR #1031's first image run exposed precisely that 1.99.0 → 1.99.1 switch,
+  rebuilding Rust dependencies after cooking (24m23 cook, 8m56 final build). The
+  image job cannot attach `sccache-write`: doing so changes the OIDC subject
+  and breaks the branch-pinned ECR role. Monitor release-cache write errors;
+  its effectiveness on lockfile changes is a separate cold/warm measurement.
+- Observability reconciliation skips only with a matching configuration and
+  secret-version fingerprint plus healthy releases/workloads. A missing marker,
+  changed input, rotation or unhealthy workload reconciles and verifies again.
+
+`ci-build-experiment.yml` is opt-in (`workflow_dispatch`, or the
+`ci:archive-experiment` label on its implementation PR). It compares five
+baseline groups with five build-once/archive groups. Include producer and
+transfer time when comparing the maximum shard duration per group. Keep the
+existing method unless the archive arm improves the median by at least 15%,
+all corresponding test identities match and every leg succeeds. Run
+`python3 scripts/ci/archive-verdict.py <run-id>` to compute that verdict. Never share an
+archive across commits or workflow runs.
+
+The November 9 trial, [run 42575743751](https://github.com/athvin/entity-resolution-engine/actions/runs/42575743751),
+passed all 45 jobs with identical corresponding test identities. Baseline pair
+critical paths were 473/375/482/452/464 seconds; archive paths, including the
+producer and transfer, were 504/416/514/432/498. The medians were 464 and
+498 seconds: archive reuse was **7.33% slower**, so it was **not adopted**.
+These figures exclude runner queue contention between the concurrent pairs;
+they are an experiment comparison, not the normal PR workflow duration.
+
+Release-cache validation, [run 42582949028](https://github.com/athvin/entity-resolution-engine/actions/runs/42582949028):
+the API image job completed in **3m44** without an ECR layer cache. Dependency
+cooking took **57.15s**, with **100% compiler-cache hits** across Rust, C/C++
+and assembler, and zero read/write errors. The application build took **1m11**.
+The earlier cold attempt took **24m23** to cook dependencies and **8m56** for
+the final build, which switched compilers as described above. This is one warm
+PR-image observation, not a production rollout percentile; main must populate
+its own branch-scoped compiler cache.
+
+Two image attempts also exposed repeated HTTP 504s downloading sccache inside
+Docker. CI now supplies the verified tool archive as a named build context,
+restored in one second in the successful run. The Dockerfile rechecks its
+checksum and retains a pinned-download fallback for standalone builds. Archives
+must not use BuildKit secret mounts: those are limited to 500 KiB.
+
+Targets are sub-five-minute ordinary warm PR feedback and warm merge-to-prod.
+They are targets, not results. Gather 20 relevant runs after rollout and report
+median/p95, retry frequency and cold dependency rebuilds separately. Paid
+runner selection is a follow-up only if current-runner improvements miss them.
 
 ## Incident: rust-cache restored a partial target and broke main (2026-11-03)
 

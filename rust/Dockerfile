@@ -36,7 +36,17 @@
 # features per selected target, so cooking the whole workspace would unify a
 # different feature set than the final build asks for, and every crate whose
 # features differed would compile a second time — handing back the saving.
-FROM rust:1-bookworm AS chef
+# CI overrides this named context with verified archives; standalone builds
+# retain the pinned-download fallback. Tool archives are not BuildKit secrets
+# (which have a 500 KiB size limit).
+FROM scratch AS ci-tools
+COPY .dockerignore /placeholder
+
+FROM rust:1.99.0-bookworm@sha256:114c7a4425406451c2866b6aafe69fe29b1b298832db1277d411ac73c82d04d6 AS chef
+# Keep prepare, cook and build on the compiler pinned by the base image.
+# COPY brings in rust-toolchain.toml (channel=stable); without this override
+# it can switch the final build to a newer compiler and rebuild dependencies.
+ENV RUSTUP_TOOLCHAIN=1.99.0
 WORKDIR /src
 # mold is the LINKER FIX, not an optimisation: on aarch64-linux, GNU ld fails
 # this link with `undefined reference to duckdb_register_static_extensions` —
@@ -52,6 +62,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends mold \
 # Pinned, like every other third-party tool here. This compiles cargo-chef
 # itself, which is why it sits in the shared base stage: the layer is reused by
 # both stages below and only rebuilt when this version changes.
+ARG TARGETARCH
+RUN --mount=type=bind,from=ci-tools,target=/ci-tools \
+    case "$TARGETARCH" in \
+      amd64) arch=x86_64; digest=aa73c7270c997894038c0d8f0d297865f57569e1687883322bc431713d4bb9dd ;; \
+      arm64) arch=aarch64; digest=3e47fc4a71b1ddd1b4294a0de9d34498922fdf41e3cd0bda5df3954e3d6deb9d ;; \
+      *) exit 1 ;; \
+    esac \
+    && if [ -f "/ci-tools/$digest.tar.gz" ]; then cp "/ci-tools/$digest.tar.gz" /tmp/sccache.tar.gz; \
+       else curl -fSL --connect-timeout 10 --max-time 60 --retry 3 --retry-all-errors \
+      "https://github.com/mozilla/sccache/releases/download/v0.19.0/sccache-v0.19.0-${arch}-unknown-linux-musl.tar.gz" -o /tmp/sccache.tar.gz; fi \
+    && echo "$digest  /tmp/sccache.tar.gz" | sha256sum -c - \
+    && tar xzf /tmp/sccache.tar.gz -C /tmp \
+    && install "/tmp/sccache-v0.19.0-${arch}-unknown-linux-musl/sccache" /usr/local/bin/sccache \
+    && rm -rf /tmp/sccache*
 RUN cargo install cargo-chef --locked --version 0.1.78
 
 FROM chef AS planner
@@ -70,9 +94,21 @@ COPY --from=planner /src/recipe.json recipe.json
 # `bundled` feature untars them and builds with cc), so the only network this
 # stage needs is crates.io — it does NOT fetch a prebuilt library. This is the
 # step that takes the time, and the step the layer cache now spares.
-RUN RUSTFLAGS="-C link-arg=-fuse-ld=mold" cargo chef cook --release --bin er-server --recipe-path recipe.json
+RUN --mount=type=secret,id=gha_url,env=ACTIONS_RESULTS_URL \
+    --mount=type=secret,id=gha_token,env=ACTIONS_RUNTIME_TOKEN \
+    --mount=type=cache,target=/root/.cache/sccache \
+    if [ -n "${ACTIONS_RUNTIME_TOKEN:-}" ]; then export SCCACHE_GHA_ENABLED=on ACTIONS_CACHE_SERVICE_V2=on; fi; \
+    RUSTC_WRAPPER=sccache RUSTFLAGS="-C link-arg=-fuse-ld=mold" cargo chef cook --release --bin er-server --recipe-path recipe.json \
+    && sccache --show-stats \
+    && sccache --stop-server
 COPY . .
-RUN RUSTFLAGS="-C link-arg=-fuse-ld=mold" cargo build --release --bin er-server
+RUN --mount=type=secret,id=gha_url,env=ACTIONS_RESULTS_URL \
+    --mount=type=secret,id=gha_token,env=ACTIONS_RUNTIME_TOKEN \
+    --mount=type=cache,target=/root/.cache/sccache \
+    if [ -n "${ACTIONS_RUNTIME_TOKEN:-}" ]; then export SCCACHE_GHA_ENABLED=on ACTIONS_CACHE_SERVICE_V2=on; fi; \
+    RUSTC_WRAPPER=sccache RUSTFLAGS="-C link-arg=-fuse-ld=mold" cargo build --release --bin er-server \
+    && sccache --show-stats \
+    && sccache --stop-server
 RUN strip target/release/er-server || true
 
 # Bake the DuckDB extensions, using the binary just built.

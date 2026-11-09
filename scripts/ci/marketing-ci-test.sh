@@ -45,7 +45,7 @@ head="$(git -C "$tmp/repo" rev-parse HEAD)"
 detect() {
   : > "$tmp/out"
   EVENT="$2" BASE_SHA="$base" HEAD_SHA="$head" MQ_BASE="$base" MQ_HEAD="$head" \
-    PUSH_BEFORE="${3-$base}" PUSH_AFTER="$head" FULL_CI="${4-false}" \
+    SUCCESS_BASE="${3-$base}" PUSH_AFTER="$head" FULL_CI="${4-false}" \
     GITHUB_OUTPUT="$tmp/out" bash "$tmp/repo/scripts/ci/$1-detect.sh" > "$tmp/detect.log" 2>&1 || return $?
   tr '\n' ' ' < "$tmp/out"
 }
@@ -81,8 +81,8 @@ git -C "$tmp/repo" mv frontend/src/components/shell.tsx frontend/src/components/
 git -C "$tmp/repo" commit -qm rename
 head="$(git -C "$tmp/repo" rev-parse HEAD)"
 expect 'rename from shared app triggers full frontend' "$app" "$(detect frontend pull_request)"
-expect 'rename from shared app triggers Rust' "$rust_all" "$(detect rust pull_request)"
-expect 'mixed push retains full Rust verification' "$rust_all" "$(detect rust push)"
+expect 'rename within frontend skips Rust' "$rust_skip" "$(detect rust pull_request)"
+expect 'frontend push skips Rust' "$rust_skip" "$(detect rust push)"
 base=$head
 git -C "$tmp/repo" rm -q frontend/src/components/marketing/hero.tsx
 git -C "$tmp/repo" commit -qm deletion

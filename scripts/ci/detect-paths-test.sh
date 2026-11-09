@@ -42,17 +42,22 @@ EMPTY='code=false erd=false drift=false empty=true'
 expect 'a rust source change' "$ALL" 'rust/crates/er-match/src/lib.rs'
 expect 'a manifest change' "$ALL" 'rust/Cargo.toml'
 expect 'an entity yaml' "$ALL" 'entities/orgs/entity.yaml'
-expect 'the frontend' "$ALL" 'frontend/src/app/page.tsx'
+expect 'the frontend' "$NONE" 'frontend/src/app/page.tsx'
 expect 'marketing page' "$NONE" 'frontend/src/app/(marketing)/page.tsx'
 expect 'marketing layout' "$NONE" 'frontend/src/app/(marketing)/layout.tsx'
 expect 'marketing demo' "$NONE" 'frontend/src/components/marketing/demo/flow-demo.tsx'
 expect 'marketing browser coverage' "$NONE" 'frontend/tests/functional/marketing-interactions.spec.ts'
 expect 'marketing visual baseline' "$NONE" 'frontend/tests/functional/marketing.spec.ts-snapshots/hero.png'
 expect 'marketing social image' "$NONE" 'frontend/src/app/opengraph-image.png'
-expect 'marketing and shared shell' "$ALL" 'frontend/src/app/(marketing)/page.tsx' 'frontend/src/app/layout.tsx'
+expect 'marketing and shared shell' "$NONE" 'frontend/src/app/(marketing)/page.tsx' 'frontend/src/app/layout.tsx'
 expect 'marketing and backend' "$ALL" 'frontend/src/components/marketing/hero.tsx' 'rust/Cargo.lock'
 for path in frontend/src/app/globals.css frontend/src/proxy.ts frontend/package.json frontend/pnpm-lock.yaml frontend/src/lib/api/openapi.json frontend/src/lib/entities/bindings/Entity.ts frontend/drizzle/meta/0000_snapshot.json frontend/src/components/settings/webhooks-content.tsx frontend/src/components/marketing-shared.tsx 'frontend/src/app/(marketing)/api/route.ts' frontend/tests/functional/marketing.spec.ts.extra; do
-	expect "shared or unrecognized path: $path" "$ALL" "$path"
+	case "$path" in
+    frontend/src/lib/api/*) expected="$ALL" ;;
+    frontend/src/lib/entities/*|frontend/drizzle/meta/*) expected='code=false erd=true drift=false empty=false' ;;
+    *) expected="$NONE" ;;
+    esac
+    expect "frontend path: $path" "$expected" "$path"
 done
 expect 'the skills gate itself' "$ALL" 'scripts/skills-check.sh'
 expect 'the classifier itself (fail-safe)' "$ALL" 'scripts/ci/detect-paths.sh'

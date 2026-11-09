@@ -15,9 +15,9 @@
 # scripts/ci/pass-key.sh, which is what stops the filter and the key drifting.
 #
 # `merge_group` filters exactly like a PR: an infra-only or skills-only change
-# in the queue would otherwise pay the full backend gate there, which is what
-# it skips today on the PR. A push skips only for a proven marketing-only
-# change; other main pushes, schedules and manual runs still run everything.
+# in the queue would otherwise pay the full backend gate there. Main pushes
+# select all changes since a successful ancestor; schedules, manual runs and
+# missing history select everything.
 #
 # Inputs (env): EVENT, BASE_SHA, HEAD_SHA, PUSH_BEFORE, PUSH_AFTER, FULL_CI.
 # Outputs ($GITHUB_OUTPUT): code,
@@ -30,37 +30,32 @@ cd "$(dirname "$0")/../.."
 # shellcheck source=scripts/ci/detect-paths.sh
 . scripts/ci/detect-paths.sh
 
-# Unlike PRs, main keeps its full verification for every non-marketing push.
-# An absent/unresolvable before-SHA cannot prove isolation, so falls through.
-if [ "${EVENT:-}" = push ] && [ "${FULL_CI:-false}" != true ] \
-   && [ -n "${PUSH_BEFORE:-}" ] && [ -n "${PUSH_AFTER:-}" ] \
-   && git cat-file -e "$PUSH_BEFORE^{commit}" 2>/dev/null; then
-	changed="$(git diff --no-renames --name-only "$PUSH_BEFORE..$PUSH_AFTER")"
-	outside="$(printf '%s\n' "$changed" | grep -cvE "$MARKETING_INCLUDE" || true)"
-	if [ -n "$changed" ] && [ "$outside" -eq 0 ]; then
-		printf '%s\n' "$changed" | detect_classify >> "$GITHUB_OUTPUT"
-		exit 0
-	fi
+# A push must include changes missed by failed/superseded runs. The workflow
+# supplies the last successful ancestor, never the immediately previous push.
+full=false
+case "${EVENT:-}" in
+pull_request|merge_group) range="${BASE_SHA:?}...${HEAD_SHA:?}" ;;
+push)
+    if [ -n "${SUCCESS_BASE:-}" ] && git merge-base --is-ancestor "$SUCCESS_BASE" "${PUSH_AFTER:?}"; then
+        range="$SUCCESS_BASE..$PUSH_AFTER"
+    else
+        full=true
+    fi
+    ;;
+*) full=true ;;
+esac
+[ "${FULL_CI:-false}" != true ] || full=true
+if [ "$full" = true ]; then
+    verdict=$(printf 'code=true\nerd=true\ndrift=true\nempty=false')
+    changed=''
+else
+    changed="$(git diff --no-renames --name-only "$range")"
+    verdict="$(printf '%s\n' "$changed" | detect_classify)"
 fi
-
-if [ "${FULL_CI:-false}" = true ] || { [ "${EVENT:-}" != "pull_request" ] && [ "${EVENT:-}" != "merge_group" ]; }; then
-	{
-		echo "code=true"
-		echo "erd=true"
-		echo "drift=true"
-		# `empty` is about a PULL REQUEST introducing no files. A push, a
-		# schedule or a dispatch has no base...head to be empty of, and the
-		# `empty pull request` job is gated on the event as well, so false is
-		# the only answer that means anything here.
-		echo "empty=false"
-	} >> "$GITHUB_OUTPUT"
-	exit 0
-fi
-
-# `base...head` = what the PR (or the queue's candidate) introduces.
-changed="$(git diff --no-renames --name-only "${BASE_SHA:?}...${HEAD_SHA:?}")"
-printf 'changed paths:\n%s\n' "$changed"
-
-verdict="$(printf '%s\n' "$changed" | detect_classify)"
-printf 'verdict:\n%s\n' "$verdict"
 printf '%s\n' "$verdict" >> "$GITHUB_OUTPUT"
+# Existing fixture callers exercise classification without Cargo installed.
+if [ "${SELECT_PACKAGES:-false}" = true ]; then
+    relevant="$(printf '%s\n' "$changed" | GATE_EXEMPT="$DETECT_EXEMPT" GATE_COUPLED="$DETECT_CONTRACT" \
+        awk 'length && ($0 !~ ENVIRON["GATE_EXEMPT"] || $0 ~ ENVIRON["GATE_COUPLED"])')"
+    printf '%s\n' "$relevant" | SELECT_FULL="$full" python3 scripts/ci/rust-select.py >> "$GITHUB_OUTPUT"
+fi

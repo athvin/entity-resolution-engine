@@ -16,7 +16,7 @@
 # detect-paths.sh except for the `tf-` prefix — so both gates re-prove
 # themselves on a change to either.
 # shellcheck disable=SC2034  # consumed by the files that source this
-FRONTEND_INCLUDE='^(frontend/|scripts/frontend-dev/|scripts/ci/frontend-(paths|detect|run)\.sh$|scripts/ci/marketing-(paths|ci-test)\.sh$|scripts/ci/gate-all-legs\.sh$|scripts/ci/pass-(key|decide|gate-test)\.sh$|\.github/workflows/frontend\.yml$)'
+FRONTEND_INCLUDE='^scripts/ci/(successful-base\.py|gate-selection\.sh|test_ci_[^/]+\.py)$|^(frontend/|scripts/frontend-dev/|scripts/ci/frontend-(paths|detect|run)\.sh$|scripts/ci/marketing-(paths|ci-test)\.sh$|scripts/ci/gate-all-legs\.sh$|scripts/ci/pass-(key|decide|gate-test)\.sh$|\.github/workflows/frontend\.yml$)'
 
 # shellcheck source=scripts/ci/marketing-paths.sh
 . "$(dirname "${BASH_SOURCE[0]}")/marketing-paths.sh"

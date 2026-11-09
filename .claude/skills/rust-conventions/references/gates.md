@@ -19,10 +19,11 @@ grown twice — `doc` and `skills-check` were both added after this reference wa
 written, and nothing failed while the prose said otherwise.
 
 <!-- BEGIN GENERATED: rust-gates -->
-**`make check` = fmt + lint + doc + entities-check + skills-check + agent-bridge-check + scripts-home-check + workflow-shell-check + pr-contract-check + tf-static-credentials-check + test** — the `check:` target's prerequisites, in order.
+**`make check` = ci-speed-check + fmt + lint + doc + entities-check + skills-check + agent-bridge-check + scripts-home-check + workflow-shell-check + pr-contract-check + tf-static-credentials-check + test** — the `check:` target's prerequisites, in order.
 
 | Step | Command |
 |---|---|
+| `ci-speed-check` | `python3 -m unittest discover -s scripts/ci -p 'test_ci_*.py'; bash scripts/ci/detect-paths-test.sh; bash scripts/ci/marketing-ci-test.sh; bash scripts/ci/pass-gate-test.sh` |
 | `fmt` | `cd rust && cargo fmt --all --check` |
 | `lint` | `cd rust && cargo clippy --workspace --all-targets -- -D warnings` |
 | `doc` | `cd rust && RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items` |

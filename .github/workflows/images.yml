@@ -55,6 +55,7 @@ on:
       # file: with deploy.yml's push trigger gone (#661), this list is the ONLY
       # road a deploy-script edit has to the workflow that runs it.
       - "scripts/ci/deploy-*.sh"
+      - "scripts/ci/deploy-*.py"
   # A Dockerfile change was UNVALIDATABLE before merge: this workflow ran on
   # `push` to main only, so the first exercise of a restructured build was the
   # merge itself, and a break blocked dev deploys until someone reverted it.
@@ -171,6 +172,18 @@ jobs:
       - name: Resolve the image tag (full sha of the built ref)
         id: tag
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      # Keep the branch OIDC subject used by ECR. Attaching sccache-write
+      # here would change that subject to an environment and break AWS auth.
+      - name: Restore verified build tools
+        id: tools
+        uses: ./.github/actions/ci-tools
+      - name: Export branch-scoped release compiler cache credentials
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            if (!process.env.ACTIONS_RESULTS_URL || !process.env.ACTIONS_RUNTIME_TOKEN) throw new Error('Missing cache runtime credentials');
+            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL);
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN);
       - name: Build + push er-api
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
@@ -179,6 +192,10 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ env.ECR }}/er-api:${{ steps.tag.outputs.sha }}
+          build-contexts: ci-tools=${{ steps.tools.outputs.archives_directory }}
+          secret-envs: |
+            gha_url=ACTIONS_RESULTS_URL
+            gha_token=ACTIONS_RUNTIME_TOKEN
           # Layer cache in ECR (er-buildcache, terraform: envs/core/registry.tf),
           # not the Actions cache: the gha backend's ~5 GB mode=max cache was the
           # largest producer in the shared 10 GB budget — the thing rust.yml's
@@ -265,6 +282,17 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Restore verified build tools
+        if: matrix.image == 'er-api'
+        id: tools
+        uses: ./.github/actions/ci-tools
+      - name: Export branch-scoped release compiler cache credentials
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            if (!process.env.ACTIONS_RESULTS_URL || !process.env.ACTIONS_RUNTIME_TOKEN) throw new Error('Missing cache runtime credentials');
+            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL);
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN);
       - name: Build ${{ matrix.image }} (not pushed)
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
@@ -275,6 +303,10 @@ jobs:
           # either — nothing here runs the image, and loading a multi-GB
           # image into the daemon is disk this runner does not have spare.
           push: false
+          build-contexts: ${{ matrix.image == 'er-api' && format('ci-tools={0}', steps.tools.outputs.archives_directory) || '' }}
+          secret-envs: |
+            gha_url=ACTIONS_RESULTS_URL
+            gha_token=ACTIONS_RUNTIME_TOKEN
 
   # §14.2's Helm half — "Dev platform releases apply from CI on `main`" — used
   # to be a `deploy-dev` job here. It is now .github/workflows/deploy.yml,

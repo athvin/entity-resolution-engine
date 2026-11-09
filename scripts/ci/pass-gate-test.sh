@@ -152,12 +152,21 @@ keyat() { # <gate> <ref> -> the key pass-key.sh emits for that tree
 	sed -n 's/^key=//p' "$tmp/k"
 }
 
+# An empty keyed tree must never receive a reusable pass marker.
+empty_tree="$(git hash-object -t tree -w --stdin < /dev/null)"
+check 'key: empty Rust tree emits no key' '' "$(keyat rust "$empty_tree")"
+check 'key: empty frontend tree emits no key' '' "$(keyat frontend "$empty_tree")"
+
 differs() {
 	local name=$1 a=$2 b=$3
 	if [ -n "$a" ] && [ -n "$b" ] && [ "$a" != "$b" ]; then ok "$name"; else
 		no "$name" "two different non-empty keys" "$a / $b"
 	fi
 }
+
+differs 'key: selected packages participate in Rust key' \
+    "$(SELECTION_KEY='["er-match"]' keyfor rust)" \
+    "$(SELECTION_KEY='["er-server"]' keyfor rust)"
 
 # A path the Rust gate reads must move the rust key — and must not move the
 # frontend one.
@@ -171,7 +180,7 @@ check 'key: a rust/ file does NOT move the frontend key' \
 c_front="$(probed 'frontend/src/app/zz_probe.ts')"
 differs 'key: a new frontend/ file moves the frontend key' \
 	"$fk" "$(keyat frontend "$c_front")"
-differs 'key: shared frontend moves the rust key' "$rk" "$(keyat rust "$c_front")"
+check 'key: ordinary frontend leaves the rust key unchanged' "$rk" "$(keyat rust "$c_front")"
 for path in 'frontend/src/app/(marketing)/page.tsx' 'frontend/src/components/marketing/demo/flow-demo.tsx' 'frontend/tests/functional/marketing-interactions.spec.ts' 'frontend/assets/marketing-social.svg'; do
 	c_marketing="$(probed "$path")"
 	check "key: marketing leaves rust unchanged: $path" "$rk" "$(keyat rust "$c_marketing")"
@@ -180,6 +189,10 @@ done
 
 # An exempt path the Rust gate provably never reads must leave the rust key
 # alone — that is the whole point of the skip.
+for path in frontend/src/lib/api/openapi.json frontend/src/lib/api/schema.d.ts frontend/src/lib/api/envelopes.json frontend/tests/mock-erserver/server.mjs frontend/src/lib/entities/bindings/Entity.ts frontend/drizzle/meta/0000_snapshot.json scripts/ci/rust-select.py scripts/ci/successful-base.py .github/actions/ci-tools/action.yml; do
+    differs "key: coupled input moves Rust: $path" "$rk" "$(keyat rust "$(probed "$path")")"
+done
+
 c_prose="$(probed '.claude/skills/er-matching/references/zz_probe.md')"
 check 'key: an exempt .claude/ file does NOT move the rust key' \
 	"$rk" "$(keyat rust "$c_prose")"

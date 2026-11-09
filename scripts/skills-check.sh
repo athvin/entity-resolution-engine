@@ -1757,6 +1757,14 @@ infra_job_stacks() {
 	' "$wf" | sort -u
 }
 
+# Ignore binary build artifacts: importing a Python CI helper can otherwise
+# put its local __pycache__ path into a generated reference, absent on CI.
+infra_references() {
+    { grep -rIlF "$1" Makefile scripts .github/workflows 2>/dev/null || true; } |
+        { grep -vxF 'scripts/skills-check.sh' || true; } |
+        sort -u | tr '\n' ' ' | sed -e 's/ $//' -e 's/ /`, `/g'
+}
+
 gen_infra_coverage() {
 	local stacks validate plan apply uncovered
 	local s k sites
@@ -1842,9 +1850,7 @@ gen_infra_coverage() {
 		# makes grep exit 1, and that is the row this table exists to print.
 		# Without it the whole regen dies on the first unreferenced path.
 		sites=$(
-			{ grep -rlF "$k" Makefile scripts .github/workflows 2>/dev/null || true; } \
-				| { grep -vxF 'scripts/skills-check.sh' || true; } \
-				| sort -u | tr '\n' ' ' | sed -e 's/ $//' -e 's/ /`, `/g'
+            infra_references "$k"
 		)
 		if [[ -n $sites ]]; then
 			printf '%s\n' "| \`${k#infra/k8s/}\` | \`$sites\` |"

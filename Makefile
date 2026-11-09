@@ -110,7 +110,7 @@ tf-static-credentials-check:
 # The fast PR-equivalent backend gate (mirrors rust.yml's lint + test tiers),
 # plus the skill gate — a stale generated reference is the same class of defect
 # as a stale generated entity artifact.
-check: fmt lint doc entities-check skills-check agent-bridge-check scripts-home-check workflow-shell-check pr-contract-check tf-static-credentials-check test
+check: ci-speed-check fmt lint doc entities-check skills-check agent-bridge-check scripts-home-check workflow-shell-check pr-contract-check tf-static-credentials-check test
 
 # The gated e2e tiers: the DuckLake + extension pipeline and the Postgres
 # control-plane queue/dispatch. Needs the DuckDB extensions and a local
@@ -365,3 +365,11 @@ obs-up:
 # Rebuildable local caches only.
 clean:
 	cd rust && cargo clean
+
+# Selective CI and setup guards must fail locally before they can skip a gate.
+.PHONY: ci-speed-check
+ci-speed-check:
+	python3 -m unittest discover -s scripts/ci -p 'test_ci_*.py'
+	bash scripts/ci/detect-paths-test.sh
+	bash scripts/ci/marketing-ci-test.sh
+	bash scripts/ci/pass-gate-test.sh

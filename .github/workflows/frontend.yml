@@ -72,6 +72,9 @@ jobs:
   # a Rust-only merge cost ~5 minutes and proved nothing. Nightly and manual runs
   # still always report `true`.
   detect:
+    permissions:
+      contents: read
+      actions: read
     name: detect changes
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -83,13 +86,21 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      - id: baseline
+        if: github.event_name == 'push'
+        working-directory: ${{ github.workspace }}
+        env:
+          EVENT: ${{ github.event_name }}
+          GH_TOKEN: ${{ github.token }}
+          CI_WORKFLOW: frontend.yml
+        run: python3 scripts/ci/successful-base.py
       - id: filter
         working-directory: ${{ github.workspace }}
         env:
           EVENT: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PUSH_BEFORE: ${{ github.event.before }}
+          SUCCESS_BASE: ${{ steps.baseline.outputs.sha }}
           PUSH_AFTER: ${{ github.event.after }}
           MQ_BASE: ${{ github.event.merge_group.base_sha }}
           MQ_HEAD: ${{ github.event.merge_group.head_sha }}
@@ -299,7 +310,7 @@ jobs:
     # `!cancelled()`: the gate must RUN (and fail) when a shard fails — a gate
     # skipped because its `needs` failed would read to branch protection as
     # satisfied.
-    if: ${{ !cancelled() && needs.detect.outputs.frontend == 'true' }}
+    if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -311,9 +322,10 @@ jobs:
           # For the matrix job this is the aggregate: `success` only if every
           # shard succeeded, `failure` if any failed, `skipped` if the whole
           # job was.
+          DETECT_RESULT: ${{ needs.detect.result }}
           GATE_LEGS: |
-            e2e=${{ needs.e2e.result }}
-        run: bash scripts/ci/gate-all-legs.sh
+            e2e=${{ needs.detect.outputs.frontend == 'true' }},${{ needs.e2e.result }}
+        run: bash scripts/ci/gate-selection.sh
 
   # The ONLY job here that loads postgres.js. Every other tier — the unit files
   # and both Playwright webServers — points ERWEB_DATABASE_URL at
