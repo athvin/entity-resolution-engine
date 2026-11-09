@@ -59,10 +59,9 @@ def main():
     root = Path(os.environ.get("CI_TOOLS_CACHE", str(Path.home() / ".cache/er-ci-tools")))
     for name in sys.argv[1:]:
         install(name, specs[name], root / "archives", root / "bin")
-        if os.environ.get("GITHUB_OUTPUT"):
-            with open(os.environ["GITHUB_OUTPUT"], "a") as output:
-                archive = (root / "archives" / (specs[name]["sha256"] + ".tar.gz")).resolve()
-                print(f"{name}_archive={archive}", file=output)
+    if os.environ.get("GITHUB_OUTPUT"):
+        with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+            print(f"archives_directory={(root / 'archives').resolve()}", file=output)
     with open(os.environ["GITHUB_PATH"], "a") as output:
         print(root / "bin", file=output)
 

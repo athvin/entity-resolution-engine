@@ -192,7 +192,7 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ env.ECR }}/er-api:${{ steps.tag.outputs.sha }}
-          secret-files: sccache_archive=${{ steps.tools.outputs.sccache_archive }}
+          build-contexts: ci-tools=${{ steps.tools.outputs.archives_directory }}
           secret-envs: |
             gha_url=ACTIONS_RESULTS_URL
             gha_token=ACTIONS_RUNTIME_TOKEN
@@ -303,7 +303,7 @@ jobs:
           # either — nothing here runs the image, and loading a multi-GB
           # image into the daemon is disk this runner does not have spare.
           push: false
-          secret-files: ${{ matrix.image == 'er-api' && format('sccache_archive={0}', steps.tools.outputs.sccache_archive) || '' }}
+          build-contexts: ${{ matrix.image == 'er-api' && format('ci-tools={0}', steps.tools.outputs.archives_directory) || '' }}
           secret-envs: |
             gha_url=ACTIONS_RESULTS_URL
             gha_token=ACTIONS_RUNTIME_TOKEN

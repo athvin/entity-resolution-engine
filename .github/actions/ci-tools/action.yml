@@ -6,9 +6,9 @@ inputs:
     required: false
     default: mold sccache
 outputs:
-  sccache_archive:
-    description: Absolute path to the checksum-verified sccache archive
-    value: ${{ steps.install.outputs.sccache_archive }}
+  archives_directory:
+    description: Directory containing checksum-verified tool archives
+    value: ${{ steps.install.outputs.archives_directory }}
 runs:
   using: composite
   steps:
