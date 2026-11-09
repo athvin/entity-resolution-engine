@@ -109,42 +109,39 @@ Both properties are pinned by `tests/component/structured-data.test.tsx`,
 because they are React implementation details whose failure mode is invisible —
 the page still renders, and only crawlers break.
 
-## It inherits the grayscale rule
+## Marketing follows the product tokens, with one explicit exception
 
-The ESLint palette rule is repo-wide under `frontend/`, and the design doc calls
-the constraint standing "on every surface". Do not carve an exception: it would
-need either a second config block (which also exempts those paths from the other
-rules in that array) or hue-bearing variables in the token file every app
-component reads.
+The site remains grayscale except for the user-requested audit demonstration:
+marketing-scoped `--story-flag` and `--story-corrected` tokens show a red flagged
+match becoming two green corrected entities. Labels and shapes carry the same
+meaning. These tokens belong to the marketing stylesheet, not `globals.css`;
+the application palette and palette-utility lint rule remain unchanged.
 
-The positive case is stronger anyway. In a category of indigo-gradient SaaS
-sites, grayscale *is* the distinctive identity, and a landing page that opens on
-a gradient before handing the visitor a black-and-white app has said the product
-is less confident than its marketing.
+## A visual story and a detailed reference
 
-So: a 6–8× type-scale ratio, weight contrast within a line,
-`bg-foreground text-background` inversion spent **once per viewport** on the
-primary CTA, the three surface planes, `py-20 lg:py-28` rhythm, and one honest
-product image. The channel-by-channel table is in the frontend-design-system
-skill.
+Home opens with a quiet hero, then stacked ingress, organization/dataset, dedupe
+and egress panels, followed by audit, usage, and a short FAQ and closing CTA.
+Measured paths connect actual exit and entry ports across section boundaries;
+resize and dataset/source changes must preserve their alignment. The
+header links Home and Docs; pricing lives on Home without invented rates.
+Section links are ordinary anchors with native mandatory scroll snapping scoped
+to Home. Every section, including the closing FAQ, needs a snap area so content
+cannot become unreachable. Oversized sections scroll within their area; reduced
+motion disables snapping. Do not intercept wheel or touch events.
 
-## Section order, and the one CTA
+`/docs` is a static workflow guide and operation reference. Its committed
+`operations.json` is generated from the MCP route manifest and response-envelope
+contract by `frontend/scripts/gen-developer-reference.mjs`; the unit test checks
+drift. It is distinct from the OpenAPI component schemas, which currently contain
+no operations. Keep examples grounded in handlers and identify contract gaps.
 
-The page has one job: send a qualified visitor into the portal. The shipped
-order is hero → problem → how it works → proof → FAQ → closing CTA, and it is a
-sequence rather than a menu — the numbered markers in "how it works" are
-legitimate because resolve/review/reconcile genuinely is one.
-
-**Every CTA points at `PORTAL_ENTRY_PATH`, and nothing else.** That route is the
-signed-in dispatcher and is deliberately *not* public, so the proxy's cookie
-check turns an anonymous visitor away before its database query runs and returns
-them after login. The result is one CTA that is correct for both states with no
-session read — and therefore **no client JavaScript on the landing page**, which
-is the property to protect when adding anything.
+Conversion CTAs point at `PORTAL_ENTRY_PATH`. Story links navigate to their
+sections and Docs links to `/docs`. Small client components own demonstration
+state and copy buttons; the page and layout remain static server components.
 
 Reading `cookies()` to vary the label would make the page dynamic; doing it in
 the browser costs a round trip and flashes the wrong label on the one page where
-first paint matters most.
+first paint matters most. Interactive demos do not read sessions.
 
 Copy lives in `src/components/marketing/content.ts`, outside `src/lib/**` on
 purpose: the coverage floor measures that tree with Vitest's `all`, so

@@ -2,13 +2,8 @@ import type { Metadata } from "next";
 
 import { ClosingCta } from "@/components/marketing/cta";
 import { Faq } from "@/components/marketing/faq";
-import { Connections } from "@/components/marketing/connections";
-import { ProvenanceExplorer } from "@/components/marketing/provenance-explorer";
-import { ReviewFlow } from "@/components/marketing/demo/review-flow";
 import { Hero } from "@/components/marketing/hero";
-import { HowItWorks } from "@/components/marketing/how-it-works";
-import { Problem } from "@/components/marketing/problem";
-import { Proof } from "@/components/marketing/proof";
+import { InteractiveStory } from "@/components/marketing/interactive-story";
 import { StructuredData } from "@/components/marketing/structured-data";
 import { HERO } from "@/components/marketing/content";
 
@@ -42,17 +37,25 @@ export const metadata: Metadata = {
 
 export default function LandingPage() {
   return (
-    <>
+    <div className="marketing-story">
       <StructuredData />
       <Hero />
-      <Problem />
-      <HowItWorks />
-      <ReviewFlow />
-      <ProvenanceExplorer />
-      <Connections />
-      <Proof />
-      <Faq />
-      <ClosingCta />
-    </>
+      <InteractiveStory />
+      <section id="questions" className="story-close" aria-label="Evidence and questions">
+        <div className="story-close-intro">
+          <p className="story-eyebrow">08 / Built to be explained</p>
+          <h2>
+            A record you can trace.
+            <br />A decision you can check.
+          </h2>
+          <p>
+            Keep the source behind every surviving value. Inspect the comparisons behind a match.
+            Change a decision without losing its history.
+          </p>
+        </div>
+        <Faq />
+        <ClosingCta />
+      </section>
+    </div>
   );
 }

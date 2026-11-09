@@ -42,23 +42,10 @@ export const CANONICAL_ORIGIN = "https://dupezero.com";
  * `src/proxy.ts` (reachable without a session, via MARKETING_PUBLIC_PATHS
  * below) and `src/app/sitemap.ts` (what crawlers are told about).
  *
- * The nav is NOT a third consumer, though this comment claimed it was. Nothing
- * in `src/components/marketing/` imports this list: `marketing-header.tsx`
- * carries one wordmark link to `/` and one CTA to PORTAL_ENTRY_PATH, and that
- * is deliberate — a plain row at every width keeps the mobile DOM a subset of
- * the desktop one, which is the premise the desktop-only axe sweep rests on.
- *
- * So adding a page here makes it reachable and indexed and linked from
- * nowhere. The link is a separate, manual edit.
+ * The header separately links Home and Docs. Adding a public path here makes
+ * it reachable and indexed; add its navigation link explicitly as well.
  */
-/*
- * Annotated `readonly string[]` rather than left to infer `as const`. With the
- * literal tuple type, `strictTypeChecked` proves `path === "/"` always true in
- * `sitemap.ts` and rejects the comparison — correct about today's single entry,
- * and wrong about what this list is. It is a list of paths that happens to have
- * one element, not a one-element tuple.
- */
-export const MARKETING_PATHS: readonly string[] = ["/"];
+export const MARKETING_PATHS: readonly string[] = ["/", "/docs"];
 
 /**
  * Paths the proxy must let through unauthenticated for the marketing surface to
@@ -88,8 +75,8 @@ export const MARKETING_PUBLIC_PATHS: readonly string[] = [
  * proxy's cookie check before that page's database query runs, and arrives back
  * here after login via `?next=`.
  *
- * The upshot is one CTA that is correct for both states with zero client
- * JavaScript on the landing page — no session fetch, no flash of the wrong
+ * The upshot is one CTA that is correct for both states without session-dependent
+ * client JavaScript — no session fetch, no flash of the wrong
  * label.
  */
 export const PORTAL_ENTRY_PATH = "/app";

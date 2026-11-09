@@ -24,11 +24,19 @@ export function MarketingHeader() {
       className="bg-background/80 sticky top-0 z-10 border-b backdrop-blur"
       data-testid="marketing-header"
     >
-      <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-4 px-6">
+      <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-3 px-4 sm:px-6">
         <Link href="/" className="text-base font-medium tracking-tight">
           DupeZero
         </Link>
-        <Button asChild size="sm" variant="outline">
+        <nav aria-label="Main navigation" className="ml-auto flex items-center gap-1 sm:gap-5">
+          <Link className="inline-flex min-h-11 items-center px-2 text-sm" href="/">
+            Home
+          </Link>
+          <Link className="inline-flex min-h-11 items-center px-2 text-sm" href="/docs">
+            Docs
+          </Link>
+        </nav>
+        <Button asChild size="sm" variant="outline" className="min-h-11">
           <Link href={PORTAL_ENTRY_PATH} data-testid="marketing-cta-header">
             Open the app
           </Link>

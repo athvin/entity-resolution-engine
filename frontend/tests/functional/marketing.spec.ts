@@ -26,12 +26,9 @@ test.describe("marketing", () => {
     for (const section of [
       "marketing-header",
       "marketing-hero",
-      "marketing-problem",
-      "marketing-how-it-works",
-      "marketing-proof",
-      "marketing-provenance",
-      "marketing-review-flow",
-      "marketing-connections",
+      "marketing-flow",
+      "marketing-audit",
+      "marketing-usage",
       "marketing-faq",
       "marketing-cta",
       "marketing-footer",
@@ -42,14 +39,14 @@ test.describe("marketing", () => {
 
   test("every call to action points at the portal entry", async ({ page }) => {
     await page.goto("/");
-    for (const cta of ["marketing-cta-header", "marketing-cta-hero", "marketing-cta-closing"]) {
+    for (const cta of ["marketing-cta-header", "marketing-cta-closing"]) {
       await expect(page.getByTestId(cta)).toHaveAttribute("href", "/app");
     }
   });
 
   test("the portal CTA sends a signed-out visitor to login and back", async ({ page }) => {
     await page.goto("/");
-    await page.getByTestId("marketing-cta-hero").click();
+    await page.getByTestId("marketing-cta-header").click();
     // The proxy's cookie gate catches /app before its database query runs, and
     // preserves the destination so login returns the visitor to it.
     await expect(page).toHaveURL(/\/login\?next=%2Fapp$/);
@@ -116,17 +113,24 @@ test.describe("marketing", () => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.goto("/");
     await expect(page.getByTestId("marketing-hero")).toBeVisible();
-    await expect(page.getByRole("button", { name: "Pause pipeline" })).toBeDisabled();
+    await expect(
+      page.getByTestId("pipeline-demo").getByRole("button", { name: "Pause pipeline" }),
+    ).toBeDisabled();
     await expect(page.getByTestId("marketing-hero")).toHaveScreenshot("marketing-hero.png");
   });
 
-  test("landing how-it-works visual baseline @visual", async ({ page }) => {
-    await page.goto("/");
-    await expect(page.getByTestId("marketing-how-it-works")).toBeVisible();
-    await expect(page.getByTestId("marketing-how-it-works")).toHaveScreenshot(
-      "marketing-how-it-works.png",
-    );
-  });
+  for (const stage of ["ingress", "dataset", "dedupe", "egress"]) {
+    test(`landing ${stage} visual baseline @visual`, async ({ page }) => {
+      await page.emulateMedia({ reducedMotion: "reduce" });
+      await page.goto("/");
+      await page.addStyleTag({
+        content: '[data-testid="marketing-header"] { visibility: hidden; }',
+      });
+      await expect(page.getByTestId(`trail-${stage}-panel`)).toHaveScreenshot(
+        `marketing-${stage}.png`,
+      );
+    });
+  }
 
   test("landing closing cta visual baseline @visual", async ({ page }) => {
     await page.goto("/");
