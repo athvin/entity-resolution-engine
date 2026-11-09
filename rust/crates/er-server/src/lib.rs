@@ -8478,7 +8478,6 @@ async fn webhooks_index(
     }
 }
 
-/// Admin+: delete a webhook (`DELETE /v1/orgs/{org}/webhooks/{webhook_id}`).
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct TagIn {
@@ -9164,6 +9163,7 @@ async fn taggings_index(
     }
 }
 
+/// Admin+: delete a webhook (`DELETE /v1/orgs/{org}/webhooks/{webhook_id}`).
 async fn delete_webhook(
     principal: Principal,
     State(state): State<AppState>,
