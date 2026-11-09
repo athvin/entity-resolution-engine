@@ -219,30 +219,30 @@ def main() -> int:
                 f"that true"
             )
 
-    # (3b) the TargetGroupBinding must reference the LIVE er-web Service, by
+    # (3b) the TargetGroupBinding must reference the dedicated er-web-edge Service, by
     # name and port. Binding a preview Service would health-check the colour
     # not serving; a port the Service does not carry registers targets that
     # never go healthy, which is the edge-stuck-at-503 failure #556 exists to
     # close. Rendered on (above) precisely so this is checked here rather than
     # against a live cluster.
     tgb = next((d for d in platform if d.get("kind") == "TargetGroupBinding"), None)
-    web = next((s for s in services if s["metadata"]["name"] == "er-web"), None)
+    web = next((s for s in services if s["metadata"]["name"] == "er-web-edge"), None)
     if tgb is None or web is None:
         problems.append(
-            "expected a TargetGroupBinding and a Service/er-web to check the "
+            "expected a TargetGroupBinding and a Service/er-web-edge to check the "
             "edge binding against; one is missing, so this check examined nothing"
         )
     else:
         ref = tgb["spec"]["serviceRef"]
         web_ports = {port["port"] for port in web["spec"]["ports"]}
-        if ref["name"] != "er-web":
+        if ref["name"] != "er-web-edge":
             problems.append(
-                f"TargetGroupBinding binds Service/{ref['name']}, not er-web — "
-                f"the live Service is the only one whose selector follows a cutover"
+                f"TargetGroupBinding binds Service/{ref['name']}, not er-web-edge — "
+                f"the edge Service stages registration before removing old targets"
             )
         if ref["port"] not in web_ports:
             problems.append(
-                f"TargetGroupBinding port {ref['port']} is not one of er-web's "
+                f"TargetGroupBinding port {ref['port']} is not one of er-web-edge's "
                 f"ports {sorted(web_ports)} — targets would never health-check"
             )
         print(f"  TargetGroupBinding -> Service/{ref['name']}:{ref['port']}")
@@ -394,6 +394,29 @@ def main() -> int:
                     problems.append(f"{environment}/{ns}/{container['name']}: operational metric scope must be {enabled}")
         if publishers < 2:
             problems.append(f"{environment}/{ns}: metric scope check missed API or dispatcher")
+
+    # Registration overlap must affect only the edge Service, never recreate
+    # a serving pod or erase the canonical live/preview colour selectors.
+    for active in ("blue", "green"):
+        args = ["er-platform", REPO_CHART, "--namespace", NAMESPACE,
+                "--set", "efs.fileSystemId=fs-0", "--set", "efs.accessPointId=fsap-0",
+                "--set", "edge.targetGroupArn=arn:test", "--set", f"color.active={active}"]
+        normal = render(args)
+        overlap = render([*args, "--set", "edge.overlap=true"])
+        normal_deploys = {d["metadata"]["name"]: d["spec"] for d in normal if d["kind"] == "Deployment"}
+        overlap_deploys = {d["metadata"]["name"]: d["spec"] for d in overlap if d["kind"] == "Deployment"}
+        if normal_deploys != overlap_deploys:
+            problems.append("edge overlap must not change any Deployment spec")
+        for docs, expected_edge in ((normal, {active}), (overlap, {"blue", "green"})):
+            ss = {d["metadata"]["name"]: d for d in docs if d["kind"] == "Service"}
+            for name in ("er-web", "er-api"):
+                if ss[name]["spec"]["selector"].get(COLOR) != active:
+                    problems.append(f"{name}: overlap erased the canonical active colour")
+            edge = ss["er-web-edge"]["spec"]
+            hits = {labels[COLOR] for _, labels in pod_templates(docs)
+                    if matches(edge["selector"], labels)}
+            if hits != expected_edge or [p["port"] for p in edge["ports"]] != [3000]:
+                problems.append(f"edge overlap: expected web-only {expected_edge}, got {hits}")
 
     if problems:
         print("\ncharts-check FAILED:\n", file=sys.stderr)

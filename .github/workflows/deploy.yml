@@ -257,10 +257,9 @@ jobs:
         run: bash scripts/ci/deploy-smoke-preview.sh
 
       - name: Cut over
-        # Phase 2: one selector field on two Services moves traffic; the old
-        # colour keeps running so rollback is the same field moving back. The
-        # verification and the rollback summary live in
-        # scripts/ci/deploy-cutover.sh.
+        # Phase 2: stage ALB target health where configured, then verify
+        # public readiness before retirement. Failure restores the old colour;
+        # selector-only upgrades do not repeat the migration hooks.
         if: steps.colour.outputs.first != 'true'
         env:
           LIVE: ${{ steps.colour.outputs.live }}
@@ -303,6 +302,7 @@ jobs:
       CLUSTER: er-prod
       AWS_REGION: us-east-2
       DEPLOY_ENV: prod
+      PUBLIC_HEALTH_URL: https://dupezero.com/api/healthz
       # See deploy-dev's env block: the commit being deployed, never the
       # default-branch tip.
       DEPLOY_SHA: ${{ github.event.inputs.sha || github.event.workflow_run.head_sha }}
