@@ -247,7 +247,7 @@ The heart of the migration. 2.3 is the largest single piece of work in the plan.
   Mode Network Policy Controller ConfigMap was applied (infra/k8s/network-policy-controller.yaml
   — §8.5's predicted silent failure, found by the probe), then BLOCKED as designed.*
   - `make dev-up DEV=alice` → login at `alice.dev.<domain>` over the tailnet, create an org, submit `run_all_full`, run completes.
-  - `er lake maintain` succeeds — the `max_locks_per_transaction=1024` flag took effect (the operation that fails at 64).
+  - `er maintain` succeeds — the `max_locks_per_transaction=1024` flag took effect (the operation that fails at 64).
   - `make dev-suspend` → Karpenter reclaims the app node and `pg_stat_activity` on the (stopped) DB path shows nothing held; resume → golden-record counts and snapshot history unchanged (PVC survived).
   - From alice's namespace, a connection to bob's Postgres service **fails** — NetworkPolicy enforcing, which proves the CNI policy agent is actually on (§8.5).
   - `make dev-down` → PVC gone, S3 prefix empty, secrets deleted.
@@ -322,7 +322,7 @@ against a dev namespace, and the negative tests (no invite, email collision) bot
 ## Phase 3 — Prod (needs: the prod gate, Phase 2)
 
 - [ ] **3.1 Prod network + EKS + Aurora** (§5, §7.1)
-  - Aurora Serverless v2 multi-AZ with the cluster parameter group; `er lake maintain` against Aurora succeeds (the `max_locks` proof, again — different mechanism than dev's `-c` flag).
+  - Aurora Serverless v2 multi-AZ with the cluster parameter group; `er maintain` against Aurora succeeds (the `max_locks` proof, again — different mechanism than dev's `-c` flag).
   - Every DSN carries `sslmode=verify-full` and connects — which first requires the CA bundle in the images (§18.15; expect an image change).
   - 14-day PITR confirmed on, from the API (owner confirmed this retention on 2026-11-08 in #553's production build-out).
 - [ ] **3.2 Prod lake + scoped CloudTrail** (§7.3)
