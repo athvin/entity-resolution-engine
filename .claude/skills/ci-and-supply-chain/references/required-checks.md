@@ -89,7 +89,7 @@ job instead — `terraform plan` is the worked example.
 | `check` | lint + types + unit | 15 | `needs.detect.outputs.frontend == 'true'` |
 | `e2e` | playwright e2e (${{ matrix.leg }}) | 30 | `needs.detect.outputs.frontend == 'true'` |
 | `e2e-gate` | playwright functional tier | 5 | `${{ !cancelled() && needs.detect.outputs.frontend == 'true' }}` |
-| `driver` | postgres.js driver contract | 10 | `needs.detect.outputs.frontend == 'true'` |
+| `driver` | postgres.js driver contract | 10 | `needs.detect.outputs.frontend == 'true' && needs.detect.outputs.marketing_only != 'true'` |
 | `audit` | pnpm audit + licenses | 10 | `needs.detect.outputs.frontend == 'true'` |
 | `semgrep` | semgrep (static analysis) | 15 | `needs.detect.outputs.frontend == 'true'` |
 | `coverage` | coverage (vitest) | 15 | `github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch'` |
@@ -152,8 +152,8 @@ job instead — `terraform plan` is the worked example.
 | `lake-e2e` | DuckLake e2e shard (${{ matrix.partition }}) | 45 | `needs.detect.outputs.code == 'true'` |
 | `ducklake-e2e` | DuckLake e2e server (${{ matrix.slice }}) | 45 | `needs.detect.outputs.code == 'true'` |
 | `ducklake-gate` | DuckLake + extensions e2e | 5 | `${{ !cancelled() && needs.detect.outputs.code == 'true' }}` |
-| `bench-compile` | benchmarks (compile) | 30 | `github.event_name != 'pull_request' && github.event_name != 'merge_group'` |
-| `scale-tests` | scale golden (50k) | 30 | `github.event_name != 'pull_request' && github.event_name != 'merge_group'` |
+| `bench-compile` | benchmarks (compile) | 30 | `needs.detect.outputs.code == 'true' && github.event_name != 'pull_request' && github.event …` |
+| `scale-tests` | scale golden (50k) | 30 | `needs.detect.outputs.code == 'true' && github.event_name != 'pull_request' && github.event …` |
 | `coverage` | coverage (llvm-cov) | 60 | `github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch'` |
 | `cache-prune` | prune the Actions cache to budget | 30 | `github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch'` |
 | `record-pass` | record pass marker | 5 | `${{ !cancelled() && github.event_name == 'pull_request' && needs.detect.outputs.code == 't …` |

@@ -53,7 +53,7 @@ it when a change spans BFF → er-server → engine; its sequence is
 
 ## The coverage floor
 
-Enforced **per-PR** by `pnpm check` (`vitest run --coverage`), scoped to
+Enforced **per app-changing PR** by `pnpm check` (`vitest run --coverage`), scoped to
 `src/lib/**`. The thresholds and the Playwright pin are generated:
 [references/tiers-and-thresholds.md](references/tiers-and-thresholds.md), which
 is also the canonical copy of why the floor sits where it does.
@@ -63,8 +63,12 @@ because Playwright exercises those hooks, so the floor is an honest ceiling and
 not a soft target. Raising it means writing unit tests for `src/lib`, **not**
 re-scoping the measurement to flatter it.
 
-The nightly `coverage` job only publishes the HTML artifact; the gate is the
-per-PR one.
+Marketing-only diffs use `scripts/ci/marketing-paths.sh` to select lint,
+formatting, types, build, marketing browser specs and landing-page axe coverage.
+They skip app unit/coverage, API drift and the Postgres driver tier. Shared app
+code, shell, styles, dependencies or test configuration restore the full gate.
+The nightly `coverage` job only publishes the HTML artifact; the app PR gate
+enforces the floor. See ci-and-supply-chain for classification and cache rules.
 
 ## The accessibility gate
 

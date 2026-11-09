@@ -128,6 +128,21 @@ workflows (`infra.yml`, `drift.yml`), it exempts the whole agentic set —
 `.github/aw/`, `.github/workflows/shared/`, `agentics-maintenance.yml`, and
 every `*.md` and `*.lock.yml` under `.github/workflows/`.
 
+The static marketing site is also exempt from Rust compilation. Its boundary
+is `scripts/ci/marketing-paths.sh`, shared by both classifiers and the Rust
+pass key. Marketing-only frontend diffs run lint, formatting, types, a Next
+build, marketing Playwright specs and the landing-page axe check. They skip
+app unit/coverage, API drift and Postgres driver tests; audit and repository
+checks still run. App code, root layout, global CSS, dependencies, contracts
+and CI helpers take the full path. Mixed diffs widen to the affected gates.
+Renames inspect both paths, so moving app code into marketing cannot skip tests.
+
+Marketing subsets neither consume nor write full-app pass markers. A main push
+skips Rust only when its entire diff is marketing; missing history, other main
+pushes, nightly/manual runs and `ci:full` retain full verification. Exercise
+these boundaries with `bash scripts/ci/marketing-ci-test.sh`, alongside the
+detector and pass-key self-tests.
+
 **`.claude/` and `CLAUDE.md` are exempt as prefixes too, so a documentation
 change does _not_ run the gate.** Four files beneath them are gate inputs and
 are re-admitted **by name**:

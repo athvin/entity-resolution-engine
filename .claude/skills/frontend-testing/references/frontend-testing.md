@@ -42,20 +42,25 @@ setup (how to run things, the dev substrate) stays in
    PR reports those three contexts as `conclusion=skipped` (completed, not
    pending), which branch protection accepts.
 
-   **`detect` filters pushes to main too**, which is where this diverges from
-   `rust.yml` — that workflow always runs on main because it *is* the gate
-   protecting it. This one's main run only re-tests what the just-merged PR
+   **`detect` filters pushes to main too**. Rust skips proven marketing-only
+   pushes and otherwise keeps full verification on main. This workflow
+   re-tests what the just-merged PR
    already tested (a squash commit and the PR head are near-identical trees), so
    re-running the Playwright container for a Rust-only merge cost ~5 minutes and
    proved nothing. It fails *safe*: an all-zeroes `event.before` (a branch's
    first push) or an unresolvable one (after a force-push) runs the gate rather
    than skipping it. Nightly and manual runs always run. All eight event paths
    are exercised against real commits before changing this job.
-3. **Coverage is enforced per-PR, not nightly.** `pnpm check` runs
+3. **Coverage is enforced for app-changing PRs, not deferred to nightly.** `pnpm check` runs
    `vitest run --coverage`; the floor lives in `vitest.config.ts`. This
    deliberately diverges from the Rust side (`rust.yml` runs llvm-cov nightly)
    because v8 instrumentation of this tier costs under a second — there is no
    latency argument for deferring it.
+   Static marketing diffs, classified by `scripts/ci/marketing-paths.sh`, run
+   lint, formatting, types, build, marketing browser tests and landing-page axe
+   instead of app unit/coverage, API drift and driver tests. Shared shell,
+   styles, app code, dependencies or test configuration select the full gate.
+   Marketing subsets cannot consume or create full-app pass markers.
 4. **The floor is a non-regression backstop, not the quality bar.** Ratchet it up
    as coverage grows; never down. The real gate is the behavioral suites.
 5. **`semgrep` is advisory, not required.** Its registry packs are fetched over

@@ -166,12 +166,17 @@ differs 'key: a new rust/ file moves the rust key' "$rk" "$(keyat rust "$c_rust"
 check 'key: a rust/ file does NOT move the frontend key' \
 	"$fk" "$(keyat frontend "$c_rust")"
 
-# The mirror: a frontend path must move the frontend key and not the rust one.
-# `code=false` for a frontend-only PR is false here — `make check` reads
-# frontend/ — so this is the asymmetry the two filters encode, asserted.
+# Shared app files still affect both gates; isolated marketing files only
+# affect the frontend gate. Drive the actual keys so the two filters agree.
 c_front="$(probed 'frontend/src/app/zz_probe.ts')"
 differs 'key: a new frontend/ file moves the frontend key' \
 	"$fk" "$(keyat frontend "$c_front")"
+differs 'key: shared frontend moves the rust key' "$rk" "$(keyat rust "$c_front")"
+for path in 'frontend/src/app/(marketing)/page.tsx' 'frontend/src/components/marketing/demo/flow-demo.tsx' 'frontend/tests/functional/marketing-interactions.spec.ts' 'frontend/assets/marketing-social.svg'; do
+	c_marketing="$(probed "$path")"
+	check "key: marketing leaves rust unchanged: $path" "$rk" "$(keyat rust "$c_marketing")"
+	differs "key: marketing moves frontend: $path" "$fk" "$(keyat frontend "$c_marketing")"
+done
 
 # An exempt path the Rust gate provably never reads must leave the rust key
 # alone — that is the whole point of the skip.

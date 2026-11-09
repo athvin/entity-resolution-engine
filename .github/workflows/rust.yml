@@ -2,8 +2,8 @@
 # `rust/`); the Python/dbt implementation has been removed, so this is the whole
 # backend gate — effectively unfiltered (the frontend keeps its own pnpm gate).
 #
-# Three exceptions: a PR that touches nothing but `.claude/**` (agent/skill
-# prose), `infra/terraform/**`, and/or the `gh aw` agentic-workflow files runs
+# Exemptions: a PR confined to the paths in scripts/ci/detect-paths.sh, including
+# agent/skill prose, Terraform, agentic workflows and the static marketing site, runs
 # none of the compile jobs. Because the required jobs below are REQUIRED status
 # checks, a workflow-level path filter would leave them "pending" forever and
 # block the PR; instead a `detect` job computes whether any file outside those
@@ -11,7 +11,7 @@
 # `if:` reports a "skipped" conclusion, which branch protection accepts as
 # satisfied — so the PR stays mergeable with zero compute.
 #
-# A FOURTH exception, and it is a different kind: a PR that changes NO FILES AT
+# Another exception, and it is a different kind: a PR that changes NO FILES AT
 # ALL. `detect` reports `code=false` for it too, but that case needed a guard of
 # its own, because this is the one detect in the repo built as a DENYLIST and an
 # empty path list inverts through it — the blank line a shell `printf` emits for
@@ -285,12 +285,9 @@ env:
   # failure — the same behaviour `sccache.tf` relied on for the S3 read role.
 
 jobs:
-  # Did anything outside `.claude/**`, `infra/terraform/**` and the agentic
-  # workflow files change? The required compile jobs below gate on this, so a
-  # skills-only, terraform-only or prompt-only PR skips them (a skipped required
-  # check still satisfies branch protection). Non-PR events (push to main,
-  # nightly) always report `true` — the gate never self-skips on the branch it
-  # protects.
+  # Required compile jobs skip when the diff is entirely exempt. Main pushes
+  # skip only for a proven marketing-only change; other pushes, nightly and
+  # manual runs retain the full gate. Missing push history runs everything.
   detect:
     name: detect changes
     runs-on: ubuntu-latest
@@ -318,6 +315,9 @@ jobs:
           # One of the two pairs is set: a PR's, or the merge queue's.
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.event.after }}
+          FULL_CI: ${{ contains(github.event.pull_request.labels.*.name, 'ci:full') }}
         # The last detect step to become a script; frontend.yml, infra.yml and
         # images.yml already had one. Its classification lives in
         # scripts/ci/detect-paths.sh (which argues the denylist and is
@@ -603,6 +603,9 @@ jobs:
         # if it asserted nothing.
         working-directory: ${{ github.workspace }}
         run: bash scripts/ci/detect-paths-test.sh
+      - name: static site and app CI stay separated
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/ci/marketing-ci-test.sh
       - name: the content-addressed pass gate still gates
         # The step after the classifier in the same chain, and ungated for the
         # same reason: `detect` consults a pass marker to decide whether the
@@ -728,9 +731,8 @@ jobs:
       - name: agent-skill generated references are not stale
         # The GENERATED blocks in .claude/skills/**/references/ are derived from
         # entities/, the crate tree, er-sql-check's analyze.rs, the workflows and
-        # the frontend config. They can only go stale when CODE changes — and a
-        # code change always reaches this job — so the regen half belongs here
-        # rather than in the always-on `skills` job, which has no toolchain.
+        # the frontend config. The ungated skills job also runs the full skill
+        # check, including for marketing edits that skip this compile job.
         working-directory: ${{ github.workspace }}
         run: bash scripts/skills-check.sh check
       - name: Build cost (sccache stats, target size)
@@ -1423,10 +1425,11 @@ jobs:
 
   bench-compile:
     name: benchmarks (compile)
+    needs: detect
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # Not on merge_group either: the queue is a PR gate, these are main+nightly.
-    if: github.event_name != 'pull_request' && github.event_name != 'merge_group'
+    if: needs.detect.outputs.code == 'true' && github.event_name != 'pull_request' && github.event_name != 'merge_group'
     permissions:
       contents: read
     # `main` writes the cache, every other ref only reads it. See the env block
@@ -1483,10 +1486,11 @@ jobs:
 
   scale-tests:
     name: scale golden (50k)
+    needs: detect
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # Not on merge_group either: the queue is a PR gate, these are main+nightly.
-    if: github.event_name != 'pull_request' && github.event_name != 'merge_group'
+    if: needs.detect.outputs.code == 'true' && github.event_name != 'pull_request' && github.event_name != 'merge_group'
     permissions:
       contents: read
     # `main` writes the cache, every other ref only reads it. See the env block

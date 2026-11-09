@@ -16,4 +16,26 @@
 # detect-paths.sh except for the `tf-` prefix — so both gates re-prove
 # themselves on a change to either.
 # shellcheck disable=SC2034  # consumed by the files that source this
-FRONTEND_INCLUDE='^(frontend/|scripts/frontend-dev/|scripts/ci/frontend-paths\.sh$|scripts/ci/frontend-detect\.sh$|scripts/ci/gate-all-legs\.sh$|scripts/ci/pass-(key|decide|gate-test)\.sh$|\.github/workflows/frontend\.yml$)'
+FRONTEND_INCLUDE='^(frontend/|scripts/frontend-dev/|scripts/ci/frontend-(paths|detect|run)\.sh$|scripts/ci/marketing-(paths|ci-test)\.sh$|scripts/ci/gate-all-legs\.sh$|scripts/ci/pass-(key|decide|gate-test)\.sh$|\.github/workflows/frontend\.yml$)'
+
+# shellcheck source=scripts/ci/marketing-paths.sh
+. "$(dirname "${BASH_SOURCE[0]}")/marketing-paths.sh"
+
+# Unrelated backend/docs paths do not widen frontend coverage. Any shared app
+# path does. Renames are diffed with --no-renames so both ends are classified.
+frontend_classify() {
+	local changed relevant app
+	changed="$(cat)"
+	relevant="$(printf '%s\n' "$changed" | grep -E "$FRONTEND_INCLUDE" || true)"
+	if [ -z "$relevant" ]; then
+		printf 'frontend=false\nmarketing_only=false\n'
+		return
+	fi
+	app="$(printf '%s\n' "$relevant" | grep -cvE "$MARKETING_INCLUDE" || true)"
+	printf 'frontend=true\n'
+	if [ "$app" -eq 0 ]; then
+		printf 'marketing_only=true\n'
+	else
+		printf 'marketing_only=false\n'
+	fi
+}

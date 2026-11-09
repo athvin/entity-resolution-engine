@@ -80,6 +80,13 @@
 # Everything the Rust gate never reads.
 DETECT_EXEMPT='^(\.claude/|\.agents/|\.devcontainer/|CLAUDE\.md$|AGENTS\.md$|infra/terraform/|scripts/ci/tf-|scripts/hooks/|\.github/aw/|\.github/workflows/((infra|drift|devcontainer)\.yml$|shared/|agentics-maintenance\.yml$|[A-Za-z0-9._-]+\.md$|[A-Za-z0-9._-]+\.lock\.yml$))'
 
+# Marketing has browser coverage in frontend.yml, and no Rust dependency.
+# skills-check's frontend-derived references remain covered by its ungated job.
+# Use the same boundary for path detection and pass-key hashing.
+# shellcheck source=scripts/ci/marketing-paths.sh
+. "$(dirname "${BASH_SOURCE[0]}")/marketing-paths.sh"
+DETECT_EXEMPT="$DETECT_EXEMPT|$MARKETING_INCLUDE"
+
 # A generated artifact `er-entity verify` re-renders and byte-compares.
 DETECT_ERD='^\.claude/skills/entity-framework/references/erd\.md$'
 
