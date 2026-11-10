@@ -345,7 +345,7 @@ The DuckLake catalog is the least ephemeral thing in the system (table definitio
 | Form | `postgres:16` StatefulSet, one per developer namespace | Aurora PostgreSQL 16 Serverless v2 |
 | Storage | 50 GiB gp3 PVC | Aurora storage |
 | Capacity | 1 vCPU / 2 GiB | 0.5 → 16 ACU |
-| `max_locks_per_transaction` | `-c` flag on the pod | cluster parameter group |
+| `max_locks_per_transaction` | `-c` flag on the pod | `aws_rds_cluster_parameter_group.prod`, 1024; static, so verify activation after instance reboot |
 | Availability | single-AZ, pinned by its EBS volume | multi-AZ |
 | Backups | none — prod is the system of record | 14-day PITR (owner confirmed in #553) |
 | Idle cost | **~$4/mo of EBS** | ~$50/mo |
@@ -364,7 +364,7 @@ Roles, both forms: `er_app` for application traffic, `er_provisioner` with `CREA
 
 **DDL ledger install:** the `er_ddl_audit_*` event triggers (the `ddl_log` ledger) need superuser/rds_superuser — neither `er_app` nor `er_provisioner` qualifies. Boot applies them best-effort (succeeds in CI/dev where the role is superuser; logs a warning otherwise); in production they are installed once by running `er-server migrate` with the Aurora master-user DSN as part of the deploy.
 
-**Every DSN carries `sslmode=verify-full` in prod** (`sslmode` appears nowhere in the repo today, an encryption-in-transit gap against Aurora an auditor will ask about — §8.6). It affects `ERSERVER_DSN`, `ERSERVER_MAINT_DSN`, `ERSERVER_TENANT_DSN_TEMPLATE`, `ERWEB_DATABASE_URL`, and `ER_CATALOG_DSN` — a secret-value change, not code, provided `verify-full` works with the Aurora CA bundle in the images (§18.15). Dev keeps `sslmode=disable` against the in-namespace pod.
+**Every production PostgreSQL DSN must carry `sslmode=verify-full` and an explicit `sslrootcert=/etc/ssl/rds/global-bundle.pem`.** The control-plane, frontend and shared-secret declarations live in `envs/prod/{secrets,rds}.tf`; the frontend secret ignores Terraform value updates, so its live URL needs a read-modify-write preserving every other key. Both runtime images must be deployed with the RDS bundle before changing the URLs (§18.15). Apply the same options to `ER_PROVISION_MAINT_DSN` and derived tenant catalog connections when PostgreSQL provisioning is configured. Dev keeps its existing in-namespace TLS posture.
 
 ### 7.2 The tenant database name collision
 
@@ -956,7 +956,7 @@ kubectl -n alice get jobs -w
 kubectl -n alice exec deploy/er-api -- df -h /app/.tmp   # NVMe, not the root filesystem
 ```
 
-- **The parameter actually took effect.** Run `er lake maintain`, the operation that fails at the default of 64 locks.
+- **The parameter actually took effect.** Run `er maintain`, the operation that fails at the default of 64 locks.
 - **Suspend really reaches zero.** `make dev-suspend DEV=alice`, then confirm Karpenter reclaims the `app` node and no pod holds a database connection (§5.2).
 - **The catalog survives suspension.** Suspend, resume, confirm golden-record counts and snapshot history unchanged. §7.1 rests on the PVC outliving the pod; a misconfigured volumeClaimTemplate silently gives an `emptyDir`.
 - **NetworkPolicy enforces.** From Alice's namespace, attempt to reach Bob's Postgres. It must fail. Under the VPC CNI without the policy agent enabled, this *succeeds* while the object looks correct (§8.5).
