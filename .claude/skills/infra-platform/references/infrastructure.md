@@ -177,7 +177,7 @@ Crucially, the 141 GiB figure is measured at a **4 GB** DuckDB memory limit, and
 
 ### 5.4 One cluster per environment
 
-One EKS cluster per environment, for cluster-scoped blast-radius containment, a staging-shaped upgrade path, and — the decisive argument — secret separation. Two clusters are kept in the design but **only dev is built now**: there is no prod traffic, so deferring the prod cluster costs nothing and preserves the boundary (§15 sequences it). The rejected single-cluster-total option and the full secret-separation argument are in `infrastructure-decisions.md` D-CLUSTER.
+One EKS cluster per environment, for cluster-scoped blast-radius containment, a staging-shaped upgrade path, and — the decisive argument — secret separation. **Both dev and prod are deployed**, with Terraform declarations under `infra/terraform/envs/dev` and `infra/terraform/envs/prod`. Cluster existence does not complete production acceptance: verified TLS and the Aurora maintenance proof remain tracked in [#553](https://github.com/athvin/entity-resolution-engine/issues/553). The rejected single-cluster-total option and the full secret-separation argument are in `infrastructure-decisions.md` D-CLUSTER.
 
 ### 5.5 EKS Auto Mode — chosen (D1, 2026-10-10)
 
