@@ -79,6 +79,7 @@ mod pg_profile;
 mod pg_protect_master;
 mod pg_provision;
 mod pg_publish;
+mod pg_readiness_reads;
 mod pg_record_overlays;
 mod pg_run_all_dag;
 mod pg_run_all_pipeline;
