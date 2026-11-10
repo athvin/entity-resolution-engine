@@ -191,6 +191,23 @@ Auto Mode manages Karpenter and the core addons, removing the system node group 
 
 Account-level counterparts — S3 Block Public Access on the account, MFA on the root user, no root access keys — are one-liners that live in Phase 0 (§15).
 
+### 5.7 Schema validation can fail while an add-on reports healthy
+
+An EKS add-on in `ACTIVE` state and an APIService marked `Available` do not prove
+its OpenAPI schema is valid. In [#1058](https://github.com/athvin/entity-resolution-engine/issues/1058),
+metrics-server contributed malformed definitions to development's aggregate
+OpenAPI v2 document. Raw JSON retrieval succeeded, but protobuf conversion failed
+and strict kubectl validation returned `ServiceUnavailable` before creating Jobs.
+
+Compare `kubectl explain job --api-version=batch/v1` with
+`kubectl explain job --api-version=batch/v1 --output=plaintext-openapiv2`, using a
+supported client and `--v=6` to capture request paths and status without headers.
+The latter requests protobuf, unlike `kubectl get --raw=/openapi/v2`. Compare the
+live add-on image/version with a healthy environment; the reviewed versions are
+pinned in each environment's `eks.tf`. Repair the schema producer through
+Terraform, then rerun the unchanged acceptance workflow. Do not disable strict
+validation or treat a successful JSON GET as proof the failing path recovered.
+
 ## 6. Job execution: the runner as a Kubernetes Job
 
 > **A run is many pods now, not one.** Since #645 the dispatcher has no in-process arm, and a run is a compiled DAG whose every **task attempt** is its own Job — see `infrastructure-decisions.md` **D-TASKJOB**, and [batch-orchestration-design.md](../../er-engine-ops/references/batch-orchestration-design.md) for the ledger, the readiness pass and the fingerprints. The amendments are inline below, per subsection.
