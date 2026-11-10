@@ -40,6 +40,9 @@ module "eks" {
 resource "aws_eks_addon" "metrics_server" {
   cluster_name = module.eks.cluster_name
   addon_name   = "metrics-server"
+  # Match the verified production build. The older dev build emitted malformed
+  # OpenAPI definitions, breaking protobuf schema validation despite ACTIVE (#1058).
+  addon_version = "v0.9.0-eksbuild.14"
 }
 
 output "cluster_name" {
