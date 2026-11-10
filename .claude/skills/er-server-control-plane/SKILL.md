@@ -34,6 +34,16 @@ connection, which history triggers and the DDL ledger read. It is
 connection. If pooling ever arrives, that has to become transaction-scoped
 first.
 
+**Synchronous lake reads run through `with_dataset_lake`.** Resolve and
+authorize the dataset first, then keep the entire DuckDB session lifecycle
+(open, queries, result serialization and drop) inside its blocking closure.
+Returning a session to an async handler blocks the HTTP executor during lake
+I/O and can starve even the literal liveness endpoint. `lake_reads` bounds
+concurrent sessions and carries request trace context; the worker owns its
+capacity permit until it actually finishes, even if the client disconnects.
+Fetch asynchronous Postgres metadata before the closure and perform subsequent
+control-plane writes after it returns owned results.
+
 Because the unit tests run against the in-memory store, **a green
 `cargo test --workspace` says nothing about the Postgres paths.** They self-skip
 without `ER_TEST_PG_DSN`. See the rust-conventions skill's gates reference.

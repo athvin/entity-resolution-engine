@@ -41,6 +41,7 @@ pub mod exec_task;
 pub mod executor;
 pub mod extract_params;
 pub(crate) mod fixups;
+mod lake_reads;
 pub mod mail;
 pub mod migrate_plan;
 pub mod openapi;
@@ -3815,19 +3816,29 @@ async fn publish_advisories(
 ) -> Vec<String> {
     // The config just published, passed in rather than re-read: advising on a
     // re-fetch would race the write and could describe the previous version.
-    let Ok(session) = dataset_lake(state, org, ds).await else {
+    let Ok(dataset) = dataset_for_lake(state, org, ds).await else {
         return Vec::new();
     };
-    let Ok(snapshot) = session.latest_snapshot_version() else {
-        return Vec::new();
-    };
-    match read::profiled_standardized_columns(&session, snapshot) {
-        Ok(columns) => config_check::profile_advisories(config, &columns),
-        Err(e) => {
-            tracing::warn!(er.org = %org, er.dataset = %ds, error = %e, "reading the profile for publish advisories failed");
-            Vec::new()
+    let config = config.clone();
+    let org = org.to_owned();
+    let ds = ds.to_owned();
+    with_dataset_lake(dataset, move |session, _dataset| {
+        let Ok(snapshot) = session.latest_snapshot_version() else {
+            return Vec::new();
+        };
+        match read::profiled_standardized_columns(session, snapshot) {
+            Ok(columns) => config_check::profile_advisories(&config, &columns),
+            Err(e) => {
+                tracing::warn!(
+                    er.org = %org, er.dataset = %ds, error = %e,
+                    "reading the profile for publish advisories failed"
+                );
+                Vec::new()
+            }
         }
-    }
+    })
+    .await
+    .unwrap_or_default()
 }
 
 #[derive(Deserialize)]
@@ -5470,40 +5481,34 @@ async fn dataset_for_lake(
     }
 }
 
-/// Open one dataset's lake read-only. Returns the attached session, or a ready
-/// error response (404 no org/dataset, 501 no Postgres backend, 503 lake
-/// unavailable).
-async fn dataset_lake(
-    state: &AppState,
-    org: &str,
-    ds: &str,
-) -> Result<dedupe_core::Session, Box<axum::response::Response>> {
-    let d = dataset_for_lake(state, org, ds).await?;
-    read::open_org_lake(&d.env).map_err(|e| {
-        Box::new(detail_err(
-            StatusCode::SERVICE_UNAVAILABLE,
-            format!("lake unavailable: {e}"),
-        ))
+/// Run the complete lake session lifecycle off the async executor. Only owned
+/// results cross back; opening, querying and dropping a session all happen in
+/// the bounded blocking closure. Authorization and dataset lookup precede this.
+async fn with_dataset_lake<F, T>(
+    dataset: pg::DatasetDetail,
+    read: F,
+) -> Result<T, Box<axum::response::Response>>
+where
+    F: FnOnce(&dedupe_core::Session, &pg::DatasetDetail) -> T + Send + 'static,
+    T: Send + 'static,
+{
+    lake_reads::run(move || {
+        let session = read::open_org_lake(&dataset.env).map_err(|error| {
+            Box::new(detail_err(
+                StatusCode::SERVICE_UNAVAILABLE,
+                format!("lake unavailable: {error}"),
+            ))
+        })?;
+        Ok(read(&session, &dataset))
     })
-}
-
-/// Like [`dataset_lake`], but also resolves the dataset's auto-merge threshold
-/// from its config (for the run ledger's per-run auto-merge count). The
-/// threshold is `None` when the dataset has no readable config.
-async fn dataset_lake_auto_merge(
-    state: &AppState,
-    org: &str,
-    ds: &str,
-) -> Result<(dedupe_core::Session, Option<f64>), Box<axum::response::Response>> {
-    let d = dataset_for_lake(state, org, ds).await?;
-    let auto_merge = auto_merge_from_env(&d.env);
-    let session = read::open_org_lake(&d.env).map_err(|e| {
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, "lake read worker failed");
         Box::new(detail_err(
             StatusCode::SERVICE_UNAVAILABLE,
-            format!("lake unavailable: {e}"),
+            "lake read failed",
         ))
-    })?;
-    Ok((session, auto_merge))
+    })?
 }
 
 /// The org's entity type, from its `ER_CONFIG_PATH` yaml. Person when the key is
@@ -5530,28 +5535,6 @@ fn auto_merge_from_env(env: &Value) -> Option<f64> {
         .map(|c| c.thresholds.auto_merge)
 }
 
-/// Like [`dataset_lake`], but also resolves the dataset's entity type (its own
-/// column — no config re-parse). The golden/entity reads dispatch on it so an
-/// account dataset reads its `acct_golden_*` projection.
-async fn dataset_lake_golden(
-    state: &AppState,
-    org: &str,
-    ds: &str,
-) -> Result<(dedupe_core::Session, er_config::EntityType), Box<axum::response::Response>> {
-    let d = dataset_for_lake(state, org, ds).await?;
-    let entity_type = match d.entity_type.as_str() {
-        "account" => er_config::EntityType::Account,
-        _ => er_config::EntityType::Person,
-    };
-    let session = read::open_org_lake(&d.env).map_err(|e| {
-        Box::new(detail_err(
-            StatusCode::SERVICE_UNAVAILABLE,
-            format!("lake unavailable: {e}"),
-        ))
-    })?;
-    Ok((session, entity_type))
-}
-
 /// Viewer+: a keyset page of the org's golden (resolved) records
 /// (`GET /v1/orgs/{org}/datasets/{ds}/golden-records`). Query: `q` (contains-search), `cursor`
 /// (opaque), `limit` (<=200). Reads the org's DuckLake at a pinned snapshot.
@@ -5564,65 +5547,78 @@ async fn golden_records_list(
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
     }
-    let (session, entity_type) = match dataset_lake_golden(&state, &org, &ds).await {
-        Ok(s) => s,
-        Err(r) => return *r,
+    let dataset = match dataset_for_lake(&state, &org, &ds).await {
+        Ok(dataset) => dataset,
+        Err(response) => return *response,
     };
-    let (snapshot, after) =
-        match read::page_start(&session, params.get("cursor").map(String::as_str)) {
-            Ok(x) => x,
-            Err(read::PageStartError::BadCursor) => {
-                return detail_err(StatusCode::UNPROCESSABLE_ENTITY, "invalid cursor");
-            }
-            Err(read::PageStartError::Lake(e)) => {
-                return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}"));
+    with_dataset_lake(dataset, move |session, dataset| {
+        let entity_type = match dataset.entity_type.as_str() {
+            "account" => er_config::EntityType::Account,
+            _ => er_config::EntityType::Person,
+        };
+        let (snapshot, after) =
+            match read::page_start(session, params.get("cursor").map(String::as_str)) {
+                Ok(x) => x,
+                Err(read::PageStartError::BadCursor) => {
+                    return detail_err(StatusCode::UNPROCESSABLE_ENTITY, "invalid cursor");
+                }
+                Err(read::PageStartError::Lake(e)) => {
+                    return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}"));
+                }
+            };
+        let limit = read::parse_limit(params.get("limit").map(String::as_str));
+        let page = match read::golden_arrow_page(
+            session,
+            entity_type,
+            snapshot,
+            params.get("q").map(String::as_str),
+            after.as_deref(),
+            limit,
+        ) {
+            Ok(p) => p,
+            Err(e) => {
+                return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}"));
             }
         };
-    let limit = read::parse_limit(params.get("limit").map(String::as_str));
-    let page = match read::golden_arrow_page(
-        &session,
-        entity_type,
-        snapshot,
-        params.get("q").map(String::as_str),
-        after.as_deref(),
-        limit,
-    ) {
-        Ok(p) => p,
-        Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
-    };
 
-    // Serialise the page as an Arrow IPC stream (schema message then batches); the
-    // snapshot and the next cursor travel in response headers.
-    let mut buf: Vec<u8> = Vec::new();
-    match arrow::ipc::writer::StreamWriter::try_new(&mut buf, &page.schema) {
-        Ok(mut writer) => {
-            for batch in &page.batches {
-                if let Err(e) = writer.write(batch) {
+        // Serialise the page as an Arrow IPC stream (schema message then batches); the
+        // snapshot and the next cursor travel in response headers.
+        let mut buf: Vec<u8> = Vec::new();
+        match arrow::ipc::writer::StreamWriter::try_new(&mut buf, &page.schema) {
+            Ok(mut writer) => {
+                for batch in &page.batches {
+                    if let Err(e) = writer.write(batch) {
+                        return detail_err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            format!("arrow: {e}"),
+                        );
+                    }
+                }
+                if let Err(e) = writer.finish() {
                     return detail_err(StatusCode::INTERNAL_SERVER_ERROR, format!("arrow: {e}"));
                 }
             }
-            if let Err(e) = writer.finish() {
-                return detail_err(StatusCode::INTERNAL_SERVER_ERROR, format!("arrow: {e}"));
-            }
+            Err(e) => return detail_err(StatusCode::INTERNAL_SERVER_ERROR, format!("arrow: {e}")),
         }
-        Err(e) => return detail_err(StatusCode::INTERNAL_SERVER_ERROR, format!("arrow: {e}")),
-    }
 
-    let mut response = axum::response::Response::new(axum::body::Body::from(buf));
-    let headers = response.headers_mut();
-    headers.insert(
-        axum::http::header::CONTENT_TYPE,
-        axum::http::HeaderValue::from_static("application/vnd.apache.arrow.stream"),
-    );
-    if let Ok(v) = axum::http::HeaderValue::from_str(&snapshot.to_string()) {
-        headers.insert("x-er-snapshot", v);
-    }
-    if let Some(cursor) = &page.next_cursor
-        && let Ok(v) = axum::http::HeaderValue::from_str(cursor)
-    {
-        headers.insert("x-er-next-cursor", v);
-    }
-    response
+        let mut response = axum::response::Response::new(axum::body::Body::from(buf));
+        let headers = response.headers_mut();
+        headers.insert(
+            axum::http::header::CONTENT_TYPE,
+            axum::http::HeaderValue::from_static("application/vnd.apache.arrow.stream"),
+        );
+        if let Ok(v) = axum::http::HeaderValue::from_str(&snapshot.to_string()) {
+            headers.insert("x-er-snapshot", v);
+        }
+        if let Some(cursor) = &page.next_cursor
+            && let Ok(v) = axum::http::HeaderValue::from_str(cursor)
+        {
+            headers.insert("x-er-next-cursor", v);
+        }
+        response
+    })
+    .await
+    .unwrap_or_else(|response| *response)
 }
 
 /// The optional point in history a golden read is taken at (O12c).
@@ -5652,22 +5648,30 @@ async fn golden_record_detail(
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
     }
-    let (session, entity_type) = match dataset_lake_golden(&state, &org, &ds).await {
-        Ok(s) => s,
-        Err(r) => return *r,
+    let dataset = match dataset_for_lake(&state, &org, &ds).await {
+        Ok(dataset) => dataset,
+        Err(response) => return *response,
     };
-    let snapshot = match query.snapshot {
-        Some(pinned) => pinned,
-        None => match read::latest_snapshot(&session) {
-            Ok(s) => s,
-            Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}")),
-        },
-    };
-    match read::entity_detail(&session, entity_type, snapshot, &entity_id) {
-        Ok(Some(detail)) => Json(detail).into_response(),
-        Ok(None) => detail_err(StatusCode::NOT_FOUND, format!("no entity '{entity_id}'")),
-        Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
-    }
+    with_dataset_lake(dataset, move |session, dataset| {
+        let entity_type = match dataset.entity_type.as_str() {
+            "account" => er_config::EntityType::Account,
+            _ => er_config::EntityType::Person,
+        };
+        let snapshot = match query.snapshot {
+            Some(pinned) => pinned,
+            None => match read::latest_snapshot(session) {
+                Ok(s) => s,
+                Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}")),
+            },
+        };
+        match read::entity_detail(session, entity_type, snapshot, &entity_id) {
+            Ok(Some(detail)) => Json(detail).into_response(),
+            Ok(None) => detail_err(StatusCode::NOT_FOUND, format!("no entity '{entity_id}'")),
+            Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
+        }
+    })
+    .await
+    .unwrap_or_else(|response| *response)
 }
 
 /// Viewer+: dashboard counters over the org's lake (`GET /v1/orgs/{org}/datasets/{ds}/metrics`).
@@ -5679,18 +5683,22 @@ async fn org_metrics(
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
     }
-    let session = match dataset_lake(&state, &org, &ds).await {
-        Ok(s) => s,
-        Err(r) => return *r,
+    let dataset = match dataset_for_lake(&state, &org, &ds).await {
+        Ok(dataset) => dataset,
+        Err(response) => return *response,
     };
-    let snapshot = match read::latest_snapshot(&session) {
-        Ok(s) => s,
-        Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}")),
-    };
-    match read::metrics(&session, snapshot) {
-        Ok(m) => Json(m).into_response(),
-        Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
-    }
+    with_dataset_lake(dataset, move |session, _dataset| {
+        let snapshot = match read::latest_snapshot(session) {
+            Ok(s) => s,
+            Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}")),
+        };
+        match read::metrics(session, snapshot) {
+            Ok(m) => Json(m).into_response(),
+            Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
+        }
+    })
+    .await
+    .unwrap_or_else(|response| *response)
 }
 
 /// Viewer+: data-quality scores over the org's lake
@@ -5710,18 +5718,22 @@ async fn org_data_quality(
         .and_then(|s| s.parse::<i64>().ok())
         .unwrap_or(365)
         .clamp(1, 36_500);
-    let session = match dataset_lake(&state, &org, &ds).await {
-        Ok(s) => s,
-        Err(r) => return *r,
+    let dataset = match dataset_for_lake(&state, &org, &ds).await {
+        Ok(dataset) => dataset,
+        Err(response) => return *response,
     };
-    let snapshot = match read::latest_snapshot(&session) {
-        Ok(s) => s,
-        Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}")),
-    };
-    match read::data_quality(&session, snapshot, stale_days) {
-        Ok(m) => Json(m).into_response(),
-        Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
-    }
+    with_dataset_lake(dataset, move |session, _dataset| {
+        let snapshot = match read::latest_snapshot(session) {
+            Ok(s) => s,
+            Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}")),
+        };
+        match read::data_quality(session, snapshot, stale_days) {
+            Ok(m) => Json(m).into_response(),
+            Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
+        }
+    })
+    .await
+    .unwrap_or_else(|response| *response)
 }
 
 /// Viewer+: duplicate groups (entities with >=2 members)
@@ -5739,20 +5751,10 @@ async fn duplicates_list(
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
     }
-    let (session, entity_type) = match dataset_lake_golden(&state, &org, &ds).await {
-        Ok(sv) => sv,
-        Err(r) => return *r,
+    let dataset = match dataset_for_lake(&state, &org, &ds).await {
+        Ok(dataset) => dataset,
+        Err(response) => return *response,
     };
-    let (snapshot, after) =
-        match read::page_start(&session, params.get("cursor").map(String::as_str)) {
-            Ok(x) => x,
-            Err(read::PageStartError::BadCursor) => {
-                return detail_err(StatusCode::UNPROCESSABLE_ENTITY, "invalid cursor");
-            }
-            Err(read::PageStartError::Lake(e)) => {
-                return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}"));
-            }
-        };
     let limit = read::parse_limit(params.get("limit").map(String::as_str));
     let number = |key: &str| params.get(key).and_then(|v| v.trim().parse::<i64>().ok());
     let text = |key: &str| {
@@ -5797,25 +5799,6 @@ async fn duplicates_list(
             StatusCode::UNPROCESSABLE_ENTITY,
             format!("min_confidence {lo} is above max_confidence {hi}; the band is empty"),
         );
-    }
-    // The member-record search: resolve the key to its entity and pin the
-    // list to it, so the group payload is assembled identically on both
-    // paths. An unknown key is an empty result, not an error.
-    if let Some(member) = text("member") {
-        match read::entity_of_record_key(&session, snapshot, &member) {
-            Ok(Some(entity)) => filters.only_entity = Some(entity),
-            Ok(None) => {
-                return Json(json!({
-                    "items": [],
-                    "snapshot": snapshot,
-                    "next_cursor": null,
-                }))
-                .into_response();
-            }
-            Err(e) => {
-                return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}"));
-            }
-        }
     }
     // Tag include/exclude: the taggings live in the control-plane Postgres,
     // so these are the one filter dimension that leaves the lake. Resolved
@@ -5877,22 +5860,60 @@ async fn duplicates_list(
             *slot = Some(ids);
         }
     }
-    match read::duplicates(
-        &session,
-        entity_type,
-        snapshot,
-        after.as_deref(),
-        &filters,
-        limit,
-    ) {
-        Ok((items, next_cursor)) => Json(json!({
-            "items": items,
-            "snapshot": snapshot,
-            "next_cursor": next_cursor,
-        }))
-        .into_response(),
-        Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
-    }
+    let member = text("member");
+    with_dataset_lake(dataset, move |session, dataset| {
+        let entity_type = match dataset.entity_type.as_str() {
+            "account" => er_config::EntityType::Account,
+            _ => er_config::EntityType::Person,
+        };
+        let (snapshot, after) =
+            match read::page_start(session, params.get("cursor").map(String::as_str)) {
+                Ok(x) => x,
+                Err(read::PageStartError::BadCursor) => {
+                    return detail_err(StatusCode::UNPROCESSABLE_ENTITY, "invalid cursor");
+                }
+                Err(read::PageStartError::Lake(e)) => {
+                    return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}"));
+                }
+            };
+        // The member-record search: resolve the key to its entity and pin the
+        // list to it, so the group payload is assembled identically on both
+        // paths. An unknown key is an empty result, not an error.
+        if let Some(member) = member {
+            match read::entity_of_record_key(session, snapshot, &member) {
+                Ok(Some(entity)) => filters.only_entity = Some(entity),
+                Ok(None) => {
+                    return Json(json!({
+                        "items": [],
+                        "snapshot": snapshot,
+                        "next_cursor": null,
+                    }))
+                    .into_response();
+                }
+                Err(e) => {
+                    return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}"));
+                }
+            }
+        }
+        match read::duplicates(
+            session,
+            entity_type,
+            snapshot,
+            after.as_deref(),
+            &filters,
+            limit,
+        ) {
+            Ok((items, next_cursor)) => Json(json!({
+                "items": items,
+                "snapshot": snapshot,
+                "next_cursor": next_cursor,
+            }))
+            .into_response(),
+            Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
+        }
+    })
+    .await
+    .unwrap_or_else(|response| *response)
 }
 
 /// Viewer+: one run's per-source duplicate attribution
@@ -5910,40 +5931,46 @@ async fn insight_sources(
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
     }
-    let session = match dataset_lake(&state, &org, &ds).await {
-        Ok(s) => s,
-        Err(r) => return *r,
+    let dataset = match dataset_for_lake(&state, &org, &ds).await {
+        Ok(dataset) => dataset,
+        Err(response) => return *response,
     };
-    let snapshot = match read::latest_snapshot(&session) {
-        Ok(s) => s,
-        Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}")),
-    };
-    // Default to the newest run rather than making the caller know one:
-    // "which source is causing this" is a question asked about now.
-    let run_id = match params.get("run_id").map(String::as_str) {
-        Some(id) if !id.is_empty() => id.to_string(),
-        _ => match read::insights(&session, snapshot, 1) {
-            Ok(series) => match series.first().and_then(|r| r["run_id"].as_str()) {
-                Some(id) => id.to_string(),
-                None => {
-                    return Json(json!({ "snapshot": snapshot, "run_id": null, "sources": [] }))
+    with_dataset_lake(dataset, move |session, _dataset| {
+        let snapshot = match read::latest_snapshot(session) {
+            Ok(s) => s,
+            Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}")),
+        };
+        // Default to the newest run rather than making the caller know one:
+        // "which source is causing this" is a question asked about now.
+        let run_id = match params.get("run_id").map(String::as_str) {
+            Some(id) if !id.is_empty() => id.to_string(),
+            _ => match read::insights(session, snapshot, 1) {
+                Ok(series) => match series.first().and_then(|r| r["run_id"].as_str()) {
+                    Some(id) => id.to_string(),
+                    None => {
+                        return Json(
+                            json!({ "snapshot": snapshot, "run_id": null, "sources": [] }),
+                        )
                         .into_response();
+                    }
+                },
+                Err(e) => {
+                    return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}"));
                 }
             },
-            Err(e) => {
-                return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}"));
-            }
-        },
-    };
-    match read::insight_sources(&session, snapshot, &run_id) {
-        Ok(sources) => Json(json!({
-            "snapshot": snapshot,
-            "run_id": run_id,
-            "sources": sources,
-        }))
-        .into_response(),
-        Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
-    }
+        };
+        match read::insight_sources(session, snapshot, &run_id) {
+            Ok(sources) => Json(json!({
+                "snapshot": snapshot,
+                "run_id": run_id,
+                "sources": sources,
+            }))
+            .into_response(),
+            Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
+        }
+    })
+    .await
+    .unwrap_or_else(|response| *response)
 }
 
 /// Viewer+: the resolution metrics over time (`GET /v1/orgs/{org}/datasets/{ds}/insights`).
@@ -5963,24 +5990,28 @@ async fn insights(
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
     }
-    let session = match dataset_lake(&state, &org, &ds).await {
-        Ok(s) => s,
-        Err(r) => return *r,
+    let dataset = match dataset_for_lake(&state, &org, &ds).await {
+        Ok(dataset) => dataset,
+        Err(response) => return *response,
     };
-    let snapshot = match read::page_start(&session, None) {
-        Ok((snap, _)) => snap,
-        Err(read::PageStartError::BadCursor) => {
-            return detail_err(StatusCode::UNPROCESSABLE_ENTITY, "invalid cursor");
+    with_dataset_lake(dataset, move |session, _dataset| {
+        let snapshot = match read::page_start(session, None) {
+            Ok((snap, _)) => snap,
+            Err(read::PageStartError::BadCursor) => {
+                return detail_err(StatusCode::UNPROCESSABLE_ENTITY, "invalid cursor");
+            }
+            Err(read::PageStartError::Lake(e)) => {
+                return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}"));
+            }
+        };
+        let limit = read::parse_limit(params.get("limit").map(String::as_str));
+        match read::insights(session, snapshot, limit) {
+            Ok(series) => Json(json!({ "snapshot": snapshot, "series": series })).into_response(),
+            Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
         }
-        Err(read::PageStartError::Lake(e)) => {
-            return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}"));
-        }
-    };
-    let limit = read::parse_limit(params.get("limit").map(String::as_str));
-    match read::insights(&session, snapshot, limit) {
-        Ok(series) => Json(json!({ "snapshot": snapshot, "series": series })).into_response(),
-        Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
-    }
+    })
+    .await
+    .unwrap_or_else(|response| *response)
 }
 
 /// Viewer+: the corpus's data-quality picture (`GET /v1/orgs/{org}/datasets/{ds}/quality`).
@@ -6000,24 +6031,28 @@ async fn quality(
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
     }
-    let session = match dataset_lake(&state, &org, &ds).await {
-        Ok(s) => s,
-        Err(r) => return *r,
+    let dataset = match dataset_for_lake(&state, &org, &ds).await {
+        Ok(dataset) => dataset,
+        Err(response) => return *response,
     };
-    let snapshot = match read::page_start(&session, None) {
-        Ok((snap, _)) => snap,
-        Err(read::PageStartError::BadCursor) => {
-            return detail_err(StatusCode::UNPROCESSABLE_ENTITY, "invalid cursor");
+    with_dataset_lake(dataset, move |session, _dataset| {
+        let snapshot = match read::page_start(session, None) {
+            Ok((snap, _)) => snap,
+            Err(read::PageStartError::BadCursor) => {
+                return detail_err(StatusCode::UNPROCESSABLE_ENTITY, "invalid cursor");
+            }
+            Err(read::PageStartError::Lake(e)) => {
+                return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}"));
+            }
+        };
+        let limit = read::parse_limit(params.get("limit").map(String::as_str));
+        match read::quality(session, snapshot, limit) {
+            Ok(body) => Json(body).into_response(),
+            Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
         }
-        Err(read::PageStartError::Lake(e)) => {
-            return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}"));
-        }
-    };
-    let limit = read::parse_limit(params.get("limit").map(String::as_str));
-    match read::quality(&session, snapshot, limit) {
-        Ok(body) => Json(body).into_response(),
-        Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
-    }
+    })
+    .await
+    .unwrap_or_else(|response| *response)
 }
 
 /// Viewer+: a corpus stage's profile
@@ -6063,35 +6098,39 @@ async fn dataset_profile(
         // is one a job could actually run.
         Err(message) => return detail_err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
-    let session = match dataset_lake(&state, &org, &ds).await {
-        Ok(s) => s,
-        Err(r) => return *r,
+    let dataset = match dataset_for_lake(&state, &org, &ds).await {
+        Ok(dataset) => dataset,
+        Err(response) => return *response,
     };
-    let snapshot = match read::page_start(&session, None) {
-        Ok((snap, _)) => snap,
-        Err(read::PageStartError::BadCursor) => {
-            return detail_err(StatusCode::UNPROCESSABLE_ENTITY, "invalid cursor");
+    with_dataset_lake(dataset, move |session, _dataset| {
+        let snapshot = match read::page_start(session, None) {
+            Ok((snap, _)) => snap,
+            Err(read::PageStartError::BadCursor) => {
+                return detail_err(StatusCode::UNPROCESSABLE_ENTITY, "invalid cursor");
+            }
+            Err(read::PageStartError::Lake(e)) => {
+                return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}"));
+            }
+        };
+        let source_system = request
+            .source
+            .clone()
+            .unwrap_or_else(|| er_cli::profile::NO_SOURCE.to_string());
+        let include_values = guard(&principal, &org, Role::Steward).is_ok();
+        match read::profile(
+            session,
+            snapshot,
+            request.subject.as_str(),
+            &source_system,
+            request.tier,
+            include_values,
+        ) {
+            Ok(body) => Json(body).into_response(),
+            Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
         }
-        Err(read::PageStartError::Lake(e)) => {
-            return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}"));
-        }
-    };
-    let source_system = request
-        .source
-        .clone()
-        .unwrap_or_else(|| er_cli::profile::NO_SOURCE.to_string());
-    let include_values = guard(&principal, &org, Role::Steward).is_ok();
-    match read::profile(
-        &session,
-        snapshot,
-        request.subject.as_str(),
-        &source_system,
-        request.tier,
-        include_values,
-    ) {
-        Ok(body) => Json(body).into_response(),
-        Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
-    }
+    })
+    .await
+    .unwrap_or_else(|response| *response)
 }
 
 /// Steward+: profile a corpus stage
@@ -6172,39 +6211,43 @@ async fn match_scores_list(
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
     }
-    let session = match dataset_lake(&state, &org, &ds).await {
-        Ok(s) => s,
-        Err(r) => return *r,
+    let dataset = match dataset_for_lake(&state, &org, &ds).await {
+        Ok(dataset) => dataset,
+        Err(response) => return *response,
     };
-    let (snapshot, after) =
-        match read::page_start(&session, params.get("cursor").map(String::as_str)) {
-            Ok(x) => x,
-            Err(read::PageStartError::BadCursor) => {
-                return detail_err(StatusCode::UNPROCESSABLE_ENTITY, "invalid cursor");
-            }
-            Err(read::PageStartError::Lake(e)) => {
-                return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}"));
-            }
-        };
-    let limit = read::parse_limit(params.get("limit").map(String::as_str));
-    let band_low = read::parse_f64(params.get("band_low").map(String::as_str));
-    let band_high = read::parse_f64(params.get("band_high").map(String::as_str));
-    match read::match_scores_list(
-        &session,
-        snapshot,
-        after.as_deref(),
-        band_low,
-        band_high,
-        limit,
-    ) {
-        Ok((items, next_cursor)) => Json(json!({
-            "items": items,
-            "snapshot": snapshot,
-            "next_cursor": next_cursor,
-        }))
-        .into_response(),
-        Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
-    }
+    with_dataset_lake(dataset, move |session, _dataset| {
+        let (snapshot, after) =
+            match read::page_start(session, params.get("cursor").map(String::as_str)) {
+                Ok(x) => x,
+                Err(read::PageStartError::BadCursor) => {
+                    return detail_err(StatusCode::UNPROCESSABLE_ENTITY, "invalid cursor");
+                }
+                Err(read::PageStartError::Lake(e)) => {
+                    return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}"));
+                }
+            };
+        let limit = read::parse_limit(params.get("limit").map(String::as_str));
+        let band_low = read::parse_f64(params.get("band_low").map(String::as_str));
+        let band_high = read::parse_f64(params.get("band_high").map(String::as_str));
+        match read::match_scores_list(
+            session,
+            snapshot,
+            after.as_deref(),
+            band_low,
+            band_high,
+            limit,
+        ) {
+            Ok((items, next_cursor)) => Json(json!({
+                "items": items,
+                "snapshot": snapshot,
+                "next_cursor": next_cursor,
+            }))
+            .into_response(),
+            Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
+        }
+    })
+    .await
+    .unwrap_or_else(|response| *response)
 }
 
 /// Viewer+: what to label next (`GET /v1/orgs/{org}/datasets/{ds}/labeling/next`).
@@ -6261,47 +6304,51 @@ async fn labeling_next(
         .map(|l| (l.rec_a_key.clone(), l.rec_b_key.clone()))
         .collect();
 
-    let session = match dataset_lake(&state, &org, &ds).await {
-        Ok(s) => s,
-        Err(r) => return *r,
+    let dataset = match dataset_for_lake(&state, &org, &ds).await {
+        Ok(dataset) => dataset,
+        Err(response) => return *response,
     };
-    let snapshot = match read::page_start(&session, None) {
-        Ok((snap, _)) => snap,
-        Err(read::PageStartError::BadCursor) => {
-            return detail_err(StatusCode::UNPROCESSABLE_ENTITY, "invalid cursor");
+    with_dataset_lake(dataset, move |session, _dataset| {
+        let snapshot = match read::page_start(session, None) {
+            Ok((snap, _)) => snap,
+            Err(read::PageStartError::BadCursor) => {
+                return detail_err(StatusCode::UNPROCESSABLE_ENTITY, "invalid cursor");
+            }
+            Err(read::PageStartError::Lake(e)) => {
+                return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}"));
+            }
+        };
+        // The gray band is where a label is worth having: above `auto_merge` the
+        // engine merges without asking and below `review_low` it never scored the
+        // pair at all, so neither end teaches it anything. A caller may narrow
+        // further but not widen past what was scored.
+        let threshold = config.thresholds.auto_merge;
+        let band_low = read::parse_f64(params.get("min").map(String::as_str))
+            .unwrap_or(config.thresholds.review_low)
+            .max(config.thresholds.review_low);
+        let band_high = read::parse_f64(params.get("max").map(String::as_str)).unwrap_or(1.0);
+        let limit = read::parse_limit(params.get("limit").map(String::as_str));
+        match read::uncertain_pairs(
+            session,
+            snapshot,
+            threshold,
+            (band_low, band_high),
+            &labelled,
+            limit,
+        ) {
+            Ok(items) => Json(json!({
+                "items": items,
+                "snapshot": snapshot,
+                "threshold": threshold,
+                "band": { "min": band_low, "max": band_high },
+                "coverage": coverage,
+            }))
+            .into_response(),
+            Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
         }
-        Err(read::PageStartError::Lake(e)) => {
-            return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}"));
-        }
-    };
-    // The gray band is where a label is worth having: above `auto_merge` the
-    // engine merges without asking and below `review_low` it never scored the
-    // pair at all, so neither end teaches it anything. A caller may narrow
-    // further but not widen past what was scored.
-    let threshold = config.thresholds.auto_merge;
-    let band_low = read::parse_f64(params.get("min").map(String::as_str))
-        .unwrap_or(config.thresholds.review_low)
-        .max(config.thresholds.review_low);
-    let band_high = read::parse_f64(params.get("max").map(String::as_str)).unwrap_or(1.0);
-    let limit = read::parse_limit(params.get("limit").map(String::as_str));
-    match read::uncertain_pairs(
-        &session,
-        snapshot,
-        threshold,
-        (band_low, band_high),
-        &labelled,
-        limit,
-    ) {
-        Ok(items) => Json(json!({
-            "items": items,
-            "snapshot": snapshot,
-            "threshold": threshold,
-            "band": { "min": band_low, "max": band_high },
-            "coverage": coverage,
-        }))
-        .into_response(),
-        Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
-    }
+    })
+    .await
+    .unwrap_or_else(|response| *response)
 }
 
 /// How much labelled signal a tenant has, split by verdict and origin.
@@ -6897,19 +6944,23 @@ async fn records_by_key(
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
     }
-    let session = match dataset_lake(&state, &org, &ds).await {
-        Ok(s) => s,
-        Err(r) => return *r,
+    let dataset = match dataset_for_lake(&state, &org, &ds).await {
+        Ok(dataset) => dataset,
+        Err(response) => return *response,
     };
-    let snapshot = match read::latest_snapshot(&session) {
-        Ok(s) => s,
-        Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}")),
-    };
-    let keys = read::keys_from_query(query.as_deref());
-    match read::records_by_key(&session, snapshot, &keys) {
-        Ok(items) => Json(json!({ "items": items, "snapshot": snapshot })).into_response(),
-        Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
-    }
+    with_dataset_lake(dataset, move |session, _dataset| {
+        let snapshot = match read::latest_snapshot(session) {
+            Ok(s) => s,
+            Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}")),
+        };
+        let keys = read::keys_from_query(query.as_deref());
+        match read::records_by_key(session, snapshot, &keys) {
+            Ok(items) => Json(json!({ "items": items, "snapshot": snapshot })).into_response(),
+            Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
+        }
+    })
+    .await
+    .unwrap_or_else(|response| *response)
 }
 
 /// Resolve `(snapshot, after)` from the `cursor` query param, or a ready error
@@ -6952,64 +7003,69 @@ async fn reviews_list(
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
     }
-    let session = match dataset_lake(&state, &org, &ds).await {
-        Ok(s) => s,
-        Err(r) => return *r,
+    let dataset = match dataset_for_lake(&state, &org, &ds).await {
+        Ok(dataset) => dataset,
+        Err(response) => return *response,
     };
-    let (snapshot, after) = match page_or_err(&session, params.get("cursor").map(String::as_str)) {
-        Ok(x) => x,
-        Err(r) => return *r,
-    };
-    let limit = read::parse_limit(params.get("limit").map(String::as_str));
-    // The confidence band (O6). A steward with a 40,000-item queue wants the
-    // high-confidence tail first — it clears fastest — and the queue was FIFO
-    // by id with no way to say so.
-    let probability = |key: &str| params.get(key).and_then(|v| v.trim().parse::<f64>().ok());
-    let text = |key: &str| {
-        params
-            .get(key)
-            .map(String::as_str)
-            .filter(|v| !v.trim().is_empty())
-    };
-    let filters = read::ReviewFilters {
-        status: text("status"),
-        reason: text("reason"),
-        min_probability: probability("min_probability"),
-        max_probability: probability("max_probability"),
-    };
-    let band = (filters.min_probability, filters.max_probability);
-    if let (Some(lo), Some(hi)) = band
-        && lo > hi
-    {
-        return detail_err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            format!("min_probability {lo} is above max_probability {hi}; the band is empty"),
-        );
-    }
-    let (items, next_cursor) =
-        match read::reviews_list(&session, snapshot, after.as_deref(), filters, limit) {
-            Ok(page) => page,
-            Err(e) => {
-                return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}"));
-            }
+    with_dataset_lake(dataset, move |session, _dataset| {
+        let (snapshot, after) = match page_or_err(session, params.get("cursor").map(String::as_str))
+        {
+            Ok(x) => x,
+            Err(r) => return *r,
         };
-    // What the band HIDES, reported rather than left to be discovered. A
-    // `never_unsatisfiable` escalation carries no probability (it is a
-    // structural contradiction, not a scored pair), so it is in no band — and
-    // it is the highest-priority item in the queue. Silently removing it behind
-    // a slider is how it goes unanswered forever.
-    let unscored_hidden = if band.0.is_some() || band.1.is_some() {
-        read::unscored_open_reviews(&session, snapshot).unwrap_or(0)
-    } else {
-        0
-    };
-    Json(json!({
-        "items": items,
-        "snapshot": snapshot,
-        "next_cursor": next_cursor,
-        "unscored_hidden": unscored_hidden,
-    }))
-    .into_response()
+        let limit = read::parse_limit(params.get("limit").map(String::as_str));
+        // The confidence band (O6). A steward with a 40,000-item queue wants the
+        // high-confidence tail first — it clears fastest — and the queue was FIFO
+        // by id with no way to say so.
+        let probability = |key: &str| params.get(key).and_then(|v| v.trim().parse::<f64>().ok());
+        let text = |key: &str| {
+            params
+                .get(key)
+                .map(String::as_str)
+                .filter(|v| !v.trim().is_empty())
+        };
+        let filters = read::ReviewFilters {
+            status: text("status"),
+            reason: text("reason"),
+            min_probability: probability("min_probability"),
+            max_probability: probability("max_probability"),
+        };
+        let band = (filters.min_probability, filters.max_probability);
+        if let (Some(lo), Some(hi)) = band
+            && lo > hi
+        {
+            return detail_err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                format!("min_probability {lo} is above max_probability {hi}; the band is empty"),
+            );
+        }
+        let (items, next_cursor) =
+            match read::reviews_list(session, snapshot, after.as_deref(), filters, limit) {
+                Ok(page) => page,
+                Err(e) => {
+                    return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}"));
+                }
+            };
+        // What the band HIDES, reported rather than left to be discovered. A
+        // `never_unsatisfiable` escalation carries no probability (it is a
+        // structural contradiction, not a scored pair), so it is in no band — and
+        // it is the highest-priority item in the queue. Silently removing it behind
+        // a slider is how it goes unanswered forever.
+        let unscored_hidden = if band.0.is_some() || band.1.is_some() {
+            read::unscored_open_reviews(session, snapshot).unwrap_or(0)
+        } else {
+            0
+        };
+        Json(json!({
+            "items": items,
+            "snapshot": snapshot,
+            "next_cursor": next_cursor,
+            "unscored_hidden": unscored_hidden,
+        }))
+        .into_response()
+    })
+    .await
+    .unwrap_or_else(|response| *response)
 }
 
 /// Viewer+: one review by id (`GET /v1/orgs/{org}/datasets/{ds}/reviews/{review_id}`), 404 if absent.
@@ -7021,19 +7077,23 @@ async fn review_detail(
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
     }
-    let session = match dataset_lake(&state, &org, &ds).await {
-        Ok(s) => s,
-        Err(r) => return *r,
+    let dataset = match dataset_for_lake(&state, &org, &ds).await {
+        Ok(dataset) => dataset,
+        Err(response) => return *response,
     };
-    let snapshot = match read::latest_snapshot(&session) {
-        Ok(s) => s,
-        Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}")),
-    };
-    match read::review_get(&session, snapshot, &review_id) {
-        Ok(Some(r)) => Json(r).into_response(),
-        Ok(None) => detail_err(StatusCode::NOT_FOUND, format!("no review '{review_id}'")),
-        Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
-    }
+    with_dataset_lake(dataset, move |session, _dataset| {
+        let snapshot = match read::latest_snapshot(session) {
+            Ok(s) => s,
+            Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}")),
+        };
+        match read::review_get(session, snapshot, &review_id) {
+            Ok(Some(r)) => Json(r).into_response(),
+            Ok(None) => detail_err(StatusCode::NOT_FOUND, format!("no review '{review_id}'")),
+            Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
+        }
+    })
+    .await
+    .unwrap_or_else(|response| *response)
 }
 
 /// Viewer+: the review merge dialog's group
@@ -7048,25 +7108,30 @@ async fn review_merge_group(
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
     }
-    let session = match dataset_lake(&state, &org, &ds).await {
-        Ok(s) => s,
-        Err(r) => return *r,
+    let dataset = match dataset_for_lake(&state, &org, &ds).await {
+        Ok(dataset) => dataset,
+        Err(response) => return *response,
     };
-    let snapshot = match read::latest_snapshot(&session) {
-        Ok(s) => s,
-        Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}")),
-    };
-    match read::merge_group(&session, snapshot, &review_id) {
-        Ok(Some(read::MergeGroup::Group { items, total })) => {
-            Json(json!({ "items": items, "total": total, "snapshot": snapshot })).into_response()
+    with_dataset_lake(dataset, move |session, _dataset| {
+        let snapshot = match read::latest_snapshot(session) {
+            Ok(s) => s,
+            Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}")),
+        };
+        match read::merge_group(session, snapshot, &review_id) {
+            Ok(Some(read::MergeGroup::Group { items, total })) => {
+                Json(json!({ "items": items, "total": total, "snapshot": snapshot }))
+                    .into_response()
+            }
+            Ok(Some(read::MergeGroup::NoPair)) => detail_err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "this review is about an entity rather than a pair of records",
+            ),
+            Ok(None) => detail_err(StatusCode::NOT_FOUND, format!("no review '{review_id}'")),
+            Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
         }
-        Ok(Some(read::MergeGroup::NoPair)) => detail_err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "this review is about an entity rather than a pair of records",
-        ),
-        Ok(None) => detail_err(StatusCode::NOT_FOUND, format!("no review '{review_id}'")),
-        Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
-    }
+    })
+    .await
+    .unwrap_or_else(|response| *response)
 }
 
 /// Viewer+: the assertion ledger (`GET /v1/orgs/{org}/datasets/{ds}/assertions`), active-only
@@ -7080,26 +7145,31 @@ async fn assertions_list(
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
     }
-    let session = match dataset_lake(&state, &org, &ds).await {
-        Ok(s) => s,
-        Err(r) => return *r,
+    let dataset = match dataset_for_lake(&state, &org, &ds).await {
+        Ok(dataset) => dataset,
+        Err(response) => return *response,
     };
-    let (snapshot, after) = match page_or_err(&session, params.get("cursor").map(String::as_str)) {
-        Ok(x) => x,
-        Err(r) => return *r,
-    };
-    let include_retracted = matches!(
-        params.get("include_retracted").map(String::as_str),
-        Some("true" | "1")
-    );
-    let limit = read::parse_limit(params.get("limit").map(String::as_str));
-    page_envelope(read::assertions_list(
-        &session,
-        snapshot,
-        include_retracted,
-        after.as_deref(),
-        limit,
-    ))
+    with_dataset_lake(dataset, move |session, _dataset| {
+        let (snapshot, after) = match page_or_err(session, params.get("cursor").map(String::as_str))
+        {
+            Ok(x) => x,
+            Err(r) => return *r,
+        };
+        let include_retracted = matches!(
+            params.get("include_retracted").map(String::as_str),
+            Some("true" | "1")
+        );
+        let limit = read::parse_limit(params.get("limit").map(String::as_str));
+        page_envelope(read::assertions_list(
+            session,
+            snapshot,
+            include_retracted,
+            after.as_deref(),
+            limit,
+        ))
+    })
+    .await
+    .unwrap_or_else(|response| *response)
 }
 
 /// The upload cap, mirrored client-side by the BFF so an oversize file fails
@@ -7689,22 +7759,27 @@ async fn imports_list(
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
     }
-    let session = match dataset_lake(&state, &org, &ds).await {
-        Ok(s) => s,
-        Err(r) => return *r,
+    let dataset = match dataset_for_lake(&state, &org, &ds).await {
+        Ok(dataset) => dataset,
+        Err(response) => return *response,
     };
-    let (snapshot, after) = match page_or_err(&session, params.get("cursor").map(String::as_str)) {
-        Ok(x) => x,
-        Err(r) => return *r,
-    };
-    let limit = read::parse_limit(params.get("limit").map(String::as_str));
-    page_envelope(read::imports_list(
-        &session,
-        snapshot,
-        params.get("source").map(String::as_str),
-        after.as_deref(),
-        limit,
-    ))
+    with_dataset_lake(dataset, move |session, _dataset| {
+        let (snapshot, after) = match page_or_err(session, params.get("cursor").map(String::as_str))
+        {
+            Ok(x) => x,
+            Err(r) => return *r,
+        };
+        let limit = read::parse_limit(params.get("limit").map(String::as_str));
+        page_envelope(read::imports_list(
+            session,
+            snapshot,
+            params.get("source").map(String::as_str),
+            after.as_deref(),
+            limit,
+        ))
+    })
+    .await
+    .unwrap_or_else(|response| *response)
 }
 
 /// Viewer+: the most recent ingest-batch receipts
@@ -7726,24 +7801,28 @@ async fn imports_recent(
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
     }
-    let session = match dataset_lake(&state, &org, &ds).await {
-        Ok(s) => s,
-        Err(r) => return *r,
+    let dataset = match dataset_for_lake(&state, &org, &ds).await {
+        Ok(dataset) => dataset,
+        Err(response) => return *response,
     };
-    let snapshot = match read::latest_snapshot(&session) {
-        Ok(s) => s,
-        Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}")),
-    };
-    let limit = read::parse_limit(params.get("limit").map(String::as_str));
-    match read::imports_recent(
-        &session,
-        snapshot,
-        params.get("source").map(String::as_str),
-        limit,
-    ) {
-        Ok(items) => Json(json!(items)).into_response(),
-        Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
-    }
+    with_dataset_lake(dataset, move |session, _dataset| {
+        let snapshot = match read::latest_snapshot(session) {
+            Ok(s) => s,
+            Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}")),
+        };
+        let limit = read::parse_limit(params.get("limit").map(String::as_str));
+        match read::imports_recent(
+            session,
+            snapshot,
+            params.get("source").map(String::as_str),
+            limit,
+        ) {
+            Ok(items) => Json(json!(items)).into_response(),
+            Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
+        }
+    })
+    .await
+    .unwrap_or_else(|response| *response)
 }
 
 /// Viewer+: this tenant's auto-ingest state
@@ -7821,18 +7900,23 @@ async fn runs_list(
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
     }
-    let (session, auto_merge) = match dataset_lake_auto_merge(&state, &org, &ds).await {
-        Ok(pair) => pair,
-        Err(r) => return *r,
+    let dataset = match dataset_for_lake(&state, &org, &ds).await {
+        Ok(dataset) => dataset,
+        Err(response) => return *response,
     };
-    let snapshot = match read::latest_snapshot(&session) {
-        Ok(s) => s,
-        Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}")),
-    };
-    match read::runs_list(&session, snapshot, auto_merge) {
-        Ok(items) => Json(json!(items)).into_response(),
-        Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
-    }
+    with_dataset_lake(dataset, move |session, dataset| {
+        let auto_merge = auto_merge_from_env(&dataset.env);
+        let snapshot = match read::latest_snapshot(session) {
+            Ok(s) => s,
+            Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}")),
+        };
+        match read::runs_list(session, snapshot, auto_merge) {
+            Ok(items) => Json(json!(items)).into_response(),
+            Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
+        }
+    })
+    .await
+    .unwrap_or_else(|response| *response)
 }
 
 /// Viewer+: one run's entity events
@@ -7854,41 +7938,45 @@ async fn run_entity_events(
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
     }
-    let session = match dataset_lake(&state, &org, &ds).await {
-        Ok(s) => s,
-        Err(r) => return *r,
+    let dataset = match dataset_for_lake(&state, &org, &ds).await {
+        Ok(dataset) => dataset,
+        Err(response) => return *response,
     };
-    let (snapshot, after) =
-        match read::page_start(&session, params.get("cursor").map(String::as_str)) {
-            Ok(x) => x,
-            Err(read::PageStartError::BadCursor) => {
-                return detail_err(StatusCode::UNPROCESSABLE_ENTITY, "invalid cursor");
-            }
-            Err(read::PageStartError::Lake(e)) => {
-                return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}"));
-            }
-        };
-    let limit = read::parse_limit(params.get("limit").map(String::as_str));
-    match read::entity_events_by_run(
-        &session,
-        snapshot,
-        &run_id,
-        params
-            .get("event_type")
-            .map(String::as_str)
-            .filter(|v| !v.is_empty()),
-        after.as_deref(),
-        limit,
-    ) {
-        Ok((items, next_cursor)) => Json(json!({
-            "items": items,
-            "run_id": run_id,
-            "snapshot": snapshot,
-            "next_cursor": next_cursor,
-        }))
-        .into_response(),
-        Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
-    }
+    with_dataset_lake(dataset, move |session, _dataset| {
+        let (snapshot, after) =
+            match read::page_start(session, params.get("cursor").map(String::as_str)) {
+                Ok(x) => x,
+                Err(read::PageStartError::BadCursor) => {
+                    return detail_err(StatusCode::UNPROCESSABLE_ENTITY, "invalid cursor");
+                }
+                Err(read::PageStartError::Lake(e)) => {
+                    return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}"));
+                }
+            };
+        let limit = read::parse_limit(params.get("limit").map(String::as_str));
+        match read::entity_events_by_run(
+            session,
+            snapshot,
+            &run_id,
+            params
+                .get("event_type")
+                .map(String::as_str)
+                .filter(|v| !v.is_empty()),
+            after.as_deref(),
+            limit,
+        ) {
+            Ok((items, next_cursor)) => Json(json!({
+                "items": items,
+                "run_id": run_id,
+                "snapshot": snapshot,
+                "next_cursor": next_cursor,
+            }))
+            .into_response(),
+            Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
+        }
+    })
+    .await
+    .unwrap_or_else(|response| *response)
 }
 
 /// Load an org's `source_system -> priority_rank` map from its active published
@@ -7946,32 +8034,39 @@ async fn merge_plans(
     } else {
         None
     };
-    let session = match dataset_lake(&state, &org, &ds).await {
-        Ok(s) => s,
-        Err(r) => return *r,
+    let policy = policy.to_owned();
+    let dataset = match dataset_for_lake(&state, &org, &ds).await {
+        Ok(dataset) => dataset,
+        Err(response) => return *response,
     };
-    let limit = read::parse_limit(params.get("limit").map(String::as_str));
-    let items = match read::merge_plans(
-        &session,
-        policy,
-        params.get("since").map(String::as_str),
-        source_ranks.as_ref(),
-        limit,
-    ) {
-        Ok(items) => items,
-        Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
-    };
-    if params.get("format").map(String::as_str) == Some("csv") {
-        let csv = read::merge_plans_csv(&items);
-        (
-            StatusCode::OK,
-            [(axum::http::header::CONTENT_TYPE, "text/csv; charset=utf-8")],
-            csv,
-        )
-            .into_response()
-    } else {
-        Json(json!({ "items": items })).into_response()
-    }
+    with_dataset_lake(dataset, move |session, _dataset| {
+        let limit = read::parse_limit(params.get("limit").map(String::as_str));
+        let items = match read::merge_plans(
+            session,
+            &policy,
+            params.get("since").map(String::as_str),
+            source_ranks.as_ref(),
+            limit,
+        ) {
+            Ok(items) => items,
+            Err(e) => {
+                return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}"));
+            }
+        };
+        if params.get("format").map(String::as_str) == Some("csv") {
+            let csv = read::merge_plans_csv(&items);
+            (
+                StatusCode::OK,
+                [(axum::http::header::CONTENT_TYPE, "text/csv; charset=utf-8")],
+                csv,
+            )
+                .into_response()
+        } else {
+            Json(json!({ "items": items })).into_response()
+        }
+    })
+    .await
+    .unwrap_or_else(|response| *response)
 }
 
 /// Job kinds that may be scheduled (`erserver.policy.SCHEDULABLE_KINDS`).
@@ -10009,32 +10104,37 @@ async fn assertions_contradictions(
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
     }
-    let session = match dataset_lake(&state, &org, &ds).await {
-        Ok(s) => s,
-        Err(r) => return *r,
+    let dataset = match dataset_for_lake(&state, &org, &ds).await {
+        Ok(dataset) => dataset,
+        Err(response) => return *response,
     };
-    let snapshot = match read::latest_snapshot(&session) {
-        Ok(s) => s,
-        Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}")),
-    };
-    let active = match read::active_assertions(&session, snapshot) {
-        Ok(a) => a,
-        Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}")),
-    };
-    let findings = er_reconcile::assertions::check_contradiction_1(&active_to_assertions(active));
-    let items: Vec<Value> = findings
-        .into_iter()
-        .map(|c| {
-            json!({
-                "rec_a_key": c.rec_a_key,
-                "rec_b_key": c.rec_b_key,
-                "never_assertion_id": c.never_assertion_id,
-                "always_assertion_ids": c.always_assertion_ids,
-                "component": c.component.into_iter().collect::<Vec<_>>(),
+    with_dataset_lake(dataset, move |session, _dataset| {
+        let snapshot = match read::latest_snapshot(session) {
+            Ok(s) => s,
+            Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}")),
+        };
+        let active = match read::active_assertions(session, snapshot) {
+            Ok(a) => a,
+            Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}")),
+        };
+        let findings =
+            er_reconcile::assertions::check_contradiction_1(&active_to_assertions(active));
+        let items: Vec<Value> = findings
+            .into_iter()
+            .map(|c| {
+                json!({
+                    "rec_a_key": c.rec_a_key,
+                    "rec_b_key": c.rec_b_key,
+                    "never_assertion_id": c.never_assertion_id,
+                    "always_assertion_ids": c.always_assertion_ids,
+                    "component": c.component.into_iter().collect::<Vec<_>>(),
+                })
             })
-        })
-        .collect();
-    Json(json!({ "contradictions": items })).into_response()
+            .collect();
+        Json(json!({ "contradictions": items })).into_response()
+    })
+    .await
+    .unwrap_or_else(|response| *response)
 }
 
 #[derive(Deserialize)]
@@ -10087,81 +10187,109 @@ async fn unmerge_entity(
 
     // Read the entity + active assertions from the lake (read-only) to pick the
     // kept representative and precheck the proposed never-rules.
-    let session = match dataset_lake(&state, &org, &ds).await {
-        Ok(s) => s,
-        Err(r) => return *r,
+    let dataset = match dataset_for_lake(&state, &org, &ds).await {
+        Ok(dataset) => dataset,
+        Err(response) => return *response,
     };
-    let snapshot = match read::latest_snapshot(&session) {
-        Ok(s) => s,
-        Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}")),
-    };
-    let members = match read::entity_member_keys(&session, snapshot, &entity_id) {
-        Ok(m) => m,
-        Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}")),
-    };
-    if members.is_empty() {
-        return detail_err(StatusCode::NOT_FOUND, format!("no entity '{entity_id}'"));
-    }
-    let member_set: BTreeSet<&str> = members.iter().map(String::as_str).collect();
-    // The requested records that are actually members, de-duplicated + ordered.
-    let marked: BTreeSet<String> = body
-        .records
-        .iter()
-        .filter(|r| member_set.contains(r.as_str()))
-        .cloned()
-        .collect();
-    if marked.is_empty() {
-        return detail_err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "none of records[] are members of this entity",
-        );
-    }
-    if marked.len() >= members.len() {
-        return detail_err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "cannot unmerge every member; keep at least one record in the entity",
-        );
-    }
-    // Representative = the smallest member being kept (members is ascending).
-    let representative = members
-        .iter()
-        .find(|m| !marked.contains(m.as_str()))
-        .expect("a kept member exists (marked is a strict subset)");
-    // One canonical never-pair per peeled record, against the representative.
-    let proposed: Vec<(String, String)> = marked
-        .iter()
-        .map(|m| canon_pair(m, representative))
-        .collect();
+    let read_entity_id = entity_id.clone();
+    let records = body.records;
+    let proposed = match with_dataset_lake(dataset, move |session, _dataset| {
+        let entity_id = read_entity_id;
+        let snapshot = match read::latest_snapshot(session) {
+            Ok(s) => s,
+            Err(e) => {
+                return Err(Box::new(detail_err(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    format!("lake: {e}"),
+                )));
+            }
+        };
+        let members = match read::entity_member_keys(session, snapshot, &entity_id) {
+            Ok(m) => m,
+            Err(e) => {
+                return Err(Box::new(detail_err(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    format!("lake: {e}"),
+                )));
+            }
+        };
+        if members.is_empty() {
+            return Err(Box::new(detail_err(
+                StatusCode::NOT_FOUND,
+                format!("no entity '{entity_id}'"),
+            )));
+        }
+        let member_set: BTreeSet<&str> = members.iter().map(String::as_str).collect();
+        // The requested records that are actually members, de-duplicated + ordered.
+        let marked: BTreeSet<String> = records
+            .iter()
+            .filter(|r| member_set.contains(r.as_str()))
+            .cloned()
+            .collect();
+        if marked.is_empty() {
+            return Err(Box::new(detail_err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "none of records[] are members of this entity",
+            )));
+        }
+        if marked.len() >= members.len() {
+            return Err(Box::new(detail_err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "cannot unmerge every member; keep at least one record in the entity",
+            )));
+        }
+        // Representative = the smallest member being kept (members is ascending).
+        let representative = members
+            .iter()
+            .find(|m| !marked.contains(m.as_str()))
+            .expect("a kept member exists (marked is a strict subset)");
+        // One canonical never-pair per peeled record, against the representative.
+        let proposed: Vec<(String, String)> = marked
+            .iter()
+            .map(|m| canon_pair(m, representative))
+            .collect();
 
-    // Contradiction-1 precheck over the active ledger + the proposed nevers.
-    let active = match read::active_assertions(&session, snapshot) {
-        Ok(a) => a,
-        Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}")),
+        // Contradiction-1 precheck over the active ledger + the proposed nevers.
+        let active = match read::active_assertions(session, snapshot) {
+            Ok(a) => a,
+            Err(e) => {
+                return Err(Box::new(detail_err(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    format!("lake: {e}"),
+                )));
+            }
+        };
+        let mut assertions = active_to_assertions(active);
+        for (i, (a, b)) in proposed.iter().enumerate() {
+            assertions.push(er_reconcile::assertions::Assertion {
+                assertion_id: format!("proposed-{i}"),
+                rec_a_key: a.clone(),
+                rec_b_key: b.clone(),
+                kind: er_reconcile::assertions::AssertionKind::Never,
+                active: true,
+            });
+        }
+        let blocking: Vec<_> = er_reconcile::assertions::check_contradiction_1(&assertions)
+            .into_iter()
+            .filter(|c| c.never_assertion_id.starts_with("proposed-"))
+            .collect();
+        if let Some(c) = blocking.first() {
+            return Err(Box::new(detail_err(
+                StatusCode::CONFLICT,
+                format!(
+                    "unmerge conflicts with an always-rule: '{}' and '{}' are forced together",
+                    c.rec_a_key, c.rec_b_key
+                ),
+            )));
+        }
+
+        Ok(proposed)
+    })
+    .await
+    {
+        Ok(Ok(proposed)) => proposed,
+        Ok(Err(response)) | Err(response) => return *response,
     };
-    let mut assertions = active_to_assertions(active);
-    for (i, (a, b)) in proposed.iter().enumerate() {
-        assertions.push(er_reconcile::assertions::Assertion {
-            assertion_id: format!("proposed-{i}"),
-            rec_a_key: a.clone(),
-            rec_b_key: b.clone(),
-            kind: er_reconcile::assertions::AssertionKind::Never,
-            active: true,
-        });
-    }
-    let blocking: Vec<_> = er_reconcile::assertions::check_contradiction_1(&assertions)
-        .into_iter()
-        .filter(|c| c.never_assertion_id.starts_with("proposed-"))
-        .collect();
-    if let Some(c) = blocking.first() {
-        return detail_err(
-            StatusCode::CONFLICT,
-            format!(
-                "unmerge conflicts with an always-rule: '{}' and '{}' are forced together",
-                c.rec_a_key, c.rec_b_key
-            ),
-        );
-    }
-    drop(session);
 
     // Stage one never-rule per peeled record (attributed to the steward).
     let client = match connect_pg(dsn).await {
