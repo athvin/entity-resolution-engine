@@ -67,8 +67,8 @@ async fn dashboard_catalog_wait_does_not_starve_probes() {
     let router = app(AppState::with_pg("op-secret".into(), db.dsn().into()));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let api = listener.local_addr().unwrap();
-    let routes = router.clone();
-    let server = tokio::spawn(async move { axum::serve(listener, routes).await.unwrap() });
+    let http_app = router.clone();
+    let server = tokio::spawn(async move { axum::serve(listener, http_app).await.unwrap() });
 
     for endpoint in ["metrics", "data-quality", "runs"] {
         let catalog = TcpListener::bind("127.0.0.1:0").unwrap();
