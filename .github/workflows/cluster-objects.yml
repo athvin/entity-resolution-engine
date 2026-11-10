@@ -38,6 +38,7 @@ on:
       - "infra/k8s/priorityclasses/**"
       - "infra/k8s/network-policy-controller.yaml"
       - "infra/k8s/secrets/**"
+      - "infra/k8s/duckfleet/**"
       - "scripts/cluster_objects.sh"
       - ".github/workflows/cluster-objects.yml"
   workflow_dispatch:

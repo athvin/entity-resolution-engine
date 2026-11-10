@@ -1,0 +1,90 @@
+# Platform-owned authorization boundary; DuckFleet CI cannot change these objects.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: duckfleet-dev
+  labels:
+    app.kubernetes.io/part-of: duckfleet
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: duckfleet-budget
+  namespace: duckfleet-dev
+spec:
+  hard:
+    requests.cpu: "6"
+    limits.cpu: "8"
+    requests.memory: 8Gi
+    limits.memory: 10Gi
+    requests.storage: 20Gi
+    persistentvolumeclaims: "1"
+    pods: "10"
+    services.loadbalancers: "0"
+    services.nodeports: "0"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: duckfleet-deploy
+  namespace: duckfleet-dev
+rules:
+  - apiGroups: [""]
+    resources: [pods, services, secrets, configmaps, serviceaccounts, persistentvolumeclaims]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [""]
+    resources: [pods/log, events, resourcequotas]
+    verbs: [get, list, watch]
+  - apiGroups: [apps]
+    resources: [deployments, statefulsets, replicasets]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [batch]
+    resources: [jobs]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [networking.k8s.io]
+    resources: [networkpolicies]
+    verbs: [get, list, watch, create, update, patch, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: duckfleet-deploy
+  namespace: duckfleet-dev
+subjects:
+  - kind: Group
+    name: duckfleet:deploy
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role
+  name: duckfleet-deploy
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: duckfleet-discovery
+rules:
+  - apiGroups: [""]
+    resources: [namespaces]
+    resourceNames: [duckfleet-dev]
+    verbs: [get]
+  - apiGroups: [storage.k8s.io]
+    resources: [storageclasses]
+    resourceNames: [gp3]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: duckfleet-discovery
+subjects:
+  - kind: Group
+    name: duckfleet:deploy
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: duckfleet-discovery
+  apiGroup: rbac.authorization.k8s.io

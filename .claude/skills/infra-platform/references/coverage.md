@@ -60,6 +60,7 @@ Every stack in the tree is reached by at least one tier.
 | Path | Referenced by |
 |---|---|
 | `charts` | `.github/workflows/deploy.yml`, `Makefile`, `scripts/check_kind.sh`, `scripts/ci/bluegreen-acceptance.sh`, `scripts/ci/charts-check.py`, `scripts/ci/charts-render-validate.sh`, `scripts/ci/deploy-cutover.py`, `scripts/ci/deploy-inactive-colour.sh`, `scripts/ci/deploy-namespace-chart.sh`, `scripts/ci/helm-lint.sh`, `scripts/ci/infra-detect-test.sh`, `scripts/ci/infra-detect.sh`, `scripts/ci/runner-isolation-test.py`, `scripts/ci/runner-isolation.sh`, `scripts/ci/tenant-runners-check.py`, `scripts/kind_env.sh` |
+| `duckfleet` | `.github/workflows/cluster-objects.yml`, `scripts/ci/charts-render-validate.sh`, `scripts/ci/duckfleet-boundary-test.py`, `scripts/ci/infra-detect-test.sh`, `scripts/ci/infra-detect.sh`, `scripts/cluster_objects.sh` |
 | `kind` | `scripts/kind_env.sh` |
 | `network-policy-controller.yaml` | `.github/workflows/cluster-objects.yml`, `scripts/cluster_objects.sh` |
 | `nodepools` | `.github/workflows/cluster-objects.yml`, `scripts/cluster_objects.sh`, `scripts/measure_runner_startup.sh` |

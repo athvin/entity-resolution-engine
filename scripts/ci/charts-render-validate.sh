@@ -29,3 +29,7 @@ render "er-platform (kind profile)" er-platform infra/k8s/charts/er-platform \
 render "er-dev-namespace" ci infra/k8s/charts/er-dev-namespace \
   --namespace default --set developer=ci \
   --set webIngressFromVpc.enabled=true
+
+# Platform-owned boundary for a separate product; no missing-schema allowance.
+kubeconform -strict -summary -kubernetes-version 1.32.0 infra/k8s/duckfleet/dev/bootstrap.yaml
+python3 scripts/ci/duckfleet-boundary-test.py

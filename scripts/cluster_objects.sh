@@ -95,6 +95,10 @@ SURFACES=(
 	"infra/k8s/secrets/cluster-secret-store.yaml"
 )
 
+if [[ "$ENV" == dev ]]; then
+	SURFACES+=("infra/k8s/duckfleet/dev/")
+fi
+
 for surface in "${SURFACES[@]}"; do
 	kubectl --context "$CONTEXT" apply -f "$surface"
 done

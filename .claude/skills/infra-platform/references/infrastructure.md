@@ -1036,3 +1036,37 @@ production installer. `deploy-observability.py` includes environment and secret
 identity in its fingerprint and verifies workload health before recording it.
 The store retains the existing single-node/Recreate/emptyDir WAL trade: recent
 unflushed telemetry can be lost on restart; S3 data and Aurora metadata persist.
+
+
+## DuckFleet development bootstrap
+
+DuckFleet is a separate product/repository sharing this AWS account. Its initial
+AWS feasibility lane uses `duckfleet-dev` on `er-dev`; Docker remains its local
+harness. This is planned configuration until the CI apply and live harness pass.
+
+`envs/dev/duckfleet.tf` and `modules/duckfleet-ci` own a dedicated main-only OIDC
+role, an EKS access entry in group `duckfleet:deploy`, and the worker role and Pod
+Identity association. The immutable subject names repository ID `1452020329`
+and owner ID `273880343`. Do not expand ER CI role trust to that repository.
+
+`infra/k8s/duckfleet/dev/bootstrap.yaml`, applied only by the dev leg of
+`cluster-objects.yml`, owns the restricted namespace, quota and RBAC. DuckFleet CI
+may deploy application objects there but cannot edit the quota, security labels,
+RBAC, or ER namespaces. The quota bounds resources, not AWS spend. The effective
+identity is also probed by DuckFleet CI before deploying. The Terraform mock tests
+and `scripts/ci/duckfleet-boundary-test.py` cover positive and negative grants;
+the latter runs in the chart gate and is sensitive to changes in the actual YAML.
+
+DuckFleet owns its bucket, two ECR repositories and state under
+`duckfleet/dev.tfstate`, using lockfile locking and workspace prefix
+`duckfleet/workspaces`. Its CI role has no IAM/EKS write or ER state access. The
+platform-owned worker identity can access only `lake/*` in
+`duckfleet-dev-797781631727-us-east-2`. Its trust binds er-dev, duckfleet-dev and
+service account duckfleet-worker, with session tags enabled.
+
+Apply this bootstrap through platform CI before merging DuckFleet's deployment
+workflow. The DuckFleet lane waits for its own exact-commit checks, rejects
+destructive plans, publishes immutable images, runs real dbt model-sizing tests,
+and suspends compute afterward. S3, images and its catalog PVC still incur storage
+cost. Live results belong in DuckFleet's infrastructure runbook and CI artifacts;
+passing the mocked bootstrap tests is not live evidence.

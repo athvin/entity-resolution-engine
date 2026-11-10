@@ -30,3 +30,7 @@ terraform -chdir=infra/terraform/modules/tenant-runner test -no-color
 # Operational alarm semantics are exercised against a mock provider as well.
 terraform -chdir=infra/terraform/modules/operational-observability init -backend=false -input=false
 terraform -chdir=infra/terraform/modules/operational-observability test -no-color
+
+# Separate-product CI cannot grant itself IAM or platform access.
+terraform -chdir=infra/terraform/modules/duckfleet-ci init -backend=false -input=false
+terraform -chdir=infra/terraform/modules/duckfleet-ci test -no-color
