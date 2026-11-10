@@ -58,9 +58,9 @@ creating two sets of real resources.
 Distinct `resource "aws_*"` blocks across `infra/terraform/`, by count:
 
 ```
-  26  aws_iam_role
-  22  aws_iam_role_policy
-  13  aws_eks_pod_identity_association
+  28  aws_iam_role
+  24  aws_iam_role_policy
+  14  aws_eks_pod_identity_association
    9  aws_cloudwatch_metric_alarm
    9  aws_s3_bucket
    9  aws_s3_bucket_public_access_block
@@ -77,6 +77,7 @@ Distinct `resource "aws_*"` blocks across `infra/terraform/`, by count:
    4  aws_security_group
    4  aws_ssoadmin_account_assignment
    4  aws_ssoadmin_permission_set
+   3  aws_eks_access_entry
    3  aws_s3_bucket_versioning
    3  aws_ssoadmin_managed_policy_attachment
    3  aws_vpc_security_group_ingress_rule
@@ -84,7 +85,6 @@ Distinct `resource "aws_*"` blocks across `infra/terraform/`, by count:
    2  aws_db_subnet_group
    2  aws_ecr_lifecycle_policy
    2  aws_ecr_repository
-   2  aws_eks_access_entry
    2  aws_eks_access_policy_association
    2  aws_identitystore_group
    2  aws_identitystore_group_membership
@@ -223,7 +223,7 @@ cannot reach AWS:
 
 | Mechanism | Count |
 |---|---|
-| `aws_eks_pod_identity_association` blocks | 13 |
+| `aws_eks_pod_identity_association` blocks | 14 |
 | `aws_iam_user` blocks (should be the lake key and the builder key only) | 1 |
 | `aws_iam_openid_connect_provider` blocks (GitHub Actions only; never for workloads) | 1 |
 <!-- END GENERATED: aws-footprint -->

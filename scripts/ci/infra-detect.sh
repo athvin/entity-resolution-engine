@@ -77,7 +77,7 @@ fi
 # `install-helm.sh` owns the helm pin for three workflows, so a bump
 # to it must render the charts with the helm that will deploy them.
 c="$(printf '%s\n' "$changed" \
-      | grep -cE '^(infra/k8s/charts/|scripts/ci/charts-check\.py$|scripts/ci/tenant-runners-check\.py$|scripts/ci/runner-isolation[^/]*\.(sh|py)$|\.github/workflows/runner-isolation\.yml$|scripts/ci/charts-render-validate\.sh$|scripts/ci/helm-lint\.sh$|scripts/ci/install-chart-tools\.sh$|scripts/ci/install-helm\.sh$|\.github/workflows/infra\.yml$)' || true)"
+      | grep -cE '^(infra/k8s/duckfleet/|scripts/ci/duckfleet-boundary-test\.py$|infra/k8s/charts/|scripts/ci/charts-check\.py$|scripts/ci/tenant-runners-check\.py$|scripts/ci/runner-isolation[^/]*\.(sh|py)$|\.github/workflows/runner-isolation\.yml$|scripts/ci/charts-render-validate\.sh$|scripts/ci/helm-lint\.sh$|scripts/ci/install-chart-tools\.sh$|scripts/ci/install-helm\.sh$|\.github/workflows/infra\.yml$)' || true)"
 if [ "${c:-0}" -gt 0 ]; then
   echo "charts=true" >> "$GITHUB_OUTPUT"
 else

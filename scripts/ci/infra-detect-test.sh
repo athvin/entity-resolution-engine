@@ -32,3 +32,5 @@ check_path scripts/ci/runner-isolation.sh false true
 check_path scripts/ci/runner-isolation-test.py false true
 check_path .github/workflows/runner-isolation.yml false true
 printf 'infra detector: registry and neighboring input boundaries pass\n'
+check_path infra/k8s/duckfleet/dev/bootstrap.yaml false true
+check_path scripts/ci/duckfleet-boundary-test.py false true
