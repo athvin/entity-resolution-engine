@@ -118,7 +118,7 @@ serde_json = { version = "1", features = ["float_roundtrip"] }
 # config document; config_hash is computed over the serde_json re-serialisation,
 # not this crate's output, so YAML quirks never reach the digest.
 serde_norway = "0.9"
-sqlparser = { version = "0.63", features = ["visitor"] }
+sqlparser = { version = "0.64", features = ["visitor"] }
 thiserror = "2"
 
 # The telemetry wire. Already in Cargo.lock transitively (hyper, reqwest,
