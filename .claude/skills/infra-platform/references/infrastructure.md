@@ -345,8 +345,8 @@ The DuckLake catalog is the least ephemeral thing in the system (table definitio
 | Form | `postgres:16` StatefulSet, one per developer namespace | Aurora PostgreSQL 16 Serverless v2 |
 | Storage | 50 GiB gp3 PVC | Aurora storage |
 | Capacity | 1 vCPU / 2 GiB | 0.5 → 16 ACU |
-| `max_locks_per_transaction` | `-c` flag on the pod | `aws_rds_cluster_parameter_group.prod`, 1024; static, so verify activation after instance reboot |
-| Availability | single-AZ, pinned by its EBS volume | multi-AZ |
+| `max_locks_per_transaction` | `-c` flag on the pod | `aws_rds_cluster_parameter_group.prod`, 1024; static, so it takes effect only after an instance reboot — and prod is single-instance, so that reboot is an outage, not a failover |
+| Availability | single-AZ, pinned by its EBS volume | one Serverless v2 instance; storage is replicated across AZs, but there is no reader and so **no automatic failover** (#1096) |
 | Backups | none — prod is the system of record | 14-day PITR (owner confirmed in #553) |
 | Idle cost | **~$4/mo of EBS** | ~$50/mo |
 

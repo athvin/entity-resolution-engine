@@ -322,7 +322,7 @@ against a dev namespace, and the negative tests (no invite, email collision) bot
 ## Phase 3 — Prod (needs: the prod gate, Phase 2)
 
 - [ ] **3.1 Prod network + EKS + Aurora** (§5, §7.1)
-  - Aurora Serverless v2 multi-AZ with the cluster parameter group; `er maintain` against Aurora succeeds (the `max_locks` proof, again — different mechanism than dev's `-c` flag).
+  - Aurora Serverless v2 with the cluster parameter group; `er maintain` against Aurora succeeds (the `max_locks` proof, again — different mechanism than dev's `-c` flag). Single-instance since #1096, so activating that static parameter costs an outage rather than a failover.
   - Every DSN carries `sslmode=verify-full` and connects — which first requires the CA bundle in the images (§18.15; expect an image change).
   - 14-day PITR confirmed on, from the API (owner confirmed this retention on 2026-11-08 in #553's production build-out).
 - [ ] **3.2 Prod lake + scoped CloudTrail** (§7.3)
