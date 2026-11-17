@@ -43,6 +43,24 @@ test.describe("interactive marketing", () => {
     page,
   }) => {
     await page.goto("/#flow");
+    // Wait for hydration before touching a CONTROLLED input. `#flow-volume` is
+    // React-owned (`interactive-story.tsx` holds volumePosition in useState), so
+    // a fill() that lands before hydration sets the DOM value and is then
+    // silently reverted when React mounts and re-renders from its own default —
+    // the input reads back DEFAULT_VOLUME_POSITION and the assertion below sees
+    // "100,000 records per run" instead of the filled value.
+    //
+    // This is the only test in this file that interacted immediately after
+    // goto(); every other one clicks something and asserts a state change first,
+    // which incidentally proves hydration. So it was always racing and simply
+    // won on timing until next 16.4.6 shifted hydration later (#1105) — it then
+    // failed 3/3 on webkit under `--workers=2`, and still passed when run alone.
+    //
+    // "Inspect a record" is `disabled={!ready}` where `ready` is set in
+    // story-flow's mount effect, which makes it a pure hydration gate.
+    // Deliberately not `data-still`, which also depends on reduced motion.
+    const flow = page.getByTestId("marketing-flow");
+    await expect(flow.getByRole("button", { name: "Inspect a record" })).toBeEnabled();
     const slider = page.locator("#flow-volume");
     await slider.fill("50");
     await expect(slider).toHaveAttribute("aria-valuetext", "2,500,750 records per run");
