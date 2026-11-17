@@ -1,5 +1,5 @@
 # Task 0.7 (infrastructure.md §11, rev 4): the account's single registry —
-# immutable tags, scan-on-push, last-30 lifecycle. AES256 is the §8.3
+# immutable tags, scan-on-push, a manifest-count lifecycle. AES256 is the §8.3
 # deliberate exception. Promotion is by digest, never by tag; replication
 # dissolved with the account split.
 
@@ -22,6 +22,36 @@ resource "aws_ecr_repository" "this" {
   }
 }
 
+# The budget is counted in MANIFESTS, and one build pushes three of them. That
+# is the whole of #1101: "retain the last 30 images" sounds like weeks and was
+# measured at ~1.5 days, which broke a dev namespace pinned to a 33-day-old tag
+# with `ErrImagePull ... not found` — a message that reads as a registry fault.
+#
+# Measured on er-api, 2026-11-17 (48 manifests, 16 of them tagged):
+#
+#   16  tagged     application/vnd.oci.image.index.v1+json      <- what a tag names
+#   16  UNTAGGED   application/vnd.oci.image.manifest.v1+json   <- the platform image
+#   16  UNTAGGED   .../vnd.docker.attestation.manifest.v1+json  <- buildkit SLSA
+#
+# So 30 manifests is **ten pullable builds**, and at the measured ~10 builds/day
+# that is the 1.5-day window.
+#
+# DO NOT "reclaim" the untagged two-thirds with an expire-untagged rule. The
+# count symmetry above is not a coincidence: those untagged manifests are the
+# live children of the tagged indexes, so expiring them deletes the platform
+# image every tag resolves to. It looks like free headroom and is a way to break
+# every image in the registry.
+#
+# Raising the count is therefore the only safe lever here, and it stays a count
+# rather than becoming `sinceImagePushed`: ECR permits only one `tagStatus: any`
+# rule, so an age rule cannot simply be added beside this one, and any
+# tag-scoped rule reintroduces the hazard above.
+#
+# 900 manifests = 300 builds ~= 30 days at the measured rate, and longer while
+# the repo is quiet, which is exactly the idle-dev-namespace case. Cost ceiling,
+# using per-image sizes that double-count shared layers so the true figure is
+# lower: 300 builds x (107 + 68 + 204) MB ~= 114 GB ~= $11/month at
+# $0.10/GB-month. The three repos held 16.8 GB combined before this change.
 resource "aws_ecr_lifecycle_policy" "this" {
   for_each   = aws_ecr_repository.this
   repository = each.value.name
@@ -29,11 +59,11 @@ resource "aws_ecr_lifecycle_policy" "this" {
   policy = jsonencode({
     rules = [{
       rulePriority = 1
-      description  = "Retain the last 30 images"
+      description  = "Retain the last 900 manifests (~300 builds; 3 manifests per build)"
       selection = {
         tagStatus   = "any"
         countType   = "imageCountMoreThan"
-        countNumber = 30
+        countNumber = 900
       }
       action = { type = "expire" }
     }]
