@@ -158,3 +158,46 @@ jobs:
         env:
           STACK_KEY: ${{ matrix.key }}
         run: bash scripts/ci/drift-summary.sh
+
+  # A SECOND question, asked here because it is the same question: does the
+  # account still match what we believe about it? Not a matrix leg — it is not
+  # per-stack, and it reads SNS rather than Terraform state.
+  #
+  # WHY IT IS NOT LEFT TO `refresh` ABOVE. Drift does eventually notice an
+  # unconfirmed subscription, and that is exactly the problem: it notices on the
+  # wrong side of a three-day delay and for the wrong reason. AWS deletes a
+  # subscription that stays pending, the refresh-only plan then reports the
+  # resource gone, and the classifier calls it real drift — days after delivery
+  # stopped. Worse, it self-heals destructively: the next `apply` re-creates the
+  # subscription, pending again, so the cycle repeats forever and the alarms
+  # never deliver. Measured 2026-11-17 (#1107): 19 alarms armed, one
+  # subscription, never confirmed, nothing delivered for over a week.
+  #
+  # Terraform cannot fix this and is not at fault — SNS requires the ADDRESS to
+  # confirm, and an unconfirmed subscription is indistinguishable from a working
+  # one in the console. That is precisely why it needs its own assertion.
+  alert-path:
+    name: alert path (a confirmed subscriber)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write # OIDC exchange for er-ci-tf-drift
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
+        with:
+          aws-region: us-east-2
+          role-to-assume: arn:aws:iam::797781631727:role/er-ci-tf-drift
+      - name: read the alarm topic's subscriptions
+        env:
+          # The one topic every CloudWatch alarm in the account publishes to
+          # (envs/core/alerts.tf). Spelled out here as the role ARN above is,
+          # rather than discovered, so this job has no dependency on naming.
+          TOPIC_ARN: arn:aws:sns:us-east-2:797781631727:er-alerts
+        run: mkdir -p alertout && aws sns list-subscriptions-by-topic --topic-arn "$TOPIC_ARN" > alertout/subs.json
+      - name: does the alarm path terminate at a human
+        # Self-test first, as the other detectors do: this one guards a path
+        # that was already silently dead for a week, so a check that has stopped
+        # being able to fail is worse than no check — it reads as cover.
+        run: bash scripts/ci/alert-path-check-test.sh && bash scripts/ci/alert-path-check.sh alertout/subs.json
