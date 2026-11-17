@@ -88,6 +88,7 @@ job instead — `terraform plan` is the worked example.
 | Job | Status-check context | Timeout | Condition |
 |---|---|---|---|
 | `refresh` | drift (${{ matrix.key }}) | 20 | `always` |
+| `alert-path` | alert path (a confirmed subscriber) | 10 | `always` |
 
 ### `frontend-experiments.yml`
 
