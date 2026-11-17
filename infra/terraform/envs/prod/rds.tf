@@ -1,8 +1,18 @@
-# The prod control-plane + catalog database: Aurora Serverless v2 (PostgreSQL),
-# multi-AZ — a writer plus a reader in a second AZ. Unlike dev (min_capacity 0,
-# auto-pause, disposable) prod keeps a warm floor (min 0.5) so real traffic
-# never eats a cold start, is deletion-protected, and takes a final snapshot +
-# 14-day backups. Right-sized for prod; it costs nothing until applied.
+# The prod control-plane + catalog database: Aurora Serverless v2 (PostgreSQL).
+# Unlike dev (min_capacity 0, auto-pause, disposable) prod keeps a warm floor
+# (min 0.5) so real traffic never eats a cold start, is deletion-protected, and
+# takes a final snapshot + 14-day backups.
+#
+# SINGLE INSTANCE — there is no reader, and therefore no automatic failover.
+# This was a writer plus a reader in a second AZ until 2026-11-16. The reader
+# cost ~$43/month (a 0.5 ACU floor at $0.12/ACU-hr) and was removed as an owner
+# cost decision, after the cluster was measured averaging 0.51 ACU — i.e. pinned
+# to its floor, so the reader was buying failover rather than capacity.
+#
+# Be clear about what that bought and what it cost. An instance or AZ failure is
+# now an outage until someone promotes a replacement, and a maintenance restart
+# is visible downtime rather than a failover. Restoring HA is `count = 2` and
+# nothing else: no application code reads the reader endpoint.
 data "aws_rds_engine_version" "aurora_pg" {
   engine       = "aurora-postgresql"
   default_only = true
@@ -69,10 +79,37 @@ resource "aws_rds_cluster" "prod" {
   }
 }
 
-resource "aws_rds_cluster_instance" "prod" {
-  count = 2 # writer + reader, placed across AZs by the subnet group (multi-AZ HA)
+# Keyed by identifier, NOT by count — because which instance is the writer is
+# runtime state, not configuration. Aurora swaps the roles on every failover, so
+# an index-keyed resource makes "which instance does a shrink destroy" depend on
+# that state. Concretely, when this went from two instances to one, `er-prod-2`
+# was the writer and `er-prod-1` the reader: a `count = 2 -> 1` shrink destroys
+# the HIGHEST index, which would have deleted the writer and forced a failover
+# on a live database instead of removing the idle replica. Keyed by name, the
+# plan names the instance it is removing and cannot pick the wrong one.
+#
+# To restore multi-AZ HA, add the second identifier back to the set.
+#
+# The two `moved` blocks carry the existing instances from the old index-keyed
+# addresses onto the name-keyed ones. They are what keeps this a one-instance
+# destroy rather than a destroy-both-and-recreate: without them the planner sees
+# no state at either new address. `er-prod-1` lands on an address the for_each
+# set does not contain, which is precisely the reader removal. They can be
+# deleted once this has been applied.
+moved {
+  from = aws_rds_cluster_instance.prod[0]
+  to   = aws_rds_cluster_instance.prod["er-prod-1"]
+}
 
-  identifier                   = "er-prod-${count.index + 1}"
+moved {
+  from = aws_rds_cluster_instance.prod[1]
+  to   = aws_rds_cluster_instance.prod["er-prod-2"]
+}
+
+resource "aws_rds_cluster_instance" "prod" {
+  for_each = toset(["er-prod-2"])
+
+  identifier                   = each.key
   cluster_identifier           = aws_rds_cluster.prod.id
   instance_class               = "db.serverless"
   engine                       = aws_rds_cluster.prod.engine
@@ -92,7 +129,10 @@ resource "aws_secretsmanager_secret_version" "db" {
   secret_id = aws_secretsmanager_secret.db.id
 
   secret_string = jsonencode({
-    ER_PG_HOST     = aws_rds_cluster.prod.endpoint
+    ER_PG_HOST = aws_rds_cluster.prod.endpoint
+    # With no reader instance the Aurora reader endpoint resolves to the writer,
+    # so this stays correct and keeps working if `count` goes back to 2. No
+    # application code reads it today.
     ER_PG_RO_HOST  = aws_rds_cluster.prod.reader_endpoint
     ER_PG_PORT     = 5432
     ER_PG_USER     = "er"
