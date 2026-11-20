@@ -127,13 +127,19 @@ test.describe("interactive marketing", () => {
     await expect(page.getByRole("button", { name: /Switch to (light|dark) mode/ })).toHaveCount(0);
   });
 
-  test("a partial swipe settles onto the next chapter", async ({ page }) => {
+  // The story scrolls freely (snap scrolling was removed on purpose): a partial
+  // scroll stays where the reader left it, and the next-chapter button moves on.
+  test("a partial scroll stays put, and the next-chapter button moves on", async ({ page }) => {
     await page.goto("/");
     await expect(page.getByRole("button", { name: "Pause pipeline" })).toBeEnabled();
-    await page.locator("#flow").evaluate((node) => {
+    const target = await page.locator("#flow").evaluate((node) => {
       const destination = node.getBoundingClientRect().top + scrollY - 64;
       window.scrollTo({ top: destination * 0.65, behavior: "instant" });
+      return Math.round(destination * 0.65);
     });
+    await page.waitForTimeout(800);
+    expect(Math.abs((await page.evaluate(() => scrollY)) - target)).toBeLessThan(2);
+    await page.getByTestId("marketing-next-chapter").click();
     await expect
       .poll(() =>
         page.locator("#flow").evaluate((node) => Math.abs(node.getBoundingClientRect().top - 64)),
@@ -224,8 +230,9 @@ test.describe("interactive marketing", () => {
     if (!isMobile) await page.mouse.wheel(0, 600);
     await page.waitForTimeout(800);
     expect(await bottomGap()).toBeLessThan(3);
+    // The footer's last link: Sign in sits near the top of a footer taller than a phone screen.
     await expect(
-      page.getByTestId("marketing-footer").getByRole("link", { name: "Sign in" }),
+      page.getByTestId("marketing-footer").getByRole("link", { name: "Terms" }),
     ).toBeInViewport();
   });
 
@@ -385,6 +392,11 @@ test.describe("interactive marketing", () => {
     const time = await clock();
     await page.waitForTimeout(250);
     expect(Math.abs((await clock()) - time)).toBeLessThan(40);
+    // Clicking Pause scrolled the button into view, and with free scrolling the
+    // audit can now sit mostly above the fold; the flow locks while it is on screen.
+    await audit.evaluate((node) => {
+      node.scrollIntoView({ block: "start", behavior: "instant" });
+    });
     await expect(page.locator("#flow-dataset")).toBeDisabled();
     await audit.getByRole("button", { name: "Resume audit" }).click();
     await expect(audit).toHaveAttribute("data-phase", "4", { timeout: 20000 });

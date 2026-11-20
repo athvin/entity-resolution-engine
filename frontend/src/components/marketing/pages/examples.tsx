@@ -30,13 +30,22 @@ const PAIR = [
   { field: "Phone", a: "(415) 555-0142", b: "415.555.0199", result: "Different", weight: "−1.4" },
 ] as const;
 
+/** The table scrolls sideways on a phone, so it takes focus and a name (axe: scrollable-region-focusable). */
+function Scroll({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="page-example-scroll" role="region" aria-label={label} tabIndex={0}>
+      {children}
+    </div>
+  );
+}
+
 export function ExampleReviewPair({ label }: { label: string }) {
   return (
     <figure className="page-example" aria-label={label}>
       <figcaption>
         <span className="page-example-tag">Example</span> A pair waiting for review
       </figcaption>
-      <div className="page-example-scroll">
+      <Scroll label="Example review pair, table">
         <table>
           <thead>
             <tr>
@@ -61,7 +70,7 @@ export function ExampleReviewPair({ label }: { label: string }) {
             ))}
           </tbody>
         </table>
-      </div>
+      </Scroll>
       <p className="page-example-foot">
         <span>Three fields agree, one differs.</span>
         <span className="page-example-actions" aria-hidden="true">
@@ -88,7 +97,7 @@ export function ExampleMapping({ label }: { label: string }) {
       <figcaption>
         <span className="page-example-tag">Example</span> Mapping a new source
       </figcaption>
-      <div className="page-example-scroll">
+      <Scroll label="Example field mapping, table">
         <table>
           <thead>
             <tr>
@@ -105,7 +114,7 @@ export function ExampleMapping({ label }: { label: string }) {
             ))}
           </tbody>
         </table>
-      </div>
+      </Scroll>
     </figure>
   );
 }

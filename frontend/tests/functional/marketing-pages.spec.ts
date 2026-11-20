@@ -77,7 +77,11 @@ test.describe("marketing content pages", () => {
 
   test("footer links all resolve, and nothing is wider than a 320px phone", async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 720 });
-    for (const href of new Set(FOOTER_COLUMNS.flatMap((c) => c.links.map((l) => l.href)))) {
+    // One visit per page: /pricing#roi is a section of /pricing, and a same-document
+    // hash navigation returns no response.
+    for (const href of new Set(
+      FOOTER_COLUMNS.flatMap((c) => c.links.map((l) => l.href.split("#")[0] ?? l.href)),
+    )) {
       const response = await page.goto(href);
       expect(response?.status(), href).toBe(200);
       expect(

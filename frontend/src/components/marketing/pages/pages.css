@@ -169,6 +169,11 @@
 }
 .page-example-scroll {
   overflow-x: auto;
+  border-radius: 6px;
+}
+.page-example-scroll:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 .page-example table {
   width: 100%;

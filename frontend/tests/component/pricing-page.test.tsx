@@ -89,6 +89,7 @@ describe("the main navigation", () => {
     const pricing = screen.getByRole("link", { name: "Pricing" });
     expect(pricing).toHaveAttribute("href", "/pricing");
     expect(pricing).toHaveAttribute("aria-current", "page");
-    expect(screen.getByRole("link", { name: "Docs" })).not.toHaveAttribute("aria-current");
+    // Docs now sits in the Resources dropdown, so it is matched by test id.
+    expect(screen.getByTestId("marketing-nav-docs")).not.toHaveAttribute("aria-current");
   });
 });
