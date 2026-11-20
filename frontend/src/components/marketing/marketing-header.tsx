@@ -12,7 +12,7 @@ import { DEMO_PATH } from "./site-links";
  * navigation works independently of the interactive demos. There is no theme
  * control: the marketing site is always dark (see `app/providers.tsx`).
  *
- * Two buttons: Book a demo, the site's primary action, and Login. Login is
+ * Two buttons, in this order: Book a demo, the site's primary action, then Login. Login is
  * correct for both signed-in and signed-out visitors without knowing which it
  * is talking to: PORTAL_ENTRY_PATH is behind the proxy's
  * cookie gate, so the redirect happens server-side. Reading the session here
@@ -70,14 +70,14 @@ export function MarketingHeader() {
           </span>
         </Link>
         <MarketingNav />
-        <Button asChild size="sm" variant="outline" className="min-h-11 shrink-0 max-sm:hidden">
-          <Link href={PORTAL_ENTRY_PATH} data-testid="marketing-cta-header">
-            Login
-          </Link>
-        </Button>
         <Button asChild size="sm" className="min-h-11 shrink-0">
           <Link href={DEMO_PATH} data-testid="marketing-cta-demo">
             Book a demo
+          </Link>
+        </Button>
+        <Button asChild size="sm" variant="outline" className="min-h-11 shrink-0 max-sm:hidden">
+          <Link href={PORTAL_ENTRY_PATH} data-testid="marketing-cta-header">
+            Login
           </Link>
         </Button>
       </div>
