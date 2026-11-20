@@ -32,8 +32,8 @@ export interface OptionResult {
   /** Monthly: twelve months plus onboarding. Upfront terms: the upfront price. */
   totalCents: number;
   onboardingCents: number;
-  /** "free": waived. "included": part of the term's price. */
-  onboarding: "charged" | "free" | "included";
+  /** Charged once on Monthly; free on every upfront term (1, 2 or 3 years). */
+  onboarding: "charged" | "free";
   support: "added" | "not-added" | "included";
   /** Saving in cost per year against Monthly with the same support setting. */
   savingsPct: number;
@@ -179,7 +179,7 @@ function optionsFor(
       perMonthCents: divideRounded(two, 24),
       totalCents: two,
       onboardingCents: 0,
-      onboarding: "included",
+      onboarding: "free",
       support: "included",
     },
     threeYear: {
@@ -191,7 +191,7 @@ function optionsFor(
       perMonthCents: divideRounded(three, 36),
       totalCents: three,
       onboardingCents: 0,
-      onboarding: "included",
+      onboarding: "free",
       support: "included",
     },
   };

@@ -105,9 +105,7 @@ function optionNote(option: OptionResult): string {
   const onboarding =
     option.onboarding === "charged"
       ? `Onboarding ${formatUsd(option.onboardingCents)} once, at signup.`
-      : option.onboarding === "free"
-        ? "Onboarding free."
-        : "Onboarding included.";
+      : "Onboarding free.";
   const support =
     option.support === "included"
       ? "Support included."

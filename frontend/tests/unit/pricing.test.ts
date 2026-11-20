@@ -66,7 +66,7 @@ describe("the brief's Professional cases (A = $4,500)", () => {
     expect(y.savingsPct).toBe(17);
   });
 
-  it("2 years: $9,000 upfront, $4,500/year, $375/month, support and onboarding included", () => {
+  it("2 years: $9,000 upfront, $4,500/year, $375/month, support included, onboarding free", () => {
     for (const support of [false, true]) {
       const t = pro(support).twoYear;
       expect(formatUsd(t.dueAtSignupCents)).toBe("$9,000");
@@ -74,7 +74,20 @@ describe("the brief's Professional cases (A = $4,500)", () => {
       expect(formatUsd(t.perYearCents)).toBe("$4,500");
       expect(formatUsd(t.perMonthCents)).toBe("$375");
       expect(t.support).toBe("included");
-      expect(t.onboarding).toBe("included");
+      expect(t.onboarding).toBe("free");
+      expect(t.onboardingCents).toBe(0);
+    }
+  });
+
+  it("onboarding is charged once on Monthly only; every upfront term gets it free", () => {
+    for (const support of [false, true]) {
+      const all = pro(support);
+      expect(all.monthly.onboarding).toBe("charged");
+      expect(all.monthly.onboardingCents).toBe(45_000);
+      for (const term of [all.yearly, all.twoYear, all.threeYear]) {
+        expect(term.onboarding).toBe("free");
+        expect(term.onboardingCents).toBe(0);
+      }
     }
   });
 

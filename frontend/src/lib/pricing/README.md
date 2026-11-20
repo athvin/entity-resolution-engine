@@ -49,7 +49,9 @@ there. That is intended: a price change should be a reviewed diff.
 - A started 100K increment in a custom band counts as a whole one, and the
   estimate then rounds up to the next $250.
 - Support is optional on Monthly and Yearly only; 2- and 3-year terms include
-  it, and onboarding. The support floor applies per billing period.
+  it. The support floor applies per billing period.
+- Onboarding (10% of the annual list price) is charged once, at signup, on
+  Monthly only. Every upfront term, 1, 2 or 3 years, gets it free.
 - "Savings vs monthly" compares cost per year against Monthly with the same
   support setting.
 
