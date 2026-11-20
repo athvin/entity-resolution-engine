@@ -3,7 +3,10 @@
  * `app/(marketing)/solutions/{roles,industries}/[slug]`.
  *
  * Every "how it helps" line names a capability marked VERIFIED in
- * docs/feature-inventory.md, and links to the page that describes it. The
+ * docs/feature-inventory.md, and links to the page that describes it. How data
+ * reaches DupeZero (the Salesforce app on AppExchange and API connections to
+ * other systems) is owner-confirmed, 2026-11-20; the copy does not claim that
+ * results are written back to Salesforce, which the owner has not confirmed. The
  * "where duplicates hurt" lines describe the visitor's situation, not the
  * product, and carry no statistics: none were supplied. Industry pages make no
  * compliance claim; each says so, with a TODO where the owner must decide what
@@ -40,13 +43,21 @@ const GOLDEN = "/features/golden-records";
 const SECURITY = "/security";
 const INTEGRATIONS = "/integrations";
 
-const CSV_NOTE = {
-  title: "How data moves today",
-  body: "DupeZero works from CSV exports. It does not connect to your Salesforce org or change records in it, so applying the result in Salesforce is a step your team runs.",
+const CONNECT_NOTE = {
+  title: "How your data reaches DupeZero",
+  body: "Connect your Salesforce org with the DupeZero app on the Salesforce AppExchange, or connect other systems through their APIs, and DupeZero pulls the records in to deduplicate. A CSV upload works too, for a one-off list.",
 };
 
+/** Owner decisions shared by every solution page, shown as visible TODOs. */
+const CONNECT_TODOS = [
+  "link to the DupeZero AppExchange listing",
+  "owner to list the systems DupeZero connects to through their APIs",
+] as const;
+
 const NO_CERTIFICATION =
-  "DupeZero holds no security or industry compliance certification today, and this page does not imply one. Only the columns you export reach DupeZero, so leave out anything it does not need for matching.";
+  "DupeZero holds no security or industry compliance certification today, and this page does not imply one. Send DupeZero only the fields it needs for matching.";
+
+const BEFORE_CONNECTING = "Before you connect your data";
 
 export const ROLES: readonly Solution[] = [
   {
@@ -82,18 +93,19 @@ export const ROLES: readonly Solution[] = [
     useCases: [
       {
         title: "Find Leads that are already Contacts",
-        body: "Upload a Lead export and a Contact export as two sources in one people dataset, and see where they overlap.",
+        body: "Bring in Leads and Contacts from your connected org as two sources in one people dataset, and see where they overlap.",
       },
       {
         title: "Check an import before it lands",
-        body: "Upload a new list beside an export of existing records to see which rows already exist.",
+        body: "Upload a new list beside the records already pulled from your org to see which rows already exist.",
       },
       {
         title: "Plan a cleanup before a migration",
         body: "Resolve the duplicates in DupeZero first, then decide what to merge in Salesforce with the evidence in hand.",
       },
     ],
-    note: CSV_NOTE,
+    note: CONNECT_NOTE,
+    todos: CONNECT_TODOS,
   },
   {
     slug: "revenue-operations",
@@ -128,7 +140,7 @@ export const ROLES: readonly Solution[] = [
     useCases: [
       {
         title: "Deduplicate Accounts",
-        body: "Upload an Account export to a company dataset and review the groups before anyone merges them.",
+        body: "Pull Accounts from your connected org into a company dataset and review the groups before anyone merges them.",
       },
       {
         title: "Settle ownership questions",
@@ -136,10 +148,11 @@ export const ROLES: readonly Solution[] = [
       },
       {
         title: "Keep it clean over time",
-        body: "Upload each new export; after the first full run, later runs can process only what is new or changed.",
+        body: "After the first full run, later runs can process only the records that are new or changed in your connected systems.",
       },
     ],
-    note: CSV_NOTE,
+    note: CONNECT_NOTE,
+    todos: CONNECT_TODOS,
   },
   {
     slug: "marketing",
@@ -174,7 +187,7 @@ export const ROLES: readonly Solution[] = [
     useCases: [
       {
         title: "Clean an event list",
-        body: "Upload the attendee list beside your existing contacts and see who is new and who is already there.",
+        body: "Upload the attendee list beside the contacts already in DupeZero and see who is new and who is already there.",
       },
       {
         title: "Deduplicate before a send",
@@ -185,13 +198,14 @@ export const ROLES: readonly Solution[] = [
         body: "See every source record behind a person in one place.",
       },
     ],
-    note: CSV_NOTE,
+    note: CONNECT_NOTE,
+    todos: CONNECT_TODOS,
   },
   {
     slug: "it-and-security",
     name: "IT and Security",
     title: "Know where customer data goes, and who can touch it.",
-    lead: "Before a team uploads customer records anywhere, you need to know how they are kept apart, protected and audited. Here is what DupeZero does today, and what it does not.",
+    lead: "Before a team connects your Salesforce org or other systems to anything, you need to know how the records are kept apart, protected and audited. Here is what DupeZero does today, and what it does not.",
     metaDescription:
       "For IT and security teams: how DupeZero separates, encrypts and audits customer records, how access works, and what it does not yet offer.",
     hurts: [
@@ -223,7 +237,7 @@ export const ROLES: readonly Solution[] = [
       },
       {
         title: "Limit what leaves Salesforce",
-        body: "Only the columns a team exports reach DupeZero. Agree the column list before the first upload.",
+        body: "Agree which objects and fields DupeZero reads before a team connects your org.",
       },
       {
         title: "Check outgoing calls",
@@ -234,6 +248,10 @@ export const ROLES: readonly Solution[] = [
       title: "What we do not offer yet",
       body: "Sign-in is by email and password. Single sign-on and multi-factor sign-in are not available, and DupeZero holds no security certification today.",
     },
+    todos: [
+      ...CONNECT_TODOS,
+      "owner to state which Salesforce permissions the AppExchange app requests",
+    ],
   },
 ];
 
@@ -270,14 +288,15 @@ export const INDUSTRIES: readonly Solution[] = [
     useCases: [
       {
         title: "Connect sign-ups to existing accounts",
-        body: "Upload sign-ups beside your Account export and see which companies you already know.",
+        body: "Bring sign-ups in beside your Salesforce Accounts and see which companies you already know.",
       },
       {
         title: "Clean a trial list",
         body: "Find trial users who are already contacts before routing them.",
       },
     ],
-    note: { title: "Before you upload", body: NO_CERTIFICATION },
+    note: { title: BEFORE_CONNECTING, body: NO_CERTIFICATION },
+    todos: CONNECT_TODOS,
   },
   {
     slug: "nonprofit",
@@ -310,15 +329,16 @@ export const INDUSTRIES: readonly Solution[] = [
     ],
     useCases: [
       {
-        title: "Combine giving channel exports",
-        body: "Upload each channel's export as a source in one people dataset, and resolve them together.",
+        title: "Combine giving channels",
+        body: "Bring each giving channel in as a source in one people dataset, and resolve them together.",
       },
       {
         title: "Clean before a mailing",
         body: "Resolve the mailing list into golden records first.",
       },
     ],
-    note: { title: "Before you upload", body: NO_CERTIFICATION },
+    note: { title: BEFORE_CONNECTING, body: NO_CERTIFICATION },
+    todos: CONNECT_TODOS,
   },
   {
     slug: "financial-services",
@@ -352,15 +372,15 @@ export const INDUSTRIES: readonly Solution[] = [
     useCases: [
       {
         title: "Check a prospect list against clients",
-        body: "Upload the list beside a client export and see who you already serve.",
+        body: "Upload the list beside the clients pulled from your org and see who you already serve.",
       },
       {
         title: "Tidy company records",
         body: "Ignore legal suffixes when comparing company names.",
       },
     ],
-    note: { title: "Before you upload", body: NO_CERTIFICATION },
-    todos: ["owner to confirm which client data DupeZero may hold"],
+    note: { title: BEFORE_CONNECTING, body: NO_CERTIFICATION },
+    todos: [...CONNECT_TODOS, "owner to confirm which client data DupeZero may hold"],
   },
   {
     slug: "healthcare-and-life-sciences",
@@ -394,7 +414,7 @@ export const INDUSTRIES: readonly Solution[] = [
     useCases: [
       {
         title: "Clean a contact list",
-        body: "Upload contact exports from several teams and resolve them together.",
+        body: "Bring in contacts from several teams' systems and resolve them together.",
       },
       {
         title: "Tidy organisation records",
@@ -402,10 +422,10 @@ export const INDUSTRIES: readonly Solution[] = [
       },
     ],
     note: {
-      title: "Before you upload",
-      body: `${NO_CERTIFICATION} Do not upload patient health information until we have confirmed in writing that we can hold it.`,
+      title: BEFORE_CONNECTING,
+      body: `${NO_CERTIFICATION} Do not send patient health information to DupeZero until we have confirmed in writing that we can hold it.`,
     },
-    todos: ["owner to confirm whether DupeZero may process health information"],
+    todos: [...CONNECT_TODOS, "owner to confirm whether DupeZero may process health information"],
   },
   {
     slug: "education",
@@ -439,15 +459,15 @@ export const INDUSTRIES: readonly Solution[] = [
     useCases: [
       {
         title: "Join enquiries to applications",
-        body: "Upload both exports as sources in one people dataset and resolve them together.",
+        body: "Bring both systems in as sources in one people dataset and resolve them together.",
       },
       {
         title: "Clean an alumni list before an appeal",
         body: "Resolve the list into golden records before it is used.",
       },
     ],
-    note: { title: "Before you upload", body: NO_CERTIFICATION },
-    todos: ["owner to confirm whether DupeZero may hold student records"],
+    note: { title: BEFORE_CONNECTING, body: NO_CERTIFICATION },
+    todos: [...CONNECT_TODOS, "owner to confirm whether DupeZero may hold student records"],
   },
   {
     slug: "real-estate",
@@ -481,14 +501,15 @@ export const INDUSTRIES: readonly Solution[] = [
     useCases: [
       {
         title: "Merge portal leads",
-        body: "Upload each portal's export as a source and resolve them together.",
+        body: "Bring each portal's leads in as a source and resolve them together.",
       },
       {
         title: "Clean an open-house list",
         body: "See who on the list is already in your database.",
       },
     ],
-    note: { title: "Before you upload", body: NO_CERTIFICATION },
+    note: { title: BEFORE_CONNECTING, body: NO_CERTIFICATION },
+    todos: CONNECT_TODOS,
   },
   {
     slug: "manufacturing",
@@ -522,14 +543,15 @@ export const INDUSTRIES: readonly Solution[] = [
     useCases: [
       {
         title: "Deduplicate the account list",
-        body: "Upload an Account export to a company dataset and review the groups.",
+        body: "Pull Accounts from your connected org into a company dataset and review the groups.",
       },
       {
         title: "Check a trade show list",
-        body: "Upload the list beside your contacts and see who is already there.",
+        body: "Upload the list beside the contacts already in DupeZero and see who is already there.",
       },
     ],
-    note: { title: "Before you upload", body: NO_CERTIFICATION },
+    note: { title: BEFORE_CONNECTING, body: NO_CERTIFICATION },
+    todos: CONNECT_TODOS,
   },
 ];
 
@@ -537,12 +559,12 @@ export const INDUSTRIES: readonly Solution[] = [
 export const USE_CASES: readonly { title: string; body: string; href: string }[] = [
   {
     title: "Find Leads that are already Contacts",
-    body: "Two exports, two sources, one people dataset: see where they overlap.",
+    body: "Two objects from your connected org, one people dataset: see where they overlap.",
     href: MATCHING,
   },
   {
     title: "Check a list before importing it",
-    body: "Upload a new list beside existing records to see which rows already exist.",
+    body: "Upload a new list beside the records already in DupeZero to see which rows already exist.",
     href: "/how-it-works",
   },
   {

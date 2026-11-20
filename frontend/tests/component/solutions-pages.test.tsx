@@ -111,7 +111,19 @@ describe("the role and industry pages", () => {
     expect(
       screen.getByText(/\[TODO: owner to confirm whether DupeZero may process health/),
     ).toBeVisible();
-    expect(screen.getByText(/Do not upload patient health information/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Do not send patient health information to DupeZero/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/\[TODO: link to the DupeZero AppExchange listing/)).toBeVisible();
+  });
+
+  it("does not describe DupeZero as working only from CSV exports", () => {
+    // Owner-confirmed 2026-11-20: data arrives through the Salesforce
+    // AppExchange app and API connections, with CSV upload as one option.
+    for (const s of [...ROLES, ...INDUSTRIES]) {
+      const text = JSON.stringify(s);
+      expect(text, s.slug).not.toMatch(/works from CSV|does not connect|Upload an? \w+ export/i);
+    }
   });
 
   it("links every role and industry from the overview", () => {

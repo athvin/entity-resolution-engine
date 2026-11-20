@@ -31,6 +31,14 @@ are as of commit `9f905b1f`.
 
 ## Salesforce
 
+> **Owner-confirmed, 2026-11-20:** DupeZero connects to customer systems
+> through their APIs to pull records for deduplication, and has a Salesforce
+> app listed on the Salesforce AppExchange. Neither is visible in this
+> repository (no package source here; connections are API-only routes with no
+> screen), so the rows below record what the code shows, and the solution pages
+> now state the owner's account. Writing results back to Salesforce has not
+> been confirmed and is still not claimed.
+
 | Feature                                        | Plain-language description                                                              | Status                        | Evidence                                                                                                                                                 | Notes                                                                                                                                                                                                                             |
 | ---------------------------------------------- | --------------------------------------------------------------------------------------- | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Connect a Salesforce org                       | Register an org with a connected app's client ID and secret                             | PARTIAL OR HIDDEN             | `SRV/lib.rs:9308-9536`; `SRV/salesforce.rs:220-257`; `entities/salesforce_connection/entity.yaml`; tests `rust/crates/er-server/tests/pg_connections.rs` | API only, no screen. OAuth client-credentials flow only (no "Log in with Salesforce" redirect). **The client secret is stored unencrypted in the database** (`entity.yaml:37-40`), so treat this as a security item before launch |
