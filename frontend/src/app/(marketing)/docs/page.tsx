@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+
+import { Breadcrumbs, LastUpdated, PAGE_UPDATED, SHARE_IMAGE } from "@/components/marketing/seo";
 import { CodeExample } from "@/components/marketing/docs/code-example";
 import { DeveloperReference } from "@/components/marketing/docs/developer-reference";
 import "@/components/marketing/docs/docs.css";
@@ -9,7 +11,12 @@ export const metadata: Metadata = {
   description:
     "Organization and dataset concepts, authentication, ingestion, resolution, results, corrections, and the current DupeZero API reference.",
   alternates: { canonical: "/docs" },
-  openGraph: { title: "DupeZero developer docs", url: "/docs" },
+  openGraph: { title: "DupeZero developer docs", url: "/docs", images: [SHARE_IMAGE] },
+  twitter: {
+    card: "summary_large_image",
+    title: "DupeZero developer docs",
+    images: [SHARE_IMAGE.url],
+  },
 };
 const CONTENTS: [string, string][] = [
   ["overview", "Start here"],
@@ -51,6 +58,8 @@ export default function DocsPage() {
         <nav aria-label="Mobile documentation contents">{links}</nav>
       </details>
       <article className="docs-article">
+        <Breadcrumbs path="/docs" label="Docs" />
+        <LastUpdated iso={PAGE_UPDATED["/docs"] ?? ""} />
         <section id="overview">
           <p className="story-eyebrow">The details behind the flow</p>
           <h1>Build with DupeZero.</h1>

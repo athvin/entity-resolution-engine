@@ -25,7 +25,7 @@ export const metadata = pageMetadata({
 
 export default function TermsPage() {
   return (
-    <Page testId="page-legal-terms">
+    <Page testId="page-legal-terms" crumb={{ path: "/legal/terms", label: "Terms of service" }}>
       <PageIntro
         eyebrow="Legal · Last updated 20 November 2026"
         title="Terms of service"

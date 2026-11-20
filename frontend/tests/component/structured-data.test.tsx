@@ -43,7 +43,7 @@ describe("StructuredData", () => {
     expect(parsed).toBeTypeOf("object");
   });
 
-  it("describes the Organization and the SoftwareApplication", () => {
+  it("describes the Organization and the WebSite", () => {
     const parsed = JSON.parse(scriptBody(renderScript())) as {
       "@context": string;
       "@graph": { "@type": string; name: string }[];
@@ -51,7 +51,7 @@ describe("StructuredData", () => {
     expect(parsed["@context"]).toBe("https://schema.org");
     expect(parsed["@graph"].map((node) => node["@type"]).sort()).toEqual([
       "Organization",
-      "SoftwareApplication",
+      "WebSite",
     ]);
     for (const node of parsed["@graph"]) expect(node.name).toBe("DupeZero");
   });

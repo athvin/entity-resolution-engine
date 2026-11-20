@@ -12,7 +12,7 @@ export const metadata = pageMetadata({
 
 export default function ContactPage() {
   return (
-    <Page testId="page-contact">
+    <Page testId="page-contact" crumb={{ path: "/contact", label: "Contact" }}>
       <PageIntro
         eyebrow="Contact"
         title="Request a demo, or ask us anything."

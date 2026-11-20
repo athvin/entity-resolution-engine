@@ -80,7 +80,7 @@ test.describe("marketing", () => {
     await expect(first).toHaveAttribute("open", "");
   });
 
-  test("the page carries Organization and SoftwareApplication JSON-LD", async ({ page }) => {
+  test("the page carries Organization and WebSite JSON-LD", async ({ page }) => {
     await page.goto("/");
     const raw = await page.locator('script[type="application/ld+json"]').textContent();
     expect(raw).toBeTruthy();
@@ -90,8 +90,21 @@ test.describe("marketing", () => {
     const parsed = JSON.parse(raw ?? "") as { "@graph": { "@type": string }[] };
     expect(parsed["@graph"].map((node) => node["@type"]).sort()).toEqual([
       "Organization",
-      "SoftwareApplication",
+      "WebSite",
     ]);
+  });
+
+  test("product and pricing carry SoftwareApplication; interior pages carry breadcrumbs", async ({
+    page,
+  }) => {
+    for (const path of ["/product", "/pricing"]) {
+      await page.goto(path);
+      const blocks = await page.locator('script[type="application/ld+json"]').allTextContents();
+      const types = blocks.map((b) => (JSON.parse(b) as { "@type": string })["@type"]);
+      expect(types, path).toContain("SoftwareApplication");
+      expect(types, path).toContain("BreadcrumbList");
+      await expect(page.getByRole("navigation", { name: "Breadcrumb" })).toBeVisible();
+    }
   });
 
   test("robots.txt is served as text and is not redirected", async ({ page }) => {

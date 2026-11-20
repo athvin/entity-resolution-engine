@@ -22,7 +22,7 @@ export const metadata = pageMetadata({
 
 export default function MatchingPage() {
   return (
-    <Page testId="page-matching">
+    <Page testId="page-matching" crumb={{ path: "/features/matching", label: "Matching" }}>
       <PageIntro
         eyebrow="Feature / Matching"
         title="Matching rules you can read, and change."

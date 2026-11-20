@@ -27,7 +27,7 @@ export const metadata = pageMetadata({
 
 export default function SolutionsPage() {
   return (
-    <Page testId="page-solutions">
+    <Page testId="page-solutions" crumb={{ path: "/solutions", label: "Solutions" }}>
       <PageIntro
         eyebrow="Solutions"
         title="The same duplicates, a different problem for each team."

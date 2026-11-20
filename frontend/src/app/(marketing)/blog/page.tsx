@@ -21,7 +21,7 @@ export const metadata = pageMetadata({
 
 export default function BlogPage() {
   return (
-    <Page testId="page-blog">
+    <Page testId="page-blog" crumb={{ path: "/blog", label: "Blog" }}>
       <PageIntro
         eyebrow="Blog"
         title="Notes on cleaner customer data."

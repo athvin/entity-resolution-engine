@@ -22,7 +22,7 @@ export const metadata = pageMetadata({
 
 export default function ResourcesPage() {
   return (
-    <Page testId="page-resources">
+    <Page testId="page-resources" crumb={{ path: "/resources", label: "Resources" }}>
       <PageIntro
         eyebrow="Resources"
         title="Guides to cleaner records."
