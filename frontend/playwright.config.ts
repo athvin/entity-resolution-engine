@@ -58,7 +58,13 @@ export default defineConfig({
     // waits for it. Five cycles at ratio **0** now pass, so what is left here
     // is margin for cross-architecture rasterization (baselines are
     // regenerated on arm64, CI compares on amd64) and nothing else.
-    toHaveScreenshot: { maxDiffPixelRatio: 0.0005, animations: "disabled" },
+    toHaveScreenshot: {
+      maxDiffPixelRatio: 0.0005,
+      animations: "disabled",
+      // Hides the viewport-fixed next-chapter button, which otherwise drifts
+      // over captured elements between runs (see the file).
+      stylePath: "./tests/functional/screenshot.css",
+    },
   },
   use: {
     baseURL: "http://localhost:3100",

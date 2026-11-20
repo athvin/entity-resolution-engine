@@ -1,6 +1,8 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 
+import { SOURCE_NAMES } from "../../src/components/marketing/demo/story-model";
+
 test.describe("interactive marketing", () => {
   test("the quiet entrance becomes the next-chapter button and leads into the audit", async ({
     page,
@@ -52,7 +54,9 @@ test.describe("interactive marketing", () => {
     await page.goto("/#flow");
     const flow = page.getByTestId("marketing-flow");
     await flow.getByRole("button", { name: /ZoomInfo/ }).click();
-    await expect(flow.locator('[data-node="source-6"]')).toBeVisible();
+    // Ports are numbered by position in SOURCE_NAMES; ZoomInfo is 7 since HubSpot.
+    const zoomInfoPort = `[data-node="source-${String(SOURCE_NAMES.indexOf("ZoomInfo"))}"]`;
+    await expect(flow.locator(zoomInfoPort)).toBeVisible();
     // WebKit native selects ignore min-height; measure the actual touch target.
     for (const id of ["#flow-dataset", "#usage-dataset"]) {
       expect(
@@ -60,7 +64,7 @@ test.describe("interactive marketing", () => {
       ).toBeGreaterThanOrEqual(44);
     }
     await page.locator("#flow-dataset").selectOption("1");
-    await expect(flow.locator('[data-node="source-6"]')).toHaveCount(0);
+    await expect(flow.locator(zoomInfoPort)).toHaveCount(0);
     await page.locator("#flow-dataset").selectOption("0");
     await expect(flow.getByRole("button", { name: /ZoomInfo/ })).toHaveAttribute(
       "aria-pressed",
