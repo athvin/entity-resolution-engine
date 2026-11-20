@@ -77,24 +77,34 @@ function LoginForm() {
     <main className="bg-muted/40 flex min-h-dvh items-center justify-center p-4">
       <Card className="w-full max-w-sm" data-testid="login-card">
         <CardHeader className="space-y-2 text-center">
-          {/* The logo is a brand asset, not palette: its blue stays inside the image. */}
-          <CardTitle className="flex justify-center py-1">
-            <Image
-              src="/brand/dupezero-logo-on-light.svg"
-              alt="DupeZero"
-              width={142}
-              height={36}
-              priority
-              className="h-9 w-auto dark:hidden"
-            />
-            <Image
-              src="/brand/dupezero-logo-on-dark.svg"
-              alt="DupeZero"
-              width={142}
-              height={36}
-              priority
-              className="hidden h-9 w-auto dark:block"
-            />
+          {/* The logo is a brand asset, not palette: its blue stays inside the image.
+              It links back to the marketing site. The link carries the title's old
+              vertical padding (36px logo + 2×4px = the 44px touch target), so the
+              card's layout is unchanged. */}
+          <CardTitle className="flex justify-center">
+            <Link
+              href="/"
+              aria-label="DupeZero home"
+              className="focus-visible:ring-ring inline-flex min-h-11 items-center rounded-md px-1 focus-visible:ring-2 focus-visible:outline-none"
+              data-testid="login-home-link"
+            >
+              <Image
+                src="/brand/dupezero-logo-on-light.svg"
+                alt="DupeZero"
+                width={142}
+                height={36}
+                priority
+                className="h-9 w-auto dark:hidden"
+              />
+              <Image
+                src="/brand/dupezero-logo-on-dark.svg"
+                alt="DupeZero"
+                width={142}
+                height={36}
+                priority
+                className="hidden h-9 w-auto dark:block"
+              />
+            </Link>
           </CardTitle>
           <CardDescription>Sign in to your workspace</CardDescription>
         </CardHeader>
