@@ -156,8 +156,8 @@ describe("navigation", () => {
     expect(HEADER_LINKS.map((l) => l.label)).toEqual([
       "Product",
       "Solutions",
-      "Pricing",
       "Resources",
+      "Pricing",
       "Contact",
     ]);
   });

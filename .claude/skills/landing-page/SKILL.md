@@ -144,7 +144,7 @@ Home opens with a quiet hero, then stacked ingress, organization/dataset, dedupe
 and egress panels, followed by audit, usage, and a short FAQ and closing CTA.
 Measured paths connect actual exit and entry ports across section boundaries;
 resize and dataset/source changes must preserve their alignment. The
-header links Product, Solutions, Pricing, Resources and Contact through
+header links Product, Solutions, Resources, Pricing and Contact through
 `marketing-nav.tsx`, a client island so the current page carries
 `aria-current`. From `lg` the links sit in the row; below it they move behind a
 Menu disclosure (Escape and an outside click close it). The row ends with two

@@ -58,8 +58,8 @@ export const RESOURCE_GROUPS: readonly LinkGroup[] = [
 export const HEADER_LINKS: readonly NavItem[] = [
   { href: "/product", label: "Product" },
   { href: "/solutions", label: "Solutions", groups: SOLUTION_GROUPS },
-  { href: "/pricing", label: "Pricing" },
   { href: "/resources", label: "Resources", groups: RESOURCE_GROUPS },
+  { href: "/pricing", label: "Pricing" },
   { href: "/contact", label: "Contact" },
 ];
 

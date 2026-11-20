@@ -54,7 +54,7 @@ The three articles:
 
 ## Navigation and footer
 
-- **Header:** Product, Solutions (dropdown: by role, by industry), Pricing, Resources (dropdown: Docs, Blog, ROI calculator), Contact. How it works is a section of `/product`; `/how-it-works` redirects there. Below 640px these
+- **Header:** Product, Solutions (dropdown: by role, by industry), Resources (dropdown: Docs, Blog, ROI calculator), Pricing, Contact. How it works is a section of `/product`; `/how-it-works` redirects there. Below 640px these
   move into a Menu disclosure, because five links do not fit 320px. This adds
   the site's first mobile menu.
 - **Footer:** link columns.
