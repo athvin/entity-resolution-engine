@@ -102,7 +102,6 @@ export const PRICING_CONFIG = {
 
   /** Footnote figures. */
   SOFT_BUFFER_BP: 1_000,
-  ADDITIONAL_ORG_RATE_BP: 5_000,
 
   /**
    * Comparison against a competitor's list price. Do not enable without legal

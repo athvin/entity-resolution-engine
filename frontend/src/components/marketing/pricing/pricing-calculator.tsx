@@ -162,6 +162,7 @@ export function PricingCalculator() {
   const supportLocked = term === "twoYear" || term === "threeYear";
   const errorId = `${id}-records-error`;
   const hintId = `${id}-records-hint`;
+  const helperId = `${id}-records-helper`;
 
   const onText = (value: string) => {
     setText(value);
@@ -177,15 +178,18 @@ export function PricingCalculator() {
       <div className="pricing-controls">
         <div className="pricing-field">
           <label className="pricing-label" htmlFor={`${id}-records`}>
-            Records across all scanned objects
+            Total records across all connected systems
           </label>
+          <p id={helperId} className="pricing-note story-muted">
+            Count records from every system you connect, added together.
+          </p>
           <Input
             id={`${id}-records`}
             inputMode="numeric"
             autoComplete="off"
             value={text}
             aria-invalid={error !== null}
-            aria-describedby={error ? `${errorId} ${hintId}` : hintId}
+            aria-describedby={error ? `${errorId} ${helperId} ${hintId}` : `${helperId} ${hintId}`}
             onChange={(e) => {
               onText(e.target.value);
             }}
@@ -217,7 +221,7 @@ export function PricingCalculator() {
           />
           <p id={hintId} className="pricing-hint story-muted">
             <span>{formatRecords(CONFIG.SLIDER_MIN_RECORDS)}</span>
-            <span>Total across every object we scan, per org</span>
+            <span>Total across every connected system</span>
             <span>{formatRecords(CONFIG.SLIDER_MAX_RECORDS)}</span>
           </p>
         </div>
@@ -443,19 +447,33 @@ export function PricingCalculator() {
             <a href={CONFIG.SALES_URL}>Talk to sales</a>
           </Button>
         </div>
-        <p className="story-muted">Your Salesforce sandbox org is always free.</p>
+        <p className="story-muted">
+          Records in free sandbox or test environments do not count toward your tier.
+        </p>
+        <p className="story-muted" data-testid="pricing-bespoke">
+          Need an integration built for your own system? Contact us for a project quote.
+        </p>
       </section>
 
       <ul className="pricing-footnotes story-muted">
-        <li>Every tier includes unlimited users and every feature.</li>
         <li>
-          Each tier has a {pct(CONFIG.SOFT_BUFFER_BP)} soft buffer over its record cap. We true up
-          at renewal.
+          Price depends only on your total records, counted across every system you connect,
+          Salesforce and any other supported system combined. Records are the rows in the objects
+          you choose to scan, such as leads, contacts, accounts and custom objects; activities,
+          tasks and other objects we do not process are not counted.
         </li>
         <li>
-          Additional production orgs are {pct(CONFIG.ADDITIONAL_ORG_RATE_BP)} of that org’s tier
-          price.
+          Records are counted at signup and again at renewal. In between, each tier has a{" "}
+          {pct(CONFIG.SOFT_BUFFER_BP)} soft buffer above its record cap, then we prompt you to
+          upgrade. Any true-up happens at renewal, with no surprise mid-term charges.
         </li>
+        <li>
+          Standard connectors are included at no extra charge, and their setup is part of
+          onboarding, which is free on prepaid terms. The number of systems, connectors or orgs
+          never changes the price.
+        </li>
+        <li>Records in free sandbox or test environments do not count toward your tier.</li>
+        <li>Every tier includes every feature and unlimited users.</li>
         <li>Prices are in {CONFIG.currency} and subject to change.</li>
       </ul>
     </div>

@@ -12,6 +12,36 @@ arithmetic. Every rule lives here, and every number lives in one object.
 | `tests/unit/pricing.test.ts` | The brief's worked cases, every boundary, both flags                         |
 | `tests/unit/savings.test.ts` | The savings defaults worked through, a loss, no price, the input bounds      |
 
+## Pricing rule: records only
+
+Price depends **only on total records**, counted across every system a
+customer connects (Salesforce and any other supported system, added
+together). Never on systems, connectors, integrations, CRMs, orgs or users.
+
+- Records are rows in the objects the customer chooses to scan (leads,
+  contacts, accounts, custom objects). Activities, tasks and objects we do not
+  process are not counted.
+- Records are counted at signup and at renewal. In between there is a 10% soft
+  buffer above the tier cap (`SOFT_BUFFER_BP`), then an upgrade prompt; any
+  true-up is at renewal, never mid-term.
+- Standard connectors are included; their setup is part of onboarding, which
+  is free on prepaid terms. Sandbox and test records do not count.
+- Every tier has every feature and unlimited users.
+- **The one exception:** integration work built for one customer's own system
+  is a separate project quote. It is never in the calculator and appears only
+  as "Contact us".
+
+Where things live: tiers, caps and prices in `config.ts`; the rules in
+`calculator.ts`; the calculator's labels and footnotes in
+`src/components/marketing/pricing/pricing-calculator.tsx`; the page intro and
+meta description in `PRICING` in `src/components/marketing/content.ts`; the
+pricing FAQ in `src/components/marketing/pages/faq-content.ts`.
+
+`tests/unit/pricing-rule.test.ts` fails if pricing by org, connector, system
+or seat returns to user-facing copy or the pricing code.
+Its `EXCEPTIONS` list, at the top of that file, is where a deliberate
+exception goes, with the reason.
+
 ## Changing a price
 
 Edit `PRICING_CONFIG` in `config.ts`, then run
@@ -31,7 +61,7 @@ there. That is intended: a price change should be a reviewed diff.
 | Multi-year upfront prices (2A, 2.4A)   | `TWO_YEAR_PRICE_BP`, `THREE_YEAR_PRICE_BP`                         |
 | Custom bands above the largest tier    | `customBands`, `CUSTOM_INCREMENT_RECORDS`, `CUSTOM_ROUND_UP_CENTS` |
 | Where estimates stop ("Contact sales") | `MAX_ESTIMATE_RECORDS`                                             |
-| Footnote figures                       | `SOFT_BUFFER_BP`, `ADDITIONAL_ORG_RATE_BP`                         |
+| Footnote figures                       | `SOFT_BUFFER_BP`                                                   |
 | Trial and sales links                  | `TRIAL_URL`, `SALES_URL` (placeholders until launch)               |
 
 ## Flags
