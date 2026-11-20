@@ -9,6 +9,9 @@
 
 import { INDUSTRIES, INDUSTRY_BASE, ROLE_BASE, ROLES } from "./pages/solutions-content";
 
+/** Where every demo button goes: the contact form, until a booking tool exists. */
+export const DEMO_PATH = "/contact";
+
 export interface SiteLink {
   href: string;
   label: string;

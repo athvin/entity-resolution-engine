@@ -23,6 +23,7 @@ import ResourcesPage, { metadata as resourcesMeta } from "@/app/(marketing)/reso
 import SecurityPage, { metadata as securityMeta } from "@/app/(marketing)/security/page";
 import SolutionsPage, { metadata as solutionsMeta } from "@/app/(marketing)/solutions/page";
 import { MarketingFooter } from "@/components/marketing/marketing-footer";
+import { MarketingHeader } from "@/components/marketing/marketing-header";
 import { MarketingNav } from "@/components/marketing/marketing-nav";
 import { validateContact } from "@/components/marketing/pages/contact-form";
 import { FAQ_ITEMS } from "@/components/marketing/pages/faq-content";
@@ -165,6 +166,17 @@ describe("navigation", () => {
     fireEvent.click(button);
     fireEvent.click(document.body);
     expect(button).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("offers Login and Book a demo in the header, and no theme control", () => {
+    render(<MarketingHeader />);
+    expect(screen.getByTestId("marketing-cta-header")).toHaveTextContent("Login");
+    expect(screen.getByTestId("marketing-cta-header")).toHaveAttribute("href", "/app");
+    expect(screen.getByTestId("marketing-cta-demo")).toHaveTextContent("Book a demo");
+    expect(screen.getByTestId("marketing-cta-demo")).toHaveAttribute("href", "/contact");
+    expect(screen.queryByRole("button", { name: /mode|theme/i })).toBeNull();
+    // Below 640px the header's Login button is hidden; the menu carries it.
+    expect(screen.getByTestId("marketing-menu-login")).toHaveAttribute("href", "/app");
   });
 
   it("renders the footer's columns and keeps Sign in", () => {

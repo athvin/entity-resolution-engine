@@ -114,25 +114,22 @@ test.describe("interactive marketing", () => {
     await expect(slider).toHaveAttribute("aria-valuetext", "625,938 records per run");
   });
 
-  test("dark is the default and the theme toggle remembers an explicit choice", async ({
-    page,
-  }) => {
+  test("the marketing site is always dark and offers no theme control", async ({ page }) => {
     await page.emulateMedia({ colorScheme: "light" });
-    await page.goto("/");
-    await expect(page.locator("html")).toHaveClass("dark");
-    await page.getByRole("button", { name: "Switch to light mode" }).click();
-    await expect(page.locator("html")).toHaveClass("light");
-    await page.reload();
-    await expect(page.locator("html")).toHaveClass("light");
-    await page.getByRole("link", { name: "Docs", exact: true }).click();
-    await expect(page.locator("html")).toHaveClass("light");
-    await page.getByRole("button", { name: "Switch to dark mode" }).click();
-    await expect(page.locator("html")).toHaveClass("dark");
+    // A choice stored by the app's own toggle must not carry over.
+    await page.addInitScript(() => {
+      localStorage.setItem("theme", "light");
+    });
+    for (const path of ["/", "/solutions", "/pricing", "/docs"]) {
+      await page.goto(path);
+      await expect(page.locator("html")).toHaveClass("dark");
+    }
+    await expect(page.getByRole("button", { name: /Switch to (light|dark) mode/ })).toHaveCount(0);
   });
 
   test("a partial swipe settles onto the next chapter", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("button", { name: "Switch to light mode" })).toBeEnabled();
+    await expect(page.getByRole("button", { name: "Pause pipeline" })).toBeEnabled();
     await page.locator("#flow").evaluate((node) => {
       const destination = node.getBoundingClientRect().top + scrollY - 64;
       window.scrollTo({ top: destination * 0.65, behavior: "instant" });
@@ -205,27 +202,6 @@ test.describe("interactive marketing", () => {
         return Math.hypot(after.x - before.x, after.y - before.y);
       })
       .toBeGreaterThan(3);
-  });
-
-  test("tapping the theme control preserves the current chapter", async ({ page, isMobile }) => {
-    await page.goto("/#dedupe");
-    const toggle = page.getByRole("button", { name: "Switch to light mode" });
-    await expect(toggle).toBeEnabled();
-    await expect
-      .poll(() =>
-        page.locator("#dedupe").evaluate((node) => Math.abs(node.getBoundingClientRect().top - 64)),
-      )
-      .toBeLessThan(2);
-    const scroll = await page.evaluate(() => scrollY);
-    const box = await toggle.boundingBox();
-    if (!box) throw new Error("Theme toggle is not rendered");
-    // Locator.click scrolls a sticky header into view before pressing it. Use
-    // a real pointer location so the test measures the visitor's tap instead.
-    if (isMobile) await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
-    else await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-    await expect(page.locator("html")).toHaveClass("light");
-    await page.waitForTimeout(500);
-    expect(Math.abs((await page.evaluate(() => scrollY)) - scroll)).toBeLessThan(2);
   });
 
   test("the footer stays reachable after scrolling and opening the FAQ", async ({

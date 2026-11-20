@@ -7,6 +7,8 @@ import { useEffect, useId, useRef, useState } from "react";
 
 import { HEADER_LINKS, isCurrent, type NavItem } from "./site-links";
 
+import { PORTAL_ENTRY_PATH } from "@/lib/site/routes";
+
 import { cn } from "@/lib/utils";
 
 /**
@@ -259,6 +261,10 @@ export function MarketingNav() {
           ))}
           <li>
             <NavLink href="/" label="Home" pathname={pathname} mobile />
+          </li>
+          {/* The header's Login button is hidden below sm; it lives here instead. */}
+          <li className="sm:hidden">
+            <NavLink href={PORTAL_ENTRY_PATH} label="Login" pathname={pathname} mobile />
           </li>
         </ul>
       </nav>

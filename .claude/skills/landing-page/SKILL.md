@@ -141,8 +141,12 @@ resize and dataset/source changes must preserve their alignment. The
 header links Product, Solutions, How it works, Pricing, Docs and Contact through
 `marketing-nav.tsx`, a client island so the current page carries
 `aria-current`. From `lg` the links sit in the row; below it they move behind a
-Menu disclosure (Escape and an outside click close it). Below `sm` the header
-shows the logo mark and an icon-only theme toggle so the row fits 320px. The
+Menu disclosure (Escape and an outside click close it). The row ends with two
+buttons, Login (`PORTAL_ENTRY_PATH`) and Book a demo (`DEMO_PATH`); below `sm`
+the header shows the logo mark and Book a demo, and Login moves into the Menu,
+so the row fits 320px. There is no theme control: `app/providers.tsx` forces
+dark on every `MARKETING_PUBLIC_PATHS` page, so a choice stored by the app's
+own toggle cannot strand a visitor in light mode. The
 footer has four link columns from the same `site-links.ts`. Solutions is a
 click-to-open dropdown (never hover-only) of role and industry pages, nested
 inside the Menu below `lg`; Escape closes the innermost open disclosure. Those

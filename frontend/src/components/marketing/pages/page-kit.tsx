@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import "./pages.css";
+import { DEMO_PATH } from "../site-links";
 
 import { Button } from "@/components/ui/button";
 
@@ -246,4 +247,4 @@ export function Page({ children, testId }: { children: React.ReactNode; testId: 
 }
 
 /** The demo call to action every page ends on. */
-export const DEMO: Action = { href: "/contact", label: "Request a demo" };
+export const DEMO: Action = { href: DEMO_PATH, label: "Request a demo" };

@@ -1,26 +1,27 @@
 import Image from "next/image";
 import Link from "next/link";
 import { MarketingNav } from "./marketing-nav";
-import { MarketingThemeToggle } from "./theme-toggle";
 
 import { Button } from "@/components/ui/button";
 import { PORTAL_ENTRY_PATH } from "@/lib/site/routes";
+import { DEMO_PATH } from "./site-links";
 
 /**
  * The marketing header. A server component with no `"use client"`; only the
- * nav (to mark the current page) and the theme toggle are client islands, so
- * navigation works independently of the interactive demos.
+ * nav (to mark the current page and open its menus) is a client island, so
+ * navigation works independently of the interactive demos. There is no theme
+ * control: the marketing site is always dark (see `app/providers.tsx`).
  *
- * One CTA, and it is correct for both signed-in and signed-out visitors without
- * knowing which it is talking to: PORTAL_ENTRY_PATH is behind the proxy's
+ * Two buttons: Book a demo, the site's primary action, and Login. Login is
+ * correct for both signed-in and signed-out visitors without knowing which it
+ * is talking to: PORTAL_ENTRY_PATH is behind the proxy's
  * cookie gate, so the redirect happens server-side. Reading the session here
  * would make the page dynamic and defeat the static prerender; reading it in
  * the browser would cost a round trip and flash the wrong label on the one page
  * where first paint matters most.
  *
- * No mobile drawer, deliberately. The nav is a plain row at every width, which
- * keeps the mobile DOM a subset of the desktop one — the premise the axe gate
- * relies on when it sweeps desktop only (see the frontend-testing skill).
+ * Below `sm` the row has no room for both, so Login moves into the Menu panel
+ * (`marketing-nav.tsx`) and the footer's Sign in link.
  */
 export function MarketingHeader() {
   return (
@@ -28,8 +29,8 @@ export function MarketingHeader() {
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-1 px-4 sm:px-6">
         {/* Every theme and width variant is in the markup and CSS shows one, so
             the right logo is in the static HTML before the theme script runs.
-            Below `sm` the mark alone, because the wordmark, the Menu button,
-            the toggle and the app button do not fit a 320px row. SVG `src` is served unoptimized automatically. */}
+            Below `sm` the mark alone, because the wordmark, the Menu button
+            and the demo button do not fit a 320px row. SVG `src` is served unoptimized automatically. */}
         <Link href="/" className="inline-flex min-h-11 shrink-0 items-center">
           <span className="inline-flex sm:hidden">
             <Image
@@ -69,10 +70,14 @@ export function MarketingHeader() {
           </span>
         </Link>
         <MarketingNav />
-        <MarketingThemeToggle />
-        <Button asChild size="sm" variant="outline" className="min-h-11">
+        <Button asChild size="sm" variant="outline" className="min-h-11 shrink-0 max-sm:hidden">
           <Link href={PORTAL_ENTRY_PATH} data-testid="marketing-cta-header">
-            Open the app
+            Login
+          </Link>
+        </Button>
+        <Button asChild size="sm" className="min-h-11 shrink-0">
+          <Link href={DEMO_PATH} data-testid="marketing-cta-demo">
+            Book a demo
           </Link>
         </Button>
       </div>
