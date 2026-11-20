@@ -109,13 +109,25 @@ Both properties are pinned by `tests/component/structured-data.test.tsx`,
 because they are React implementation details whose failure mode is invisible —
 the page still renders, and only crawlers break.
 
-## Marketing follows the product tokens, with one explicit exception
+## Marketing follows the product tokens, with two explicit exceptions
 
-The site remains grayscale except for the user-requested audit demonstration:
-marketing-scoped `--story-flag` and `--story-corrected` tokens show a red flagged
-match becoming two green corrected entities. Labels and shapes carry the same
-meaning. These tokens belong to the marketing stylesheet, not `globals.css`;
-the application palette and palette-utility lint rule remain unchanged.
+Both were requested by the owner, and both live in `story.css` under
+`.marketing-site`, never in `globals.css`; the application palette and the
+palette-utility lint rule remain unchanged.
+
+- **The audit demonstration.** `--story-flag` and `--story-corrected` show a red
+  flagged match becoming two green corrected entities. Labels and shapes carry
+  the same meaning.
+- **The brand blue from the logo** (`frontend/assets/dupezero-logo-*.svg`).
+  `--brand` is the logo's exact `#2F6BFF`, for marks and the flow's moving
+  light only: it sits at the AA edge (4.4-4.5:1), so text and filled controls
+  use `--brand-ink` and a marketing-scoped `--primary`, which clear 5.8:1 in
+  both themes. Eyebrows, story links, focus rings, primary buttons and the
+  next-chapter button carry it; everything else stays grayscale. One accent,
+  no gradients, no second hue.
+
+The header shows the logo, with both theme variants in the markup from
+`public/brand/`; the favicon `src/app/icon.svg` is the mark on a solid tile.
 
 ## A visual story and a detailed reference
 
@@ -123,14 +135,24 @@ Home opens with a quiet hero, then stacked ingress, organization/dataset, dedupe
 and egress panels, followed by audit, usage, and a short FAQ and closing CTA.
 Measured paths connect actual exit and entry ports across section boundaries;
 resize and dataset/source changes must preserve their alignment. The
-header links Home and Docs; pricing lives on Home without invented rates.
-Section links are ordinary anchors with native mandatory scroll snapping scoped
-to Home. Every chapter, including the closing FAQ, needs reachable snap targets so
-content cannot become unreachable. Mobile trail headings and diagrams use
-separate targets without an overlapping parent snap area. The footer is an
-end-aligned snap target. Next-step links supply reachable end stops. Oversized
-sections scroll within their area; reduced motion disables snapping. Do not
-intercept wheel or touch events.
+header links Home, Docs and Pricing through `marketing-nav.tsx`, a client island
+so the current page carries `aria-current`; below `sm` it shows the logo mark
+and an icon-only theme toggle so the row fits 320px. `/pricing` is a calculator
+whose every figure is in `src/lib/pricing/config.ts` and whose rules are the
+pure `calculator.ts` beside it (see its README); the page itself does no
+arithmetic. Home's usage section still describes per-run compute pricing as
+unpublished, which the pricing page now contradicts.
+Home scrolls freely: there is no scroll snapping, by the owner's decision, and
+no wheel or touch event is intercepted. Section links are ordinary anchors.
+Progression is opt-in through `story-chapters.tsx`: one floating button that
+always names the next chapter, and becomes "Back to top" at the end. It is
+hidden at the top of the page and fades in once the reader scrolls down; after
+the hero's `[data-explore-flow]` link it waits until that scroll has landed.
+Both the link and the button move the page through `glide.ts`, one eased,
+interruptible scroll on every device, rather than native smooth scrolling,
+which story.css disables on touch.
+Hidden means `visibility: hidden` plus `inert`, not just transparent. Its `CHAPTERS`
+list must name every section id in page order.
 
 `/docs` is a static workflow guide and operation reference. Its committed
 `operations.json` is generated from the MCP route manifest and response-envelope

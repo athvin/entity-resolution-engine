@@ -121,3 +121,13 @@ export const FOOTER = {
   tagline: "Entity resolution you can defend.",
   note: "DupeZero",
 } as const;
+
+/** The /pricing page. Figures come from src/lib/pricing/config.ts, never from here. */
+export const PRICING = {
+  eyebrow: "Pricing",
+  heading: "Pricing that follows your records.",
+  intro:
+    "Every tier has every feature. Choose by the records you scan, per Salesforce org, with unlimited users.",
+  metaDescription:
+    "Estimate DupeZero pricing for Salesforce deduplication: every feature on every tier, priced per org by record volume, with monthly, yearly and multi-year billing.",
+};

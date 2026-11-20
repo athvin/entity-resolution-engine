@@ -1,10 +1,9 @@
-import Link from "next/link";
-import { ArrowDownRight, ArrowUpRight } from "lucide-react";
+import { ArrowDownRight } from "lucide-react";
 import { HERO } from "./content";
 
 export function Hero() {
   return (
-    <section className="story-hero story-section" data-testid="marketing-hero">
+    <section id="intro" className="story-hero story-section" data-testid="marketing-hero">
       <div className="story-hero-copy">
         <p className="story-eyebrow">Independent records. A connected world.</p>
         <h1>
@@ -27,12 +26,12 @@ export function Hero() {
           <span className="story-muted">Every connection has a reason.</span>
         </p>
         <div className="story-jump-links">
-          <Link href="#flow">
+          {/* A plain anchor, not next/link: the browser's own fragment
+              navigation scrolls every time, with the page's smooth scroll and
+              header offset, even when the URL already ends in #flow. */}
+          <a href="#flow" data-explore-flow>
             Explore the flow <ArrowDownRight aria-hidden="true" />
-          </Link>
-          <Link href="#audit" data-start-audit>
-            See how audit works <ArrowUpRight aria-hidden="true" />
-          </Link>
+          </a>
         </div>
       </div>
     </section>

@@ -27,8 +27,12 @@ export function MarketingThemeToggle() {
     >
       <Sun className="hidden dark:block" aria-hidden="true" />
       <Moon className="dark:hidden" aria-hidden="true" />
-      <span className="hidden dark:inline">Light</span>
-      <span className="dark:hidden">Dark</span>
+      {/* Icon-only on phones, where the header row has no room for the word;
+          the accessible name comes from aria-label either way. */}
+      <span className="max-sm:hidden">
+        <span className="hidden dark:inline">Light</span>
+        <span className="dark:hidden">Dark</span>
+      </span>
     </Button>
   );
 }

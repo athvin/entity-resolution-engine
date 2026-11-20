@@ -46,6 +46,14 @@ const SCREENS: {
     },
   },
   {
+    name: "pricing",
+    path: "/pricing",
+    anonymous: true,
+    ready: async (page) => {
+      await expect(page.getByTestId("pricing-tier")).toHaveText("Professional");
+    },
+  },
+  {
     name: "dashboard",
     path: `/${ORG}/${DS}/dashboard`,
     ready: async (page) => {

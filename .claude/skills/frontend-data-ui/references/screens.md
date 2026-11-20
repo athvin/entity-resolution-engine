@@ -86,6 +86,7 @@ false the moment a screen renders different markup below `lg`.
 - `/datasets-dev/datasets/new`
 - `/docs`
 - `/login`
+- `/pricing`
 - `/reset`
 
 ### Routes NOT in the axe gate

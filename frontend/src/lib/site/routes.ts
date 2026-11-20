@@ -42,10 +42,11 @@ export const CANONICAL_ORIGIN = "https://dupezero.com";
  * `src/proxy.ts` (reachable without a session, via MARKETING_PUBLIC_PATHS
  * below) and `src/app/sitemap.ts` (what crawlers are told about).
  *
- * The header separately links Home and Docs. Adding a public path here makes
- * it reachable and indexed; add its navigation link explicitly as well.
+ * The header separately links Home, Docs and Pricing (marketing-nav.tsx).
+ * Adding a public path here makes it reachable and indexed; add its
+ * navigation link explicitly as well.
  */
-export const MARKETING_PATHS: readonly string[] = ["/", "/docs"];
+export const MARKETING_PATHS: readonly string[] = ["/", "/docs", "/pricing"];
 
 /**
  * Paths the proxy must let through unauthenticated for the marketing surface to

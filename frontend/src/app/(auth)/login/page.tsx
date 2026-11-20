@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 
@@ -76,7 +77,25 @@ function LoginForm() {
     <main className="bg-muted/40 flex min-h-dvh items-center justify-center p-4">
       <Card className="w-full max-w-sm" data-testid="login-card">
         <CardHeader className="space-y-2 text-center">
-          <CardTitle className="text-2xl">DupeZero</CardTitle>
+          {/* The logo is a brand asset, not palette: its blue stays inside the image. */}
+          <CardTitle className="flex justify-center py-1">
+            <Image
+              src="/brand/dupezero-logo-on-light.svg"
+              alt="DupeZero"
+              width={142}
+              height={36}
+              priority
+              className="h-9 w-auto dark:hidden"
+            />
+            <Image
+              src="/brand/dupezero-logo-on-dark.svg"
+              alt="DupeZero"
+              width={142}
+              height={36}
+              priority
+              className="hidden h-9 w-auto dark:block"
+            />
+          </CardTitle>
           <CardDescription>Sign in to your workspace</CardDescription>
         </CardHeader>
         <CardContent>

@@ -2,15 +2,45 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 
 test.describe("interactive marketing", () => {
-  test("the quiet entrance links to the flow and directly into the audit", async ({ page }) => {
+  test("the quiet entrance becomes the next-chapter button and leads into the audit", async ({
+    page,
+  }) => {
     await page.goto("/");
     await expect(page.getByTestId("marketing-hero").locator("svg.story-wires")).toHaveCount(0);
+    const next = page.getByTestId("marketing-next-chapter");
+    await expect(next).toBeHidden();
     await page.getByRole("link", { name: "Explore the flow" }).click();
     await expect(page).toHaveURL(/#flow$/);
+    await expect(next).toBeVisible();
+    await expect(next).toHaveAccessibleName(/^Next chapter: /);
+    // Back at the top of the page, the button steps away again.
+    await page.evaluate(() => {
+      window.scrollTo({ top: 0, behavior: "instant" });
+    });
+    await expect(next).toBeHidden();
     await page.goto("/");
-    await page.getByRole("link", { name: "See how audit works", exact: true }).click();
+    await page.getByRole("link", { name: /Follow an audit/ }).click();
     await expect(page).toHaveURL(/#audit$/);
     await expect(page.getByTestId("marketing-audit")).toHaveAttribute("data-running", "true");
+  });
+
+  test("Pricing is in the main navigation and prices a record count", async ({ page }) => {
+    await page.goto("/");
+    await page
+      .getByRole("navigation", { name: "Main navigation" })
+      .getByRole("link", { name: "Pricing" })
+      .click();
+    await expect(page).toHaveURL(/\/pricing$/);
+    await expect(page.getByTestId("marketing-nav-pricing")).toHaveAttribute("aria-current", "page");
+    await page.getByTestId("pricing-records").fill("300,001");
+    await expect(page.getByTestId("pricing-tier")).toHaveText("Professional");
+    await page.getByTestId("pricing-records").fill("300000");
+    await expect(page.getByTestId("pricing-tier")).toHaveText("Standard");
+    // Nothing on the page is wider than a 320px phone.
+    await page.setViewportSize({ width: 320, height: 720 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      320,
+    );
   });
 
   test("source choices persist per dataset and stay synchronized with usage", async ({ page }) => {

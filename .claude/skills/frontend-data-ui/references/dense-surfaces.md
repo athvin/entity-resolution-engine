@@ -44,7 +44,7 @@ surface can be linked, bookmarked or restored by the back button:
 
 ### Semantic tables
 
-Files under `frontend/src` rendering a `<table>` element: **27**.
+Files under `frontend/src` rendering a `<table>` element: **28**.
 Tabular data gets a real `<table>`; the records browser's grid-of-rows is
 what virtualization costs, not the house pattern to copy by default.
 <!-- END GENERATED: dense-surface-facts -->
