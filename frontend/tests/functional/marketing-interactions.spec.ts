@@ -26,12 +26,17 @@ test.describe("interactive marketing", () => {
 
   test("Pricing is in the main navigation and prices a record count", async ({ page }) => {
     await page.goto("/");
-    await page
-      .getByRole("navigation", { name: "Main navigation" })
-      .getByRole("link", { name: "Pricing" })
-      .click();
+    // Below lg the links sit behind the Menu button; either way, one visible nav.
+    const menu = page.getByTestId("marketing-menu-button");
+    if (await menu.isVisible()) await menu.click();
+    const nav = page.getByRole("navigation", { name: "Main navigation" });
+    await nav.getByRole("link", { name: "Pricing" }).click();
     await expect(page).toHaveURL(/\/pricing$/);
-    await expect(page.getByTestId("marketing-nav-pricing")).toHaveAttribute("aria-current", "page");
+    if (await menu.isVisible()) await menu.click();
+    await expect(nav.getByRole("link", { name: "Pricing" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
     await page.getByTestId("pricing-records").fill("300,001");
     await expect(page.getByTestId("pricing-tier")).toHaveText("Professional");
     await page.getByTestId("pricing-records").fill("300000");

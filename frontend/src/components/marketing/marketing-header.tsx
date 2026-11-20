@@ -28,8 +28,8 @@ export function MarketingHeader() {
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-1 px-4 sm:px-6">
         {/* Every theme and width variant is in the markup and CSS shows one, so
             the right logo is in the static HTML before the theme script runs.
-            Below `sm` the mark alone, because the wordmark plus three nav links
-            do not fit a 320px row. SVG `src` is served unoptimized automatically. */}
+            Below `sm` the mark alone, because the wordmark, the Menu button,
+            the toggle and the app button do not fit a 320px row. SVG `src` is served unoptimized automatically. */}
         <Link href="/" className="inline-flex min-h-11 shrink-0 items-center">
           <span className="inline-flex sm:hidden">
             <Image

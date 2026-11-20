@@ -53,10 +53,13 @@ in `MARKETING_PATHS`, not that list** — `MARKETING_PUBLIC_PATHS` spreads
 reaches both consumers. Adding a page to the public list instead makes it
 reachable while leaving it out of the sitemap.
 
-**The nav is not one of those consumers**, despite what `routes.ts` used to say.
-Nothing under `src/components/marketing/` imports either list — the header is a
-wordmark plus the one CTA. A page added to `MARKETING_PATHS` is reachable and in
-the sitemap and **linked from nowhere**; adding the link is a separate edit.
+**The nav is not one of those consumers.** The header and footer read
+`src/components/marketing/site-links.ts`, which is hand-maintained. A page added
+to `MARKETING_PATHS` is reachable and in the sitemap and **linked from nowhere**
+until it is added there; `tests/component/marketing-pages.test.tsx` fails when
+an indexed path has no link. Placeholder pages (article outlines, legal pages
+awaiting counsel) go in `MARKETING_UNLISTED_PATHS` instead: public, out of the
+sitemap, and `noindex` through `pageMetadata({ unlisted: true })`.
 
 **3. The OG image is a committed PNG, not `opengraph-image.tsx`.** A generated
 one is served **extensionless**, so the proxy intercepts it and a crawler
@@ -135,9 +138,20 @@ Home opens with a quiet hero, then stacked ingress, organization/dataset, dedupe
 and egress panels, followed by audit, usage, and a short FAQ and closing CTA.
 Measured paths connect actual exit and entry ports across section boundaries;
 resize and dataset/source changes must preserve their alignment. The
-header links Home, Docs and Pricing through `marketing-nav.tsx`, a client island
-so the current page carries `aria-current`; below `sm` it shows the logo mark
-and an icon-only theme toggle so the row fits 320px. `/pricing` is a calculator
+header links Product, How it works, Pricing, Docs and Contact through
+`marketing-nav.tsx`, a client island so the current page carries
+`aria-current`. From `lg` the links sit in the row; below it they move behind a
+Menu disclosure (Escape and an outside click close it). Below `sm` the header
+shows the logo mark and an icon-only theme toggle so the row fits 320px. The
+footer has three link columns from the same `site-links.ts`.
+
+The content pages (product, features, solutions, integrations, security, FAQ,
+resources, about, contact) are built from `components/marketing/pages/page-kit.tsx`.
+**Their copy may describe only what `docs/feature-inventory.md` marks VERIFIED**:
+no Salesforce connection or writeback, no sign-up, no certification. Content
+still owed by the owner renders visibly as `Todo` or `ScreenshotPlaceholder`,
+never as plausible-looking filler. The contact form hands off to the visitor's
+email app through `mailto:`; there is no form backend. `/pricing` is a calculator
 whose every figure is in `src/lib/pricing/config.ts` and whose rules are the
 pure `calculator.ts` beside it (see its README); the page itself does no
 arithmetic. Home's usage section still describes per-run compute pricing as
@@ -198,7 +212,7 @@ or both share one hostname, which needs nothing. See the infra-platform skill.
 **Adding a page.** Create it under `(marketing)/`, add
 `export const dynamic = "force-static"`, add its path to `MARKETING_PATHS`
 (which feeds the proxy and the sitemap at once), **link it from
-`marketing-header.tsx` by hand** because no nav derives from that list, register
+`site-links.ts` by hand** because no nav derives from that list, register
 it in the axe gate with `anonymous: true`, and confirm `next build` prints `○`
 beside it.
 
