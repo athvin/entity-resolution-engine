@@ -112,9 +112,9 @@ Both properties are pinned by `tests/component/structured-data.test.tsx`,
 because they are React implementation details whose failure mode is invisible —
 the page still renders, and only crawlers break.
 
-## Marketing follows the product tokens, with two explicit exceptions
+## Marketing follows the product tokens, with three explicit exceptions
 
-Both were requested by the owner, and both live in `story.css` under
+All were requested by the owner, and all live in `story.css` under
 `.marketing-site`, never in `globals.css`; the application palette and the
 palette-utility lint rule remain unchanged.
 
@@ -128,6 +128,12 @@ palette-utility lint rule remain unchanged.
   both themes. Eyebrows, story links, focus rings, primary buttons and the
   next-chapter button carry it; everything else stays grayscale. One accent,
   no gradients, no second hue.
+- **Source logos on the home page's source buttons** (`demo/source-logo.tsx`).
+  Google Sheets, Salesforce, S3 and Shopify carry their Simple Icons marks
+  (CC0, inlined as path data) and `--brand-<key>` colours: a tint when off, the
+  solid colour under `--brand-on-fill` ink when on (5.6:1 or better). Scoped to
+  those two pickers by `data-brand`; SFTP, Custom API and ZoomInfo stay
+  grayscale. A brand colour used anywhere else is a new exception to ask for.
 
 The header shows the logo, with both theme variants in the markup from
 `public/brand/`; the favicon `src/app/icon.svg` is the mark on a solid tile.

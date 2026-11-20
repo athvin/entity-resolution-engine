@@ -7,6 +7,7 @@ import { TrailBridges } from "./demo/trail-bridges";
 import { StoryFlow } from "./demo/story-flow";
 import { UsageStream } from "./demo/usage-stream";
 import { AuditStory } from "./demo/audit-story";
+import { SourceLogo, sourceBrand } from "./demo/source-logo";
 import {
   DEMO_DATASETS,
   SOURCE_NAMES,
@@ -57,6 +58,7 @@ export function InteractiveStory() {
               type="button"
               key={name}
               aria-pressed={sources.includes(i)}
+              data-brand={sourceBrand(name)}
               onClick={() => {
                 setAssignments((all) =>
                   all.map((set, index) =>
@@ -70,6 +72,7 @@ export function InteractiveStory() {
               }}
             >
               <span aria-hidden="true">{sources.includes(i) ? "−" : "+"}</span>
+              <SourceLogo name={name} size={14} />
               {name}
               {i === 6 ? "*" : ""}
             </button>

@@ -9,6 +9,7 @@ import { FlowTransmission, type FlowSurface } from "./flow-transmission";
 import { VolumeControl } from "./volume-control";
 import { FlowPath, useFlowMotion } from "./flow-motion";
 import { DEMO_DATASETS, SOURCE_NAMES, packetCount } from "./story-model";
+import { SourceLogo, sourceBrand } from "./source-logo";
 import "./vendor/index.css";
 import "./flow-demo.css";
 
@@ -179,11 +180,12 @@ export function StoryFlow({
                 key={name}
                 type="button"
                 aria-pressed={sources.includes(i)}
+                data-brand={sourceBrand(name)}
                 onClick={() => {
                   onSource(i);
                 }}
               >
-                <Database size={16} aria-hidden="true" />
+                <SourceLogo name={name} size={18} />
                 <span>
                   {name}
                   {i === 6 && <small>Proposed integration</small>}

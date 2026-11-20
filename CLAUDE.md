@@ -323,10 +323,11 @@ and the one known exception (`--destructive` is still red). The techniques that
 replaced the 47 colour utilities this rule originally found are also tabulated
 in `.claude/skills/frontend-testing/references/frontend-testing.md`.
 
-The marketing site has two explicit user-requested exceptions: the audit
-illustration's red for a flagged match and green for corrected entities, and
-the logo's brand blue as the site's one accent. Both go through marketing-only
-semantic tokens in `story.css`. Neither extends the app palette. See
+The marketing site has three explicit user-requested exceptions: the audit
+illustration's red for a flagged match and green for corrected entities, the
+logo's brand blue as the site's one accent, and third-party brand colours on
+the home page's source buttons. All go through marketing-only semantic tokens
+in `story.css`. None extends the app palette. See
 `landing-page` for the scope.
 
 **All infrastructure is Terraform. Never generate CDK, CloudFormation or SAM.**

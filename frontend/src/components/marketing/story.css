@@ -14,6 +14,15 @@
   --ring: #2f6bff;
   --story-flag: #b42318;
   --story-light: var(--brand);
+  /* Third-party brand colours for the home page's source buttons: a third
+     user-requested exception, scoped to those buttons (source-logo.tsx).
+     Hex values from Simple Icons 13.21.0. Each is a fill under dark ink
+     (#0b0b0b), which clears 5:1 on all four. */
+  --brand-sheets: #34a853;
+  --brand-salesforce: #00a1e0;
+  --brand-s3: #569a31;
+  --brand-shopify: #7ab55c;
+  --brand-on-fill: #0b0b0b;
   --story-glow-opacity: 0.18;
   --story-surface: color-mix(in oklch, var(--muted) 76%, transparent);
   --story-container-surface: color-mix(in oklch, var(--muted) 30%, transparent);
@@ -1454,6 +1463,46 @@ html:has(.marketing-story) {
 .trail-dataset-detail select,
 .story-source-picker button {
   background: var(--story-surface);
+}
+
+/* Branded source buttons. Off: a tint of the brand with its mark in colour
+   and text in the foreground. On: the brand's solid colour with dark ink, so
+   the selected sources read at a glance. Unbranded buttons keep the
+   grayscale styles above. */
+[data-brand="sheets"] {
+  --source-brand: var(--brand-sheets);
+}
+[data-brand="salesforce"] {
+  --source-brand: var(--brand-salesforce);
+}
+[data-brand="s3"] {
+  --source-brand: var(--brand-s3);
+}
+[data-brand="shopify"] {
+  --source-brand: var(--brand-shopify);
+}
+.trail-source-picker button[data-brand],
+.story-source-picker button[data-brand] {
+  color: var(--foreground);
+  border-color: color-mix(in oklch, var(--source-brand) 60%, transparent);
+  background: color-mix(in oklch, var(--source-brand) 14%, var(--background));
+}
+.trail-source-picker button[data-brand] .source-logo,
+.story-source-picker button[data-brand] .source-logo {
+  color: var(--source-brand);
+}
+.trail-source-picker button[data-brand][aria-pressed="true"],
+.story-source-picker button[data-brand][aria-pressed="true"] {
+  color: var(--brand-on-fill);
+  border-color: var(--source-brand);
+  background: var(--source-brand);
+}
+.trail-source-picker button[data-brand][aria-pressed="true"] .source-logo,
+.story-source-picker button[data-brand][aria-pressed="true"] .source-logo {
+  color: var(--brand-on-fill);
+}
+.source-logo {
+  flex: none;
 }
 /* Transmitted light must not lower contrast beneath small explanatory text. */
 .trail-diagram p,
