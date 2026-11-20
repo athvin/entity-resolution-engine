@@ -38,6 +38,14 @@ are as of commit `9f905b1f`.
 > screen), so the rows below record what the code shows, and the solution pages
 > now state the owner's account. Writing results back to Salesforce has not
 > been confirmed and is still not claimed.
+>
+> **Owner-confirmed, 2026-11-20 (later):** once records are deduplicated,
+> DupeZero writes the clean records back to the systems they came from, so
+> every connected system holds the same deduplicated data. **No write path
+> exists in this repository** (`SRV/writeback.rs` builds proposals and is
+> called only from a test; no Salesforce or other write call exists), so this
+> claim rests on the owner's account of the AppExchange app and integrations
+> outside this repo. The site now states it; re-verify before launch.
 
 | Feature                                        | Plain-language description                                                              | Status                        | Evidence                                                                                                                                                 | Notes                                                                                                                                                                                                                             |
 | ---------------------------------------------- | --------------------------------------------------------------------------------------- | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

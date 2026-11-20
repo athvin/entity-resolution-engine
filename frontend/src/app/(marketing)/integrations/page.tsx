@@ -15,7 +15,7 @@ export const metadata = pageMetadata({
   path: "/integrations",
   title: "Integrations",
   description:
-    "How records get into and out of DupeZero today: CSV upload, CSV download and signed webhooks.",
+    "How records get into DupeZero and how clean records get back to your systems: the Salesforce AppExchange app, API connections, CSV and signed webhooks.",
 });
 
 export default function IntegrationsPage() {
@@ -23,8 +23,8 @@ export default function IntegrationsPage() {
     <Page testId="page-integrations">
       <PageIntro
         eyebrow="Integrations"
-        title="What connects today."
-        lead="This page lists only the ways in and out that work now. If you need something that is not here, ask us."
+        title="Records in, clean records back."
+        lead="DupeZero connects to the systems that hold your records, resolves the duplicates, and writes the clean records back, so every system ends up with the same data."
         primary={{ href: "/contact", label: "Ask about your systems" }}
         secondary={{ href: "/docs", label: "Read the developer docs" }}
       />
@@ -33,16 +33,28 @@ export default function IntegrationsPage() {
         <CardGrid
           items={[
             {
+              title: "Salesforce",
+              body: "Install the DupeZero app from the Salesforce AppExchange to connect your org. DupeZero pulls the objects and fields you map.",
+            },
+            {
+              title: "Other systems, by API",
+              body: "Connect other systems through their APIs, and each one becomes a source in a dataset.",
+            },
+            {
               title: "CSV upload",
-              body: "Upload a CSV file as a source in a dataset and map its columns to fields. Any system that can export CSV, Salesforce included, can feed DupeZero this way.",
+              body: "Upload a CSV file as a source and map its columns to fields, for a one-off list or a system without an API.",
             },
           ]}
         />
       </Section>
 
-      <Section id="out" title="Sending results out">
+      <Section id="out" title="Sending clean records back">
         <CardGrid
           items={[
+            {
+              title: "Back to the source systems",
+              body: "Once records are resolved, DupeZero writes the clean records back to the systems they came from: your Salesforce org through the app, and your other connected systems through their APIs.",
+            },
             {
               title: "CSV download",
               body: "Download a filtered set of golden records as CSV, up to 10,000 per download.",
@@ -56,9 +68,10 @@ export default function IntegrationsPage() {
       </Section>
 
       <Section id="salesforce" title="Salesforce">
-        <Note title="How Salesforce fits today">
-          Export from Salesforce as CSV, resolve in DupeZero, and apply the result with your own
-          import or merge tools. DupeZero does not connect to your org or change records in it.
+        <Note title="How Salesforce fits">
+          The DupeZero app connects your org. DupeZero pulls the records in, you review the close
+          calls, and the clean records are written back to your org, so Salesforce and your other
+          systems hold the same deduplicated data.
         </Note>
       </Section>
 

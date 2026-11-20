@@ -12,8 +12,13 @@ export interface FaqItem {
 export const FAQ_ITEMS: readonly FaqItem[] = [
   {
     q: "Does DupeZero connect directly to Salesforce?",
-    a: "No. DupeZero works from CSV files today. Export your records from Salesforce, resolve them in DupeZero, and download the result as CSV. DupeZero does not connect to your org or change records in it.",
-    link: { href: "/integrations", label: "What connects today" },
+    a: "Yes. Install the DupeZero app from the Salesforce AppExchange to connect your org. Other systems connect through their APIs, and a CSV upload works for a one-off list.",
+    link: { href: "/integrations", label: "How systems connect" },
+  },
+  {
+    q: "What happens to my data once it is deduplicated?",
+    a: "DupeZero writes the clean records back to the systems they came from, so your Salesforce org and your other connected systems all hold the same deduplicated data. Every golden record also keeps the history of how it was formed.",
+    link: { href: "/product#how-it-works", label: "How it works" },
   },
   {
     q: "What kinds of records can it deduplicate?",

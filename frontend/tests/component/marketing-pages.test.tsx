@@ -162,6 +162,16 @@ describe("navigation", () => {
     ]);
   });
 
+  it("tells visitors clean records go back to the systems they came from", () => {
+    // Owner-confirmed 2026-11-20 (docs/feature-inventory.md); no write path is in this repo.
+    for (const Page of [ProductPage, IntegrationsPage, GoldenPage, FaqPage]) {
+      const { unmount } = render(<Page />);
+      expect(document.body).toHaveTextContent(/back to the systems they came from/i);
+      expect(document.body).not.toHaveTextContent(/does not connect|change records in it/i);
+      unmount();
+    }
+  });
+
   it("puts the step-by-step walkthrough on the Product page", () => {
     render(<ProductPage />);
     expect(document.getElementById("how-it-works")).not.toBeNull();

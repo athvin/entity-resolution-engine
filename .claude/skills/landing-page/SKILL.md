@@ -168,7 +168,8 @@ The content pages (product, features, solutions, integrations, security, FAQ,
 resources, about, contact) are built from `components/marketing/pages/page-kit.tsx`.
 **Their copy may describe only what `docs/feature-inventory.md` marks VERIFIED
 or the owner has confirmed** (the AppExchange app and API connections, dated in
-the inventory): no writeback, no sign-up, no certification. Where a fact is
+the inventory), including writing clean records back to the source systems,
+which has no write path in this repo; no sign-up, no certification. Where a fact is
 missing (a founding year, a customer quote), write the copy so it does not need
 one; never invent it. Screens are shown as labelled, fictional example panels
 (`pages/examples.tsx`), not mock screenshots presented as real. The legal pages

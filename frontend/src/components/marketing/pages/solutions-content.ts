@@ -44,7 +44,7 @@ const INTEGRATIONS = "/integrations";
 
 export const CONNECT_NOTE = {
   title: "How your data reaches DupeZero",
-  body: "Connect your Salesforce org with the DupeZero app on the Salesforce AppExchange, or connect other systems through their APIs, and DupeZero pulls the records in to deduplicate. A CSV upload works too, for a one-off list.",
+  body: "Connect your Salesforce org with the DupeZero app on the Salesforce AppExchange, or connect other systems through their APIs. DupeZero pulls the records in, resolves the duplicates, and writes the clean records back to the systems they came from, so every system holds the same deduplicated data. A CSV upload works too, for a one-off list.",
 };
 
 const NO_CERTIFICATION =
@@ -94,7 +94,7 @@ export const ROLES: readonly Solution[] = [
       },
       {
         title: "Plan a cleanup before a migration",
-        body: "Resolve the duplicates in DupeZero first, then decide what to merge in Salesforce with the evidence in hand.",
+        body: "Resolve the duplicates in DupeZero first, review the close calls with the evidence in hand, and DupeZero writes the clean records back to your org.",
       },
     ],
     note: CONNECT_NOTE,
@@ -227,7 +227,7 @@ export const ROLES: readonly Solution[] = [
       },
       {
         title: "Limit what leaves Salesforce",
-        body: "DupeZero reads only the objects and fields you map. Agree that list before a team connects your org.",
+        body: "DupeZero reads the objects and fields you map and writes the resolved records back to them. Agree that list before a team connects your org.",
       },
       {
         title: "Check outgoing calls",
@@ -563,8 +563,8 @@ export const USE_CASES: readonly { title: string; body: string; href: string }[]
     href: REVIEW,
   },
   {
-    title: "Build a clean list",
-    body: "Download golden records as CSV to build lists and sends from.",
+    title: "Clean data in every system",
+    body: "Resolved records go back to the systems they came from, so every team works from the same clean data.",
     href: GOLDEN,
   },
   {

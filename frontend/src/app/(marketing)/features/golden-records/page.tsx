@@ -15,7 +15,7 @@ export const metadata = pageMetadata({
   path: "/features/golden-records",
   title: "Golden records",
   description:
-    "One record per person or company, built by field rules you choose, traceable to every source record behind it, and exportable as CSV.",
+    "One record per person or company, built by field rules you choose, traceable to every source record behind it, and written back to the systems it came from.",
 });
 
 export default function GoldenRecordsPage() {
@@ -59,13 +59,19 @@ export default function GoldenRecordsPage() {
 
       <Section
         id="out"
-        title="Take the result with you."
+        title="Clean records go back where they came from."
         intro={
-          <p>
-            Download a filtered set of golden records as CSV, up to 10,000 per download, or have
-            DupeZero notify your systems by signed webhook when records are created, merged or
-            split.
-          </p>
+          <>
+            <p>
+              Golden records are written back to the systems they came from, so your Salesforce org
+              and your other connected systems all hold the same deduplicated data.
+            </p>
+            <p>
+              You can also download a filtered set of golden records as CSV, up to 10,000 per
+              download, or have DupeZero notify your systems by signed webhook when records are
+              created, merged or split.
+            </p>
+          </>
         }
       />
 

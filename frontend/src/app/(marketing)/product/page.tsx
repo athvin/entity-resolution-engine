@@ -23,7 +23,7 @@ export const metadata = pageMetadata({
   path: "/product",
   title: "Product",
   description:
-    "What DupeZero does and how it works, step by step: connect your records, set the matching rules, review the close calls, and get one trusted record per customer.",
+    "What DupeZero does and how it works, step by step: connect your systems, resolve the duplicates, review the close calls, and send clean records back to every system.",
 });
 
 export default function ProductPage() {
@@ -32,7 +32,7 @@ export default function ProductPage() {
       <PageIntro
         eyebrow="Product"
         title="One record for every customer, and the reasons behind it."
-        lead="DupeZero finds the records that describe the same person or company, shows you why it thinks so, and builds one trusted record from them. It is made for the people who look after CRM data: Salesforce admins and revenue operations teams."
+        lead="DupeZero finds the records that describe the same person or company, shows you why it thinks so, builds one trusted record from them, and sends that clean record back to the systems it came from. It is made for the people who look after CRM data: Salesforce admins and revenue operations teams."
         primary={DEMO}
         secondary={{ href: "#how-it-works", label: "See how it works" }}
       />
@@ -70,7 +70,7 @@ export default function ProductPage() {
             },
             {
               title: "Integrations",
-              body: "Brings records in from your Salesforce org and other connected systems, or a CSV upload, and sends results out as CSV downloads and signed webhooks.",
+              body: "Brings records in from your Salesforce org and other connected systems, writes the clean records back to them, and also offers CSV downloads and signed webhooks.",
               href: "/integrations",
             },
           ]}
@@ -109,8 +109,8 @@ export default function ProductPage() {
               body: "Pairs between your thresholds wait in a review queue with the evidence for and against each match. Accept, reject, or merge by hand; a wrong merge can be split apart later.",
             },
             {
-              title: "Use the result",
-              body: "Download golden records as CSV, up to 10,000 per download, or have DupeZero call your systems by webhook when runs finish and records change.",
+              title: "Send clean data back",
+              body: "DupeZero writes the resolved records back to the systems they came from, so your Salesforce org and your other connected systems all hold the same clean data. You can also download golden records as CSV, or have DupeZero call your systems by webhook when runs finish and records change.",
             },
           ]}
         />

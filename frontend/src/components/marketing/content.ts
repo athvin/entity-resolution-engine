@@ -3,7 +3,7 @@ export const HERO = {
   title: "Entity resolution you can defend. | DupeZero",
   headline: "Entity resolution\nyou can defend.",
   subhead:
-    "Any source. Any destination. Resolve records across your systems, review the evidence, and reconcile with confidence. Built around your data, in any industry.",
+    "Any source. Any destination. Resolve records across your systems, review the evidence, and send clean records back to every system they came from. Built around your data, in any industry.",
   primaryCta: "Open the app",
   secondaryCta: "See how it works",
 } as const;

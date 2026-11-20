@@ -391,7 +391,9 @@ export function StoryFlow({
               <br />
               <span className="story-muted">that need the answer.</span>
             </h2>
-            <p>A resolved entity, its source records, and the evidence behind it.</p>
+            <p>
+              Clean records go back to the systems they came from, with the evidence behind them.
+            </p>
           </div>
           <TrailDiagram
             name="egress"

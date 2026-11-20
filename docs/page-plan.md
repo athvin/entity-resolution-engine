@@ -17,7 +17,9 @@ The pages therefore describe the workflow that works today:
 
 There is no self-serve sign-up (accounts come from invitations), so the
 primary call to action is **Request a demo** (`/contact`), not a free trial.
-The pages make no promise of a direct connection, writeback, or merging
+Superseded 2026-11-20 by owner confirmation: the pages now state the AppExchange
+app, API connections and writeback of clean records to the source systems.
+Originally, the pages made no promise of a direct connection, writeback, or merging
 inside Salesforce, and use no "coming soon" wording. Prices stay on `/pricing`.
 New pages do not repeat "every feature in every tier", because `/pricing`
 already says it.
