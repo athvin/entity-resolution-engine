@@ -18,13 +18,21 @@ export interface SiteLink {
 }
 
 export interface LinkGroup {
-  heading: string;
+  /** Shown above the group's links; omit it for a dropdown with one plain list. */
+  heading?: string | undefined;
   links: readonly SiteLink[];
+}
+
+/** A footer column always has its heading: it names the column's nav landmark. */
+export interface FooterColumn extends LinkGroup {
+  heading: string;
 }
 
 /** A header item: a plain link, or a dropdown of grouped links. */
 export interface NavItem extends SiteLink {
   groups?: readonly LinkGroup[];
+  /** The dropdown's first link, to `href`. Defaults to "All <label>". */
+  overviewLabel?: string | undefined;
 }
 
 export const SOLUTION_GROUPS: readonly LinkGroup[] = [
@@ -55,15 +63,26 @@ export const RESOURCE_GROUPS: readonly LinkGroup[] = [
   },
 ];
 
+export const PRODUCT_GROUPS: readonly LinkGroup[] = [
+  {
+    links: [
+      { href: "/features/matching", label: "Matching" },
+      { href: "/features/review", label: "Review" },
+      { href: "/features/golden-records", label: "Golden Records" },
+      { href: "/integrations", label: "Integrations" },
+    ],
+  },
+];
+
 export const HEADER_LINKS: readonly NavItem[] = [
-  { href: "/product", label: "Product" },
+  { href: "/product", label: "Product", groups: PRODUCT_GROUPS, overviewLabel: "Overview" },
   { href: "/solutions", label: "Solutions", groups: SOLUTION_GROUPS },
   { href: "/resources", label: "Resources", groups: RESOURCE_GROUPS },
   { href: "/pricing", label: "Pricing" },
   { href: "/contact", label: "Contact" },
 ];
 
-export const FOOTER_COLUMNS: readonly LinkGroup[] = [
+export const FOOTER_COLUMNS: readonly FooterColumn[] = [
   {
     heading: "Product",
     links: [
