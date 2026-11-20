@@ -735,10 +735,13 @@ html:has(.marketing-story) {
   padding-top: 28px;
 }
 
+/* A box like `.trail-organization`: its shaded fill needs inner space on
+   every side, or the figures sit on its edge. */
 .story-usage-stream {
   margin: 36px 0;
-  border-block: 1px solid var(--border);
-  padding: 24px 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 24px 28px;
 }
 .story-usage-nodes {
   display: grid;
@@ -784,6 +787,9 @@ html:has(.marketing-story) {
   .story-usage-nodes span {
     font-size: 11px;
     line-height: 1.6;
+  }
+  .story-usage-stream {
+    padding: 20px 16px;
   }
   .story-usage-stream .story-flow-toolbar {
     flex-direction: row;
