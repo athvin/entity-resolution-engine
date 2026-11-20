@@ -3,7 +3,7 @@ export const HERO = {
   title: "Entity resolution you can defend. | DupeZero",
   headline: "Entity resolution\nyou can defend.",
   subhead:
-    "Any source. Any destination. Resolve records across your systems, review the evidence, and reconcile with confidence. Built around your data, in any industry.",
+    "Any source. Any destination. Resolve records across your systems, review the evidence, and send clean records back to every system they came from. Built around your data, in any industry.",
   primaryCta: "Open the app",
   secondaryCta: "See how it works",
 } as const;
@@ -121,3 +121,13 @@ export const FOOTER = {
   tagline: "Entity resolution you can defend.",
   note: "DupeZero",
 } as const;
+
+/** The /pricing page. Figures come from src/lib/pricing/config.ts, never from here. */
+export const PRICING = {
+  eyebrow: "Pricing",
+  heading: "Pricing that follows your records.",
+  intro:
+    "Priced on the total records you connect, across every system. Every tier has every feature and unlimited users.",
+  metaDescription:
+    "Estimate DupeZero pricing: priced only on the total records you connect across every system, with every feature and unlimited users on every tier, and monthly, yearly and multi-year billing.",
+};

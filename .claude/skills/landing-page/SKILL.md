@@ -53,10 +53,13 @@ in `MARKETING_PATHS`, not that list** — `MARKETING_PUBLIC_PATHS` spreads
 reaches both consumers. Adding a page to the public list instead makes it
 reachable while leaving it out of the sitemap.
 
-**The nav is not one of those consumers**, despite what `routes.ts` used to say.
-Nothing under `src/components/marketing/` imports either list — the header is a
-wordmark plus the one CTA. A page added to `MARKETING_PATHS` is reachable and in
-the sitemap and **linked from nowhere**; adding the link is a separate edit.
+**The nav is not one of those consumers.** The header and footer read
+`src/components/marketing/site-links.ts`, which is hand-maintained. A page added
+to `MARKETING_PATHS` is reachable and in the sitemap and **linked from nowhere**
+until it is added there; `tests/component/marketing-pages.test.tsx` fails when
+an indexed path has no link. Placeholder pages (article outlines, legal pages
+awaiting counsel) go in `MARKETING_UNLISTED_PATHS` instead: public, out of the
+sitemap, and `noindex` through `pageMetadata({ unlisted: true })`.
 
 **3. The OG image is a committed PNG, not `opengraph-image.tsx`.** A generated
 one is served **extensionless**, so the proxy intercepts it and a crawler
@@ -69,7 +72,7 @@ source rather than reaching for runtime generation.
 **4. A prerendered route must not call `env()`.** It runs during `next build`,
 where the schema's four required secrets are deliberately unset, and the whole
 export step fails. `robots.ts` reads `publicBaseUrl()` instead — the one narrow
-accessor for a single optional variable. Anything needing a *required* value
+accessor for a single optional variable. Anything needing a _required_ value
 must not be prerendered.
 
 ## The canonical origin is a constant, and that is not a `NEXT_PUBLIC_` evasion
@@ -98,7 +101,7 @@ The standard advice is `dangerouslySetInnerHTML`, on the grounds that React
 escapes text children. **Measured against React 19, that is not true of
 `<script>`:** quotes pass through so the JSON parses, and `</script` is encoded
 as a legal JSON escape so a payload cannot close its own tag. The plain text
-child is therefore byte-identical for valid payloads and *safer* for hostile
+child is therefore byte-identical for valid payloads and _safer_ for hostile
 ones.
 
 That matters because `.semgrep.yml`'s `no-html-injection-sink` bans that sink at
@@ -109,13 +112,32 @@ Both properties are pinned by `tests/component/structured-data.test.tsx`,
 because they are React implementation details whose failure mode is invisible —
 the page still renders, and only crawlers break.
 
-## Marketing follows the product tokens, with one explicit exception
+## Marketing follows the product tokens, with three explicit exceptions
 
-The site remains grayscale except for the user-requested audit demonstration:
-marketing-scoped `--story-flag` and `--story-corrected` tokens show a red flagged
-match becoming two green corrected entities. Labels and shapes carry the same
-meaning. These tokens belong to the marketing stylesheet, not `globals.css`;
-the application palette and palette-utility lint rule remain unchanged.
+All were requested by the owner, and all live in `story.css` under
+`.marketing-site`, never in `globals.css`; the application palette and the
+palette-utility lint rule remain unchanged.
+
+- **The audit demonstration.** `--story-flag` and `--story-corrected` show a red
+  flagged match becoming two green corrected entities. Labels and shapes carry
+  the same meaning.
+- **The brand blue from the logo** (`frontend/assets/dupezero-logo-*.svg`).
+  `--brand` is the logo's exact `#2F6BFF`, for marks and the flow's moving
+  light only: it sits at the AA edge (4.4-4.5:1), so text and filled controls
+  use `--brand-ink` and a marketing-scoped `--primary`, which clear 5.8:1 in
+  both themes. Eyebrows, story links, focus rings, primary buttons and the
+  next-chapter button carry it; everything else stays grayscale. One accent,
+  no gradients, no second hue.
+- **Source logos on the home page's source buttons** (`demo/source-logo.tsx`).
+  Google Sheets, Salesforce, S3, Shopify and HubSpot carry their Simple Icons
+  marks (CC0, inlined as path data); ZoomInfo carries its own logomark. Each has
+  a `--brand-<key>` colour: a tint when off, the solid colour under
+  `--brand-on-fill` ink when on (5.6:1 or better; ZoomInfo's red takes white).
+  Scoped to those two pickers by `data-brand`; SFTP and Custom API stay
+  grayscale. A brand colour used anywhere else is a new exception to ask for.
+
+The header shows the logo, with both theme variants in the markup from
+`public/brand/`; the favicon `src/app/icon.svg` is the mark on a solid tile.
 
 ## A visual story and a detailed reference
 
@@ -123,14 +145,56 @@ Home opens with a quiet hero, then stacked ingress, organization/dataset, dedupe
 and egress panels, followed by audit, usage, and a short FAQ and closing CTA.
 Measured paths connect actual exit and entry ports across section boundaries;
 resize and dataset/source changes must preserve their alignment. The
-header links Home and Docs; pricing lives on Home without invented rates.
-Section links are ordinary anchors with native mandatory scroll snapping scoped
-to Home. Every chapter, including the closing FAQ, needs reachable snap targets so
-content cannot become unreachable. Mobile trail headings and diagrams use
-separate targets without an overlapping parent snap area. The footer is an
-end-aligned snap target. Next-step links supply reachable end stops. Oversized
-sections scroll within their area; reduced motion disables snapping. Do not
-intercept wheel or touch events.
+header links Product, Solutions, Resources, Pricing and Contact through
+`marketing-nav.tsx`, a client island so the current page carries
+`aria-current`. From `lg` the links sit in the row; below it they move behind a
+Menu disclosure (Escape and an outside click close it). The row ends with two
+buttons, Login (`PORTAL_ENTRY_PATH`) and Book a demo (`DEMO_PATH`); below `sm`
+the header shows the logo mark and Book a demo, and Login moves into the Menu,
+so the row fits 320px. There is no theme control: `app/providers.tsx` forces
+dark on every `MARKETING_PUBLIC_PATHS` page, so a choice stored by the app's
+own toggle cannot strand a visitor in light mode. The
+footer has four link columns from the same `site-links.ts`. Solutions is a
+click-to-open dropdown (never hover-only) of role and industry pages, and
+Resources one of Docs, Blog and the ROI calculator (`/pricing#roi`), each nested
+inside the Menu below `lg`; Escape closes the innermost open disclosure and
+refocuses that dropdown's own button. How it works is a section of `/product`;
+`next.config.ts` redirects the old `/how-it-works` URL there (308). A merged page
+keeps its old URL working the same way. Those
+pages are data in `pages/solutions-content.ts`, rendered by one template, and
+**industry pages make no compliance claim**: a test fails on HIPAA, SOC 2 and
+similar terms.
+
+The content pages (product, features, solutions, integrations, security, FAQ,
+resources, about, contact) are built from `components/marketing/pages/page-kit.tsx`.
+**Their copy may describe only what `docs/feature-inventory.md` marks VERIFIED
+or the owner has confirmed** (the AppExchange app and API connections, dated in
+the inventory), including writing clean records back to the source systems,
+which has no write path in this repo; no sign-up, no certification. Where a fact is
+missing (a founding year, a customer quote), write the copy so it does not need
+one; never invent it. Screens are shown as labelled, fictional example panels
+(`pages/examples.tsx`), not mock screenshots presented as real. The legal pages
+are written from verified data handling but unreviewed by counsel, so they stay
+in `MARKETING_UNLISTED_PATHS` (noindex). The contact form hands off to the visitor's
+email app through `mailto:`; there is no form backend. `/pricing` is a calculator
+whose every figure is in `src/lib/pricing/config.ts` and whose rules are the
+pure `calculator.ts` beside it (see its README); the page itself does no
+arithmetic. **Pricing is records only**: total records across every connected
+system, never per org, system, connector or user (the rule and where it lives
+are in `src/lib/pricing/README.md`). `tests/unit/pricing-rule.test.ts` fails on
+per-org, per-connector, per-system or per-seat language in marketing copy or
+the pricing code; deliberate exceptions go in its `EXCEPTIONS` list.
+Home scrolls freely: there is no scroll snapping, by the owner's decision, and
+no wheel or touch event is intercepted. Section links are ordinary anchors.
+Progression is opt-in through `story-chapters.tsx`: one floating button that
+always names the next chapter, and becomes "Back to top" at the end. It is
+hidden at the top of the page and fades in once the reader scrolls down; after
+the hero's `[data-explore-flow]` link it waits until that scroll has landed.
+Both the link and the button move the page through `glide.ts`, one eased,
+interruptible scroll on every device, rather than native smooth scrolling,
+which story.css disables on touch.
+Hidden means `visibility: hidden` plus `inert`, not just transparent. Its `CHAPTERS`
+list must name every section id in page order.
 
 `/docs` is a static workflow guide and operation reference. Its committed
 `operations.json` is generated from the MCP route manifest and response-envelope
@@ -176,7 +240,7 @@ or both share one hostname, which needs nothing. See the infra-platform skill.
 **Adding a page.** Create it under `(marketing)/`, add
 `export const dynamic = "force-static"`, add its path to `MARKETING_PATHS`
 (which feeds the proxy and the sitemap at once), **link it from
-`marketing-header.tsx` by hand** because no nav derives from that list, register
+`site-links.ts` by hand** because no nav derives from that list, register
 it in the axe gate with `anonymous: true`, and confirm `next build` prints `○`
 beside it.
 

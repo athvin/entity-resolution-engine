@@ -4,6 +4,7 @@ import { ClosingCta } from "@/components/marketing/cta";
 import { Faq } from "@/components/marketing/faq";
 import { Hero } from "@/components/marketing/hero";
 import { InteractiveStory } from "@/components/marketing/interactive-story";
+import { StoryChapters } from "@/components/marketing/story-chapters";
 import { StructuredData } from "@/components/marketing/structured-data";
 import { HERO } from "@/components/marketing/content";
 
@@ -56,6 +57,7 @@ export default function LandingPage() {
         <Faq />
         <ClosingCta />
       </section>
+      <StoryChapters />
     </div>
   );
 }

@@ -1,31 +1,54 @@
-/* Public marketing only. The audit accents are the explicitly requested
-   exception to the product's grayscale design; they never enter app tokens. */
+/* Public marketing only. Two explicitly requested exceptions to the product's
+   grayscale design, both scoped here and never entering app tokens: the audit
+   accents, and the DupeZero brand blue taken from the logo
+   (frontend/assets/dupezero-logo-*.svg).
+
+   `--brand` is the logo's exact #2F6BFF, for marks and light. It sits at the
+   AA edge (4.4-4.5:1), so text and filled controls use `--brand-ink` and
+   `--primary`, deeper on light and lighter on dark, each clearing 5.8:1. */
 .marketing-site {
+  --brand: #2f6bff;
+  --brand-ink: #2457e0;
+  --primary: #2457e0;
+  --primary-foreground: #ffffff;
+  --ring: #2f6bff;
   --story-flag: #b42318;
-  --story-light: var(--foreground);
+  --story-light: var(--brand);
+  /* Third-party brand colours for the home page's source buttons: a third
+     user-requested exception, scoped to those buttons (source-logo.tsx).
+     Hex values from Simple Icons 13.21.0. Each is a fill under dark ink
+     (#0b0b0b), which clears 5:1 on all five (HubSpot 7.7:1). */
+  --brand-sheets: #34a853;
+  --brand-salesforce: #00a1e0;
+  --brand-s3: #569a31;
+  --brand-shopify: #7ab55c;
+  --brand-hubspot: #ff7a59;
+  /* ZoomInfo's own logomark red; dark ink is only 4.3:1 on it, so it takes
+     white (4.6:1) when filled. */
+  --brand-zoominfo: #ea1b15;
+  --brand-on-fill: #0b0b0b;
   --story-glow-opacity: 0.18;
   --story-surface: color-mix(in oklch, var(--muted) 76%, transparent);
   --story-container-surface: color-mix(in oklch, var(--muted) 30%, transparent);
   --story-corrected: #087443;
 }
 .dark .marketing-site {
+  --brand-ink: #6e9bff;
   --story-glow-opacity: 0.22;
   --story-flag: #ff9b91;
   --story-corrected: #79dfac;
 }
 html:has(.marketing-story) {
-  scroll-snap-type: y mandatory;
   scroll-padding-top: 64px;
   scroll-behavior: smooth;
 }
 .story-section {
-  scroll-snap-align: start;
   scroll-margin-top: 0;
   padding: 64px max(24px, calc((100vw - 1280px) / 2));
   border-bottom: 1px solid var(--border);
 }
 .story-eyebrow {
-  color: var(--muted-foreground);
+  color: var(--brand-ink);
   font-size: 11px;
   font-weight: 500;
   text-transform: uppercase;
@@ -93,7 +116,7 @@ html:has(.marketing-story) {
 .marketing-site summary:focus-visible,
 .marketing-site input:focus-visible,
 .marketing-site select:focus-visible {
-  outline: 2px solid var(--foreground);
+  outline: 2px solid var(--ring);
   outline-offset: 4px;
 }
 .story-section-heading {
@@ -120,6 +143,7 @@ html:has(.marketing-story) {
   justify-content: space-between;
   align-items: center;
   font-size: 13px;
+  color: var(--brand-ink);
 }
 .story-flow {
   margin: 0;
@@ -391,6 +415,7 @@ html:has(.marketing-story) {
   align-items: center;
   min-height: 44px;
   font-size: 14px;
+  color: var(--brand-ink);
   text-decoration: underline;
   text-underline-offset: 5px;
 }
@@ -713,7 +738,6 @@ html:has(.marketing-story) {
 @media (prefers-reduced-motion: reduce) {
   html:has(.marketing-story) {
     scroll-behavior: auto;
-    scroll-snap-type: none;
   }
   .story-jump-links svg {
     transition: none;
@@ -724,10 +748,13 @@ html:has(.marketing-story) {
   padding-top: 28px;
 }
 
+/* A box like `.trail-organization`: its shaded fill needs inner space on
+   every side, or the figures sit on its edge. */
 .story-usage-stream {
   margin: 36px 0;
-  border-block: 1px solid var(--border);
-  padding: 24px 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 24px 28px;
 }
 .story-usage-nodes {
   display: grid;
@@ -774,6 +801,9 @@ html:has(.marketing-story) {
     font-size: 11px;
     line-height: 1.6;
   }
+  .story-usage-stream {
+    padding: 20px 16px;
+  }
   .story-usage-stream .story-flow-toolbar {
     flex-direction: row;
     align-items: center;
@@ -787,14 +817,13 @@ html:has(.marketing-story) {
   fill: var(--muted-foreground);
 }
 
-/* One native document scroller. Oversized panels remain readable; no wheel trap. */
+/* Free native scrolling: no snapping. The padding keeps a jumped-to chapter
+   clear of the sticky header. */
 html:has(.marketing-story) {
-  scroll-snap-type: y mandatory;
   scroll-padding-top: 64px;
 }
 .marketing-story .story-section {
   scroll-margin-top: 0;
-  scroll-snap-stop: normal;
 }
 .trail-panel {
   min-height: calc(100svh - 112px);
@@ -1198,7 +1227,6 @@ html:has(.marketing-story) {
 }
 @media (prefers-reduced-motion: reduce) {
   html:has(.marketing-story) {
-    scroll-snap-type: none;
     scroll-behavior: auto;
   }
 }
@@ -1257,18 +1285,6 @@ html:has(.marketing-story) {
   }
 }
 
-/* The closing content is a snap area too, so native details and the final CTA
-   remain reachable after the last story panel, including without JavaScript. */
-.story-close {
-  scroll-snap-align: start;
-  scroll-snap-stop: normal;
-}
-
-/* The footer is the final stop, so the bottom never resolves to an earlier chapter. */
-html:has(.marketing-story) [data-testid="marketing-footer"] {
-  scroll-snap-align: end;
-}
-
 .story-audit > .story-section-heading,
 .story-audit-bottom,
 .story-audit > .story-audit-note,
@@ -1277,8 +1293,7 @@ html:has(.marketing-story) [data-testid="marketing-footer"] {
   margin-inline: auto;
 }
 
-/* Touch scrolling already has native momentum. Avoid a second smooth-scroll
-   animation racing snap settlement when a phone user taps a playback control. */
+/* Touch scrolling already has native momentum; jumps land instantly there. */
 @media (hover: none) {
   html:has(.marketing-story) {
     scroll-behavior: auto;
@@ -1438,15 +1453,6 @@ html:has(.marketing-story) [data-testid="marketing-footer"] {
   }
 }
 
-/* WebKit needs an explicit reachable end stop on oversized story chapters.
-   The footer remains the document's final stop, after every chapter link. */
-@media (max-width: 800px) {
-  .marketing-story .story-next {
-    scroll-snap-align: end;
-    scroll-margin-bottom: 24px;
-  }
-}
-
 /* Every flow surface transmits the same stream. No backdrop filters: the
    moving light is a small composited gradient, and text stays on top. */
 .trail-diagram {
@@ -1462,41 +1468,66 @@ html:has(.marketing-story) [data-testid="marketing-footer"] {
 .story-source-picker button {
   background: var(--story-surface);
 }
+
+/* Branded source buttons. Off: a tint of the brand with its mark in colour
+   and text in the foreground. On: the brand's solid colour with dark ink, so
+   the selected sources read at a glance. Unbranded buttons keep the
+   grayscale styles above. */
+[data-brand="sheets"] {
+  --source-brand: var(--brand-sheets);
+}
+[data-brand="salesforce"] {
+  --source-brand: var(--brand-salesforce);
+}
+[data-brand="s3"] {
+  --source-brand: var(--brand-s3);
+}
+[data-brand="shopify"] {
+  --source-brand: var(--brand-shopify);
+}
+[data-brand="hubspot"] {
+  --source-brand: var(--brand-hubspot);
+}
+[data-brand="zoominfo"] {
+  --source-brand: var(--brand-zoominfo);
+  --source-on-fill: #ffffff;
+}
+.trail-source-picker button[data-brand],
+.story-source-picker button[data-brand] {
+  color: var(--foreground);
+  border-color: color-mix(in oklch, var(--source-brand) 60%, transparent);
+  background: color-mix(in oklch, var(--source-brand) 14%, var(--background));
+}
+.trail-source-picker button[data-brand] .source-logo,
+.story-source-picker button[data-brand] .source-logo {
+  color: var(--source-brand);
+}
+.trail-source-picker button[data-brand][aria-pressed="true"],
+.story-source-picker button[data-brand][aria-pressed="true"] {
+  color: var(--source-on-fill, var(--brand-on-fill));
+  border-color: var(--source-brand);
+  background: var(--source-brand);
+}
+.trail-source-picker button[data-brand][aria-pressed="true"] .source-logo,
+.story-source-picker button[data-brand][aria-pressed="true"] .source-logo {
+  color: var(--source-on-fill, var(--brand-on-fill));
+}
+/* A knocked-out mark (ZoomInfo's "Z") takes the button's own fill behind it. */
+.source-logo-knockout {
+  fill: #ffffff;
+}
+[aria-pressed="true"] .source-logo-knockout {
+  fill: var(--source-brand);
+}
+.source-logo {
+  flex: none;
+}
 /* Transmitted light must not lower contrast beneath small explanatory text. */
 .trail-diagram p,
 .trail-diagram small,
 .trail-step-example > span,
 .trail-dataset-detail p span {
   color: var(--foreground);
-}
-
-/* Short phones need intermediate reading stops inside oversized chapters. */
-@media (max-width: 800px) {
-  .marketing-story .story-section {
-    scroll-snap-stop: always;
-  }
-  .trail-organization,
-  .trail-dedupe,
-  .story-audit-stage,
-  .story-audit-bottom,
-  .story-usage .story-controls,
-  .story-usage-stream,
-  .story-pricing-note {
-    scroll-snap-align: start;
-    scroll-snap-stop: always;
-  }
-}
-@media (max-width: 800px) and (max-height: 700px) {
-  .trail-egress {
-    scroll-snap-align: start;
-    scroll-snap-stop: always;
-  }
-}
-@media (max-width: 800px) and (max-height: 600px) {
-  .trail-ingress {
-    scroll-snap-align: start;
-    scroll-snap-stop: always;
-  }
 }
 .story-usage-paths {
   position: relative;
@@ -1512,15 +1543,77 @@ html:has(.marketing-story) [data-testid="marketing-footer"] {
     padding-inline: 8px;
   }
 }
-@media (max-width: 800px) {
-  /* A tall parent snap area swallows its children's stops in touch scrolling.
-     Use the heading and diagram as separate stops, with no overlapping parent. */
-  .marketing-story .trail-panel {
-    scroll-snap-align: none;
+
+/* The floating next-chapter button: one large brand-blue target that carries
+   the reader forward over a freely scrolling page. */
+.story-chapters {
+  position: fixed;
+  right: max(16px, env(safe-area-inset-right));
+  bottom: max(16px, env(safe-area-inset-bottom));
+  z-index: 20;
+  transition:
+    opacity 200ms ease,
+    transform 200ms ease;
+}
+/* Away at the top of the page. `visibility` (delayed until the fade ends)
+   takes it out of the accessibility tree and hit testing, not just from view. */
+.story-chapters[data-shown="false"] {
+  opacity: 0;
+  transform: translateY(12px);
+  visibility: hidden;
+  transition:
+    opacity 200ms ease,
+    transform 200ms ease,
+    visibility 0s linear 200ms;
+}
+.story-chapters-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 52px;
+  max-width: min(360px, calc(100vw - 32px));
+  padding: 0 22px;
+  border: 1px solid var(--primary);
+  border-radius: 999px;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 8px 28px color-mix(in oklch, var(--brand) 32%, transparent);
+  transition: transform 160ms ease;
+}
+.story-chapters-trigger:hover {
+  transform: translateY(-2px);
+}
+.story-chapters-trigger:active {
+  transform: translateY(0);
+}
+.story-chapters-trigger:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 3px;
+}
+.story-chapters-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.story-chapters-trigger svg {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .story-chapters,
+  .story-chapters[data-shown="false"],
+  .story-chapters-trigger {
+    transition: none;
   }
-  .trail-heading {
-    scroll-snap-align: start;
-    scroll-snap-stop: always;
-    scroll-margin-top: 22px;
-  }
+}
+
+/* glide.ts focuses the section it lands on, as fragment navigation would, so
+   keyboard users continue from there. The section is a reading position, not
+   a control, so it takes no focus ring. */
+.marketing-story section[tabindex="-1"]:focus {
+  outline: none;
 }

@@ -4,6 +4,7 @@ import {
   CANONICAL_ORIGIN,
   MARKETING_PATHS,
   MARKETING_PUBLIC_PATHS,
+  MARKETING_UNLISTED_PATHS,
   PORTAL_ENTRY_PATH,
   canonicalUrl,
 } from "@/lib/site/routes";
@@ -50,6 +51,15 @@ describe("marketing route constants", () => {
     // case fail.
     for (const path of MARKETING_PATHS) {
       expect(MARKETING_PUBLIC_PATHS).toContain(path);
+    }
+  });
+
+  it("keeps unlisted paths public but out of the sitemap list", () => {
+    // Unlisted pages are placeholders marked noindex; listing one in the
+    // sitemap would ask crawlers to index a page that says not to.
+    for (const path of MARKETING_UNLISTED_PATHS) {
+      expect(MARKETING_PUBLIC_PATHS).toContain(path);
+      expect(MARKETING_PATHS).not.toContain(path);
     }
   });
 

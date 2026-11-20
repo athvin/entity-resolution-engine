@@ -26,6 +26,17 @@ test.describe("login screen", () => {
     await expect(page.getByTestId("login-submit")).toBeVisible();
   });
 
+  test("the logo goes back to the website's home page", async ({ page }) => {
+    await page.goto("/login");
+    const home = page.getByRole("link", { name: "DupeZero home" });
+    await expect(home).toHaveAttribute("href", "/");
+    const box = await home.boundingBox();
+    expect(box?.height).toBeGreaterThanOrEqual(44);
+    await home.click();
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.getByTestId("marketing-hero")).toBeVisible();
+  });
+
   test("deep links carry a next parameter through the redirect", async ({ page }) => {
     await page.goto("/acme/default/dashboard");
     await expect(page).toHaveURL(/\/login\?next=%2Facme%2Fdefault%2Fdashboard$/);

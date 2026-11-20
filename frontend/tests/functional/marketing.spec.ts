@@ -44,7 +44,27 @@ test.describe("marketing", () => {
     }
   });
 
+  test("the header offers Login and Book a demo", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto("/");
+    await expect(page.getByTestId("marketing-cta-header")).toHaveText("Login");
+    await expect(page.getByTestId("marketing-cta-demo")).toHaveText("Book a demo");
+    await expect(page.getByTestId("marketing-cta-demo")).toHaveAttribute("href", "/contact");
+  });
+
+  test("below 640px Login moves into the menu", async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 568 });
+    await page.goto("/");
+    await expect(page.getByTestId("marketing-cta-header")).toBeHidden();
+    await expect(page.getByTestId("marketing-cta-demo")).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(320);
+    await page.getByTestId("marketing-menu-button").click();
+    await expect(page.getByTestId("marketing-menu-login")).toHaveAttribute("href", "/app");
+  });
+
   test("the portal CTA sends a signed-out visitor to login and back", async ({ page }) => {
+    // The header's Login button shows from 640px; below that it is in the menu.
+    await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto("/");
     await page.getByTestId("marketing-cta-header").click();
     // The proxy's cookie gate catches /app before its database query runs, and

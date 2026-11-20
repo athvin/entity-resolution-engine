@@ -1,23 +1,62 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 
+import { SOURCE_NAMES } from "../../src/components/marketing/demo/story-model";
+
 test.describe("interactive marketing", () => {
-  test("the quiet entrance links to the flow and directly into the audit", async ({ page }) => {
+  test("the quiet entrance becomes the next-chapter button and leads into the audit", async ({
+    page,
+  }) => {
     await page.goto("/");
     await expect(page.getByTestId("marketing-hero").locator("svg.story-wires")).toHaveCount(0);
+    const next = page.getByTestId("marketing-next-chapter");
+    await expect(next).toBeHidden();
     await page.getByRole("link", { name: "Explore the flow" }).click();
     await expect(page).toHaveURL(/#flow$/);
+    await expect(next).toBeVisible();
+    await expect(next).toHaveAccessibleName(/^Next chapter: /);
+    // Back at the top of the page, the button steps away again.
+    await page.evaluate(() => {
+      window.scrollTo({ top: 0, behavior: "instant" });
+    });
+    await expect(next).toBeHidden();
     await page.goto("/");
-    await page.getByRole("link", { name: "See how audit works", exact: true }).click();
+    await page.getByRole("link", { name: /Follow an audit/ }).click();
     await expect(page).toHaveURL(/#audit$/);
     await expect(page.getByTestId("marketing-audit")).toHaveAttribute("data-running", "true");
+  });
+
+  test("Pricing is in the main navigation and prices a record count", async ({ page }) => {
+    await page.goto("/");
+    // Below lg the links sit behind the Menu button; either way, one visible nav.
+    const menu = page.getByTestId("marketing-menu-button");
+    if (await menu.isVisible()) await menu.click();
+    const nav = page.getByRole("navigation", { name: "Main navigation" });
+    await nav.getByRole("link", { name: "Pricing" }).click();
+    await expect(page).toHaveURL(/\/pricing$/);
+    if (await menu.isVisible()) await menu.click();
+    await expect(nav.getByRole("link", { name: "Pricing" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    await page.getByTestId("pricing-records").fill("300,001");
+    await expect(page.getByTestId("pricing-tier")).toHaveText("Professional");
+    await page.getByTestId("pricing-records").fill("300000");
+    await expect(page.getByTestId("pricing-tier")).toHaveText("Standard");
+    // Nothing on the page is wider than a 320px phone.
+    await page.setViewportSize({ width: 320, height: 720 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      320,
+    );
   });
 
   test("source choices persist per dataset and stay synchronized with usage", async ({ page }) => {
     await page.goto("/#flow");
     const flow = page.getByTestId("marketing-flow");
     await flow.getByRole("button", { name: /ZoomInfo/ }).click();
-    await expect(flow.locator('[data-node="source-6"]')).toBeVisible();
+    // Ports are numbered by position in SOURCE_NAMES; ZoomInfo is 7 since HubSpot.
+    const zoomInfoPort = `[data-node="source-${String(SOURCE_NAMES.indexOf("ZoomInfo"))}"]`;
+    await expect(flow.locator(zoomInfoPort)).toBeVisible();
     // WebKit native selects ignore min-height; measure the actual touch target.
     for (const id of ["#flow-dataset", "#usage-dataset"]) {
       expect(
@@ -25,7 +64,7 @@ test.describe("interactive marketing", () => {
       ).toBeGreaterThanOrEqual(44);
     }
     await page.locator("#flow-dataset").selectOption("1");
-    await expect(flow.locator('[data-node="source-6"]')).toHaveCount(0);
+    await expect(flow.locator(zoomInfoPort)).toHaveCount(0);
     await page.locator("#flow-dataset").selectOption("0");
     await expect(flow.getByRole("button", { name: /ZoomInfo/ })).toHaveAttribute(
       "aria-pressed",
@@ -79,29 +118,32 @@ test.describe("interactive marketing", () => {
     await expect(slider).toHaveAttribute("aria-valuetext", "625,938 records per run");
   });
 
-  test("dark is the default and the theme toggle remembers an explicit choice", async ({
-    page,
-  }) => {
+  test("the marketing site is always dark and offers no theme control", async ({ page }) => {
     await page.emulateMedia({ colorScheme: "light" });
-    await page.goto("/");
-    await expect(page.locator("html")).toHaveClass("dark");
-    await page.getByRole("button", { name: "Switch to light mode" }).click();
-    await expect(page.locator("html")).toHaveClass("light");
-    await page.reload();
-    await expect(page.locator("html")).toHaveClass("light");
-    await page.getByRole("link", { name: "Docs", exact: true }).click();
-    await expect(page.locator("html")).toHaveClass("light");
-    await page.getByRole("button", { name: "Switch to dark mode" }).click();
-    await expect(page.locator("html")).toHaveClass("dark");
+    // A choice stored by the app's own toggle must not carry over.
+    await page.addInitScript(() => {
+      localStorage.setItem("theme", "light");
+    });
+    for (const path of ["/", "/solutions", "/pricing", "/docs"]) {
+      await page.goto(path);
+      await expect(page.locator("html")).toHaveClass("dark");
+    }
+    await expect(page.getByRole("button", { name: /Switch to (light|dark) mode/ })).toHaveCount(0);
   });
 
-  test("a partial swipe settles onto the next chapter", async ({ page }) => {
+  // The story scrolls freely (snap scrolling was removed on purpose): a partial
+  // scroll stays where the reader left it, and the next-chapter button moves on.
+  test("a partial scroll stays put, and the next-chapter button moves on", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("button", { name: "Switch to light mode" })).toBeEnabled();
-    await page.locator("#flow").evaluate((node) => {
+    await expect(page.getByRole("button", { name: "Pause pipeline" })).toBeEnabled();
+    const target = await page.locator("#flow").evaluate((node) => {
       const destination = node.getBoundingClientRect().top + scrollY - 64;
       window.scrollTo({ top: destination * 0.65, behavior: "instant" });
+      return Math.round(destination * 0.65);
     });
+    await page.waitForTimeout(800);
+    expect(Math.abs((await page.evaluate(() => scrollY)) - target)).toBeLessThan(2);
+    await page.getByTestId("marketing-next-chapter").click();
     await expect
       .poll(() =>
         page.locator("#flow").evaluate((node) => Math.abs(node.getBoundingClientRect().top - 64)),
@@ -109,7 +151,9 @@ test.describe("interactive marketing", () => {
       .toBeLessThan(2);
   });
 
-  test("a short touch swipe settles on the processing diagram", async ({
+  // Free scrolling (snap was removed on purpose): a touch swipe moves the page
+  // with the finger, and the page then stays where the swipe left it.
+  test("a short touch swipe scrolls the page and is not pulled back", async ({
     page,
     browserName,
     isMobile,
@@ -121,6 +165,7 @@ test.describe("interactive marketing", () => {
     await page.setViewportSize({ width: 375, height: 667 });
     await page.goto("/#dedupe");
     await expect(page.getByRole("button", { name: "Pause pipeline" })).toBeEnabled();
+    const before = await page.evaluate(() => scrollY);
     const input = await page.context().newCDPSession(page);
     await input.send("Input.dispatchTouchEvent", {
       type: "touchStart",
@@ -134,13 +179,11 @@ test.describe("interactive marketing", () => {
       await page.waitForTimeout(16);
     }
     await input.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
-    await expect
-      .poll(() =>
-        page
-          .getByTestId("trail-dedupe")
-          .evaluate((node) => Math.abs(node.getBoundingClientRect().top - 64)),
-      )
-      .toBeLessThan(2);
+    await expect.poll(() => page.evaluate(() => scrollY)).toBeGreaterThan(before + 80);
+    await page.waitForTimeout(800);
+    const settled = await page.evaluate(() => scrollY);
+    await page.waitForTimeout(500);
+    expect(Math.abs((await page.evaluate(() => scrollY)) - settled)).toBeLessThan(2);
   });
 
   test("narrow phones fit the viewport and visibly move records", async ({ page }) => {
@@ -172,27 +215,6 @@ test.describe("interactive marketing", () => {
       .toBeGreaterThan(3);
   });
 
-  test("tapping the theme control preserves the current chapter", async ({ page, isMobile }) => {
-    await page.goto("/#dedupe");
-    const toggle = page.getByRole("button", { name: "Switch to light mode" });
-    await expect(toggle).toBeEnabled();
-    await expect
-      .poll(() =>
-        page.locator("#dedupe").evaluate((node) => Math.abs(node.getBoundingClientRect().top - 64)),
-      )
-      .toBeLessThan(2);
-    const scroll = await page.evaluate(() => scrollY);
-    const box = await toggle.boundingBox();
-    if (!box) throw new Error("Theme toggle is not rendered");
-    // Locator.click scrolls a sticky header into view before pressing it. Use
-    // a real pointer location so the test measures the visitor's tap instead.
-    if (isMobile) await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
-    else await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-    await expect(page.locator("html")).toHaveClass("light");
-    await page.waitForTimeout(500);
-    expect(Math.abs((await page.evaluate(() => scrollY)) - scroll)).toBeLessThan(2);
-  });
-
   test("the footer stays reachable after scrolling and opening the FAQ", async ({
     page,
     isMobile,
@@ -213,8 +235,9 @@ test.describe("interactive marketing", () => {
     if (!isMobile) await page.mouse.wheel(0, 600);
     await page.waitForTimeout(800);
     expect(await bottomGap()).toBeLessThan(3);
+    // The footer's last link: Sign in sits near the top of a footer taller than a phone screen.
     await expect(
-      page.getByTestId("marketing-footer").getByRole("link", { name: "Sign in" }),
+      page.getByTestId("marketing-footer").getByRole("link", { name: "Terms" }),
     ).toBeInViewport();
   });
 
@@ -374,6 +397,11 @@ test.describe("interactive marketing", () => {
     const time = await clock();
     await page.waitForTimeout(250);
     expect(Math.abs((await clock()) - time)).toBeLessThan(40);
+    // Clicking Pause scrolled the button into view, and with free scrolling the
+    // audit can now sit mostly above the fold; the flow locks while it is on screen.
+    await audit.evaluate((node) => {
+      node.scrollIntoView({ block: "start", behavior: "instant" });
+    });
     await expect(page.locator("#flow-dataset")).toBeDisabled();
     await audit.getByRole("button", { name: "Resume audit" }).click();
     await expect(audit).toHaveAttribute("data-phase", "4", { timeout: 20000 });

@@ -1,8 +1,15 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
-  <!-- Solid tile so the mark reads on light and dark browser chrome alike.
-       Two offset records collapsing into one: the overlap is the golden record. -->
-  <rect width="32" height="32" rx="7" fill="#0a0a0a"/>
-  <rect x="7" y="7" width="12" height="12" rx="3" fill="none" stroke="#fdfdfd" stroke-width="2"/>
-  <rect x="13" y="13" width="12" height="12" rx="3" fill="#0a0a0a" stroke="#fdfdfd" stroke-width="2"/>
-  <rect x="13" y="13" width="6" height="6" fill="#fdfdfd"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="32" height="32">
+  <!-- The DupeZero mark (frontend/assets/dupezero-icon-on-dark.svg) on a solid
+       tile, so it reads on light and dark browser chrome alike. -->
+  <defs>
+    <clipPath id="cut">
+      <polygon points="109.87,-3.27 166.44,53.3 53.3,166.44 -3.27,109.87"/>
+      <polygon points="99.27,-13.87 42.7,-70.44 -70.44,42.7 -13.87,99.27"/>
+    </clipPath>
+  </defs>
+  <rect width="96" height="96" rx="21" fill="#0B0B0C"/>
+  <g transform="translate(8.4 8.4) scale(0.825)">
+    <circle cx="48" cy="48" r="28" fill="none" stroke="#FFFFFF" stroke-width="13" clip-path="url(#cut)"/>
+    <line x1="12" y1="84" x2="84" y2="12" stroke="#2F6BFF" stroke-width="6" stroke-linecap="round"/>
+  </g>
 </svg>

@@ -9,6 +9,7 @@ import { FlowTransmission, type FlowSurface } from "./flow-transmission";
 import { VolumeControl } from "./volume-control";
 import { FlowPath, useFlowMotion } from "./flow-motion";
 import { DEMO_DATASETS, SOURCE_NAMES, packetCount } from "./story-model";
+import { SourceLogo, sourceBrand } from "./source-logo";
 import "./vendor/index.css";
 import "./flow-demo.css";
 
@@ -179,14 +180,15 @@ export function StoryFlow({
                 key={name}
                 type="button"
                 aria-pressed={sources.includes(i)}
+                data-brand={sourceBrand(name)}
                 onClick={() => {
                   onSource(i);
                 }}
               >
-                <Database size={16} aria-hidden="true" />
+                <SourceLogo name={name} size={18} />
                 <span>
                   {name}
-                  {i === 6 && <small>Proposed integration</small>}
+                  {name === "ZoomInfo" && <small>Proposed integration</small>}
                 </span>
                 <span className="trail-toggle" aria-hidden="true">
                   {sources.includes(i) ? "−" : "+"}
@@ -389,7 +391,9 @@ export function StoryFlow({
               <br />
               <span className="story-muted">that need the answer.</span>
             </h2>
-            <p>A resolved entity, its source records, and the evidence behind it.</p>
+            <p>
+              Clean records go back to the systems they came from, with the evidence behind them.
+            </p>
           </div>
           <TrailDiagram
             name="egress"
