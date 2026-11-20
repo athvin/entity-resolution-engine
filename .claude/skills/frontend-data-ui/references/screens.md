@@ -102,6 +102,8 @@ false the moment a screen renders different markup below `lg`.
 - `/resources/matching-rules-explained`
 - `/security`
 - `/solutions`
+- `/solutions/industries/healthcare-and-life-sciences`
+- `/solutions/roles/salesforce-admins`
 
 ### Routes NOT in the axe gate
 
@@ -121,5 +123,7 @@ for the three categories that legitimately sit outside the sweep.
 - `/legal/terms`
 - `/reset/[token]`
 - `/resources/[slug]`
+- `/solutions/industries/[slug]`
+- `/solutions/roles/[slug]`
 - `/widget/[token]`
 <!-- END GENERATED: screens-coverage -->

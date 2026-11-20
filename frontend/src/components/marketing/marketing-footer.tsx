@@ -7,7 +7,7 @@ import { PORTAL_ENTRY_PATH } from "@/lib/site/routes";
 export function MarketingFooter() {
   return (
     <footer className="border-t" data-testid="marketing-footer">
-      <div className="text-muted-foreground mx-auto grid max-w-7xl gap-10 px-4 py-12 text-sm sm:px-6 md:grid-cols-[1.4fr_repeat(3,1fr)]">
+      <div className="text-muted-foreground mx-auto grid max-w-7xl gap-10 px-4 py-12 text-sm sm:grid-cols-2 sm:px-6 lg:grid-cols-[1.4fr_repeat(4,1fr)]">
         <div>
           <p>
             <span className="text-foreground font-medium">{FOOTER.note}</span> — {FOOTER.tagline}

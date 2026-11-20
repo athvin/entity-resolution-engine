@@ -26,7 +26,7 @@ import { MarketingFooter } from "@/components/marketing/marketing-footer";
 import { MarketingNav } from "@/components/marketing/marketing-nav";
 import { validateContact } from "@/components/marketing/pages/contact-form";
 import { FAQ_ITEMS } from "@/components/marketing/pages/faq-content";
-import { FOOTER_COLUMNS, HEADER_LINKS, isCurrent } from "@/components/marketing/site-links";
+import { allLinkedHrefs, FOOTER_COLUMNS, isCurrent } from "@/components/marketing/site-links";
 import {
   MARKETING_PATHS,
   MARKETING_PUBLIC_PATHS,
@@ -124,10 +124,7 @@ describe("navigation", () => {
   });
 
   it("links every marketing page from the header or the footer", () => {
-    const linked = new Set([
-      ...HEADER_LINKS.map((l) => l.href),
-      ...FOOTER_COLUMNS.flatMap((c) => c.links.map((l) => l.href)),
-    ]);
+    const linked = allLinkedHrefs();
     for (const path of MARKETING_PATHS.filter((p) => p !== "/")) {
       expect(linked, path).toContain(path);
     }

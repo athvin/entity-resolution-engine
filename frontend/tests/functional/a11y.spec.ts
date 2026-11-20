@@ -102,6 +102,22 @@ const SCREENS: {
     },
   },
   {
+    name: "solution-role",
+    path: "/solutions/roles/salesforce-admins",
+    anonymous: true,
+    ready: async (page) => {
+      await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    },
+  },
+  {
+    name: "solution-industry",
+    path: "/solutions/industries/healthcare-and-life-sciences",
+    anonymous: true,
+    ready: async (page) => {
+      await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    },
+  },
+  {
     name: "integrations",
     path: "/integrations",
     anonymous: true,

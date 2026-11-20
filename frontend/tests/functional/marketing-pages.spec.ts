@@ -24,7 +24,7 @@ test.describe("marketing content pages", () => {
   }
 
   test("every header link navigates and is marked current", async ({ page }) => {
-    for (const { href, label } of HEADER_LINKS) {
+    for (const { href, label } of HEADER_LINKS.filter((l) => !l.groups)) {
       await page.goto("/");
       const menu = page.getByTestId("marketing-menu-button");
       if (await menu.isVisible()) await menu.click();
@@ -36,6 +36,25 @@ test.describe("marketing content pages", () => {
         "aria-current",
         "page",
       );
+    }
+  });
+
+  test("the Solutions dropdown opens by click and reaches every page", async ({ page }) => {
+    const solutions = HEADER_LINKS.find((l) => l.groups);
+    for (const link of (solutions?.groups ?? []).flatMap((g) => g.links)) {
+      await page.goto("/");
+      const menu = page.getByTestId("marketing-menu-button");
+      const mobile = await menu.isVisible();
+      if (mobile) await menu.click();
+      await page
+        .getByTestId(mobile ? "marketing-menu-solutions" : "marketing-nav-solutions")
+        .click();
+      const panel = page.getByTestId(
+        mobile ? "marketing-menu-solutions-panel" : "marketing-nav-solutions-panel",
+      );
+      await panel.getByRole("link", { name: link.label, exact: true }).click();
+      await expect(page).toHaveURL(new RegExp(`${link.href}$`));
+      await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
     }
   });
 

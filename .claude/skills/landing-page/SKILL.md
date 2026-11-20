@@ -138,12 +138,17 @@ Home opens with a quiet hero, then stacked ingress, organization/dataset, dedupe
 and egress panels, followed by audit, usage, and a short FAQ and closing CTA.
 Measured paths connect actual exit and entry ports across section boundaries;
 resize and dataset/source changes must preserve their alignment. The
-header links Product, How it works, Pricing, Docs and Contact through
+header links Product, Solutions, How it works, Pricing, Docs and Contact through
 `marketing-nav.tsx`, a client island so the current page carries
 `aria-current`. From `lg` the links sit in the row; below it they move behind a
 Menu disclosure (Escape and an outside click close it). Below `sm` the header
 shows the logo mark and an icon-only theme toggle so the row fits 320px. The
-footer has three link columns from the same `site-links.ts`.
+footer has four link columns from the same `site-links.ts`. Solutions is a
+click-to-open dropdown (never hover-only) of role and industry pages, nested
+inside the Menu below `lg`; Escape closes the innermost open disclosure. Those
+pages are data in `pages/solutions-content.ts`, rendered by one template, and
+**industry pages make no compliance claim**: a test fails on HIPAA, SOC 2 and
+similar terms.
 
 The content pages (product, features, solutions, integrations, security, FAQ,
 resources, about, contact) are built from `components/marketing/pages/page-kit.tsx`.
