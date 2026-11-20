@@ -54,6 +54,118 @@ const SCREENS: {
     },
   },
   {
+    name: "product",
+    path: "/product",
+    anonymous: true,
+    ready: async (page) => {
+      await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    },
+  },
+  {
+    name: "how-it-works",
+    path: "/how-it-works",
+    anonymous: true,
+    ready: async (page) => {
+      await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    },
+  },
+  {
+    name: "feature-matching",
+    path: "/features/matching",
+    anonymous: true,
+    ready: async (page) => {
+      await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    },
+  },
+  {
+    name: "feature-review",
+    path: "/features/review",
+    anonymous: true,
+    ready: async (page) => {
+      await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    },
+  },
+  {
+    name: "feature-golden-records",
+    path: "/features/golden-records",
+    anonymous: true,
+    ready: async (page) => {
+      await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    },
+  },
+  {
+    name: "solutions",
+    path: "/solutions",
+    anonymous: true,
+    ready: async (page) => {
+      await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    },
+  },
+  {
+    name: "integrations",
+    path: "/integrations",
+    anonymous: true,
+    ready: async (page) => {
+      await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    },
+  },
+  {
+    name: "security",
+    path: "/security",
+    anonymous: true,
+    ready: async (page) => {
+      await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    },
+  },
+  {
+    name: "faq",
+    path: "/faq",
+    anonymous: true,
+    ready: async (page) => {
+      await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    },
+  },
+  {
+    name: "resources",
+    path: "/resources",
+    anonymous: true,
+    ready: async (page) => {
+      await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    },
+  },
+  {
+    name: "resource-article",
+    path: "/resources/matching-rules-explained",
+    anonymous: true,
+    ready: async (page) => {
+      await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    },
+  },
+  {
+    name: "about",
+    path: "/about",
+    anonymous: true,
+    ready: async (page) => {
+      await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    },
+  },
+  {
+    name: "contact",
+    path: "/contact",
+    anonymous: true,
+    ready: async (page) => {
+      await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    },
+  },
+  {
+    name: "legal-privacy",
+    path: "/legal/privacy",
+    anonymous: true,
+    ready: async (page) => {
+      await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    },
+  },
+  {
     name: "dashboard",
     path: `/${ORG}/${DS}/dashboard`,
     ready: async (page) => {

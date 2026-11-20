@@ -77,17 +77,31 @@ false the moment a screen renders different markup below `lg`.
 - `/[org]/settings/members`
 - `/[org]/settings/profile`
 - `/[org]/settings/webhooks`
+- `/about`
 - `/admin/audit`
 - `/admin/queue`
 - `/admin/tenants`
 - `/admin/tenants/[org]`
 - `/admin/tenants/new`
+- `/contact`
 - `/datasets-dev/datasets`
 - `/datasets-dev/datasets/new`
 - `/docs`
+- `/faq`
+- `/features/golden-records`
+- `/features/matching`
+- `/features/review`
+- `/how-it-works`
+- `/integrations`
+- `/legal/privacy`
 - `/login`
 - `/pricing`
+- `/product`
 - `/reset`
+- `/resources`
+- `/resources/matching-rules-explained`
+- `/security`
+- `/solutions`
 
 ### Routes NOT in the axe gate
 
@@ -104,6 +118,8 @@ for the three categories that legitimately sit outside the sweep.
 - `/admin`
 - `/app`
 - `/invite/[token]`
+- `/legal/terms`
 - `/reset/[token]`
+- `/resources/[slug]`
 - `/widget/[token]`
 <!-- END GENERATED: screens-coverage -->
