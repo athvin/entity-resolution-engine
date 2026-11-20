@@ -83,6 +83,8 @@ false the moment a screen renders different markup below `lg`.
 - `/admin/tenants`
 - `/admin/tenants/[org]`
 - `/admin/tenants/new`
+- `/blog`
+- `/blog/estimating-what-duplicates-cost`
 - `/contact`
 - `/datasets-dev/datasets`
 - `/datasets-dev/datasets/new`
@@ -119,6 +121,7 @@ for the three categories that legitimately sit outside the sweep.
 - `/[org]/settings`
 - `/admin`
 - `/app`
+- `/blog/[slug]`
 - `/invite/[token]`
 - `/legal/terms`
 - `/reset/[token]`

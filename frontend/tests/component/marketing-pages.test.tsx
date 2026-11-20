@@ -1,8 +1,13 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import type { Metadata } from "next";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import AboutPage, { metadata as aboutMeta } from "@/app/(marketing)/about/page";
+import BlogPostPage, {
+  generateMetadata as postMeta,
+  generateStaticParams as blogParams,
+} from "@/app/(marketing)/blog/[slug]/page";
+import BlogPage, { metadata as blogMeta } from "@/app/(marketing)/blog/page";
 import ContactPage, { metadata as contactMeta } from "@/app/(marketing)/contact/page";
 import FaqPage, { metadata as faqMeta } from "@/app/(marketing)/faq/page";
 import GoldenPage, { metadata as goldenMeta } from "@/app/(marketing)/features/golden-records/page";
@@ -25,7 +30,9 @@ import SolutionsPage, { metadata as solutionsMeta } from "@/app/(marketing)/solu
 import { MarketingFooter } from "@/components/marketing/marketing-footer";
 import { MarketingHeader } from "@/components/marketing/marketing-header";
 import { MarketingNav } from "@/components/marketing/marketing-nav";
+import { POSTS } from "@/components/marketing/pages/blog-content";
 import { validateContact } from "@/components/marketing/pages/contact-form";
+import { formatPostDate } from "@/components/marketing/pages/post-date";
 import { FAQ_ITEMS } from "@/components/marketing/pages/faq-content";
 import { allLinkedHrefs, FOOTER_COLUMNS, isCurrent } from "@/components/marketing/site-links";
 import {
@@ -130,10 +137,41 @@ describe("navigation", () => {
   it("links every marketing page from the header or the footer", () => {
     const linked = allLinkedHrefs();
     // Articles are linked from the /resources index rather than the header or footer.
-    for (const path of MARKETING_PATHS.filter((p) => p !== "/" && !p.startsWith("/resources/"))) {
+    // Articles and posts are linked from their index pages, not the header or footer.
+    const fromIndex = (p: string) => p.startsWith("/resources/") || p.startsWith("/blog/");
+    for (const path of MARKETING_PATHS.filter((p) => p !== "/" && !fromIndex(p))) {
       expect(linked, path).toContain(path);
     }
-    for (const href of linked) expect(MARKETING_PUBLIC_PATHS).toContain(href);
+    for (const href of linked) expect(MARKETING_PUBLIC_PATHS).toContain(href.split("#")[0]);
+  });
+
+  it("groups Docs, Blog and the ROI calculator under Resources", () => {
+    pathname.current = "/blog";
+    render(<MarketingNav />);
+    const button = screen.getByTestId("marketing-nav-resources");
+    const panel = screen.getByTestId("marketing-nav-resources-panel");
+    expect(panel).not.toBeVisible();
+    // The current page is inside the dropdown, so its button carries the weight.
+    expect(button.className).toContain("font-semibold");
+    fireEvent.click(button);
+    expect(panel).toBeVisible();
+    expect(within(panel).getByRole("link", { name: "Docs" })).toHaveAttribute("href", "/docs");
+    expect(within(panel).getByRole("link", { name: "Blog" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(within(panel).getByRole("link", { name: "ROI calculator" })).toHaveAttribute(
+      "href",
+      "/pricing#roi",
+    );
+    expect(within(panel).getByRole("link", { name: "All resources" })).toHaveAttribute(
+      "href",
+      "/resources",
+    );
+    // Escape returns focus to this dropdown's button, not the Solutions one.
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(panel).not.toBeVisible();
+    expect(button).toHaveFocus();
   });
 
   it("marks the current page, including a section's sub-pages", () => {
@@ -142,6 +180,7 @@ describe("navigation", () => {
     expect(isCurrent("/", "/product")).toBe(false);
     expect(isCurrent("/", "/")).toBe(true);
     expect(isCurrent("/pricing", "/pricingx")).toBe(false);
+    expect(isCurrent("/pricing#roi", "/pricing")).toBe(false);
 
     render(<MarketingNav />);
     expect(screen.getByTestId("marketing-nav-product")).toHaveAttribute("aria-current", "page");
@@ -226,5 +265,35 @@ describe("the contact form", () => {
     fireEvent.click(screen.getByLabelText("Security review"));
     fireEvent.click(screen.getByTestId("contact-submit"));
     expect(screen.getByTestId("contact-status")).toHaveTextContent("write to sales@dupezero.com");
+  });
+});
+
+describe("the blog", () => {
+  it("lists every post and renders each one in full at an indexed path", async () => {
+    render(<BlogPage />);
+    for (const post of POSTS) {
+      expect(screen.getByText(post.title)).toBeInTheDocument();
+    }
+    expect(blogMeta.alternates?.canonical).toBe("/blog");
+    cleanup();
+
+    for (const { slug } of blogParams()) {
+      expect(MARKETING_PATHS).toContain(`/blog/${slug}`);
+      const params = Promise.resolve({ slug });
+      const meta = await postMeta({ params });
+      expect(meta.robots).toBeUndefined();
+      const { unmount } = render(await BlogPostPage({ params }));
+      expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+      expect(document.body).toHaveTextContent("20 November 2026");
+      expect(document.body).not.toHaveTextContent("TODO");
+      unmount();
+    }
+    await expect(BlogPostPage({ params: Promise.resolve({ slug: "nope" }) })).rejects.toThrow(
+      "notFound",
+    );
+  });
+
+  it("formats post dates in UTC", () => {
+    expect(formatPostDate("2026-01-01")).toBe("1 January 2026");
   });
 });

@@ -79,10 +79,13 @@ function Dropdown({
   mobile: boolean;
   open: boolean;
   onToggle: () => void;
-  buttonRef: React.RefObject<HTMLButtonElement | null>;
+  buttonRef: (el: HTMLButtonElement | null) => void;
 }) {
   const panelId = useId();
-  const inside = isCurrent(item.href, pathname);
+  // Highlighted when the current page is the overview or any page it lists.
+  const inside =
+    isCurrent(item.href, pathname) ||
+    (item.groups ?? []).some((g) => g.links.some((l) => isCurrent(l.href, pathname)));
   return (
     <div className={cn(!mobile && "relative")}>
       <button
@@ -151,8 +154,12 @@ export function MarketingNav() {
   const menuId = useId();
   const root = useRef<HTMLDivElement>(null);
   const menuButton = useRef<HTMLButtonElement>(null);
-  const dropdownButton = useRef<HTMLButtonElement>(null);
-  const mobileDropdownButton = useRef<HTMLButtonElement>(null);
+  /** Each dropdown's button, by `${mobile}:${href}`, so Escape refocuses the right one. */
+  const dropdownButtons = useRef(new Map<string, HTMLButtonElement>());
+  const registerButton = (key: string) => (el: HTMLButtonElement | null) => {
+    if (el) dropdownButtons.current.set(key, el);
+    else dropdownButtons.current.delete(key);
+  };
 
   // Close everything on navigation.
   useEffect(() => {
@@ -167,7 +174,7 @@ export function MarketingNav() {
       if (e.key !== "Escape") return;
       if (dropdown !== null) {
         setDropdown(null);
-        (menuOpen ? mobileDropdownButton : dropdownButton).current?.focus();
+        dropdownButtons.current.get(`${String(menuOpen)}:${dropdown}`)?.focus();
       } else {
         setMenuOpen(false);
         menuButton.current?.focus();
@@ -205,7 +212,7 @@ export function MarketingNav() {
               onToggle={() => {
                 toggle(item.href);
               }}
-              buttonRef={dropdownButton}
+              buttonRef={registerButton(`false:${item.href}`)}
             />
           ) : (
             <NavLink
@@ -252,7 +259,7 @@ export function MarketingNav() {
                   onToggle={() => {
                     toggle(item.href);
                   }}
-                  buttonRef={mobileDropdownButton}
+                  buttonRef={registerButton(`true:${item.href}`)}
                 />
               ) : (
                 <NavLink href={item.href} label={item.label} pathname={pathname} mobile />

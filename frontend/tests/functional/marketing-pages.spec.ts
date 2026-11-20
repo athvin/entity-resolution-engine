@@ -39,22 +39,22 @@ test.describe("marketing content pages", () => {
     }
   });
 
-  test("the Solutions dropdown opens by click and reaches every page", async ({ page }) => {
-    const solutions = HEADER_LINKS.find((l) => l.groups);
-    for (const link of (solutions?.groups ?? []).flatMap((g) => g.links)) {
-      await page.goto("/");
-      const menu = page.getByTestId("marketing-menu-button");
-      const mobile = await menu.isVisible();
-      if (mobile) await menu.click();
-      await page
-        .getByTestId(mobile ? "marketing-menu-solutions" : "marketing-nav-solutions")
-        .click();
-      const panel = page.getByTestId(
-        mobile ? "marketing-menu-solutions-panel" : "marketing-nav-solutions-panel",
-      );
-      await panel.getByRole("link", { name: link.label, exact: true }).click();
-      await expect(page).toHaveURL(new RegExp(`${link.href}$`));
-      await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+  test("each dropdown opens by click and reaches every page", async ({ page }) => {
+    for (const item of HEADER_LINKS.filter((l) => l.groups)) {
+      const slug = item.label.toLowerCase();
+      for (const link of (item.groups ?? []).flatMap((g) => g.links)) {
+        await page.goto("/");
+        const menu = page.getByTestId("marketing-menu-button");
+        const mobile = await menu.isVisible();
+        if (mobile) await menu.click();
+        await page.getByTestId(mobile ? `marketing-menu-${slug}` : `marketing-nav-${slug}`).click();
+        const panel = page.getByTestId(
+          mobile ? `marketing-menu-${slug}-panel` : `marketing-nav-${slug}-panel`,
+        );
+        await panel.getByRole("link", { name: link.label, exact: true }).click();
+        await expect(page).toHaveURL(new RegExp(`${link.href}$`));
+        await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+      }
     }
   });
 

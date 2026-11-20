@@ -158,6 +158,22 @@ const SCREENS: {
     },
   },
   {
+    name: "blog",
+    path: "/blog",
+    anonymous: true,
+    ready: async (page) => {
+      await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    },
+  },
+  {
+    name: "blog-post",
+    path: "/blog/estimating-what-duplicates-cost",
+    anonymous: true,
+    ready: async (page) => {
+      await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    },
+  },
+  {
     name: "about",
     path: "/about",
     anonymous: true,

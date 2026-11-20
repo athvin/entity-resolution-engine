@@ -420,6 +420,8 @@ li[data-cheapest="true"] .pricing-bar {
 .savings {
   grid-column: 1 / -1;
   margin-top: 24px;
+  /* Linked as /pricing#roi; clear the sticky header. */
+  scroll-margin-top: 80px;
 }
 .savings-head {
   max-width: 720px;

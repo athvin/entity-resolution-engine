@@ -38,12 +38,29 @@ export const SOLUTION_GROUPS: readonly LinkGroup[] = [
   },
 ];
 
+/** The savings (ROI) calculator: a section of /pricing, not its own page. */
+export const ROI_CALCULATOR_HREF = "/pricing#roi";
+
+export const RESOURCE_GROUPS: readonly LinkGroup[] = [
+  {
+    heading: "Read",
+    links: [
+      { href: "/docs", label: "Docs" },
+      { href: "/blog", label: "Blog" },
+    ],
+  },
+  {
+    heading: "Calculate",
+    links: [{ href: ROI_CALCULATOR_HREF, label: "ROI calculator" }],
+  },
+];
+
 export const HEADER_LINKS: readonly NavItem[] = [
   { href: "/product", label: "Product" },
   { href: "/solutions", label: "Solutions", groups: SOLUTION_GROUPS },
   { href: "/how-it-works", label: "How it works" },
   { href: "/pricing", label: "Pricing" },
-  { href: "/docs", label: "Docs" },
+  { href: "/resources", label: "Resources", groups: RESOURCE_GROUPS },
   { href: "/contact", label: "Contact" },
 ];
 
@@ -70,9 +87,11 @@ export const FOOTER_COLUMNS: readonly LinkGroup[] = [
     heading: "Learn",
     links: [
       { href: "/resources", label: "Resources" },
+      { href: "/blog", label: "Blog" },
       { href: "/faq", label: "FAQ" },
       { href: "/docs", label: "Developer docs" },
       { href: "/pricing", label: "Pricing" },
+      { href: ROI_CALCULATOR_HREF, label: "ROI calculator" },
     ],
   },
   {
@@ -100,6 +119,8 @@ export function allLinkedHrefs(): Set<string> {
 
 /** True when `href` is the current page or a section containing it. */
 export function isCurrent(href: string, pathname: string): boolean {
+  // A link to a section of a page (the ROI calculator) is never "the current page".
+  if (href.includes("#")) return false;
   if (href === "/") return pathname === "/";
   return pathname === href || pathname.startsWith(`${href}/`);
 }

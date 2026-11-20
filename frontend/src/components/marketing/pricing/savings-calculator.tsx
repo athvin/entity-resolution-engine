@@ -182,7 +182,12 @@ export function SavingsCalculator({
     ({ "--bar-w": `${String((cents / barMax) * 100)}%` }) as React.CSSProperties;
 
   return (
-    <section className="savings" aria-labelledby={`${id}-title`} data-testid="savings-calculator">
+    <section
+      id="roi"
+      className="savings"
+      aria-labelledby={`${id}-title`}
+      data-testid="savings-calculator"
+    >
       <div className="savings-head">
         <p className="story-eyebrow">Savings</p>
         <h2 id={`${id}-title`}>What duplicates cost you</h2>
