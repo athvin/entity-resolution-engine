@@ -1,23 +1,36 @@
 "use client";
 
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { usePathname } from "next/navigation";
 import { ThemeProvider } from "next-themes";
+import { useState } from "react";
 
+import { ToasterProvider } from "@/components/ui/toaster";
+import { BffRequestError } from "@/lib/api/client";
 import { MARKETING_PUBLIC_PATHS } from "@/lib/site/routes";
 
-/**
- * The root layout's only provider: the theme, which every page needs.
- *
- * Deliberately small. Everything the signed-in app needs (React Query, toasts,
- * BFF error handling) lives in `AppProviders`, mounted by the app's own
- * layouts, so the marketing site does not download it: before this split every
- * marketing page shipped ~247 KB gzip of JavaScript, mostly app machinery.
- */
 export function Providers({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   // The marketing site has no theme control, so it is always dark: a visitor's
   // stored choice from the app must not leave them in a theme they cannot leave.
   const marketing = MARKETING_PUBLIC_PATHS.includes(pathname);
+  const [queryClient] = useState(
+    () =>
+      new QueryClient({
+        defaultOptions: {
+          queries: {
+            staleTime: 15_000,
+            retry: (failureCount, error) => {
+              // Auth failures never resolve by retrying.
+              if (error instanceof BffRequestError && [401, 403, 404].includes(error.status)) {
+                return false;
+              }
+              return failureCount < 2;
+            },
+          },
+        },
+      }),
+  );
   return (
     <ThemeProvider
       attribute="class"
@@ -26,7 +39,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
       enableSystem
       disableTransitionOnChange
     >
-      {children}
+      <QueryClientProvider client={queryClient}>
+        <ToasterProvider>{children}</ToasterProvider>
+      </QueryClientProvider>
     </ThemeProvider>
   );
 }
