@@ -4,6 +4,43 @@ import { publicBaseUrl } from "@/lib/env";
 import { CANONICAL_ORIGIN, canonicalUrl } from "@/lib/site/routes";
 
 /**
+ * AI TRAINING CRAWLERS: the one setting. `true` lets model-training crawlers
+ * read the public marketing pages; `false` disallows the whole site to them.
+ * Search engines and answer-retrieval bots (which fetch a page to cite it in an
+ * answer) are unaffected either way. A business decision, not a technical
+ * one: owner chose to allow, 2026-11-20.
+ */
+const ALLOW_AI_TRAINING: boolean = true;
+
+/** Behind the session, or there only to bounce someone into it. Never indexed. */
+const PRIVATE = ["/api/", "/admin", "/app", "/login", "/reset", "/invite"];
+
+/** Search engines and answer-retrieval bots: always allowed the public site. */
+const SEARCH_AND_RETRIEVAL = [
+  "Googlebot",
+  "Bingbot",
+  "DuckDuckBot",
+  "Applebot",
+  "OAI-SearchBot",
+  "ChatGPT-User",
+  "PerplexityBot",
+  "Perplexity-User",
+  "Claude-SearchBot",
+  "Claude-User",
+];
+
+/** Crawlers that collect content to train models. */
+const AI_TRAINING = [
+  "GPTBot",
+  "ClaudeBot",
+  "Google-Extended",
+  "CCBot",
+  "Applebot-Extended",
+  "Meta-ExternalAgent",
+  "Bytespider",
+];
+
+/**
  * MUST live at `src/app/`, never inside the `(marketing)` route group.
  *
  * Next's metadata normalizer appends a hash suffix to any metadata file reached
@@ -37,16 +74,16 @@ export default function robots(): MetadataRoute.Robots {
     return { rules: [{ userAgent: "*", disallow: "/" }] };
   }
 
+  // A crawler obeys only the most specific group naming it, so every named
+  // group repeats the private paths. No Crawl-delay: answer bots fetch in real
+  // time and a delay would make them time out.
   return {
     rules: [
-      {
-        userAgent: "*",
-        allow: "/",
-        // Everything behind the session, plus the routes that exist only to
-        // bounce someone into it. None of these are useful in an index and
-        // several would leak the shape of the product's internals.
-        disallow: ["/api/", "/admin", "/app", "/login", "/reset", "/invite"],
-      },
+      { userAgent: "*", allow: "/", disallow: PRIVATE },
+      { userAgent: SEARCH_AND_RETRIEVAL, allow: "/", disallow: PRIVATE },
+      ALLOW_AI_TRAINING
+        ? { userAgent: AI_TRAINING, allow: "/", disallow: PRIVATE }
+        : { userAgent: AI_TRAINING, disallow: "/" },
     ],
     sitemap: canonicalUrl("/sitemap.xml"),
   };
