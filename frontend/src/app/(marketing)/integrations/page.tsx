@@ -67,6 +67,15 @@ export default function IntegrationsPage() {
         />
       </Section>
 
+      <Section id="pricing" title="Connectors are included.">
+        <Note title="Priced by records only">
+          Standard connectors are included at no extra charge, and their setup is part of
+          onboarding. You pay only for the total records you connect, added together across every
+          system, never on the number of systems, connectors or orgs. Integration work built for
+          your own system is a separate project: contact us for a quote.
+        </Note>
+      </Section>
+
       <Section id="salesforce" title="Salesforce">
         <Note title="How Salesforce fits">
           The DupeZero app connects your org. DupeZero pulls the records in, you review the close

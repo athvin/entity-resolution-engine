@@ -127,7 +127,7 @@ export const PRICING = {
   eyebrow: "Pricing",
   heading: "Pricing that follows your records.",
   intro:
-    "Every tier has every feature. Choose by the records you scan, per Salesforce org, with unlimited users.",
+    "Priced on the total records you connect, across every system. Every tier has every feature and unlimited users.",
   metaDescription:
-    "Estimate DupeZero pricing for Salesforce deduplication: every feature on every tier, priced per org by record volume, with monthly, yearly and multi-year billing.",
+    "Estimate DupeZero pricing: priced only on the total records you connect across every system, with every feature and unlimited users on every tier, and monthly, yearly and multi-year billing.",
 };

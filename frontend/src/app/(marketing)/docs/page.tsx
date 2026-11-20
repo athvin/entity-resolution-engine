@@ -402,15 +402,16 @@ Content-Type: application/json
             imply a per-source charge.
           </p>
           <p>
-            The current pricing direction is per-run compute, with commercial rates still to be
-            established. The web application’s existing usage panel meters AI calls and token units;
-            those counts are not a billing ledger. Bring-your-own model keys can also incur provider
-            charges outside DupeZero.
+            Pricing is based only on the total records you connect, added together across every
+            system, in tiers set out on the pricing page. It does not depend on the number of
+            systems, connectors, orgs or users, or on how many runs you do. Records in free sandbox
+            or test environments do not count.
           </p>
           <p>
-            Record volume alone cannot predict runtime or price: comparisons, candidate generation,
-            configuration, and actual execution work matter. Confirm a commercial estimate for your
-            workload before treating any usage number as cost.
+            The web application’s usage panel meters AI calls and token units; those counts are not
+            a billing ledger. Bring-your-own model keys can also incur provider charges outside
+            DupeZero. Runtime depends on comparisons, candidate generation and configuration, not on
+            record volume alone, but it does not change the price.
           </p>
         </section>
         <DeveloperReference />

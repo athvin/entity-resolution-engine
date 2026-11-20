@@ -53,7 +53,12 @@ export const FAQ_ITEMS: readonly FaqItem[] = [
   },
   {
     q: "How is pricing worked out?",
-    a: "Pricing is per Salesforce org, in tiers by the number of records included. The pricing page has the tiers and a calculator.",
+    a: "Pricing is based on the total number of records you connect, added together across every system, in tiers by record count. Every tier has every feature and unlimited users. The pricing page has the tiers and a calculator.",
+    link: { href: "/pricing", label: "See pricing" },
+  },
+  {
+    q: "Do I pay more for connecting more systems?",
+    a: "No. Standard connectors are included at no extra charge, and the number of systems, connectors, orgs or users never changes the price. Records from every system you connect are added together, and that total sets your tier. Records in free sandbox or test environments do not count. Integration work built for your own system is a separate project; contact us for a quote.",
     link: { href: "/pricing", label: "See pricing" },
   },
   {

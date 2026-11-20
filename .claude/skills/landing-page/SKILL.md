@@ -178,8 +178,11 @@ in `MARKETING_UNLISTED_PATHS` (noindex). The contact form hands off to the visit
 email app through `mailto:`; there is no form backend. `/pricing` is a calculator
 whose every figure is in `src/lib/pricing/config.ts` and whose rules are the
 pure `calculator.ts` beside it (see its README); the page itself does no
-arithmetic. Home's usage section still describes per-run compute pricing as
-unpublished, which the pricing page now contradicts.
+arithmetic. **Pricing is records only**: total records across every connected
+system, never per org, system, connector or user (the rule and where it lives
+are in `src/lib/pricing/README.md`). `tests/unit/pricing-rule.test.ts` fails on
+per-org, per-connector, per-system or per-seat language in marketing copy or
+the pricing code; deliberate exceptions go in its `EXCEPTIONS` list.
 Home scrolls freely: there is no scroll snapping, by the owner's decision, and
 no wheel or touch event is intercepted. Section links are ordinary anchors.
 Progression is opt-in through `story-chapters.tsx`: one floating button that

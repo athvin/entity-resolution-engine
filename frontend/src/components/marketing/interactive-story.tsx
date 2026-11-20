@@ -148,11 +148,11 @@ export function InteractiveStory() {
           volumePosition={volumePosition}
         />
         <div className="story-pricing-note">
-          <h3>Pricing follows the work.</h3>
+          <h3>Pricing follows your records.</h3>
           <p>
-            Our pricing direction is per-run compute. Record volume, configuration, and the work a
-            run performs shape that discussion. This is a usage illustration; rates and a price
-            estimate are not yet published.
+            Pricing is based on the total records you connect, added together across every system,
+            never on the number of systems, connectors or users. This illustration shows the shape
+            of a run, not a price; the pricing page has the tiers.
           </p>
           <p>
             Adding a source redistributes the selected total. Animation density is illustrative, not
