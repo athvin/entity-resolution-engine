@@ -1,5 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 
+import { AppProviders } from "@/app/app-providers";
 import { AdminShell } from "@/components/admin/admin-shell";
 import { identityFromCookies } from "@/lib/auth/session";
 
@@ -10,5 +11,9 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   if (!identity.user.isSuperAdmin) notFound();
   // While impersonating, the super admin IS the tenant; exit first.
   if (identity.impersonating) redirect(`/${identity.impersonating.org}`);
-  return <AdminShell user={identity.user}>{children}</AdminShell>;
+  return (
+    <AppProviders>
+      <AdminShell user={identity.user}>{children}</AdminShell>
+    </AppProviders>
+  );
 }
