@@ -12,10 +12,15 @@ import type { SOURCE_NAMES } from "./story-model";
  * Google, Salesforce (brand.salesforce.com/content/logo-guidelines), AWS
  * (aws.amazon.com/architecture/icons) and Shopify (shopify.com/brand-assets).
  *
+ * ZoomInfo is not in Simple Icons. Its mark is ZoomInfo's own red logomark,
+ * zoominfo.com/logos/acquisitions/zoominfo/zoominfo-red-logomark.svg, fetched
+ * 2026-11-20: a rounded square (drawn in the brand colour) with the "Z"
+ * knocked out of it (drawn in `--source-knockout`).
+ * TODO(owner): confirm ZoomInfo's logo terms allow this use.
+ *
  * `brand` selects the colour token in story.css (`--brand-<key>`). SFTP and
  * Custom API are protocols, not brands, so they keep a generic icon and the
- * site's grayscale. ZoomInfo has no mark in Simple Icons.
- * TODO(owner): supply ZoomInfo's logo and colour from its brand kit.
+ * site's grayscale.
  */
 
 type SourceName = (typeof SOURCE_NAMES)[number];
@@ -23,6 +28,9 @@ type SourceName = (typeof SOURCE_NAMES)[number];
 interface Mark {
   brand: string | null;
   path: string | null;
+  /** Drawn over `path` in the knockout colour; ZoomInfo's "Z". */
+  knockout?: string;
+  viewBox?: string;
 }
 
 const MARKS: Record<SourceName, Mark> = {
@@ -44,7 +52,13 @@ const MARKS: Record<SourceName, Mark> = {
     path: "M15.337 23.979l7.216-1.561s-2.604-17.613-2.625-17.73c-.018-.116-.114-.192-.211-.192s-1.929-.136-1.929-.136-1.275-1.274-1.439-1.411c-.045-.037-.075-.057-.121-.074l-.914 21.104h.023zM11.71 11.305s-.81-.424-1.774-.424c-1.447 0-1.504.906-1.504 1.141 0 1.232 3.24 1.715 3.24 4.629 0 2.295-1.44 3.76-3.406 3.76-2.354 0-3.54-1.465-3.54-1.465l.646-2.086s1.245 1.066 2.28 1.066c.675 0 .975-.545.975-.932 0-1.619-2.654-1.694-2.654-4.359-.034-2.237 1.571-4.416 4.827-4.416 1.257 0 1.875.361 1.875.361l-.945 2.715-.02.01zM11.17.83c.136 0 .271.038.405.135-.984.465-2.064 1.639-2.508 3.992-.656.213-1.293.405-1.889.578C7.697 3.75 8.951.84 11.17.84V.83zm1.235 2.949v.135c-.754.232-1.583.484-2.394.736.466-1.777 1.333-2.645 2.085-2.971.193.501.309 1.176.309 2.1zm.539-2.234c.694.074 1.141.867 1.429 1.755-.349.114-.735.231-1.158.366v-.252c0-.752-.096-1.371-.271-1.871v.002zm2.992 1.289c-.02 0-.06.021-.078.021s-.289.075-.714.21c-.423-1.233-1.176-2.37-2.508-2.37h-.115C12.135.209 11.669 0 11.265 0 8.159 0 6.675 3.877 6.21 5.846c-1.194.365-2.063.636-2.16.674-.675.213-.694.232-.772.87-.075.462-1.83 14.063-1.83 14.063L15.009 24l.927-21.166z",
   },
   "Custom API": { brand: null, path: null },
-  ZoomInfo: { brand: null, path: null },
+  ZoomInfo: {
+    brand: "zoominfo",
+    viewBox: "0 0 64 64",
+    path: "m0 8c0-4.41828 3.58172-8 8-8h48c4.4183 0 8 3.58172 8 8v48c0 4.4183-3.5817 8-8 8h-48c-4.41828 0-8-3.5817-8-8z",
+    knockout:
+      "m44.0001 15.9999h3.437c.3117 0 .563.2514.563.5632v8.8636c0 .3118-.2413.5632-.5529.5732h-2.8841c-.3117 0-.563-.2514-.563-.5631v-2.5931l-22.2345 21.1563h5.6714c.3117 0 .563.2514.563.5632v2.8736c0 .3118-.2513.5632-.563.5632h-10.874c-.3117 0-.563-.2514-.563-.5632v-3.4368l25.2032-24.0001h-2.6401c-.3117 0-.563-.2514-.563-.5632v-2.8636c0-.3117.2513-.5631.563-.5631zm-20.0001 4 9.4371-.01c.3116 0 .563-.2515.563-.5632v-2.8636c0-.3118-.2514-.5632-.553-.5632h-16.864c-.3117 0-.563.2514-.563.5632v8.8737c0 .3117.2513.5631.563.5631h2.864c.3116 0 .5529-.2514.5529-.5631v-5.4369zm20.0001 24.0001h-11.4371c-.3116 0-.563.2514-.563.5632v2.8736c0 .3118.2514.5632.563.5632h14.8741c.3117 0 .563-.2514.563-.5632v-8.9205c0-.3118-.2513-.5632-.563-.5632h-2.874c-.3117 0-.563.2514-.563.5632z",
+  },
 };
 
 /** The `data-brand` value for a source's button, or undefined for none. */
@@ -54,12 +68,12 @@ export function sourceBrand(name: SourceName): string | undefined {
 
 /** A source's mark, decorative: the button's text already names it. */
 export function SourceLogo({ name, size = 16 }: { name: SourceName; size?: number }) {
-  const { path } = MARKS[name];
+  const { path, knockout, viewBox = "0 0 24 24" } = MARKS[name];
   if (path) {
     return (
       <svg
         className="source-logo"
-        viewBox="0 0 24 24"
+        viewBox={viewBox}
         width={size}
         height={size}
         fill="currentColor"
@@ -67,6 +81,7 @@ export function SourceLogo({ name, size = 16 }: { name: SourceName; size?: numbe
         focusable="false"
       >
         <path d={path} />
+        {knockout && <path d={knockout} className="source-logo-knockout" />}
       </svg>
     );
   }

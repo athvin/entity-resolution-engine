@@ -22,6 +22,9 @@
   --brand-salesforce: #00a1e0;
   --brand-s3: #569a31;
   --brand-shopify: #7ab55c;
+  /* ZoomInfo's own logomark red; dark ink is only 4.3:1 on it, so it takes
+     white (4.6:1) when filled. */
+  --brand-zoominfo: #ea1b15;
   --brand-on-fill: #0b0b0b;
   --story-glow-opacity: 0.18;
   --story-surface: color-mix(in oklch, var(--muted) 76%, transparent);
@@ -1481,6 +1484,10 @@ html:has(.marketing-story) {
 [data-brand="shopify"] {
   --source-brand: var(--brand-shopify);
 }
+[data-brand="zoominfo"] {
+  --source-brand: var(--brand-zoominfo);
+  --source-on-fill: #ffffff;
+}
 .trail-source-picker button[data-brand],
 .story-source-picker button[data-brand] {
   color: var(--foreground);
@@ -1493,13 +1500,20 @@ html:has(.marketing-story) {
 }
 .trail-source-picker button[data-brand][aria-pressed="true"],
 .story-source-picker button[data-brand][aria-pressed="true"] {
-  color: var(--brand-on-fill);
+  color: var(--source-on-fill, var(--brand-on-fill));
   border-color: var(--source-brand);
   background: var(--source-brand);
 }
 .trail-source-picker button[data-brand][aria-pressed="true"] .source-logo,
 .story-source-picker button[data-brand][aria-pressed="true"] .source-logo {
-  color: var(--brand-on-fill);
+  color: var(--source-on-fill, var(--brand-on-fill));
+}
+/* A knocked-out mark (ZoomInfo's "Z") takes the button's own fill behind it. */
+.source-logo-knockout {
+  fill: #ffffff;
+}
+[aria-pressed="true"] .source-logo-knockout {
+  fill: var(--source-brand);
 }
 .source-logo {
   flex: none;
