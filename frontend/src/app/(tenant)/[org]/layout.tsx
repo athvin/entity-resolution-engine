@@ -1,6 +1,5 @@
 import { notFound, redirect } from "next/navigation";
 
-import { AppProviders } from "@/app/app-providers";
 import { AppShell } from "@/components/shell/app-shell";
 import { identityFromCookies } from "@/lib/auth/session";
 
@@ -36,15 +35,13 @@ export default async function OrgLayout({
     : identity.memberships;
 
   return (
-    <AppProviders>
-      <AppShell
-        org={org}
-        user={identity.user}
-        memberships={memberships}
-        impersonation={impersonation}
-      >
-        {children}
-      </AppShell>
-    </AppProviders>
+    <AppShell
+      org={org}
+      user={identity.user}
+      memberships={memberships}
+      impersonation={impersonation}
+    >
+      {children}
+    </AppShell>
   );
 }
