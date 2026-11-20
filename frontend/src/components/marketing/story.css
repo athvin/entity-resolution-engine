@@ -17,11 +17,12 @@
   /* Third-party brand colours for the home page's source buttons: a third
      user-requested exception, scoped to those buttons (source-logo.tsx).
      Hex values from Simple Icons 13.21.0. Each is a fill under dark ink
-     (#0b0b0b), which clears 5:1 on all four. */
+     (#0b0b0b), which clears 5:1 on all five (HubSpot 7.7:1). */
   --brand-sheets: #34a853;
   --brand-salesforce: #00a1e0;
   --brand-s3: #569a31;
   --brand-shopify: #7ab55c;
+  --brand-hubspot: #ff7a59;
   /* ZoomInfo's own logomark red; dark ink is only 4.3:1 on it, so it takes
      white (4.6:1) when filled. */
   --brand-zoominfo: #ea1b15;
@@ -1483,6 +1484,9 @@ html:has(.marketing-story) {
 }
 [data-brand="shopify"] {
   --source-brand: var(--brand-shopify);
+}
+[data-brand="hubspot"] {
+  --source-brand: var(--brand-hubspot);
 }
 [data-brand="zoominfo"] {
   --source-brand: var(--brand-zoominfo);

@@ -6,6 +6,7 @@ export const SOURCE_NAMES = [
   "S3 files",
   "Shopify",
   "Custom API",
+  "HubSpot",
   "ZoomInfo",
 ] as const;
 export const DEMO_DATASETS = [

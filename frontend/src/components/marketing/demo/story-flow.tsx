@@ -188,7 +188,7 @@ export function StoryFlow({
                 <SourceLogo name={name} size={18} />
                 <span>
                   {name}
-                  {i === 6 && <small>Proposed integration</small>}
+                  {name === "ZoomInfo" && <small>Proposed integration</small>}
                 </span>
                 <span className="trail-toggle" aria-hidden="true">
                   {sources.includes(i) ? "−" : "+"}

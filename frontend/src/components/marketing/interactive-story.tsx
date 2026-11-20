@@ -74,7 +74,7 @@ export function InteractiveStory() {
               <span aria-hidden="true">{sources.includes(i) ? "−" : "+"}</span>
               <SourceLogo name={name} size={14} />
               {name}
-              {i === 6 ? "*" : ""}
+              {name === "ZoomInfo" ? "*" : ""}
             </button>
           ))}
         </div>

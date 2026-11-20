@@ -129,10 +129,11 @@ palette-utility lint rule remain unchanged.
   next-chapter button carry it; everything else stays grayscale. One accent,
   no gradients, no second hue.
 - **Source logos on the home page's source buttons** (`demo/source-logo.tsx`).
-  Google Sheets, Salesforce, S3 and Shopify carry their Simple Icons marks
-  (CC0, inlined as path data) and `--brand-<key>` colours: a tint when off, the
-  solid colour under `--brand-on-fill` ink when on (5.6:1 or better). Scoped to
-  those two pickers by `data-brand`; SFTP, Custom API and ZoomInfo stay
+  Google Sheets, Salesforce, S3, Shopify and HubSpot carry their Simple Icons
+  marks (CC0, inlined as path data); ZoomInfo carries its own logomark. Each has
+  a `--brand-<key>` colour: a tint when off, the solid colour under
+  `--brand-on-fill` ink when on (5.6:1 or better; ZoomInfo's red takes white).
+  Scoped to those two pickers by `data-brand`; SFTP and Custom API stay
   grayscale. A brand colour used anywhere else is a new exception to ask for.
 
 The header shows the logo, with both theme variants in the markup from
