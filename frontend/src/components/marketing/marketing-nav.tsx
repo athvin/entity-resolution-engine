@@ -82,6 +82,7 @@ function Dropdown({
   buttonRef: (el: HTMLButtonElement | null) => void;
 }) {
   const panelId = useId();
+  const columns = item.groups?.length ?? 0;
   // Highlighted when the current page is the overview or any page it lists.
   const inside =
     isCurrent(item.href, pathname) ||
@@ -114,23 +115,26 @@ function Dropdown({
         className={cn(
           mobile
             ? "pb-2 pl-4"
-            : "bg-background absolute top-full left-0 z-20 mt-2 w-[min(560px,90vw)] rounded-xl border p-4 shadow-lg",
+            : "bg-background absolute top-full left-0 z-20 mt-2 rounded-xl border p-4 shadow-lg",
+          !mobile && (columns > 1 ? "w-[min(560px,90vw)]" : "w-[min(280px,90vw)]"),
         )}
         data-testid={`${testId(mobile ? "menu" : "nav", item.label)}-panel`}
       >
         <NavLink
           href={item.href}
-          label={`All ${item.label.toLowerCase()}`}
+          label={item.overviewLabel ?? `All ${item.label.toLowerCase()}`}
           pathname={pathname}
           mobile={mobile}
           exact
         />
-        <div className={cn("grid gap-4", !mobile && "mt-2 grid-cols-2")}>
-          {item.groups?.map((group) => (
-            <div key={group.heading}>
-              <p className="text-muted-foreground px-2 pt-2 pb-1 text-xs font-semibold tracking-widest uppercase">
-                {group.heading}
-              </p>
+        <div className={cn("grid gap-4", !mobile && columns > 1 && "mt-2 grid-cols-2")}>
+          {item.groups?.map((group, i) => (
+            <div key={group.heading ?? i}>
+              {group.heading && (
+                <p className="text-muted-foreground px-2 pt-2 pb-1 text-xs font-semibold tracking-widest uppercase">
+                  {group.heading}
+                </p>
+              )}
               <ul>
                 {group.links.map((l) => (
                   <li key={l.href}>

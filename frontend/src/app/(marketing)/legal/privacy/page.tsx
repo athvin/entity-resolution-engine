@@ -26,7 +26,7 @@ export const metadata = pageMetadata({
 
 export default function PrivacyPage() {
   return (
-    <Page testId="page-legal-privacy">
+    <Page testId="page-legal-privacy" crumb={{ path: "/legal/privacy", label: "Privacy policy" }}>
       <PageIntro
         eyebrow="Legal · Last updated 20 November 2026"
         title="Privacy policy"

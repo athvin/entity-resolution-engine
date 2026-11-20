@@ -1,7 +1,9 @@
 import { CANONICAL_ORIGIN, canonicalUrl } from "@/lib/site/routes";
 
 /**
- * Organization + SoftwareApplication JSON-LD for the landing page.
+ * Organization + WebSite JSON-LD for the landing page. The SoftwareApplication
+ * node lives on /product and /pricing, where its description and prices are
+ * visible (structured data must repeat what the page shows).
  *
  * ## No `dangerouslySetInnerHTML`, and no semgrep exemption
  *
@@ -43,18 +45,21 @@ const STRUCTURED_DATA = {
       "@id": `${CANONICAL_ORIGIN}/#organization`,
       name: "DupeZero",
       url: CANONICAL_ORIGIN,
-      description: "Trusted records, wherever you need them.",
+      logo: canonicalUrl("/brand/dupezero-logo-on-light.svg"),
+      // The contact page is the real way to reach us; no phone or email is
+      // published, so none is claimed. Add `sameAs` only for profiles that exist.
+      contactPoint: {
+        "@type": "ContactPoint",
+        contactType: "sales",
+        url: canonicalUrl("/contact"),
+      },
     },
     {
-      "@type": "SoftwareApplication",
-      "@id": `${CANONICAL_ORIGIN}/#software`,
+      "@type": "WebSite",
+      "@id": `${CANONICAL_ORIGIN}/#website`,
       name: "DupeZero",
-      applicationCategory: "BusinessApplication",
-      operatingSystem: "Web",
       url: canonicalUrl("/"),
       publisher: { "@id": `${CANONICAL_ORIGIN}/#organization` },
-      description:
-        "Resolves duplicate entity records across sources, with inspectable match evidence and integrations for your destinations.",
     },
   ],
 } as const;

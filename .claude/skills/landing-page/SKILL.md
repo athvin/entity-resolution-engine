@@ -112,6 +112,22 @@ Both properties are pinned by `tests/component/structured-data.test.tsx`,
 because they are React implementation details whose failure mode is invisible —
 the page still renders, and only crawlers break.
 
+## Search and AI crawlers
+
+`src/components/marketing/seo.tsx` holds the share image, `JsonLd`,
+`Breadcrumbs` (visible trail plus a matching BreadcrumbList) and
+`PAGE_UPDATED`, the content dates that feed both the sitemap's `lastmod` and
+the visible "Last updated" lines; change a page's date when its content
+changes, never per deploy. Structured data repeats what the page shows:
+Organization + WebSite on `/`, SoftwareApplication on `/product` (its lead as
+the description) and `/pricing` (an AggregateOffer built from
+`PRICING_CONFIG`), BlogPosting and Article, FAQPage. No ratings, reviews,
+awards or certifications; `tests/component/seo.test.tsx` fails on them. A
+page-level `openGraph` replaces the layout's, so `pageMetadata` sets the image
+itself. `robots.ts` has separate search/retrieval and AI-training groups, with
+`ALLOW_AI_TRAINING` at the top. The audit and its baseline are in
+`docs/seo-audit.md`.
+
 ## Marketing follows the product tokens, with three explicit exceptions
 
 All were requested by the owner, and all live in `story.css` under
@@ -172,8 +188,12 @@ or the owner has confirmed** (the AppExchange app and API connections, dated in
 the inventory), including writing clean records back to the source systems,
 which has no write path in this repo; no sign-up, no certification. Where a fact is
 missing (a founding year, a customer quote), write the copy so it does not need
-one; never invent it. Screens are shown as labelled, fictional example panels
-(`pages/examples.tsx`), not mock screenshots presented as real. The legal pages
+one; never invent it. Product screens are the app's own desktop visual
+baselines (rendered in CI with fixture data), copied to `public/screenshots/`
+and shown by `ProductScreenshot` in `pages/examples.tsx`; re-copy them when the
+app's screens change. Never use a screen that shows storage paths, internal
+code names or figures that read as statistics (Sources, Dashboard). Where no
+clean screen exists, a labelled example panel stands in. The legal pages
 are written from verified data handling but unreviewed by counsel, so they stay
 in `MARKETING_UNLISTED_PATHS` (noindex). The contact form hands off to the visitor's
 email app through `mailto:`; there is no form backend. `/pricing` is a calculator

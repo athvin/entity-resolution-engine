@@ -8,7 +8,7 @@ import {
   Related,
   Section,
 } from "@/components/marketing/pages/page-kit";
-import { ExampleReviewPair } from "@/components/marketing/pages/examples";
+import { ProductScreenshot } from "@/components/marketing/pages/examples";
 
 export const dynamic = "force-static";
 
@@ -21,7 +21,7 @@ export const metadata = pageMetadata({
 
 export default function ReviewPage() {
   return (
-    <Page testId="page-review">
+    <Page testId="page-review" crumb={{ path: "/features/review", label: "Review" }}>
       <PageIntro
         eyebrow="Feature / Review"
         title="The close calls go to a person, with the evidence."
@@ -46,7 +46,7 @@ export default function ReviewPage() {
             },
           ]}
         />
-        <ExampleReviewPair label="A review pair in DupeZero, with agreeing and disagreeing fields marked" />
+        <ProductScreenshot screen="review" />
       </Section>
 
       <Section id="fix" title="Fix a mistake without losing the history.">

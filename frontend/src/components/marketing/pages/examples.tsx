@@ -1,34 +1,56 @@
+import Image from "next/image";
+
 /**
- * Example panels for the content pages, in place of screenshots: what the
- * review and source-mapping screens show, drawn in HTML with fictional
+ * Real screens from the DupeZero app, rendered from this codebase.
+ *
+ * The images are the desktop visual baselines the Playwright suite renders in
+ * CI (tests/functional/{reviews,records}.spec.ts-snapshots), copied to
+ * public/screenshots/. They show the test fixtures' sample data, never customer
+ * data. When the app's screens change, re-copy the matching baseline.
+ */
+const SCREENS = {
+  review: {
+    src: "/screenshots/review-queue.png",
+    width: 1440,
+    height: 1110,
+    alt: "The DupeZero review screen: a queue of possible duplicates on the left, and one pair compared field by field on the right, with the fields that differ flagged and the weight each agreement added to the match.",
+    caption:
+      "The review screen. Each pair shows which fields agree, which differ, and how much each counted.",
+  },
+  golden: {
+    src: "/screenshots/golden-record.png",
+    width: 1440,
+    height: 1334,
+    alt: "A DupeZero golden record: each value with the source record and rule it came from, the values each member record disagrees on, the member records, and the history of runs that formed it.",
+    caption: "A golden record. Every value shows where it came from, and the history is kept.",
+  },
+} as const;
+
+export function ProductScreenshot({ screen }: { screen: keyof typeof SCREENS }) {
+  const s = SCREENS[screen];
+  return (
+    <figure className="page-screenshot">
+      <Image
+        src={s.src}
+        alt={s.alt}
+        width={s.width}
+        height={s.height}
+        sizes="(max-width: 800px) 100vw, 1100px"
+        loading="lazy"
+      />
+      <figcaption className="story-muted">
+        {s.caption} <span>Sample data.</span>
+      </figcaption>
+    </figure>
+  );
+}
+
+/**
+ * Example panel for the content pages, where no clean app screen exists: what the
+ * source-mapping screen shows, drawn in HTML with fictional
  * records and labelled "Example". Agreement is carried by words and weight,
  * never colour, so the panels follow the grayscale rule.
  */
-
-const PAIR = [
-  {
-    field: "Name",
-    a: "Liz Moreno",
-    b: "Elizabeth Moreno",
-    result: "Nickname match",
-    weight: "+3.2",
-  },
-  {
-    field: "Email",
-    a: "liz.moreno@harbourline.example",
-    b: "LIZ.MORENO+events@harbourline.example",
-    result: "Same after cleanup",
-    weight: "+6.8",
-  },
-  {
-    field: "Company",
-    a: "Harbourline Ltd",
-    b: "Harbourline",
-    result: "Same, suffix ignored",
-    weight: "+2.1",
-  },
-  { field: "Phone", a: "(415) 555-0142", b: "415.555.0199", result: "Different", weight: "−1.4" },
-] as const;
 
 /** The table scrolls sideways on a phone, so it takes focus and a name (axe: scrollable-region-focusable). */
 function Scroll({ label, children }: { label: string; children: React.ReactNode }) {
@@ -36,49 +58,6 @@ function Scroll({ label, children }: { label: string; children: React.ReactNode 
     <div className="page-example-scroll" role="region" aria-label={label} tabIndex={0}>
       {children}
     </div>
-  );
-}
-
-export function ExampleReviewPair({ label }: { label: string }) {
-  return (
-    <figure className="page-example" aria-label={label}>
-      <figcaption>
-        <span className="page-example-tag">Example</span> A pair waiting for review
-      </figcaption>
-      <Scroll label="Example review pair, table">
-        <table>
-          <thead>
-            <tr>
-              <th scope="col">Field</th>
-              <th scope="col">Record A</th>
-              <th scope="col">Record B</th>
-              <th scope="col">Evidence</th>
-              <th scope="col" className="page-example-num">
-                Counted
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {PAIR.map((row) => (
-              <tr key={row.field} data-differs={row.result === "Different"}>
-                <th scope="row">{row.field}</th>
-                <td>{row.a}</td>
-                <td>{row.b}</td>
-                <td>{row.result}</td>
-                <td className="page-example-num">{row.weight}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </Scroll>
-      <p className="page-example-foot">
-        <span>Three fields agree, one differs.</span>
-        <span className="page-example-actions" aria-hidden="true">
-          <span>Same person</span>
-          <span>Not the same</span>
-        </span>
-      </p>
-    </figure>
   );
 }
 
