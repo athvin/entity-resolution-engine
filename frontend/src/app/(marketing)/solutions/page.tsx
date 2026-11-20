@@ -69,7 +69,7 @@ export default function SolutionsPage() {
       <Related
         links={[
           { href: "/product", label: "Product overview" },
-          { href: "/how-it-works", label: "How it works" },
+          { href: "/product#how-it-works", label: "How it works" },
           { href: "/resources/causes-of-salesforce-duplicates", label: "What causes duplicates" },
         ]}
       />

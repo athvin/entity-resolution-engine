@@ -34,6 +34,8 @@
 .page-section {
   border-top: 1px solid var(--border);
   padding: 48px 0;
+  /* In-page links (/product#how-it-works) clear the sticky header. */
+  scroll-margin-top: 64px;
 }
 .page-section h2 {
   font-size: clamp(26px, 3vw, 34px);

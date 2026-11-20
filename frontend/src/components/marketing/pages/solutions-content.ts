@@ -42,7 +42,7 @@ const GOLDEN = "/features/golden-records";
 const SECURITY = "/security";
 const INTEGRATIONS = "/integrations";
 
-const CONNECT_NOTE = {
+export const CONNECT_NOTE = {
   title: "How your data reaches DupeZero",
   body: "Connect your Salesforce org with the DupeZero app on the Salesforce AppExchange, or connect other systems through their APIs, and DupeZero pulls the records in to deduplicate. A CSV upload works too, for a one-off list.",
 };
@@ -550,7 +550,7 @@ export const USE_CASES: readonly { title: string; body: string; href: string }[]
   {
     title: "Check a list before importing it",
     body: "Upload a new list beside the records already in DupeZero to see which rows already exist.",
-    href: "/how-it-works",
+    href: "/product#how-it-works",
   },
   {
     title: "Deduplicate Accounts",

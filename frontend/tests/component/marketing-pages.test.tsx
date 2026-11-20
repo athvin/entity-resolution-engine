@@ -13,7 +13,6 @@ import FaqPage, { metadata as faqMeta } from "@/app/(marketing)/faq/page";
 import GoldenPage, { metadata as goldenMeta } from "@/app/(marketing)/features/golden-records/page";
 import MatchingPage, { metadata as matchingMeta } from "@/app/(marketing)/features/matching/page";
 import ReviewPage, { metadata as reviewMeta } from "@/app/(marketing)/features/review/page";
-import HowPage, { metadata as howMeta } from "@/app/(marketing)/how-it-works/page";
 import IntegrationsPage, {
   metadata as integrationsMeta,
 } from "@/app/(marketing)/integrations/page";
@@ -34,7 +33,12 @@ import { POSTS } from "@/components/marketing/pages/blog-content";
 import { validateContact } from "@/components/marketing/pages/contact-form";
 import { formatPostDate } from "@/components/marketing/pages/post-date";
 import { FAQ_ITEMS } from "@/components/marketing/pages/faq-content";
-import { allLinkedHrefs, FOOTER_COLUMNS, isCurrent } from "@/components/marketing/site-links";
+import {
+  allLinkedHrefs,
+  FOOTER_COLUMNS,
+  HEADER_LINKS,
+  isCurrent,
+} from "@/components/marketing/site-links";
 import {
   MARKETING_PATHS,
   MARKETING_PUBLIC_PATHS,
@@ -51,7 +55,6 @@ vi.mock("next/navigation", () => ({
 
 const PAGES: [string, () => React.ReactElement, Metadata][] = [
   ["/product", ProductPage, productMeta],
-  ["/how-it-works", HowPage, howMeta],
   ["/features/matching", MatchingPage, matchingMeta],
   ["/features/review", ReviewPage, reviewMeta],
   ["/features/golden-records", GoldenPage, goldenMeta],
@@ -143,6 +146,30 @@ describe("navigation", () => {
       expect(linked, path).toContain(path);
     }
     for (const href of linked) expect(MARKETING_PUBLIC_PATHS).toContain(href.split("#")[0]);
+  });
+
+  it("keeps the header to five items, with How it works inside Product", () => {
+    render(<MarketingNav />);
+    const nav = screen.getAllByRole("navigation", { name: "Main navigation" })[0];
+    if (!nav) throw new Error("no main navigation");
+    expect(within(nav).queryByRole("link", { name: "How it works" })).toBeNull();
+    expect(HEADER_LINKS.map((l) => l.label)).toEqual([
+      "Product",
+      "Solutions",
+      "Pricing",
+      "Resources",
+      "Contact",
+    ]);
+  });
+
+  it("puts the step-by-step walkthrough on the Product page", () => {
+    render(<ProductPage />);
+    expect(document.getElementById("how-it-works")).not.toBeNull();
+    expect(screen.getByRole("link", { name: "See how it works" })).toHaveAttribute(
+      "href",
+      "#how-it-works",
+    );
+    expect(document.body).not.toHaveTextContent(/works from CSV|does not connect/i);
   });
 
   it("groups Docs, Blog and the ROI calculator under Resources", () => {

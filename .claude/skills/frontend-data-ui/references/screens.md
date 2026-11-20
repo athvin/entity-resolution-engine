@@ -93,7 +93,6 @@ false the moment a screen renders different markup below `lg`.
 - `/features/golden-records`
 - `/features/matching`
 - `/features/review`
-- `/how-it-works`
 - `/integrations`
 - `/legal/privacy`
 - `/login`

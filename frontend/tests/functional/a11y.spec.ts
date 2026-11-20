@@ -62,14 +62,6 @@ const SCREENS: {
     },
   },
   {
-    name: "how-it-works",
-    path: "/how-it-works",
-    anonymous: true,
-    ready: async (page) => {
-      await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
-    },
-  },
-  {
     name: "feature-matching",
     path: "/features/matching",
     anonymous: true,

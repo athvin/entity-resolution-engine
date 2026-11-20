@@ -39,6 +39,15 @@ test.describe("marketing content pages", () => {
     }
   });
 
+  test("the old How it works URL lands on the Product page's walkthrough", async ({ page }) => {
+    const response = await page.request.get("/how-it-works", { maxRedirects: 0 });
+    expect(response.status()).toBe(308);
+    expect(response.headers().location).toBe("/product#how-it-works");
+    await page.goto("/how-it-works");
+    await expect(page).toHaveURL(/\/product#how-it-works$/);
+    await expect(page.locator("#how-it-works")).toBeVisible();
+  });
+
   test("each dropdown opens by click and reaches every page", async ({ page }) => {
     for (const item of HEADER_LINKS.filter((l) => l.groups)) {
       const slug = item.label.toLowerCase();

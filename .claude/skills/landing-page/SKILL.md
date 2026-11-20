@@ -144,7 +144,7 @@ Home opens with a quiet hero, then stacked ingress, organization/dataset, dedupe
 and egress panels, followed by audit, usage, and a short FAQ and closing CTA.
 Measured paths connect actual exit and entry ports across section boundaries;
 resize and dataset/source changes must preserve their alignment. The
-header links Product, Solutions, How it works, Pricing, Docs and Contact through
+header links Product, Solutions, Pricing, Resources and Contact through
 `marketing-nav.tsx`, a client island so the current page carries
 `aria-current`. From `lg` the links sit in the row; below it they move behind a
 Menu disclosure (Escape and an outside click close it). The row ends with two
@@ -154,8 +154,12 @@ so the row fits 320px. There is no theme control: `app/providers.tsx` forces
 dark on every `MARKETING_PUBLIC_PATHS` page, so a choice stored by the app's
 own toggle cannot strand a visitor in light mode. The
 footer has four link columns from the same `site-links.ts`. Solutions is a
-click-to-open dropdown (never hover-only) of role and industry pages, nested
-inside the Menu below `lg`; Escape closes the innermost open disclosure. Those
+click-to-open dropdown (never hover-only) of role and industry pages, and
+Resources one of Docs, Blog and the ROI calculator (`/pricing#roi`), each nested
+inside the Menu below `lg`; Escape closes the innermost open disclosure and
+refocuses that dropdown's own button. How it works is a section of `/product`;
+`next.config.ts` redirects the old `/how-it-works` URL there (308). A merged page
+keeps its old URL working the same way. Those
 pages are data in `pages/solutions-content.ts`, rendered by one template, and
 **industry pages make no compliance claim**: a test fails on HIPAA, SOC 2 and
 similar terms.

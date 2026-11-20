@@ -58,7 +58,6 @@ export const RESOURCE_GROUPS: readonly LinkGroup[] = [
 export const HEADER_LINKS: readonly NavItem[] = [
   { href: "/product", label: "Product" },
   { href: "/solutions", label: "Solutions", groups: SOLUTION_GROUPS },
-  { href: "/how-it-works", label: "How it works" },
   { href: "/pricing", label: "Pricing" },
   { href: "/resources", label: "Resources", groups: RESOURCE_GROUPS },
   { href: "/contact", label: "Contact" },
@@ -69,7 +68,6 @@ export const FOOTER_COLUMNS: readonly LinkGroup[] = [
     heading: "Product",
     links: [
       { href: "/product", label: "Overview" },
-      { href: "/how-it-works", label: "How it works" },
       { href: "/features/matching", label: "Matching" },
       { href: "/features/review", label: "Review" },
       { href: "/features/golden-records", label: "Golden records" },

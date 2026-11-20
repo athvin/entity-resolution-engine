@@ -49,7 +49,6 @@ export const CANONICAL_ORIGIN = "https://dupezero.com";
 export const MARKETING_PATHS: readonly string[] = [
   "/",
   "/product",
-  "/how-it-works",
   "/features/matching",
   "/features/review",
   "/features/golden-records",

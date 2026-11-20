@@ -69,7 +69,7 @@ export default function IntegrationsPage() {
       />
       <Related
         links={[
-          { href: "/how-it-works", label: "How it works" },
+          { href: "/product#how-it-works", label: "How it works" },
           { href: "/features/golden-records", label: "Golden records" },
           { href: "/docs", label: "Developer docs" },
         ]}

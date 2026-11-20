@@ -10,15 +10,20 @@ import {
   Section,
   Steps,
 } from "@/components/marketing/pages/page-kit";
-import { ExampleReviewPair } from "@/components/marketing/pages/examples";
+import { ExampleMapping, ExampleReviewPair } from "@/components/marketing/pages/examples";
+import { CONNECT_NOTE } from "@/components/marketing/pages/solutions-content";
 
 export const dynamic = "force-static";
 
+/**
+ * The product overview and the step-by-step walkthrough, on one page. The old
+ * /how-it-works URL redirects to #how-it-works here (next.config.ts).
+ */
 export const metadata = pageMetadata({
   path: "/product",
-  title: "Product overview",
+  title: "Product",
   description:
-    "DupeZero finds records that describe the same person or company, shows the evidence behind each match, and gives you one trusted record to work from.",
+    "What DupeZero does and how it works, step by step: connect your records, set the matching rules, review the close calls, and get one trusted record per customer.",
 });
 
 export default function ProductPage() {
@@ -29,7 +34,7 @@ export default function ProductPage() {
         title="One record for every customer, and the reasons behind it."
         lead="DupeZero finds the records that describe the same person or company, shows you why it thinks so, and builds one trusted record from them. It is made for the people who look after CRM data: Salesforce admins and revenue operations teams."
         primary={DEMO}
-        secondary={{ href: "/how-it-works", label: "See how it works" }}
+        secondary={{ href: "#how-it-works", label: "See how it works" }}
       />
 
       <Section
@@ -65,43 +70,66 @@ export default function ProductPage() {
             },
             {
               title: "Integrations",
-              body: "Brings records in from CSV files and sends results out as CSV downloads and signed webhooks.",
+              body: "Brings records in from your Salesforce org and other connected systems, or a CSV upload, and sends results out as CSV downloads and signed webhooks.",
               href: "/integrations",
             },
           ]}
         />
       </Section>
 
-      <Section id="flow" title="How a cleanup runs">
+      <Section
+        id="how-it-works"
+        eyebrow="How it works"
+        title="From your records to a clean one, step by step."
+      >
         <Steps
           items={[
             {
-              title: "Upload",
-              body: "Export your records as CSV and upload them to a dataset of people or companies.",
+              title: "Create a dataset",
+              body: "A dataset holds one kind of record, people or companies, with its own sources, rules and results. Keep separate cleanups in separate datasets.",
             },
             {
-              title: "Match",
-              body: "Set the fields to compare and how confident a match must be before records join automatically.",
+              title: "Bring your records in",
+              body: "Connect your Salesforce org with the DupeZero app, connect another system through its API, or upload a CSV file. Each one becomes a source in the dataset.",
             },
             {
-              title: "Review",
-              body: "Decide the close calls in a queue that shows the evidence for each pair.",
+              title: "Map the fields",
+              body: "Tell DupeZero which field is which: names, emails, phone numbers, addresses, company names and websites. If your organisation has turned on AI features, it can suggest the mapping for you to check.",
             },
             {
-              title: "Export",
-              body: "Download the golden records, or let your systems hear about changes by webhook.",
+              title: "Set the matching rules",
+              body: "Choose the fields to compare and how strictly, any fields that must agree, and two thresholds: the score above which records join automatically, and the band that goes to a person.",
+            },
+            {
+              title: "Run",
+              body: "Runs work in the background. Follow their progress, cancel or resume them, and schedule them to repeat. After the first full run, later runs can process only what is new or changed.",
+            },
+            {
+              title: "Review the close calls",
+              body: "Pairs between your thresholds wait in a review queue with the evidence for and against each match. Accept, reject, or merge by hand; a wrong merge can be split apart later.",
+            },
+            {
+              title: "Use the result",
+              body: "Download golden records as CSV, up to 10,000 per download, or have DupeZero call your systems by webhook when runs finish and records change.",
             },
           ]}
         />
-        <ExampleReviewPair label="The DupeZero review queue, showing a pair of records and the fields that agree and disagree" />
+        <ExampleMapping label="Example of mapping a new source: each field in your data is assigned a DupeZero field" />
+        <ExampleReviewPair label="Example of a pair in the review queue, showing the fields that agree and disagree" />
       </Section>
 
-      <Section id="know" title="Before you start">
-        <Note title="How data moves today">
-          DupeZero works from CSV files. You export records from Salesforce, or any other system,
-          and download the results as CSV. It does not connect to your Salesforce org or change
-          records there, so applying the result in Salesforce is a step your team runs.
-        </Note>
+      <Section
+        id="next-run"
+        title="The next run remembers."
+        intro={
+          <p>
+            Decisions you make in review are kept. If you record that two records are not the same,
+            or always are, that rule holds on every later run and survives retraining of the
+            matching model.
+          </p>
+        }
+      >
+        <Note title={CONNECT_NOTE.title}>{CONNECT_NOTE.body}</Note>
       </Section>
 
       <CtaBand
@@ -112,7 +140,7 @@ export default function ProductPage() {
       />
       <Related
         links={[
-          { href: "/how-it-works", label: "How it works" },
+          { href: "/features/matching", label: "How matching works" },
           { href: "/solutions", label: "Solutions by role" },
           { href: "/security", label: "Security and data handling" },
           { href: "/faq", label: "FAQ" },

@@ -68,6 +68,12 @@ const nextConfig: NextConfig = {
   headers() {
     return Promise.resolve([{ source: "/:path*", headers: SECURITY_HEADERS }]);
   },
+  // Marketing pages that were merged into another keep their old URL working.
+  redirects() {
+    return Promise.resolve([
+      { source: "/how-it-works", destination: "/product#how-it-works", permanent: true },
+    ]);
+  },
   // Native/node-API packages the server bundle must require at runtime, not inline.
   // drizzle-orm is external for the standalone image's sake: inlined, it would be
   // absent from the traced node_modules, and scripts/db-migrate.mjs -- the er-web
