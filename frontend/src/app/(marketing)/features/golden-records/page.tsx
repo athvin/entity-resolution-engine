@@ -8,6 +8,7 @@ import {
   Related,
   Section,
 } from "@/components/marketing/pages/page-kit";
+import { ProductScreenshot } from "@/components/marketing/pages/examples";
 
 export const dynamic = "force-static";
 
@@ -55,7 +56,9 @@ export default function GoldenRecordsPage() {
             when records joined and when one was split out. The original values stay attached.
           </p>
         }
-      />
+      >
+        <ProductScreenshot screen="golden" />
+      </Section>
 
       <Section
         id="out"
