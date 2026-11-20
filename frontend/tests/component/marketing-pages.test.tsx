@@ -120,8 +120,11 @@ describe("the content pages", () => {
 
   it("publishes FAQ structured data matching the visible questions", () => {
     const { container } = render(<FaqPage />);
-    const script = container.querySelector('script[type="application/ld+json"]');
-    const data = JSON.parse(script?.textContent ?? "{}") as {
+    // The page also carries a BreadcrumbList; pick the FAQPage block.
+    const blocks = [...container.querySelectorAll('script[type="application/ld+json"]')].map(
+      (s) => JSON.parse(s.textContent) as Record<string, unknown>,
+    );
+    const data = blocks.find((b) => b["@type"] === "FAQPage") as {
       mainEntity: { name: string; acceptedAnswer: { text: string } }[];
     };
     expect(data.mainEntity.map((q) => q.name)).toEqual(FAQ_ITEMS.map((i) => i.q));

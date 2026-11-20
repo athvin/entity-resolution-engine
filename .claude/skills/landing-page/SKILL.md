@@ -112,6 +112,22 @@ Both properties are pinned by `tests/component/structured-data.test.tsx`,
 because they are React implementation details whose failure mode is invisible —
 the page still renders, and only crawlers break.
 
+## Search and AI crawlers
+
+`src/components/marketing/seo.tsx` holds the share image, `JsonLd`,
+`Breadcrumbs` (visible trail plus a matching BreadcrumbList) and
+`PAGE_UPDATED`, the content dates that feed both the sitemap's `lastmod` and
+the visible "Last updated" lines; change a page's date when its content
+changes, never per deploy. Structured data repeats what the page shows:
+Organization + WebSite on `/`, SoftwareApplication on `/product` (its lead as
+the description) and `/pricing` (an AggregateOffer built from
+`PRICING_CONFIG`), BlogPosting and Article, FAQPage. No ratings, reviews,
+awards or certifications; `tests/component/seo.test.tsx` fails on them. A
+page-level `openGraph` replaces the layout's, so `pageMetadata` sets the image
+itself. `robots.ts` has separate search/retrieval and AI-training groups, with
+`ALLOW_AI_TRAINING` at the top. The audit and its baseline are in
+`docs/seo-audit.md`.
+
 ## Marketing follows the product tokens, with three explicit exceptions
 
 All were requested by the owner, and all live in `story.css` under

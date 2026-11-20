@@ -32,7 +32,7 @@ is closest to the new one is the better thing to copy:
 Files named `loading.tsx`, `error.tsx` or `not-found.tsx` anywhere under
 `frontend/src/app`:
 
-**None.** Every one of those states is handled inline, per component.
+- `frontend/src/app/not-found.tsx`
 
 ### Client components that read the URL
 
