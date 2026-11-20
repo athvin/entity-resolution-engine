@@ -10,7 +10,7 @@ import {
   Section,
   Steps,
 } from "@/components/marketing/pages/page-kit";
-import { ExampleMapping, ExampleReviewPair } from "@/components/marketing/pages/examples";
+import { ExampleMapping, ProductScreenshot } from "@/components/marketing/pages/examples";
 import { JsonLd, ORGANIZATION_ID, SOFTWARE_ID } from "@/components/marketing/seo";
 import { canonicalUrl } from "@/lib/site/routes";
 import { CONNECT_NOTE } from "@/components/marketing/pages/solutions-content";
@@ -133,7 +133,7 @@ export default function ProductPage() {
           ]}
         />
         <ExampleMapping label="Example of mapping a new source: each field in your data is assigned a DupeZero field" />
-        <ExampleReviewPair label="Example of a pair in the review queue, showing the fields that agree and disagree" />
+        <ProductScreenshot screen="review" />
       </Section>
 
       <Section
