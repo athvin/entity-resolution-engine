@@ -147,7 +147,9 @@ test.describe("interactive marketing", () => {
       .toBeLessThan(2);
   });
 
-  test("a short touch swipe settles on the processing diagram", async ({
+  // Free scrolling (snap was removed on purpose): a touch swipe moves the page
+  // with the finger, and the page then stays where the swipe left it.
+  test("a short touch swipe scrolls the page and is not pulled back", async ({
     page,
     browserName,
     isMobile,
@@ -159,6 +161,7 @@ test.describe("interactive marketing", () => {
     await page.setViewportSize({ width: 375, height: 667 });
     await page.goto("/#dedupe");
     await expect(page.getByRole("button", { name: "Pause pipeline" })).toBeEnabled();
+    const before = await page.evaluate(() => scrollY);
     const input = await page.context().newCDPSession(page);
     await input.send("Input.dispatchTouchEvent", {
       type: "touchStart",
@@ -172,13 +175,11 @@ test.describe("interactive marketing", () => {
       await page.waitForTimeout(16);
     }
     await input.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
-    await expect
-      .poll(() =>
-        page
-          .getByTestId("trail-dedupe")
-          .evaluate((node) => Math.abs(node.getBoundingClientRect().top - 64)),
-      )
-      .toBeLessThan(2);
+    await expect.poll(() => page.evaluate(() => scrollY)).toBeGreaterThan(before + 80);
+    await page.waitForTimeout(800);
+    const settled = await page.evaluate(() => scrollY);
+    await page.waitForTimeout(500);
+    expect(Math.abs((await page.evaluate(() => scrollY)) - settled)).toBeLessThan(2);
   });
 
   test("narrow phones fit the viewport and visibly move records", async ({ page }) => {

@@ -48,10 +48,13 @@ test.describe("marketing content pages", () => {
     await expect(page.locator("#how-it-works")).toBeVisible();
   });
 
-  test("each dropdown opens by click and reaches every page", async ({ page }) => {
-    for (const item of HEADER_LINKS.filter((l) => l.groups)) {
-      const slug = item.label.toLowerCase();
-      for (const link of (item.groups ?? []).flatMap((g) => g.links)) {
+  // One test per link: a single test walking all of them outran the 30s budget.
+  for (const item of HEADER_LINKS.filter((l) => l.groups)) {
+    const slug = item.label.toLowerCase();
+    for (const link of (item.groups ?? []).flatMap((g) => g.links)) {
+      test(`the ${item.label} dropdown opens by click and reaches ${link.label}`, async ({
+        page,
+      }) => {
         await page.goto("/");
         const menu = page.getByTestId("marketing-menu-button");
         const mobile = await menu.isVisible();
@@ -63,9 +66,9 @@ test.describe("marketing content pages", () => {
         await panel.getByRole("link", { name: link.label, exact: true }).click();
         await expect(page).toHaveURL(new RegExp(`${link.href}$`));
         await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
-      }
+      });
     }
-  });
+  }
 
   test("the sitemap lists indexed pages only", async ({ request }) => {
     const xml = await (await request.get("/sitemap.xml")).text();
