@@ -182,6 +182,32 @@ describe("navigation", () => {
     expect(document.body).not.toHaveTextContent(/works from CSV|does not connect/i);
   });
 
+  it("lists Overview, Matching, Review, Golden Records and Integrations under Product", () => {
+    pathname.current = "/features/review";
+    render(<MarketingNav />);
+    const button = screen.getByTestId("marketing-nav-product");
+    const panel = screen.getByTestId("marketing-nav-product-panel");
+    expect(button.className).toContain("font-semibold");
+    fireEvent.click(button);
+    expect(
+      within(panel)
+        .getAllByRole("link")
+        .map((l) => [l.textContent, l.getAttribute("href")]),
+    ).toEqual([
+      ["Overview", "/product"],
+      ["Matching", "/features/matching"],
+      ["Review", "/features/review"],
+      ["Golden Records", "/features/golden-records"],
+      ["Integrations", "/integrations"],
+    ]);
+    expect(within(panel).getByRole("link", { name: "Review" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    // One plain list: no group heading.
+    expect(within(panel).queryByText(/^by /i)).toBeNull();
+  });
+
   it("groups Docs, Blog and the ROI calculator under Resources", () => {
     pathname.current = "/blog";
     render(<MarketingNav />);
@@ -220,7 +246,9 @@ describe("navigation", () => {
     expect(isCurrent("/pricing#roi", "/pricing")).toBe(false);
 
     render(<MarketingNav />);
-    expect(screen.getByTestId("marketing-nav-product")).toHaveAttribute("aria-current", "page");
+    // Product is a dropdown: its button takes the weight, and Overview is the current link.
+    expect(screen.getByTestId("marketing-nav-product").className).toContain("font-semibold");
+    expect(screen.getByTestId("marketing-nav-overview")).toHaveAttribute("aria-current", "page");
     expect(screen.getByTestId("marketing-nav-docs")).not.toHaveAttribute("aria-current");
   });
 
@@ -234,9 +262,8 @@ describe("navigation", () => {
     fireEvent.click(button);
     expect(button).toHaveAttribute("aria-expanded", "true");
     expect(panel).toBeVisible();
-    expect(within(panel).getByRole("link", { name: "Product" })).toHaveAttribute(
-      "aria-current",
-      "page",
+    expect(within(panel).getByTestId("marketing-menu-product").className).toContain(
+      "font-semibold",
     );
 
     fireEvent.keyDown(document, { key: "Escape" });
