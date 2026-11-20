@@ -42,11 +42,40 @@ export const CANONICAL_ORIGIN = "https://dupezero.com";
  * `src/proxy.ts` (reachable without a session, via MARKETING_PUBLIC_PATHS
  * below) and `src/app/sitemap.ts` (what crawlers are told about).
  *
- * The header separately links Home, Docs and Pricing (marketing-nav.tsx).
- * Adding a public path here makes it reachable and indexed; add its
- * navigation link explicitly as well.
+ * The header and footer link these separately (`site-links.ts` in
+ * components/marketing). Adding a public path here makes it reachable and
+ * indexed; add its navigation link explicitly as well.
  */
-export const MARKETING_PATHS: readonly string[] = ["/", "/docs", "/pricing"];
+export const MARKETING_PATHS: readonly string[] = [
+  "/",
+  "/product",
+  "/how-it-works",
+  "/features/matching",
+  "/features/review",
+  "/features/golden-records",
+  "/solutions",
+  "/integrations",
+  "/security",
+  "/pricing",
+  "/faq",
+  "/resources",
+  "/about",
+  "/contact",
+  "/docs",
+];
+
+/**
+ * Public but unlisted: reachable without a session, kept out of the sitemap,
+ * and marked `noindex` by each page. These hold placeholders (article outlines
+ * and legal pages awaiting counsel) that should not be indexed until written.
+ */
+export const MARKETING_UNLISTED_PATHS: readonly string[] = [
+  "/resources/causes-of-salesforce-duplicates",
+  "/resources/preparing-for-a-bulk-merge",
+  "/resources/matching-rules-explained",
+  "/legal/privacy",
+  "/legal/terms",
+];
 
 /**
  * Paths the proxy must let through unauthenticated for the marketing surface to
@@ -62,6 +91,7 @@ export const MARKETING_PATHS: readonly string[] = ["/", "/docs", "/pricing"];
  */
 export const MARKETING_PUBLIC_PATHS: readonly string[] = [
   ...MARKETING_PATHS,
+  ...MARKETING_UNLISTED_PATHS,
   "/robots.txt",
   "/sitemap.xml",
 ];
