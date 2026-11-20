@@ -6,10 +6,10 @@ import {
   PageIntro,
   pageMetadata,
   Related,
-  ScreenshotPlaceholder,
   Section,
   Steps,
 } from "@/components/marketing/pages/page-kit";
+import { ExampleMapping } from "@/components/marketing/pages/examples";
 
 export const dynamic = "force-static";
 
@@ -63,10 +63,7 @@ export default function HowItWorksPage() {
             },
           ]}
         />
-        <ScreenshotPlaceholder
-          alt="The source setup screen, mapping CSV columns to record fields"
-          todo="column mapping in the new-source wizard"
-        />
+        <ExampleMapping label="Example of mapping a new source: each column in your data is assigned a DupeZero field" />
       </Section>
 
       <Section

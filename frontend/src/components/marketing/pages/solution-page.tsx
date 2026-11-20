@@ -9,7 +9,6 @@ import {
   pageMetadata,
   Related,
   Section,
-  Todo,
 } from "./page-kit";
 import type { Solution } from "./solutions-content";
 
@@ -67,13 +66,6 @@ export function SolutionPage({
 
       <Section id="note" title="Worth knowing">
         <Note title={solution.note.title}>{solution.note.body}</Note>
-        {solution.todos && (
-          <p className="page-section-intro">
-            {solution.todos.map((t) => (
-              <Todo key={t}>{t}</Todo>
-            ))}
-          </p>
-        )}
       </Section>
 
       <CtaBand

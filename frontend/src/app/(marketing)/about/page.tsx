@@ -5,7 +5,6 @@ import {
   PageIntro,
   pageMetadata,
   Section,
-  Todo,
 } from "@/components/marketing/pages/page-kit";
 
 export const dynamic = "force-static";
@@ -40,10 +39,21 @@ export default function AboutPage() {
         id="company"
         title="The company"
         intro={
-          <p>
-            <Todo>company story, founding year and location</Todo>{" "}
-            <Todo>team, if you want people named</Todo>
-          </p>
+          <>
+            <p>
+              DupeZero builds one product: a service that finds the records describing the same
+              person or company, shows why it thinks so, and keeps the history of every decision.
+            </p>
+            <p>
+              We started with Salesforce, because that is where many teams feel duplicates most, and
+              the DupeZero app is on the Salesforce AppExchange. The same engine works on records
+              from the other systems you connect to it.
+            </p>
+            <p>
+              We would rather tell you what DupeZero cannot do yet than have you find out later. If
+              you are weighing it up, ask us anything.
+            </p>
+          </>
         }
       />
       <CtaBand

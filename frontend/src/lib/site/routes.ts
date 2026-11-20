@@ -70,6 +70,9 @@ export const MARKETING_PATHS: readonly string[] = [
   "/pricing",
   "/faq",
   "/resources",
+  "/resources/causes-of-salesforce-duplicates",
+  "/resources/preparing-for-a-bulk-merge",
+  "/resources/matching-rules-explained",
   "/about",
   "/contact",
   "/docs",
@@ -77,16 +80,11 @@ export const MARKETING_PATHS: readonly string[] = [
 
 /**
  * Public but unlisted: reachable without a session, kept out of the sitemap,
- * and marked `noindex` by each page. These hold placeholders (article outlines
- * and legal pages awaiting counsel) that should not be indexed until written.
+ * and marked `noindex` by each page. The legal pages are written from the
+ * product's verified data handling but have not been reviewed by counsel, so
+ * they stay out of search until they are.
  */
-export const MARKETING_UNLISTED_PATHS: readonly string[] = [
-  "/resources/causes-of-salesforce-duplicates",
-  "/resources/preparing-for-a-bulk-merge",
-  "/resources/matching-rules-explained",
-  "/legal/privacy",
-  "/legal/terms",
-];
+export const MARKETING_UNLISTED_PATHS: readonly string[] = ["/legal/privacy", "/legal/terms"];
 
 /**
  * Paths the proxy must let through unauthenticated for the marketing surface to

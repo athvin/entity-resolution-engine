@@ -8,7 +8,6 @@ import {
   PageIntro,
   pageMetadata,
   Section,
-  Todo,
 } from "@/components/marketing/pages/page-kit";
 
 export const dynamic = "force-static";
@@ -26,7 +25,6 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
     path: `/resources/${article.slug}`,
     title: article.title,
     description: article.summary,
-    unlisted: true,
   });
 }
 
@@ -36,13 +34,16 @@ export default async function ArticlePage({ params }: { params: Promise<{ slug: 
   if (!article) notFound();
   return (
     <Page testId="page-article">
-      <p className="page-draft" role="note">
-        <Todo>write this article</Todo> This guide is an outline. The full article is on its way.
-      </p>
       <PageIntro eyebrow="Guide" title={article.title} lead={article.summary} />
-      {article.outline.map((part) => (
-        <Section key={part.heading} title={part.heading}>
-          <Bullets items={part.points} />
+      {article.sections.map((part) => (
+        <Section
+          key={part.heading}
+          title={part.heading}
+          intro={part.paragraphs.map((p) => (
+            <p key={p}>{p}</p>
+          ))}
+        >
+          {part.points && <Bullets items={part.points} />}
         </Section>
       ))}
       <p className="page-related">

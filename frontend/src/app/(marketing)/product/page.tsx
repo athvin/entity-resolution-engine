@@ -7,10 +7,10 @@ import {
   PageIntro,
   pageMetadata,
   Related,
-  ScreenshotPlaceholder,
   Section,
   Steps,
 } from "@/components/marketing/pages/page-kit";
+import { ExampleReviewPair } from "@/components/marketing/pages/examples";
 
 export const dynamic = "force-static";
 
@@ -93,10 +93,7 @@ export default function ProductPage() {
             },
           ]}
         />
-        <ScreenshotPlaceholder
-          alt="The DupeZero review queue, showing a pair of records and the fields that agree and disagree"
-          todo="review queue with match evidence"
-        />
+        <ExampleReviewPair label="The DupeZero review queue, showing a pair of records and the fields that agree and disagree" />
       </Section>
 
       <Section id="know" title="Before you start">

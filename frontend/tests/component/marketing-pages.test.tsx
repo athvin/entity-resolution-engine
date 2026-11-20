@@ -75,28 +75,31 @@ describe("the content pages", () => {
     expect(new Set(descriptions).size).toBe(descriptions.length);
   });
 
-  it("marks the legal placeholders noindex and keeps them unlisted", () => {
+  it("keeps the unreviewed legal pages noindex and unlisted, with their text filled in", () => {
     for (const [path, Page, meta] of [
       ["/legal/privacy", PrivacyPage, privacyMeta],
       ["/legal/terms", TermsPage, termsMeta],
     ] as const) {
       const { unmount } = render(<Page />);
-      expect(screen.getByRole("note")).toHaveTextContent("[TODO:");
+      expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+      expect(document.body).toHaveTextContent("Last updated 20 November 2026");
+      expect(document.body).not.toHaveTextContent("TODO");
       expect(meta.robots).toEqual({ index: false, follow: true });
       expect(MARKETING_UNLISTED_PATHS).toContain(path);
       unmount();
     }
   });
 
-  it("renders every article outline as a noindex draft at an unlisted path", async () => {
+  it("publishes every article in full at an indexed path", async () => {
     for (const { slug } of generateStaticParams()) {
       const params = Promise.resolve({ slug });
       const meta = await articleMeta({ params });
-      expect(meta.robots).toEqual({ index: false, follow: true });
-      expect(MARKETING_UNLISTED_PATHS).toContain(`/resources/${slug}`);
+      expect(meta.robots).toBeUndefined();
+      expect(MARKETING_PATHS).toContain(`/resources/${slug}`);
       const { unmount } = render(await ArticlePage({ params }));
       expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
-      expect(screen.getByRole("note")).toHaveTextContent("write this article");
+      expect(screen.getAllByRole("heading", { level: 2 }).length).toBeGreaterThanOrEqual(4);
+      expect(document.body).not.toHaveTextContent("TODO");
       unmount();
     }
     expect(await articleMeta({ params: Promise.resolve({ slug: "nope" }) })).toEqual({});
@@ -126,7 +129,8 @@ describe("navigation", () => {
 
   it("links every marketing page from the header or the footer", () => {
     const linked = allLinkedHrefs();
-    for (const path of MARKETING_PATHS.filter((p) => p !== "/")) {
+    // Articles are linked from the /resources index rather than the header or footer.
+    for (const path of MARKETING_PATHS.filter((p) => p !== "/" && !p.startsWith("/resources/"))) {
       expect(linked, path).toContain(path);
     }
     for (const href of linked) expect(MARKETING_PUBLIC_PATHS).toContain(href);

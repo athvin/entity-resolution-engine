@@ -6,9 +6,9 @@ import {
   PageIntro,
   pageMetadata,
   Related,
-  ScreenshotPlaceholder,
   Section,
 } from "@/components/marketing/pages/page-kit";
+import { ExampleReviewPair } from "@/components/marketing/pages/examples";
 
 export const dynamic = "force-static";
 
@@ -46,10 +46,7 @@ export default function ReviewPage() {
             },
           ]}
         />
-        <ScreenshotPlaceholder
-          alt="A review pair in DupeZero, with agreeing and disagreeing fields marked"
-          todo="a review pair with its evidence and the decision buttons"
-        />
+        <ExampleReviewPair label="A review pair in DupeZero, with agreeing and disagreeing fields marked" />
       </Section>
 
       <Section id="fix" title="Fix a mistake without losing the history.">

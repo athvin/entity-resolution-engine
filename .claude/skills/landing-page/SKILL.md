@@ -72,7 +72,7 @@ source rather than reaching for runtime generation.
 **4. A prerendered route must not call `env()`.** It runs during `next build`,
 where the schema's four required secrets are deliberately unset, and the whole
 export step fails. `robots.ts` reads `publicBaseUrl()` instead — the one narrow
-accessor for a single optional variable. Anything needing a *required* value
+accessor for a single optional variable. Anything needing a _required_ value
 must not be prerendered.
 
 ## The canonical origin is a constant, and that is not a `NEXT_PUBLIC_` evasion
@@ -101,7 +101,7 @@ The standard advice is `dangerouslySetInnerHTML`, on the grounds that React
 escapes text children. **Measured against React 19, that is not true of
 `<script>`:** quotes pass through so the JSON parses, and `</script` is encoded
 as a legal JSON escape so a payload cannot close its own tag. The plain text
-child is therefore byte-identical for valid payloads and *safer* for hostile
+child is therefore byte-identical for valid payloads and _safer_ for hostile
 ones.
 
 That matters because `.semgrep.yml`'s `no-html-injection-sink` bans that sink at
@@ -162,10 +162,14 @@ similar terms.
 
 The content pages (product, features, solutions, integrations, security, FAQ,
 resources, about, contact) are built from `components/marketing/pages/page-kit.tsx`.
-**Their copy may describe only what `docs/feature-inventory.md` marks VERIFIED**:
-no Salesforce connection or writeback, no sign-up, no certification. Content
-still owed by the owner renders visibly as `Todo` or `ScreenshotPlaceholder`,
-never as plausible-looking filler. The contact form hands off to the visitor's
+**Their copy may describe only what `docs/feature-inventory.md` marks VERIFIED
+or the owner has confirmed** (the AppExchange app and API connections, dated in
+the inventory): no writeback, no sign-up, no certification. Where a fact is
+missing (a founding year, a customer quote), write the copy so it does not need
+one; never invent it. Screens are shown as labelled, fictional example panels
+(`pages/examples.tsx`), not mock screenshots presented as real. The legal pages
+are written from verified data handling but unreviewed by counsel, so they stay
+in `MARKETING_UNLISTED_PATHS` (noindex). The contact form hands off to the visitor's
 email app through `mailto:`; there is no form backend. `/pricing` is a calculator
 whose every figure is in `src/lib/pricing/config.ts` and whose rules are the
 pure `calculator.ts` beside it (see its README); the page itself does no

@@ -24,7 +24,7 @@ export default function ResourcesPage() {
       <PageIntro
         eyebrow="Resources"
         title="Guides to cleaner records."
-        lead="Practical reading for the people who look after CRM data. These guides are being written; each one shows its outline in the meantime."
+        lead="Practical reading for the people who look after CRM data: where duplicates come from, how to merge safely, and how matching decides."
       />
       <Section id="articles" title="Guides">
         <CardGrid
@@ -32,7 +32,7 @@ export default function ResourcesPage() {
             title: a.title,
             body: a.summary,
             href: `/resources/${a.slug}`,
-            linkLabel: "Read the outline",
+            linkLabel: "Read the guide",
           }))}
         />
       </Section>

@@ -104,17 +104,16 @@ describe("the role and industry pages", () => {
     await expect(IndustryPage({ params })).rejects.toThrow("notFound");
   });
 
-  it("shows the owner's open decisions as visible TODOs", async () => {
+  it("asks for written confirmation before regulated data is sent, with no TODOs left", async () => {
     render(
       await IndustryPage({ params: Promise.resolve({ slug: "healthcare-and-life-sciences" }) }),
     );
     expect(
-      screen.getByText(/\[TODO: owner to confirm whether DupeZero may process health/),
-    ).toBeVisible();
-    expect(
       screen.getByText(/Do not send patient health information to DupeZero/),
     ).toBeInTheDocument();
-    expect(screen.getByText(/\[TODO: link to the DupeZero AppExchange listing/)).toBeVisible();
+    for (const s of [...ROLES, ...INDUSTRIES])
+      expect(JSON.stringify(s), s.slug).not.toMatch(/TODO/);
+    expect(JSON.stringify(INDUSTRIES)).toMatch(/confirm in writing whether we can hold them/);
   });
 
   it("does not describe DupeZero as working only from CSV exports", () => {

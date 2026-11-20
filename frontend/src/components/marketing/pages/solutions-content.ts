@@ -9,8 +9,9 @@
  * results are written back to Salesforce, which the owner has not confirmed. The
  * "where duplicates hurt" lines describe the visitor's situation, not the
  * product, and carry no statistics: none were supplied. Industry pages make no
- * compliance claim; each says so, with a TODO where the owner must decide what
- * data DupeZero may hold.
+ * compliance claim; each says so, and where regulated data is likely
+ * (healthcare, financial services, education) the page asks the visitor to get
+ * written confirmation before sending it.
  *
  * Slugs must match the paths in MARKETING_PATHS (src/lib/site/routes.ts);
  * tests/component/solutions-pages.test.tsx checks both directions.
@@ -33,8 +34,6 @@ export interface Solution {
   helps: readonly Help[];
   useCases: readonly { title: string; body: string }[];
   note: { title: string; body: string };
-  /** Shown as visible TODO markers: decisions only the owner can make. */
-  todos?: readonly string[];
 }
 
 const MATCHING = "/features/matching";
@@ -47,12 +46,6 @@ const CONNECT_NOTE = {
   title: "How your data reaches DupeZero",
   body: "Connect your Salesforce org with the DupeZero app on the Salesforce AppExchange, or connect other systems through their APIs, and DupeZero pulls the records in to deduplicate. A CSV upload works too, for a one-off list.",
 };
-
-/** Owner decisions shared by every solution page, shown as visible TODOs. */
-const CONNECT_TODOS = [
-  "link to the DupeZero AppExchange listing",
-  "owner to list the systems DupeZero connects to through their APIs",
-] as const;
 
 const NO_CERTIFICATION =
   "DupeZero holds no security or industry compliance certification today, and this page does not imply one. Send DupeZero only the fields it needs for matching.";
@@ -105,7 +98,6 @@ export const ROLES: readonly Solution[] = [
       },
     ],
     note: CONNECT_NOTE,
-    todos: CONNECT_TODOS,
   },
   {
     slug: "revenue-operations",
@@ -152,7 +144,6 @@ export const ROLES: readonly Solution[] = [
       },
     ],
     note: CONNECT_NOTE,
-    todos: CONNECT_TODOS,
   },
   {
     slug: "marketing",
@@ -199,7 +190,6 @@ export const ROLES: readonly Solution[] = [
       },
     ],
     note: CONNECT_NOTE,
-    todos: CONNECT_TODOS,
   },
   {
     slug: "it-and-security",
@@ -237,7 +227,7 @@ export const ROLES: readonly Solution[] = [
       },
       {
         title: "Limit what leaves Salesforce",
-        body: "Agree which objects and fields DupeZero reads before a team connects your org.",
+        body: "DupeZero reads only the objects and fields you map. Agree that list before a team connects your org.",
       },
       {
         title: "Check outgoing calls",
@@ -248,10 +238,6 @@ export const ROLES: readonly Solution[] = [
       title: "What we do not offer yet",
       body: "Sign-in is by email and password. Single sign-on and multi-factor sign-in are not available, and DupeZero holds no security certification today.",
     },
-    todos: [
-      ...CONNECT_TODOS,
-      "owner to state which Salesforce permissions the AppExchange app requests",
-    ],
   },
 ];
 
@@ -296,7 +282,6 @@ export const INDUSTRIES: readonly Solution[] = [
       },
     ],
     note: { title: BEFORE_CONNECTING, body: NO_CERTIFICATION },
-    todos: CONNECT_TODOS,
   },
   {
     slug: "nonprofit",
@@ -338,7 +323,6 @@ export const INDUSTRIES: readonly Solution[] = [
       },
     ],
     note: { title: BEFORE_CONNECTING, body: NO_CERTIFICATION },
-    todos: CONNECT_TODOS,
   },
   {
     slug: "financial-services",
@@ -379,8 +363,10 @@ export const INDUSTRIES: readonly Solution[] = [
         body: "Ignore legal suffixes when comparing company names.",
       },
     ],
-    note: { title: BEFORE_CONNECTING, body: NO_CERTIFICATION },
-    todos: [...CONNECT_TODOS, "owner to confirm which client data DupeZero may hold"],
+    note: {
+      title: BEFORE_CONNECTING,
+      body: `${NO_CERTIFICATION} Tell us which client fields you plan to send before you connect, and we will confirm in writing whether we can hold them.`,
+    },
   },
   {
     slug: "healthcare-and-life-sciences",
@@ -425,7 +411,6 @@ export const INDUSTRIES: readonly Solution[] = [
       title: BEFORE_CONNECTING,
       body: `${NO_CERTIFICATION} Do not send patient health information to DupeZero until we have confirmed in writing that we can hold it.`,
     },
-    todos: [...CONNECT_TODOS, "owner to confirm whether DupeZero may process health information"],
   },
   {
     slug: "education",
@@ -466,8 +451,10 @@ export const INDUSTRIES: readonly Solution[] = [
         body: "Resolve the list into golden records before it is used.",
       },
     ],
-    note: { title: BEFORE_CONNECTING, body: NO_CERTIFICATION },
-    todos: [...CONNECT_TODOS, "owner to confirm whether DupeZero may hold student records"],
+    note: {
+      title: BEFORE_CONNECTING,
+      body: `${NO_CERTIFICATION} Tell us which student fields you plan to send before you connect, and we will confirm in writing whether we can hold them.`,
+    },
   },
   {
     slug: "real-estate",
@@ -509,7 +496,6 @@ export const INDUSTRIES: readonly Solution[] = [
       },
     ],
     note: { title: BEFORE_CONNECTING, body: NO_CERTIFICATION },
-    todos: CONNECT_TODOS,
   },
   {
     slug: "manufacturing",
@@ -551,7 +537,6 @@ export const INDUSTRIES: readonly Solution[] = [
       },
     ],
     note: { title: BEFORE_CONNECTING, body: NO_CERTIFICATION },
-    todos: CONNECT_TODOS,
   },
 ];
 

@@ -6,7 +6,6 @@ import {
   pageMetadata,
   Related,
   Section,
-  Todo,
 } from "@/components/marketing/pages/page-kit";
 
 export const dynamic = "force-static";
@@ -77,12 +76,37 @@ export default function SecurityPage() {
               We hold no security certification today, and this page does not imply one. Single
               sign-on and multi-factor sign-in are not available yet.
             </p>
-            <p>
-              <Todo>owner to confirm: data retention and deletion terms on request</Todo>{" "}
-              <Todo>owner to confirm: list of subprocessors</Todo>{" "}
-              <Todo>owner to confirm: security contact address</Todo>
-            </p>
           </>
+        }
+      />
+
+      <Section id="processors" title="Who processes data for us.">
+        <Bullets
+          items={[
+            "Amazon Web Services hosts DupeZero, stores its data and backups, and sends its email.",
+            "Anthropic provides the model behind the optional AI features. It receives data only if your organisation turns AI on, and you can use your own Anthropic key.",
+          ]}
+        />
+      </Section>
+
+      <Section id="retention" title="Retention and removal.">
+        <Bullets
+          items={[
+            "Your organisation's records are kept while it uses DupeZero.",
+            "Audit log entries are kept for at least 400 days.",
+            "To have records removed, write to us and we will confirm what will be removed and when.",
+          ]}
+        />
+      </Section>
+
+      <Section
+        id="report"
+        title="Report a security issue."
+        intro={
+          <p>
+            Use our contact page and choose Security review. Tell us what you found and how to
+            reproduce it, and please give us time to fix it before you share it.
+          </p>
         }
       />
 

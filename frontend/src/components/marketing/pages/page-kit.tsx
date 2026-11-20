@@ -11,10 +11,9 @@ import { Button } from "@/components/ui/button";
  * solutions, security and the rest). Server components only, so every page
  * prerenders to static HTML like the rest of the `(marketing)` group.
  *
- * Copy lives in each page file. Anything still waiting for real content is
- * rendered with `Todo` or `ScreenshotPlaceholder`, which are visible on the
- * page on purpose: a placeholder that looks finished is how invented content
- * ships.
+ * Copy lives in each page file. Where a page would otherwise need a fact we do
+ * not have (a founding year, a customer quote, a certification), the copy is
+ * written so it does not need one, rather than inventing it.
  */
 
 /** Title, description, canonical URL and Open Graph for one page. */
@@ -185,19 +184,6 @@ export function Note({ title, children }: { title: string; children: React.React
 }
 
 /** Visible marker for content the owner still has to supply. */
-export function Todo({ children }: { children: React.ReactNode }) {
-  return <span className="page-todo">[TODO: {children}]</span>;
-}
-
-/** Where a real screenshot belongs. Never a mock-up standing in for the product. */
-export function ScreenshotPlaceholder({ alt, todo }: { alt: string; todo: string }) {
-  return (
-    <div className="page-shot" role="img" aria-label={alt}>
-      <Todo>add screenshot: {todo}</Todo>
-    </div>
-  );
-}
-
 export function CtaBand({
   title,
   body,
