@@ -13,6 +13,8 @@ import {
   Section,
 } from "@/components/marketing/pages/page-kit";
 import { formatPostDate } from "@/components/marketing/pages/post-date";
+import { JsonLd, ORGANIZATION_ID, SHARE_IMAGE } from "@/components/marketing/seo";
+import { canonicalUrl } from "@/lib/site/routes";
 
 export const dynamic = "force-static";
 export const dynamicParams = false;
@@ -37,7 +39,21 @@ export default async function BlogPostPage({ params }: { params: Promise<{ slug:
   const post = POSTS.find((p) => p.slug === slug);
   if (!post) notFound();
   return (
-    <Page testId="page-blog-post">
+    <Page testId="page-blog-post" crumb={{ path: `${BLOG_BASE}/${post.slug}`, label: post.title }}>
+      <JsonLd
+        data={{
+          "@type": "BlogPosting",
+          headline: post.title,
+          description: post.summary,
+          datePublished: post.date,
+          dateModified: post.date,
+          // The byline the page shows: the team, as an organisation, not a person.
+          author: { "@type": "Organization", name: "DupeZero team", url: canonicalUrl("/about") },
+          publisher: { "@id": ORGANIZATION_ID },
+          image: canonicalUrl(SHARE_IMAGE.url),
+          mainEntityOfPage: canonicalUrl(`${BLOG_BASE}/${post.slug}`),
+        }}
+      />
       <PageIntro
         eyebrow={`Blog · ${formatPostDate(post.date)} · DupeZero team`}
         title={post.title}

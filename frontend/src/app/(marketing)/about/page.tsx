@@ -18,7 +18,7 @@ export const metadata = pageMetadata({
 
 export default function AboutPage() {
   return (
-    <Page testId="page-about">
+    <Page testId="page-about" crumb={{ path: "/about", label: "About" }}>
       <PageIntro
         eyebrow="About"
         title="Duplicates should be resolved with evidence."

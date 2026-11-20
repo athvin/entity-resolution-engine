@@ -3,6 +3,14 @@ import { notFound } from "next/navigation";
 
 import { ARTICLES } from "@/components/marketing/pages/resources-content";
 import {
+  JsonLd,
+  ORGANIZATION_ID,
+  PAGE_UPDATED,
+  SHARE_IMAGE,
+  formatUpdated,
+} from "@/components/marketing/seo";
+import { canonicalUrl } from "@/lib/site/routes";
+import {
   Bullets,
   Page,
   PageIntro,
@@ -32,9 +40,30 @@ export default async function ArticlePage({ params }: { params: Promise<{ slug: 
   const { slug } = await params;
   const article = ARTICLES.find((a) => a.slug === slug);
   if (!article) notFound();
+  const updated = PAGE_UPDATED[`/resources/${article.slug}`] ?? "";
   return (
-    <Page testId="page-article">
-      <PageIntro eyebrow="Guide" title={article.title} lead={article.summary} />
+    <Page
+      testId="page-article"
+      crumb={{ path: `/resources/${article.slug}`, label: article.title }}
+    >
+      <JsonLd
+        data={{
+          "@type": "Article",
+          headline: article.title,
+          description: article.summary,
+          datePublished: updated,
+          dateModified: updated,
+          author: { "@type": "Organization", name: "DupeZero team", url: canonicalUrl("/about") },
+          publisher: { "@id": ORGANIZATION_ID },
+          image: canonicalUrl(SHARE_IMAGE.url),
+          mainEntityOfPage: canonicalUrl(`/resources/${article.slug}`),
+        }}
+      />
+      <PageIntro
+        eyebrow={`Guide · Last updated ${formatUpdated(updated)} · DupeZero team`}
+        title={article.title}
+        lead={article.summary}
+      />
       {article.sections.map((part) => (
         <Section
           key={part.heading}

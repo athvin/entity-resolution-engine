@@ -36,7 +36,7 @@ const FAQ_STRUCTURED_DATA = {
 
 export default function FaqPage() {
   return (
-    <Page testId="page-faq">
+    <Page testId="page-faq" crumb={{ path: "/faq", label: "FAQ" }}>
       <script type="application/ld+json">{JSON.stringify(FAQ_STRUCTURED_DATA)}</script>
       <PageIntro
         eyebrow="FAQ"

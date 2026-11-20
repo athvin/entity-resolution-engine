@@ -20,7 +20,7 @@ export const metadata = pageMetadata({
 
 export default function IntegrationsPage() {
   return (
-    <Page testId="page-integrations">
+    <Page testId="page-integrations" crumb={{ path: "/integrations", label: "Integrations" }}>
       <PageIntro
         eyebrow="Integrations"
         title="Records in, clean records back."

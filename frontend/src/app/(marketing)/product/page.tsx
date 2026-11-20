@@ -11,9 +11,15 @@ import {
   Steps,
 } from "@/components/marketing/pages/page-kit";
 import { ExampleMapping, ExampleReviewPair } from "@/components/marketing/pages/examples";
+import { JsonLd, ORGANIZATION_ID, SOFTWARE_ID } from "@/components/marketing/seo";
+import { canonicalUrl } from "@/lib/site/routes";
 import { CONNECT_NOTE } from "@/components/marketing/pages/solutions-content";
 
 export const dynamic = "force-static";
+
+/** The page's lead: also the SoftwareApplication description, so the two match. */
+const LEAD =
+  "DupeZero finds the records that describe the same person or company, shows you why it thinks so, builds one trusted record from them, and sends that clean record back to the systems it came from. It is made for the people who look after CRM data: Salesforce admins and revenue operations teams.";
 
 /**
  * The product overview and the step-by-step walkthrough, on one page. The old
@@ -28,11 +34,23 @@ export const metadata = pageMetadata({
 
 export default function ProductPage() {
   return (
-    <Page testId="page-product">
+    <Page testId="page-product" crumb={{ path: "/product", label: "Product" }}>
+      <JsonLd
+        data={{
+          "@type": "SoftwareApplication",
+          "@id": SOFTWARE_ID,
+          name: "DupeZero",
+          description: LEAD,
+          applicationCategory: "BusinessApplication",
+          operatingSystem: "Web",
+          url: canonicalUrl("/product"),
+          publisher: { "@id": ORGANIZATION_ID },
+        }}
+      />
       <PageIntro
         eyebrow="Product"
         title="One record for every customer, and the reasons behind it."
-        lead="DupeZero finds the records that describe the same person or company, shows you why it thinks so, builds one trusted record from them, and sends that clean record back to the systems it came from. It is made for the people who look after CRM data: Salesforce admins and revenue operations teams."
+        lead={LEAD}
         primary={DEMO}
         secondary={{ href: "#how-it-works", label: "See how it works" }}
       />

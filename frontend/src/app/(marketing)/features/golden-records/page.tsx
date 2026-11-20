@@ -20,7 +20,10 @@ export const metadata = pageMetadata({
 
 export default function GoldenRecordsPage() {
   return (
-    <Page testId="page-golden-records">
+    <Page
+      testId="page-golden-records"
+      crumb={{ path: "/features/golden-records", label: "Golden records" }}
+    >
       <PageIntro
         eyebrow="Feature / Golden records"
         title="One record you can trust, built from the ones you have."

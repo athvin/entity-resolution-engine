@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import "./pages.css";
+import { Breadcrumbs, SHARE_IMAGE } from "../seo";
 import { DEMO_PATH } from "../site-links";
 
 import { Button } from "@/components/ui/button";
@@ -16,7 +17,12 @@ import { Button } from "@/components/ui/button";
  * written so it does not need one, rather than inventing it.
  */
 
-/** Title, description, canonical URL and Open Graph for one page. */
+/**
+ * Title, description, canonical URL, Open Graph and Twitter card for one page.
+ * The share image is set here explicitly: a page-level `openGraph` replaces
+ * the layout's rather than merging with it, so leaving `images` out dropped
+ * the image from every page.
+ */
 export function pageMetadata({
   path,
   title,
@@ -33,7 +39,13 @@ export function pageMetadata({
     title,
     description,
     alternates: { canonical: path },
-    openGraph: { title: `${title} · DupeZero`, description, url: path },
+    openGraph: { title: `${title} · DupeZero`, description, url: path, images: [SHARE_IMAGE] },
+    twitter: {
+      card: "summary_large_image",
+      title: `${title} · DupeZero`,
+      description,
+      images: [SHARE_IMAGE.url],
+    },
     ...(unlisted ? { robots: { index: false, follow: true } } : {}),
   };
 }
@@ -224,9 +236,19 @@ export function Related({ links }: { links: readonly Action[] }) {
   );
 }
 
-export function Page({ children, testId }: { children: React.ReactNode; testId: string }) {
+export function Page({
+  children,
+  testId,
+  crumb,
+}: {
+  children: React.ReactNode;
+  testId: string;
+  /** This page's path and short name: renders breadcrumbs and their BreadcrumbList. */
+  crumb?: { path: string; label: string } | undefined;
+}) {
   return (
     <div className="page" data-testid={testId}>
+      {crumb && <Breadcrumbs path={crumb.path} label={crumb.label} />}
       {children}
     </div>
   );

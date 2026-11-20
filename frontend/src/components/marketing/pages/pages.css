@@ -402,3 +402,47 @@
     width: 100%;
   }
 }
+
+/* Breadcrumbs (seo.tsx): small, above the eyebrow, separators drawn in CSS. */
+.page-breadcrumbs {
+  margin-bottom: 20px;
+  font-size: 13px;
+}
+.page-breadcrumbs ol {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.page-breadcrumbs li {
+  display: inline-flex;
+  align-items: center;
+  color: var(--muted-foreground);
+}
+.page-breadcrumbs li + li::before {
+  content: "/";
+  margin: 0 8px;
+  color: var(--muted-foreground);
+}
+.page-breadcrumbs a {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  color: var(--muted-foreground);
+  text-underline-offset: 4px;
+}
+.page-breadcrumbs a:hover {
+  color: var(--foreground);
+  text-decoration: underline;
+}
+.page-breadcrumbs [aria-current="page"] {
+  color: var(--foreground);
+}
+
+.page-updated {
+  margin-top: 12px;
+  font-size: 14px;
+}

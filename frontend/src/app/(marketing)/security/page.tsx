@@ -19,7 +19,7 @@ export const metadata = pageMetadata({
 
 export default function SecurityPage() {
   return (
-    <Page testId="page-security">
+    <Page testId="page-security" crumb={{ path: "/security", label: "Security" }}>
       <PageIntro
         eyebrow="Security"
         title="How we look after your records."

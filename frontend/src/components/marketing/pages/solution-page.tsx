@@ -36,7 +36,10 @@ export function SolutionPage({
   siblings: readonly Solution[];
 }) {
   return (
-    <Page testId={`page-solution-${solution.slug}`}>
+    <Page
+      testId={`page-solution-${solution.slug}`}
+      crumb={{ path: `${base}/${solution.slug}`, label: solution.name }}
+    >
       <PageIntro
         eyebrow={`Solutions / ${solution.name}`}
         title={solution.title}
