@@ -299,7 +299,8 @@ describe("the contact form", () => {
     render(<ContactPage />);
     fireEvent.change(screen.getByTestId("contact-name"), { target: { value: "Sam" } });
     fireEvent.change(screen.getByTestId("contact-email"), { target: { value: "sam@co.com" } });
-    fireEvent.click(screen.getByLabelText("Security review"));
+    // No "What can we help with?" options any more; the message carries the topic.
+    expect(screen.queryByRole("radio")).toBeNull();
     fireEvent.click(screen.getByTestId("contact-submit"));
     expect(screen.getByTestId("contact-status")).toHaveTextContent("write to sales@dupezero.com");
   });

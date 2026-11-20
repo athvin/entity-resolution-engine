@@ -16,11 +16,8 @@ import { PRICING_CONFIG } from "@/lib/pricing/config";
  * page. TODO(owner): wire submissions to a real endpoint (a BFF route under
  * src/app/api, or a form service), then replace `send` below.
  *
- * Four fields only, as the brief asks: what we need to reply, and why.
+ * Three fields: a name and work email to reply to, and an optional message.
  */
-
-const REASONS = ["Request a demo", "Ask a question", "Security review"] as const;
-type Reason = (typeof REASONS)[number];
 
 const MESSAGE_MAX = 2_000;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -50,13 +47,12 @@ export function ContactForm() {
   const id = useId();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
-  const [reason, setReason] = useState<Reason>("Request a demo");
   const [message, setMessage] = useState("");
   const [errors, setErrors] = useState<Errors>({});
   const [sent, setSent] = useState(false);
 
   const send = () => {
-    const subject = `${reason}: ${name.trim()}`;
+    const subject = `DupeZero enquiry: ${name.trim()}`;
     const body = `${message.trim()}\n\n${name.trim()}\n${email.trim()}`;
     window.location.href = `mailto:${salesAddress()}?subject=${encodeURIComponent(
       subject,
@@ -123,25 +119,6 @@ export function ContactForm() {
           </p>
         )}
       </div>
-
-      <fieldset className="grid gap-2">
-        <legend className="mb-2 text-sm font-medium">What can we help with?</legend>
-        {REASONS.map((r) => (
-          <label key={r} className="flex min-h-11 cursor-pointer items-center gap-3 text-sm">
-            <input
-              type="radio"
-              name="reason"
-              value={r}
-              checked={reason === r}
-              onChange={() => {
-                setReason(r);
-              }}
-              className="size-5 accent-[var(--primary)]"
-            />
-            {r}
-          </label>
-        ))}
-      </fieldset>
 
       <div className="grid gap-2">
         <Label htmlFor={`${id}-message`}>

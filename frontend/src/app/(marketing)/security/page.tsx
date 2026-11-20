@@ -104,7 +104,7 @@ export default function SecurityPage() {
         title="Report a security issue."
         intro={
           <p>
-            Use our contact page and choose Security review. Tell us what you found and how to
+            Use our contact page and say it is a security report. Tell us what you found and how to
             reproduce it, and please give us time to fix it before you share it.
           </p>
         }
