@@ -20,6 +20,13 @@ version = 2
 #     upstream in smithy-rs, not here, and pinning our AWS crates back would trade
 #     an unmaintained-notice for real missed security updates in code that does
 #     handle credentials. Retire when the SDK's own dependency drops it.
+#   - RUSTSEC-2026-0543 / RUSTSEC-2026-0555: `chrono` and `chrono-tz`, declared
+#     unmaintained on 2026-09-14 with no patched version. Informational, not a
+#     vulnerability. Our own crates (er-cli, er-entities, er-entity-diff,
+#     er-server) use chrono directly, but migrating them to `jiff` or `time`
+#     would not clear the notice: arrow (arrow-array also pulls chrono-tz),
+#     datafusion and postgres-types depend on chrono themselves. Retire when
+#     those upstreams move, and migrate our crates at the same time.
 #
 # There is deliberately no `zip` exception here any more. One existed for `zip`
 # 6.0.0 — a registry yank plus three extract-time path-handling advisories
@@ -33,6 +40,8 @@ ignore = [
     "RUSTSEC-2024-0436",
     "RUSTSEC-2024-0449",
     "RUSTSEC-2026-0441",
+    "RUSTSEC-2026-0543",
+    "RUSTSEC-2026-0555",
 ]
 
 [licenses]
