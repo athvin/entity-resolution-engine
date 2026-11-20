@@ -1,5 +1,5 @@
 import {
-  Bullets,
+  CardGrid,
   CtaBand,
   DEMO,
   Page,
@@ -8,14 +8,21 @@ import {
   Related,
   Section,
 } from "@/components/marketing/pages/page-kit";
+import {
+  INDUSTRIES,
+  INDUSTRY_BASE,
+  ROLE_BASE,
+  ROLES,
+  USE_CASES,
+} from "@/components/marketing/pages/solutions-content";
 
 export const dynamic = "force-static";
 
 export const metadata = pageMetadata({
   path: "/solutions",
-  title: "Solutions by role",
+  title: "Solutions",
   description:
-    "How Salesforce admins, sales operations, marketing operations and data teams use DupeZero to find and resolve duplicate records.",
+    "How Salesforce admins, revenue operations, marketing and IT teams use DupeZero, by role and by industry, with the use cases each one starts from.",
 });
 
 export default function SolutionsPage() {
@@ -24,82 +31,33 @@ export default function SolutionsPage() {
       <PageIntro
         eyebrow="Solutions"
         title="The same duplicates, a different problem for each team."
-        lead="A duplicate record is an admin's cleanup task, a rep's wasted call, a marketer's double send and an analyst's wrong number. Here is what DupeZero offers each of them."
+        lead="A duplicate record is an admin's cleanup, a rep's wasted call, a marketer's double send and a security reviewer's question. Find your role or your industry below."
         primary={DEMO}
       />
 
-      <Section
-        id="admins"
-        eyebrow="Salesforce admins"
-        title="Clean up without guessing."
-        intro={
-          <p>
-            Native duplicate rules catch some duplicates at entry. The older ones, and the ones that
-            only look alike, need a closer look before anyone merges them.
-          </p>
-        }
-      >
-        <Bullets
-          items={[
-            "Matching rules you can read and change, field by field.",
-            "Evidence for every proposed match, before anything is merged.",
-            "Rules that keep two records apart, or together, on every run.",
-          ]}
+      <Section id="use-cases" title="Use cases">
+        <CardGrid items={USE_CASES.map((u) => ({ ...u, linkLabel: "How it works" }))} />
+      </Section>
+
+      <Section id="roles" title="By role">
+        <CardGrid
+          items={ROLES.map((r) => ({
+            title: r.name,
+            body: r.lead,
+            href: `${ROLE_BASE}/${r.slug}`,
+            linkLabel: `DupeZero for ${r.name}`,
+          }))}
         />
       </Section>
 
-      <Section
-        id="sales-ops"
-        eyebrow="Sales operations"
-        title="One record per customer, one owner per account."
-        intro={
-          <p>
-            When a customer is split across records, so is their activity history, and two reps can
-            end up calling the same person.
-          </p>
-        }
-      >
-        <Bullets
-          items={[
-            "Golden records that bring a customer's records together, with the source of every value.",
-            "A review queue for the cases a person should decide.",
-            "Field rules that choose which phone number and address survive.",
-          ]}
-        />
-      </Section>
-
-      <Section
-        id="marketing-ops"
-        eyebrow="Marketing operations"
-        title="Reach each person once."
-        intro={
-          <p>
-            Duplicates send the same email twice, and split one person's engagement across records
-            so scoring sees less than happened.
-          </p>
-        }
-      >
-        <Bullets
-          items={[
-            "Emails cleaned before comparing, so capitals and plus tags do not hide a duplicate.",
-            "Nicknames recognised, so Liz and Elizabeth at the same company can be matched.",
-            "A clean CSV of golden records to build lists from.",
-          ]}
-        />
-      </Section>
-
-      <Section
-        id="data-teams"
-        eyebrow="Data teams"
-        title="A result you can explain."
-        intro={<p>A match score is only useful if you can say where it came from.</p>}
-      >
-        <Bullets
-          items={[
-            "A statistical model trained on your data, with the weight of each field visible in the evidence.",
-            "Every golden record traceable to its source records and their history.",
-            "Signed webhooks to tell your systems when records are created, merged or split.",
-          ]}
+      <Section id="industries" title="By industry">
+        <CardGrid
+          items={INDUSTRIES.map((i) => ({
+            title: i.name,
+            body: i.lead,
+            href: `${INDUSTRY_BASE}/${i.slug}`,
+            linkLabel: `DupeZero for ${i.name}`,
+          }))}
         />
       </Section>
 
