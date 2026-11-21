@@ -58,6 +58,14 @@ test.describe("marketing", () => {
     await expect(page.getByTestId("marketing-cta-header")).toBeHidden();
     await expect(page.getByTestId("marketing-cta-demo")).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(320);
+    // The full DupeZero wordmark shows on phones, beside an icon-only Menu button.
+    const logo = page.getByTestId("marketing-logo").locator("img:visible");
+    await expect(logo).toHaveCount(1);
+    await expect(logo).toHaveAttribute("src", /dupezero-logo-on-/);
+    const logoBox = await logo.boundingBox();
+    const menuBox = await page.getByTestId("marketing-menu-button").boundingBox();
+    expect(logoBox && menuBox && logoBox.x + logoBox.width <= menuBox.x).toBe(true);
+    await expect(page.getByRole("button", { name: "Menu" })).toBeVisible();
     await page.getByTestId("marketing-menu-button").click();
     await expect(page.getByTestId("marketing-menu-login")).toHaveAttribute("href", "/app");
   });

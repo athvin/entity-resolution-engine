@@ -232,7 +232,7 @@ export function MarketingNav() {
       <button
         ref={menuButton}
         type="button"
-        className="focus-visible:ring-ring inline-flex min-h-11 items-center gap-2 rounded-md px-3 text-sm font-medium focus-visible:ring-2 focus-visible:outline-none lg:hidden"
+        className="focus-visible:ring-ring inline-flex min-h-11 min-w-11 items-center justify-center gap-2 rounded-md px-2 text-sm font-medium focus-visible:ring-2 focus-visible:outline-none sm:px-3 lg:hidden"
         aria-expanded={menuOpen}
         aria-controls={menuId}
         onClick={() => {
@@ -242,7 +242,8 @@ export function MarketingNav() {
         data-testid="marketing-menu-button"
       >
         {menuOpen ? <X size={18} aria-hidden="true" /> : <Menu size={18} aria-hidden="true" />}
-        Menu
+        {/* Icon only on phones, to leave room for the wordmark; still named "Menu". */}
+        <span className="max-sm:sr-only">Menu</span>
       </button>
       <nav
         id={menuId}

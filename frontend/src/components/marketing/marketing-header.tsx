@@ -27,47 +27,32 @@ export function MarketingHeader() {
   return (
     <header className="bg-background sticky top-0 z-10 border-b" data-testid="marketing-header">
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-1 px-4 sm:px-6">
-        {/* Every theme and width variant is in the markup and CSS shows one, so
-            the right logo is in the static HTML before the theme script runs.
-            Below `sm` the mark alone, because the wordmark, the Menu button
-            and the demo button do not fit a 320px row. SVG `src` is served unoptimized automatically. */}
-        <Link href="/" className="inline-flex min-h-11 shrink-0 items-center">
-          <span className="inline-flex sm:hidden">
-            <Image
-              src="/brand/dupezero-icon-on-light.svg"
-              alt="DupeZero"
-              width={36}
-              height={36}
-              priority
-              className="size-9 dark:hidden"
-            />
-            <Image
-              src="/brand/dupezero-icon-on-dark.svg"
-              alt="DupeZero"
-              width={36}
-              height={36}
-              priority
-              className="hidden size-9 dark:block"
-            />
-          </span>
-          <span className="hidden sm:inline-flex">
-            <Image
-              src="/brand/dupezero-logo-on-light.svg"
-              alt="DupeZero"
-              width={158}
-              height={40}
-              priority
-              className="h-10 w-auto dark:hidden"
-            />
-            <Image
-              src="/brand/dupezero-logo-on-dark.svg"
-              alt="DupeZero"
-              width={158}
-              height={40}
-              priority
-              className="hidden h-10 w-auto dark:block"
-            />
-          </span>
+        {/* Both theme variants are in the markup and CSS shows one, so the right
+            logo is in the static HTML before the theme script runs. The full
+            wordmark at every width: 28px tall below `sm` (about 110px wide) so it
+            fits a 320px row beside the icon-only Menu button and Book a demo;
+            40px from `sm` up. SVG `src` is served unoptimized automatically. */}
+        <Link
+          href="/"
+          className="inline-flex min-h-11 shrink-0 items-center"
+          data-testid="marketing-logo"
+        >
+          <Image
+            src="/brand/dupezero-logo-on-light.svg"
+            alt="DupeZero"
+            width={158}
+            height={40}
+            priority
+            className="h-7 w-auto sm:h-10 dark:hidden"
+          />
+          <Image
+            src="/brand/dupezero-logo-on-dark.svg"
+            alt="DupeZero"
+            width={158}
+            height={40}
+            priority
+            className="hidden h-7 w-auto sm:h-10 dark:block"
+          />
         </Link>
         <MarketingNav />
         <Button asChild size="sm" className="min-h-11 shrink-0">
