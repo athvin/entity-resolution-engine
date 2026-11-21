@@ -364,7 +364,6 @@ can still accept a routing clause.
 |   62 | `rust-conventions` | 962 |
 |   63 | `observability` | 961 |
 |   69 | `entity-framework` | 955 |
-|   69 | `land-pr` | 955 |
 |   72 | `infra-platform` | 952 |
 |   76 | `health-sweep` | 948 |
 |   77 | `frontend-design-system` | 947 |
@@ -373,18 +372,19 @@ can still accept a routing clause.
 |   88 | `frontend-data-ui` | 936 |
 |   89 | `frontend-testing` | 935 |
 |   96 | `er-matching` | 928 |
-|   99 | `ci-and-supply-chain` | 925 |
 |  102 | `claim-ticket` | 922 |
 |  104 | `ducklake-performance` | 920 |
+|  110 | `land-pr` | 914 |
 |  127 | `skill-writer` | 897 |
 |  129 | `pr-review` | 895 |
+|  140 | `ci-and-supply-chain` | 884 |
 |  193 | `sql-analysis` | 831 |
-|  326 | `project-board` | 698 |
 |  342 | `pentest` | 682 |
+|  344 | `project-board` | 680 |
 |  375 | `api-contract` | 649 |
 |  412 | `stageshow` | 612 |
 
-The median routing clause here is **53 characters**. Skills with less
+The median routing clause here is **52 characters**. Skills with less
 headroom than that cannot take another one — adding routing to any of them
 means trimming its **what** clause first, which is the documented fix:
 
@@ -404,17 +404,16 @@ measured harmless, lost trigger vocabulary measured as a misroute.
 | `skill-audit` | TRIGGER TEXT | 316 |
 | `observability` | TRIGGER TEXT | 313 |
 | `entity-framework` | TRIGGER TEXT | 307 |
-| `land-pr` | TRIGGER TEXT | 307 |
 | `health-sweep` | TRIGGER TEXT | 300 |
 | `frontend-design-system` | TRIGGER TEXT | 299 |
 | `landing-page` | TRIGGER TEXT | 290 |
 | `frontend-data-ui` | TRIGGER TEXT | 288 |
 | `frontend-testing` | TRIGGER TEXT | 287 |
 | `er-matching` | TRIGGER TEXT | 280 |
-| `ci-and-supply-chain` | TRIGGER TEXT | 277 |
 | `claim-ticket` | TRIGGER TEXT | 274 |
 | `skill-writer` | TRIGGER TEXT | 249 |
 | `pr-review` | TRIGGER TEXT | 247 |
+| `ci-and-supply-chain` | TRIGGER TEXT | 236 |
 | `sql-analysis` | TRIGGER TEXT | 183 |
 | `er-engine-ops` | tail only | 350 |
 | `security` | tail only | 340 |
@@ -425,8 +424,9 @@ measured harmless, lost trigger vocabulary measured as a misroute.
 | `infra-platform` | tail only | 304 |
 | `ducklake-lakehouse` | tail only | 296 |
 | `ducklake-performance` | tail only | 272 |
-| `project-board` | tail only | 50 |
+| `land-pr` | tail only | 266 |
 | `pentest` | tail only | 34 |
+| `project-board` | tail only | 32 |
 | `api-contract` | tail only | 1 |
 
 `TRIGGER TEXT` is the row to act on, and only when the lost words are

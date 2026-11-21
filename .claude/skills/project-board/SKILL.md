@@ -1,6 +1,6 @@
 ---
 name: project-board
-description: Explains how to read, rebuild and prioritize this project's GitHub Projects board — the configurable deduplication API product direction, Salesforce as the first commercial integration, release labels, stack ranks, ID discovery, automations and stale reads. Use when asked to prioritize roadmap tickets or inspect the board, rebuild or move cards, plan API or connector work, size an iteration, reconcile issues and pull requests, or debug gh project scopes and IDs. For required checks and the merge bus see ci-and-supply-chain; for driving a PR to green see land-pr; for claiming work see claim-ticket; for API generation see api-contract; for filing cards from live telemetry see health-sweep.
+description: Explains how to read, rebuild and prioritize this project's GitHub Projects board — the configurable deduplication API product direction, Salesforce as the first commercial integration, release labels, stack ranks, ID discovery, automations and stale reads. Use when asked to prioritize roadmap tickets or inspect the board, rebuild or move cards, plan API or connector work, size an iteration, reconcile issues and pull requests, or debug gh project scopes and IDs. For required checks see ci-and-supply-chain; for driving a PR to green see land-pr; for claiming work see claim-ticket; for API generation see api-contract; for filing cards from live telemetry see health-sweep.
 ---
 
 # The project board
@@ -134,8 +134,7 @@ What follows from them:
 - **A merged pull request moves the card of the issue it closes — it has no
   card of its own.** "Pull request linked to issue" and "Pull request merged"
   act on the linked issue, so a pull request closing nothing moves nothing, and
-  the merge bus squash-merging a batch of such pull requests leaves the board
-  untouched. Where a pull request does close an issue, moving that card by hand
+  merging such pull requests leaves the board untouched. Where a pull request does close an issue, moving that card by hand
   is duplicated work and races the automation.
 
   **The Status it writes is `Done`. Verified, not inferred.** Two merged pull
@@ -292,7 +291,7 @@ carrying one **class** label:
 |---|---|---|
 | `epic` | a product outcome spanning implementation tickets; older `E<n>` titles retain their historical identity | a release label when scheduled |
 | `docs-backlog` | open work found in a design record (now under `.claude/skills/*/references/`) and verified against the code | a release label when scheduled |
-| `ci-backlog` | CI, runner and merge-bus work | — |
+| `ci-backlog` | CI and runner work | — |
 | `obs-backlog` | observability work | — |
 | `followup` | a small operational follow-up an investigation surfaced; not an epic and not a design-record finding | a release flag only when it gates one |
 | `shipped` | a built capability the design records describe, recorded so the board shows the product and not only its gaps | nothing — closed, so the release question is moot |
@@ -365,9 +364,8 @@ edit this section as it changes.
   the first entry of the field's `iterations` array — completed ones move to a
   separate `completedIterations` array, so index 0 is not a guess.
 - **A card follows the pull request that closes its issue, not the reverse** —
-  and only if one does; the pull request itself never has a card. The merge bus
-  is what moves work to done; see the ci-and-supply-chain skill for why an
-  individual pull request's green can be stale.
+  and only if one does; the pull request itself never has a card. The board automation
+  moves the linked issue to Done when its pull request merges.
 - **The `[aw] … failed` cards are not work.** They are failure issues from the
   gh-aw agentic workflows, which are `disabled_manually` and fail closed on a
   missing `COPILOT_GITHUB_TOKEN`. They arrived by "Auto-add to project". Closing

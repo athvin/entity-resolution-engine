@@ -47,20 +47,7 @@ PR_LEDGER_BEGIN='<!-- BEGIN POST-MERGE -->'
 PR_LEDGER_END='<!-- END POST-MERGE -->'
 
 # pr_contract_exemption — print why this pull request is exempt; 0 if it is.
-#
-# THE MERGE-BUS ENTRY IS LOAD-BEARING, not a convenience. The bus opens an
-# ordinary pull request to prove a COMBINATION green, closes no issue, and
-# carries a generated body; `merge-bus-verdict.sh` then reads that pull
-# request's `statusCheckRollup` and treats any failed context as a red batch.
-# A contract failure there would stop every batch from landing — the gate
-# blocking the mechanism that exists to keep `main` green.
 pr_contract_exemption() {
-	case "${PR_HEAD_REF:-}" in
-	merge-bus/*)
-		echo 'merge-bus branch — a bus pull request closes no issue by design'
-		return 0
-		;;
-	esac
 	case "${PR_AUTHOR:-}" in
 	dependabot | 'dependabot[bot]' | app/dependabot)
 		echo 'dependabot — a dependency bump has no ticket'

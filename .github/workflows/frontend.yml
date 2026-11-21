@@ -34,8 +34,7 @@ name: frontend
 on:
   pull_request:
   # Merge-queue wiring, which NOTHING CONSUMES TODAY (see rust.yml's trigger
-  # block for why the queue cannot be enabled here, and `merge-bus.yml` for the
-  # substitute that actually proves a combination). Kept so a queue, if one ever
+  # block for why the queue cannot be enabled here). Kept so a queue, if one ever
   # existed, would not stall on a workflow missing `merge_group:`. `detect`
   # applies its usual path filter to the queue's own base...head but never
   # consults the content-addressed pass markers.

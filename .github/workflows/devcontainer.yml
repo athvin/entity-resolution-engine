@@ -30,8 +30,8 @@ on:
 # Windows collaborator to hold AWS credentials and run
 # `aws ecr get-login-password` before the container would open.
 #
-# Declaring this block sets every scope not named to `none`, which is how
-# merge-bus.yml lost `actions: read` three times — so both scopes are named.
+# Declaring this block sets every scope not named to `none`, so both required
+# scopes are named.
 permissions:
   contents: read
   packages: write

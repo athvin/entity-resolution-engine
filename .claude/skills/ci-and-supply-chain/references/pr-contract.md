@@ -46,7 +46,6 @@ everything, which is indistinguishable from a clean tree.
 
 | Exempt | Why |
 |---|---|
-| a `merge-bus/*` head branch | a bus PR closes no issue by design, and `merge-bus-verdict.sh` reads its `statusCheckRollup` — a failing context there would stop **every** batch from landing |
 | Dependabot | a bump has no ticket |
 | a title starting `Revert` | `/land-pr` reverts to get `main` green; bookkeeping must not stand in front of that |
 | the `no-ticket` label | the human override, matched on the whole name (`no-ticket-yet` is a different label) |
@@ -99,6 +98,3 @@ them* — including a `FAILURE` that a later run had already healed.
   longer exists.
 - `polling.md`'s recipe is already immune: `group_by(.name) |
   map(max_by(.started_at))`. That line is load-bearing rather than tidy.
-- `merge-bus-verdict.sh` does **not** take the latest, but is not exposed — the
-  bus pull request is exempt, so its contract check reports success and a healed
-  failure cannot arise there.
