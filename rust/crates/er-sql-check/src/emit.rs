@@ -204,7 +204,64 @@ fn emit_lake_read_fn(entity: &Entity, stmt: &LoadedStatement) -> String {
     push_lake_query_body(&mut out, &parts, stmt, &entity.relation);
     out.push_str("        Ok(batches)\n");
     out.push_str("    }\n");
+    out.push_str(&emit_executor_read(entity, stmt, &parts));
     out
+}
+
+/// Additive execution path: existing embedded signatures remain unchanged.
+fn emit_executor_read(entity: &Entity, stmt: &LoadedStatement, parts: &LakeReadParts) -> String {
+    let mut out = String::new();
+    let args = parts
+        .args
+        .replace("conn: &::duckdb::Connection", "executor: &E");
+    out.push_str(&format!("    /// Backend-independent Arrow read with the same snapshot and bindings.\n    pub fn {}_with_executor<E: crate::execution::Executor>(\n{}    ) -> Result<Vec<::arrow::record_batch::RecordBatch>, E::Error> {{\n", parts.fn_name, args));
+    out.push_str(&format!(
+        "        const SQL: &str = \"{}\";\n",
+        parts.escaped
+    ));
+    push_statement_span(&mut out, "Lake", stmt, &entity.relation);
+    out.push_str("        let __entered = __span.enter();\n");
+    if let Some(name) = &parts.splice {
+        out.push_str(&format!(
+            "        let sql = SQL.replace(\"{{snapshot}}\", &{name}.to_string());\n"
+        ));
+    } else {
+        out.push_str("        let sql = SQL;\n");
+    }
+    let binds = stmt
+        .params
+        .iter()
+        .filter(|p| Some(&p.name) != parts.splice.as_ref())
+        .map(parameter_expr)
+        .collect::<Vec<_>>()
+        .join(", ");
+    out.push_str(&format!(
+        "        let batches = ::er_span::check(&__span, executor.query(&sql, &[{binds}]))?;\n"
+    ));
+    out.push_str("        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());\n        drop(__entered);\n        Ok(batches)\n    }\n");
+    out
+}
+
+fn parameter_expr(param: &StatementParam) -> String {
+    let value = if param.nullable { "value" } else { &param.name };
+    let expression = match param.param_type {
+        ColumnType::Varchar => format!("Text({value}.to_owned())"),
+        ColumnType::Json | ColumnType::Date => format!("Text({value}.to_string())"),
+        ColumnType::Timestamp => format!("Text({value}.to_rfc3339())"),
+        ColumnType::Bigint => format!("Bigint({value})"),
+        ColumnType::Double => format!("Double({value})"),
+        ColumnType::Boolean => format!("Boolean({value})"),
+        ColumnType::ListVarchar => format!("ListVarchar({value}.to_vec())"),
+    };
+    let expression = format!("crate::execution::Parameter::{expression}");
+    if param.nullable {
+        format!(
+            "{}.map_or(crate::execution::Parameter::Null, |value| {expression})",
+            param.name
+        )
+    } else {
+        expression
+    }
 }
 
 /// The `::arrow::datatypes::DataType` constructor expression for a declared

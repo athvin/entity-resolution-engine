@@ -5,6 +5,8 @@
 //! operation. Revocation prevents new admissions; the operator also revokes the
 //! upstream token and drains existing sessions before completing revocation.
 
+pub mod execution;
+
 use std::collections::BTreeSet;
 use std::path::Path;
 
@@ -164,6 +166,23 @@ impl Registry {
             bucket: document.bucket,
             entries,
         })
+    }
+
+    /// Admit a new operation at the current operator-owned generation. Later
+    /// calls retain this capability; never resolve a replacement after loss.
+    pub fn resolve_current(
+        &self,
+        org_id: &str,
+        dataset_id: &str,
+        now_unix_seconds: u64,
+    ) -> Result<Binding<'_>, Error> {
+        let generation = self
+            .entries
+            .iter()
+            .find(|(entry, _)| entry.org_id == org_id && entry.dataset_id == dataset_id)
+            .map(|(entry, _)| entry.generation)
+            .ok_or(Error::Unavailable)?;
+        self.resolve(org_id, dataset_id, generation, now_unix_seconds)
     }
 
     /// Resolve only after the control plane authorizes and loads the dataset.

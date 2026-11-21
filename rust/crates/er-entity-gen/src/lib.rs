@@ -58,6 +58,7 @@ impl GeneratedTree {
 /// The static lake-read batch support module (typed Arrow extraction), emitted
 /// verbatim into the generated crate whenever any entity emits Rust.
 const BATCH_SUPPORT: &str = include_str!("../assets/batch.rs");
+const EXECUTION_SUPPORT: &str = include_str!("../assets/execution.rs");
 
 /// The DDL-ledger event triggers (functions + CREATE EVENT TRIGGER), emitted
 /// when the catalog declares a postgres `ddl_log` entity. Applied OUTSIDE the
@@ -183,6 +184,11 @@ pub fn generate(catalog: &Catalog) -> Result<GeneratedTree, ConvertError> {
             BATCH_SUPPORT.to_string(),
         );
         extra_modules.push("batch");
+        tree.push(
+            format!("{RUST_ENTITIES_DIR}/execution.rs"),
+            EXECUTION_SUPPORT.to_string(),
+        );
+        extra_modules.push("execution");
     }
 
     // The compiled-in catalog: every entity's YAML embedded with `include_str!`
