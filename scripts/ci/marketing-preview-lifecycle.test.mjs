@@ -257,3 +257,21 @@ test("HTTP adapter makes deletion idempotent but fails other API errors without 
     /Cloudflare rejected/,
   );
 });
+
+test("Cloudflare pagination respects its 25-entry API limit", async () => {
+  const calls = [];
+  const api = {
+    cloudflare: async (path, options) => {
+      calls.push(path);
+      if (options) return {};
+      assert(path.includes("per_page=25"));
+      return {
+        result: path.endsWith("page=1")
+          ? Array.from({ length: 25 }, (_, i) => deployment(`item-${i}`))
+          : [],
+      };
+    },
+  };
+  assert.equal(await deletePreviews(api, ctx), 25);
+  assert(calls[1].endsWith("page=2"));
+});

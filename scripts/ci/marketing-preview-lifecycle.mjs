@@ -7,6 +7,7 @@ export const MARKER = "<!-- marketing-preview -->";
 export const PROJECT = "dupezero-marketing-preview";
 const ACCOUNT = "9eefbe6bc92d11b2bb4e962494765a4c";
 const PAGE_SIZE = 100;
+const CLOUDFLARE_PAGE_SIZE = 25;
 
 export function clients(env, fetchImpl = fetch) {
   async function request(base, token, path, options = {}) {
@@ -97,7 +98,7 @@ export async function deletePreviews(api, ctx) {
   // Collect all pages BEFORE deleting: deleting during pagination shifts entries.
   for (let page = 1; ; page++) {
     const data = await api.cloudflare(
-      `/deployments?env=preview&per_page=${PAGE_SIZE}&page=${page}`,
+      `/deployments?env=preview&per_page=${CLOUDFLARE_PAGE_SIZE}&page=${page}`,
     );
     if (!Array.isArray(data.result))
       throw new Error("Invalid Cloudflare deployments response");
@@ -110,7 +111,7 @@ export async function deletePreviews(api, ctx) {
     );
     if (data.result_info?.total_pages !== undefined) {
       if (page >= data.result_info.total_pages) break;
-    } else if (data.result.length < PAGE_SIZE) break;
+    } else if (data.result.length < CLOUDFLARE_PAGE_SIZE) break;
   }
   for (const deployment of deployments) {
     if (!/^[a-zA-Z0-9-]+$/.test(deployment.id))
