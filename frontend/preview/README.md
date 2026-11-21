@@ -4,7 +4,8 @@
 frontend pull requests, main pushes, or manual dispatch. The Actions run retains
 a `marketing-preview` artifact even before hosting is configured. Once enabled,
 its **publish marketing preview** job and GitHub environment show a clickable
-Cloudflare Pages URL. Fork PRs build but do not receive deployment credentials.
+Cloudflare Pages URL. A single bot comment on the PR is updated with each new
+preview link. Fork PRs build but do not receive deployment credentials or links.
 
 The build copies the current marketing routes, root layout, providers, components,
 styles and public assets into ignored `.marketing-preview/` at the repository
@@ -38,8 +39,23 @@ blocks crawling. These previews are public to anyone with the link.
 
 All uploads use preview branches, including manual/main runs, so this workflow
 never promotes a preview to the Pages production branch. PR aliases update on
-new commits; immutable deployment links remain available until deleted in Pages.
-Artifact retention is seven days; it does not delete hosted deployments.
+new commits. Closing or merging a PR triggers `marketing-preview-cleanup.yml`,
+which waits for any in-flight preview run, deletes all preview deployments on
+that PR's `preview-<number>` branch (including aliases), and marks the bot comment
+as removed. Deployment also checks the PR before upload and after commenting,
+so closing during a build cannot leave a fresh preview behind. A reopened PR is
+not cleaned up; its next qualifying push creates a new preview.
+
+Cleanup always executes the helper from the trusted default branch, never PR
+code. Other PRs and main/manual deployments are retained. Downloadable Actions
+artifacts retain their independent seven-day expiry; they are not live websites.
+If cleanup fails, rerun its failed job or dispatch it for the closed PR:
+
+```sh
+gh workflow run marketing-preview-cleanup.yml -f pull_request=123
+```
+
+The workflow refuses to delete previews for an open PR.
 Disable publishing with `MARKETING_PREVIEW_ENABLED=false`. Leave the infrastructure
 flag enabled unless intentionally retiring the project through Terraform.
 

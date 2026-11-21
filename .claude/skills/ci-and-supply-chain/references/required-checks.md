@@ -139,6 +139,12 @@ job instead — `terraform plan` is the worked example.
 | `assertions` | kind probe assertions (fixtures) | 5 | `always` |
 | `probe` | kind probe (executor e2e) | 120 | `github.event_name != 'pull_request'` |
 
+### `marketing-preview-cleanup.yml`
+
+| Job | Status-check context | Timeout | Condition |
+|---|---|---|---|
+| `cleanup` | remove closed PR previews | 35 | `vars.MARKETING_PREVIEW_ENABLED == 'true' && (github.event_name == 'workflow_dispatch' \|\| …` |
+
 ### `marketing-preview.yml`
 
 | Job | Status-check context | Timeout | Condition |
