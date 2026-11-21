@@ -238,35 +238,38 @@ WHERE dataset_id = $1 AND released_at IS NULL
             .collect())
     }
 
-    /// Bounded restart-safe recovery working set, oldest evidence first.
-    pub async fn unresolved(
+    /// Unresolved attempts whose owning launch can no longer submit SQL (the task is terminal, archived or relaunched): the reconciliation working set, oldest evidence first, bounded.
+    pub async fn settleable(
         client: &impl ::tokio_postgres::GenericClient,
     ) -> ::std::result::Result<Vec<super::RemoteAttempt>, ::tokio_postgres::Error> {
-        const SQL: &str = "SELECT id,
-  org_id,
-  dataset_id,
-  job_id,
-  task_instance_id,
-  launch,
-  binding_generation,
-  namespace,
-  session_id,
-  request_id,
-  commit_request_id,
-  phase,
-  released_at,
-  created_at,
-  updated_at
-FROM public.remote_attempts
-WHERE released_at IS NULL
-ORDER BY updated_at, id
+        const SQL: &str = "SELECT a.id,
+  a.org_id,
+  a.dataset_id,
+  a.job_id,
+  a.task_instance_id,
+  a.launch,
+  a.binding_generation,
+  a.namespace,
+  a.session_id,
+  a.request_id,
+  a.commit_request_id,
+  a.phase,
+  a.released_at,
+  a.created_at,
+  a.updated_at
+FROM public.remote_attempts a
+WHERE a.released_at IS NULL
+  AND NOT EXISTS (SELECT 1 FROM public.task_instances t
+    WHERE t.id = a.task_instance_id AND t.launches = a.launch
+      AND t.live IS TRUE AND t.state = 'running')
+ORDER BY a.updated_at, a.id
 LIMIT 100
 ";
         let __span = ::er_span::sql_span(
             ::er_span::Store::Control,
             "remote_attempt",
             "read",
-            "unresolved",
+            "settleable",
             "remote_attempts",
             SQL,
         );
@@ -294,5 +297,138 @@ LIMIT 100
                 updated_at: row.get("updated_at"),
             })
             .collect())
+    }
+}
+
+pub mod update {
+    //! @generated query functions for this entity + operation.
+    /// Record that the owning pod could not establish the outcome. The fence stays held; only reconciliation evidence releases it. Allowed after the task is fenced, because it only narrows what is known.
+    pub async fn note_unknown(
+        client: &impl ::tokio_postgres::GenericClient,
+        id: &str,
+        task_instance_id: &str,
+    ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
+        const SQL: &str = "UPDATE public.remote_attempts
+SET phase = 'unknown', updated_at = now()
+WHERE id = $1 AND task_instance_id = $2
+  AND released_at IS NULL AND phase IN ('opening', 'active', 'committing')
+";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "remote_attempt",
+            "update",
+            "note_unknown",
+            "remote_attempts",
+            SQL,
+        );
+        let __result =
+            ::er_span::instrument(&__span, client.execute(SQL, &[&id, &task_instance_id])).await;
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, __n);
+        Ok(__n)
+    }
+
+    /// Write-ahead journal of the next remote request id, before it is sent. A COMMIT is journaled at most once per attempt. Only the live owning task may write, so a fenced pod cannot submit further SQL.
+    pub async fn record_request(
+        client: &impl ::tokio_postgres::GenericClient,
+        request_id: &str,
+        commit: bool,
+        id: &str,
+        task_instance_id: &str,
+    ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
+        const SQL: &str = "UPDATE public.remote_attempts
+SET request_id = $1,
+    commit_request_id = CASE WHEN $2 THEN $1 ELSE commit_request_id END,
+    phase = CASE WHEN $2 THEN 'committing' ELSE phase END,
+    updated_at = now()
+WHERE id = $3 AND task_instance_id = $4
+  AND released_at IS NULL AND phase IN ('active', 'committing')
+  AND (NOT $2 OR commit_request_id IS NULL)
+  AND EXISTS (SELECT 1 FROM public.task_instances t
+    WHERE t.id = remote_attempts.task_instance_id AND t.live IS TRUE AND t.state = 'running')
+";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "remote_attempt",
+            "update",
+            "record_request",
+            "remote_attempts",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.execute(SQL, &[&request_id, &commit, &id, &task_instance_id]),
+        )
+        .await;
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, __n);
+        Ok(__n)
+    }
+
+    /// Journal the acknowledged remote session before any SQL is submitted. Only the live owning task may write; a fenced pod is refused and must not submit.
+    pub async fn record_session(
+        client: &impl ::tokio_postgres::GenericClient,
+        session_id: &str,
+        id: &str,
+        task_instance_id: &str,
+    ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
+        const SQL: &str = "UPDATE public.remote_attempts
+SET session_id = $1, phase = 'active', updated_at = now()
+WHERE id = $2 AND task_instance_id = $3
+  AND released_at IS NULL AND phase = 'opening' AND session_id IS NULL
+  AND EXISTS (SELECT 1 FROM public.task_instances t
+    WHERE t.id = remote_attempts.task_instance_id AND t.live IS TRUE AND t.state = 'running')
+";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "remote_attempt",
+            "update",
+            "record_session",
+            "remote_attempts",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.execute(SQL, &[&session_id, &id, &task_instance_id]),
+        )
+        .await;
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, __n);
+        Ok(__n)
+    }
+
+    /// Release the dataset fence with an established publication outcome. Callers release only on conclusive evidence (a returned COMMIT, a COMMIT never sent, or reconciled receipt and request state); an unresolved outcome is never released.
+    pub async fn release(
+        client: &impl ::tokio_postgres::GenericClient,
+        phase: &str,
+        id: &str,
+        task_instance_id: &str,
+    ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
+        const SQL: &str = "UPDATE public.remote_attempts
+SET phase = $1, released_at = now(), updated_at = now()
+WHERE id = $2 AND task_instance_id = $3
+  AND released_at IS NULL
+  AND $1 IN ('committed', 'rolled_back', 'not_executed')
+";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "remote_attempt",
+            "update",
+            "release",
+            "remote_attempts",
+            SQL,
+        );
+        let __result = ::er_span::instrument(
+            &__span,
+            client.execute(SQL, &[&phase, &id, &task_instance_id]),
+        )
+        .await;
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, __n);
+        Ok(__n)
     }
 }

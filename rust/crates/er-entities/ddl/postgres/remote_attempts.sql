@@ -19,3 +19,4 @@ CREATE TABLE IF NOT EXISTS public.remote_attempts (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS remote_attempts_dataset_unresolved ON public.remote_attempts (dataset_id) WHERE released_at IS NULL;
 CREATE INDEX IF NOT EXISTS remote_attempts_org ON public.remote_attempts (org_id);
+CREATE INDEX IF NOT EXISTS remote_attempts_dataset_history ON public.remote_attempts (dataset_id, created_at);

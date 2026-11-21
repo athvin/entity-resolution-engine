@@ -403,7 +403,8 @@ CREATE INDEX IF NOT EXISTS task_instances_dataset ON public.task_instances (data
   UNIQUE (dataset_id, task_instance_id, launch)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS remote_attempts_dataset_unresolved ON public.remote_attempts (dataset_id) WHERE released_at IS NULL;
-CREATE INDEX IF NOT EXISTS remote_attempts_org ON public.remote_attempts (org_id);"#,
+CREATE INDEX IF NOT EXISTS remote_attempts_org ON public.remote_attempts (org_id);
+CREATE INDEX IF NOT EXISTS remote_attempts_dataset_history ON public.remote_attempts (dataset_id, created_at);"#,
     r#"CREATE TABLE IF NOT EXISTS public.s3_ingest_cursors (
   id text NOT NULL,
   org_id text NOT NULL REFERENCES orgs(id),

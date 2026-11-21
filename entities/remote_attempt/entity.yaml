@@ -81,3 +81,5 @@ indexes:
     where: "released_at IS NULL"
   - name: remote_attempts_org
     columns: [org_id]
+  - name: remote_attempts_dataset_history
+    columns: [dataset_id, created_at]

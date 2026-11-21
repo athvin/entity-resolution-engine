@@ -1,0 +1,10 @@
+kind: statement
+operation: update
+mode: partial
+description: "Journal the acknowledged remote session before any SQL is submitted. Only the live owning task may write; a fenced pod is refused and must not submit."
+params:
+  - { name: session_id, type: varchar }
+  - { name: id, type: varchar }
+  - { name: task_instance_id, type: varchar }
+reads: [task_instance]
+returns: none

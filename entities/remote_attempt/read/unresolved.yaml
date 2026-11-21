@@ -1,6 +1,0 @@
-kind: statement
-operation: read
-mode: partial
-description: "Bounded restart-safe recovery working set, oldest evidence first."
-params: []
-returns: entity

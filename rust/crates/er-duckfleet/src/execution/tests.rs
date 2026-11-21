@@ -317,7 +317,7 @@ fn task_options() -> TaskOptions {
 #[test]
 fn task_capacity_is_verified_and_mismatch_closes_without_querying() {
     let (transport, join) = server(vec![opened(), reply(200, json!({"closed":true}))]);
-    let error = RemoteSession::open_task(transport, task_options())
+    let error = RemoteSession::open_task(transport, task_options(), None)
         .err()
         .unwrap();
     assert_eq!(error.kind, Failure::Capacity);
@@ -338,7 +338,7 @@ fn task_deadline_and_identity_reach_the_worker_without_replay() {
         reply(400, json!({"failure_kind":"sql_error"})),
         reply(200, json!({"closed":true})),
     ]);
-    let mut session = RemoteSession::open_task(transport, task_options()).unwrap();
+    let mut session = RemoteSession::open_task(transport, task_options(), None).unwrap();
     assert_eq!(
         session.query("SELECT 1", &[]).unwrap_err().kind,
         Failure::Query
@@ -422,4 +422,330 @@ fn cleanup_requires_an_explicit_boolean_acknowledgement() {
         assert!(session.cleanup_complete);
         assert_eq!(join.join().unwrap().len(), 3);
     }
+}
+
+fn arrow_ok() -> Reply {
+    use arrow::datatypes::{DataType, Field, Schema};
+    let schema = Schema::new(vec![Field::new("Count", DataType::Int64, true)]);
+    let mut body = Vec::new();
+    arrow::ipc::writer::StreamWriter::try_new(&mut body, &schema)
+        .unwrap()
+        .finish()
+        .unwrap();
+    Reply {
+        status: 200,
+        headers: "",
+        body,
+    }
+}
+
+fn placed() -> Reply {
+    reply(
+        200,
+        json!({"session_id":"00000000-0000-0000-0000-000000000001", "placement": {
+            "compute":"persistent", "cpu":1, "memory_bytes":1073741824_u64, "disk_bytes":2147483648_u64
+        }}),
+    )
+}
+
+fn dropped() -> Reply {
+    Reply {
+        status: 0,
+        headers: "",
+        body: Vec::new(),
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Event {
+    Session(Uuid),
+    Request(Uuid, bool),
+}
+
+#[derive(Default)]
+struct Recorder {
+    events: std::sync::Mutex<Vec<Event>>,
+    refuse_session: bool,
+    refuse_after: Option<usize>,
+}
+
+impl Journal for Recorder {
+    fn session(&self, id: Uuid) -> Result<(), JournalRefused> {
+        if self.refuse_session {
+            return Err(JournalRefused);
+        }
+        self.events.lock().unwrap().push(Event::Session(id));
+        Ok(())
+    }
+    fn request(&self, id: Uuid, commit: bool) -> Result<(), JournalRefused> {
+        let mut events = self.events.lock().unwrap();
+        let requests = events
+            .iter()
+            .filter(|e| matches!(e, Event::Request(..)))
+            .count();
+        if self.refuse_after.is_some_and(|limit| requests >= limit) {
+            return Err(JournalRefused);
+        }
+        events.push(Event::Request(id, commit));
+        Ok(())
+    }
+}
+
+fn journaled(transport: Transport, recorder: &Arc<Recorder>) -> RemoteSession {
+    RemoteSession::open_task(
+        transport,
+        task_options(),
+        Some(Arc::clone(recorder) as Arc<dyn Journal>),
+    )
+    .unwrap()
+}
+
+fn sent_request_ids(requests: &[String]) -> Vec<Uuid> {
+    requests
+        .iter()
+        .filter(|r| r.contains("/queries "))
+        .map(|r| {
+            let payload: Value = serde_json::from_str(r.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+            Uuid::parse_str(payload["request_id"].as_str().unwrap()).unwrap()
+        })
+        .collect()
+}
+
+#[test]
+fn every_sent_request_was_journaled_first_and_commit_is_flagged() {
+    let (transport, join) = server(vec![
+        placed(),
+        arrow_ok(),
+        arrow_ok(),
+        arrow_ok(),
+        reply(200, json!({"closed":true})),
+    ]);
+    let recorder = Arc::new(Recorder::default());
+    let mut session = journaled(transport, &recorder);
+    assert_eq!(session.commit_state(), CommitState::NotSent);
+    session.query("BEGIN TRANSACTION", &[]).unwrap();
+    session.query("CREATE TABLE lake.t AS SELECT 1", &[]).unwrap();
+    session.query("COMMIT", &[]).unwrap();
+    assert_eq!(session.commit_state(), CommitState::Returned);
+    session.close(STATEMENT_TIMEOUT).unwrap();
+    let requests = join.join().unwrap();
+    let events = recorder.events.lock().unwrap().clone();
+    assert_eq!(
+        events[0],
+        Event::Session(Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap())
+    );
+    let journaled: Vec<_> = events
+        .iter()
+        .filter_map(|e| match e {
+            Event::Request(id, commit) => Some((*id, *commit)),
+            Event::Session(_) => None,
+        })
+        .collect();
+    assert_eq!(
+        journaled.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+        sent_request_ids(&requests)
+    );
+    assert_eq!(
+        journaled.iter().map(|(_, c)| *c).collect::<Vec<_>>(),
+        [false, false, true]
+    );
+}
+
+#[test]
+fn a_refused_session_journal_sends_no_sql_and_closes() {
+    let (transport, join) = server(vec![placed(), reply(200, json!({"closed":true}))]);
+    let recorder = Arc::new(Recorder {
+        refuse_session: true,
+        ..Recorder::default()
+    });
+    let error = RemoteSession::open_task(
+        transport,
+        task_options(),
+        Some(Arc::clone(&recorder) as Arc<dyn Journal>),
+    )
+    .err()
+    .unwrap();
+    assert_eq!(error.kind, Failure::Journal);
+    let requests = join.join().unwrap();
+    assert_eq!(requests.len(), 2);
+    assert!(requests[1].starts_with("DELETE "));
+}
+
+#[test]
+fn a_refused_request_journal_is_never_sent_and_poisons_the_session() {
+    // A fenced owner: the journal refuses the COMMIT, so it never leaves.
+    let (transport, join) = server(vec![
+        placed(),
+        arrow_ok(),
+        reply(200, json!({"closed":true})),
+    ]);
+    let recorder = Arc::new(Recorder {
+        refuse_after: Some(1),
+        ..Recorder::default()
+    });
+    let mut session = journaled(transport, &recorder);
+    session.query("BEGIN TRANSACTION", &[]).unwrap();
+    let error = session.query("COMMIT", &[]).unwrap_err();
+    assert_eq!(error.kind, Failure::Journal);
+    assert_eq!(session.commit_state(), CommitState::NotSent);
+    assert_eq!(
+        session.query("SELECT 1", &[]).unwrap_err().kind,
+        Failure::SessionLost
+    );
+    session.close(STATEMENT_TIMEOUT).unwrap();
+    let requests = join.join().unwrap();
+    assert_eq!(sent_request_ids(&requests).len(), 1);
+    assert!(!requests.iter().any(|r| r.contains("\"COMMIT\"")));
+    assert_eq!(
+        recovery::decide_owner(session.commit_state(), true),
+        Some(recovery::Decision::RolledBack)
+    );
+}
+
+#[test]
+fn loss_during_temporary_work_cannot_publish_and_is_not_replayed() {
+    let (transport, join) = server(vec![
+        placed(),
+        arrow_ok(),
+        dropped(),
+        reply(200, json!({"closed":true})),
+    ]);
+    let recorder = Arc::new(Recorder::default());
+    let mut session = journaled(transport, &recorder);
+    session.query("BEGIN TRANSACTION", &[]).unwrap();
+    let error = session
+        .query("CREATE TEMP TABLE er_golden_lineage AS SELECT 1", &[])
+        .unwrap_err();
+    assert_eq!(error.kind, Failure::UnknownOutcome);
+    // The caller's rollback attempt is refused locally, never sent.
+    assert_eq!(
+        session.query("ROLLBACK", &[]).unwrap_err().kind,
+        Failure::SessionLost
+    );
+    session.close(STATEMENT_TIMEOUT).unwrap();
+    let requests = join.join().unwrap();
+    assert_eq!(sent_request_ids(&requests).len(), 2);
+    assert_eq!(
+        recovery::decide_owner(session.commit_state(), true),
+        Some(recovery::Decision::RolledBack)
+    );
+}
+
+#[test]
+fn loss_during_lake_writes_cannot_publish_and_is_not_replayed() {
+    let (transport, join) = server(vec![
+        placed(),
+        arrow_ok(),
+        arrow_ok(),
+        reply(504, json!({"failure_kind":"timeout"})),
+        reply(200, json!({"closed":true})),
+    ]);
+    let recorder = Arc::new(Recorder::default());
+    let mut session = journaled(transport, &recorder);
+    session.query("BEGIN TRANSACTION", &[]).unwrap();
+    session.query("DROP TABLE IF EXISTS lake.t", &[]).unwrap();
+    assert_eq!(
+        session
+            .query("CREATE TABLE lake.t AS SELECT 1", &[])
+            .unwrap_err()
+            .kind,
+        Failure::UnknownOutcome
+    );
+    assert_eq!(session.commit_state(), CommitState::NotSent);
+    session.close(STATEMENT_TIMEOUT).unwrap();
+    assert_eq!(sent_request_ids(&join.join().unwrap()).len(), 3);
+}
+
+#[test]
+fn loss_around_commit_is_unknown_to_the_owner_and_commit_is_sent_once() {
+    for failure in [
+        dropped(),
+        reply(504, json!({"failure_kind":"interrupted"})),
+        reply(404, json!({"failure_kind":"worker_lost"})),
+        reply(400, json!({"failure_kind":"sql_error"})),
+    ] {
+        let (transport, join) = server(vec![
+            placed(),
+            arrow_ok(),
+            failure,
+            reply(200, json!({"closed":true})),
+        ]);
+        let recorder = Arc::new(Recorder::default());
+        let mut session = journaled(transport, &recorder);
+        session.query("BEGIN TRANSACTION", &[]).unwrap();
+        assert!(session.query("COMMIT", &[]).is_err());
+        // Even a definite statement error leaves settlement to the evidence:
+        // the owner only settles a returned or unsent COMMIT.
+        assert_eq!(session.commit_state(), CommitState::Sent);
+        assert_eq!(recovery::decide_owner(session.commit_state(), true), None);
+        session.close(STATEMENT_TIMEOUT).unwrap();
+        let requests = join.join().unwrap();
+        assert_eq!(
+            requests.iter().filter(|r| r.contains("\"COMMIT\"")).count(),
+            1
+        );
+        let commits = recorder
+            .events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|e| matches!(e, Event::Request(_, true)))
+            .count();
+        assert_eq!(commits, 1);
+    }
+}
+
+#[test]
+fn cancellation_during_execution_reaches_the_session_and_cleanup_is_acknowledged() {
+    let (transport, join) = server(vec![
+        placed(),
+        reply(200, json!({"cancelled":true})),
+        reply(409, json!({"failure_kind":"canceled"})),
+        reply(200, json!({"closed":true})),
+    ]);
+    let recorder = Arc::new(Recorder::default());
+    let mut session = Session::Remote(journaled(transport, &recorder));
+    session.cancellation().unwrap().cancel().unwrap();
+    assert_eq!(
+        session.query("SELECT 1", &[]).unwrap_err().kind,
+        Failure::Cancelled
+    );
+    assert!(session.request_sent());
+    assert_eq!(session.commit_state(), CommitState::NotSent);
+    session.close().unwrap();
+    let requests = join.join().unwrap();
+    assert!(requests[1].contains("/cancel "));
+    assert!(requests[3].starts_with("DELETE "));
+}
+
+#[test]
+fn durable_request_records_are_read_without_trusting_failures() {
+    let (transport, join) = server(vec![
+        reply(200, json!({"state":"terminal","outcome":"unknown"})),
+        reply(200, json!({"state":"executing","outcome":"unknown"})),
+        reply(404, json!({"error":"not found"})),
+        reply(503, json!({})),
+        reply(401, json!({})),
+        reply(200, json!({"state":"mystery"})),
+        Reply {
+            status: 200,
+            headers: "",
+            body: vec![b' '; 64 * 1024 + 1],
+        },
+    ]);
+    let id = Uuid::now_v7();
+    use recovery::{ReadFailed, RequestOutcome, RequestState};
+    let read = || recovery::request_state_with(&transport, id);
+    assert_eq!(
+        read(),
+        Ok(RequestState::Terminal(RequestOutcome::Unknown))
+    );
+    assert_eq!(read(), Ok(RequestState::Pending));
+    assert_eq!(read(), Ok(RequestState::NotFound));
+    for _ in 0..4 {
+        assert_eq!(read(), Err(ReadFailed));
+    }
+    let requests = join.join().unwrap();
+    assert!(requests[0].starts_with(&format!("GET /v1/requests/{id} ")));
+    assert!(requests[0].contains("authorization: Bearer private-fixture-token"));
 }

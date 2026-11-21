@@ -1,0 +1,9 @@
+kind: statement
+operation: update
+mode: partial
+description: "Release the dataset fence with an established publication outcome. Callers release only on conclusive evidence (a returned COMMIT, a COMMIT never sent, or reconciled receipt and request state); an unresolved outcome is never released."
+params:
+  - { name: phase, type: varchar }
+  - { name: id, type: varchar }
+  - { name: task_instance_id, type: varchar }
+returns: none
