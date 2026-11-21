@@ -64,6 +64,7 @@ the same fix.
 | `frontend-design-system` | the Tailwind v4 CSS-first tokens in `globals.css` and the two deliberate WCAG deviations from stock shadcn |
 | `frontend-testing` | which tier a change belongs in (unit, component, Playwright functional, the Docker-backed full-stack tier that is a release gate, not a PR gate) |
 | `health-sweep` | reads the CloudWatch alarms and whether their SNS subscriptions are confirmed (user-invoked only) |
+| `herdr` | explicit session selection, layout changes, fleet inspection and agent messaging (user-invoked only) |
 | `infra-platform` | the Terraform env/module layout and shared S3 state with lockfile locking |
 | `land-pr` | the PR loop, the main loop for the push-only workflows no PR can run |
 | `landing-page` | the `(marketing)` route group that prerenders statically inside the same app that serves the BFF |
@@ -383,6 +384,7 @@ can still accept a routing clause.
 |  344 | `project-board` | 680 |
 |  375 | `api-contract` | 649 |
 |  412 | `stageshow` | 612 |
+|  674 | `herdr` | 350 |
 
 The median routing clause here is **52 characters**. Skills with less
 headroom than that cannot take another one — adding routing to any of them
@@ -704,6 +706,22 @@ The obligation that comes with it: the vendoring preamble must say what our own
 gates already cover, so a reviewer does not spend effort re-deriving findings
 that the axe gate or ESLint produces on its own.
 
+### Personal skill installations
+
+Repository-specific skills are authored here and bridged through `.agents/skills`.
+Do not maintain a second personal copy under `~/.claude/skills` or
+`~/.codex/skills`; it can shadow the reviewed version and cannot be landed by PR.
+Herdr now follows this rule and supports explicit session targeting from outside
+Herdr. Its helpers live under `scripts/herdr`, with private state outside Git.
+
+The personal `rust-skills` guide is redundant with `rust-conventions` and the
+existing dependency guidance; the incomplete `github-ship-loop` installation is
+superseded by `land-pr`. Neither is a migration candidate. Keep built-in agent
+skills application-managed and dependency-generated skills under Symposium's
+existing lifecycle. Plugin skills outside this collection are disabled or removed
+through their owning manager rather than copied out of a cache without their
+dependencies. Tool-only integrations can remain installed.
+
 ### Tier 2 — installed plugins
 
 Vendor-maintained only, declared in `.claude/settings.json` via
@@ -777,13 +795,13 @@ failure looks like the server simply not appearing.
 | `stageshow` (benjitaylor/skills) | **vendored skill**, whole folder at a pinned commit | wanted in-repo for marketing demos; kept byte-identical to upstream under `.claude/skills/stageshow/` with a `VENDORED.md` provenance record, which `skills-check` reads instead of applying the house authoring rules. Its colour guidance is overridden by `frontend-design-system`, and its Node scripts run only on demand, never from a gate or hook |
 | `marketingskills`, `claude-seo` | deferred | reasonable once a marketing surface exists and copy/SEO work begins |
 | `rust-analyzer-lsp` | **installed** | code intelligence over a large Rust workspace: jump to a definition instead of reading files to find it. Official marketplace, no always-on skill cost |
-| `frontend-design` | **installed, then overridden** | the unusual row. It is enabled here *deliberately* so that the supersession below has a subject — its quality floor and writing guidance are wanted, only its palette and aesthetic-risk guidance conflict. It was previously enabled in a developer's own `~/.claude/settings.json`, which made the override's premise invisible to this repo and untrue for anyone else cloning it |
+| `frontend-design` | **disabled** | the repository design-system skill owns frontend guidance; the override below remains defensive for sessions or other installations that still load the generic skill |
 | `superpowers` plugin (obra) | **out** | delivered through a `SessionStart` hook that injects its `using-superpowers` bootstrap into every session, and no setting disables a plugin's hook short of disabling the plugin — the `impeccable` objection, except here the hook is the product's core mechanism, and it reads the skill file from disk so `skillOverrides` cannot contain it. Its fifteen process-methodology skills overlap this collection and the harness's own plan/subagent machinery on the same triggers — `writing-skills` against `skill-writer`, `requesting-`/`receiving-code-review` against `pr-review` — and `finishing-a-development-branch` prescribes a bare test suite as the finish line, the exact defect `rust-best-practice` is overridden for. Individual skills (`systematic-debugging` is the strongest) remain eligible for Tier-1 vendoring at a pinned commit |
 
 ### Skills we deliberately override
 
-Three general-purpose skills are loaded in a normal session and are each wrong
-for this repo in a specific, predictable way. Overriding one is not a one-off;
+General-purpose skills can arrive through dependency sync or another installation
+and conflict with this repo in specific, predictable ways. Overriding one is not a one-off;
 it is a recurring obligation, and the pattern is always the same — the house
 skill states the supersession in its own body, and wins structurally because
 root skills load at startup while nested and plugin skills load later.
