@@ -287,6 +287,14 @@ describe("navigation", () => {
     expect(screen.queryByRole("button", { name: /mode|theme/i })).toBeNull();
     // Below 640px the header's Login button is hidden; the menu carries it.
     expect(screen.getByTestId("marketing-menu-login")).toHaveAttribute("href", "/app");
+    // The wordmark at every width: no icon-only logo variant any more.
+    const logos = [...screen.getByTestId("marketing-logo").querySelectorAll("img")];
+    expect(logos.map((img) => img.getAttribute("src"))).toEqual([
+      expect.stringContaining("dupezero-logo-on-light"),
+      expect.stringContaining("dupezero-logo-on-dark"),
+    ]);
+    // The Menu button keeps its name when its label is visually hidden on phones.
+    expect(screen.getByRole("button", { name: "Menu" })).toBeInTheDocument();
   });
 
   it("renders the footer's columns and keeps Sign in", () => {
