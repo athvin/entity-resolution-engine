@@ -2,6 +2,11 @@
   "decision": "no-go",
   "probes": [
     {
+      "name": "baseline_version_matches_repo",
+      "passed": true,
+      "evidence": "2.0.0"
+    },
+    {
       "name": "engine_version_alignment",
       "passed": false,
       "error": "engine versions differ: local 2.0.0, remote v1.5.4"
@@ -13,6 +18,11 @@
         "schema": "id: int64\nperson_name: string\namount: decimal128(20, 4)\ndate_value: date32[day]\ninstant: timestamp[us]\nflag: bool\nmissing: string",
         "sha256": "c1285c2713fd4f658d4ad3cd7cec41ab1fa56dd8f2b8d7fb352cd51fb9c01bb3"
       }
+    },
+    {
+      "name": "bound_float_roundtrip",
+      "passed": false,
+      "error": "result mismatch: v: double vs v: double; rows 58/58; first difference (0, {'v': 0.0012033694344163659}, {'v': 0.001203369434416366})"
     },
     {
       "name": "session_temp_isolation",

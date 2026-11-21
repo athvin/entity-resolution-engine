@@ -13,6 +13,7 @@ import platform
 from pathlib import Path
 import re
 import tempfile
+import tomllib
 import urllib.error
 import urllib.request
 import uuid
@@ -71,7 +72,8 @@ class Local:
         self.conn.execute('SET threads=1')
 
     def query(self, sql, params=None):
-        return self.conn.execute(sql, params or []).to_arrow_table()
+        result = self.conn.sql(sql, params=params or [])
+        return pa.table({}) if result is None else result.to_arrow_table()
 
 
 def equal(left, right):
@@ -156,8 +158,8 @@ def lake_semantics(backend, attach):
 
 
 EXPECTED_PROBES = {
-    'engine_version_alignment', 'bound_parameters_and_arrow_types',
-    'session_temp_isolation', 'golden_tolerance_parity', 'exact_scoring_parity',
+    'baseline_version_matches_repo', 'engine_version_alignment', 'bound_parameters_and_arrow_types',
+    'bound_float_roundtrip', 'session_temp_isolation', 'golden_tolerance_parity', 'exact_scoring_parity',
     'baseline_lake_semantics', 'postgres_metadata_schema_and_lake_semantics',
     'long_task_deadline_admission', 'bulk_result_capacity',
 }
@@ -190,6 +192,14 @@ def run(args):
         print(name + ': ' + ('PASS' if report['probes'][-1]['passed'] else 'FAIL'), flush=True)
 
     local = Local()
+
+    def baseline_version():
+        config = tomllib.loads((ROOT / 'rust/.cargo/config.toml').read_text())
+        expected = re.search(r'DUCKDB_VERSION="v([^"]+)"', config['env']['CXXFLAGS'])[1]
+        if duckdb.__version__ != expected:
+            raise AssertionError(f'baseline wheel {duckdb.__version__} differs from ER engine {expected}')
+        return expected
+    probe('baseline_version_matches_repo', baseline_version)
     try:
         with Remote(args.url, os.environ['DUCKFLEET_TOKEN']) as remote:
             report['remote_engine'] = scalar(remote, 'SELECT version()')
@@ -208,6 +218,18 @@ def run(args):
                 equal(a, b)
                 return {'schema': str(a.schema), 'sha256': digest(a)}
             probe('bound_parameters_and_arrow_types', types)
+
+            def float_roundtrip():
+                fixture = pq.read_table(GOLDEN / 'stages/blocked_with_cols.parquet')
+                values = sorted({value for field in fixture.schema if pa.types.is_floating(field.type)
+                                 for value in fixture[field.name].to_pylist() if value is not None})
+                if not values:
+                    raise AssertionError('fixture contains no floating-point values')
+                sql = 'SELECT * FROM (VALUES ' + ','.join('(?::DOUBLE)' for _ in values) + ') t(v) ORDER BY v'
+                a, b = local.query(sql, values), remote.query(sql, values)
+                equal(a, b)
+                return {'distinct_values': len(values), 'sha256': digest(a)}
+            probe('bound_float_roundtrip', float_roundtrip)
 
             def temporary():
                 remote.query('CREATE TEMP TABLE session_probe AS SELECT 42::BIGINT probe_value')

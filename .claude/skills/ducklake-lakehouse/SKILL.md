@@ -187,4 +187,5 @@ catalog metadata is unchanged: still a Postgres DSN or a local file.
 
 For DuckFleet compatibility evidence, the disposable harness and adoption blockers,
 see [references/duckfleet-compatibility.md](references/duckfleet-compatibility.md).
-A passing SQL probe is not approval to share a customer catalog or change engines.
+The [recorded synthetic evidence](references/duckfleet-compatibility-evidence.json)
+contains the measured results. A passing SQL probe is not approval to share a customer catalog or change engines.

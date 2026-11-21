@@ -5,6 +5,14 @@ ER execution backend**. Continue the epic's isolated implementation work; do not
 point this build at a customer catalog. This is a discovery result, not a shipped
 remote backend or a claim that the complete pipeline passed.
 
+## Contents
+
+- [Reproduce](#reproduce)
+- [Assessed version matrix](#assessed-version-matrix)
+- [What the probes establish](#what-the-probes-establish)
+- [Adoption conditions and ownership](#adoption-conditions-and-ownership)
+- [Coverage limits](#coverage-limits)
+
 ## Reproduce
 
 From the repository root, with Docker and Python >= 3.11:
@@ -60,7 +68,7 @@ or change a production catalog to make discovery pass. Arrow IPC interoperated
 for the tested types despite different Rust Arrow majors; this does not establish
 support for every nested or extension type.
 
-The recorded [JSON evidence](duckfleet-compatibility-evidence.json) is a synthetic
+The recorded `duckfleet-compatibility-evidence.json` is a synthetic
 fixture run from 2026-11-21 UTC. It is historical evidence; rerun after any pin or
 protocol change.
 
@@ -68,6 +76,12 @@ protocol change.
 
 - Bound BIGINT near the signed limit, quoted text, precise DECIMAL, date,
   microsecond timestamp, boolean and null values survive HTTP/Arrow unchanged.
+- JSON numeric DOUBLE binding does not preserve every input bit. Of the 58
+  distinct floating-point fixture values, the first mismatch is
+  `0.0012033694344163659` sent versus `0.001203369434416366` returned by a plain
+  `SELECT` with a DOUBLE cast. This isolates a transport/binding precision issue
+  without scoring arithmetic. Decimal parameters above use explicit string
+  transport and pass; they must not be mistaken for a floating-point test.
 - Temporary tables survive requests within a session and are absent from another
   session on the same worker.
 - Explicit `METADATA_SCHEMA`, `DATA_PATH`, `AUTOMATIC_MIGRATION false` and disabled
@@ -92,7 +106,10 @@ protocol change.
 
 ## Adoption conditions and ownership
 
-1. **Version and scoring qualification.** Align the worker engine/extensions with
+1. **Version and scoring qualification.** Preserve floating-point parameters
+   across JSON decoding/binding first (a DuckFleet decoder change or an explicitly
+   typed, lossless parameter representation must pass the exact round-trip probe).
+   #1130 owns that adapter/upstream contract. Align the worker engine/extensions with
    ER, then repeat the harness on comparable runtime platforms and run actual
    bundled-Rust/executor parity. Investigate exact differences rather than
    loosening the gate to hide them. #1130 owns adapter parity; #1134 owns complete
