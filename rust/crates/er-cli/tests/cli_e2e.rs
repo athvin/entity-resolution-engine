@@ -309,6 +309,8 @@ fn er_run_all_reproduces_base_10_relations() {
             "golden_record_overrides",
             "record_overlays",
             "record_qualities",
+            // Verification is a steward action; base_10 does not perform it.
+            "record_verifications",
             // The per-stage ledger (batch-orchestration-design §4.3). It has
             // NO writer anywhere — a search of the workspace finds zero
             // callers of `er_entities::run_stage`'s generated `start` /
