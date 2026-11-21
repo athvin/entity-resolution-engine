@@ -1,4 +1,4 @@
-//! `run_all_full` as SEVEN pods (batch-orchestration-design §11 Phase 3),
+//! `run_all_full` as EIGHT pods (batch-orchestration-design §11 Phase 3),
 //! gated on `ER_TEST_PG_DSN` + `DEDUPE_E2E_DUCKLAKE=1`.
 //!
 //! The acceptance this file exists for: the DAG path and the composed path
@@ -34,7 +34,7 @@ fn repo_fixture(rel: &str) -> PathBuf {
 }
 
 #[tokio::test]
-async fn run_all_full_runs_as_seven_pods_and_reproduces_base_10() {
+async fn run_all_full_runs_as_eight_pods_and_reproduces_base_10() {
     let Some(db) = common::fresh_db("run_all_pipeline").await else {
         return;
     };
@@ -147,11 +147,11 @@ async fn run_all_full_runs_as_seven_pods_and_reproduces_base_10() {
         .unwrap();
     assert_eq!(
         rows.len(),
-        7,
-        "init, ingest, standardize, match, reconcile, assemble, finish"
+        8,
+        "init, ingest, standardize, match, reconcile, golden, assemble, finish"
     );
 
-    // Seven child processes, one stage each. Generous: this runs the whole
+    // Eight child processes, one stage each. Generous: this runs the whole
     // pipeline, and each pod pays a cold DuckDB open.
     let mut settled = String::new();
     for _ in 0..900 {
@@ -282,7 +282,7 @@ async fn run_all_full_runs_as_seven_pods_and_reproduces_base_10() {
     );
     assert_eq!(
         got_owned, want,
-        "the SEVEN-POD partition differs from the golden the monolithic path reproduces"
+        "the EIGHT-POD partition differs from the golden the monolithic path reproduces"
     );
 
     // ---- phase 2: `train` — the first kind with BOTH halves ----------------

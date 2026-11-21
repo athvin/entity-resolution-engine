@@ -99,6 +99,12 @@ pub const ORG: &str = "er.org";
 pub const DATASET: &str = "er.dataset";
 /// The pipeline run.
 pub const RUN_ID: &str = "er.run_id";
+/// The remote statement execution, an opaque query UUID.
+pub const QUERY_ID: &str = "er.query_id";
+/// The scheduler task identifier.
+pub const TASK_ID: &str = "er.task_id";
+/// The authenticated task attempt identifier.
+pub const TASK_INSTANCE_ID: &str = "er.task_instance_id";
 /// A `RUN_STAGES` member.
 pub const STAGE: &str = "er.stage";
 /// `ok` or `error` — the dimension that keeps a histogram honest without
@@ -168,6 +174,24 @@ pub const ATTRIBUTES: &[Attr] = &[
     Attr {
         name: RUN_ID,
         description: "The pipeline run. The join key from a span back to `runs` and `run_stages`, which is how per-tenant detail is recovered without a metric label.",
+        pii: Pii::Identifier,
+        cardinality: Cardinality::Unbounded,
+    },
+    Attr {
+        name: QUERY_ID,
+        description: "Opaque remote query UUID, joining a task span to DuckFleet execution history.",
+        pii: Pii::Identifier,
+        cardinality: Cardinality::Unbounded,
+    },
+    Attr {
+        name: TASK_ID,
+        description: "Scheduler task identifier, joining remote statements to the pipeline task.",
+        pii: Pii::Identifier,
+        cardinality: Cardinality::Unbounded,
+    },
+    Attr {
+        name: TASK_INSTANCE_ID,
+        description: "Authenticated task attempt identifier, distinguishing retries of the same task.",
         pii: Pii::Identifier,
         cardinality: Cardinality::Unbounded,
     },

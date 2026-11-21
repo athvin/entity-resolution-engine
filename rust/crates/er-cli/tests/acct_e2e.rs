@@ -144,6 +144,67 @@ fn acct_run_all_clusters_accounts_and_assembles_golden() {
         "every account golden row has a surviving company_name and domain"
     );
 
+    let before_records = session
+        .query_strings("select * from lake.main.acct_golden_records order by id")
+        .unwrap();
+    let before_lineage = session
+        .query_strings("select * from lake.main.acct_golden_lineage order by all")
+        .unwrap();
+    let checks = std::cell::Cell::new(0);
+    let failed = er_cli::golden_task::run_account_guarded(
+        session.connection(),
+        &config,
+        "2026-04-01 00:00:00",
+        || {
+            checks.set(checks.get() + 1);
+            anyhow::ensure!(
+                checks.get() == 1,
+                "attempt lost ownership before publication"
+            );
+            Ok(())
+        },
+    );
+    assert!(failed.is_err());
+    assert_eq!(
+        checks.get(),
+        2,
+        "failure occurs after the new tables were staged"
+    );
+    assert_eq!(
+        session
+            .query_strings("select * from lake.main.acct_golden_records order by id")
+            .unwrap(),
+        before_records
+    );
+    assert_eq!(
+        session
+            .query_strings("select * from lake.main.acct_golden_lineage order by all")
+            .unwrap(),
+        before_lineage
+    );
+    // assembled_at is explicitly volatile in the entity contract. Rollback
+    // above preserves it; a successful new assembly gets a fresh wall clock.
+    let stable_records = session
+        .query_strings(
+            "select * exclude(assembled_at) from lake.main.acct_golden_records order by id",
+        )
+        .unwrap();
+    er_cli::run_golden(&session, &config, "2026-03-03 00:00:00").unwrap();
+    assert_eq!(
+        session
+            .query_strings(
+                "select * exclude(assembled_at) from lake.main.acct_golden_records order by id"
+            )
+            .unwrap(),
+        stable_records
+    );
+    assert_eq!(
+        session
+            .query_strings("select * from lake.main.acct_golden_lineage order by all")
+            .unwrap(),
+        before_lineage
+    );
+
     let _ = std::fs::remove_dir_all(&tmp);
 }
 

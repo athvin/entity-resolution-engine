@@ -123,7 +123,14 @@ async fn the_clear_endpoint_computes_its_own_closure() {
         .iter()
         .map(|v| v.as_str().unwrap_or_default())
         .collect();
-    for want in ["standardize", "match", "reconcile", "assemble", "finish"] {
+    for want in [
+        "standardize",
+        "match",
+        "reconcile",
+        "golden",
+        "assemble",
+        "finish",
+    ] {
         assert!(names.contains(&want), "{want} is in the closure: {names:?}");
     }
     for never in ["init", "ingest"] {

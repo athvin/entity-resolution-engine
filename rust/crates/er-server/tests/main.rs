@@ -55,6 +55,8 @@ mod pg_delivery_ordering;
 mod pg_dispatch;
 mod pg_drain;
 mod pg_drain_dispatcher;
+#[cfg(feature = "disposable-proof")]
+mod pg_duckfleet_task;
 mod pg_e2e;
 mod pg_entity_events;
 mod pg_entity_links;

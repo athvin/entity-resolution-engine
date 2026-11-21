@@ -199,3 +199,9 @@ The accepted-input and sealed-output transport contract, inventory and storage
 qualification limits are in [references/duckfleet-artifacts.md](references/duckfleet-artifacts.md).
 The [artifact transfer evidence](references/duckfleet-artifact-evidence.json) records
 the disposable restricted-identity proof and its AWS qualification limit.
+
+The account golden-task pilot and its operator policy are described in
+[references/duckfleet-tasks.md](references/duckfleet-tasks.md).
+
+[Account task proof evidence](references/duckfleet-task-evidence.json) records the
+pinned disposable task and long-statement measurements for the pilot.

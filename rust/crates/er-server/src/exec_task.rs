@@ -424,22 +424,37 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
         })
     };
 
-    // Open the session at the class's resource settings (§6.2's env half).
-    let session = open_order_session(&order)?;
-
-    // Step 5: run exactly one try.
-    let mut ctx = TaskCtx {
-        order: &order,
-        session: &session,
-        counters: &counters,
-        fence: &fence,
-        cancel: &cancel,
+    // Remote selection is operator-owned and happens before any embedded lake
+    // opens. Both paths settle through the same heartbeat and finish channel.
+    let (result, snapshot_end) = if let Some(policy) =
+        crate::duckfleet_tasks::selected(&task_id, env_var)
+    {
+        match crate::duckfleet_tasks::run(&order, &attempt, &policy, &fence, &sigterm) {
+            Ok((result, snapshot)) => (Ok(result), snapshot),
+            Err(error) => (Err(error), None),
+        }
+    } else {
+        let result = (|| {
+            let session = open_order_session(&order)
+                .map_err(|message| TaskError::Failed(er_errors::ErError::stage_failure(message)))?;
+            let mut ctx = TaskCtx {
+                order: &order,
+                session: &session,
+                counters: &counters,
+                fence: &fence,
+                cancel: &cancel,
+            };
+            if sigterm.load(Ordering::SeqCst) {
+                cancel.cancel();
+            }
+            let result = dags::run_pod_task(kind, &task_id, &mut ctx);
+            Ok((result, session.latest_snapshot_version().ok()))
+        })();
+        match result {
+            Ok(pair) => pair,
+            Err(error) => (Err(error), None),
+        }
     };
-    if sigterm.load(Ordering::SeqCst) {
-        cancel.cancel();
-    }
-    let result = dags::run_pod_task(kind, &task_id, &mut ctx);
-    let snapshot_end = session.latest_snapshot_version().ok();
     done.store(true, Ordering::SeqCst);
     let _ = heartbeat.join();
 

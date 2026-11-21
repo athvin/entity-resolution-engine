@@ -102,7 +102,7 @@ async fn the_task_ledger_statements_hold_their_contracts() {
     let rows = er_entities::task_instance::read::by_job(&client, &org_id, &job.id)
         .await
         .unwrap();
-    assert_eq!(rows.len(), 7, "one row per compiled node");
+    assert_eq!(rows.len(), 8, "one row per compiled node");
     assert!(rows.iter().all(|r| r.state == "none" && r.try_number == 1));
     let id_of = |task: &str| taskpg::attempt_id(&job.id, task, 1);
     for row in &rows {
@@ -485,7 +485,7 @@ async fn the_task_ledger_statements_hold_their_contracts() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     let tasks = body_json(resp).await;
-    assert_eq!(tasks["tasks"].as_array().unwrap().len(), 7);
+    assert_eq!(tasks["tasks"].as_array().unwrap().len(), 8);
 
     // ---- Phase C: fail_or_retry — exact backoff, lineage, escalation ------
     let ingest1 = id_of("ingest");
@@ -705,9 +705,9 @@ async fn the_task_ledger_statements_hold_their_contracts() {
     // ---- Phase D: propagation deadens the chain; the job settles failed ----
     let states = states_for(&client, &dag, &org_id, &job.id).await;
     let actions = er_dag::pass(&dag, &states);
-    // standardize, match, reconcile, assemble propagate; finish fires.
-    assert_eq!(actions.len(), 5);
-    for (idx, action) in &actions[..4] {
+    // standardize, match, reconcile, golden, assemble propagate; finish fires.
+    assert_eq!(actions.len(), 6);
+    for (idx, action) in &actions[..5] {
         assert_eq!(*action, PassAction::Propagate(TaskState::UpstreamFailed));
         let target = taskpg::attempt_id(&job.id, dag.nodes[*idx].task_id, 1);
         let done =
@@ -717,8 +717,8 @@ async fn the_task_ledger_statements_hold_their_contracts() {
         assert_eq!(done.len(), 1, "{}", dag.nodes[*idx].task_id);
     }
     assert_eq!(
-        actions[4],
-        (6, PassAction::Schedule),
+        actions[5],
+        (7, PassAction::Schedule),
         "finish fires all_terminal"
     );
 
@@ -789,6 +789,7 @@ async fn the_task_ledger_statements_hold_their_contracts() {
             "standardize",
             "match",
             "reconcile",
+            "golden",
             "assemble",
             "finish"
         ]
@@ -805,9 +806,9 @@ async fn the_task_ledger_statements_hold_their_contracts() {
     .await
     .unwrap();
     assert!(cleared.restarting.is_empty(), "nothing was live");
-    // ingest try 3 rotates to try 4 with max_tries = 3 + 2; the four
+    // ingest try 3 rotates to try 4 with max_tries = 3 + 2; the five
     // propagated rows and finish rotate to try 2 with max_tries = 1 + 2.
-    assert_eq!(cleared.rotated.len(), 6);
+    assert_eq!(cleared.rotated.len(), 7);
     let ingest4 = cleared
         .rotated
         .iter()
@@ -859,8 +860,8 @@ async fn the_task_ledger_statements_hold_their_contracts() {
         .unwrap()
         .get(0);
     assert_eq!(
-        count, 15,
-        "re-planning inserted nothing (9 archived + 6 live)"
+        count, 17,
+        "re-planning inserted nothing (8 initial + 2 retries + 7 rotated)"
     );
 
     let scheduled =

@@ -1,0 +1,38 @@
+{
+  "measured_at_utc": "2026-11-21",
+  "task": {
+    "embedded_remote_equal": true,
+    "golden_attempt_id": "212618cc94feade5a99ea50b1d5d322f8cb6baa10aad303116aa66d2ed5bf8db",
+    "golden_lineage": 16,
+    "golden_records": 4,
+    "job_id": "01a1fcdb-1512-75f1-8796-c37cd96b4cd8",
+    "matching_scores": 3,
+    "remote_queries": 9,
+    "remote_rerun_equal": true,
+    "unsupported_capacity_job_failed": true,
+    "writer_exclusion": true,
+    "upstream_revision": "ac894b551e6d802e4c4f88422881c6aaac6e4f4b",
+    "image_id": "sha256:d00f37fe9e8d272e277b7becfd1e44c3f24fa9c2b3b9e53478a56c732a490040"
+  },
+  "deadline": {
+    "elapsed_seconds": 65.12780712498352,
+    "statement_deadline_seconds": 120,
+    "rows": [
+      {
+        "n": 42
+      }
+    ],
+    "out_of_range_601_refused": true,
+    "short_deadline_refused": true,
+    "short_initial_failure": "timeout",
+    "short_final_status": "timed_out",
+    "short_deadline_elapsed_seconds": 65.20319154206663,
+    "scope": "actual DuckDB statement through gateway; delayed synthetic HTTP CSV"
+  },
+  "limits": [
+    "Disposable Compose with real DuckFleet, PostgreSQL and object storage; Kubernetes is the existing child-process test double.",
+    "One account fixture and persistent compute only; AWS and isolated production capacity remain unqualified.",
+    "External I/O observes cancellation late; timeout is not proof of rollback or a hard wall-clock kill.",
+    "Rerun equality excludes volatile assembled_at; rollback equality includes it."
+  ]
+}

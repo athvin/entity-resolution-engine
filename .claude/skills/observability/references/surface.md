@@ -82,6 +82,7 @@ be grouped, filtered by target, or joined to a trace.
 **Product files emitting structured events:**
 
 - `er-cli/src/lib.rs`
+- `er-duckfleet/src/execution.rs`
 - `er-mcp/src/main.rs`
 - `er-obs/src/identity.rs`
 - `er-obs/src/init.rs`

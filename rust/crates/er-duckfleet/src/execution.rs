@@ -17,6 +17,9 @@ use uuid::Uuid;
 
 use crate::Binding;
 
+mod task_options;
+pub use task_options::{Compute, TaskOptions};
+
 const MAX_RESULT_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_CONTROL_BYTES: u64 = 64 * 1024;
 const STATEMENT_TIMEOUT: Duration = Duration::from_secs(75);
@@ -40,6 +43,8 @@ pub enum Failure {
     Parameter,
     #[error("execution authorization refused")]
     Unauthorized,
+    #[error("execution capacity unavailable")]
+    Capacity,
     #[error("execution query failed")]
     Query,
     #[error("execution query cancelled")]
@@ -139,6 +144,9 @@ impl Transport {
             (_, Some("canceled" | "cancelled" | "query_cancelled")) => Failure::Cancelled,
             (_, Some("timeout" | "interrupted" | "budget_exceeded")) => Failure::UnknownOutcome,
             (413, _) => Failure::Limit,
+            (_, Some("capacity_unavailable" | "capacity" | "compute_unavailable")) => {
+                Failure::Capacity
+            }
             (400, Some("sql_error")) => Failure::Query,
             _ => Failure::Protocol,
         };
@@ -184,6 +192,32 @@ impl Session {
             binding.bearer_token().to_owned(),
         )?)
         .map(Self::Remote)
+    }
+
+    /// Open a task session with explicit placement and bounded execution policy.
+    pub fn open_remote_task(
+        binding: &Binding<'_>,
+        options: TaskOptions,
+    ) -> Result<Self, ExecutionError> {
+        RemoteSession::open_task(
+            Transport::new(binding.endpoint(), binding.bearer_token().to_owned())?,
+            options,
+        )
+        .map(Self::Remote)
+    }
+
+    /// Actual-service proof entry point, restricted to loopback and test builds.
+    #[cfg(feature = "disposable-proof")]
+    pub fn open_loopback_task_proof(
+        address: std::net::SocketAddr,
+        token: String,
+        options: TaskOptions,
+    ) -> Result<Self, ExecutionError> {
+        if !address.ip().is_loopback() {
+            return Err(Failure::Unauthorized.into());
+        }
+        RemoteSession::open_task(Transport::new(format!("http://{address}"), token)?, options)
+            .map(Self::Remote)
     }
 
     pub fn cancellation(&self) -> Result<Cancellation, ExecutionError> {
@@ -273,16 +307,27 @@ pub struct RemoteSession {
     closed: Arc<AtomicBool>,
     lost: AtomicBool,
     cleanup_complete: bool,
+    task: Option<TaskOptions>,
 }
 
 impl RemoteSession {
     fn open(transport: Transport) -> Result<Self, ExecutionError> {
-        // Default persistent worker only. This first read slice does not request
-        // an isolated pod or accept customer-supplied resource sizing.
+        Self::open_with(transport, None)
+    }
+
+    fn open_task(transport: Transport, options: TaskOptions) -> Result<Self, ExecutionError> {
+        options.validate()?;
+        Self::open_with(transport, Some(options))
+    }
+
+    fn open_with(transport: Transport, task: Option<TaskOptions>) -> Result<Self, ExecutionError> {
+        let payload = task
+            .as_ref()
+            .map_or_else(|| json!({}), TaskOptions::payload);
         let bytes = transport.request(
             Method::POST,
             "/v1/sessions",
-            Some(&json!({})),
+            Some(&payload),
             Duration::from_secs(450),
             false,
         )?;
@@ -292,13 +337,23 @@ impl RemoteSession {
             .and_then(Value::as_str)
             .and_then(|value| Uuid::parse_str(value).ok())
             .ok_or(Failure::Protocol)?;
-        Ok(Self {
+        let mut session = Self {
             transport,
             path: format!("/v1/sessions/{id}"),
             closed: Arc::new(AtomicBool::new(false)),
             lost: AtomicBool::new(false),
             cleanup_complete: false,
-        })
+            task,
+        };
+        if session
+            .task
+            .as_ref()
+            .is_some_and(|options| !options.matches(&response["placement"]))
+        {
+            let _ = session.close(Duration::from_secs(3));
+            return Err(Failure::Capacity.into());
+        }
+        Ok(session)
     }
 
     fn close(&mut self, timeout: Duration) -> Result<(), ExecutionError> {
@@ -347,12 +402,30 @@ impl Executor for RemoteSession {
             })
             .collect::<Result<Vec<_>, _>>()?;
         let request_id = Uuid::now_v7();
-        let payload = json!({"request_id": request_id.to_string(), "sql": sql, "parameters": parameters, "timeout_seconds": 60});
+        let span = tracing::info_span!("duckfleet.query",
+            er.query_id = %request_id,
+            er.job_id = self.task.as_ref().map(|task| task.job_id.as_str()).unwrap_or_default(),
+            er.task_id = self.task.as_ref().map(|task| task.task_id.as_str()).unwrap_or_default(),
+            er.task_instance_id = self.task.as_ref().map(|task| task.attempt_id.as_str()).unwrap_or_default(),
+            error.type = tracing::field::Empty,
+        );
+        let _entered = span.enter();
+        let seconds = self
+            .task
+            .as_ref()
+            .map_or(60, |options| options.statement_seconds);
+        let context = self
+            .task
+            .as_ref()
+            .map_or_else(|| json!({}), TaskOptions::context);
+        let payload = json!({"request_id": request_id.to_string(), "sql": sql, "parameters": parameters, "timeout_seconds": seconds, "context": context});
         let result = self.transport.request(
             Method::POST,
             &format!("{}/queries", self.path),
             Some(&payload),
-            STATEMENT_TIMEOUT,
+            self.task
+                .as_ref()
+                .map_or(STATEMENT_TIMEOUT, |_| Duration::from_secs(seconds + 135)),
             true,
         );
         let bytes = match result {
@@ -372,6 +445,7 @@ impl Executor for RemoteSession {
                 ) {
                     self.lost.store(true, Ordering::Release);
                 }
+                span.record("error.type", error.kind.to_string());
                 error.request_id = Some(request_id);
                 return Err(error);
             }
