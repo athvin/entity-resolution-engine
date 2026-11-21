@@ -34,3 +34,7 @@ terraform -chdir=infra/terraform/modules/operational-observability test -no-colo
 # Separate-product CI cannot grant itself IAM or platform access.
 terraform -chdir=infra/terraform/modules/duckfleet-ci init -backend=false -input=false
 terraform -chdir=infra/terraform/modules/duckfleet-ci test -no-color
+
+# DuckFleet dataset identities reuse the runner policy with a distinct namespace.
+terraform -chdir=infra/terraform/modules/duckfleet-dataset init -backend=false -input=false
+terraform -chdir=infra/terraform/modules/duckfleet-dataset test -no-color

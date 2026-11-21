@@ -1,0 +1,5 @@
+apiVersion: v2
+name: er-duckfleet-dataset
+description: Platform-owned dataset namespace and gateway admission boundary
+type: application
+version: 0.1.0

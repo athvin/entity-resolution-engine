@@ -26,6 +26,7 @@ check_path infra/k8s/charts/er-platform/tenant-runners.json true true
 check_path infra/k8s/charts/er-platform/values.yaml false true
 check_path infra/terraform/envs/dev/example.tf true false
 check_path scripts/ci/tenant-runners-check.py false true
+check_path scripts/ci/duckfleet-dataset-test.py false true
 check_path scripts/ci/infra-detect-test.sh true false
 check_path scripts/ci/runner-isolation-pod.sh false true
 check_path scripts/ci/runner-isolation.sh false true
