@@ -182,3 +182,60 @@ fn namespace_matches_terraform_contract() {
         "duckfleet-2c92e260fe9935ecd6664c5a84639cd7b464e280"
     );
 }
+
+#[test]
+fn artifact_scope_content_identity_and_rotation() {
+    use crate::artifacts::{Artifact, Format, Staging};
+    let (mut doc, mut credentials) = fixture();
+    let registry = parse(&doc, &credentials).unwrap();
+    let a = registry.resolve("org-a", "dataset-a", 3, 100).unwrap();
+    let b = registry.resolve("org-a", "dataset-b", 3, 100).unwrap();
+    let c = registry.resolve("org-b", "dataset-c", 3, 100).unwrap();
+    let digest = hex::encode(Sha256::digest(b"accepted"));
+    let artifact = Artifact::new(&a, "delivery-1", Format::Csv, 8, &digest).unwrap();
+    let uri = artifact.uri(&a).unwrap();
+    assert!(uri.starts_with(&a.storage_root()));
+    assert!(uri.ends_with(&format!("/artifacts/immutable/delivery-1/{digest}.csv")));
+    assert!(artifact.uri(&b).is_err());
+    assert!(artifact.uri(&c).is_err());
+    let staging = Staging::new(&a, uuid::Uuid::nil(), Format::Parquet);
+    assert!(staging.uri(&a).unwrap().contains("/artifacts/staging/"));
+    assert!(staging.uri(&b).is_err());
+    assert!(staging.uri(&c).is_err());
+    doc["bindings"][0]["generation"] = json!(4);
+    credentials[0]["generation"] = json!(4);
+    credentials[0]["token"] = json!("new-token-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx");
+    let rotated = parse(&doc, &credentials).unwrap();
+    let a_new = rotated.resolve("org-a", "dataset-a", 4, 100).unwrap();
+    assert_eq!(artifact.uri(&a_new).unwrap(), uri);
+    assert!(rotated.resolve("org-a", "dataset-a", 3, 100).is_err());
+    assert!(rotated.resolve("org-a", "dataset-a", 4, 201).is_err());
+}
+
+#[test]
+fn deserialized_artifacts_cannot_inject_paths_or_escape_limits() {
+    use crate::artifacts::{Artifact, Format, MAX_ARTIFACT_BYTES};
+    let (doc, credentials) = fixture();
+    let registry = parse(&doc, &credentials).unwrap();
+    let a = registry.resolve("org-a", "dataset-a", 3, 100).unwrap();
+    let artifact = Artifact::new(&a, "delivery-1", Format::Csv, 8, &"a".repeat(64)).unwrap();
+    let original = serde_json::to_value(artifact).unwrap();
+    for (field, bad) in [
+        ("version", json!(2)),
+        ("org_id", json!("org-b")),
+        ("dataset_id", json!("dataset-b")),
+        ("identity", json!("../other")),
+        ("identity", json!("file.csv?versionId=other")),
+        ("sha256", json!("A".repeat(64))),
+        ("sha256", json!("a".repeat(63))),
+        ("bytes", json!(MAX_ARTIFACT_BYTES + 1)),
+    ] {
+        let mut value = original.clone();
+        value[field] = bad;
+        let decoded: Artifact = serde_json::from_value(value).unwrap();
+        assert!(decoded.key(&a).is_err(), "accepted invalid {field}");
+    }
+    let mut value = original;
+    value["uri"] = json!("s3://foreign/key");
+    assert!(serde_json::from_value::<Artifact>(value).is_err());
+}

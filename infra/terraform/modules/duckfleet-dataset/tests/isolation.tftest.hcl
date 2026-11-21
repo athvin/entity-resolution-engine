@@ -33,3 +33,14 @@ run "invalid_identity_refused" {
   variables { datasets = [{ org_id = "org-a", dataset_id = "../other" }] }
   expect_failures = [var.datasets]
 }
+run "workers_cannot_seal_or_delete_accepted_artifacts" {
+  command = plan
+  assert {
+    condition = alltrue([for id, ns in output.namespaces :
+      jsondecode(output.policies[id]).Statement[4].Effect == "Deny" &&
+      jsondecode(output.policies[id]).Statement[4].Resource == ["${var.bucket_arn}/duckfleet/${ns}/artifacts/immutable/*"] &&
+      toset(jsondecode(output.policies[id]).Statement[4].Action) == toset(["s3:PutObject", "s3:DeleteObject", "s3:DeleteObjectVersion", "s3:AbortMultipartUpload"])
+    ])
+    error_message = "Workers may read sealed artifacts but must never mutate or delete them; staging stays outside this deny."
+  }
+}

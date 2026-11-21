@@ -18,10 +18,11 @@ variable "kms_key_arn" { type = string }
 variable "region" { type = string }
 variable "bindings" {
   type = map(object({
-    namespace       = string
-    org_id          = string
-    prefix          = string
-    service_account = optional(string)
+    namespace          = string
+    org_id             = string
+    prefix             = string
+    service_account    = optional(string)
+    read_only_prefixes = optional(list(string), [])
   }))
   validation {
     condition = alltrue([for b in values(var.bindings) :
@@ -29,7 +30,11 @@ variable "bindings" {
       can(regex("^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", b.namespace)) &&
       length(b.namespace) <= 63 &&
       (b.service_account == null ? true : (can(regex("^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", b.service_account)) && length(b.service_account) <= 63)) &&
-      can(regex("^[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*/$", b.prefix))
+      can(regex("^[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*/$", b.prefix)) &&
+      alltrue([for prefix in b.read_only_prefixes :
+        startswith(prefix, b.prefix) &&
+        can(regex("^[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*/$", prefix))
+      ])
     ])
     error_message = "Bindings require a nonempty org, a Kubernetes namespace and a literal non-root prefix ending in '/'; wildcards and path traversal are forbidden."
   }
@@ -50,7 +55,7 @@ locals {
   accounts = { for key, b in var.bindings : key => coalesce(b.service_account, "er-runner-${substr(sha256(b.org_id), 0, 20)}") }
   policies = { for key, b in var.bindings : key => jsonencode({
     Version = "2012-10-17"
-    Statement = [
+    Statement = concat([
       {
         Sid      = "TenantObjects"
         Effect   = "Allow"
@@ -85,7 +90,12 @@ locals {
           "kms:EncryptionContext:aws:s3:arn" = var.bucket_arn
         } }
       }
-    ]
+      ], length(b.read_only_prefixes) == 0 ? [] : [{
+        Sid      = "ReadOnlyArtifacts"
+        Effect   = "Deny"
+        Action   = ["s3:PutObject", "s3:DeleteObject", "s3:DeleteObjectVersion", "s3:AbortMultipartUpload"]
+        Resource = [for prefix in b.read_only_prefixes : "${var.bucket_arn}/${prefix}*"]
+    }])
   }) }
 }
 

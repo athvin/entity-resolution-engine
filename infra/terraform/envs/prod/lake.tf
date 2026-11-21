@@ -1,7 +1,8 @@
 # The environment lake: SSE-KMS, TLS-only and versioned. The shared runner
 # identity has no data permissions; tenant_runners.tf owns prefix-scoped roles.
 module "lake" {
-  source = "../../modules/lake"
+  immutable_prefixes = ["duckfleet/*/artifacts/immutable/"]
+  source             = "../../modules/lake"
 
   name = "er-prod-lake-797781631727"
 }

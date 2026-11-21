@@ -26,10 +26,11 @@ locals {
   # Matches er_duckfleet::namespace. Never derive a boundary from a display name.
   namespaces = { for d in var.datasets : d.dataset_id => "duckfleet-${substr(sha256("${d.org_id}\u0000${d.dataset_id}"), 0, 40)}" }
   bindings = { for d in var.datasets : d.dataset_id => {
-    namespace       = local.namespaces[d.dataset_id]
-    org_id          = "${d.org_id}/${d.dataset_id}"
-    service_account = "duckfleet-worker"
-    prefix          = "duckfleet/${local.namespaces[d.dataset_id]}/"
+    namespace          = local.namespaces[d.dataset_id]
+    org_id             = "${d.org_id}/${d.dataset_id}"
+    service_account    = "duckfleet-worker"
+    prefix             = "duckfleet/${local.namespaces[d.dataset_id]}/"
+    read_only_prefixes = ["duckfleet/${local.namespaces[d.dataset_id]}/artifacts/immutable/"]
   } }
 }
 module "identities" {

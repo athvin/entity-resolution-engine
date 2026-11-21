@@ -2438,6 +2438,7 @@ dependencies = [
  "serde_urlencoded",
  "sha2 0.11.1",
  "signal-hook",
+ "tempfile",
  "thiserror",
  "tokio",
  "tokio-postgres",
