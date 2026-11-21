@@ -542,6 +542,70 @@ LIMIT $3
         drop(__entered);
         Ok(batches)
     }
+    /// Backend-independent Arrow read with the same snapshot and bindings.
+    pub fn list_page_with_executor<E: crate::execution::Executor>(
+        executor: &E,
+        snapshot: i64,
+        after: Option<&str>,
+        q: Option<&str>,
+        limit: i64,
+    ) -> Result<Vec<::arrow::record_batch::RecordBatch>, E::Error> {
+        const SQL: &str = "SELECT
+  id,
+  given_name,
+  family_name,
+  email,
+  phone_e164,
+  addr_number,
+  addr_street,
+  addr_unit,
+  addr_city,
+  addr_region,
+  addr_postal,
+  birth_date,
+  metadata,
+  survivorship_version,
+  assembled_at,
+  created_at,
+  updated_at
+FROM lake.main.golden_records AT (VERSION => {snapshot})
+WHERE ($1 IS NULL OR id > $1)
+  AND (
+    $2 IS NULL
+    OR (coalesce(given_name, '') || ' ' || coalesce(family_name, '') || ' ' || coalesce(email, '')) ILIKE $2 ESCAPE '\\'
+  )
+ORDER BY id
+LIMIT $3
+";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "golden_record",
+            "read",
+            "list_page",
+            "golden_records",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let sql = SQL.replace("{snapshot}", &snapshot.to_string());
+        let batches = ::er_span::check(
+            &__span,
+            executor.query(
+                &sql,
+                &[
+                    after.map_or(crate::execution::Parameter::Null, |value| {
+                        crate::execution::Parameter::Text(value.to_owned())
+                    }),
+                    q.map_or(crate::execution::Parameter::Null, |value| {
+                        crate::execution::Parameter::Text(value.to_owned())
+                    }),
+                    crate::execution::Parameter::Bigint(limit),
+                ],
+            ),
+        )?;
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
+        Ok(batches)
+    }
 
     /// One row of `preview_in_range`: The golden preview columns of every entity in an id range at a pinned snapshot (the duplicates page preview).
     #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]

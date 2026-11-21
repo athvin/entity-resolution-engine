@@ -2124,11 +2124,16 @@ dependencies = [
 name = "er-duckfleet"
 version = "0.1.0"
 dependencies = [
+ "arrow 60.1.0",
+ "duckdb",
+ "er-entities",
  "hex",
+ "reqwest",
  "serde",
  "serde_json",
  "sha2 0.11.1",
  "thiserror",
+ "uuid",
 ]
 
 [[package]]
@@ -2404,6 +2409,7 @@ dependencies = [
  "er-compile",
  "er-config",
  "er-dag",
+ "er-duckfleet",
  "er-entities",
  "er-entity-diff",
  "er-entity-gen",

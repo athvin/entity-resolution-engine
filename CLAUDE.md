@@ -67,17 +67,9 @@ can be gated; read it from the repository settings.
 belongs in, what each gate is for, and the rule that every gate must be observed
 *failing* before it is trusted.
 
-**Those greens can be stale, and the merge bus is what re-earns them.** `main`'s
-protection has `strict: false`, so a PR merges on a green it won against a base
-that may since have moved — four PRs each green against an older `main` can all
-merge and leave `main` red. `merge-bus.yml` batches the PRs **labelled
-`merge-bus`**, proves the *combination* green through an ordinary PR, and only
-then squash-merges the members. GitHub's own merge queue is this feature and
-cannot be enabled here, because it is offered only for organization-owned
-repositories and this one is user-owned — visibility is not the blocker — which
-is why it is a workflow here. The
-`ci-and-supply-chain` skill carries the rules; the one that bites is that
-`merge bus` must never become a required check.
+**A green can be stale when `main` moves.** Refresh from `origin/main` before
+merging and verify the checks for the updated branch, then watch `main` after
+the merge using `/land-pr`.
 
 **A pull request is not done at green — it is done when `main` is green with the
 change on it and its post-merge ledger is closed.** `/land-pr <n>` is the
@@ -101,9 +93,8 @@ the template's collapsed Context block so the top of a body stays readable.
 `pull request contract` (`pr-contract.yml`) enforces both clauses and reads
 GitHub's own parsed closing references rather than the body text, so a
 `Closes #<n>` that would not actually close anything does not pass.
-`merge-bus/*` branches, Dependabot, reverts and the `no-ticket` label are
-exempt — the first of those load-bearing, since the merge bus reads its own
-PR's check rollup. The check is a **required context** as of 2026-11-07, added
+Dependabot, reverts and the `no-ticket` label are exempt. The check is a
+**required context** as of 2026-11-07, added
 only after it had been seen failing and after no open PR would be blocked by
 it; the `ci-and-supply-chain` skill carries that order, which is the reusable
 part. `scripts/ci/pr-ledger-audit.sh` sweeps merged PRs for ledgers an

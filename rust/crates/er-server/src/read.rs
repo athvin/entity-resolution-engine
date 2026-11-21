@@ -117,11 +117,22 @@ pub fn golden_arrow_page(
     after: Option<&str>,
     limit: i64,
 ) -> Result<GoldenArrowPage, String> {
+    golden_arrow_page_with_executor(session.connection(), entity_type, snapshot, q, after, limit)
+}
+
+/// The same response shaping for embedded and operator-selected remote reads.
+pub fn golden_arrow_page_with_executor<E: er_entities::execution::Executor>(
+    executor: &E,
+    entity_type: EntityType,
+    snapshot: i64,
+    q: Option<&str>,
+    after: Option<&str>,
+    limit: i64,
+) -> Result<GoldenArrowPage, String> {
     use arrow::array::StringArray;
     use arrow::record_batch::RecordBatch;
 
     let limit = limit.clamp(1, MAX_LIMIT);
-    let conn = session.connection();
     // The read statements bind `$q` as a LIKE pattern (`... ILIKE $q ESCAPE '\'`),
     // so the contains-search term is wrapped in `%…%` with its LIKE metacharacters
     // escaped here; an empty term means "no filter" (NULL).
@@ -131,12 +142,20 @@ pub fn golden_arrow_page(
     // Fetch one extra row to decide whether a next page exists, via the generated
     // typed query function (person or account).
     let batches = match entity_type {
-        EntityType::Person => {
-            er_entities::golden_record::read::list_page(conn, snapshot, after, q, limit + 1)
-        }
-        EntityType::Account => {
-            er_entities::acct_golden_record::read::list_page(conn, snapshot, after, q, limit + 1)
-        }
+        EntityType::Person => er_entities::golden_record::read::list_page_with_executor(
+            executor,
+            snapshot,
+            after,
+            q,
+            limit + 1,
+        ),
+        EntityType::Account => er_entities::acct_golden_record::read::list_page_with_executor(
+            executor,
+            snapshot,
+            after,
+            q,
+            limit + 1,
+        ),
     }
     .map_err(|e| e.to_string())?;
 

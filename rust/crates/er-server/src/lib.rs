@@ -36,6 +36,7 @@ pub mod dags;
 pub mod delivery;
 pub mod dispatcher;
 pub mod dispatcher_bin;
+mod duckfleet_reads;
 pub mod errfmt;
 pub mod exec_task;
 pub mod executor;
@@ -103,6 +104,7 @@ struct JobStore {
 /// pool dependency).
 #[derive(Clone)]
 pub struct AppState {
+    duckfleet_reads: Option<Result<duckfleet_reads::Config, String>>,
     /// The operator bearer token (cross-org admin). Empty disables operator auth.
     pub operator_token: String,
     store: Arc<Mutex<JobStore>>,
@@ -150,6 +152,7 @@ impl AppState {
             provision: None,
             provision_error: None,
             sa_verifier: None,
+            duckfleet_reads: None,
         }
     }
 
@@ -167,6 +170,7 @@ impl AppState {
             provision: None,
             provision_error: None,
             sa_verifier: None,
+            duckfleet_reads: None,
         }
     }
 
@@ -5551,36 +5555,14 @@ async fn golden_records_list(
         Ok(dataset) => dataset,
         Err(response) => return *response,
     };
-    with_dataset_lake(dataset, move |session, dataset| {
-        let entity_type = match dataset.entity_type.as_str() {
-            "account" => er_config::EntityType::Account,
-            _ => er_config::EntityType::Person,
+    // Keep the actual response constructor in the handler: the OpenAPI source
+    // extractor classifies GET media types here. SQL and encoding still run in
+    // the bounded blocking closure, with only the finished response crossing out.
+    let respond = |result: Result<(i64, read::GoldenArrowPage), Box<axum::response::Response>>| {
+        let (snapshot, page) = match result {
+            Ok(page) => page,
+            Err(response) => return *response,
         };
-        let (snapshot, after) =
-            match read::page_start(session, params.get("cursor").map(String::as_str)) {
-                Ok(x) => x,
-                Err(read::PageStartError::BadCursor) => {
-                    return detail_err(StatusCode::UNPROCESSABLE_ENTITY, "invalid cursor");
-                }
-                Err(read::PageStartError::Lake(e)) => {
-                    return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}"));
-                }
-            };
-        let limit = read::parse_limit(params.get("limit").map(String::as_str));
-        let page = match read::golden_arrow_page(
-            session,
-            entity_type,
-            snapshot,
-            params.get("q").map(String::as_str),
-            after.as_deref(),
-            limit,
-        ) {
-            Ok(p) => p,
-            Err(e) => {
-                return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}"));
-            }
-        };
-
         // Serialise the page as an Arrow IPC stream (schema message then batches); the
         // snapshot and the next cursor travel in response headers.
         let mut buf: Vec<u8> = Vec::new();
@@ -5616,9 +5598,89 @@ async fn golden_records_list(
             headers.insert("x-er-next-cursor", v);
         }
         response
+    };
+    if let Some(config) = state.duckfleet_reads {
+        let config = match config {
+            Ok(config) => config,
+            Err(error) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, error),
+        };
+        return lake_reads::run(move || {
+            let mut session = match config.open(&dataset.org_id, &dataset.id) {
+                Ok(session) => session,
+                Err(error) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, error),
+            };
+            let start =
+                duckfleet_reads::page_start(&session, params.get("cursor").map(String::as_str));
+            let page = golden_records_page(&session, &dataset, &params, start);
+            if let Err(error) = session.close() {
+                tracing::error!(error = %error, "remote lake read cleanup failed");
+                return detail_err(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "lake session cleanup failed",
+                );
+            }
+            respond(page)
+        })
+        .await
+        .unwrap_or_else(|_| detail_err(StatusCode::SERVICE_UNAVAILABLE, "lake read failed"));
+    }
+    with_dataset_lake(dataset, move |session, dataset| {
+        let start = read::page_start(session, params.get("cursor").map(String::as_str));
+        respond(golden_records_page(
+            session.connection(),
+            dataset,
+            &params,
+            start,
+        ))
     })
     .await
     .unwrap_or_else(|response| *response)
+}
+
+fn golden_records_page<E: er_entities::execution::Executor>(
+    executor: &E,
+    dataset: &pg::DatasetDetail,
+    params: &HashMap<String, String>,
+    page_start: Result<(i64, Option<String>), read::PageStartError>,
+) -> Result<(i64, read::GoldenArrowPage), Box<axum::response::Response>> {
+    let entity_type = match dataset.entity_type.as_str() {
+        "account" => er_config::EntityType::Account,
+        _ => er_config::EntityType::Person,
+    };
+    let (snapshot, after) = match page_start {
+        Ok(x) => x,
+        Err(read::PageStartError::BadCursor) => {
+            return Err(Box::new(detail_err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "invalid cursor",
+            )));
+        }
+        Err(read::PageStartError::Lake(e)) => {
+            return Err(Box::new(detail_err(
+                StatusCode::SERVICE_UNAVAILABLE,
+                format!("lake: {e}"),
+            )));
+        }
+    };
+    let limit = read::parse_limit(params.get("limit").map(String::as_str));
+    let page = match read::golden_arrow_page_with_executor(
+        executor,
+        entity_type,
+        snapshot,
+        params.get("q").map(String::as_str),
+        after.as_deref(),
+        limit,
+    ) {
+        Ok(p) => p,
+        Err(e) => {
+            return Err(Box::new(detail_err(
+                StatusCode::SERVICE_UNAVAILABLE,
+                format!("lake read: {e}"),
+            )));
+        }
+    };
+
+    Ok((snapshot, page))
 }
 
 /// The optional point in history a golden read is taken at (O12c).
@@ -11949,7 +12011,8 @@ pub async fn state_from_env() -> AppState {
     };
     // Present only when this process runs as a pod; locally the attempt
     // channel stays fallback-token-only.
-    let state = state.with_sa_verifier(satoken::Verifier::in_cluster());
+    let mut state = state.with_sa_verifier(satoken::Verifier::in_cluster());
+    state.duckfleet_reads = duckfleet_reads::Config::from_lookup(|name| std::env::var(name).ok());
     // Async because a SES backend resolves credentials at construction; `off`
     // and `log` do not await anything.
     state

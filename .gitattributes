@@ -18,4 +18,3 @@ Makefile text eol=lf
 # rather than their name, so this list and that gate agree on what a script is;
 # re-derive it with that script's own shebang test if one is ever added.
 scripts/symposium text eol=lf
-scripts/ci/merge-bus-sim/gh text eol=lf
