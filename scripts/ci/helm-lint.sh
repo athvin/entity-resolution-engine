@@ -14,3 +14,6 @@ cd "$(dirname "$0")/../.."
 helm lint infra/k8s/charts/er-platform \
 	--set efs.fileSystemId=fs-0 --set efs.accessPointId=fsap-0
 helm lint infra/k8s/charts/er-dev-namespace --set developer=ci
+
+helm lint infra/k8s/charts/er-duckfleet-dataset \
+  --set orgId=org-a --set datasetId=dataset-a --set clientNamespace=er
