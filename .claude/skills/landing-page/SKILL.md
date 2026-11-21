@@ -14,8 +14,11 @@ worth knowing before anyone proposes making it one:
 > plus audit allowlist, and a hosting target that **does not exist** — the ALB
 > is internal and there is no CDN in the Terraform.
 
-`output: 'export'` is unavailable regardless: the same app serves the BFF route
-handlers and needs a server.
+`output: 'export'` is unavailable for the full app: the same app serves the BFF
+route handlers and needs a server. Marketing previews use a disposable copy of
+the marketing routes instead; `frontend/preview/README.md` describes the export,
+CI artifact and optional Cloudflare Pages deployment. The production build
+continues to use the normal configuration.
 
 ## The page is static, and that is structural
 

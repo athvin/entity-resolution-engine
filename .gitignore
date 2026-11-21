@@ -44,3 +44,6 @@ rust/.codex/
 # Per-developer Claude Code settings. The shared .claude/settings.json IS
 # committed; this one holds locally-granted permissions and must not be.
 .claude/settings.local.json
+
+# Isolated static marketing preview build
+.marketing-preview/

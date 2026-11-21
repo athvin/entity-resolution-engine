@@ -41,7 +41,8 @@
     "upstream:check": "node scripts/check-bff-upstream.mjs",
     "actions:check": "node scripts/check-er-actions.mjs",
     "migrations:check": "node scripts/check-migrations.mjs",
-    "check": "eslint . --max-warnings 0 && prettier --check . && tsc --noEmit && node scripts/check-bff-authz.mjs && node scripts/check-bff-upstream.mjs && node scripts/check-er-actions.mjs && node scripts/check-migrations.mjs && vitest run --coverage"
+    "check": "eslint . --max-warnings 0 && prettier --check . && tsc --noEmit && node scripts/check-bff-authz.mjs && node scripts/check-bff-upstream.mjs && node scripts/check-er-actions.mjs && node scripts/check-migrations.mjs && vitest run --coverage",
+    "build:preview": "node scripts/build-marketing-preview.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.8.0",

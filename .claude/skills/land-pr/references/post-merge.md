@@ -107,6 +107,7 @@ were `cancelled` with `jobs=0` and the 3 survivors had 19–22. So:
 | `images` | `pull_request push workflow_dispatch` |
 | `infra` | `merge_group pull_request push` |
 | `kind` | `pull_request schedule workflow_dispatch` |
+| `marketing-preview` | `pull_request push workflow_dispatch` |
 | `rust` | `merge_group pull_request push schedule workflow_dispatch` |
 
 ### Of those, the ones no pull request can pre-test
