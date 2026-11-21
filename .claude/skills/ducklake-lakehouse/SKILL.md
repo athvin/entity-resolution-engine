@@ -182,3 +182,9 @@ and give the host its credential shape — nothing at all in-cluster (the pod
 identity is the credential, with the org enrolled in the tenant-runner registry),
 the `ER_LAKE_S3_*` process env elsewhere. The
 catalog metadata is unchanged: still a Postgres DSN or a local file.
+
+## Remote execution discovery
+
+For DuckFleet compatibility evidence, the disposable harness and adoption blockers,
+see [references/duckfleet-compatibility.md](references/duckfleet-compatibility.md).
+A passing SQL probe is not approval to share a customer catalog or change engines.
