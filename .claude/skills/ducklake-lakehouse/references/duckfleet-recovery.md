@@ -112,4 +112,12 @@ the journal records.
   on conclusive evidence.
 - `acct_e2e`: the receipt is atomic with publication on a real DuckLake.
 - `make check-duckfleet-task`: the real service runs the journaled task,
-  receipt and owner release end to end.
+  receipt and owner release end to end, then two faults through an in-test
+  relay. A COMMIT whose reply is lost after it landed fails the job, holds the
+  dataset and reconciles `committed` with exactly one receipt. A COMMIT that
+  never reaches the gateway reconciles `rolled_back` with the lake unchanged.
+  `fault_outcomes` in `duckfleet-task-evidence.json` records the run.
+- Not exercised against the real service: gateway restart and worker-process
+  loss. Upstream marks such requests terminal with an `unknown` outcome
+  (`interrupt_abandoned`); that is the same row of the matrix as the lost
+  COMMIT reply, settled by the receipt.
