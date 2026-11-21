@@ -289,3 +289,103 @@ fn malformed_arrow_poisons_the_session_without_exposing_the_body() {
     session.close(STATEMENT_TIMEOUT).unwrap();
     assert_eq!(join.join().unwrap().len(), 3);
 }
+
+fn task_options() -> TaskOptions {
+    TaskOptions {
+        compute: Compute::Persistent,
+        statement_seconds: 120,
+        job_id: "job-1".into(),
+        task_id: "golden".into(),
+        attempt_id: "attempt-1".into(),
+    }
+}
+
+#[test]
+fn task_capacity_is_verified_and_mismatch_closes_without_querying() {
+    let (transport, join) = server(vec![opened(), reply(200, json!({"closed":true}))]);
+    let error = RemoteSession::open_task(transport, task_options())
+        .err()
+        .unwrap();
+    assert_eq!(error.kind, Failure::Capacity);
+    let requests = join.join().unwrap();
+    assert_eq!(requests.len(), 2);
+    assert!(requests[1].starts_with("DELETE "));
+}
+
+#[test]
+fn task_deadline_and_identity_reach_the_worker_without_replay() {
+    let (transport, join) = server(vec![
+        reply(
+            200,
+            json!({"session_id":"00000000-0000-0000-0000-000000000001", "placement": {
+                "compute":"persistent", "cpu":1, "memory_bytes":1073741824_u64, "disk_bytes":2147483648_u64
+            }}),
+        ),
+        reply(400, json!({"failure_kind":"sql_error"})),
+        reply(200, json!({"closed":true})),
+    ]);
+    let mut session = RemoteSession::open_task(transport, task_options()).unwrap();
+    assert_eq!(
+        session.query("SELECT 1", &[]).unwrap_err().kind,
+        Failure::Query
+    );
+    session.close(STATEMENT_TIMEOUT).unwrap();
+    let requests = join.join().unwrap();
+    let payload: Value =
+        serde_json::from_str(requests[1].split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    assert_eq!(payload["timeout_seconds"], 120);
+    assert_eq!(payload["context"]["er"]["job_id"], "job-1");
+    assert_eq!(payload["context"]["er"]["attempt_id"], "attempt-1");
+    assert!(Uuid::parse_str(payload["request_id"].as_str().unwrap()).is_ok());
+    assert_eq!(requests.len(), 3);
+}
+
+#[test]
+fn task_options_bound_deadlines_resources_and_diagnostic_identifiers() {
+    let mut options = task_options();
+    for seconds in [1, 61, 600] {
+        options.statement_seconds = seconds;
+        assert!(options.validate().is_ok());
+    }
+    for seconds in [0, 601, u64::MAX] {
+        options.statement_seconds = seconds;
+        assert_eq!(options.validate().unwrap_err().kind, Failure::Parameter);
+    }
+    options = task_options();
+    options.compute = Compute::Isolated {
+        cpu: 0,
+        memory_gib: 1,
+        disk_gib: 2,
+    };
+    assert!(options.validate().is_err());
+    options = task_options();
+    options.job_id = "sensitive\ntext".into();
+    assert!(options.validate().is_err());
+}
+
+#[test]
+fn task_capacity_never_downgrades_the_executors_engine_budget() {
+    let mut options = task_options();
+    assert!(options.require_capacity(1, 512 * 1024 * 1024).is_ok());
+    assert_eq!(
+        options
+            .require_capacity(2, 512 * 1024 * 1024)
+            .unwrap_err()
+            .kind,
+        Failure::Capacity
+    );
+    assert_eq!(
+        options
+            .require_capacity(1, 512 * 1024 * 1024 + 1)
+            .unwrap_err()
+            .kind,
+        Failure::Capacity
+    );
+    options.compute = Compute::Isolated {
+        cpu: 6,
+        memory_gib: 12,
+        disk_gib: 150,
+    };
+    assert!(options.require_capacity(6, 6_000_000_000).is_ok());
+    assert!(options.require_capacity(12, 6_000_000_000).is_err());
+}

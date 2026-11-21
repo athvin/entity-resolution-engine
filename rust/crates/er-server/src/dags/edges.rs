@@ -33,7 +33,14 @@ impl LakeEdge for Resolved {
     const RELATIONS: &'static [&'static str] = &["entities", "entity_membership", "entity_events"];
 }
 
-/// What `assemble` (golden + reviews + metrics + quality) produces.
+/// Golden-record generation has committed before descriptive assembly runs.
+pub struct Golden;
+impl LakeEdge for Golden {
+    const STABLE_NAME: &'static str = "golden";
+    const RELATIONS: &'static [&'static str] = &["golden_records", "golden_lineage"];
+}
+
+/// What `assemble` (reviews + metrics + quality) produces.
 pub struct Assembled;
 impl LakeEdge for Assembled {
     const STABLE_NAME: &'static str = "assembled";
@@ -68,6 +75,7 @@ pub fn all() -> Vec<(&'static str, &'static [&'static str])> {
         (Standardized::STABLE_NAME, Standardized::RELATIONS),
         (Scored::STABLE_NAME, Scored::RELATIONS),
         (Resolved::STABLE_NAME, Resolved::RELATIONS),
+        (Golden::STABLE_NAME, Golden::RELATIONS),
         (Assembled::STABLE_NAME, Assembled::RELATIONS),
         (Profiled::STABLE_NAME, Profiled::RELATIONS),
     ]

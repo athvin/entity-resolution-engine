@@ -38,6 +38,7 @@ pub mod dispatcher;
 pub mod dispatcher_bin;
 pub mod duckfleet_artifacts;
 mod duckfleet_reads;
+mod duckfleet_tasks;
 pub mod errfmt;
 pub mod exec_task;
 pub mod executor;

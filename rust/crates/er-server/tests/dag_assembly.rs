@@ -82,16 +82,17 @@ fn the_run_all_graph_matches_the_design() {
             "standardize",
             "match",
             "reconcile",
+            "golden",
             "assemble",
             "finish"
         ]
     );
-    let finish = &dag.nodes[6];
+    let finish = &dag.nodes[7];
     assert!(finish.teardown);
     assert_eq!(finish.trigger_rule.as_str(), "all_terminal");
     // Every lake writer is ordered against every other (the §3.3 single-writer
     // check holds by construction on the chain).
-    assert!(dag.nodes.iter().take(6).all(|n| n.writes_lake));
+    assert!(dag.nodes.iter().take(7).all(|n| n.writes_lake));
     // match and reconcile escalate on OOM by default (§5.5).
     assert!(dag.nodes[3].policy.escalate_on_oom);
     assert!(dag.nodes[4].policy.escalate_on_oom);

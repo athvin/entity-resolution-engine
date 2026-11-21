@@ -18,6 +18,7 @@
 /// shipping three copies of statically-linked DuckDB — see `rust/Dockerfile`
 /// and the multicall dispatch in `er-server`'s `main`.
 pub mod cli;
+pub mod golden_task;
 pub mod profile;
 pub mod related;
 
@@ -3667,34 +3668,7 @@ pub fn run_reconcile(session: &Session, config: &Config, run_id: &str, run_at: &
 /// Propagates the survivorship SQL / lake write errors.
 pub fn run_golden(session: &Session, config: &Config, run_at: &str) -> Result<()> {
     if !config.entity_type.is_person() {
-        // Account golden assembly over the shared entity tables + the Account
-        // standardized corpus. (Steward golden overrides are a person-only path
-        // today; not wired for Account.)
-        session.execute_batch(&format!("drop table if exists {ACCT_GOLDEN_LINEAGE}"))?;
-        let lineage_sql = er_golden::acct_golden_lineage_sql(
-            config,
-            ACCT_INT_STD_RECORDS,
-            ENTITY_MEMBERSHIP,
-            ENTITIES,
-            run_at,
-        )?;
-        session.execute_batch(&format!(
-            "create table {ACCT_GOLDEN_LINEAGE} as\n{lineage_sql}"
-        ))?;
-
-        session.execute_batch(&format!("drop table if exists {ACCT_GOLDEN_RECORDS}"))?;
-        let records_sql = er_golden::acct_golden_records_sql(
-            config,
-            ACCT_GOLDEN_LINEAGE,
-            ACCT_INT_STD_RECORDS,
-            ENTITY_MEMBERSHIP,
-            ENTITIES,
-            run_at,
-        );
-        session.execute_batch(&format!(
-            "create table {ACCT_GOLDEN_RECORDS} as\n{records_sql}"
-        ))?;
-        return Ok(());
+        return golden_task::run_account(session.connection(), config, run_at);
     }
     session.execute_batch(&format!("drop table if exists {GOLDEN_LINEAGE}"))?;
     let lineage_sql = er_golden::golden_lineage_sql(
@@ -4611,6 +4585,18 @@ pub fn stage_assemble(
     inputs: &PipelineInputs<'_>,
 ) -> Result<()> {
     run_golden(session, config, inputs.run_at)?;
+    stage_assemble_after_golden(session, config, inputs)
+}
+
+/// Complete reviews, metrics and quality after the golden task has committed.
+///
+/// # Errors
+/// Propagates review queue failures, as `stage_assemble` does.
+pub fn stage_assemble_after_golden(
+    session: &Session,
+    config: &Config,
+    inputs: &PipelineInputs<'_>,
+) -> Result<()> {
     write_reviews(session, config, inputs.run_id, inputs.run_at)?;
     // Metrics last, and best-effort: the run's results are already written,
     // so a failure to describe them must not fail the run that produced

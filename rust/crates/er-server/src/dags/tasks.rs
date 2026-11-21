@@ -20,7 +20,7 @@
 
 use er_dag::{LakeRef, NodePolicy, Outcome, Plan, Task, TaskCtx, TaskError};
 
-use super::edges::{Assembled, Landed, Profiled, Resolved, Scored, Standardized};
+use super::edges::{Assembled, Golden, Landed, Profiled, Resolved, Scored, Standardized};
 use super::plans::{
     DrainedActions, ExtractReport, FinishReport, LakeInitialized, MaintenanceReport, RunPlan,
     SchemaReconciled, TrainedModel,
@@ -403,15 +403,41 @@ impl Task<Session> for Reconcile {
     }
 }
 
-/// Golden records, the review queue, then metrics and quality (the last two
-/// best-effort — see `er_cli::stage_assemble`).
+/// Generate golden records before downstream review and reporting tasks.
+#[derive(Default)]
+pub struct GenerateGolden;
+
+impl Task<Session> for GenerateGolden {
+    const NAME: &'static str = "golden";
+    const VERSION: u32 = 1;
+    type Input = (Plan<RunPlan>, LakeRef<Resolved>);
+    type Output = LakeRef<Golden>;
+    const WRITES_LAKE: bool = true;
+
+    fn run(
+        &mut self,
+        ctx: &mut TaskCtx<'_, Session>,
+        (plan, _resolved): Self::Input,
+    ) -> Result<Outcome<Self::Output>, TaskError> {
+        let run = context(ctx, false)?;
+        er_cli::run_golden(ctx.session, &run.config, &plan.0.run_at)
+            .map_err(|e| engine_error(&format!("{e:#}")))?;
+        Ok(Outcome::Done(
+            LakeRef::new(head_or_unknown(ctx.session), 0),
+            er_dag::Counters::default(),
+        ))
+    }
+}
+
+/// Review queue, then metrics and quality after golden publication (the last
+/// two best-effort — see `er_cli::stage_assemble_after_golden`).
 #[derive(Default)]
 pub struct Assemble;
 
 impl Task<Session> for Assemble {
     const NAME: &'static str = "assemble";
-    const VERSION: u32 = 1;
-    type Input = (Plan<RunPlan>, LakeRef<Resolved>);
+    const VERSION: u32 = 2;
+    type Input = (Plan<RunPlan>, LakeRef<Golden>);
     type Output = LakeRef<Assembled>;
     const WRITES_LAKE: bool = true;
 
@@ -423,7 +449,7 @@ impl Task<Session> for Assemble {
         let run = context(ctx, false)?;
         let model = run.model();
         let inputs = inputs_from_plan(ctx, &run, &model, &plan.0);
-        er_cli::stage_assemble(ctx.session, &run.config, &inputs)
+        er_cli::stage_assemble_after_golden(ctx.session, &run.config, &inputs)
             .map_err(|e| engine_error(&format!("{e:#}")))?;
         Ok(Outcome::Done(
             LakeRef::new(head_or_unknown(ctx.session), 0),

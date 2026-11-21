@@ -217,7 +217,7 @@ pub const METRICS: &[Metric] = &[
         unit: "ms",
         description: "Committed pod-task execution durations by bounded stage and class, from durable start/finish timestamps. Includes failed executions; excludes tasks without a start timestamp.",
         dimensions: &["resource_class", "stage"],
-        series: 64,
+        series: 68,
     },
     Metric {
         name: "er.tasks.completed",

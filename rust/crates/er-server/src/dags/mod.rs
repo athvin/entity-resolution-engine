@@ -27,8 +27,8 @@ use control::{
 };
 use tasks::{
     ApplyStaged, Assemble, CorrectReconcile, CorrectionsInit, CorrectionsReconcile, ExtractPull,
-    Finish, Ingest, Init, LakeInit, Maintain, Match, ProfileCorpus, Reconcile, ReconcileSchema,
-    Standardize, Train, WriteBackScan,
+    Finish, GenerateGolden, Ingest, Init, LakeInit, Maintain, Match, ProfileCorpus, Reconcile,
+    ReconcileSchema, Standardize, Train, WriteBackScan,
 };
 
 /// The lake session type every pod task body takes; fixed here so `er-dag`
@@ -382,10 +382,24 @@ pub fn run_pod_task(
             | JobKind::RunAllIncremental
             | JobKind::Correct
             | JobKind::ApplyCorrections,
-            "assemble",
+            "golden",
         ) => {
             let plan = pin::<er_dag::Plan<plans::RunPlan>>(ctx, 0)?;
             let ents = pin::<er_dag::LakeRef<edges::Resolved>>(ctx, 1)?;
+            completed(tasks::GenerateGolden.run(ctx, (plan, ents))?)
+        }
+        // `assemble` is the SAME stage for a run and a correction pass: both
+        // hand it a `Resolved` partition and ask for golden records, reviews,
+        // metrics and quality over it.
+        (
+            JobKind::RunAllFull
+            | JobKind::RunAllIncremental
+            | JobKind::Correct
+            | JobKind::ApplyCorrections,
+            "assemble",
+        ) => {
+            let plan = pin::<er_dag::Plan<plans::RunPlan>>(ctx, 0)?;
+            let ents = pin::<er_dag::LakeRef<edges::Golden>>(ctx, 1)?;
             completed(tasks::Assemble.run(ctx, (plan, ents))?)
         }
         // The teardown takes NO input: it fires on whatever its upstreams did,
@@ -422,7 +436,8 @@ fn run_all() -> Dag {
     let std = d.then::<Standardize>((plan, raw));
     let scored = d.then::<Match>((plan, std));
     let ents = d.then::<Reconcile>((plan, scored));
-    let done = d.then::<Assemble>((plan, ents));
+    let golden = d.then::<GenerateGolden>((plan, ents));
+    let done = d.then::<Assemble>((plan, golden));
     d.epilogue::<Finish>(&[done.id()], TriggerRule::AllTerminal);
     d.build().expect("the run_all DAG assembles")
 }
@@ -431,7 +446,8 @@ fn correct() -> Dag {
     let mut d = Builder::new(JobKind::Correct.dag_name());
     let plan = d.source::<Init>();
     let ents = d.then::<CorrectReconcile>((plan,));
-    let done = d.then::<Assemble>((plan, ents));
+    let golden = d.then::<GenerateGolden>((plan, ents));
+    let done = d.then::<Assemble>((plan, golden));
     d.epilogue::<Finish>(&[done.id()], TriggerRule::AllTerminal);
     d.build().expect("the correct DAG assembles")
 }
@@ -498,7 +514,8 @@ fn apply_corrections() -> Dag {
     // `init`'s `RunPlan` does not carry them and was never going to.
     let applied = d.then::<ApplyStaged>((plan, drained));
     let ents = d.then::<CorrectionsReconcile>((plan, applied));
-    let done = d.then::<Assemble>((plan, ents));
+    let golden = d.then::<GenerateGolden>((plan, ents));
+    let done = d.then::<Assemble>((plan, golden));
     // `settle_actions` takes the APPLIED receipt, not just the drained set:
     // `apply_staged` derives pair labels and review resolutions that only
     // Postgres can store, and a pod cannot store them (§6.4). It also takes

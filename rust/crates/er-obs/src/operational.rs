@@ -198,6 +198,7 @@ pub fn task_completed(
         "match" => "match",
         "reconcile" => "reconcile",
         "assemble" => "assemble",
+        "golden" => "golden",
         "finish" => "finish",
         "apply_staged" => "apply_staged",
         "write_back_scan" => "write_back_scan",
