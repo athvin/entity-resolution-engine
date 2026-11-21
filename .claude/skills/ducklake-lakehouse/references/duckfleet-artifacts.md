@@ -84,8 +84,10 @@ and generation rotation. Terraform tests cover worker denies and bucket-policy
 construction. `scripts/duckfleet/artifacts.py` runs the Rust transport against a
 fresh disposable Compose deployment, with a CSV and export larger than 16 MiB,
 receipt/retry checks, digest validation, bounded SQL and staging-only cleanup.
-Use its `--source`, `--image` and `--output` arguments with the pinned upstream
-source and locally built proof image. All data is synthetic. The harness always
+Use its `--source`, `--image`, `--output` and `--mc` arguments with the pinned
+upstream source, locally built proof image and verified mc binary. It creates
+restricted publisher and worker identities before starting DuckFleet; the real
+worker must ingest/export successfully and refuse foreign reads and sealed writes. All data is synthetic. The harness always
 removes its own containers and volumes; it never touches an existing fleet.
 
 `artifact-policy.py --mc /path/to/verified/mc` separately creates restricted
@@ -94,3 +96,6 @@ write/delete refusal and cross-dataset read refusal against a present object.
 It records the local store's conditional-policy limitation instead of treating
 an unsupported policy as a pass. The pinned mc release used for qualification is
 `RELEASE.2025-08-13T08-35-41Z`; verify its release SHA-256 before execution.
+
+The [recorded artifact evidence](duckfleet-artifact-evidence.json) contains the
+measured file sizes, digests, refusals and cleanup result.

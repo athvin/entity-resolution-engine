@@ -1,0 +1,31 @@
+{
+  "changed_input_refused": true,
+  "delivery_retry_identical": true,
+  "input_bytes": 27408901,
+  "invalid_credentials_refused_retry_preserved": true,
+  "output_bytes": 27408901,
+  "output_retry_identical": true,
+  "output_sha256": "b48e47f2f27eaa41c04cce4a09eed46b5a024563dde5b1d1d0cb11dd46507606",
+  "oversized_sql_refused": "Query",
+  "receipt_unchanged": true,
+  "rows": 60000,
+  "staging_cleanup_preserved_sealed": true,
+  "worker_foreign_read_refused": true,
+  "worker_sealed_write_refused": true,
+  "worker_sessions_after_close": 0,
+  "upstream_revision": "398ff60c7abe973514707be3e47248a610560ec9",
+  "image_id": "sha256:ea887ed66bcd9f80f8fd467fa798b7b898952193a0add6968ba7f215670d7e38",
+  "conditional_policy_enforcement": "unsupported by RustFS 1.0.4; requires AWS qualification",
+  "scope": "Rust artifact transfer; disposable Compose with restricted publisher and worker identities; not AWS qualification",
+  "worker_policy_probe": {
+    "conditional_policy_enforcement": "unsupported by RustFS 1.0.4; requires AWS qualification",
+    "publish": "allowed",
+    "conditional_rewrite": "PreconditionFailed",
+    "publisher_delete": "AccessDenied",
+    "worker_read": "allowed",
+    "worker_delete": "AccessDenied",
+    "worker_seal": "AccessDenied",
+    "worker_staging": "allowed",
+    "foreign_read": "AccessDenied"
+  }
+}

@@ -105,6 +105,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     // A file changed after acceptance cannot silently create a new digest.
     let wrong = tempfile::NamedTempFile::new()?;
     std::fs::write(wrong.path(), b"changed")?;
+    wrong.as_file().set_len(input.bytes())?;
     assert!(
         runtime
             .block_on(store.publish_file(&binding, input.clone(), wrong.reopen()?))
@@ -130,6 +131,34 @@ fn main() -> Result<(), Box<dyn Error>> {
             .ok_or("count type")?
             .value(0),
         60000
+    );
+    // The worker runs with the restricted identity, and the foreign object
+    // exists: neither a missing-key error nor a root credential proves isolation.
+    assert!(
+        remote
+            .query(
+                "SELECT * FROM read_csv('s3://duckfleet/foreign/artifacts/immutable/exists.csv')",
+                &[]
+            )
+            .is_err()
+    );
+    let sealed_probe = Artifact::new(
+        &binding,
+        "worker-must-not-publish",
+        Format::Csv,
+        0,
+        &"0".repeat(64),
+    )?;
+    assert!(
+        remote
+            .query(
+                &format!(
+                    "COPY (SELECT 1) TO '{}' (FORMAT CSV)",
+                    sealed_probe.uri(&binding)?
+                ),
+                &[]
+            )
+            .is_err()
     );
     let staging = Staging::new(&binding, er_ids::new_v7().parse()?, Format::Csv);
     // This URI is generated from the validated binding and a UUID, never from
@@ -167,7 +196,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let _: Artifact = serde_json::from_slice(&serde_json::to_vec(&output)?)?;
     println!(
         "{}",
-        json!({"rows":60000,"input_bytes":input.bytes(),"output_bytes":output.bytes(),"output_sha256":output.sha256(),"delivery_retry_identical":true,"receipt_unchanged":true,"invalid_credentials_refused_retry_preserved":true,"changed_input_refused":true,"output_retry_identical":true,"staging_cleanup_preserved_sealed":true,"oversized_sql_refused":bounded_kind})
+        json!({"rows":60000,"worker_foreign_read_refused":true,"worker_sealed_write_refused":true,"input_bytes":input.bytes(),"output_bytes":output.bytes(),"output_sha256":output.sha256(),"delivery_retry_identical":true,"receipt_unchanged":true,"invalid_credentials_refused_retry_preserved":true,"changed_input_refused":true,"output_retry_identical":true,"staging_cleanup_preserved_sealed":true,"oversized_sql_refused":bounded_kind})
     );
     Ok(())
 }

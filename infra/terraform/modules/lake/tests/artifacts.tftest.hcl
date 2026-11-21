@@ -1,10 +1,5 @@
 # Use the real policy-document provider function; mock resources only. A
 # fabricated policy JSON would test the fixture instead of the generated deny.
-mock_provider "aws" {
-  mock_resource "aws_s3_bucket" {
-    defaults = { arn = "arn:aws:s3:::test-lake" }
-  }
-}
 provider "aws" {
   alias                       = "policy"
   region                      = "us-east-2"
