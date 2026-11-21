@@ -361,20 +361,17 @@ impl RemoteSession {
         if self.cleanup_complete {
             return Ok(());
         }
-        match self
+        let bytes = self
             .transport
-            .request(Method::DELETE, &self.path, None, timeout, false)
-        {
-            Ok(_)
-            | Err(ExecutionError {
-                kind: Failure::SessionLost,
-                ..
-            }) => {
-                self.cleanup_complete = true;
-                Ok(())
-            }
-            Err(error) => Err(error),
+            .request(Method::DELETE, &self.path, None, timeout, false)?;
+        let response: Value = serde_json::from_slice(&bytes).map_err(|_| Failure::Protocol)?;
+        // A missing gateway route does not prove that its worker stopped. Only
+        // the upstream's explicit closure acknowledgement completes cleanup.
+        if response.get("closed").and_then(Value::as_bool) != Some(true) {
+            return Err(Failure::UnknownOutcome.into());
         }
+        self.cleanup_complete = true;
+        Ok(())
     }
 }
 

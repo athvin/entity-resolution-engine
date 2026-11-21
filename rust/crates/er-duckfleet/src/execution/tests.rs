@@ -95,7 +95,7 @@ fn redirects_never_forward_credentials() {
 }
 
 #[test]
-fn lost_session_is_never_replaced_and_explicit_close_is_idempotent() {
+fn missing_route_does_not_prove_cleanup_and_session_is_never_replaced() {
     let (transport, join) = server(vec![
         opened(),
         reply(
@@ -103,6 +103,7 @@ fn lost_session_is_never_replaced_and_explicit_close_is_idempotent() {
             json!({"failure_kind":"unknown_session", "error":"sensitive SQL"}),
         ),
         reply(404, json!({"failure_kind":"unknown_session"})),
+        reply(200, json!({"closed":true})),
     ]);
     let mut session = RemoteSession::open(transport).unwrap();
     let error = session.query("select 1", &[]).unwrap_err();
@@ -113,6 +114,11 @@ fn lost_session_is_never_replaced_and_explicit_close_is_idempotent() {
         session.query("select 2", &[]).unwrap_err().kind,
         Failure::SessionLost
     );
+    assert_eq!(
+        session.close(STATEMENT_TIMEOUT).unwrap_err().kind,
+        Failure::SessionLost
+    );
+    assert!(!session.cleanup_complete);
     session.close(STATEMENT_TIMEOUT).unwrap();
     session.close(STATEMENT_TIMEOUT).unwrap();
     assert_eq!(
@@ -120,7 +126,7 @@ fn lost_session_is_never_replaced_and_explicit_close_is_idempotent() {
         Failure::Closed
     );
     let requests = join.join().unwrap();
-    assert_eq!(requests.len(), 3);
+    assert_eq!(requests.len(), 4);
     assert!(requests[0].starts_with("POST /v1/sessions "));
     assert!(
         requests[1].starts_with("POST /v1/sessions/00000000-0000-0000-0000-000000000001/queries ")
@@ -130,7 +136,11 @@ fn lost_session_is_never_replaced_and_explicit_close_is_idempotent() {
 
 #[test]
 fn cleanup_failure_is_reported_and_can_be_retried_without_reopening() {
-    let (transport, join) = server(vec![opened(), reply(503, json!({})), reply(200, json!({}))]);
+    let (transport, join) = server(vec![
+        opened(),
+        reply(503, json!({})),
+        reply(200, json!({"closed":true})),
+    ]);
     let mut session = RemoteSession::open(transport).unwrap();
     assert!(session.close(STATEMENT_TIMEOUT).is_err());
     assert_eq!(
@@ -144,7 +154,7 @@ fn cleanup_failure_is_reported_and_can_be_retried_without_reopening() {
 
 #[test]
 fn drop_attempts_cleanup_and_invalid_parameters_do_not_reach_server() {
-    let (transport, join) = server(vec![opened(), reply(200, json!({}))]);
+    let (transport, join) = server(vec![opened(), reply(200, json!({"closed":true}))]);
     {
         let session = RemoteSession::open(transport).unwrap();
         for parameter in [
@@ -165,7 +175,11 @@ fn drop_attempts_cleanup_and_invalid_parameters_do_not_reach_server() {
 
 #[test]
 fn cancellation_uses_the_owned_session_and_stops_after_close() {
-    let (transport, join) = server(vec![opened(), reply(200, json!({})), reply(200, json!({}))]);
+    let (transport, join) = server(vec![
+        opened(),
+        reply(200, json!({"closed":true})),
+        reply(200, json!({"closed":true})),
+    ]);
     let mut session = Session::Remote(RemoteSession::open(transport).unwrap());
     let control = session.cancellation().unwrap();
     control.cancel().unwrap();
@@ -243,7 +257,7 @@ fn transport_loss_has_a_request_identity_and_never_replays() {
             headers: "",
             body: Vec::new(),
         },
-        reply(200, json!({})),
+        reply(200, json!({"closed":true})),
     ]);
     let mut session = RemoteSession::open(transport).unwrap();
     let error = session.query("SELECT 1", &[]).unwrap_err();
@@ -276,7 +290,7 @@ fn malformed_arrow_poisons_the_session_without_exposing_the_body() {
     let (transport, join) = server(vec![
         opened(),
         reply(200, json!({"secret":"upstream-value"})),
-        reply(200, json!({})),
+        reply(200, json!({"closed":true})),
     ]);
     let mut session = RemoteSession::open(transport).unwrap();
     let error = session.query("SELECT 1", &[]).unwrap_err();
@@ -388,4 +402,24 @@ fn task_capacity_never_downgrades_the_executors_engine_budget() {
     };
     assert!(options.require_capacity(6, 6_000_000_000).is_ok());
     assert!(options.require_capacity(12, 6_000_000_000).is_err());
+}
+
+#[test]
+fn cleanup_requires_an_explicit_boolean_acknowledgement() {
+    for body in [json!({}), json!({"closed":false}), json!({"closed":"true"})] {
+        let (transport, join) = server(vec![
+            opened(),
+            reply(200, body),
+            reply(200, json!({"closed":true})),
+        ]);
+        let mut session = RemoteSession::open(transport).unwrap();
+        assert_eq!(
+            session.close(STATEMENT_TIMEOUT).unwrap_err().kind,
+            Failure::UnknownOutcome
+        );
+        assert!(!session.cleanup_complete);
+        session.close(STATEMENT_TIMEOUT).unwrap();
+        assert!(session.cleanup_complete);
+        assert_eq!(join.join().unwrap().len(), 3);
+    }
 }
