@@ -1,0 +1,3 @@
+# Discovery harness only; the production engine remains Rust.
+duckdb==2.0.0
+pyarrow==23.0.1
