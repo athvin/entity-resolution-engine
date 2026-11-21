@@ -1,7 +1,0 @@
-kind: statement
-operation: read
-mode: partial
-description: "Unresolved attempt preventing another writer for this dataset."
-params:
-  - { name: dataset_id, type: varchar }
-returns: entity

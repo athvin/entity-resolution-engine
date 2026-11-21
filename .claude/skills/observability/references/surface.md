@@ -92,6 +92,7 @@ be grouped, filtered by target, or joined to a trace.
 - `er-server/src/dags/tasks.rs`
 - `er-server/src/dispatcher.rs`
 - `er-server/src/dispatcher_bin.rs`
+- `er-server/src/duckfleet_tasks.rs`
 - `er-server/src/exec_task.rs`
 - `er-server/src/executor.rs`
 - `er-server/src/fixups.rs`
@@ -100,6 +101,7 @@ be grouped, filtered by target, or joined to a trace.
 - `er-server/src/main.rs`
 - `er-server/src/ops.rs`
 - `er-server/src/pg.rs`
+- `er-server/src/remote_attempts.rs`
 - `er-server/src/satoken.rs`
 - `er-server/src/shutdown.rs`
 - `er-server/src/telemetry.rs`

@@ -181,63 +181,6 @@ WHERE id = $1
             .collect())
     }
 
-    /// Unresolved attempt preventing another writer for this dataset.
-    pub async fn for_dataset(
-        client: &impl ::tokio_postgres::GenericClient,
-        dataset_id: &str,
-    ) -> ::std::result::Result<Vec<super::RemoteAttempt>, ::tokio_postgres::Error> {
-        const SQL: &str = "SELECT id,
-  org_id,
-  dataset_id,
-  job_id,
-  task_instance_id,
-  launch,
-  binding_generation,
-  namespace,
-  session_id,
-  request_id,
-  commit_request_id,
-  phase,
-  released_at,
-  created_at,
-  updated_at
-FROM public.remote_attempts
-WHERE dataset_id = $1 AND released_at IS NULL
-";
-        let __span = ::er_span::sql_span(
-            ::er_span::Store::Control,
-            "remote_attempt",
-            "read",
-            "for_dataset",
-            "remote_attempts",
-            SQL,
-        );
-        let __result = ::er_span::instrument(&__span, client.query(SQL, &[&dataset_id])).await;
-        let __entered = __span.enter();
-        let rows = ::er_span::check(&__span, __result)?;
-        ::er_span::rows(&__span, rows.len() as u64);
-        Ok(rows
-            .iter()
-            .map(|row| super::RemoteAttempt {
-                id: row.get("id"),
-                org_id: row.get("org_id"),
-                dataset_id: row.get("dataset_id"),
-                job_id: row.get("job_id"),
-                task_instance_id: row.get("task_instance_id"),
-                launch: row.get("launch"),
-                binding_generation: row.get("binding_generation"),
-                namespace: row.get("namespace"),
-                session_id: row.get("session_id"),
-                request_id: row.get("request_id"),
-                commit_request_id: row.get("commit_request_id"),
-                phase: row.get("phase"),
-                released_at: row.get("released_at"),
-                created_at: row.get("created_at"),
-                updated_at: row.get("updated_at"),
-            })
-            .collect())
-    }
-
     /// The unresolved attempt holding the dataset of the given task, if any: the identifier a refused acquire names in its customer-safe detail.
     pub async fn holding(
         client: &impl ::tokio_postgres::GenericClient,
