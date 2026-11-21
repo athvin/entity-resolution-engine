@@ -498,6 +498,7 @@ The table below is **generated** from each skill's frontmatter by
 | building or restyling a component or page | `frontend-design-system` |
 | adding or fixing a frontend test, when a Playwright or vitest run fails | `frontend-testing` |
 | asked to check dev or prod health, hunt errors in the running system (user-invoked only) | `health-sweep` |
+| the user explicitly mentions Herdr or asks to inspect or control its panes (user-invoked only) | `herdr` |
 | editing Terraform or a Helm chart, writing a NodePool | `infra-platform` |
 | asked to monitor, watch, babysit or land a pull request | `land-pr` |
 | editing or adding a marketing page or its copy | `landing-page` |
@@ -520,8 +521,8 @@ within weeks — including the count that used to sit in this very paragraph.
 
 ### Three general-purpose skills are overridden
 
-A normal session loads skills that are each wrong for this repo in a specific
-way. In every case the house skill states the supersession in its own body and
+Dependency sync or external installations can supply skills that conflict with
+this repo in a specific way. In every case the house skill states the supersession in its own body and
 wins structurally, because root skills load at startup while nested and plugin
 skills load later. The override is partial each time — only the conflicting
 claim is superseded.
