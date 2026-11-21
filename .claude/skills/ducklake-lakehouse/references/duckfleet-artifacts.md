@@ -5,6 +5,13 @@ It does not introduce another customer upload or result API. Durable public
 receipts, resumable upload and bulk export remain #1011, #1012 and #521.
 Backend task adoption is #1132; live AWS qualification is #1134.
 
+## Contents
+
+- [Input inventory](#input-inventory)
+- [Storage contract](#storage-contract)
+- [Bounds and compatibility](#bounds-and-compatibility)
+- [Verification](#verification)
+
 ## Input inventory
 
 | Existing input | Current owner | Remote-worker representation |
@@ -97,5 +104,5 @@ It records the local store's conditional-policy limitation instead of treating
 an unsupported policy as a pass. The pinned mc release used for qualification is
 `RELEASE.2025-08-13T08-35-41Z`; verify its release SHA-256 before execution.
 
-The [recorded artifact evidence](duckfleet-artifact-evidence.json) contains the
+The artifact evidence linked from the parent skill contains the
 measured file sizes, digests, refusals and cleanup result.

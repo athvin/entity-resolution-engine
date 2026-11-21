@@ -116,13 +116,18 @@ fn main() -> Result<(), Box<dyn Error>> {
         "CREATE TEMP TABLE artifact_input AS SELECT * FROM read_csv(?, header=true)",
         &[Parameter::Text(input.uri(&binding)?)],
     )?;
+    remote.query(
+        include_str!("../../er-entities/ddl/lake/raw_records.sql"),
+        &[],
+    )?;
+    remote.query("CREATE TEMP TABLE artifact_rows AS SELECT id::VARCHAR AS id, 'fixture' AS source_system, id::VARCHAR AS source_record_id, json_object('payload', payload) AS payload, sha256(payload) AS content_hash, false AS is_deleted, NULL::TIMESTAMP AS deleted_at, 'fixture-batch' AS ingest_batch_id, TIMESTAMP '2026-01-01' AS ingested_at, TIMESTAMP '2026-01-01' AS created_at, TIMESTAMP '2026-01-01' AS updated_at FROM artifact_input", &[])?;
     remote.query("BEGIN", &[])?;
     remote.query(
-        "CREATE TABLE lake.main.artifact_proof AS SELECT * FROM artifact_input",
+        "INSERT INTO lake.main.raw_records SELECT * FROM artifact_rows",
         &[],
     )?;
     remote.query("COMMIT", &[])?;
-    let count = remote.query("SELECT count(*)::BIGINT FROM lake.main.artifact_proof", &[])?;
+    let count = remote.query("SELECT count(*)::BIGINT FROM lake.main.raw_records", &[])?;
     assert_eq!(
         count[0]
             .column(0)
@@ -163,7 +168,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let staging = Staging::new(&binding, er_ids::new_v7().parse()?, Format::Csv);
     // This URI is generated from the validated binding and a UUID, never from
     // request text. COPY's target is syntax rather than a bound SQL value.
-    remote.query(&format!("COPY (SELECT * FROM lake.main.artifact_proof ORDER BY id) TO '{}' (HEADER, FORMAT CSV)", staging.uri(&binding)?), &[])?;
+    remote.query(&format!("COPY (SELECT id::BIGINT AS id, payload->>'payload' AS payload FROM lake.main.raw_records ORDER BY id::BIGINT) TO '{}' (HEADER, FORMAT CSV)", staging.uri(&binding)?), &[])?;
     let output = runtime.block_on(store.seal(&binding, &staging, "result-1"))?;
     assert!(output.bytes() > 16 * 1024 * 1024);
     let result = runtime.block_on(store.fetch(&binding, &output))?;
@@ -186,10 +191,17 @@ fn main() -> Result<(), Box<dyn Error>> {
     runtime.block_on(store.verify(&binding, &input))?;
     runtime.block_on(store.verify(&binding, &output))?;
     assert_eq!(
-        remote.query("SELECT payload FROM lake.main.artifact_proof LIMIT 1", &[])?[0].num_rows(),
+        remote.query(
+            "SELECT payload->>'payload' AS payload FROM lake.main.raw_records LIMIT 1",
+            &[]
+        )?[0]
+            .num_rows(),
         1
     );
-    let bounded = remote.query("SELECT payload FROM lake.main.artifact_proof", &[]);
+    let bounded = remote.query(
+        "SELECT payload->>'payload' AS payload FROM lake.main.raw_records",
+        &[],
+    );
     assert!(bounded.is_err(), "oversized SQL result must be refused");
     let bounded_kind = format!("{:?}", bounded.unwrap_err().kind);
     remote.close()?;

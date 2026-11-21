@@ -103,7 +103,7 @@ impl Store {
         let root = root.to_owned();
         let spec = spec.clone();
         let dataset = binding.dataset_id().to_owned();
-        let prepared = tokio::task::spawn_blocking(move || {
+        let prepared = er_obs::spawn_blocking_in_span(move || {
             snapshot(pin.open_verified(&root, &dataset, &spec)?)
         })
         .await
@@ -127,7 +127,7 @@ impl Store {
         if !metadata.is_file() || metadata.len() != artifact.bytes() {
             return Err(Error::Integrity);
         }
-        let prepared = tokio::task::spawn_blocking(move || snapshot(file))
+        let prepared = er_obs::spawn_blocking_in_span(move || snapshot(file))
             .await
             .map_err(|_| Error::Interrupted)??;
         self.publish(binding, artifact, prepared).await
