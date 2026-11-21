@@ -868,8 +868,10 @@ fn ddl_specs() -> Vec<TableSpec> {
         ),
         // Steward record overlays (PR 1.3): protect/suppress one record. One
         // latest-wins active row per (record_key, kind). `suppress` drops the
-        // record from reconcile clustering; `protect` forces it master on the
-        // read path. Loaded only when the table exists, so an empty/absent
+        // record from reconcile clustering; `delete` (spec 2.9) does the same
+        // and additionally stops the cell-data read lane from serving it, with
+        // an active `protect` winning over it; `protect` forces it master on
+        // the read path. Loaded only when the table exists, so an empty/absent
         // overlay is a byte-exact no-op (the determinism contract holds).
         tspec(
             "record_overlays",
@@ -885,6 +887,27 @@ fn ddl_specs() -> Vec<TableSpec> {
                 nn("updated_at", TIMESTAMP),
             ],
             vec![key(&["id"]), key(&["record_key", "kind"])],
+            BTreeMap::new(),
+        ),
+        // Steward verification flags (spec 2.9): a row or a single cell a
+        // steward confirmed correct. One latest-wins active row per
+        // (record_key, attribute), a NULL attribute marking the whole row.
+        // Read-side metadata only — verification never changes clustering, so
+        // an empty/absent table is a byte-exact no-op.
+        tspec(
+            "record_verifications",
+            vec![
+                nn("id", VARCHAR),
+                nn("record_key", VARCHAR),
+                col("attribute", VARCHAR),
+                nn("active", BOOLEAN),
+                nn("created_by", VARCHAR),
+                nn("created_at", TIMESTAMP),
+                nn("source_action_id", VARCHAR),
+                col("retracted_at", TIMESTAMP),
+                nn("updated_at", TIMESTAMP),
+            ],
+            vec![key(&["id"]), key(&["record_key", "attribute"])],
             BTreeMap::new(),
         ),
         // The lake's schema ledger: one row per DDL statement the reconciler

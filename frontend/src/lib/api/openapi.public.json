@@ -4502,6 +4502,87 @@
         ]
       }
     },
+    "/v1/orgs/{org}/datasets/{ds}/records/delete": {
+      "post": {
+        "summary": "delete a record (spec 2.9)",
+        "operationId": "post_orgs_by_org_datasets_by_ds_records_delete",
+        "parameters": [
+          {
+            "name": "org",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ds",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "apply_now": {
+                    "type": "boolean"
+                  },
+                  "record_key": {},
+                  "record_keys": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "2XX": {
+            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "default": {
+            "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "detail"
+                  ],
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "steward"
+            ]
+          }
+        ]
+      }
+    },
     "/v1/orgs/{org}/datasets/{ds}/records/ingest": {
       "post": {
         "summary": "push records as JSON",
@@ -4753,6 +4834,167 @@
         ]
       }
     },
+    "/v1/orgs/{org}/datasets/{ds}/records/undelete": {
+      "post": {
+        "summary": "retract a record deletion",
+        "operationId": "post_orgs_by_org_datasets_by_ds_records_undelete",
+        "parameters": [
+          {
+            "name": "org",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ds",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "apply_now": {
+                    "type": "boolean"
+                  },
+                  "record_key": {},
+                  "record_keys": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "2XX": {
+            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "default": {
+            "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "detail"
+                  ],
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "steward"
+            ]
+          }
+        ]
+      }
+    },
+    "/v1/orgs/{org}/datasets/{ds}/records/unmatch": {
+      "post": {
+        "summary": "unmatch a record from its current group",
+        "operationId": "post_orgs_by_org_datasets_by_ds_records_unmatch",
+        "parameters": [
+          {
+            "name": "org",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ds",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "record_key"
+                ],
+                "properties": {
+                  "apply_now": {
+                    "type": "boolean"
+                  },
+                  "record_key": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "2XX": {
+            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "default": {
+            "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "detail"
+                  ],
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "steward"
+            ]
+          }
+        ]
+      }
+    },
     "/v1/orgs/{org}/datasets/{ds}/records/unprotect": {
       "post": {
         "summary": "retract a record protection",
@@ -4865,6 +5107,170 @@
                   "apply_now": {
                     "type": "boolean"
                   },
+                  "record_key": {},
+                  "record_keys": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "2XX": {
+            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "default": {
+            "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "detail"
+                  ],
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "steward"
+            ]
+          }
+        ]
+      }
+    },
+    "/v1/orgs/{org}/datasets/{ds}/records/unverify": {
+      "post": {
+        "summary": "retract a verification",
+        "operationId": "post_orgs_by_org_datasets_by_ds_records_unverify",
+        "parameters": [
+          {
+            "name": "org",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ds",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "apply_now": {
+                    "type": "boolean"
+                  },
+                  "attribute": {},
+                  "record_key": {},
+                  "record_keys": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "2XX": {
+            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "default": {
+            "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "detail"
+                  ],
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "steward"
+            ]
+          }
+        ]
+      }
+    },
+    "/v1/orgs/{org}/datasets/{ds}/records/verify": {
+      "post": {
+        "summary": "verify records or one cell of them (spec 2.9)",
+        "operationId": "post_orgs_by_org_datasets_by_ds_records_verify",
+        "parameters": [
+          {
+            "name": "org",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ds",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "apply_now": {
+                    "type": "boolean"
+                  },
+                  "attribute": {},
                   "record_key": {},
                   "record_keys": {
                     "type": "array",

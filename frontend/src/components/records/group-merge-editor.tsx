@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowUp } from "lucide-react";
+import { ArrowUp, BadgeCheck } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -21,6 +21,13 @@ export interface GroupMergeEditorProps {
   /** Only rows where a member offers something different. */
   differencesOnly: boolean;
   onToggleDifferences: (value: boolean) => void;
+  /** The cells (`recordKey:attribute`) carrying an active steward
+   *  verification — rendered as a mark, clicking toggles it off. */
+  verifiedCells?: ReadonlySet<string>;
+  /** Toggle a cell's verification (spec 2.9 cell-level verify). */
+  onToggleVerifyCell?: (recordKey: string, attribute: string, verified: boolean) => void;
+  /** A verify write is in flight. */
+  verifying?: boolean;
 }
 
 /**
@@ -52,6 +59,9 @@ export function GroupMergeEditor({
   onAdopt,
   differencesOnly,
   onToggleDifferences,
+  verifiedCells,
+  onToggleVerifyCell,
+  verifying,
 }: GroupMergeEditorProps) {
   if (pending) return <Skeleton className="h-40 w-full" />;
 
@@ -107,6 +117,46 @@ export function GroupMergeEditor({
                       <span className={cn(entry.differs && entry.value !== null && "font-medium")}>
                         {entry.value ?? "—"}
                       </span>
+                      {!canEdit && verifiedCells?.has(`${entry.recordKey}:${field.attribute}`) && (
+                        <span className="ml-1 inline-flex items-center gap-1 font-medium">
+                          <BadgeCheck className="size-3" aria-hidden />
+                          verified
+                        </span>
+                      )}
+                      {canEdit &&
+                        onToggleVerifyCell !== undefined &&
+                        entry.value !== null &&
+                        (verifiedCells?.has(`${entry.recordKey}:${field.attribute}`) ? (
+                          <button
+                            type="button"
+                            className="ml-1 inline-flex min-h-11 min-w-11 items-center gap-0.5 px-1 align-middle font-medium"
+                            disabled={verifying}
+                            onClick={() => {
+                              onToggleVerifyCell(entry.recordKey, field.attribute, true);
+                            }}
+                            data-er-action="records.unverify"
+                            aria-label={`Retract verification of ${entry.recordKey}'s ${field.attribute}`}
+                            data-testid={`cell-verified-${field.attribute}-${entry.recordKey}`}
+                          >
+                            <BadgeCheck className="size-3" aria-hidden />
+                            verified
+                          </button>
+                        ) : (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="ml-1 min-h-11 min-w-11 px-1"
+                            disabled={verifying}
+                            onClick={() => {
+                              onToggleVerifyCell(entry.recordKey, field.attribute, false);
+                            }}
+                            data-er-action="records.verify"
+                            aria-label={`Verify ${entry.recordKey}'s ${field.attribute}`}
+                            data-testid={`cell-verify-${field.attribute}-${entry.recordKey}`}
+                          >
+                            <BadgeCheck className="size-3" aria-hidden />
+                          </Button>
+                        ))}
                       {/* Offered only when the member has something the master
                           does not: adopting an empty value would CLEAR the
                           field, and a one-click control that silently deletes
@@ -119,7 +169,7 @@ export function GroupMergeEditor({
                         <Button
                           variant="outline"
                           size="sm"
-                          className="ml-1 h-5 px-1"
+                          className="ml-1 min-h-11 min-w-11 px-1"
                           disabled={applying !== null}
                           onClick={() => {
                             if (entry.value !== null) onAdopt(field.attribute, entry.value);

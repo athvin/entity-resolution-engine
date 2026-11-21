@@ -1,0 +1,11 @@
+kind: statement
+operation: create
+mode: partial
+description: "Activate a verification flag on a record row (attribute NULL) or one cell."
+params:
+  - { name: record_key, type: varchar }
+  - { name: attribute, type: varchar, nullable: true }
+  - { name: created_by, type: varchar }
+  - { name: created_at, type: varchar }
+  - { name: source_action_id, type: varchar }
+returns: none

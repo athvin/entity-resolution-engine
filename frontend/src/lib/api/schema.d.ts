@@ -1099,6 +1099,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/orgs/{org}/datasets/{ds}/records/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** delete a record (spec 2.9) */
+        post: operations["post_orgs_by_org_datasets_by_ds_records_delete"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/orgs/{org}/datasets/{ds}/records/ingest": {
         parameters: {
             query?: never;
@@ -1150,6 +1167,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/orgs/{org}/datasets/{ds}/records/undelete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** retract a record deletion */
+        post: operations["post_orgs_by_org_datasets_by_ds_records_undelete"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/orgs/{org}/datasets/{ds}/records/unmatch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** unmatch a record from its current group */
+        post: operations["post_orgs_by_org_datasets_by_ds_records_unmatch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/orgs/{org}/datasets/{ds}/records/unprotect": {
         parameters: {
             query?: never;
@@ -1178,6 +1229,40 @@ export interface paths {
         put?: never;
         /** retract a record suppression */
         post: operations["post_orgs_by_org_datasets_by_ds_records_unsuppress"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/orgs/{org}/datasets/{ds}/records/unverify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** retract a verification */
+        post: operations["post_orgs_by_org_datasets_by_ds_records_unverify"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/orgs/{org}/datasets/{ds}/records/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** verify records or one cell of them (spec 2.9) */
+        post: operations["post_orgs_by_org_datasets_by_ds_records_verify"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5995,6 +6080,48 @@ export interface operations {
             };
         };
     };
+    post_orgs_by_org_datasets_by_ds_records_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+                ds: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    apply_now?: boolean;
+                    record_key?: unknown;
+                    record_keys?: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description Successful response. Payload types are described only at envelope granularity. */
+            "2XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        detail: string;
+                    };
+                };
+            };
+        };
+    };
     post_orgs_by_org_datasets_by_ds_records_ingest: {
         parameters: {
             query?: never;
@@ -6123,6 +6250,89 @@ export interface operations {
             };
         };
     };
+    post_orgs_by_org_datasets_by_ds_records_undelete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+                ds: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    apply_now?: boolean;
+                    record_key?: unknown;
+                    record_keys?: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description Successful response. Payload types are described only at envelope granularity. */
+            "2XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        detail: string;
+                    };
+                };
+            };
+        };
+    };
+    post_orgs_by_org_datasets_by_ds_records_unmatch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+                ds: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    apply_now?: boolean;
+                    record_key: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful response. Payload types are described only at envelope granularity. */
+            "2XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        detail: string;
+                    };
+                };
+            };
+        };
+    };
     post_orgs_by_org_datasets_by_ds_records_unprotect: {
         parameters: {
             query?: never;
@@ -6179,6 +6389,92 @@ export interface operations {
             content: {
                 "application/json": {
                     apply_now?: boolean;
+                    record_key?: unknown;
+                    record_keys?: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description Successful response. Payload types are described only at envelope granularity. */
+            "2XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        detail: string;
+                    };
+                };
+            };
+        };
+    };
+    post_orgs_by_org_datasets_by_ds_records_unverify: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+                ds: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    apply_now?: boolean;
+                    attribute?: unknown;
+                    record_key?: unknown;
+                    record_keys?: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description Successful response. Payload types are described only at envelope granularity. */
+            "2XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        detail: string;
+                    };
+                };
+            };
+        };
+    };
+    post_orgs_by_org_datasets_by_ds_records_verify: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+                ds: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    apply_now?: boolean;
+                    attribute?: unknown;
                     record_key?: unknown;
                     record_keys?: string[];
                 };
