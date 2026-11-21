@@ -139,6 +139,13 @@ job instead — `terraform plan` is the worked example.
 | `assertions` | kind probe assertions (fixtures) | 5 | `always` |
 | `probe` | kind probe (executor e2e) | 120 | `github.event_name != 'pull_request'` |
 
+### `marketing-preview.yml`
+
+| Job | Status-check context | Timeout | Condition |
+|---|---|---|---|
+| `build` | export and test marketing preview | 15 | `always` |
+| `deploy` | publish marketing preview | 10 | `vars.MARKETING_PREVIEW_ENABLED == 'true' && (github.event_name != 'pull_request' \|\| gith …` |
+
 ### `pr-contract.yml`
 
 | Job | Status-check context | Timeout | Condition |
