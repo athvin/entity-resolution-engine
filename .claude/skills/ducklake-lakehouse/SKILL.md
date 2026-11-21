@@ -192,3 +192,5 @@ contains the measured results. A passing SQL probe is not approval to share a cu
 
 The operator-only generated-read pilot and its lifecycle contract are recorded
 in [references/duckfleet-reads.md](references/duckfleet-reads.md).
+The [read parity evidence](references/duckfleet-read-evidence.json) records the
+disposable service run and cleanup result.

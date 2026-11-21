@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/er-duckfleet-read-source.XXXXXX")"
 trap 'rm -rf "$scratch"' EXIT
-revision=ecaa09ce8df21f14dcd550a347ea3460055b4930
+revision=398ff60c7abe973514707be3e47248a610560ec9
 image="er-duckfleet-read-${revision:0:12}:proof"
 git init -q "$scratch/upstream"
 git -C "$scratch/upstream" remote add origin https://github.com/athvin/duck-fleet.git

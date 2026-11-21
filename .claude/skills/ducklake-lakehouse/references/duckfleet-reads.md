@@ -60,7 +60,7 @@ containers and volumes. No existing developer fleet is touched.
 The loopback-only constructor used by this harness is compiled solely with the
 `disposable-proof` feature; product builds do not expose an endpoint override.
 The JSON report is retained in
-[duckfleet-read-evidence.json](duckfleet-read-evidence.json). Compose evidence
+`duckfleet-read-evidence.json`. Compose evidence
 establishes this read slice, not live AWS isolation or production equivalence.
 
 The baseline compatibility probe identified JSON float decoding that changed
