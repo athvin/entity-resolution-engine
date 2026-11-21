@@ -5555,6 +5555,50 @@ async fn golden_records_list(
         Ok(dataset) => dataset,
         Err(response) => return *response,
     };
+    // Keep the actual response constructor in the handler: the OpenAPI source
+    // extractor classifies GET media types here. SQL and encoding still run in
+    // the bounded blocking closure, with only the finished response crossing out.
+    let respond = |result: Result<(i64, read::GoldenArrowPage), Box<axum::response::Response>>| {
+        let (snapshot, page) = match result {
+            Ok(page) => page,
+            Err(response) => return *response,
+        };
+        // Serialise the page as an Arrow IPC stream (schema message then batches); the
+        // snapshot and the next cursor travel in response headers.
+        let mut buf: Vec<u8> = Vec::new();
+        match arrow::ipc::writer::StreamWriter::try_new(&mut buf, &page.schema) {
+            Ok(mut writer) => {
+                for batch in &page.batches {
+                    if let Err(e) = writer.write(batch) {
+                        return detail_err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            format!("arrow: {e}"),
+                        );
+                    }
+                }
+                if let Err(e) = writer.finish() {
+                    return detail_err(StatusCode::INTERNAL_SERVER_ERROR, format!("arrow: {e}"));
+                }
+            }
+            Err(e) => return detail_err(StatusCode::INTERNAL_SERVER_ERROR, format!("arrow: {e}")),
+        }
+
+        let mut response = axum::response::Response::new(axum::body::Body::from(buf));
+        let headers = response.headers_mut();
+        headers.insert(
+            axum::http::header::CONTENT_TYPE,
+            axum::http::HeaderValue::from_static("application/vnd.apache.arrow.stream"),
+        );
+        if let Ok(v) = axum::http::HeaderValue::from_str(&snapshot.to_string()) {
+            headers.insert("x-er-snapshot", v);
+        }
+        if let Some(cursor) = &page.next_cursor
+            && let Ok(v) = axum::http::HeaderValue::from_str(cursor)
+        {
+            headers.insert("x-er-next-cursor", v);
+        }
+        response
+    };
     if let Some(config) = state.duckfleet_reads {
         let config = match config {
             Ok(config) => config,
@@ -5567,7 +5611,7 @@ async fn golden_records_list(
             };
             let start =
                 duckfleet_reads::page_start(&session, params.get("cursor").map(String::as_str));
-            let response = golden_records_response(&session, &dataset, &params, start);
+            let page = golden_records_page(&session, &dataset, &params, start);
             if let Err(error) = session.close() {
                 tracing::error!(error = %error, "remote lake read cleanup failed");
                 return detail_err(
@@ -5575,25 +5619,30 @@ async fn golden_records_list(
                     "lake session cleanup failed",
                 );
             }
-            response
+            respond(page)
         })
         .await
         .unwrap_or_else(|_| detail_err(StatusCode::SERVICE_UNAVAILABLE, "lake read failed"));
     }
     with_dataset_lake(dataset, move |session, dataset| {
         let start = read::page_start(session, params.get("cursor").map(String::as_str));
-        golden_records_response(session.connection(), dataset, &params, start)
+        respond(golden_records_page(
+            session.connection(),
+            dataset,
+            &params,
+            start,
+        ))
     })
     .await
     .unwrap_or_else(|response| *response)
 }
 
-fn golden_records_response<E: er_entities::execution::Executor>(
+fn golden_records_page<E: er_entities::execution::Executor>(
     executor: &E,
     dataset: &pg::DatasetDetail,
     params: &HashMap<String, String>,
     page_start: Result<(i64, Option<String>), read::PageStartError>,
-) -> axum::response::Response {
+) -> Result<(i64, read::GoldenArrowPage), Box<axum::response::Response>> {
     let entity_type = match dataset.entity_type.as_str() {
         "account" => er_config::EntityType::Account,
         _ => er_config::EntityType::Person,
@@ -5601,10 +5650,16 @@ fn golden_records_response<E: er_entities::execution::Executor>(
     let (snapshot, after) = match page_start {
         Ok(x) => x,
         Err(read::PageStartError::BadCursor) => {
-            return detail_err(StatusCode::UNPROCESSABLE_ENTITY, "invalid cursor");
+            return Err(Box::new(detail_err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "invalid cursor",
+            )));
         }
         Err(read::PageStartError::Lake(e)) => {
-            return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}"));
+            return Err(Box::new(detail_err(
+                StatusCode::SERVICE_UNAVAILABLE,
+                format!("lake: {e}"),
+            )));
         }
     };
     let limit = read::parse_limit(params.get("limit").map(String::as_str));
@@ -5618,42 +5673,14 @@ fn golden_records_response<E: er_entities::execution::Executor>(
     ) {
         Ok(p) => p,
         Err(e) => {
-            return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}"));
+            return Err(Box::new(detail_err(
+                StatusCode::SERVICE_UNAVAILABLE,
+                format!("lake read: {e}"),
+            )));
         }
     };
 
-    // Serialise the page as an Arrow IPC stream (schema message then batches); the
-    // snapshot and the next cursor travel in response headers.
-    let mut buf: Vec<u8> = Vec::new();
-    match arrow::ipc::writer::StreamWriter::try_new(&mut buf, &page.schema) {
-        Ok(mut writer) => {
-            for batch in &page.batches {
-                if let Err(e) = writer.write(batch) {
-                    return detail_err(StatusCode::INTERNAL_SERVER_ERROR, format!("arrow: {e}"));
-                }
-            }
-            if let Err(e) = writer.finish() {
-                return detail_err(StatusCode::INTERNAL_SERVER_ERROR, format!("arrow: {e}"));
-            }
-        }
-        Err(e) => return detail_err(StatusCode::INTERNAL_SERVER_ERROR, format!("arrow: {e}")),
-    }
-
-    let mut response = axum::response::Response::new(axum::body::Body::from(buf));
-    let headers = response.headers_mut();
-    headers.insert(
-        axum::http::header::CONTENT_TYPE,
-        axum::http::HeaderValue::from_static("application/vnd.apache.arrow.stream"),
-    );
-    if let Ok(v) = axum::http::HeaderValue::from_str(&snapshot.to_string()) {
-        headers.insert("x-er-snapshot", v);
-    }
-    if let Some(cursor) = &page.next_cursor
-        && let Ok(v) = axum::http::HeaderValue::from_str(cursor)
-    {
-        headers.insert("x-er-next-cursor", v);
-    }
-    response
+    Ok((snapshot, page))
 }
 
 /// The optional point in history a golden read is taken at (O12c).
