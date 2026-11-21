@@ -27,9 +27,6 @@ pub fn receipt(attempt_id: &str) -> String {
     json!({ "remote_attempt": attempt_id }).to_string()
 }
 
-/// The statement the publishing transaction executes before COMMIT.
-pub const RECEIPT_SQL: &str = "CALL lake.set_commit_message('er', 'golden', extra_info => ?)";
-
 /// Whether the attempt's publication receipt is in the lake's snapshot history.
 ///
 /// # Errors

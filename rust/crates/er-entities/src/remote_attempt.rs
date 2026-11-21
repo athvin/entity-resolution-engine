@@ -73,12 +73,12 @@ impl RemoteAttempt {
 
 pub mod create {
     //! @generated query functions for this entity + operation.
-    /// Acquire a fence from a live running task and job before opening remote compute. Scope is copied from the task, never caller-supplied. A duplicate live dataset fence refuses admission.
+    /// Acquire a fence from the live running task, as its registered pod, before opening remote compute. Scope is copied from the task, never caller-supplied. A duplicate live dataset fence refuses admission.
     pub async fn acquire(
         client: &impl ::tokio_postgres::GenericClient,
         id: &str,
         task_instance_id: &str,
-        launch: i64,
+        pod_uid: &str,
         binding_generation: i64,
         namespace: &str,
     ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
@@ -88,7 +88,7 @@ pub mod create {
 SELECT $1, t.org_id, t.dataset_id, t.job_id, t.id, t.launches,
        $4, $5, 'opening'
 FROM public.task_instances t JOIN public.jobs j ON j.id = t.job_id
-WHERE t.id = $2 AND t.launches = $3
+WHERE t.id = $2 AND t.pod_uid = $3
   AND t.live IS TRUE AND t.state = 'running' AND j.state = 'running'
   AND t.dataset_id IS NOT NULL
 ON CONFLICT DO NOTHING
@@ -108,7 +108,7 @@ ON CONFLICT DO NOTHING
                 &[
                     &id,
                     &task_instance_id,
-                    &launch,
+                    &pod_uid,
                     &binding_generation,
                     &namespace,
                 ],
@@ -238,6 +238,65 @@ WHERE dataset_id = $1 AND released_at IS NULL
             .collect())
     }
 
+    /// The unresolved attempt holding the dataset of the given task, if any: the identifier a refused acquire names in its customer-safe detail.
+    pub async fn holding(
+        client: &impl ::tokio_postgres::GenericClient,
+        task_instance_id: &str,
+    ) -> ::std::result::Result<Vec<super::RemoteAttempt>, ::tokio_postgres::Error> {
+        const SQL: &str = "SELECT a.id,
+  a.org_id,
+  a.dataset_id,
+  a.job_id,
+  a.task_instance_id,
+  a.launch,
+  a.binding_generation,
+  a.namespace,
+  a.session_id,
+  a.request_id,
+  a.commit_request_id,
+  a.phase,
+  a.released_at,
+  a.created_at,
+  a.updated_at
+FROM public.remote_attempts a
+JOIN public.task_instances t ON t.dataset_id = a.dataset_id
+WHERE t.id = $1 AND a.released_at IS NULL
+";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "remote_attempt",
+            "read",
+            "holding",
+            "remote_attempts",
+            SQL,
+        );
+        let __result =
+            ::er_span::instrument(&__span, client.query(SQL, &[&task_instance_id])).await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
+        Ok(rows
+            .iter()
+            .map(|row| super::RemoteAttempt {
+                id: row.get("id"),
+                org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
+                job_id: row.get("job_id"),
+                task_instance_id: row.get("task_instance_id"),
+                launch: row.get("launch"),
+                binding_generation: row.get("binding_generation"),
+                namespace: row.get("namespace"),
+                session_id: row.get("session_id"),
+                request_id: row.get("request_id"),
+                commit_request_id: row.get("commit_request_id"),
+                phase: row.get("phase"),
+                released_at: row.get("released_at"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
+            })
+            .collect())
+    }
+
     /// Unresolved attempts whose owning launch can no longer submit SQL (the task is terminal, archived or relaunched): the reconciliation working set, oldest evidence first, bounded.
     pub async fn settleable(
         client: &impl ::tokio_postgres::GenericClient,
@@ -336,6 +395,7 @@ WHERE id = $1 AND task_instance_id = $2
         commit: bool,
         id: &str,
         task_instance_id: &str,
+        pod_uid: &str,
     ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
         const SQL: &str = "UPDATE public.remote_attempts
 SET request_id = $1,
@@ -346,7 +406,8 @@ WHERE id = $3 AND task_instance_id = $4
   AND released_at IS NULL AND phase IN ('active', 'committing')
   AND (NOT $2 OR commit_request_id IS NULL)
   AND EXISTS (SELECT 1 FROM public.task_instances t
-    WHERE t.id = remote_attempts.task_instance_id AND t.live IS TRUE AND t.state = 'running')
+    WHERE t.id = remote_attempts.task_instance_id AND t.launches = remote_attempts.launch
+      AND t.pod_uid = $5 AND t.live IS TRUE AND t.state = 'running')
 ";
         let __span = ::er_span::sql_span(
             ::er_span::Store::Control,
@@ -358,7 +419,10 @@ WHERE id = $3 AND task_instance_id = $4
         );
         let __result = ::er_span::instrument(
             &__span,
-            client.execute(SQL, &[&request_id, &commit, &id, &task_instance_id]),
+            client.execute(
+                SQL,
+                &[&request_id, &commit, &id, &task_instance_id, &pod_uid],
+            ),
         )
         .await;
         let __entered = __span.enter();
@@ -373,13 +437,15 @@ WHERE id = $3 AND task_instance_id = $4
         session_id: &str,
         id: &str,
         task_instance_id: &str,
+        pod_uid: &str,
     ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
         const SQL: &str = "UPDATE public.remote_attempts
 SET session_id = $1, phase = 'active', updated_at = now()
 WHERE id = $2 AND task_instance_id = $3
   AND released_at IS NULL AND phase = 'opening' AND session_id IS NULL
   AND EXISTS (SELECT 1 FROM public.task_instances t
-    WHERE t.id = remote_attempts.task_instance_id AND t.live IS TRUE AND t.state = 'running')
+    WHERE t.id = remote_attempts.task_instance_id AND t.launches = remote_attempts.launch
+      AND t.pod_uid = $4 AND t.live IS TRUE AND t.state = 'running')
 ";
         let __span = ::er_span::sql_span(
             ::er_span::Store::Control,
@@ -391,7 +457,7 @@ WHERE id = $2 AND task_instance_id = $3
         );
         let __result = ::er_span::instrument(
             &__span,
-            client.execute(SQL, &[&session_id, &id, &task_instance_id]),
+            client.execute(SQL, &[&session_id, &id, &task_instance_id, &pod_uid]),
         )
         .await;
         let __entered = __span.enter();

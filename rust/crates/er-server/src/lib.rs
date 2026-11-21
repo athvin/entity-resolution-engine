@@ -53,6 +53,7 @@ pub mod pg;
 pub mod profile_params;
 pub mod provision;
 pub mod read;
+pub mod remote_attempts;
 pub mod runctx;
 pub mod s3_ingest;
 pub mod salesforce;
@@ -4984,6 +4985,44 @@ async fn attempt_heartbeat(
             },
             |row| (StatusCode::OK, Json(json!(row))).into_response(),
         ),
+        Err(e) => pg_err(e),
+    }
+}
+
+/// One write-ahead step of a remote execution attempt
+/// (`POST /v1/internal/attempts/{attempt_id}/remote`): acquire the dataset
+/// fence, journal the session or a request id before it is sent, note an
+/// unknown outcome, or release with an established one. Scope comes from the
+/// authenticated task, never the body. Zero rows is the FENCE: the pod must not
+/// start the remote effect it was about to journal (#1133).
+async fn attempt_remote(
+    State(state): State<AppState>,
+    Path(attempt_id): Path<String>,
+    headers: axum::http::HeaderMap,
+    Json(body): Json<remote_attempts::AttemptRemote>,
+) -> axum::response::Response {
+    let Some(dsn) = &state.dsn else {
+        return detail_err(
+            StatusCode::NOT_IMPLEMENTED,
+            "the attempt channel requires Postgres",
+        );
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let identity = match attempt_authorized(&client, &state, &attempt_id, &headers).await {
+        Ok((_, identity)) => identity,
+        Err(r) => return *r,
+    };
+    let journal = match body.parse() {
+        Ok(journal) => journal,
+        Err(message) => return detail_err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+    let pod_uid = identity.pod_uid(journal.claimed_pod()).to_owned();
+    match remote_attempts::record(&client, &attempt_id, &pod_uid, &journal).await {
+        Ok(None) => (StatusCode::OK, Json(json!({ "recorded": true }))).into_response(),
+        Ok(Some(detail)) => detail_err(StatusCode::CONFLICT, detail),
         Err(e) => pg_err(e),
     }
 }
@@ -11637,6 +11676,10 @@ fn build_routes(state: AppState) -> Router {
         .route(
             "/v1/internal/attempts/{attempt_id}/finish",
             post(attempt_finish),
+        )
+        .route(
+            "/v1/internal/attempts/{attempt_id}/remote",
+            post(attempt_remote),
         )
         .route("/v1/orgs/{org}/api-keys", post(create_key))
         .route(

@@ -7,5 +7,6 @@ params:
   - { name: commit, type: boolean }
   - { name: id, type: varchar }
   - { name: task_instance_id, type: varchar }
+  - { name: pod_uid, type: varchar }
 reads: [task_instance]
 returns: none

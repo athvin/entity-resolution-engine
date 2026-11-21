@@ -1,11 +1,11 @@
 kind: statement
 operation: create
 mode: partial
-description: "Acquire a fence from a live running task and job before opening remote compute. Scope is copied from the task, never caller-supplied. A duplicate live dataset fence refuses admission."
+description: "Acquire a fence from the live running task, as its registered pod, before opening remote compute. Scope is copied from the task, never caller-supplied. A duplicate live dataset fence refuses admission."
 params:
   - { name: id, type: varchar }
   - { name: task_instance_id, type: varchar }
-  - { name: launch, type: bigint }
+  - { name: pod_uid, type: varchar }
   - { name: binding_generation, type: bigint }
   - { name: namespace, type: varchar }
 reads: [task_instance, job]

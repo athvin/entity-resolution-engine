@@ -246,7 +246,11 @@ fn recovery_resolves_only_the_pinned_generation_and_never_a_revoked_binding() {
     let registry = parse(&doc, &credentials).unwrap();
     // Active at the pinned generation, even past `valid_until`: evidence reads
     // admit nothing, and an expired token is refused upstream, not guessed at.
-    assert!(registry.resolve_for_recovery("org-a", "dataset-a", 3).is_ok());
+    assert!(
+        registry
+            .resolve_for_recovery("org-a", "dataset-a", 3)
+            .is_ok()
+    );
     // A replacement generation is a different principal whose owner-scoped
     // lookups would report the attempt's requests as absent.
     assert!(matches!(
@@ -259,7 +263,11 @@ fn recovery_resolves_only_the_pinned_generation_and_never_a_revoked_binding() {
     ));
     doc["bindings"][0]["state"] = json!("draining");
     let registry = parse(&doc, &credentials).unwrap();
-    assert!(registry.resolve_for_recovery("org-a", "dataset-a", 3).is_ok());
+    assert!(
+        registry
+            .resolve_for_recovery("org-a", "dataset-a", 3)
+            .is_ok()
+    );
     assert!(matches!(
         registry.resolve("org-a", "dataset-a", 3, 100),
         Err(Error::Unavailable)

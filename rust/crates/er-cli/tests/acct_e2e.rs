@@ -155,6 +155,7 @@ fn acct_run_all_clusters_accounts_and_assembles_golden() {
         session.connection(),
         &config,
         "2026-04-01 00:00:00",
+        Some(r#"{"remote_attempt":"fenced-attempt"}"#),
         || {
             checks.set(checks.get() + 1);
             anyhow::ensure!(
@@ -182,6 +183,27 @@ fn acct_run_all_clusters_accounts_and_assembles_golden() {
             .unwrap(),
         before_lineage
     );
+    let receipts = |attempt: &str| {
+        session
+            .query_strings(&format!(
+                "select count(*) from ducklake_snapshots('lake') \
+                 where commit_extra_info = '{{\"remote_attempt\":\"{attempt}\"}}'"
+            ))
+            .unwrap()[0][0]
+            .clone()
+    };
+    // A rolled-back publication leaves no receipt: absence is evidence.
+    assert_eq!(receipts("fenced-attempt"), "0");
+    er_cli::golden_task::run_account_guarded(
+        session.connection(),
+        &config,
+        "2026-04-01 00:00:00",
+        Some(r#"{"remote_attempt":"published-attempt"}"#),
+        || Ok(()),
+    )
+    .unwrap();
+    // The receipt is atomic with the commit that published both tables.
+    assert_eq!(receipts("published-attempt"), "1");
     // assembled_at is explicitly volatile in the entity contract. Rollback
     // above preserves it; a successful new assembly gets a fresh wall clock.
     let stable_records = session

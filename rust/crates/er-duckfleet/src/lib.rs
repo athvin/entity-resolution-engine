@@ -8,6 +8,10 @@
 pub mod artifacts;
 pub mod execution;
 
+/// Journal and recovery identifiers are UUIDs; re-exported so callers name the
+/// same type the session API takes.
+pub use uuid::Uuid;
+
 use std::collections::BTreeSet;
 use std::path::Path;
 

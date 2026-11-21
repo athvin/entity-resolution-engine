@@ -400,6 +400,90 @@
         ]
       }
     },
+    "/v1/internal/attempts/{attempt_id}/remote": {
+      "post": {
+        "summary": "One write-ahead step of a remote execution attempt",
+        "operationId": "post_internal_attempts_by_attempt_id_remote",
+        "parameters": [
+          {
+            "name": "attempt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "op",
+                  "id"
+                ],
+                "properties": {
+                  "binding_generation": {},
+                  "commit": {},
+                  "id": {
+                    "type": "string"
+                  },
+                  "namespace": {},
+                  "op": {
+                    "type": "string"
+                  },
+                  "phase": {},
+                  "pod_uid": {},
+                  "request_id": {},
+                  "session_id": {}
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "2XX": {
+            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "recorded": {}
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "detail"
+                  ],
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "attemptAuth": []
+          }
+        ]
+      }
+    },
     "/v1/internal/attempts/{attempt_id}/start": {
       "post": {
         "summary": "The pod's first report",

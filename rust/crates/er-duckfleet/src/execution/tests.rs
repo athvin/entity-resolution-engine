@@ -524,7 +524,9 @@ fn every_sent_request_was_journaled_first_and_commit_is_flagged() {
     let mut session = journaled(transport, &recorder);
     assert_eq!(session.commit_state(), CommitState::NotSent);
     session.query("BEGIN TRANSACTION", &[]).unwrap();
-    session.query("CREATE TABLE lake.t AS SELECT 1", &[]).unwrap();
+    session
+        .query("CREATE TABLE lake.t AS SELECT 1", &[])
+        .unwrap();
     session.query("COMMIT", &[]).unwrap();
     assert_eq!(session.commit_state(), CommitState::Returned);
     session.close(STATEMENT_TIMEOUT).unwrap();
@@ -736,10 +738,7 @@ fn durable_request_records_are_read_without_trusting_failures() {
     let id = Uuid::now_v7();
     use recovery::{ReadFailed, RequestOutcome, RequestState};
     let read = || recovery::request_state_with(&transport, id);
-    assert_eq!(
-        read(),
-        Ok(RequestState::Terminal(RequestOutcome::Unknown))
-    );
+    assert_eq!(read(), Ok(RequestState::Terminal(RequestOutcome::Unknown)));
     assert_eq!(read(), Ok(RequestState::Pending));
     assert_eq!(read(), Ok(RequestState::NotFound));
     for _ in 0..4 {
