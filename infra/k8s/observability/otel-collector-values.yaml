@@ -180,6 +180,7 @@ config:
                 "er.action", "er.actor", "er.role", "er.request_id",
                 "er.attempt", "er.duration_ms", "er.job_id", "er.job_kind",
                 "er.members", "er.mode", "er.model_version",
+                "er.query_id", "er.task_id", "er.task_instance_id",
                 "er.rebuild_reason", "er.segment", "er.snapshot_end",
                 "er.tf_snapshot_id", "er.trace_context",
                 "db.system.name", "db.collection.name",

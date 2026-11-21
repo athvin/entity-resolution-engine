@@ -860,8 +860,8 @@ async fn the_task_ledger_statements_hold_their_contracts() {
         .unwrap()
         .get(0);
     assert_eq!(
-        count, 15,
-        "re-planning inserted nothing (9 archived + 6 live)"
+        count, 17,
+        "re-planning inserted nothing (8 initial + 2 retries + 7 rotated)"
     );
 
     let scheduled =
