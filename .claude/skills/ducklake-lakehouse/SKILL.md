@@ -189,3 +189,6 @@ For DuckFleet compatibility evidence, the disposable harness and adoption blocke
 see [references/duckfleet-compatibility.md](references/duckfleet-compatibility.md).
 The [recorded synthetic evidence](references/duckfleet-compatibility-evidence.json)
 contains the measured results. A passing SQL probe is not approval to share a customer catalog or change engines.
+
+The operator-only generated-read pilot and its lifecycle contract are recorded
+in [references/duckfleet-reads.md](references/duckfleet-reads.md).

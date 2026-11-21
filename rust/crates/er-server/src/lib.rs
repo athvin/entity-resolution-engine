@@ -36,6 +36,7 @@ pub mod dags;
 pub mod delivery;
 pub mod dispatcher;
 pub mod dispatcher_bin;
+mod duckfleet_reads;
 pub mod errfmt;
 pub mod exec_task;
 pub mod executor;
@@ -103,6 +104,7 @@ struct JobStore {
 /// pool dependency).
 #[derive(Clone)]
 pub struct AppState {
+    duckfleet_reads: Option<Result<duckfleet_reads::Config, String>>,
     /// The operator bearer token (cross-org admin). Empty disables operator auth.
     pub operator_token: String,
     store: Arc<Mutex<JobStore>>,
@@ -150,6 +152,7 @@ impl AppState {
             provision: None,
             provision_error: None,
             sa_verifier: None,
+            duckfleet_reads: None,
         }
     }
 
@@ -167,6 +170,7 @@ impl AppState {
             provision: None,
             provision_error: None,
             sa_verifier: None,
+            duckfleet_reads: None,
         }
     }
 
@@ -5551,74 +5555,105 @@ async fn golden_records_list(
         Ok(dataset) => dataset,
         Err(response) => return *response,
     };
-    with_dataset_lake(dataset, move |session, dataset| {
-        let entity_type = match dataset.entity_type.as_str() {
-            "account" => er_config::EntityType::Account,
-            _ => er_config::EntityType::Person,
+    if let Some(config) = state.duckfleet_reads {
+        let config = match config {
+            Ok(config) => config,
+            Err(error) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, error),
         };
-        let (snapshot, after) =
-            match read::page_start(session, params.get("cursor").map(String::as_str)) {
-                Ok(x) => x,
-                Err(read::PageStartError::BadCursor) => {
-                    return detail_err(StatusCode::UNPROCESSABLE_ENTITY, "invalid cursor");
-                }
-                Err(read::PageStartError::Lake(e)) => {
-                    return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}"));
-                }
+        return lake_reads::run(move || {
+            let mut session = match config.open(&dataset.org_id, &dataset.id) {
+                Ok(session) => session,
+                Err(error) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, error),
             };
-        let limit = read::parse_limit(params.get("limit").map(String::as_str));
-        let page = match read::golden_arrow_page(
-            session,
-            entity_type,
-            snapshot,
-            params.get("q").map(String::as_str),
-            after.as_deref(),
-            limit,
-        ) {
-            Ok(p) => p,
-            Err(e) => {
-                return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}"));
+            let start =
+                duckfleet_reads::page_start(&session, params.get("cursor").map(String::as_str));
+            let response = golden_records_response(&session, &dataset, &params, start);
+            if let Err(error) = session.close() {
+                tracing::error!(error = %error, "remote lake read cleanup failed");
+                return detail_err(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "lake session cleanup failed",
+                );
             }
-        };
-
-        // Serialise the page as an Arrow IPC stream (schema message then batches); the
-        // snapshot and the next cursor travel in response headers.
-        let mut buf: Vec<u8> = Vec::new();
-        match arrow::ipc::writer::StreamWriter::try_new(&mut buf, &page.schema) {
-            Ok(mut writer) => {
-                for batch in &page.batches {
-                    if let Err(e) = writer.write(batch) {
-                        return detail_err(
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            format!("arrow: {e}"),
-                        );
-                    }
-                }
-                if let Err(e) = writer.finish() {
-                    return detail_err(StatusCode::INTERNAL_SERVER_ERROR, format!("arrow: {e}"));
-                }
-            }
-            Err(e) => return detail_err(StatusCode::INTERNAL_SERVER_ERROR, format!("arrow: {e}")),
-        }
-
-        let mut response = axum::response::Response::new(axum::body::Body::from(buf));
-        let headers = response.headers_mut();
-        headers.insert(
-            axum::http::header::CONTENT_TYPE,
-            axum::http::HeaderValue::from_static("application/vnd.apache.arrow.stream"),
-        );
-        if let Ok(v) = axum::http::HeaderValue::from_str(&snapshot.to_string()) {
-            headers.insert("x-er-snapshot", v);
-        }
-        if let Some(cursor) = &page.next_cursor
-            && let Ok(v) = axum::http::HeaderValue::from_str(cursor)
-        {
-            headers.insert("x-er-next-cursor", v);
-        }
-        response
+            response
+        })
+        .await
+        .unwrap_or_else(|_| detail_err(StatusCode::SERVICE_UNAVAILABLE, "lake read failed"));
+    }
+    with_dataset_lake(dataset, move |session, dataset| {
+        let start = read::page_start(session, params.get("cursor").map(String::as_str));
+        golden_records_response(session.connection(), dataset, &params, start)
     })
     .await
     .unwrap_or_else(|response| *response)
+}
+
+fn golden_records_response<E: er_entities::execution::Executor>(
+    executor: &E,
+    dataset: &pg::DatasetDetail,
+    params: &HashMap<String, String>,
+    page_start: Result<(i64, Option<String>), read::PageStartError>,
+) -> axum::response::Response {
+    let entity_type = match dataset.entity_type.as_str() {
+        "account" => er_config::EntityType::Account,
+        _ => er_config::EntityType::Person,
+    };
+    let (snapshot, after) = match page_start {
+        Ok(x) => x,
+        Err(read::PageStartError::BadCursor) => {
+            return detail_err(StatusCode::UNPROCESSABLE_ENTITY, "invalid cursor");
+        }
+        Err(read::PageStartError::Lake(e)) => {
+            return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}"));
+        }
+    };
+    let limit = read::parse_limit(params.get("limit").map(String::as_str));
+    let page = match read::golden_arrow_page_with_executor(
+        executor,
+        entity_type,
+        snapshot,
+        params.get("q").map(String::as_str),
+        after.as_deref(),
+        limit,
+    ) {
+        Ok(p) => p,
+        Err(e) => {
+            return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}"));
+        }
+    };
+
+    // Serialise the page as an Arrow IPC stream (schema message then batches); the
+    // snapshot and the next cursor travel in response headers.
+    let mut buf: Vec<u8> = Vec::new();
+    match arrow::ipc::writer::StreamWriter::try_new(&mut buf, &page.schema) {
+        Ok(mut writer) => {
+            for batch in &page.batches {
+                if let Err(e) = writer.write(batch) {
+                    return detail_err(StatusCode::INTERNAL_SERVER_ERROR, format!("arrow: {e}"));
+                }
+            }
+            if let Err(e) = writer.finish() {
+                return detail_err(StatusCode::INTERNAL_SERVER_ERROR, format!("arrow: {e}"));
+            }
+        }
+        Err(e) => return detail_err(StatusCode::INTERNAL_SERVER_ERROR, format!("arrow: {e}")),
+    }
+
+    let mut response = axum::response::Response::new(axum::body::Body::from(buf));
+    let headers = response.headers_mut();
+    headers.insert(
+        axum::http::header::CONTENT_TYPE,
+        axum::http::HeaderValue::from_static("application/vnd.apache.arrow.stream"),
+    );
+    if let Ok(v) = axum::http::HeaderValue::from_str(&snapshot.to_string()) {
+        headers.insert("x-er-snapshot", v);
+    }
+    if let Some(cursor) = &page.next_cursor
+        && let Ok(v) = axum::http::HeaderValue::from_str(cursor)
+    {
+        headers.insert("x-er-next-cursor", v);
+    }
+    response
 }
 
 /// The optional point in history a golden read is taken at (O12c).
@@ -11461,7 +11496,8 @@ pub async fn state_from_env() -> AppState {
     };
     // Present only when this process runs as a pod; locally the attempt
     // channel stays fallback-token-only.
-    let state = state.with_sa_verifier(satoken::Verifier::in_cluster());
+    let mut state = state.with_sa_verifier(satoken::Verifier::in_cluster());
+    state.duckfleet_reads = duckfleet_reads::Config::from_lookup(|name| std::env::var(name).ok());
     // Async because a SES backend resolves credentials at construction; `off`
     // and `log` do not await anything.
     state
