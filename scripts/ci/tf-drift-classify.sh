@@ -118,7 +118,12 @@ aws_iam_role:inline_policy
 # `grep -rn size_in_bytes infra/terraform/` returns nothing. Left alone it
 # fails the schedule every day that anyone uses the product, which is the exact
 # alarm fatigue this classifier exists to prevent.
+# Cloudflare Pages latest_deployment is upload metadata, not a Terraform
+# argument (provider v5.28.1 Read-Only schema). The preview workflow owns it.
+# Observed after the first static upload in run 44861665640. Do NOT ignore
+# uses_functions wholesale: becoming dynamic must remain visible.
 IGNORE_READONLY="
+cloudflare_pages_project:latest_deployment
 aws_eks_cluster:platform_version
 aws_efs_file_system:size_in_bytes
 "
@@ -140,7 +145,13 @@ extracted="$(
       .resource_drift[]? as $r
       | (($r.change.before // {})) as $b
       | (($r.change.after  // {})) as $a
-      | ((($b | keys) + ($a | keys)) | unique | map(select($b[.] != $a[.]))) as $diff
+      # A first static upload fills this computed flag from null to false.
+      # Only that measured transition is noise; false/null -> true stays loud.
+      | ((($b | keys) + ($a | keys)) | unique
+         | map(select($b[.] != $a[.])
+               | select(. != "uses_functions"
+                        or $r.type != "cloudflare_pages_project"
+                        or $b[.] != null or $a[.] != false))) as $diff
       | "\($r.address)\t\($r.type)\t\($diff | join(","))"
     ' "$json" 2>/dev/null
 )" || die "could not parse $json as a terraform plan JSON document"
