@@ -144,6 +144,7 @@ er-span = { version = "0.1.0", path = "../er-span" }
 er-api-spec = { version = "0.1.0", path = "../er-api-spec" }
 clap = { workspace = true, features = ["derive"] }
 er-duckfleet = { version = "0.1.0", path = "../er-duckfleet" }
+tempfile = "3"
 
 [lints]
 workspace = true
@@ -153,3 +154,10 @@ er-entity-gen = { path = "../er-entity-gen" }
 er-entity-spec = { path = "../er-entity-spec" }
 er-obs = { path = "../er-obs", features = ["test-support"] }
 futures = "0.3"
+
+[features]
+disposable-proof = ["er-duckfleet/disposable-proof"]
+
+[[example]]
+name = "artifact-proof"
+required-features = ["disposable-proof"]

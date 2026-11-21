@@ -8,6 +8,19 @@ variable "name" {
   type = string
 }
 
+# Reserved immutable artifact prefixes. No current-version expiration is
+# configured: accepted deliveries and referenced results must survive retries.
+variable "immutable_prefixes" {
+  type    = list(string)
+  default = []
+  validation {
+    condition = alltrue([for prefix in var.immutable_prefixes :
+      can(regex("^[A-Za-z0-9_-]+/([A-Za-z0-9_*-]+/)+$", prefix))
+    ])
+    error_message = "Immutable prefixes must be scoped paths ending in '/'."
+  }
+}
+
 resource "aws_kms_key" "lake" {
   description             = "${var.name} lake"
   enable_key_rotation     = true
@@ -78,6 +91,39 @@ resource "aws_s3_bucket_lifecycle_configuration" "lake" {
 }
 
 data "aws_iam_policy_document" "lake_tls_only" {
+  dynamic "statement" {
+    for_each = length(var.immutable_prefixes) == 0 ? [] : [1]
+    content {
+      sid       = "RequireImmutableConditionalPublication"
+      effect    = "Deny"
+      actions   = ["s3:PutObject"]
+      resources = [for prefix in var.immutable_prefixes : "${aws_s3_bucket.lake.arn}/${prefix}*"]
+      principals {
+        type        = "*"
+        identifiers = ["*"]
+      }
+      # Immutable files use bounded single PutObject, never multipart or COPY.
+      # A conditional request plus deletion denial keeps the current key fixed.
+      condition {
+        test     = "Null"
+        variable = "s3:if-none-match"
+        values   = ["true"]
+      }
+    }
+  }
+  dynamic "statement" {
+    for_each = length(var.immutable_prefixes) == 0 ? [] : [1]
+    content {
+      sid       = "RetainImmutableArtifacts"
+      effect    = "Deny"
+      actions   = ["s3:DeleteObject", "s3:DeleteObjectVersion"]
+      resources = [for prefix in var.immutable_prefixes : "${aws_s3_bucket.lake.arn}/${prefix}*"]
+      principals {
+        type        = "*"
+        identifiers = ["*"]
+      }
+    }
+  }
   statement {
     sid     = "DenyInsecureTransport"
     effect  = "Deny"

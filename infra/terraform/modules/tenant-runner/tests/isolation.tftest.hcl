@@ -80,3 +80,21 @@ run "duplicate_identity_refused" {
   }
   expect_failures = [var.bindings]
 }
+run "foreign_read_only_prefix_refused" {
+  command = plan
+  variables {
+    bindings = {
+      a = { namespace = "ci", org_id = "tenant-a", prefix = "a/", read_only_prefixes = ["b/immutable/"] }
+    }
+  }
+  expect_failures = [var.bindings]
+}
+run "wildcard_read_only_prefix_refused" {
+  command = plan
+  variables {
+    bindings = {
+      a = { namespace = "ci", org_id = "tenant-a", prefix = "a/", read_only_prefixes = ["a/*/"] }
+    }
+  }
+  expect_failures = [var.bindings]
+}

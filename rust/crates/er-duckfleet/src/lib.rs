@@ -5,6 +5,7 @@
 //! operation. Revocation prevents new admissions; the operator also revokes the
 //! upstream token and drains existing sessions before completing revocation.
 
+pub mod artifacts;
 pub mod execution;
 
 use std::collections::BTreeSet;
@@ -217,6 +218,10 @@ impl Registry {
 }
 
 impl Binding<'_> {
+    /// Operator-owned bucket. Object keys must still be derived from this binding.
+    pub fn bucket(&self) -> &str {
+        self.bucket
+    }
     /// Dataset-scoped internal gateway. Never expose it as a customer API.
     pub fn endpoint(&self) -> String {
         format!("http://server.{}.svc.cluster.local:8080", self.namespace)

@@ -194,3 +194,6 @@ The operator-only generated-read pilot and its lifecycle contract are recorded
 in [references/duckfleet-reads.md](references/duckfleet-reads.md).
 The [read parity evidence](references/duckfleet-read-evidence.json) records the
 disposable service run and cleanup result.
+
+The accepted-input and sealed-output transport contract, inventory and storage
+qualification limits are in [references/duckfleet-artifacts.md](references/duckfleet-artifacts.md).

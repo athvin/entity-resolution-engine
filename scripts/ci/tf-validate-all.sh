@@ -38,3 +38,8 @@ terraform -chdir=infra/terraform/modules/duckfleet-ci test -no-color
 # DuckFleet dataset identities reuse the runner policy with a distinct namespace.
 terraform -chdir=infra/terraform/modules/duckfleet-dataset init -backend=false -input=false
 terraform -chdir=infra/terraform/modules/duckfleet-dataset test -no-color
+
+# Artifact publication uses the real policy-document function with all AWS
+# resources overridden; this test never contacts an AWS service.
+terraform -chdir=infra/terraform/modules/lake init -backend=false -input=false
+terraform -chdir=infra/terraform/modules/lake test -no-color

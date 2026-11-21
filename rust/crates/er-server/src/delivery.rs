@@ -3,7 +3,7 @@
 //! neither success nor failure deletes published data needed by a retry.
 
 use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Write};
+use std::io::{Read, Seek, Write};
 use std::path::{Path, PathBuf};
 
 use er_config::SourceSpec;
@@ -168,6 +168,57 @@ impl DeliveryPin {
             ));
         }
         Ok(csv)
+    }
+
+    /// Open the accepted file, verify its complete digest without materializing
+    /// it in memory, and rewind the same descriptor for an artifact transfer.
+    /// The transport must also hash its private upload snapshot: a local file
+    /// could change after this verification and must never silently repin.
+    ///
+    /// # Errors
+    /// Refuses changed manifests, mappings, scope or bytes.
+    pub fn open_verified(
+        &self,
+        root: &Path,
+        dataset_id: &str,
+        spec: &SourceSpec,
+    ) -> Result<File, DeliveryError> {
+        self.validate(dataset_id, spec)?;
+        let dir = directory(root, false)?;
+        let manifest = dir.join(format!("{}.json", self.delivery_id));
+        regular_file(&manifest)?;
+        let stored: Self = serde_json::from_reader(File::open(manifest)?)?;
+        if stored != *self {
+            return Err(refused(
+                "queued delivery does not match its persisted manifest",
+            ));
+        }
+        let path = dir.join(format!("{}.csv", self.delivery_id));
+        regular_file(&path)?;
+        let mut file = File::open(path)?;
+        let mut hash = Sha256::new();
+        let mut bytes = 0_u64;
+        let mut buffer = vec![0_u8; 65536];
+        loop {
+            let n = file.read(&mut buffer)?;
+            if n == 0 {
+                break;
+            }
+            bytes += n as u64;
+            if bytes > self.bytes {
+                return Err(refused(
+                    "delivery bytes no longer match their accepted digest",
+                ));
+            }
+            hash.update(&buffer[..n]);
+        }
+        if bytes != self.bytes || hex::encode(hash.finalize()) != self.sha256 {
+            return Err(refused(
+                "delivery bytes no longer match their accepted digest",
+            ));
+        }
+        file.rewind()?;
+        Ok(file)
     }
 }
 
