@@ -202,3 +202,6 @@ the disposable restricted-identity proof and its AWS qualification limit.
 
 The account golden-task pilot and its operator policy are described in
 [references/duckfleet-tasks.md](references/duckfleet-tasks.md).
+
+[Account task proof evidence](references/duckfleet-task-evidence.json) records the
+pinned disposable task and long-statement measurements for the pilot.

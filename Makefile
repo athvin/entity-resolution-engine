@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := check
-.PHONY: check-duckfleet-reads check-duckfleet-compat build fmt lint doc test check check-e2e entities-check skills-check agent-bridge-check scripts-home-check workflow-shell-check tf-static-credentials-check frontend frontend-audit frontend-coverage run frontend-dev frontend-e2e frontend-baselines frontend-dev-reset image-api cluster-objects nodepools kind-up kind-down check-kind measure-runner-startup dev-up dev-suspend dev-resume dev-down obs-up clean symposium
+.PHONY: check-duckfleet-task check-duckfleet-reads check-duckfleet-compat build fmt lint doc test check check-e2e entities-check skills-check agent-bridge-check scripts-home-check workflow-shell-check tf-static-credentials-check frontend frontend-audit frontend-coverage run frontend-dev frontend-e2e frontend-baselines frontend-dev-reset image-api cluster-objects nodepools kind-up kind-down check-kind measure-runner-startup dev-up dev-suspend dev-resume dev-down obs-up clean symposium
 
 # --- Rust backend: the application (engine, CLI, control plane) lives in rust/ ---
 #
@@ -382,3 +382,7 @@ check-duckfleet-compat:
 # Disposable HTTP/Arrow parity proof; requires Docker and network access.
 check-duckfleet-reads:
 	bash scripts/duckfleet/run-read-parity.sh
+
+# Disposable real-job remote write proof; requires Docker and network access.
+check-duckfleet-task:
+	bash scripts/duckfleet/run-task.sh

@@ -55,13 +55,13 @@ transport allows the statement plus the maximum queue allowance and delivery
 margin; session opening remains bounded separately. The read pilot retains its
 existing 60-second statement and 75-second transport limits.
 
-Upstream dependency: DuckFleet issue #124 / PR #125 extends validation beyond
+Upstream dependency: [DuckFleet PR #125](https://github.com/athvin/duck-fleet/pull/125) extends validation beyond
 60 seconds and adjusts the gateway's bounded wait. Defaults remain unchanged.
 A deadline requests interruption, not proof that a commit did not happen.
 External I/O can delay when DuckDB observes interruption; a short HTTP wait can
 return uncertainty before durable request state records a timeout. Never replay
-that SQL to discover what happened. Upstream allows a 615-second drain inside a 630-second container grace; idle
-drains remain short. External I/O can still outlive an interruption request.
+that SQL to discover what happened. Upstream allows a 615-second drain inside a
+630-second container grace; idle drains remain short. External I/O can still outlive an interruption request.
 
 Every remote request carries job, task and attempt IDs in its diagnostic context
 and has its own request UUID. `duckfleet.query` spans carry those IDs without SQL,
@@ -85,3 +85,12 @@ The fixture's one-thread, 256-MB engine budget fits the persistent worker.
 Production placement, AWS identity and cross-dataset qualification are separate
 #1134 gates. This evidence does not supersede #1128's no-go for interchangeable
 whole-pipeline execution across the differing engine builds.
+
+Run `make check-duckfleet-task` to build the pinned upstream revision and repeat
+that proof. Recorded `duckfleet-task-evidence.json` evidence identifies the
+source and actual worker image. It records 4 golden records, 16 lineage rows,
+3 matching scores and 9 correlated remote statements. A separate controlled
+external-I/O query completed in 65.128 seconds under a 120-second deadline;
+601 seconds was refused. Under a one-second deadline, the same I/O settled
+`timed_out` after 65.203 seconds. Reproduce the deadline proof with the pinned
+upstream `scripts/test-long-deadline.py` using Python with PyArrow installed.
