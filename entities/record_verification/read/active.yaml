@@ -1,0 +1,8 @@
+kind: statement
+operation: read
+description: "The active verification flags at a pinned snapshot (entity detail, the records-by-key lane and the groups `verified` filter)."
+params:
+  - { name: snapshot, type: bigint }
+returns:
+  - { name: record_key, type: varchar, nullable: false }
+  - { name: attribute, type: varchar }

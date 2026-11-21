@@ -85,6 +85,10 @@ export const UI_ACTIONS = [
 
   // --- records ----------------------------------------------------------
   "records.merge.confirm",
+  "records.delete",
+  "records.verify",
+  "records.unverify",
+  "records.unmatch",
 
   // --- configuration ----------------------------------------------------
   "config.publish",

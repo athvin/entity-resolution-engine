@@ -1,0 +1,9 @@
+kind: statement
+operation: update
+mode: partial
+description: "Retract a verification flag (rows are never deleted)."
+params:
+  - { name: retracted_at, type: varchar }
+  - { name: record_key, type: varchar }
+  - { name: attribute, type: varchar, nullable: true }
+returns: none

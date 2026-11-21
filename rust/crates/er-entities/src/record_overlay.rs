@@ -3,14 +3,14 @@
 
 use serde::{Deserialize, Serialize};
 
-/// One steward record overlay (protect/suppress): a flag on a record key, retractable, applied at assembly.
+/// One steward record overlay (protect/suppress/delete): a flag on a record key, retractable, applied at assembly.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RecordOverlay {
     /// Content-derived row id: sha256('record_overlays:' || record_key || ':' || kind).
     pub id: String,
     /// The standardized record key.
     pub record_key: String,
-    /// always or never.
+    /// protect, suppress or delete.
     pub kind: String,
     /// Whether the row is in force (retraction flips this; rows are never deleted).
     pub active: bool,
@@ -124,6 +124,71 @@ pub mod delete {
 
 pub mod read {
     //! @generated query functions for this entity + operation.
+    /// One row of `active_keys_by_kind`: The active overlay record keys of one kind at a pinned snapshot (the er-server staging prechecks: delete refuses a protected record, merge refuses one as a non-master member).
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct ActiveKeysByKindRow {
+        pub record_key: String,
+    }
+
+    impl ActiveKeysByKindRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![("record_key", ::arrow::datatypes::DataType::Utf8)]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "record_key")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        record_key: crate::batch::req(
+                            crate::batch::opt_str(c0, i),
+                            "record_key",
+                            i,
+                        )?,
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// The active overlay record keys of one kind at a pinned snapshot (the er-server staging prechecks: delete refuses a protected record, merge refuses one as a non-master member).
+    pub fn active_keys_by_kind(
+        conn: &::duckdb::Connection,
+        snapshot: i64,
+        kind: &str,
+    ) -> ::duckdb::Result<Vec<ActiveKeysByKindRow>> {
+        const SQL: &str = "SELECT record_key
+FROM lake.main.record_overlays AT (VERSION => {snapshot})
+WHERE kind = $1 AND active
+";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "record_overlay",
+            "read",
+            "active_keys_by_kind",
+            "record_overlays",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let sql = SQL.replace("{snapshot}", &snapshot.to_string());
+        let mut stmt = ::er_span::check(&__span, conn.prepare(&sql))?;
+        let batches = ::er_span::check(&__span, stmt.query_arrow(::duckdb::params![kind]))?
+            .collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
+        ActiveKeysByKindRow::from_batches(&batches)
+    }
+
     /// One row of `active_keys_by_kind_live`: The active overlay record keys of one kind (suppress or protect), read live (the reconcile clustering inputs).
     #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
     pub struct ActiveKeysByKindLiveRow {

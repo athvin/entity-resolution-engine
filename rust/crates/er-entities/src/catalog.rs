@@ -2279,7 +2279,7 @@ columns:
 version: 1
 name: record_overlay
 relation: record_overlays
-description: "One steward record overlay (protect/suppress): a flag on a record key, retractable, applied at assembly."
+description: "One steward record overlay (protect/suppress/delete): a flag on a record key, retractable, applied at assembly."
 key: [id]
 natural_key: [record_key, kind]
 generate:
@@ -2297,7 +2297,7 @@ columns:
   - name: kind
     type: varchar
     nullable: false
-    description: "always or never."
+    description: "protect, suppress or delete."
   - name: active
     type: boolean
     nullable: false
@@ -2378,6 +2378,55 @@ columns:
     type: timestamp
     nullable: false
     description: "Run-logical last-write time."
+"#,
+    ),
+    (
+        "record_verification",
+        r#"kind: entity
+version: 1
+name: record_verification
+relation: record_verifications
+description: "One steward verification flag (spec 2.9): a record row or a single cell a steward has confirmed correct. Retractable, never deleted; latest-wins per (record_key, attribute), where a NULL attribute marks the whole row verified."
+key: [id]
+natural_key: [record_key, attribute]
+generate:
+  stores: [duckdb]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "Content-derived row id: sha256('record_verifications:' || record_key || ':' || coalesce(attribute, ''))."
+  - name: record_key
+    type: varchar
+    nullable: false
+    description: "The standardized record key verified."
+  - name: attribute
+    type: varchar
+    description: "The verified golden attribute; NULL means the whole row is verified."
+  - name: active
+    type: boolean
+    nullable: false
+    description: "Whether the row is in force (retraction flips this; rows are never deleted)."
+  - name: created_by
+    type: varchar
+    nullable: false
+    description: "The steward or system actor that created the row."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    description: "Creation stamp (the run's logical timestamp)."
+  - name: source_action_id
+    type: varchar
+    nullable: false
+    description: "The staged steward action that produced this row."
+  - name: retracted_at
+    type: timestamp
+    description: "When it was retracted; NULL while active."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    description: "Run-logical last-write time (advanced by retract)."
 "#,
     ),
     (

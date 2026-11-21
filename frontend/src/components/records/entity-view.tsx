@@ -4,7 +4,7 @@ import { useState } from "react";
 
 import { TagChips } from "@/components/tags/tag-chips";
 import Link from "next/link";
-import { ArrowLeft, GitMerge, Split } from "lucide-react";
+import { ArrowLeft, BadgeCheck, GitMerge, ShieldCheck, Split, Trash2, Unlink } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -30,7 +30,15 @@ import {
   type GoldenRecord,
   type LineageRow,
 } from "@/lib/query/hooks";
-import { useProtectRecords, useSuppressRecords, useUnmerge } from "@/lib/query/reviews";
+import {
+  useDeleteRecords,
+  useProtectRecords,
+  useSuppressRecords,
+  useUnmerge,
+  useUnmatchRecord,
+  useUnverifyRecords,
+  useVerifyRecords,
+} from "@/lib/query/reviews";
 import { FieldHistory } from "./field-history";
 import { EnrichPanel } from "./enrich-panel";
 import { MergeRecordsDialog } from "./merge-records-dialog";
@@ -55,10 +63,17 @@ export function EntityView({ org, entityId }: { org: string; entityId: string })
   const unmerge = useUnmerge(org, ds, entityId);
   const suppress = useSuppressRecords(org, ds, entityId);
   const protect = useProtectRecords(org, ds, entityId);
+  const deleteRecords = useDeleteRecords(org, ds, entityId);
+  const verify = useVerifyRecords(org, ds, entityId);
+  const unverify = useUnverifyRecords(org, ds, entityId);
+  const unmatch = useUnmatchRecord(org, ds, entityId);
   const [marked, setMarked] = useState<ReadonlySet<string>>(new Set());
   const [unmergeMessage, setUnmergeMessage] = useState<string | null>(null);
   const [suppressMessage, setSuppressMessage] = useState<string | null>(null);
   const [protectMessage, setProtectMessage] = useState<string | null>(null);
+  const [deleteMessage, setDeleteMessage] = useState<string | null>(null);
+  const [verifyMessage, setVerifyMessage] = useState<string | null>(null);
+  const [unmatchMessage, setUnmatchMessage] = useState<string | null>(null);
   const [mergeOpen, setMergeOpen] = useState(false);
   // O12c. One attribute's history at a time: the panel is per field, so two
   // open at once would be two answers to one question.
@@ -292,6 +307,30 @@ export function EntityView({ org, entityId }: { org: string; entityId: string })
               failure={adoptFailure}
               differencesOnly={differencesOnly}
               onToggleDifferences={setDifferencesOnly}
+              verifiedCells={
+                new Set(
+                  (memberValues.data?.items ?? []).flatMap((item) =>
+                    (item.verified_attributes ?? []).map(
+                      (attribute) => `${item.record_key}:${attribute}`,
+                    ),
+                  ),
+                )
+              }
+              verifying={verify.isPending || unverify.isPending}
+              onToggleVerifyCell={(recordKey, attribute, verified) => {
+                setAdoptFailure(null);
+                const failureMessage = "could not change that verification";
+                const onError = (error: unknown) => {
+                  setAdoptFailure(
+                    error instanceof BffRequestError ? error.message : failureMessage,
+                  );
+                };
+                if (verified) {
+                  unverify.mutate({ records: [recordKey], attribute }, { onError });
+                } else {
+                  verify.mutate({ records: [recordKey], attribute }, { onError });
+                }
+              }}
               onAdopt={(attribute, value) => {
                 setAdoptFailure(null);
                 setAdopting(attribute);
@@ -410,6 +449,96 @@ export function EntityView({ org, entityId }: { org: string; entityId: string })
               >
                 Protect {marked.size > 0 ? `${String(marked.size)} ` : ""}selected
               </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={marked.size === 0 || verify.isPending}
+                data-testid="verify-button"
+                data-er-action="records.verify"
+                onClick={() => {
+                  setVerifyMessage(null);
+                  verify.mutate(
+                    { records: [...marked] },
+                    {
+                      onSuccess: (result) => {
+                        setMarked(new Set());
+                        setVerifyMessage(
+                          `verification queued for ${String(result.verified)} record${result.verified === 1 ? "" : "s"} — the flag appears when the correction run finishes`,
+                        );
+                      },
+                      onError: (error) => {
+                        setVerifyMessage(
+                          error instanceof BffRequestError ? error.message : "verify failed",
+                        );
+                      },
+                    },
+                  );
+                }}
+              >
+                <BadgeCheck />
+                Verify {marked.size > 0 ? `${String(marked.size)} ` : ""}selected
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={marked.size !== 1 || unmatch.isPending}
+                data-testid="unmatch-button"
+                data-er-action="records.unmatch"
+                title={
+                  marked.size === 1
+                    ? "Never group this record with the rest of the group again"
+                    : "Select exactly one member to unmatch"
+                }
+                onClick={() => {
+                  const [recordKey] = [...marked];
+                  if (recordKey === undefined) return;
+                  setUnmatchMessage(null);
+                  unmatch.mutate(recordKey, {
+                    onSuccess: () => {
+                      setMarked(new Set());
+                      setUnmatchMessage(
+                        `unmatch queued for ${recordKey} — it will stay apart from the current members after the correction run finishes`,
+                      );
+                    },
+                    onError: (error) => {
+                      setUnmatchMessage(
+                        error instanceof BffRequestError ? error.message : "unmatch failed",
+                      );
+                    },
+                  });
+                }}
+              >
+                <Unlink />
+                Unmatch selected
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={marked.size === 0 || deleteRecords.isPending}
+                data-testid="delete-button"
+                data-er-action="records.delete"
+                onClick={() => {
+                  setDeleteMessage(null);
+                  deleteRecords.mutate([...marked], {
+                    onSuccess: (result) => {
+                      setMarked(new Set());
+                      setDeleteMessage(
+                        `deletion queued for ${String(result.deleted)} record${result.deleted === 1 ? "" : "s"} — ${result.deleted === 1 ? "it leaves" : "they leave"} the dataset when the correction run finishes`,
+                      );
+                    },
+                    onError: (error) => {
+                      // A 409 names the protected records — that message is the
+                      // useful part, so surface the server's words verbatim.
+                      setDeleteMessage(
+                        error instanceof BffRequestError ? error.message : "delete failed",
+                      );
+                    },
+                  });
+                }}
+              >
+                <Trash2 />
+                Delete {marked.size > 0 ? `${String(marked.size)} ` : ""}selected
+              </Button>
             </div>
           )}
         </CardHeader>
@@ -427,6 +556,21 @@ export function EntityView({ org, entityId }: { org: string; entityId: string })
           {protectMessage && (
             <p className="text-muted-foreground mb-2 text-xs" data-testid="protect-status">
               {protectMessage}
+            </p>
+          )}
+          {deleteMessage && (
+            <p className="text-muted-foreground mb-2 text-xs" data-testid="delete-status">
+              {deleteMessage}
+            </p>
+          )}
+          {verifyMessage && (
+            <p className="text-muted-foreground mb-2 text-xs" data-testid="verify-status">
+              {verifyMessage}
+            </p>
+          )}
+          {unmatchMessage && (
+            <p className="text-muted-foreground mb-2 text-xs" data-testid="unmatch-status">
+              {unmatchMessage}
             </p>
           )}
           <table className="w-full min-w-[28rem] text-sm">
@@ -462,7 +606,31 @@ export function EntityView({ org, entityId }: { org: string; entityId: string })
                     </td>
                   )}
                   <td className="py-2 pr-4 font-medium">{member.source_system}</td>
-                  <td className="py-2 pr-4 font-mono text-xs">{member.source_record_id}</td>
+                  <td className="py-2 pr-4 font-mono text-xs">
+                    <span className="inline-flex items-center gap-2">
+                      {member.source_record_id}
+                      {member.protected && (
+                        <span
+                          className="inline-flex items-center gap-1 font-sans font-medium"
+                          title="Protected — pinned as master; cannot be deleted, unmatched or merged as a non-master"
+                          data-testid={`protected-${member.record_key}`}
+                        >
+                          <ShieldCheck className="size-3.5" aria-hidden />
+                          protected
+                        </span>
+                      )}
+                      {member.verified && (
+                        <span
+                          className="inline-flex items-center gap-1 font-sans font-medium"
+                          title="Verified — a steward confirmed this row"
+                          data-testid={`verified-${member.record_key}`}
+                        >
+                          <BadgeCheck className="size-3.5" aria-hidden />
+                          verified
+                        </span>
+                      )}
+                    </span>
+                  </td>
                   <td className="text-muted-foreground py-2 pr-4 text-xs">
                     {member.assigned_at ?? "—"}
                   </td>

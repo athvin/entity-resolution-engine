@@ -357,7 +357,8 @@ fn insert_group_confidence(
 /// One within-group evidence edge with its provenance. A scored edge carries
 /// the model version and the comparison columns its evidence names — the
 /// matched-by and matched-on filters' raw material; an asserted edge is a
-/// steward's `always`, which is what `verified` means on a group.
+/// steward's `always`. A group is `verified` when it carries an asserted edge
+/// or one of its member rows carries an active steward verification (2.9).
 pub struct GroupEdge {
     pub rec_a: String,
     pub rec_b: String,
@@ -488,9 +489,38 @@ pub fn entity_detail(
     };
     let events = er_entities::entity_event::read::by_entity(conn, snapshot, entity_id)
         .map_err(|e| e.to_string())?;
+    // Per-member steward flags: the entity view's action affordances read
+    // these (a protected member cannot be deleted or unmatch-peeled without
+    // an explicit unprotect first; a verified member shows the mark).
+    let protected: std::collections::BTreeSet<String> =
+        active_overlay_keys(session, snapshot, "protect")?
+            .into_iter()
+            .collect();
+    let row_verified: std::collections::BTreeSet<String> = active_verifications(session, snapshot)?
+        .into_iter()
+        .filter(|(_, attribute)| attribute.is_none())
+        .map(|(record_key, _)| record_key)
+        .collect();
+    let members = members
+        .into_iter()
+        .map(|m| {
+            let Ok(Value::Object(mut obj)) = serde_json::to_value(&m) else {
+                return json!(m);
+            };
+            obj.insert(
+                "protected".to_string(),
+                Value::from(protected.contains(&m.record_key)),
+            );
+            obj.insert(
+                "verified".to_string(),
+                Value::from(row_verified.contains(&m.record_key)),
+            );
+            Value::Object(obj)
+        })
+        .collect::<Vec<Value>>();
     Ok(Some(json!({
         "golden": golden_row,
-        "members": rows_to_values(&members),
+        "members": members,
         "lineage": lineage,
         "events": rows_to_values(&events),
     })))
@@ -551,6 +581,61 @@ pub fn active_assertions(
     }
 }
 
+/// The active overlay record keys of one kind (`protect` / `suppress` /
+/// `delete`) at `snapshot` — empty when the overlay table is absent. The
+/// staging prechecks read these: delete refuses a protected record, and a
+/// mass merge refuses a protected record as a non-master member.
+///
+/// # Errors
+/// Propagates a non-missing-table lake query error.
+pub fn active_overlay_keys(
+    session: &Session,
+    snapshot: i64,
+    kind: &str,
+) -> Result<Vec<String>, String> {
+    match er_entities::record_overlay::read::active_keys_by_kind(
+        session.connection(),
+        snapshot,
+        kind,
+    ) {
+        Ok(rows) => Ok(rows.into_iter().map(|r| r.record_key).collect()),
+        Err(e) => {
+            let s = e.to_string();
+            if is_missing_table(&s) {
+                Ok(Vec::new())
+            } else {
+                Err(s)
+            }
+        }
+    }
+}
+
+/// The active verification flags (spec 2.9) at `snapshot` as
+/// `(record_key, attribute)` pairs — empty when the table is absent (no
+/// steward has verified anything yet). A NULL `attribute` marks the whole row.
+///
+/// # Errors
+/// Propagates a non-missing-table lake query error.
+pub fn active_verifications(
+    session: &Session,
+    snapshot: i64,
+) -> Result<Vec<(String, Option<String>)>, String> {
+    match er_entities::record_verification::read::active(session.connection(), snapshot) {
+        Ok(rows) => Ok(rows
+            .into_iter()
+            .map(|r| (r.record_key, r.attribute))
+            .collect()),
+        Err(e) => {
+            let s = e.to_string();
+            if is_missing_table(&s) {
+                Ok(Vec::new())
+            } else {
+                Err(s)
+            }
+        }
+    }
+}
+
 /// Server-side filters over the duplicate-group list (`readapi.duplicate_groups`).
 ///
 /// Every dimension is applied while paging: a filter that ran only over the
@@ -576,8 +661,9 @@ pub struct DuplicateFilters {
     pub model_version: Option<String>,
     /// Keep groups whose scored evidence names this comparison column.
     pub matched_on: Option<String>,
-    /// `true` keeps groups carrying an active always-assertion among their
-    /// members, `false` keeps groups without one.
+    /// `true` keeps groups carrying an active always-assertion or a row-level
+    /// steward verification among their members, `false` keeps groups with
+    /// neither.
     pub verified: Option<bool>,
     /// Entity-id sets from the Postgres tag prequery: membership required /
     /// membership forbidden. `None` is no tag filter on that side; an EMPTY
@@ -779,6 +865,16 @@ fn assemble_group_items(
     // rather than per group: active scored edges plus always-assertions.
     let edges = edges_by_entity(session, snapshot, first, last)?;
 
+    // Row-level steward verifications (spec 2.9), one fetch for the chunk:
+    // a group counts as verified when a member ROW is verified, alongside the
+    // always-assertion signal the filter has always read. Cell-level flags do
+    // not mark the group.
+    let row_verified: std::collections::BTreeSet<String> = active_verifications(session, snapshot)?
+        .into_iter()
+        .filter(|(_, attribute)| attribute.is_none())
+        .map(|(record_key, _)| record_key)
+        .collect();
+
     // The members of every entity in the chunk's id range, already ordered by
     // (entity_id, record_key) — so each group's list is record_key-ordered.
     let conn = session.connection();
@@ -863,6 +959,8 @@ fn assemble_group_items(
                         .unwrap_or(Value::Null)
                 })
                 .collect();
+            let verified = group_edges.iter().any(|e| e.asserted)
+                || member_keys.iter().any(|k| row_verified.contains(k));
             GroupItem {
                 entity_id: g.entity_id.clone(),
                 member_count: g.member_count.unwrap_or(0),
@@ -870,7 +968,7 @@ fn assemble_group_items(
                 score,
                 model_versions,
                 matched_fields,
-                verified: group_edges.iter().any(|e| e.asserted),
+                verified,
                 preview,
             }
         })
@@ -1135,11 +1233,37 @@ pub fn records_by_key(
     let joined = keys.join("\u{1f}");
     let rows = er_entities::int_std_record::read::by_keys(session.connection(), snapshot, &joined)
         .map_err(|e| e.to_string())?;
+    // A deleted record's cell data is no longer served (spec 2.9): delete is
+    // stronger than suppress, which keeps the record readable. Protect wins
+    // here exactly as in the reconcile corpus: a protected record is never
+    // deleted out from under its pin. Verification flags ride along so the
+    // member-values grid can mark verified cells.
+    let protected: std::collections::BTreeSet<String> =
+        active_overlay_keys(session, snapshot, "protect")?
+            .into_iter()
+            .collect();
+    let deleted: std::collections::BTreeSet<String> =
+        active_overlay_keys(session, snapshot, "delete")?
+            .into_iter()
+            .filter(|k| !protected.contains(k))
+            .collect();
+    let mut row_verified: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    let mut cell_verified: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
+    for (record_key, attribute) in active_verifications(session, snapshot)? {
+        match attribute {
+            None => {
+                row_verified.insert(record_key);
+            }
+            Some(attr) => cell_verified.entry(record_key).or_default().push(attr),
+        }
+    }
     // The old `struct_pack` nesting, rebuilt in Rust: the identity columns on
     // top, every other column under `attributes`. Serializing the typed row
     // first keeps the DuckDB-compatible timestamp rendering.
     Ok(rows
         .iter()
+        .filter(|r| !deleted.contains(&r.record_key))
         .map(|r| {
             let Ok(Value::Object(mut all)) = serde_json::to_value(r) else {
                 return Value::Null;
@@ -1150,6 +1274,22 @@ pub fn records_by_key(
                     top.insert(key.to_string(), v);
                 }
             }
+            top.insert(
+                "verified".to_string(),
+                Value::from(row_verified.contains(&r.record_key)),
+            );
+            top.insert(
+                "verified_attributes".to_string(),
+                Value::Array(
+                    cell_verified
+                        .get(&r.record_key)
+                        .cloned()
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(Value::from)
+                        .collect(),
+                ),
+            );
             top.insert("attributes".to_string(), Value::Object(all));
             Value::Object(top)
         })

@@ -2720,17 +2720,19 @@ pub fn apply_staged_action_labeled(
                 )?;
             }
         }
-        // Protect/suppress a record (PR 1.3): one latest-wins active row per
-        // (record_key, kind). `suppress` drops the record from reconcile
-        // clustering; `protect` forces it master on the read path. Applied only
-        // when the overlay table exists, so an empty table is a byte-exact no-op.
-        Some(kind @ ("protect_record" | "suppress_record")) => {
+        // Protect/suppress/delete a record (PR 1.3, spec 2.9): one latest-wins
+        // active row per (record_key, kind). `suppress` drops the record from
+        // reconcile clustering; `delete` does the same and stops the cell-data
+        // read lane serving it (an active `protect` wins over a `delete`);
+        // `protect` forces it master on the read path. Applied only when the
+        // overlay table exists, so an empty table is a byte-exact no-op.
+        Some(kind @ ("protect_record" | "suppress_record" | "delete_record")) => {
             create_ddl_table(session, "record_overlays")?;
             let record_key = field("record_key");
-            let overlay_kind = if kind == "protect_record" {
-                "protect"
-            } else {
-                "suppress"
+            let overlay_kind = match kind {
+                "protect_record" => "protect",
+                "delete_record" => "delete",
+                _ => "suppress",
             };
             if !record_key.is_empty() {
                 er_entities::record_overlay::delete::clear(
@@ -2751,13 +2753,49 @@ pub fn apply_staged_action_labeled(
         Some("retract_record_overlay") => {
             create_ddl_table(session, "record_overlays")?;
             let record_key = field("record_key");
-            let overlay_kind = field("kind"); // "protect" | "suppress"
-            if !record_key.is_empty() && matches!(overlay_kind, "protect" | "suppress") {
+            let overlay_kind = field("kind"); // "protect" | "suppress" | "delete"
+            if !record_key.is_empty() && matches!(overlay_kind, "protect" | "suppress" | "delete") {
                 er_entities::record_overlay::update::retract(
                     session.connection(),
                     applied_at,
                     record_key,
                     overlay_kind,
+                )?;
+            }
+        }
+        // Verify a row or a cell (spec 2.9): one latest-wins active row per
+        // (record_key, attribute), an absent attribute marking the whole row.
+        // Verification is read-side metadata — reconcile never reads it.
+        Some("verify_record") => {
+            create_ddl_table(session, "record_verifications")?;
+            let record_key = field("record_key");
+            let attribute = action.get("attribute").and_then(serde_json::Value::as_str);
+            if !record_key.is_empty() {
+                er_entities::record_verification::delete::clear(
+                    session.connection(),
+                    record_key,
+                    attribute,
+                )?;
+                er_entities::record_verification::create::set(
+                    session.connection(),
+                    record_key,
+                    attribute,
+                    field("created_by"),
+                    applied_at,
+                    action_id,
+                )?;
+            }
+        }
+        Some("unverify_record") => {
+            create_ddl_table(session, "record_verifications")?;
+            let record_key = field("record_key");
+            let attribute = action.get("attribute").and_then(serde_json::Value::as_str);
+            if !record_key.is_empty() {
+                er_entities::record_verification::update::retract(
+                    session.connection(),
+                    applied_at,
+                    record_key,
+                    attribute,
                 )?;
             }
         }
@@ -2908,6 +2946,19 @@ fn load_overlay_keys(session: &Session, kind: &str) -> Result<BTreeSet<String>> 
 /// Propagates a non-missing-table query error.
 fn load_protected_keys(session: &Session) -> Result<BTreeSet<String>> {
     load_overlay_keys(session, "protect")
+}
+
+/// Active deleted `record_key`s from `lake.main.record_overlays` (empty if the
+/// table isn't there yet — the same missing-table tolerance as suppress). A
+/// deleted record is dropped from every reconcile clustering input, exactly
+/// like a suppressed one — minus the protect interaction handled by the caller
+/// (an active `protect` wins over a `delete`, spec 2.9's "a protected record
+/// must survive it").
+///
+/// # Errors
+/// Propagates a non-missing-table query error.
+fn load_deleted_keys(session: &Session) -> Result<BTreeSet<String>> {
+    load_overlay_keys(session, "delete")
 }
 
 /// The prefix on a synthetic assertion's id, so an escalation can say whether a
@@ -3266,30 +3317,60 @@ pub fn run_reconcile(session: &Session, config: &Config, run_id: &str, run_at: &
     // S4.4 assertion adjustment (identical to er-match's proven in-memory path).
     // Empty when the lake has no assertions, so the base run is unchanged.
     let assertions = load_active_assertions(session)?;
+    // Protected records (PR 1.3c steward overlay): never-cut may not sever a
+    // protected record's membership, and (spec 2.9) an active protect wins over
+    // a delete — a protected record is never deleted out from under its pin.
+    // Empty/absent overlay ⇒ byte-identical to a run with no protections.
+    // Loaded once here so the delete exclusion, the never-cut fixpoint and the
+    // escalation surfacing below share the set.
+    let protected = load_protected_keys(session)?;
     // Suppressed records (PR 1.3 steward overlay): drop them from EVERY
     // clustering input — nodes, match-score edges, and the pushed `always`
     // edges — because label_propagate rebuilds the node universe from the nodes
     // PLUS every edge endpoint, so a surviving edge would resurrect a suppressed
     // node. Suppress therefore wins over `always`. Empty/absent overlay ⇒ the
     // partition is byte-identical to a run with no suppressions.
+    //
+    // Deleted records (spec 2.9) narrow the corpus exactly like suppressed
+    // ones, minus the records an active protect pins: those stay.
     let suppressed = load_suppressed_keys(session)?;
-    if !suppressed.is_empty() {
-        edges.retain(|(a, b, _)| !suppressed.contains(a) && !suppressed.contains(b));
+    let deleted = load_deleted_keys(session)?;
+    let deletable: BTreeSet<String> = deleted
+        .into_iter()
+        .filter(|k| !protected.contains(k))
+        .collect();
+    let excluded: BTreeSet<String> = if deletable.is_empty() {
+        suppressed.clone()
+    } else {
+        suppressed.union(&deletable).cloned().collect()
+    };
+    // A deleted record also leaves the CORPUS, unlike a suppressed one: no
+    // singleton identity is minted for it, its prior membership falls into
+    // `departed` (a `member_removed`/`cause: departed` event, the same ledger
+    // line a source tombstone writes) and the membership prune below drops its
+    // row. Suppress keeps a singleton identity; delete retires it.
+    let corpus: BTreeSet<String> = if deletable.is_empty() {
+        corpus
+    } else {
+        corpus.difference(&deletable).cloned().collect()
+    };
+    if !excluded.is_empty() {
+        edges.retain(|(a, b, _)| !excluded.contains(a) && !excluded.contains(b));
     }
-    let nodes: Vec<String> = if suppressed.is_empty() {
+    let nodes: Vec<String> = if excluded.is_empty() {
         nodes
     } else {
         nodes
             .into_iter()
-            .filter(|n| !suppressed.contains(n))
+            .filter(|n| !excluded.contains(n))
             .collect()
     };
     for a in assertions
         .iter()
         .filter(|a| a.kind == AssertionKind::Always)
     {
-        if suppressed.contains(&a.rec_a_key) || suppressed.contains(&a.rec_b_key) {
-            continue; // suppress wins over always
+        if excluded.contains(&a.rec_a_key) || excluded.contains(&a.rec_b_key) {
+            continue; // suppress/delete wins over always
         }
         // `always`: a protected edge (prob 1.0 >= cut_protect) never-cut can't sever.
         edges.push((a.rec_a_key.clone(), a.rec_b_key.clone(), 1.0));
@@ -3312,11 +3393,6 @@ pub fn run_reconcile(session: &Session, config: &Config, run_id: &str, run_at: &
         .map(|a| (a.rec_a_key.clone(), a.rec_b_key.clone()))
         .collect();
     edges.retain(|(a, b, _)| !never_pairs.contains(&(a.clone(), b.clone())));
-    // Protected records (PR 1.3c steward overlay): never-cut may not sever a
-    // protected record's membership. Empty/absent overlay ⇒ never-cut is
-    // byte-identical to a run with no protections. Loaded once here so the
-    // never-cut fixpoint and the escalation surfacing below share the set.
-    let protected = load_protected_keys(session)?;
     // never-cut: sever the lowest-probability edge on any path still
     // co-clustering a never pair through OTHER records (S4.4.2). An edge
     // touching a protected record is off-limits; a never pair reachable only
@@ -3451,6 +3527,20 @@ pub fn run_reconcile(session: &Session, config: &Config, run_id: &str, run_at: &
             ACCT_INT_STD_RECORDS
         }
     ))?;
+    if !deletable.is_empty() {
+        // A steward-deleted record is still in int_std_records (the lake is
+        // append-only), so without this its membership row survives the prune
+        // and it reads as a member of an entity it no longer belongs to. Keys
+        // cross through the same values-table + `esc` quoting as `__mem_src`.
+        let rows: Vec<String> = deletable
+            .iter()
+            .map(|k| format!("('{}')", esc(k)))
+            .collect();
+        session.execute_batch(&format!(
+            "delete from __membership_live where record_key in (select * from (values {}) as t(record_key))",
+            rows.join(", ")
+        ))?;
+    }
     er_entities::entity_membership::delete::absent_from_corpus(session.connection())?;
     session.execute_batch("drop table __membership_live")?;
 

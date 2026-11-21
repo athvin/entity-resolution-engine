@@ -2,7 +2,7 @@ kind: entity
 version: 1
 name: record_overlay
 relation: record_overlays
-description: "One steward record overlay (protect/suppress): a flag on a record key, retractable, applied at assembly."
+description: "One steward record overlay (protect/suppress/delete): a flag on a record key, retractable, applied at assembly."
 key: [id]
 natural_key: [record_key, kind]
 generate:
@@ -20,7 +20,7 @@ columns:
   - name: kind
     type: varchar
     nullable: false
-    description: "always or never."
+    description: "protect, suppress or delete."
   - name: active
     type: boolean
     nullable: false

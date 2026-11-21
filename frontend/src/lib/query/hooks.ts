@@ -65,6 +65,10 @@ export interface EntityMember {
   record_key: string;
   assigned_at?: string;
   run_id?: string;
+  /** Steward overlays (2.9): protected members cannot be deleted, unmatched
+   *  or mass-merged as a non-master; verified marks a steward-confirmed row. */
+  protected?: boolean;
+  verified?: boolean;
 }
 
 export interface LineageRow {

@@ -2341,12 +2341,13 @@ const server = http.createServer((req, res) => {
         apply_job: "mock-mass-update-job",
       });
     }
-    // Record overlays: protect (pin master) / unprotect, staged like the real
-    // steward path. The read-path master override is exercised by the Rust e2e;
-    // here we just confirm the staged acknowledgement the UI reports.
+    // Record overlays + verification flags: protect (pin master) / unprotect,
+    // suppress / unsuppress, delete / undelete, verify / unverify — staged like
+    // the real steward path. The read-path effects are exercised by the Rust
+    // e2e; here we just confirm the staged acknowledgement the UI reports.
     if (
       (match =
-        /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/records\/(protect|unprotect|suppress|unsuppress)$/.exec(
+        /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/records\/(protect|unprotect|suppress|unsuppress|delete|undelete|verify|unverify)$/.exec(
           path,
         )) &&
       req.method === "POST"
@@ -2378,6 +2379,26 @@ const server = http.createServer((req, res) => {
         count: keys.length,
         pending_until_next_reconcile: false,
         apply_job: `mock-${match[2]}-job`,
+      });
+    }
+    // Unmatch (2.9): the never-star, staged like the real path — one record in,
+    // a staged acknowledgement out. The reconcile effect (the record leaves the
+    // group and stays out) is the Rust e2e's job.
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/records\/unmatch$/.exec(path)) &&
+      req.method === "POST"
+    ) {
+      const body = await readBody(req);
+      const key = String(body.record_key ?? "").trim();
+      if (key === "") {
+        return send(res, 422, { detail: "record_key is required" });
+      }
+      return send(res, 200, {
+        status: "applied",
+        entity_id: "mock-entity",
+        pairs: 1,
+        action_ids: ["mock-unmatch-0"],
+        apply_job: "mock-unmatch-job",
       });
     }
     if (
