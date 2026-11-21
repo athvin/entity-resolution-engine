@@ -1,13 +1,13 @@
 ---
 name: ci-and-supply-chain
-description: Explains this repo's CI topology and dependency gates — the `detect`-job pattern that lets a required check skip without blocking a PR, why no required workflow may carry a `paths:` filter, the disk-reclaim step, the SHA-pinning policy for actions, the merge bus that proves a batch green, and the supply-chain gates (cargo-deny advisories/licences/bans, pnpm audit and its allowlist, and the licence list mirrored between Rust and npm). Use when a CI job fails for reasons unrelated to the diff, when `main` goes red after PRs merged green, when adding or re-wiring a workflow or job, when a dependency bump cannot go green, when an advisory or licence gate fires, or when deciding whether a check should be required. For local gates see rust-conventions; for frontend tiers see frontend-testing; for landing a PR see land-pr; for the issue card see project-board; for `infra.yml` and its destroy guard see infra-platform.
+description: Explains this repo's CI topology and dependency gates — the `detect`-job pattern that lets a required check skip without blocking a PR, why no required workflow may carry a `paths:` filter, the disk-reclaim step, the SHA-pinning policy for actions, and the supply-chain gates (cargo-deny advisories/licences/bans, pnpm audit and its allowlist, and the licence list mirrored between Rust and npm). Use when a CI job fails for reasons unrelated to the diff, when `main` goes red after PRs merged green, when adding or re-wiring a workflow or job, when a dependency bump cannot go green, when an advisory or licence gate fires, or when deciding whether a check should be required. For local gates see rust-conventions; for frontend tiers see frontend-testing; for landing a PR see land-pr; for the issue card see project-board; for `infra.yml` and its destroy guard see infra-platform.
 ---
 
 # CI and the supply chain
 
 `rust`, `frontend` and `infra` are the workflows whose jobs are required status
 checks, so a change is not mergeable until they pass. Every other workflow —
-the image build, the deploy, the kind probe, the merge bus, the agentic set —
+the image build, the deploy, the kind probe, the agentic set —
 reports nothing branch protection waits on; all of them, with their contexts,
 timeouts and conditions, are generated into
 [references/required-checks.md](references/required-checks.md), which is where
@@ -93,9 +93,9 @@ run.
 
 Measured on #473 (2026-11-05): two Rust files changed, all three `detect` jobs
 failed in the Actions-minutes outage (cause 0 below), every required context
-`skipped`, `mergeStateStatus` **CLEAN**. It was mergeable — by a human or by the
-merge bus — with nothing compiled or tested. Of the open PRs at the time it was
-the only one in that state, because the others had been pushed to since.
+`skipped`, `mergeStateStatus` **CLEAN**. It was mergeable with nothing compiled or tested. Of the open PRs at the
+time it was the only one in that state, because the others had been pushed to
+since.
 
 Note this defeats the aggregator gates too: `test` and `DuckLake + extensions
 e2e` carry `if: !cancelled() && needs.detect.outputs.code == 'true'`, and with
@@ -113,8 +113,7 @@ gh api repos/:owner/:repo/commits/<head_sha>/check-runs --paginate \
   --jq '[.check_runs[]|select(.name|startswith("detect"))|select(.conclusion=="failure")]|length'
 ```
 
-The merge bus does exactly this and refuses such a candidate. Anyone merging by
-hand after an outage should too.
+Check this before merging, especially after an outage.
 
 `rust.yml`'s detect skips the compile jobs for PRs that touch nothing outside
 its exempt set. **That set lives in `scripts/ci/detect-paths.sh` as
@@ -201,11 +200,9 @@ hand. A terraform PR skips the frontend gate for free and never reaches
 
 `rust`, `frontend` and `infra` all trigger on `merge_group`. **Nothing consumes
 that today**, and the trigger is not evidence that anything does: GitHub's merge
-queue is not enabled here and cannot be (see the merge bus below, which is the
-substitute), and `main`'s protection is `strict: false`, so neither the queue
-nor "require branches to be up to date" is what protects it. **No run examines a
-combination of PRs except the merge bus.** Probe rather than trust prose, the
-same way branch protection is probed above:
+queue is not enabled here. Refresh from `origin/main` before merging and verify
+the updated branch. Probe rather than trust prose, the same way branch
+protection is probed above:
 
 ```
 gh api graphql -f query='{repository(owner:"athvin",
@@ -260,9 +257,6 @@ starved runs summed to **0**, real ones to **5, 5 and 202**. Nothing in CI can
 go green until the spending limit is raised or the monthly allowance resets —
 and that is an account setting, not a repository one. Observed 2026-11-03,
 sustained for hours while `main` went red for the same reason.
-
-The merge bus checks for this before it builds anything, and distinguishes it
-from a bad batch afterwards; see below.
 
 **1. Supply-chain gates are time-dependent.** `cargo-deny` and `pnpm audit`
 fail on advisories and yanked releases published **since the last green run**.
@@ -366,9 +360,8 @@ record the post-merge follow-ups.
 
 It is **required** as of 2026-11-07. It reads GitHub's own
 `closingIssuesReferences` rather than regexing the body, so a `Closes #<n>` that
-would not actually close anything does not pass; `merge-bus/*`, Dependabot,
-reverts and the `no-ticket` label are exempt, the first load-bearing because
-`merge-bus-verdict.sh` reads the bus PR's own rollup.
+would not actually close anything does not pass; Dependabot, reverts and the
+`no-ticket` label are exempt.
 
 Three things it is worth not re-deriving: the order that makes promoting **any**
 check to required safe, the two mechanics of that `PATCH` that bite (the
@@ -377,33 +370,6 @@ what blocks a PR), and the fact that a body edit means one SHA can carry several
 check-runs of one name — `statusCheckRollup` returns all of them, healed
 failures included. All three: [references/pr-contract.md](references/pr-contract.md).
 
-## The merge bus
-
-`main`'s protection has **`strict: false`** — "require branches up to date
-before merging" is off — so a PR may merge on a green it earned against a base
-that has since moved. With five or six PRs open, four each green against an
-older `main` can all merge and leave `main` red, because no run ever examined
-the combination. `merge-bus.yml` is that missing run: it batches the PRs
-carrying the `merge-bus` label, opens a PR for the combination so the ordinary
-gate judges it, and squash-merges the members only if that goes green.
-Dispatch-only, `dry_run: true` by default, report-and-stop on red.
-
-GitHub's **merge queue is this feature and cannot be enabled here** — it is
-offered only for **organization-owned** repositories, and this one is owned by a
-user account. Visibility is not the blocker and has moved, so do not reason from
-it; ownership is. Moving the repo under an organisation is the trigger to
-revisit, because the queue would replace the bus.
-
-Four things bite, and each cost a live run or a false green to learn: it needs
-**`actions: read`** (an unnamed scope is `none`); it can **never carry a PR
-touching `.github/workflows/`** (`workflows` is not a grantable `GITHUB_TOKEN`
-scope); it refuses a PR whose **`detect` jobs failed**, because that green
-verified nothing; and `merge bus` **must never become a required status check**,
-since a dispatch-only job can never report on a PR.
-
-The full design, every refusal reason, the two landing invariants and the
-simulator: [references/merge-bus.md](references/merge-bus.md). Run
-`bash scripts/ci/merge-bus-test.sh` when you touch it.
 ## Agentic workflows
 
 The `gh-aw` workflows and the `agent-task.yml` dispatcher are **merged and
@@ -473,12 +439,6 @@ unblocker is upstream, never a fix in the PR.
 every PR if so (the `detect` + `if:` pattern). Then **observe it failing**
 before trusting it, and give it a rename-detection exit so it cannot pass by
 examining nothing.
-
-**A merge-bus batch went red.** The batch is not bisected, so the comment on
-each member says only that the combination failed — it does not accuse that PR.
-Read the bus PR's own checks to see which context failed, and note that a
-combination can fail when every member passes alone, which is the whole reason
-the bus exists. Re-run the bus with `max_batch=1` to attribute it.
 
 ## Two environments this skill does not otherwise cover
 

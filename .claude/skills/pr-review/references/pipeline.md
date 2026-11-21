@@ -16,7 +16,7 @@ word for anything.
 ## 0. Eligibility, twice
 
 Stop before spending anything when the diff is closed, draft, bot-authored
-(Dependabot, the merge bus), or generated-only — a lockfile bump, a regenerated
+(Dependabot), or generated-only — a lockfile bump, a regenerated
 `openapi.json`, a regenerated skill reference. Run the same check again
 immediately before posting, because the head may have moved while the reviewers
 ran and a review posted against a stale SHA cites lines that no longer exist.

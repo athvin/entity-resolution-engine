@@ -28,7 +28,7 @@ carries no guarantee.
 
 ## 2. A merge that needs no board edit
 
-**Query:** "The merge bus just squash-merged #488. Move its card to Done."
+**Query:** "PR #488 was just squash-merged. Move its card to Done."
 
 Must:
 
@@ -45,9 +45,6 @@ Must not:
 - Immediately construct an `item-edit --single-select-option-id` call for `Done`.
 - Reach for `item-add` on the pull request to create the card the request
   implies.
-
-Credit for routing merge-bus mechanics — batching, why an individual green is
-stale — to the ci-and-supply-chain skill rather than explaining them here.
 
 ## 3. `Done` is not a bookkeeping edit
 
@@ -160,7 +157,7 @@ Must:
 
 Must not:
 
-- Explain the merge bus, required checks or why a green can be stale here; that
+- Explain required checks or why a green can be stale here; that
   is `ci-and-supply-chain`'s, and this skill's description routes to it.
 - Add #604 to the board to answer the question as asked.
 - Set a card to `Done` to match the merge. "Pull request merged" owns that move,
