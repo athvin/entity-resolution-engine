@@ -139,8 +139,10 @@ export function AuditStory({ onRunning }: { onRunning: (running: boolean) => voi
     };
     sync.current = update;
     const observer = new IntersectionObserver(
-      ([entry]) => {
-        visible = entry?.isIntersecting ?? false;
+      (entries) => {
+        // This observer watches one target. A batch can contain both its old
+        // and new visibility; the last queued entry is the current state.
+        visible = entries.at(-1)?.isIntersecting ?? false;
         setInView(visible);
         update();
       },

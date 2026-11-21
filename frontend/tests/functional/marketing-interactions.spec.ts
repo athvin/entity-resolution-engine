@@ -381,6 +381,33 @@ test.describe("interactive marketing", () => {
   });
 
   test("audit holds its clock while paused and retains the corrected result", async ({ page }) => {
+    // Browsers can queue multiple entries for the same target in one callback.
+    // Reproduce the shard-only failure: an old offscreen observation arrives
+    // in the same batch as the current visible observation (and vice versa).
+    await page.addInitScript(() => {
+      const NativeObserver = window.IntersectionObserver;
+      window.IntersectionObserver = class extends NativeObserver {
+        constructor(callback: IntersectionObserverCallback, options?: IntersectionObserverInit) {
+          super((entries, observer) => {
+            const latest = entries.at(-1);
+            if (latest?.target.id === "audit") {
+              const stale: IntersectionObserverEntry = {
+                time: latest.time - 1,
+                target: latest.target,
+                rootBounds: latest.rootBounds,
+                boundingClientRect: latest.boundingClientRect,
+                intersectionRect: latest.intersectionRect,
+                intersectionRatio: latest.isIntersecting ? 0 : 1,
+                isIntersecting: !latest.isIntersecting,
+              };
+              callback([stale, ...entries], observer);
+            } else {
+              callback(entries, observer);
+            }
+          }, options);
+        }
+      };
+    });
     await page.goto("/#audit");
     const audit = page.getByTestId("marketing-audit");
     await expect(audit).toHaveAttribute("data-running", "true");
@@ -399,6 +426,14 @@ test.describe("interactive marketing", () => {
     expect(Math.abs((await clock()) - time)).toBeLessThan(40);
     // Clicking Pause scrolled the button into view, and with free scrolling the
     // audit can now sit mostly above the fold; the flow locks while it is on screen.
+    await audit.evaluate((node) => {
+      node.scrollIntoView({ block: "start", behavior: "instant" });
+    });
+    await expect(page.locator("#flow-dataset")).toBeDisabled();
+    await page.locator("#flow").evaluate((node) => {
+      node.scrollIntoView({ block: "start", behavior: "instant" });
+    });
+    await expect(page.locator("#flow-dataset")).toBeEnabled();
     await audit.evaluate((node) => {
       node.scrollIntoView({ block: "start", behavior: "instant" });
     });
