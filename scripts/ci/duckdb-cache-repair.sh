@@ -44,6 +44,15 @@
 #
 # Run: bash scripts/ci/duckdb-cache-repair.sh
 #
+# COVERAGE BUILDS UNPACK A SECOND TREE. `cargo llvm-cov` does not build in
+# `target/`: its default target dir is `target/llvm-cov-target/`, so the
+# instrumented build's shared source tree is
+# `rust/target/llvm-cov-target/duckdb-sources/<key>/`. rust-cache's
+# `workspaces: rust` saves all of `rust/target/`, sentinel-stripped there too,
+# so the same poisoned restore lands one directory over and the nightly died
+# before a test while this script reported the root tree intact. Both roots
+# are repaired below; a cold cache has neither, and that absence still prints.
+#
 # NO `set -u`, deliberately and with a failure to show for it: under `-u`,
 # expanding `"${trees[@]}"` when `nullglob` left the array EMPTY is an unbound
 # variable, so the absent-tree path — the normal one on a cold cache — exited
@@ -54,9 +63,9 @@ set -eo pipefail
 cd "$(dirname "$0")/../.."
 
 shopt -s nullglob
-trees=(rust/target/duckdb-sources/*/)
+trees=(rust/target/duckdb-sources/*/ rust/target/llvm-cov-target/duckdb-sources/*/)
 if [ ${#trees[@]} -eq 0 ]; then
-	echo "none     rust/target/duckdb-sources/ absent - build script unpacks cold"
+	echo "none     rust/target{,/llvm-cov-target}/duckdb-sources/ absent - build script unpacks cold"
 fi
 for tree in "${trees[@]}"; do
 	if [ -f "$tree.complete" ]; then
