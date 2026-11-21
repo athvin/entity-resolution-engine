@@ -197,7 +197,8 @@ fn acct_run_all_clusters_accounts_and_assembles_golden() {
     er_cli::golden_task::run_account_guarded(
         session.connection(),
         &config,
-        "2026-04-01 00:00:00",
+        // The baseline's logical time, so the stable comparison below holds.
+        "2026-03-03 00:00:00",
         Some(r#"{"remote_attempt":"published-attempt"}"#),
         || Ok(()),
     )

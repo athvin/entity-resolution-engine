@@ -418,9 +418,10 @@ pub async fn sweep_with(
             (Some(request), Some(gather)) => {
                 let gather = std::sync::Arc::clone(gather);
                 let row = attempt.clone();
-                let (receipt, commit) = tokio::task::spawn_blocking(move || gather(&row, request))
-                    .await
-                    .unwrap_or((Err(recovery::ReadFailed), Err(recovery::ReadFailed)));
+                let (receipt, commit) =
+                    er_obs::spawn_blocking_in_span(move || gather(&row, request))
+                        .await
+                        .unwrap_or((Err(recovery::ReadFailed), Err(recovery::ReadFailed)));
                 (Some(receipt), Some(commit))
             }
             _ => (None, None),
