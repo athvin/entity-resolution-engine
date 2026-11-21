@@ -15,7 +15,7 @@ variables {
 run "dataset_boundaries" {
   command = plan
   assert {
-    condition = output.namespaces["dataset-a"] == "duckfleet-2c92e260fe9935ecd6664c5a84639cd7b464e280"
+    condition     = output.namespaces["dataset-a"] == "duckfleet-2c92e260fe9935ecd6664c5a84639cd7b464e280"
     error_message = "Namespace recipe must match the Rust binding resolver."
   }
   assert {
