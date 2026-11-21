@@ -418,6 +418,34 @@ case "$boundary" in
 *) no "names only the settable attribute as drift" "output: $boundary" ;;
 esac
 
+# First Pages upload, measured in drift run 44861665640. Deployment metadata
+# changes on every CI upload; null -> false reports that the site is static.
+cat >"$tmp/dc-pages.json" <<'EOF'
+{"resource_drift":[
+ {"address":"cloudflare_pages_project.marketing_preview[0]","type":"cloudflare_pages_project",
+  "change":{"before":{"latest_deployment":null,"uses_functions":null,"production_branch":"main"},
+            "after":{"latest_deployment":{"id":"first"},"uses_functions":false,"production_branch":"main"}}}
+]}
+EOF
+jq '.resource_drift[0].change.before.latest_deployment = {id:"first"} |
+    .resource_drift[0].change.before.uses_functions = false |
+    .resource_drift[0].change.after.latest_deployment = {id:"second"}'     "$tmp/dc-pages.json" >"$tmp/dc-pages-repeat.json"
+jq '.resource_drift[0].change.after.production_branch = "unexpected"'     "$tmp/dc-pages.json" >"$tmp/dc-pages-config.json"
+jq '.resource_drift[0].change.after.uses_functions = true'     "$tmp/dc-pages.json" >"$tmp/dc-pages-functions.json"
+jq '.resource_drift[0].change.before.uses_functions = false'     "$tmp/dc-pages-functions.json" >"$tmp/dc-pages-functions-enabled.json"
+jq '.resource_drift[0].type = "another_resource"'     "$tmp/dc-pages.json" >"$tmp/dc-pages-other-type.json"
+expect_exit "first static Pages upload is NOT drift" 0 bash "$CLASSIFY" "$tmp/dc-pages.json"
+expect_exit "another Pages upload is NOT drift" 0 bash "$CLASSIFY" "$tmp/dc-pages-repeat.json"
+expect_exit "Pages configuration change IS drift" 1 bash "$CLASSIFY" "$tmp/dc-pages-config.json"
+expect_exit "first Pages upload with functions IS drift" 1 bash "$CLASSIFY" "$tmp/dc-pages-functions.json"
+expect_exit "enabling Pages functions IS drift" 1 bash "$CLASSIFY" "$tmp/dc-pages-functions-enabled.json"
+expect_exit "Pages exceptions do not cover other types" 1 bash "$CLASSIFY" "$tmp/dc-pages-other-type.json"
+pages_config="$(bash "$CLASSIFY" "$tmp/dc-pages-config.json" 2>&1 || true)"
+case "$pages_config" in
+*"[production_branch]"*) ok "names only the changed Pages configuration" ;;
+*) no "names only the changed Pages configuration" "output: $pages_config" ;;
+esac
+
 expect_exit "registry changes trigger IAM and chart gates" 0 bash scripts/ci/infra-detect-test.sh
 
 # --- verdict ----------------------------------------------------------------
