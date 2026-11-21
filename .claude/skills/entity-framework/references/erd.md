@@ -927,6 +927,17 @@ erDiagram
         timestamp retracted_at
         timestamp updated_at
     }
+    record_verifications {
+        varchar id PK
+        varchar record_key
+        varchar attribute
+        boolean active
+        varchar created_by
+        timestamp created_at
+        varchar source_action_id
+        timestamp retracted_at
+        timestamp updated_at
+    }
     schema_migrations {
         varchar id PK
         timestamp created_at
@@ -1067,12 +1078,10 @@ erDiagram
     int_std_records }o..|| entity_membership : "source_system, source_record_id"
     int_std_records }o..|| raw_records : "source_system, source_record_id, content_hash"
     golden_lineage }o..|| golden_overrides : "entity_id, attribute"
-    golden_lineage }o..|| golden_record_overrides : "record_key, attribute"
     golden_lineage }o..|| entity_membership : "source_system, source_record_id"
     acct_int_std_records }o..|| entity_membership : "source_system, source_record_id"
     acct_int_std_records }o..|| raw_records : "source_system, source_record_id, content_hash"
     acct_golden_lineage }o..|| golden_overrides : "entity_id, attribute"
-    acct_golden_lineage }o..|| golden_record_overrides : "record_key, attribute"
     acct_golden_lineage }o..|| entity_membership : "source_system, source_record_id"
     column_profiles }o..|| profile_runs : "profile_run_id → id"
     candidate_keys }o..|| profile_runs : "profile_run_id → id"
@@ -1124,7 +1133,8 @@ erDiagram
 | `ingest_batches` | ddl | One delivery receipt (S4.1): per-source landing counts for a batch, including tombstones and resurrections. |
 | `golden_overrides` | ddl | One steward golden-field override (latest-wins per entity and attribute); a NULL value means the steward cleared the field. |
 | `golden_record_overrides` | ddl | One steward golden-field override keyed by RECORD (latest-wins per record and attribute); resolved to the record's current entity through entity_membership at golden-assembly time, so a value chosen in the review merge dialog lands on the entity the merge mints. A NULL value means the steward cleared the field. |
-| `record_overlays` | ddl | One steward record overlay (protect/suppress): a flag on a record key, retractable, applied at assembly. |
+| `record_overlays` | ddl | One steward record overlay (protect/suppress/delete): a flag on a record key, retractable, applied at assembly. |
+| `record_verifications` | ddl | One steward verification flag (spec 2.9): a record row or a single cell a steward has confirmed correct. Retractable, never deleted; latest-wins per (record_key, attribute), where a NULL attribute marks the whole row verified. |
 | `schema_migrations` | ddl | A tenant lake's schema ledger: one row per DDL statement the reconciler applied to lake.main.*, plus one `verified` row each time a new catalog version found the lake already current. The latest row's catalog_hash is the version this lake is at; the lake, not the control plane, is authoritative for its own position. |
 | `int_std_records` | stage | One current standardized person record per record key: the standardization stage's output (supersession applied, tombstones excluded) and the matching stage's input. |
 | `golden_records` | stage | One resolved person: the surviving value per attribute, at a snapshot. |

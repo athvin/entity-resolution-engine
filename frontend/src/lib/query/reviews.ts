@@ -243,6 +243,10 @@ export interface SourceRecord {
   source_system: string;
   source_record_id: string;
   attributes: Record<string, unknown>;
+  /** Row-level steward verification (2.9). */
+  verified?: boolean;
+  /** The attributes carrying an active cell-level verification. */
+  verified_attributes?: string[];
 }
 
 /**
@@ -409,6 +413,100 @@ export function useProtectRecords(org: string, ds: string, entityId: string) {
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.entity(org, ds, entityId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.jobs(org, ds) });
+    },
+  });
+}
+
+/** Steward: delete member records (spec 2.9). Stronger than suppress — the
+ *  record leaves its entity, keeps no singleton identity, and its cell data
+ *  stops being served. The server 409s a protected record: unprotect first. */
+export function useDeleteRecords(org: string, ds: string, entityId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (records: string[]) => {
+      // ONE request for the whole selection — each `apply_now` call enqueues
+      // a full-corpus correction pass, so a loop would queue N of them.
+      await bffFetch(`/api/orgs/${org}/datasets/${ds}/records/delete`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ record_keys: records }),
+      });
+      return { deleted: records.length };
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.entity(org, ds, entityId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.jobs(org, ds) });
+      // Delete changes what the cell-data lane serves.
+      void queryClient.invalidateQueries({ queryKey: ["org", org, "member-values"] });
+    },
+  });
+}
+
+/** Steward: verify a member row, or one cell of it (spec 2.9). Verification
+ *  is read-side metadata: it never changes clustering, and it feeds the
+ *  groups verified filter. Pass `attribute` for a cell, omit for the row. */
+export function useVerifyRecords(org: string, ds: string, entityId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ records, attribute }: { records: string[]; attribute?: string }) => {
+      await bffFetch(`/api/orgs/${org}/datasets/${ds}/records/verify`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(
+          attribute ? { record_keys: records, attribute } : { record_keys: records },
+        ),
+      });
+      return { verified: records.length };
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.entity(org, ds, entityId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.jobs(org, ds) });
+      // Verification flags ride the member-values lane.
+      void queryClient.invalidateQueries({ queryKey: ["org", org, "member-values"] });
+    },
+  });
+}
+
+/** Steward: unmatch a member from its group (spec 2.9) — a durable never-rule
+ *  against every current co-member, so the record leaves at the next
+ *  reconcile and can never re-attach. Distinct from unmerge, which severs the
+ *  current entity only. */
+export function useUnmatchRecord(org: string, ds: string, entityId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (recordKey: string) => {
+      await bffFetch(`/api/orgs/${org}/datasets/${ds}/records/unmatch`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ record_key: recordKey }),
+      });
+      return { unmatched: recordKey };
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.entity(org, ds, entityId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.jobs(org, ds) });
+    },
+  });
+}
+
+/** Steward: retract a verification (row-level when `attribute` is omitted). */
+export function useUnverifyRecords(org: string, ds: string, entityId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ records, attribute }: { records: string[]; attribute?: string }) => {
+      await bffFetch(`/api/orgs/${org}/datasets/${ds}/records/unverify`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(
+          attribute ? { record_keys: records, attribute } : { record_keys: records },
+        ),
+      });
+      return { unverified: records.length };
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.entity(org, ds, entityId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.jobs(org, ds) });
+      void queryClient.invalidateQueries({ queryKey: ["org", org, "member-values"] });
     },
   });
 }

@@ -9930,10 +9930,50 @@ async fn record_overlay_action(
     overlay: &'static str,
     retract: bool,
 ) -> axum::response::Response {
+    record_batch_actions(
+        principal,
+        state,
+        org,
+        ds,
+        body.keys(),
+        body.apply_now,
+        move |record_key, actor| {
+            if retract {
+                json!({
+                    "type": "retract_record_overlay",
+                    "record_key": record_key,
+                    "kind": overlay,
+                    "created_by": actor,
+                })
+            } else {
+                json!({
+                    "type": format!("{overlay}_record"),
+                    "record_key": record_key,
+                    "created_by": actor,
+                })
+            }
+        },
+    )
+    .await
+}
+
+/// Stage one steward action per record (each independently auditable and
+/// independently retractable — the drain applies them one at a time) and,
+/// with `apply_now`, enqueue ONE `apply_corrections` job for the whole batch.
+/// The batch is the point: a correction pass reconciles the whole corpus, so
+/// N calls with `apply_now` queue N full passes to express one decision.
+async fn record_batch_actions(
+    principal: Principal,
+    state: AppState,
+    org: String,
+    ds: String,
+    keys: Vec<String>,
+    apply_now: bool,
+    build: impl Fn(&str, &str) -> Value,
+) -> axum::response::Response {
     if let Err(e) = guard(&principal, &org, Role::Steward) {
         return e.into_response();
     }
-    let keys = body.keys();
     if keys.is_empty() {
         return detail_err(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -9962,25 +10002,20 @@ async fn record_overlay_action(
         Ok(c) => c,
         Err(r) => return *r,
     };
-    // One staged action per record: each is independently auditable and
-    // independently retractable, and the drain applies them one at a time
-    // regardless. What the batch SHARES is the apply, below.
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(row) => row,
+        Err(response) => return *response,
+    };
+    let dataset = match dataset_or_404(&client, &org_row, &ds).await {
+        Ok(row) => row,
+        Err(response) => return *response,
+    };
+    if let Err(response) = refuse_unless_active_dataset(&org_row, &dataset, "steward actions") {
+        return *response;
+    }
     let mut action_ids: Vec<String> = Vec::with_capacity(keys.len());
     for record_key in &keys {
-        let action = if retract {
-            json!({
-                "type": "retract_record_overlay",
-                "record_key": record_key,
-                "kind": overlay,
-                "created_by": principal.actor,
-            })
-        } else {
-            json!({
-                "type": format!("{overlay}_record"),
-                "record_key": record_key,
-                "created_by": principal.actor,
-            })
-        };
+        let action = build(record_key, &principal.actor);
         match steward_stage(&client, &principal.actor, &org, &ds, &action).await {
             Ok(id) => action_ids.push(id),
             Err(r) => {
@@ -10001,10 +10036,10 @@ async fn record_overlay_action(
             }
         }
     }
-    if !body.apply_now {
+    if !apply_now {
         return staged_batch_response(StatusCode::CREATED, &action_ids);
     }
-    let idem = format!("{overlay}-apply:{}", er_ids::new_v7());
+    let idem = format!("records-apply:{}", er_ids::new_v7());
     let params = json!({ "skip_ingest": true });
     let org_row = match org_or_404(&client, &org).await {
         Ok(r) => r,
@@ -10091,6 +10126,193 @@ async fn unprotect_record_route(
     Json(body): Json<SuppressIn>,
 ) -> impl IntoResponse {
     record_overlay_action(principal, state, org, ds, body, "protect", true).await
+}
+
+async fn active_steward_dataset(
+    state: &AppState,
+    org: &str,
+    ds: &str,
+) -> Result<pg::DatasetDetail, Box<axum::response::Response>> {
+    let dsn = state.dsn.as_ref().ok_or_else(|| {
+        Box::new(detail_err(
+            StatusCode::NOT_IMPLEMENTED,
+            "steward actions require Postgres",
+        ))
+    })?;
+    let client = connect_pg(dsn).await?;
+    let org_row = org_or_404(&client, org).await?;
+    let dataset = dataset_or_404(&client, &org_row, ds).await?;
+    refuse_unless_active_dataset(&org_row, &dataset, "steward actions")?;
+    Ok(dataset)
+}
+
+/// Read protect pins without opening a lake on the async executor.
+async fn protected_record_keys(
+    state: &AppState,
+    org: &str,
+    ds: &str,
+) -> Result<BTreeSet<String>, Box<axum::response::Response>> {
+    let dataset = active_steward_dataset(state, org, ds).await?;
+    with_dataset_lake(dataset, |session, _| {
+        let snapshot = read::latest_snapshot(session)?;
+        read::active_overlay_keys(session, snapshot, "protect")
+            .map(|keys| keys.into_iter().collect())
+    })
+    .await?
+    .map_err(|error| {
+        tracing::error!(%error, "protect pins read failed");
+        Box::new(detail_err(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "could not read protected records",
+        ))
+    })
+}
+
+/// Steward+: delete a record (spec 2.9)
+/// (`POST /v1/orgs/{org}/datasets/{ds}/records/delete`). Stronger than
+/// suppress: the record leaves its entity at the next correction pass, no
+/// singleton identity is kept, its membership row is pruned, and the
+/// cell-data read lane stops serving it. Retractable (`records/undelete`);
+/// the raw landing history is never touched.
+///
+/// An active protect wins: the request is a 409 naming the protected
+/// records (unprotect first). The precheck reads the CURRENT lake, so a
+/// protect staged but not yet applied is not visible to it — the apply path
+/// gives protect precedence too, which covers that race.
+async fn delete_record_route(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, ds)): Path<(String, String)>,
+    Json(body): Json<SuppressIn>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Steward) {
+        return e.into_response();
+    }
+    let keys = body.keys();
+    if keys.is_empty() {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "record_key or a non-empty record_keys is required",
+        );
+    }
+    let protected = match protected_record_keys(&state, &org, &ds).await {
+        Ok(keys) => keys,
+        Err(response) => return *response,
+    };
+    let blocked: Vec<&str> = keys
+        .iter()
+        .map(String::as_str)
+        .filter(|k| protected.contains(*k))
+        .collect();
+    if !blocked.is_empty() {
+        let named: Vec<&str> = blocked.iter().take(5).copied().collect();
+        return detail_err(
+            StatusCode::CONFLICT,
+            format!(
+                "{} record(s) are protected and cannot be deleted — unprotect first: {}{}",
+                blocked.len(),
+                named.join(", "),
+                if blocked.len() > named.len() {
+                    ", …"
+                } else {
+                    ""
+                },
+            ),
+        );
+    }
+    record_overlay_action(principal, state, org, ds, body, "delete", false).await
+}
+
+/// Steward+: retract a record deletion
+/// (`POST /v1/orgs/{org}/datasets/{ds}/records/undelete`).
+async fn undelete_record_route(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, ds)): Path<(String, String)>,
+    Json(body): Json<SuppressIn>,
+) -> impl IntoResponse {
+    record_overlay_action(principal, state, org, ds, body, "delete", true).await
+}
+
+#[derive(Deserialize)]
+struct VerifyIn {
+    #[serde(default)]
+    record_key: Option<String>,
+    #[serde(default)]
+    record_keys: Vec<String>,
+    #[serde(default)]
+    apply_now: bool,
+    /// The cell to flag; absent verifies the whole row (spec 2.9).
+    #[serde(default)]
+    attribute: Option<String>,
+}
+
+/// Steward+: verify records or one cell of them (spec 2.9)
+/// (`POST /v1/orgs/{org}/datasets/{ds}/records/verify`). Persisted as
+/// latest-wins flags per (record_key, attribute); an absent `attribute`
+/// verifies the row. Verification is read-side metadata — it never changes
+/// clustering — and surfaces on the member-values lane, the entity view and
+/// the groups `verified` filter (1.28).
+async fn verify_record_route(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, ds)): Path<(String, String)>,
+    Json(body): Json<VerifyIn>,
+) -> impl IntoResponse {
+    record_verify_action(principal, state, org, ds, body, false).await
+}
+
+/// Steward+: retract a verification
+/// (`POST /v1/orgs/{org}/datasets/{ds}/records/unverify`).
+async fn unverify_record_route(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, ds)): Path<(String, String)>,
+    Json(body): Json<VerifyIn>,
+) -> impl IntoResponse {
+    record_verify_action(principal, state, org, ds, body, true).await
+}
+
+async fn record_verify_action(
+    principal: Principal,
+    state: AppState,
+    org: String,
+    ds: String,
+    body: VerifyIn,
+    retract: bool,
+) -> axum::response::Response {
+    if body.attribute.as_ref().is_some_and(|a| a.trim().is_empty()) {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "attribute must not be empty",
+        );
+    }
+    let attribute = body.attribute;
+    let records = SuppressIn {
+        record_key: body.record_key,
+        record_keys: body.record_keys,
+        apply_now: body.apply_now,
+    };
+    record_batch_actions(
+        principal,
+        state,
+        org,
+        ds,
+        records.keys(),
+        records.apply_now,
+        move |record_key, actor| {
+            let mut action = json!({
+                "type": if retract { "unverify_record" } else { "verify_record" },
+                "record_key": record_key,
+                "created_by": actor,
+            });
+            if let Some(attr) = &attribute {
+                action["attribute"] = json!(attr);
+            }
+            action
+        },
+    )
+    .await
 }
 
 /// Steward+: stage an assertion retraction
@@ -10424,6 +10646,230 @@ async fn unmerge_entity(
     }
 }
 
+#[derive(Deserialize)]
+struct UnmatchRecordIn {
+    record_key: String,
+    #[serde(default = "default_true")]
+    apply_now: bool,
+}
+
+/// Steward+: unmatch a record from its current group
+/// (`POST /v1/orgs/{org}/datasets/{ds}/records/unmatch`). Spec 2.9's Unmatch,
+/// which is NOT unmerge: unmerge severs members from an entity with one
+/// `never` against a kept representative; unmatch stages a `never` assertion
+/// against EVERY current co-member, so the record can never re-attach to any
+/// of them — "excluded from future grouping". The split lands at the next
+/// reconcile (the never-cut fixpoint severs the membership); the assertions
+/// persist, so every later analysis respects them.
+///
+/// The same S4.4.1 contradiction precheck as unmerge runs: a proposed `never`
+/// inside an existing `always`-closure is a 409, not a staged rule that
+/// escalates at reconcile. A protected record cannot be unmatched (the
+/// fixpoint may not sever a protected membership) — 409, unprotect first.
+async fn unmatch_record_route(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, ds)): Path<(String, String)>,
+    Json(body): Json<UnmatchRecordIn>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Steward) {
+        return e.into_response();
+    }
+    let record_key = body.record_key.trim();
+    if record_key.is_empty() {
+        return detail_err(StatusCode::UNPROCESSABLE_ENTITY, "record_key is required");
+    }
+    let Some(dsn) = &state.dsn else {
+        return detail_err(
+            StatusCode::NOT_IMPLEMENTED,
+            "steward actions require Postgres",
+        );
+    };
+
+    // Read the record's current entity + the active assertion ledger from the
+    // lake (read-only) to build the never-star and run the prechecks.
+    let dataset = match active_steward_dataset(&state, &org, &ds).await {
+        Ok(dataset) => dataset,
+        Err(response) => return *response,
+    };
+    let read_record_key = record_key.to_owned();
+    let (entity_id, proposed) = match with_dataset_lake(dataset, move |session, _| {
+        let record_key = read_record_key.as_str();
+        let snapshot = match read::latest_snapshot(session) {
+            Ok(s) => s,
+            Err(error) => {
+                tracing::error!(%error, "unmatch lake read failed");
+                return Err(Box::new(detail_err(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "could not read record matching state",
+                )));
+            }
+        };
+        let entity_id = match read::entity_of_record_key(session, snapshot, record_key) {
+            Ok(Some(e)) => e,
+            // A pair-level never between ungrouped records is POST /assertions.
+            Ok(None) => {
+                return Err(Box::new(detail_err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "record is not a member of any group; nothing to unmatch",
+                )));
+            }
+            Err(error) => {
+                tracing::error!(%error, "unmatch lake read failed");
+                return Err(Box::new(detail_err(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "could not read record matching state",
+                )));
+            }
+        };
+        let members = match read::entity_member_keys(session, snapshot, &entity_id) {
+            Ok(m) => m,
+            Err(error) => {
+                tracing::error!(%error, "unmatch lake read failed");
+                return Err(Box::new(detail_err(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "could not read record matching state",
+                )));
+            }
+        };
+        let others: Vec<&String> = members.iter().filter(|m| m != &record_key).collect();
+        if others.is_empty() {
+            return Err(Box::new(detail_err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "record is alone in its group; nothing to unmatch",
+            )));
+        }
+        match read::active_overlay_keys(session, snapshot, "protect") {
+            Ok(protected) if protected.iter().any(|k| k == record_key) => {
+                return Err(Box::new(detail_err(
+                    StatusCode::CONFLICT,
+                    "record is protected; unprotect it before unmatching",
+                )));
+            }
+            Ok(_) => {}
+            Err(error) => {
+                tracing::error!(%error, "unmatch lake read failed");
+                return Err(Box::new(detail_err(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "could not read record matching state",
+                )));
+            }
+        }
+        // One canonical never-pair per co-member.
+        let proposed: Vec<(String, String)> =
+            others.iter().map(|m| canon_pair(record_key, m)).collect();
+        let active = match read::active_assertions(session, snapshot) {
+            Ok(a) => a,
+            Err(error) => {
+                tracing::error!(%error, "unmatch lake read failed");
+                return Err(Box::new(detail_err(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "could not read record matching state",
+                )));
+            }
+        };
+        let mut assertions = active_to_assertions(active);
+        for (i, (a, b)) in proposed.iter().enumerate() {
+            assertions.push(er_reconcile::assertions::Assertion {
+                assertion_id: format!("proposed-{i}"),
+                rec_a_key: a.clone(),
+                rec_b_key: b.clone(),
+                kind: er_reconcile::assertions::AssertionKind::Never,
+                active: true,
+            });
+        }
+        let blocking: Vec<_> = er_reconcile::assertions::check_contradiction_1(&assertions)
+            .into_iter()
+            .filter(|c| c.never_assertion_id.starts_with("proposed-"))
+            .collect();
+        if let Some(c) = blocking.first() {
+            return Err(Box::new(detail_err(
+                StatusCode::CONFLICT,
+                format!(
+                    "unmatch conflicts with an always-rule: '{}' and '{}' are forced together",
+                    c.rec_a_key, c.rec_b_key
+                ),
+            )));
+        }
+
+        Ok((entity_id, proposed))
+    })
+    .await
+    {
+        Ok(Ok(result)) => result,
+        Ok(Err(response)) | Err(response) => return *response,
+    };
+
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let mut action_ids: Vec<String> = Vec::with_capacity(proposed.len());
+    for (a, b) in &proposed {
+        let action = json!({
+            "type": "add_assertion",
+            "kind": "never",
+            "a": a,
+            "b": b,
+            "created_by": principal.actor,
+            "note": format!("unmatch:{entity_id}"),
+        });
+        match steward_stage(&client, &principal.actor, &org, &ds, &action).await {
+            Ok(id) => action_ids.push(id),
+            Err(r) => return *r,
+        }
+    }
+    let pairs = action_ids.len();
+    if !body.apply_now {
+        return (
+            StatusCode::OK,
+            Json(json!({
+                "status": "staged",
+                "entity_id": entity_id,
+                "pairs": pairs,
+                "action_ids": action_ids,
+                "pending_until_next_reconcile": true,
+            })),
+        )
+            .into_response();
+    }
+    let idem = format!("unmatch-apply:{}", er_ids::new_v7());
+    let params = json!({ "skip_ingest": true });
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
+    let d = match dataset_or_404(&client, &org_row, &ds).await {
+        Ok(row) => row,
+        Err(r) => return *r,
+    };
+    match pg::enqueue(
+        &client,
+        &org_row.id,
+        Some(d.id.as_str()),
+        "apply_corrections",
+        0,
+        Some(&idem),
+        Some(&params),
+        principal.provenance(),
+    )
+    .await
+    {
+        Ok(job) => (
+            StatusCode::OK,
+            Json(json!({
+                "status": "applied",
+                "entity_id": entity_id,
+                "pairs": pairs,
+                "action_ids": action_ids,
+                "apply_job": job.id,
+            })),
+        )
+            .into_response(),
+        Err(e) => pg_err(e),
+    }
+}
+
 /// Viewer+: how many steward actions await the next reconcile
 /// (`GET /v1/orgs/{org}/datasets/{ds}/staged`).
 async fn staged_count(
@@ -10740,6 +11186,28 @@ async fn merge_group(
     } else {
         "review merge dialog"
     };
+    // A protected record may not be consumed by a merge as a NON-master
+    // member (spec 2.9: a protected record survives a mass merge untouched) —
+    // the always-star would force it in and the protect pin would silently
+    // lose. Merging INTO a protected master is the one allowed shape.
+    let protected = match protected_record_keys(&state, &org, &ds).await {
+        Ok(keys) => keys,
+        Err(response) => return *response,
+    };
+    let blocked: Vec<&str> = records
+        .iter()
+        .copied()
+        .filter(|r| *r != body.master.as_str() && protected.contains(*r))
+        .collect();
+    if !blocked.is_empty() {
+        return detail_err(
+            StatusCode::CONFLICT,
+            format!(
+                "protected records cannot join a merge as non-master members — make them the master or unprotect first: {}",
+                blocked.join(", ")
+            ),
+        );
+    }
     let mut actions: Vec<Value> = Vec::new();
     for record in &records {
         if *record == body.master {
@@ -11283,6 +11751,26 @@ fn build_routes(state: AppState) -> Router {
         .route(
             "/v1/orgs/{org}/datasets/{ds}/records/unprotect",
             post(unprotect_record_route),
+        )
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/records/delete",
+            post(delete_record_route),
+        )
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/records/undelete",
+            post(undelete_record_route),
+        )
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/records/verify",
+            post(verify_record_route),
+        )
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/records/unverify",
+            post(unverify_record_route),
+        )
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/records/unmatch",
+            post(unmatch_record_route),
         )
         .route(
             "/v1/orgs/{org}/datasets/{ds}/reviews/{review_id}",

@@ -30,7 +30,7 @@ statements is read or written only through the engine's own stage SQL, not
 through a typed query function.
 
 <!-- BEGIN GENERATED: entities-index -->
-**52 entities, 266 declared statements.**
+**53 entities, 271 declared statements.**
 
 | Entity | Relation | Store | Key | Natural key | History |
 |---|---|---|---|---|---|
@@ -68,6 +68,7 @@ through a typed query function.
 | `raw_record` | `raw_records` | duckdb | `id` | `source_system, source_record_id, content_hash` | — |
 | `record_overlay` | `record_overlays` | duckdb | `id` | `record_key, kind` | — |
 | `record_quality` | `record_qualities` | duckdb | `id` | `record_key` | — |
+| `record_verification` | `record_verifications` | duckdb | `id` | `record_key, attribute` | — |
 | `resolved_entity` | `entities` | duckdb | `id` | — | — |
 | `review` | `review_queue` | duckdb | `id` | `rec_a_key, rec_b_key, reason` | — |
 | `run` | `runs` | duckdb | `id` | — | — |
@@ -123,8 +124,9 @@ Declared statements per entity and operation:
 | `profile_finding` | 1 | 1 | 0 | 0 |
 | `profile_run` | 1 | 2 | 0 | 0 |
 | `raw_record` | 0 | 2 | 0 | 1 |
-| `record_overlay` | 1 | 2 | 1 | 1 |
+| `record_overlay` | 1 | 3 | 1 | 1 |
 | `record_quality` | 1 | 2 | 0 | 1 |
+| `record_verification` | 1 | 1 | 1 | 1 |
 | `resolved_entity` | 0 | 2 | 1 | 0 |
 | `review` | 0 | 5 | 3 | 0 |
 | `run` | 1 | 4 | 2 | 1 |

@@ -253,3 +253,45 @@ test.describe("protect", () => {
     expect((calls[0] as { record_keys?: string[] }).record_keys).toHaveLength(2);
   });
 });
+
+test.describe("per-record actions", () => {
+  for (const action of ["delete", "verify", "unmatch"] as const) {
+    test(`a steward submits ${action} through the BFF`, async ({ page }) => {
+      const calls: unknown[] = [];
+      await page.route(`**/api/orgs/${ORG}/datasets/${DS}/records/${action}`, async (route) => {
+        calls.push(route.request().postDataJSON());
+        await route.continue();
+      });
+      await login(page, USERS.steward);
+      await page.goto(`/${ORG}/${DS}/records/01jm0e000000`);
+      await expect(page.getByTestId("entity-members")).toBeVisible();
+      await page.locator("[data-testid^=mark-]").first().check();
+      await page.getByTestId(`${action}-button`).click();
+      await expect(page.getByTestId(`${action}-status`)).toContainText(
+        action === "delete"
+          ? "deletion queued"
+          : action === "verify"
+            ? "verification queued"
+            : "unmatch queued",
+      );
+      expect(calls).toHaveLength(1);
+      const body = calls[0] as { record_key?: string; record_keys?: string[] };
+      if (action === "unmatch") expect(body.record_key).toBeTruthy();
+      else expect(body.record_keys).toHaveLength(1);
+    });
+
+    test(`viewers cannot submit ${action}`, async ({ page }) => {
+      await login(page, USERS.viewer);
+      await page.goto(`/${ORG}/${DS}/records/01jm0e000000`);
+      await expect(page.getByTestId("entity-members")).toBeVisible();
+      await expect(page.getByTestId(`${action}-button`)).toHaveCount(0);
+      const response = await page.request.post(
+        `/api/orgs/${ORG}/datasets/${DS}/records/${action}`,
+        {
+          data: { record_key: "crm:1" },
+        },
+      );
+      expect(response.status()).toBe(403);
+    });
+  }
+});

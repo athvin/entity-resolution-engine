@@ -1175,6 +1175,26 @@
     "response": null
   },
   {
+    "id": "post_orgs_by_org_datasets_by_ds_records_delete",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/datasets/{ds}/records/delete",
+    "role": "steward",
+    "params": ["org", "ds"],
+    "body": {
+      "type": "object",
+      "properties": {
+        "record_key": { "type": "string" },
+        "record_keys": { "type": "array", "items": { "type": "string" } },
+        "apply_now": { "type": "boolean" }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "needs_body": false,
+    "summary": "delete a record (spec 2.9)",
+    "response": null
+  },
+  {
     "id": "post_orgs_by_org_datasets_by_ds_records_protect",
     "method": "POST",
     "path": "/v1/orgs/{org}/datasets/{ds}/records/protect",
@@ -1215,6 +1235,42 @@
     "response": null
   },
   {
+    "id": "post_orgs_by_org_datasets_by_ds_records_undelete",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/datasets/{ds}/records/undelete",
+    "role": "steward",
+    "params": ["org", "ds"],
+    "body": {
+      "type": "object",
+      "properties": {
+        "record_key": { "type": "string" },
+        "record_keys": { "type": "array", "items": { "type": "string" } },
+        "apply_now": { "type": "boolean" }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "needs_body": false,
+    "summary": "retract a record deletion",
+    "response": null
+  },
+  {
+    "id": "post_orgs_by_org_datasets_by_ds_records_unmatch",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/datasets/{ds}/records/unmatch",
+    "role": "steward",
+    "params": ["org", "ds"],
+    "body": {
+      "type": "object",
+      "properties": { "record_key": { "type": "string" }, "apply_now": { "type": "boolean" } },
+      "required": ["record_key"],
+      "additionalProperties": false
+    },
+    "needs_body": false,
+    "summary": "unmatch a record from its current group",
+    "response": null
+  },
+  {
     "id": "post_orgs_by_org_datasets_by_ds_records_unprotect",
     "method": "POST",
     "path": "/v1/orgs/{org}/datasets/{ds}/records/unprotect",
@@ -1252,6 +1308,48 @@
     },
     "needs_body": false,
     "summary": "retract a record suppression",
+    "response": null
+  },
+  {
+    "id": "post_orgs_by_org_datasets_by_ds_records_unverify",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/datasets/{ds}/records/unverify",
+    "role": "steward",
+    "params": ["org", "ds"],
+    "body": {
+      "type": "object",
+      "properties": {
+        "record_key": { "type": "string" },
+        "record_keys": { "type": "array", "items": { "type": "string" } },
+        "apply_now": { "type": "boolean" },
+        "attribute": { "type": "string" }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "needs_body": false,
+    "summary": "retract a verification",
+    "response": null
+  },
+  {
+    "id": "post_orgs_by_org_datasets_by_ds_records_verify",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/datasets/{ds}/records/verify",
+    "role": "steward",
+    "params": ["org", "ds"],
+    "body": {
+      "type": "object",
+      "properties": {
+        "record_key": { "type": "string" },
+        "record_keys": { "type": "array", "items": { "type": "string" } },
+        "apply_now": { "type": "boolean" },
+        "attribute": { "type": "string" }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "needs_body": false,
+    "summary": "verify records or one cell of them (spec 2.9)",
     "response": null
   },
   {

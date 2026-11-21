@@ -1,0 +1,8 @@
+kind: statement
+operation: read
+description: "The active overlay record keys of one kind at a pinned snapshot (the er-server staging prechecks: delete refuses a protected record, merge refuses one as a non-master member)."
+params:
+  - { name: snapshot, type: bigint }
+  - { name: kind, type: varchar }
+returns:
+  - { name: record_key, type: varchar, nullable: false }
