@@ -181,6 +181,23 @@ erDiagram
         timestamp created_at
         timestamp updated_at
     }
+    remote_attempts {
+        varchar id PK
+        varchar org_id FK
+        varchar dataset_id FK
+        varchar job_id FK
+        varchar task_instance_id FK
+        bigint launch
+        bigint binding_generation
+        varchar namespace
+        varchar session_id
+        varchar request_id
+        varchar commit_request_id
+        varchar phase "in {active, committed, committing, not_executed, opening, rolled_back, unknown}"
+        timestamp released_at
+        timestamp created_at
+        timestamp updated_at
+    }
     s3_ingest_cursors {
         varchar id PK
         varchar org_id FK
@@ -376,6 +393,10 @@ erDiagram
     matching_models }o--|| datasets : "dataset_id → id"
     pair_labels }o--|| orgs : "org_id → id"
     pair_labels }o--|| datasets : "dataset_id → id"
+    remote_attempts }o--|| orgs : "org_id → id"
+    remote_attempts }o--|| datasets : "dataset_id → id"
+    remote_attempts }o--|| jobs : "job_id → id"
+    remote_attempts }o--|| task_instances : "task_instance_id → id"
     s3_ingest_cursors }o--|| orgs : "org_id → id"
     s3_ingest_cursors }o--|| datasets : "dataset_id → id"
     salesforce_connections }o--|| orgs : "org_id → id"
@@ -414,6 +435,7 @@ erDiagram
 | `matching_models` | An immutable version of a tenant's matching model: the settings document the engine scores against, its hash, provenance and activation state. |
 | `orgs` | A tenant: its config pointer, lake env, lifecycle state and active config version. |
 | `pair_labels` | A human (or model) verdict on one candidate pair — the training signal the engine has always been able to learn from and never had. One row per (org, pair): a re-label corrects the previous verdict rather than stacking another. |
+| `remote_attempts` | Write-ahead remote execution identity and dataset fence; unresolved attempts survive task termination and dispatcher restarts. No SQL, parameters, profiles or credentials are stored. |
 | `s3_ingest_cursors` | What the auto-ingest poller has already read, one row per (org, source). The poller runs on every dispatcher tick and the newest object under a prefix stays the newest until a new one arrives, so without this row the same CSV would be re-ingested every few seconds forever — an unbounded run loop over the tenant's own lake. An upsert rather than a log: the question it answers is 'what is already in', not 'what has ever been in', and the audit log already answers the second. |
 | `salesforce_connections` | A tenant's Salesforce org credential: the instance URL and the OAuth client-credentials pair the extract job authenticates with. Org-scoped — one connection is one Salesforce org (connectors.md §4.1), and a credential is a tenant-level fact that several datasets may extract through. Deliberately NOT history: true — the history trigger copies whole rows as jsonb into an append-only companion, which would duplicate the client secret into a table nothing ever deletes from. |
 | `schedules` | A recurring job schedule for a tenant: its kind, cron and source. |

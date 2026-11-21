@@ -1,0 +1,12 @@
+kind: statement
+operation: update
+mode: partial
+description: "Write-ahead journal of the next remote request id, before it is sent. A COMMIT is journaled at most once per attempt. Only the live owning task may write, so a fenced pod cannot submit further SQL."
+params:
+  - { name: request_id, type: varchar }
+  - { name: commit, type: boolean }
+  - { name: id, type: varchar }
+  - { name: task_instance_id, type: varchar }
+  - { name: pod_uid, type: varchar }
+reads: [task_instance]
+returns: none

@@ -1,0 +1,8 @@
+kind: statement
+operation: read
+mode: partial
+description: "The unresolved attempt holding the dataset of the given task, if any: the identifier a refused acquire names in its customer-safe detail."
+params:
+  - { name: task_instance_id, type: varchar }
+reads: [task_instance]
+returns: entity

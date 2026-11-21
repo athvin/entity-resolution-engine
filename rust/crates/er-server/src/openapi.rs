@@ -99,7 +99,10 @@ fn add_operations(doc: &mut utoipa::openapi::OpenApi, audience: Audience) {
     let schemas = components.schemas.keys().cloned().collect();
     let operations = er_api_spec::operations(
         include_str!("lib.rs"),
-        &[("mail", include_str!("mail.rs"))],
+        &[
+            ("mail", include_str!("mail.rs")),
+            ("remote_attempts", include_str!("remote_attempts.rs")),
+        ],
         &schemas,
     )
     .unwrap_or_else(|e| panic!("derive OpenAPI operations: {e}"));
@@ -354,7 +357,10 @@ mod tests {
             serde_json::from_str(&openapi_json(Audience::Public)).unwrap();
         let source = er_api_spec::operations(
             include_str!("lib.rs"),
-            &[("mail", include_str!("mail.rs"))],
+            &[
+                ("mail", include_str!("mail.rs")),
+                ("remote_attempts", include_str!("remote_attempts.rs")),
+            ],
             &registered_schemas(),
         )
         .unwrap();

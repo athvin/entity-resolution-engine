@@ -1,0 +1,8 @@
+kind: statement
+operation: update
+mode: partial
+description: "Record that the owning pod could not establish the outcome. The fence stays held; only reconciliation evidence releases it. Allowed after the task is fenced, because it only narrows what is known."
+params:
+  - { name: id, type: varchar }
+  - { name: task_instance_id, type: varchar }
+returns: none

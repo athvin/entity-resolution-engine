@@ -37,6 +37,10 @@ const SCHEDULE_TICK_EVERY: Duration = Duration::from_secs(20);
 /// loop for minutes.
 const DELIVERY_BUDGET: usize = 8;
 
+/// How often unresolved remote attempts are reconciled (#1133). Well inside
+/// the delivery grace, so a settled attempt is released within one interval.
+const REMOTE_RECONCILE_EVERY: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// How often the S3 auto-ingest poller sweeps (E9c).
 ///
 /// Slower than the scheduler tick on purpose. The sweep costs one listing per
@@ -76,6 +80,14 @@ pub async fn run_loop(
     let mut next_s3_poll = tokio::time::Instant::now();
     let mut next_retention_sweep = tokio::time::Instant::now();
     let mut next_ops_snapshot = tokio::time::Instant::now();
+    let mut next_remote_reconcile = tokio::time::Instant::now();
+    // Read once: the paths are operator-owned deployment configuration, and
+    // the registry they name is reloaded on every evidence read.
+    let remote_recovery =
+        crate::remote_attempts::Recovery::from_lookup(|name| std::env::var(name).ok());
+    if let Some(Err(e)) = &remote_recovery {
+        tracing::error!(error = %e, "DuckFleet recovery is misconfigured; held attempts stay held");
+    }
     // Built lazily: see the poll tick below.
     let mut s3: Option<crate::s3_ingest::Watcher> = None;
     while !term.load(Ordering::SeqCst) {
@@ -137,6 +149,18 @@ pub async fn run_loop(
                 // The same rule as every tick: a failure must not take the
                 // job loop down; the next sweep retries.
                 Err(e) => tracing::warn!(error = %e, "a retention sweep failed"),
+            }
+        }
+
+        // Remote-attempt reconciliation (#1133): settle fences whose owner can
+        // no longer submit, from durable evidence only. Cheap when nothing is
+        // held (one indexed probe); a failure holds, it never releases.
+        if tokio::time::Instant::now() >= next_remote_reconcile {
+            next_remote_reconcile = tokio::time::Instant::now() + REMOTE_RECONCILE_EVERY;
+            match crate::remote_attempts::sweep(client, remote_recovery.as_ref()).await {
+                Ok(0) => {}
+                Ok(n) => tracing::info!(count = n, "remote attempts were reconciled"),
+                Err(e) => tracing::warn!(error = %e, "a remote attempt reconciliation failed"),
             }
         }
 

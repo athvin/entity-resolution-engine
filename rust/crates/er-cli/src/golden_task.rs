@@ -4,7 +4,7 @@
 
 use anyhow::{Result, anyhow, ensure};
 use er_config::Config;
-use er_entities::execution::Executor;
+use er_entities::execution::{Executor, Parameter};
 
 /// Execute the existing account survivorship generators on one pinned session.
 ///
@@ -12,10 +12,17 @@ use er_entities::execution::Executor;
 /// Refuses person configuration and propagates execution failures. A failed or
 /// uncertain commit is never replayed. The caller must close the session.
 pub fn run_account<E: Executor>(session: &E, config: &Config, run_at: &str) -> Result<()> {
-    run_account_guarded(session, config, run_at, || Ok(()))
+    run_account_guarded(session, config, run_at, None, || Ok(()))
 }
 
+/// The lake commit tag written inside the publication transaction. DuckLake
+/// stores it in the snapshot row COMMIT creates, so it exists exactly when the
+/// transaction committed — the evidence remote recovery reads after an
+/// interrupted COMMIT. Requires the lake to be attached as `lake`.
+const RECEIPT_SQL: &str = "CALL lake.set_commit_message('er', 'golden', extra_info => ?)";
+
 /// As `run_account`, checking the attempt fence before opening and committing.
+/// `receipt`, when given, is tagged onto the publishing commit.
 ///
 /// # Errors
 /// The guard refuses lost ownership or cancellation; execution errors propagate.
@@ -23,6 +30,7 @@ pub fn run_account_guarded<E: Executor>(
     session: &E,
     config: &Config,
     run_at: &str,
+    receipt: Option<&str>,
     guard: impl Fn() -> Result<()>,
 ) -> Result<()> {
     guard()?;
@@ -65,6 +73,12 @@ pub fn run_account_guarded<E: Executor>(
         ] {
             execute(&format!("DROP TABLE IF EXISTS {target}"))?;
             execute(&format!("CREATE TABLE {target} AS SELECT * FROM {source}"))?;
+        }
+        if let Some(receipt) = receipt {
+            session
+                .query(RECEIPT_SQL, &[Parameter::Text(receipt.to_owned())])
+                .map(|_| ())
+                .map_err(|e| anyhow!("{e}"))?;
         }
         guard()?;
         execute("COMMIT")

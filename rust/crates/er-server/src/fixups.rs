@@ -246,6 +246,9 @@ const DATASET_SCOPED: &[(&str, bool)] = &[
     ("entity_links", true),
     ("taggings", true),
     ("staged_steward_actions", true),
+    // Shipped after the re-key (#1133), like `sf_extract_cursors`: listed so
+    // the aged stores the replay tests synthesize heal its NOT NULL column.
+    ("remote_attempts", true),
     ("jobs", false),
     ("task_instances", false),
 ];

@@ -85,6 +85,7 @@ mod pg_readiness_reads;
 mod pg_record_delete;
 mod pg_record_overlays;
 mod pg_record_verify;
+mod pg_remote_attempt_fence;
 mod pg_run_all_dag;
 mod pg_run_all_pipeline;
 mod pg_s3_ingest;

@@ -17,6 +17,15 @@ WHERE id = (
                 AND (a.dataset_id = j.dataset_id
                        OR (a.org_id = j.org_id AND a.dataset_id IS NULL)))
           OR (j.dataset_id IS NULL AND a.org_id = j.org_id)))
+    -- The remote-execution fence: a dataset whose last remote attempt has no
+    -- established publication outcome admits no writer of ANY backend until
+    -- reconciliation releases it, so neither a retry nor an embedded run can
+    -- race a commit that may still land. An org-level job waits on all of them.
+    AND NOT EXISTS (
+      SELECT 1 FROM public.remote_attempts r
+      WHERE r.released_at IS NULL
+        AND ((j.dataset_id IS NOT NULL AND r.dataset_id = j.dataset_id)
+          OR (j.dataset_id IS NULL AND r.org_id = j.org_id)))
     -- The noisy-neighbor cap: at most N active jobs per org across its
     -- datasets. A COUNT cannot be index-enforced, so the claim transaction
     -- holds an advisory lock (pg.rs) and the per-dataset partial unique above

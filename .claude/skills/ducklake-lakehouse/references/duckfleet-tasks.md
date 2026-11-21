@@ -67,8 +67,9 @@ Every remote request carries job, task and attempt IDs in its diagnostic context
 and has its own request UUID. `duckfleet.query` spans carry those IDs without SQL,
 bind values or credentials. Lost ownership or SIGTERM requests cancellation;
 publication rechecks the fence. Execution failures are terminal task failures,
-not automatic transport or task retries. Full uncertain-commit, process-loss and
-cleanup qualification belongs to #1133; this pilot is not broad production use.
+not automatic transport or task retries. An uncertain outcome holds the dataset
+until it is reconciled from evidence, as the skill's recovery reference describes.
+This pilot is not broad production use.
 
 ## Qualification and limits
 
@@ -89,7 +90,7 @@ whole-pipeline execution across the differing engine builds.
 Run `make check-duckfleet-task` to build the pinned upstream revision and repeat
 that proof. Recorded `duckfleet-task-evidence.json` evidence identifies the
 source and actual worker image. It records 4 golden records, 16 lineage rows,
-3 matching scores and 9 correlated remote statements. A separate controlled
+3 matching scores and 10 correlated remote statements (the tenth is the publication receipt). A separate controlled
 external-I/O query completed in 65.128 seconds under a 120-second deadline;
 601 seconds was refused. Under a one-second deadline, the same I/O settled
 `timed_out` after 65.203 seconds. Reproduce the deadline proof with the pinned

@@ -118,6 +118,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/internal/attempts/{attempt_id}/remote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** One write-ahead step of a remote execution attempt */
+        post: operations["post_internal_attempts_by_attempt_id_remote"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/internal/attempts/{attempt_id}/start": {
         parameters: {
             query?: never;
@@ -3411,6 +3428,55 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        detail: string;
+                    };
+                };
+            };
+        };
+    };
+    post_internal_attempts_by_attempt_id_remote: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                attempt_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    binding_generation?: unknown;
+                    commit?: unknown;
+                    id: string;
+                    namespace?: unknown;
+                    op: string;
+                    phase?: unknown;
+                    pod_uid?: unknown;
+                    request_id?: unknown;
+                    session_id?: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful response. Payload types are described only at envelope granularity. */
+            "2XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        recorded?: unknown;
+                    };
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */

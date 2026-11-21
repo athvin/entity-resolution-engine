@@ -1,0 +1,7 @@
+kind: statement
+operation: read
+mode: partial
+description: "Unresolved attempts whose owning launch can no longer submit SQL (the task is terminal, archived or relaunched): the reconciliation working set, oldest evidence first, bounded."
+params: []
+reads: [task_instance]
+returns: entity

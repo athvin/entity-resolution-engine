@@ -205,3 +205,7 @@ The account golden-task pilot and its operator policy are described in
 
 [Account task proof evidence](references/duckfleet-task-evidence.json) records the
 pinned disposable task and long-statement measurements for the pilot.
+
+A remote attempt that fails is recovered from evidence, never by replay: the
+dataset fence, write-ahead journal, lake publication receipt, failure matrix
+and operating bounds are in [references/duckfleet-recovery.md](references/duckfleet-recovery.md).

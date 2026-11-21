@@ -8,6 +8,10 @@
 pub mod artifacts;
 pub mod execution;
 
+/// Journal and recovery identifiers are UUIDs; re-exported so callers name the
+/// same type the session API takes.
+pub use uuid::Uuid;
+
 use std::collections::BTreeSet;
 use std::path::Path;
 
@@ -111,7 +115,8 @@ impl Registry {
     /// path may originate in a request or dataset configuration.
     ///
     /// An invalid active entry refuses the entire snapshot. Inactive entries
-    /// need no credential, allowing provisioning and recoverable revocation.
+    /// need no credential, allowing provisioning and recoverable revocation;
+    /// a draining entry's credential is loaded when present, for recovery only.
     pub fn load(registry: &Path, credentials: &Path) -> Result<Self, Error> {
         let json = std::fs::read(registry).map_err(|_| Error::Registry)?;
         Self::parse(&json, |ns| {
@@ -143,8 +148,15 @@ impl Registry {
             {
                 return Err(Error::Registry);
             }
-            let credential = if entry.state == State::Active {
-                let bytes = read_credential(&ns)?;
+            // A draining binding admits nothing new, but its credential is
+            // still how outstanding attempts are reconciled, so it is loaded
+            // when projected. Absence is fine; a malformed one still refuses.
+            let bytes = match entry.state {
+                State::Active => Some(read_credential(&ns)?),
+                State::Draining => read_credential(&ns).ok(),
+                State::Provisioning | State::Revoked => None,
+            };
+            let credential = if let Some(bytes) = bytes {
                 let credential: Credential =
                     serde_json::from_slice(&bytes).map_err(|_| Error::Credential)?;
                 if credential.org_id != entry.org_id
@@ -205,6 +217,37 @@ impl Registry {
         if entry.state != State::Active
             || entry.generation != generation
             || now_unix_seconds >= entry.valid_until
+        {
+            return Err(Error::Unavailable);
+        }
+        Ok(Binding {
+            entry,
+            credential: credential.as_ref().ok_or(Error::Unavailable)?,
+            bucket: &self.bucket,
+            namespace: namespace(org_id, dataset_id),
+        })
+    }
+}
+
+impl Registry {
+    /// Resolve the exact generation an earlier attempt was admitted under, for
+    /// reading recovery evidence only. A draining binding still resolves —
+    /// draining is when outstanding attempts must be reconciled — but a revoked
+    /// one or a replacement generation never does, so evidence is never read
+    /// through a different principal (whose owner-scoped lookups would report
+    /// a request as absent). Opens nothing; admits no new work.
+    pub fn resolve_for_recovery(
+        &self,
+        org_id: &str,
+        dataset_id: &str,
+        generation: u64,
+    ) -> Result<Binding<'_>, Error> {
+        let (entry, credential) = self
+            .entries
+            .iter()
+            .find(|(entry, _)| entry.org_id == org_id && entry.dataset_id == dataset_id)
+            .ok_or(Error::Unavailable)?;
+        if !matches!(entry.state, State::Active | State::Draining) || entry.generation != generation
         {
             return Err(Error::Unavailable);
         }

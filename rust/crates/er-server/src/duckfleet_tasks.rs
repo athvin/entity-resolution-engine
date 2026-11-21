@@ -9,8 +9,11 @@ use std::sync::{
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use er_dag::{DurableOutput, LakeRef, Plan, TaskError, WorkOrder};
-use er_duckfleet::execution::{Compute, Session, TaskOptions};
+use er_duckfleet::Uuid;
+use er_duckfleet::execution::recovery::{self, Decision};
+use er_duckfleet::execution::{Compute, Journal, JournalRefused, Session, TaskOptions};
 use serde::Deserialize;
+use serde_json::{Value, json};
 
 use crate::dags::{PodTaskRun, edges::Golden, plans::RunPlan};
 
@@ -35,11 +38,104 @@ pub(crate) fn selected(task: &str, lookup: impl Fn(&str) -> Option<String>) -> O
         .map(PathBuf::from)
 }
 
+/// The task pod as the owner of a remote attempt: its attempt channel and the
+/// pod identity every journal write is fenced on.
+pub(crate) struct Owner<'a> {
+    pub(crate) channel: &'a crate::exec_task::Channel,
+    pub(crate) attempt: &'a str,
+    pub(crate) pod_uid: &'a str,
+}
+
+/// A refusal that is not transient: the owner is fenced or another attempt
+/// holds the dataset. Carries the server's customer-safe detail.
+struct Refused(String);
+
+/// Post one journal operation, retrying only transient channel failures. A
+/// write is durable once the server answers `recorded`; anything else is a
+/// refusal, and the corresponding remote effect must not be started.
+fn post_journal(
+    channel: &crate::exec_task::Channel,
+    attempt: &str,
+    body: &Value,
+) -> Result<(), Refused> {
+    let path = format!("/v1/internal/attempts/{attempt}/remote");
+    let mut last = "the attempt channel was unavailable".to_owned();
+    for tick in 0..3 {
+        match channel.post(&path, body) {
+            Ok((200, reply)) if reply["recorded"] == true => return Ok(()),
+            Ok((status, reply)) if !crate::exec_task::transient_channel_status(status) => {
+                return Err(Refused(
+                    reply["detail"]
+                        .as_str()
+                        .unwrap_or("the remote attempt journal was refused")
+                        .to_owned(),
+                ));
+            }
+            Ok((status, _)) => last = format!("the attempt channel returned {status}"),
+            Err(error) => last = error,
+        }
+        if tick < 2 {
+            std::thread::sleep(std::time::Duration::from_secs(2));
+        }
+    }
+    Err(Refused(last))
+}
+
+/// The DuckFleet write-ahead journal, backed by the attempt channel. Owns its
+/// own channel client: the session holds it beyond the borrow of `Owner`.
+struct ChannelJournal {
+    channel: crate::exec_task::Channel,
+    attempt: String,
+    pod_uid: String,
+    id: Uuid,
+}
+
+impl Journal for ChannelJournal {
+    fn session(&self, session_id: Uuid) -> Result<(), JournalRefused> {
+        post_journal(
+            &self.channel,
+            &self.attempt,
+            &json!({"op":"session","id":self.id.to_string(),"pod_uid":self.pod_uid,"session_id":session_id.to_string()}),
+        )
+        .map_err(|_| JournalRefused)
+    }
+    fn request(&self, request_id: Uuid, commit: bool) -> Result<(), JournalRefused> {
+        post_journal(
+            &self.channel,
+            &self.attempt,
+            &json!({"op":"request","id":self.id.to_string(),"pod_uid":self.pod_uid,
+                "request_id":request_id.to_string(),"commit":commit}),
+        )
+        .map_err(|_| JournalRefused)
+    }
+}
+
+/// Settle the attempt from what this owner observed. Conclusive outcomes
+/// release the fence; anything else is recorded as unknown and left to the
+/// reconciliation sweep. Returns the error suffix a held dataset adds.
+fn settle(owner: &Owner<'_>, id: Uuid, session: &Session) -> Option<String> {
+    let decision = recovery::decide_owner(session.commit_state(), session.request_sent());
+    let body = match decision.and_then(Decision::phase) {
+        Some(phase) => json!({"op":"release","id":id.to_string(),"phase":phase}),
+        None => json!({"op":"unknown","id":id.to_string()}),
+    };
+    let posted = post_journal(owner.channel, owner.attempt, &body);
+    let held = decision.is_none() || posted.is_err();
+    tracing::info!(
+        er.task_instance_id = %owner.attempt,
+        remote_attempt = %id,
+        outcome = decision.and_then(Decision::phase).unwrap_or("unknown"),
+        held = held,
+        "remote attempt settled by its owner"
+    );
+    held.then(|| crate::remote_attempts::held_detail(&id.to_string()))
+}
+
 /// Execute without opening an embedded lake alongside the remote writer.
 /// Errors follow the same task finish channel as embedded task errors.
 pub(crate) fn run(
     order: &WorkOrder,
-    attempt: &str,
+    owner: &Owner<'_>,
     policy: &std::path::Path,
     fence: &Arc<AtomicBool>,
     sigterm: &Arc<AtomicBool>,
@@ -111,7 +207,7 @@ pub(crate) fn run(
         statement_seconds: policy.statement_seconds,
         job_id: order.job_id.clone(),
         task_id: order.task_id.clone(),
-        attempt_id: attempt.to_owned(),
+        attempt_id: owner.attempt.to_owned(),
     };
     let threads = std::env::var("ER_DUCKDB_THREADS")
         .ok()
@@ -128,7 +224,43 @@ pub(crate) fn run(
     })?;
     let stage_error =
         |message: String| TaskError::Failed(er_errors::ErError::stage_failure(message));
-    let mut session = open(&binding, options).map_err(|e| stage_error(e.to_string()))?;
+    // The fence comes first: no session opens, and no SQL can be sent, until
+    // this pod durably owns the dataset's remote attempt.
+    let id = Uuid::now_v7();
+    post_journal(
+        owner.channel,
+        owner.attempt,
+        &json!({"op":"acquire","id":id.to_string(),"pod_uid":owner.pod_uid,
+            "binding_generation":binding.generation(),"namespace":binding.namespace()}),
+    )
+    .map_err(|Refused(detail)| {
+        TaskError::Failed(er_errors::ErError::precondition(format!(
+            "remote execution was not admitted: {detail}"
+        )))
+    })?;
+    let journal = std::sync::Arc::new(ChannelJournal {
+        channel: crate::exec_task::Channel::new(
+            owner.channel.base.clone(),
+            owner.channel.token.clone(),
+        )
+        .map_err(|_| stage_error("could not build the remote attempt journal".into()))?,
+        attempt: owner.attempt.to_owned(),
+        pod_uid: owner.pod_uid.to_owned(),
+        id,
+    });
+    let mut session = match open(&binding, options, journal) {
+        Ok(session) => session,
+        Err(error) => {
+            // Nothing was sent; the fence is released as not executed. If even
+            // that cannot be recorded, the sweep reaches the same conclusion.
+            let _ = post_journal(
+                owner.channel,
+                owner.attempt,
+                &json!({"op":"release","id":id.to_string(),"phase":"not_executed"}),
+            );
+            return Err(stage_error(error.to_string()));
+        }
+    };
     let control = session
         .cancellation()
         .map_err(|e| stage_error(e.to_string()))?;
@@ -147,14 +279,20 @@ pub(crate) fn run(
             }
         })
     };
-    let result =
-        er_cli::golden_task::run_account_guarded(&session, &run.config, &plan.0.run_at, || {
+    let receipt = recovery::receipt(&id.to_string());
+    let result = er_cli::golden_task::run_account_guarded(
+        &session,
+        &run.config,
+        &plan.0.run_at,
+        Some(&receipt),
+        || {
             if fence.load(Ordering::Acquire) || sigterm.load(Ordering::Acquire) {
                 return Err(std::io::Error::other("golden attempt fenced or cancelled").into());
             }
             Ok(())
-        })
-        .map_err(|e| stage_error(format!("{e:#}")));
+        },
+    )
+    .map_err(|e| format!("{e:#}"));
     finished.store(true, Ordering::Release);
     let _ = monitor.join();
     let snapshot = if result.is_ok() {
@@ -164,9 +302,24 @@ pub(crate) fn run(
     } else {
         None
     };
-    let closed = session.close().map_err(|e| stage_error(e.to_string()));
-    result?;
-    closed?;
+    let closed = session.close();
+    if let Err(error) = &closed {
+        // An unacknowledged close leaves worker cleanup to upstream idle and
+        // drain bounds. It does not change what was published.
+        tracing::warn!(remote_attempt = %id, error = %error, "remote session close was not acknowledged");
+    }
+    let held = settle(owner, id, &session);
+    if let Err(message) = result {
+        return Err(stage_error(match held {
+            Some(held) => format!("{message}; {held}"),
+            None => message,
+        }));
+    }
+    if let Some(held) = held {
+        // Published, but the release could not be recorded: say so truthfully.
+        tracing::warn!(remote_attempt = %id, detail = %held, "published attempt is still held");
+    }
+    closed.map_err(|e| stage_error(e.to_string()))?;
     let output = LakeRef::<Golden>::new(snapshot.unwrap_or(-1), 0)
         .serialize_reference()
         .map_err(|_| stage_error("could not serialize golden lake reference".into()))?;
@@ -198,6 +351,7 @@ fn memory_bytes(value: &str) -> Option<u64> {
 fn open(
     binding: &er_duckfleet::Binding<'_>,
     options: TaskOptions,
+    journal: std::sync::Arc<ChannelJournal>,
 ) -> Result<Session, er_duckfleet::execution::ExecutionError> {
     // Never compiled into deployed images. The integration harness runs the
     // real exec-task child against its own loopback-only disposable gateway.
@@ -206,13 +360,14 @@ fn open(
         let address = address
             .parse()
             .map_err(|_| er_duckfleet::execution::Failure::Parameter)?;
-        return Session::open_loopback_task_proof(
+        return Session::open_loopback_task_proof_journaled(
             address,
             binding.bearer_token().to_owned(),
             options,
+            journal,
         );
     }
-    Session::open_remote_task(binding, options)
+    Session::open_remote_task_journaled(binding, options, journal)
 }
 
 #[cfg(test)]

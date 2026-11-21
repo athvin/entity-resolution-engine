@@ -27,7 +27,7 @@ const EXIT_PRECONDITION: i32 = 3;
 const CHANNEL_RETRY_ATTEMPTS: usize = 6;
 const CHANNEL_RETRY_DELAY: Duration = Duration::from_secs(10);
 
-fn transient_channel_status(status: u16) -> bool {
+pub(crate) fn transient_channel_status(status: u16) -> bool {
     status == 429 || (500..=599).contains(&status)
 }
 
@@ -78,15 +78,15 @@ fn heartbeat_fenced(misses: &mut u32, response: Result<(u16, Value), String>) ->
 
 /// The attempt channel's client: one current-thread runtime, one pooled
 /// connection, the per-attempt bearer.
-struct Channel {
+pub(crate) struct Channel {
     runtime: tokio::runtime::Runtime,
     http: reqwest::Client,
-    base: String,
-    token: String,
+    pub(crate) base: String,
+    pub(crate) token: String,
 }
 
 impl Channel {
-    fn new(base: String, token: String) -> Result<Self, String> {
+    pub(crate) fn new(base: String, token: String) -> Result<Self, String> {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -122,7 +122,7 @@ impl Channel {
         })
     }
 
-    fn post(&self, path: &str, body: &Value) -> Result<(u16, Value), String> {
+    pub(crate) fn post(&self, path: &str, body: &Value) -> Result<(u16, Value), String> {
         let url = format!("{}{path}", self.base);
         self.runtime.block_on(async {
             // The workspace's reqwest carries no `json` feature; the body is
@@ -429,7 +429,12 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
     let (result, snapshot_end) = if let Some(policy) =
         crate::duckfleet_tasks::selected(&task_id, env_var)
     {
-        match crate::duckfleet_tasks::run(&order, &attempt, &policy, &fence, &sigterm) {
+        let journal = crate::duckfleet_tasks::Owner {
+            channel: &channel,
+            attempt: &attempt,
+            pod_uid: &pod_uid,
+        };
+        match crate::duckfleet_tasks::run(&order, &journal, &policy, &fence, &sigterm) {
             Ok((result, snapshot)) => (Ok(result), snapshot),
             Err(error) => (Err(error), None),
         }

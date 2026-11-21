@@ -239,3 +239,51 @@ fn deserialized_artifacts_cannot_inject_paths_or_escape_limits() {
     value["uri"] = json!("s3://foreign/key");
     assert!(serde_json::from_value::<Artifact>(value).is_err());
 }
+
+#[test]
+fn recovery_resolves_only_the_pinned_generation_and_never_a_revoked_binding() {
+    let (mut doc, credentials) = fixture();
+    let registry = parse(&doc, &credentials).unwrap();
+    // Active at the pinned generation, even past `valid_until`: evidence reads
+    // admit nothing, and an expired token is refused upstream, not guessed at.
+    assert!(
+        registry
+            .resolve_for_recovery("org-a", "dataset-a", 3)
+            .is_ok()
+    );
+    // A replacement generation is a different principal whose owner-scoped
+    // lookups would report the attempt's requests as absent.
+    assert!(matches!(
+        registry.resolve_for_recovery("org-a", "dataset-a", 2),
+        Err(Error::Unavailable)
+    ));
+    assert!(matches!(
+        registry.resolve_for_recovery("org-b", "dataset-a", 3),
+        Err(Error::Unavailable)
+    ));
+    doc["bindings"][0]["state"] = json!("draining");
+    let registry = parse(&doc, &credentials).unwrap();
+    assert!(
+        registry
+            .resolve_for_recovery("org-a", "dataset-a", 3)
+            .is_ok()
+    );
+    assert!(matches!(
+        registry.resolve("org-a", "dataset-a", 3, 100),
+        Err(Error::Unavailable)
+    ));
+    // Draining without a projected credential still loads, and cannot recover.
+    let registry = parse(&doc, &credentials[1..]).unwrap();
+    assert!(matches!(
+        registry.resolve_for_recovery("org-a", "dataset-a", 3),
+        Err(Error::Unavailable)
+    ));
+    for state in ["provisioning", "revoked"] {
+        doc["bindings"][0]["state"] = json!(state);
+        let registry = parse(&doc, &credentials).unwrap();
+        assert!(matches!(
+            registry.resolve_for_recovery("org-a", "dataset-a", 3),
+            Err(Error::Unavailable)
+        ));
+    }
+}

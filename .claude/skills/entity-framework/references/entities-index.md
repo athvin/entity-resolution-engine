@@ -30,7 +30,7 @@ statements is read or written only through the engine's own stage SQL, not
 through a typed query function.
 
 <!-- BEGIN GENERATED: entities-index -->
-**53 entities, 271 declared statements.**
+**54 entities, 279 declared statements.**
 
 | Entity | Relation | Store | Key | Natural key | History |
 |---|---|---|---|---|---|
@@ -69,6 +69,7 @@ through a typed query function.
 | `record_overlay` | `record_overlays` | duckdb | `id` | `record_key, kind` | — |
 | `record_quality` | `record_qualities` | duckdb | `id` | `record_key` | — |
 | `record_verification` | `record_verifications` | duckdb | `id` | `record_key, attribute` | — |
+| `remote_attempt` | `remote_attempts` | postgres | `id` | `dataset_id, task_instance_id, launch` | — |
 | `resolved_entity` | `entities` | duckdb | `id` | — | — |
 | `review` | `review_queue` | duckdb | `id` | `rec_a_key, rec_b_key, reason` | — |
 | `run` | `runs` | duckdb | `id` | — | — |
@@ -127,6 +128,7 @@ Declared statements per entity and operation:
 | `record_overlay` | 1 | 3 | 1 | 1 |
 | `record_quality` | 1 | 2 | 0 | 1 |
 | `record_verification` | 1 | 1 | 1 | 1 |
+| `remote_attempt` | 1 | 3 | 4 | 0 |
 | `resolved_entity` | 0 | 2 | 1 | 0 |
 | `review` | 0 | 5 | 3 | 0 |
 | `run` | 1 | 4 | 2 | 1 |
