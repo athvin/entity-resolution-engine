@@ -60,8 +60,8 @@ Upstream dependency: DuckFleet issue #124 / PR #125 extends validation beyond
 A deadline requests interruption, not proof that a commit did not happen.
 External I/O can delay when DuckDB observes interruption; a short HTTP wait can
 return uncertainty before durable request state records a timeout. Never replay
-that SQL to discover what happened. Upstream's bounded shutdown drain can also
-interrupt a long statement.
+that SQL to discover what happened. Upstream allows a 615-second drain inside a 630-second container grace; idle
+drains remain short. External I/O can still outlive an interruption request.
 
 Every remote request carries job, task and attempt IDs in its diagnostic context
 and has its own request UUID. `duckfleet.query` spans carry those IDs without SQL,

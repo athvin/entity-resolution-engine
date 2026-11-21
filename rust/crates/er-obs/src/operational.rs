@@ -197,8 +197,10 @@ pub fn task_completed(
         "standardize" => "standardize",
         "match" => "match",
         "reconcile" => "reconcile",
-        "assemble" => "assemble",
-        "golden" => "golden",
+        // Golden and descriptive assembly share the existing bounded metric
+        // category. Task spans retain their distinct IDs without adding billed
+        // series beyond the registry's per-metric budget.
+        "assemble" | "golden" => "assemble",
         "finish" => "finish",
         "apply_staged" => "apply_staged",
         "write_back_scan" => "write_back_scan",

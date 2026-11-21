@@ -28,7 +28,7 @@ of truth and this file is its output.
 | `er.tasks.active` | gauge | `1` | `resource_class` | 4 |
 | `er.ops.snapshots` | counter | `1` |  | 1 |
 | `er.jobs.dispatch.duration` | histogram | `ms` | `resource_class` | 4 |
-| `er.tasks.duration` | histogram | `ms` | `resource_class`, `stage` | 68 |
+| `er.tasks.duration` | histogram | `ms` | `resource_class`, `stage` | 64 |
 | `er.tasks.completed` | counter | `1` | `resource_class`, `outcome` | 16 |
 | `er.tasks.retries` | counter | `1` | `resource_class` | 4 |
 | `er.pods.failures` | counter | `1` | `resource_class`, `reason` | 8 |
@@ -37,7 +37,7 @@ of truth and this file is its output.
 | `er.telemetry.spans_exported` | counter | `1` | `er.role` | 4 |
 | `er.telemetry.span_exports_failed` | counter | `1` | `er.role` | 4 |
 
-**141 series in total.**
+**137 series in total.**
 
 ### `er.jobs.queue.oldest_age`
 
