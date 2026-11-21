@@ -601,7 +601,7 @@ pub fn active_overlay_keys(
         Ok(rows) => Ok(rows.into_iter().map(|r| r.record_key).collect()),
         Err(e) => {
             let s = e.to_string();
-            if is_missing_table(&s) {
+            if is_missing_table(&s, "record_overlays") {
                 Ok(Vec::new())
             } else {
                 Err(s)
@@ -627,7 +627,7 @@ pub fn active_verifications(
             .collect()),
         Err(e) => {
             let s = e.to_string();
-            if is_missing_table(&s) {
+            if is_missing_table(&s, "record_verifications") {
                 Ok(Vec::new())
             } else {
                 Err(s)
