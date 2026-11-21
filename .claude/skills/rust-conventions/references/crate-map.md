@@ -29,7 +29,7 @@ not carry: `datafusion` lives in `er-sql-check`'s manifest, not the workspace
 table, so it does not appear in the generated pin block at all.
 
 <!-- BEGIN GENERATED: crate-map -->
-**33 crates.** The cargo workspace root is `rust/`, not the repo root.
+**34 crates.** The cargo workspace root is `rust/`, not the repo root.
 
 | Crate | Purpose |
 |---|---|
@@ -40,6 +40,7 @@ table, so it does not appear in the generated pin block at all.
 | `er-compile` | Compile a tenant's declared `comparisons:` / `blocking:` into the settings document the engine loads |
 | `er-config` | The S6 configuration document and its `config_hash` (port of `src/er/config/{schema,hashing,loader}.py`, DesignDoc.md S6/S6.1/S5.2) |
 | `er-dag` | The compiled-DAG library of the batch-orchestration design, carried by the `er-engine-ops` skill as `references/batch-orchestration-design.md` |
+| `er-duckfleet` | Operator-owned dataset bindings for DuckFleet |
 | `er-entities` | The generated entity crate: one module per entity, each with its struct, `arrow_schema()` and (in later phases) its typed query functions |
 | `er-entity-cli` | `er-entity` — the entity-framework CLI |
 | `er-entity-diff` | `er-entity-diff` — does the live store match the entity catalog? |
@@ -73,7 +74,7 @@ Pinned versions that carry a reason (from `rust/Cargo.toml`):
 edition = "2024"
 rust-version = "1.89"
 duckdb = { version = "=1.20000.1", features = ["bundled"] }
-sqlparser = { version = "0.63", features = ["visitor"] }
+sqlparser = { version = "0.64", features = ["visitor"] }
 thiserror = "2"
 anyhow = "1"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }

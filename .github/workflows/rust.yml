@@ -13,8 +13,7 @@ on:
   # as evidence that a queued tree is re-tested. GitHub's merge queue is not
   # enabled here and cannot be: it is offered only for organization-owned repos
   # and this one is user-owned (visibility is not the blocker and has moved).
-  # `mergeQueue(branch:"main")` is `null`; protection is `strict: false`. The
-  # only run that ever examines a COMBINATION of PRs is `merge-bus.yml`.
+  # `mergeQueue(branch:"main")` is `null`; protection is `strict: false`.
   #
   # The wiring stays because it is nearly free, and because a workflow missing
   # `merge_group:` would stall every queued PR the day a queue did exist — the
@@ -734,21 +733,6 @@ jobs:
     # sccache forces a full bundled-DuckDB C++ rebuild, which this job has to
     # survive rather than be killed in the middle of.
     #
-    # Measured 2026-11-05 on merge-bus batch `merge-bus/42099563401`:
-    # `test shard (er-match)` ran 20:03:33 → 20:33:52 and was cancelled by this
-    # timeout at exactly 30m, which made `test` fail closed on the non-success
-    # leg. The batch's content was two shell-script lines; nothing about it was
-    # slow except the compile.
-    #
-    # Why a batch is always exposed to this: a merge-bus batch branch is a
-    # NOVEL TREE, so its own compilation units have never been cached by any
-    # run — no backend can hand them over. It still restores the dependency
-    # objects `main` populated, which is the part a cache can help with.
-    # `build-cost.md` records the same effect for a lock-touching PR ("runs cold
-    # until it merges, by design"); a batch reaches it by being new rather than
-    # by changing a lockfile, and reaches it on EVERY run. Leaving this at 30
-    # meant the bus could never land a batch that ran the Rust tier at all.
-    #
     # This survived the move off S3 unchanged. The previous wording blamed the
     # read-only PR role, which was never the operative reason: a tree nothing
     # has compiled is cold whoever holds the credential.
@@ -1423,7 +1407,7 @@ jobs:
         # have to be distinguishable in the log.
         working-directory: ${{ github.workspace }}
         run: bash scripts/ci/duckdb-cache-repair.sh
-      - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: cargo-llvm-cov
       - name: Cache DuckDB extensions

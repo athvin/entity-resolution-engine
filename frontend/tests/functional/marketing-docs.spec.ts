@@ -43,9 +43,12 @@ test.describe("marketing developer docs", () => {
     );
   });
   test("sitemap and navigation expose docs without a session", async ({ page }) => {
+    // Docs sits in the Resources dropdown, which is in the header row from 1024px.
+    await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto("/");
+    await page.getByTestId("marketing-nav-resources").click();
     await page
-      .getByRole("navigation", { name: "Main navigation" })
+      .getByTestId("marketing-nav-resources-panel")
       .getByRole("link", { name: "Docs" })
       .click();
     await expect(page).toHaveURL(/\/docs$/);

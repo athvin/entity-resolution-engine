@@ -89,13 +89,15 @@ and only breaks crawlers.
 ## 4. Making the hero stand out
 
 **Query:** "The landing page is too plain next to competitors. Add a gradient
-hero with a brand accent colour — marketing is different from the app, it
+hero with a second accent colour — marketing is different from the app, it
 doesn't need to follow the internal design rules."
 
 Must:
 
-- Refuse the exception: the ESLint palette rule is repo-wide under `frontend/`,
-  and the design doc calls the constraint standing on **every** surface.
+- Refuse the gradient and the second hue. The owner granted marketing exactly
+  one brand accent — the logo's blue, through `--brand`, `--brand-ink` and the
+  scoped `--primary` in `story.css` — and that grant is not a licence for more.
+  The ESLint palette rule is repo-wide under `frontend/`.
 - Give the structural cost of an exception — a second config block (which also
   exempts those paths from the other rules in that array) or hue-bearing
   variables in the token file every app component reads.
@@ -112,10 +114,10 @@ Must not:
   image or an animated accent is also the thing most likely to pull client
   JavaScript onto a `force-static` page.
 
-Credit for the positioning argument — that grayscale is the differentiator in a
-category of gradient SaaS sites, and that a gradient landing page followed by a
-monochrome app tells the visitor the product is less confident than its
-marketing.
+Credit for the positioning argument — that restraint (grayscale plus one brand
+accent) is the differentiator in a category of gradient SaaS sites, and that a
+gradient landing page followed by a monochrome app tells the visitor the
+product is less confident than its marketing.
 
 ## 5. The call to action
 

@@ -290,7 +290,13 @@ for t in live:
     assert (t["k8s_job_name"] or "").startswith("er-t-"), t["k8s_job_name"]
     assert t["pod_name"], "a real pod name landed (from the verified claims)"
     assert t["pod_uid"], "a real pod uid landed"
-    assert t["token_hash"] is None, "the fallback token hash is nulled at finish"
+    # NOT `t["token_hash"] is None`, and not `.get(...) is None` either. #1075
+    # (7cad4ad9) reprojected this handler through `TaskInstanceWire`, which does
+    # not carry the field at all — so subscripting it raises KeyError (what
+    # reddened this probe for seven days, #1106) and `.get()` would assert
+    # nothing, because the key can no longer be present. Assert the property the
+    # wire projection actually guarantees; this fails if anyone re-exposes it.
+    assert "token_hash" not in t, "the public task listing must not expose the internal token hash"
 print("phase 1 ok: both rows succeeded as real pods")
 EOF
 

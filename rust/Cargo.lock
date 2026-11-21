@@ -1818,7 +1818,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.1",
- "sqlparser 0.63.0",
+ "sqlparser 0.64.0",
  "thiserror",
 ]
 
@@ -2121,6 +2121,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "er-duckfleet"
+version = "0.1.0"
+dependencies = [
+ "arrow 60.1.0",
+ "duckdb",
+ "er-entities",
+ "hex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
 name = "er-entities"
 version = "0.1.0"
 dependencies = [
@@ -2393,6 +2409,7 @@ dependencies = [
  "er-compile",
  "er-config",
  "er-dag",
+ "er-duckfleet",
  "er-entities",
  "er-entity-diff",
  "er-entity-gen",
@@ -4351,9 +4368,9 @@ dependencies = [
 
 [[package]]
 name = "prost"
-version = "0.14.4"
+version = "0.14.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "528ac67416ff8646872a3c02cad9cc4ee5dc9f9540c9b10771855c95cb2e5ae1"
+checksum = "3ef0b569d1d907ab3a28596aee62cf1f61dacb0529a4bedcd8e7460e2d5228b4"
 dependencies = [
  "bytes",
  "prost-derive",
@@ -4361,9 +4378,9 @@ dependencies = [
 
 [[package]]
 name = "prost-derive"
-version = "0.14.4"
+version = "0.14.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b570b25f7617e43d59005d0990ccb79e950a423952cea19671b7a876da390adf"
+checksum = "1ad9c5423459fa2f729b8d9235fab810aa29628b171467744fc86d21460ad70d"
 dependencies = [
  "anyhow",
  "itertools 0.14.0",
@@ -5157,13 +5174,13 @@ dependencies = [
 
 [[package]]
 name = "sqlparser"
-version = "0.63.0"
+version = "0.64.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3679862809bd1f92e563cf6fd820e28f39135303668001c10331d5027183e8b4"
+checksum = "92e0d273b4f8ddd14a35ed36862acbc9cc96cec578e36ee1881a9d42e0e0f2c8"
 dependencies = [
  "log",
  "recursive",
- "sqlparser_derive 0.6.0",
+ "sqlparser_derive 0.7.0",
 ]
 
 [[package]]
@@ -5190,9 +5207,9 @@ dependencies = [
 
 [[package]]
 name = "sqlparser_derive"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2905ae8e8148d8f7f5748ea95d1e949fa4fc1d7f5161547b758ad118b2e4b0aa"
+checksum = "5fa4939c717eaef717f244768d35a5f93c62e1d440865097d2edef7d86ddb7e0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5933,9 +5950,9 @@ dependencies = [
 
 [[package]]
 name = "uuid"
-version = "1.29.1"
+version = "1.29.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a06f08a856b009bc7bbaf7d3e79808595d032dd19074c0c2ef26e49e03e6bdc"
+checksum = "bed99139f7dac9b5cfe5f17be4d66dc7079a34dee1d74bcc77217119240e267c"
 dependencies = [
  "getrandom 0.4.3",
  "js-sys",

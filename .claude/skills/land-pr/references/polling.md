@@ -81,8 +81,7 @@ list grows — do not reason from its length**, and do not treat "none of these
 applies" as proof of green when the assertion above has not been run.
 
 **1. A failed `detect` job.** Covered above and the most dangerous, because the
-PR is genuinely `CLEAN` and genuinely mergeable — by a human or by the merge
-bus — with nothing built. Seen with two Rust files changed, all three `detect`
+PR is genuinely `CLEAN` and mergeable with nothing built. Seen with two Rust files changed, all three `detect`
 jobs dead in an Actions-minutes outage, every required context `skipped`.
 
 **2. `mergeStateStatus: DIRTY`.** A conflicted PR triggers **zero** workflows
@@ -155,7 +154,7 @@ gh run view <runId> --json jobs \
 | `CLEAN` | every required check satisfied, review not required here | run the assertion above, then merge |
 | `BEHIND` | base moved | benign — protection is `strict: false`. Rebase only if the change interacts with what moved |
 | `DIRTY` | conflicted | rebase onto `origin/main`, resolve, push; **zero CI ran**, so a full pass follows |
-| `UNSTABLE` | a non-required check is red *or still pending* | usually transient. `semgrep` red is mergeable by hand; the merge bus refuses it |
+| `UNSTABLE` | a non-required check is red *or still pending* | usually transient. `semgrep` red is mergeable by hand |
 | `BLOCKED` | a required context is failing or absent | step 2 of the assertion names which |
 | `UNKNOWN` | not computed | re-read with `gh pr view`, never `gh pr list` |
 

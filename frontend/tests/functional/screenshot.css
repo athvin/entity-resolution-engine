@@ -1,0 +1,8 @@
+/* Applied to every toHaveScreenshot (playwright.config.ts `stylePath`).
+   The marketing story's floating next-chapter button is fixed to the viewport,
+   so it lands at a slightly different spot over whichever element is being
+   captured, run to run. It is tested by its own functional specs; screenshots
+   leave it out so a baseline depicts the element, not where the button was. */
+.story-chapters {
+  visibility: hidden !important;
+}

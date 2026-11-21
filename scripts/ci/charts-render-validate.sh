@@ -33,3 +33,7 @@ render "er-dev-namespace" ci infra/k8s/charts/er-dev-namespace \
 # Platform-owned boundary for a separate product; no missing-schema allowance.
 kubeconform -strict -summary -kubernetes-version 1.32.0 infra/k8s/duckfleet/dev/bootstrap.yaml
 python3 scripts/ci/duckfleet-boundary-test.py
+
+render "er-duckfleet-dataset" dataset-boundary infra/k8s/charts/er-duckfleet-dataset \
+  --namespace default --set orgId=org-a --set datasetId=dataset-a --set clientNamespace=er
+python3 scripts/ci/duckfleet-dataset-test.py

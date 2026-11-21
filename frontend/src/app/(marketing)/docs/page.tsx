@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+
+import { Breadcrumbs, LastUpdated, PAGE_UPDATED, SHARE_IMAGE } from "@/components/marketing/seo";
 import { CodeExample } from "@/components/marketing/docs/code-example";
 import { DeveloperReference } from "@/components/marketing/docs/developer-reference";
 import "@/components/marketing/docs/docs.css";
@@ -9,7 +11,12 @@ export const metadata: Metadata = {
   description:
     "Organization and dataset concepts, authentication, ingestion, resolution, results, corrections, and the current DupeZero API reference.",
   alternates: { canonical: "/docs" },
-  openGraph: { title: "DupeZero developer docs", url: "/docs" },
+  openGraph: { title: "DupeZero developer docs", url: "/docs", images: [SHARE_IMAGE] },
+  twitter: {
+    card: "summary_large_image",
+    title: "DupeZero developer docs",
+    images: [SHARE_IMAGE.url],
+  },
 };
 const CONTENTS: [string, string][] = [
   ["overview", "Start here"],
@@ -51,6 +58,8 @@ export default function DocsPage() {
         <nav aria-label="Mobile documentation contents">{links}</nav>
       </details>
       <article className="docs-article">
+        <Breadcrumbs path="/docs" label="Docs" />
+        <LastUpdated iso={PAGE_UPDATED["/docs"] ?? ""} />
         <section id="overview">
           <p className="story-eyebrow">The details behind the flow</p>
           <h1>Build with DupeZero.</h1>
@@ -402,15 +411,16 @@ Content-Type: application/json
             imply a per-source charge.
           </p>
           <p>
-            The current pricing direction is per-run compute, with commercial rates still to be
-            established. The web application’s existing usage panel meters AI calls and token units;
-            those counts are not a billing ledger. Bring-your-own model keys can also incur provider
-            charges outside DupeZero.
+            Pricing is based only on the total records you connect, added together across every
+            system, in tiers set out on the pricing page. It does not depend on the number of
+            systems, connectors, orgs or users, or on how many runs you do. Records in free sandbox
+            or test environments do not count.
           </p>
           <p>
-            Record volume alone cannot predict runtime or price: comparisons, candidate generation,
-            configuration, and actual execution work matter. Confirm a commercial estimate for your
-            workload before treating any usage number as cost.
+            The web application’s usage panel meters AI calls and token units; those counts are not
+            a billing ledger. Bring-your-own model keys can also incur provider charges outside
+            DupeZero. Runtime depends on comparisons, candidate generation and configuration, not on
+            record volume alone, but it does not change the price.
           </p>
         </section>
         <DeveloperReference />

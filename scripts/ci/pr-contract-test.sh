@@ -4,9 +4,7 @@
 #
 # Same reason detect-paths-test.sh exists: a detector breaks by noticing
 # nothing, which reads exactly like a clean tree. Both directions are asserted,
-# and the load-bearing cases are the EXEMPTIONS — a false failure on a
-# merge-bus pull request stops every batch from landing, which is worse than
-# the gate not existing.
+# including the exemptions that let dependency updates and reverts proceed.
 #
 # The other load-bearing case is `the committed template passes`. The gate
 # asserts the ledger markers are present in a pull request body, and that body
@@ -245,8 +243,8 @@ got=$(loose <"$TEMPLATE")
 # exempt pull requests are actually in.
 reset_facts
 PR_CLOSING_ISSUES=''
-PR_HEAD_REF='merge-bus/19284756'
-expect 'a merge-bus pull request' exempt <<<'### riding: #1, #2'
+PR_HEAD_REF='automation/19284756'
+expect 'an automation branch still needs a ticket' fail <<<'Automated change.'
 
 reset_facts
 PR_CLOSING_ISSUES=''

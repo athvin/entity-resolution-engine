@@ -1,0 +1,5 @@
+# Immutable IDs from the reviewed binding registry. No default enrollment.
+orgId: ""
+datasetId: ""
+# Namespace hosting the authorized ER control plane and task pods.
+clientNamespace: ""

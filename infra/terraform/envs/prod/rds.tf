@@ -105,24 +105,15 @@ resource "aws_rds_cluster" "prod" {
 # on a live database instead of removing the idle replica. Keyed by name, the
 # plan names the instance it is removing and cannot pick the wrong one.
 #
-# To restore multi-AZ HA, add the second identifier back to the set.
+# To restore multi-AZ HA, add the second identifier back to the set. Note what
+# that costs to undo in the other direction: this is now a SINGLE instance, so
+# any change needing an instance reboot — a static cluster parameter, say — is a
+# full outage rather than a failover.
 #
-# The two `moved` blocks carry the existing instances from the old index-keyed
-# addresses onto the name-keyed ones. They are what keeps this a one-instance
-# destroy rather than a destroy-both-and-recreate: without them the planner sees
-# no state at either new address. `er-prod-1` lands on an address the for_each
-# set does not contain, which is precisely the reader removal. They can be
-# deleted once this has been applied.
-moved {
-  from = aws_rds_cluster_instance.prod[0]
-  to   = aws_rds_cluster_instance.prod["er-prod-1"]
-}
-
-moved {
-  from = aws_rds_cluster_instance.prod[1]
-  to   = aws_rds_cluster_instance.prod["er-prod-2"]
-}
-
+# The two `moved` blocks that carried these instances off the old index-keyed
+# addresses were applied with #1096 and deleted here (#1100); they were inert
+# once the state had moved. Re-deriving them is only necessary if this resource
+# is ever re-keyed again.
 resource "aws_rds_cluster_instance" "prod" {
   for_each = toset(["er-prod-2"])
 

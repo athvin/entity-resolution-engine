@@ -88,6 +88,7 @@ job instead — `terraform plan` is the worked example.
 | Job | Status-check context | Timeout | Condition |
 |---|---|---|---|
 | `refresh` | drift (${{ matrix.key }}) | 20 | `always` |
+| `alert-path` | alert path (a confirmed subscriber) | 10 | `always` |
 
 ### `frontend-experiments.yml`
 
@@ -137,12 +138,6 @@ job instead — `terraform plan` is the worked example.
 |---|---|---|---|
 | `assertions` | kind probe assertions (fixtures) | 5 | `always` |
 | `probe` | kind probe (executor e2e) | 120 | `github.event_name != 'pull_request'` |
-
-### `merge-bus.yml`
-
-| Job | Status-check context | Timeout | Condition |
-|---|---|---|---|
-| `bus` | merge bus | 75 | `always` |
 
 ### `pr-contract.yml`
 
@@ -208,6 +203,8 @@ ignore = [
     "RUSTSEC-2024-0436",
     "RUSTSEC-2024-0449",
     "RUSTSEC-2026-0441",
+    "RUSTSEC-2026-0543",
+    "RUSTSEC-2026-0555",
 ]
 ```
 

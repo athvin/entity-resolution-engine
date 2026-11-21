@@ -7,6 +7,7 @@ import { TrailBridges } from "./demo/trail-bridges";
 import { StoryFlow } from "./demo/story-flow";
 import { UsageStream } from "./demo/usage-stream";
 import { AuditStory } from "./demo/audit-story";
+import { SourceLogo, sourceBrand } from "./demo/source-logo";
 import {
   DEMO_DATASETS,
   SOURCE_NAMES,
@@ -57,6 +58,7 @@ export function InteractiveStory() {
               type="button"
               key={name}
               aria-pressed={sources.includes(i)}
+              data-brand={sourceBrand(name)}
               onClick={() => {
                 setAssignments((all) =>
                   all.map((set, index) =>
@@ -70,8 +72,9 @@ export function InteractiveStory() {
               }}
             >
               <span aria-hidden="true">{sources.includes(i) ? "−" : "+"}</span>
+              <SourceLogo name={name} size={14} />
               {name}
-              {i === 6 ? "*" : ""}
+              {name === "ZoomInfo" ? "*" : ""}
             </button>
           ))}
         </div>
@@ -145,11 +148,11 @@ export function InteractiveStory() {
           volumePosition={volumePosition}
         />
         <div className="story-pricing-note">
-          <h3>Pricing follows the work.</h3>
+          <h3>Pricing follows your records.</h3>
           <p>
-            Our pricing direction is per-run compute. Record volume, configuration, and the work a
-            run performs shape that discussion. This is a usage illustration; rates and a price
-            estimate are not yet published.
+            Pricing is based on the total records you connect, added together across every system,
+            never on the number of systems, connectors or users. This illustration shows the shape
+            of a run, not a price; the pricing page has the tiers.
           </p>
           <p>
             Adding a source redistributes the selected total. Animation density is illustrative, not

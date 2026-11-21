@@ -131,3 +131,8 @@ A condensed index; the full table with exact files and line hints is
 Don't fix it inline and move on. Run (or hand off to) `/pentest` scoped to that one category so the
 finding goes through verify → lock → report like every other — that is how it stays fixed. If you are
 already mid-fix, at minimum add the regression test from the harness-map and show it fails first.
+
+For the DuckFleet pilot boundary, binding lifecycle and evidence limits, see
+[dataset isolation](references/duckfleet-isolation.md).
+The recorded synthetic probe is in
+[isolation evidence](references/duckfleet-isolation-evidence.json).

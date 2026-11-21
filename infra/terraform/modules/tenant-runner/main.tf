@@ -18,15 +18,17 @@ variable "kms_key_arn" { type = string }
 variable "region" { type = string }
 variable "bindings" {
   type = map(object({
-    namespace = string
-    org_id    = string
-    prefix    = string
+    namespace       = string
+    org_id          = string
+    prefix          = string
+    service_account = optional(string)
   }))
   validation {
     condition = alltrue([for b in values(var.bindings) :
       length(trimspace(b.org_id)) > 0 &&
       can(regex("^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", b.namespace)) &&
       length(b.namespace) <= 63 &&
+      (b.service_account == null ? true : (can(regex("^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", b.service_account)) && length(b.service_account) <= 63)) &&
       can(regex("^[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*/$", b.prefix))
     ])
     error_message = "Bindings require a nonempty org, a Kubernetes namespace and a literal non-root prefix ending in '/'; wildcards and path traversal are forbidden."
@@ -39,13 +41,13 @@ variable "bindings" {
     error_message = "Tenant prefixes must not overlap, including across namespaces."
   }
   validation {
-    condition     = length(distinct([for b in values(var.bindings) : "${b.namespace}/${b.org_id}"])) == length(var.bindings)
-    error_message = "Each namespace/org pair may have only one runner identity."
+    condition     = length(distinct([for b in values(var.bindings) : "${b.namespace}/${coalesce(b.service_account, "er-runner-${substr(sha256(b.org_id), 0, 20)}")}"])) == length(var.bindings)
+    error_message = "Each namespace/service-account pair may have only one runner identity."
   }
 }
 
 locals {
-  accounts = { for key, b in var.bindings : key => "er-runner-${substr(sha256(b.org_id), 0, 20)}" }
+  accounts = { for key, b in var.bindings : key => coalesce(b.service_account, "er-runner-${substr(sha256(b.org_id), 0, 20)}") }
   policies = { for key, b in var.bindings : key => jsonencode({
     Version = "2012-10-17"
     Statement = [

@@ -1,6 +1,6 @@
 ---
 name: land-pr
-description: Drives a pull request from opened to green on `main`, then closes its post-merge ledger — the PR loop, the main loop for the push-only workflows no PR can run, the false greens `gh pr checks` reports on a PR that compiled nothing, the house merge rules (no auto-merge; a single-commit PR squashes to the commit subject; only the merge bus judges a combination), and the ledger ticked in the merged body as the record the follow-ups happened. Use when asked to monitor, watch, babysit or land a pull request, when its checks are red or stuck pending, when a failure may be the account rather than the diff, when a merge turns `main` red, or when a merged PR's ledger has open boxes. For why a job fails see `ci-and-supply-chain`; for the local gates see `rust-conventions` and `frontend-testing`; for the card of the issue it closes see `project-board`; for claiming the ticket and the draft PR see `claim-ticket`; for reviewing the diff see `pr-review`.
+description: Drives a pull request from opened to green on `main`, then closes its post-merge ledger — the PR loop, the main loop for the push-only workflows no PR can run, the false greens `gh pr checks` reports on a PR that compiled nothing, the house merge rules (no auto-merge; a single-commit PR squashes to the commit subject), and the ledger ticked in the merged body as the record the follow-ups happened. Use when asked to monitor, watch, babysit or land a pull request, when its checks are red or stuck pending, when a failure may be the account rather than the diff, when a merge turns `main` red, or when a merged PR's ledger has open boxes. For why a job fails see `ci-and-supply-chain`; for the local gates see `rust-conventions` and `frontend-testing`; for the card of the issue it closes see `project-board`; for claiming the ticket and the draft PR see `claim-ticket`; for reviewing the diff see `pr-review`.
 argument-hint: "[pr-number-or-url] [AUTO_MERGE=true|false] [WATCH_WINDOW=30m]"
 ---
 
@@ -78,10 +78,8 @@ is the state this skill's own observations used to end in.
 5. **`make check` is the local gate, not the cargo trio.** `cargo fmt` +
    `clippy` + `test` skip `entities-check` and `skills-check`, which is where a
    change that looks clean actually fails. See `rust-conventions`.
-6. **Do not race the merge bus.** With several PRs open, hand-merging a
-   candidate out from under an in-flight batch discards a gate run the batch
-   already paid for. If a batch is running, add the label and let it land the PR.
-   See `ci-and-supply-chain`.
+6. **Refresh before merging.** Rebase or merge the latest `origin/main` and
+   verify the updated branch's checks before landing it.
 
 ## Phase 0 — record the base before touching anything
 

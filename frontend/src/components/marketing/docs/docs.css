@@ -124,6 +124,12 @@
   justify-content: space-between;
   gap: 16px;
   background: var(--muted);
+  /* Set, not inherited: WebKit sometimes keeps the inherited text colour from
+     before the theme class lands while this background updates, leaving the
+     light theme's #0a0a0a text on the dark #262626 bar (axe colour-contrast,
+     mobile-safari, intermittently). Naming the colour here resolves both
+     from the same theme. */
+  color: var(--foreground);
   padding: 8px 12px;
   font-size: 11px;
 }

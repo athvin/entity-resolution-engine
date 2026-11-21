@@ -42,10 +42,52 @@ export const CANONICAL_ORIGIN = "https://dupezero.com";
  * `src/proxy.ts` (reachable without a session, via MARKETING_PUBLIC_PATHS
  * below) and `src/app/sitemap.ts` (what crawlers are told about).
  *
- * The header separately links Home and Docs. Adding a public path here makes
- * it reachable and indexed; add its navigation link explicitly as well.
+ * The header and footer link these separately (`site-links.ts` in
+ * components/marketing). Adding a public path here makes it reachable and
+ * indexed; add its navigation link explicitly as well.
  */
-export const MARKETING_PATHS: readonly string[] = ["/", "/docs"];
+export const MARKETING_PATHS: readonly string[] = [
+  "/",
+  "/product",
+  "/features/matching",
+  "/features/review",
+  "/features/golden-records",
+  "/solutions",
+  "/solutions/roles/salesforce-admins",
+  "/solutions/roles/revenue-operations",
+  "/solutions/roles/marketing",
+  "/solutions/roles/it-and-security",
+  "/solutions/industries/technology",
+  "/solutions/industries/nonprofit",
+  "/solutions/industries/financial-services",
+  "/solutions/industries/healthcare-and-life-sciences",
+  "/solutions/industries/education",
+  "/solutions/industries/real-estate",
+  "/solutions/industries/manufacturing",
+  "/integrations",
+  "/security",
+  "/pricing",
+  "/faq",
+  "/resources",
+  "/resources/causes-of-salesforce-duplicates",
+  "/resources/preparing-for-a-bulk-merge",
+  "/resources/matching-rules-explained",
+  "/blog",
+  "/blog/estimating-what-duplicates-cost",
+  "/blog/leads-contacts-and-the-person-in-between",
+  "/blog/every-match-should-come-with-its-reasons",
+  "/about",
+  "/contact",
+  "/docs",
+];
+
+/**
+ * Public but unlisted: reachable without a session, kept out of the sitemap,
+ * and marked `noindex` by each page. The legal pages are written from the
+ * product's verified data handling but have not been reviewed by counsel, so
+ * they stay out of search until they are.
+ */
+export const MARKETING_UNLISTED_PATHS: readonly string[] = ["/legal/privacy", "/legal/terms"];
 
 /**
  * Paths the proxy must let through unauthenticated for the marketing surface to
@@ -61,6 +103,7 @@ export const MARKETING_PATHS: readonly string[] = ["/", "/docs"];
  */
 export const MARKETING_PUBLIC_PATHS: readonly string[] = [
   ...MARKETING_PATHS,
+  ...MARKETING_UNLISTED_PATHS,
   "/robots.txt",
   "/sitemap.xml",
 ];

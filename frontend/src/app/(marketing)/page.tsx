@@ -4,8 +4,10 @@ import { ClosingCta } from "@/components/marketing/cta";
 import { Faq } from "@/components/marketing/faq";
 import { Hero } from "@/components/marketing/hero";
 import { InteractiveStory } from "@/components/marketing/interactive-story";
+import { StoryChapters } from "@/components/marketing/story-chapters";
 import { StructuredData } from "@/components/marketing/structured-data";
 import { HERO } from "@/components/marketing/content";
+import { SHARE_IMAGE } from "@/components/marketing/seo";
 
 /**
  * `force-static`, not `ensureStatic`.
@@ -32,7 +34,13 @@ export const metadata: Metadata = {
   title: { absolute: HERO.title },
   description: HERO.subhead,
   alternates: { canonical: "/" },
-  openGraph: { title: HERO.title, description: HERO.subhead, url: "/" },
+  openGraph: { title: HERO.title, description: HERO.subhead, url: "/", images: [SHARE_IMAGE] },
+  twitter: {
+    card: "summary_large_image",
+    title: HERO.title,
+    description: HERO.subhead,
+    images: [SHARE_IMAGE.url],
+  },
 };
 
 export default function LandingPage() {
@@ -56,6 +64,7 @@ export default function LandingPage() {
         <Faq />
         <ClosingCta />
       </section>
+      <StoryChapters />
     </div>
   );
 }

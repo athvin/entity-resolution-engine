@@ -7,10 +7,13 @@ import { useState } from "react";
 
 import { ToasterProvider } from "@/components/ui/toaster";
 import { BffRequestError } from "@/lib/api/client";
+import { MARKETING_PUBLIC_PATHS } from "@/lib/site/routes";
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const marketing = pathname === "/" || pathname === "/docs";
+  // The marketing site has no theme control, so it is always dark: a visitor's
+  // stored choice from the app must not leave them in a theme they cannot leave.
+  const marketing = MARKETING_PUBLIC_PATHS.includes(pathname);
   const [queryClient] = useState(
     () =>
       new QueryClient({
@@ -32,6 +35,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
     <ThemeProvider
       attribute="class"
       defaultTheme={marketing ? "dark" : "system"}
+      {...(marketing ? { forcedTheme: "dark" } : {})}
       enableSystem
       disableTransitionOnChange
     >

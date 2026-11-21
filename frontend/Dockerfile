@@ -39,6 +39,11 @@ WORKDIR /app
 # the server writes its runtime cache under .next/ (infrastructure.md S5.6).
 COPY --from=builder --chown=node:node /app/.next/standalone ./
 COPY --from=builder --chown=node:node /app/.next/static ./.next/static
+# `public/` (the brand logos, product screenshots) is NOT part of standalone
+# output either; without this line every /brand/* and /screenshots/* request is
+# a 404 in production while working in `next dev`. Next's standalone guide
+# copies both directories for this reason.
+COPY --from=builder --chown=node:node /app/public ./public
 # The drizzle migrations and their runner, so the Helm pre-upgrade hook Job can
 # run `node scripts/db-migrate.mjs` from this image (infrastructure.md S12).
 # The standalone tree cannot serve the runner: output tracing is file-granular

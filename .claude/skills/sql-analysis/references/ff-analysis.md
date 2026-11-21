@@ -42,7 +42,7 @@ inside the markers.
 | arrow, rest of the workspace | 60.1.0 (declared `60`) | the major the `duckdb` crate pulls |
 | sqlparser, **the parser** | 0.59.0 | datafusion-expr 52.5.0, re-exported as `ff_analysis::sqlparser` |
 | sqlparser, ff-analysis's own | 0.61.0 | ff-analysis depends on it directly; **not** what the re-export resolves to |
-| sqlparser, the workspace | 0.63 | `rust/Cargo.toml`, for the crates below |
+| sqlparser, the workspace | 0.64 | `rust/Cargo.toml`, for the crates below |
 
 Crates declaring the standalone `sqlparser`: **dedupe-core**.
 `er-sql-check` is deliberately absent — it parses only through the
