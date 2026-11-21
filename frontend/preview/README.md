@@ -20,18 +20,19 @@ blocks crawling. These previews are public to anyone with the link.
 
 ## One-time hosting setup
 
-1. Give the Cloudflare token in the existing `infra-apply-core` GitHub environment
-   **Account / Cloudflare Pages / Edit** permission in addition to its existing
-   R2 permission. Terraform manages the project, not Wrangler.
+1. Create a dedicated Cloudflare token with **Account / Cloudflare Pages / Edit**
+   for the existing account. Store it as `CLOUDFLARE_PAGES_API_TOKEN` in both GitHub
+   environments `infra-apply-core` and `marketing-preview`. Keep the existing
+   `CLOUDFLARE_API_TOKEN` unchanged: it owns the R2 credential. Terraform's separate
+   Pages provider receives an ephemeral sensitive variable, which is omitted
+   from plan files and state; only apply and drift jobs receive that secret.
 2. Set repository variable `MARKETING_PREVIEW_INFRA_ENABLED=true`. Merge this
    configuration and let the normal core Terraform apply create
    `dupezero-marketing-preview`. If already merged, rerun the `infra` workflow
    for that main commit. Do not enable publishing until the apply succeeds.
-3. Create GitHub environment `marketing-preview`. Store a dedicated Cloudflare
-   token with **Account / Cloudflare Pages / Edit** for the existing account as
-   environment secret `CLOUDFLARE_PAGES_API_TOKEN`. Do not reuse the R2 or DNS token.
-   Cloudflare scopes this permission to the account, not one Pages project;
-   restrict who can edit workflows and use environment reviewers if needed.
+3. Cloudflare scopes Pages Edit to the account, not one Pages project. Restrict
+   who can edit workflows and use environment reviewers if needed. Fork PRs
+   never receive the deployment credential.
 4. Set repository variable `MARKETING_PREVIEW_ENABLED=true` and dispatch
    **marketing preview**, or push a frontend change. Open the URL in the job summary.
 

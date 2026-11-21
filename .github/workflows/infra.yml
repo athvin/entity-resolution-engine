@@ -500,6 +500,10 @@ jobs:
     # an Environment gets a `…:environment:<name>` subject claim instead of a
     # ref claim, so these three names are load-bearing, not decoration.
     environment: infra-apply-${{ matrix.key }}
+    env:
+      # The Pages provider uses an ephemeral variable, omitted from plans/state.
+      # Supply it at job scope so the saved-plan apply can authenticate too.
+      TF_VAR_cloudflare_pages_api_token: ${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}
     # JOB level, not step level, and that placement is the whole fix for the
     # `apply (core)` failure on be64c41e (#910). These were on the
     # `terraform plan (to a file)` step only, so the plan succeeded and the

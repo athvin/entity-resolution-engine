@@ -86,6 +86,8 @@ jobs:
     # The account-scoped R2 token is available only in this main-protected
     # Environment. Other stacks keep their ref-based OIDC subject.
     environment: ${{ matrix.key == 'core' && 'infra-apply-core' || '' }}
+    env:
+      TF_VAR_cloudflare_pages_api_token: ${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
