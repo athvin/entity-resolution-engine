@@ -2430,6 +2430,93 @@ columns:
 "#,
     ),
     (
+        "remote_attempt",
+        r#"kind: entity
+version: 1
+name: remote_attempt
+relation: remote_attempts
+description: "Write-ahead remote execution identity and dataset fence; unresolved attempts survive task termination and dispatcher restarts. No SQL, parameters, profiles or credentials are stored."
+key: [id]
+natural_key: [dataset_id, task_instance_id, launch]
+generate:
+  stores: [postgres]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "UUIDv7 identifying one remote session attempt."
+  - name: org_id
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: id }
+    description: "Organization owning this execution fence."
+  - name: dataset_id
+    type: varchar
+    nullable: false
+    references: { relation: datasets, column: id }
+    description: "Dataset whose writer slot remains fenced until reconciliation."
+  - name: job_id
+    type: varchar
+    nullable: false
+    references: { relation: jobs, column: id }
+    description: "Job that authorized remote execution."
+  - name: task_instance_id
+    type: varchar
+    nullable: false
+    references: { relation: task_instances, column: id }
+    description: "Durable task attempt that authorized this session."
+  - name: launch
+    type: bigint
+    nullable: false
+    description: "Task launch number; a restarted pod cannot inherit a prior session."
+  - name: binding_generation
+    type: bigint
+    nullable: false
+    description: "Pinned operator binding generation; recovery never silently selects a replacement."
+  - name: namespace
+    type: varchar
+    nullable: false
+    description: "Pinned compute namespace, without endpoint credentials."
+  - name: session_id
+    type: varchar
+    description: "Remote session UUID acknowledged before any SQL is submitted."
+  - name: request_id
+    type: varchar
+    description: "Last write-ahead request UUID; contains no SQL or parameters."
+  - name: commit_request_id
+    type: varchar
+    description: "Request UUID journaled before attempting transaction commit."
+  - name: phase
+    type: varchar
+    nullable: false
+    accepted_values: [opening, active, committing, unknown, committed, rolled_back, not_executed]
+    description: "Execution boundary or reconciled publication outcome."
+  - name: released_at
+    type: timestamp
+    description: "Set only after remote quiescence and publication outcome are both established."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the dataset fence was acquired."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "Last durable evidence update."
+indexes:
+  - name: remote_attempts_dataset_unresolved
+    columns: [dataset_id]
+    unique: true
+    where: "released_at IS NULL"
+  - name: remote_attempts_org
+    columns: [org_id]
+"#,
+    ),
+    (
         "resolved_entity",
         r#"kind: entity
 version: 1

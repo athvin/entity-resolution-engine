@@ -1,0 +1,7 @@
+kind: statement
+operation: read
+mode: partial
+description: "Read immutable remote attempt identity and its latest evidence."
+params:
+  - { name: id, type: varchar }
+returns: entity

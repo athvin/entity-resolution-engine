@@ -41,6 +41,7 @@ pub mod raw_record;
 pub mod record_overlay;
 pub mod record_quality;
 pub mod record_verification;
+pub mod remote_attempt;
 pub mod resolved_entity;
 pub mod review;
 pub mod run;
