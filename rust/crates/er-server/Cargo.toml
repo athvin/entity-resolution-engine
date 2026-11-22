@@ -134,7 +134,7 @@ er-k8s = { version = "0.1.0", path = "../er-k8s" }
 # banned from this image, and `rust_crypto` pulls `rsa`, which carries unfixed
 # timing advisories (RUSTSEC-2023-0071) that fail cargo-deny. `satoken::ring_jwt`
 # supplies a ring-backed provider instead; ring is already linked through rustls.
-jsonwebtoken = { version = "11", default-features = false, features = ["use_pem"] }
+jsonwebtoken = { version = "12", default-features = false, features = ["use_pem"] }
 er-obs = { version = "0.1.0", path = "../er-obs" }
 tracing.workspace = true
 tower-http = { version = "0.7.1", default-features = false, features = ["trace", "request-id"] }
