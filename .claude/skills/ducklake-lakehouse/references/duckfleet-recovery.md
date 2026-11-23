@@ -47,8 +47,9 @@ The golden transaction runs
 `CALL lake.set_commit_message('er', 'golden', extra_info => '{"remote_attempt":"<id>"}')`
 before COMMIT. DuckLake writes it into the snapshot row the commit creates, so
 `ducklake_snapshots('lake').commit_extra_info` contains it exactly when the
-transaction committed. Probed on DuckDB 1.5.4 (DuckFleet's engine) and 2.0.0
-(ER's): committed → present, rolled back → absent.
+transaction committed. Probed on DuckDB 1.5.4 and 2.0.0, and re-proven on 2.0.1
+(both sides' engine since #1169) by `make check-duckfleet-task`'s fault cases:
+committed → present, rolled back → absent.
 
 ## The failure matrix
 

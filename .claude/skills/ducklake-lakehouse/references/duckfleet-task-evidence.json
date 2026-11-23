@@ -1,18 +1,18 @@
 {
   "deadline": {
-    "elapsed_seconds": 65.12780712498352,
-    "out_of_range_601_refused": true,
+    "elapsed_seconds": 65.2207244578749,
+    "statement_deadline_seconds": 120,
     "rows": [
       {
         "n": 42
       }
     ],
-    "scope": "actual DuckDB statement through gateway; delayed synthetic HTTP CSV",
-    "short_deadline_elapsed_seconds": 65.20319154206663,
+    "out_of_range_601_refused": true,
     "short_deadline_refused": true,
-    "short_final_status": "timed_out",
     "short_initial_failure": "timeout",
-    "statement_deadline_seconds": 120
+    "short_final_status": "timed_out",
+    "short_deadline_elapsed_seconds": 65.17474879231304,
+    "scope": "actual DuckDB statement through gateway; delayed synthetic HTTP CSV"
   },
   "limits": [
     "Disposable Compose with real DuckFleet, PostgreSQL and object storage; Kubernetes is the existing child-process test double.",
@@ -20,33 +20,33 @@
     "External I/O observes cancellation late; timeout is not proof of rollback or a hard wall-clock kill.",
     "Rerun equality excludes volatile assembled_at; rollback equality includes it."
   ],
-  "measured_at_utc": "2026-11-21",
+  "measured_at_utc": "2026-11-23",
   "task": {
     "embedded_remote_equal": true,
     "fault_outcomes": [
       {
-        "attempt": "01a1fef1-1fd6-7411-8d91-e572011eae49",
+        "attempt": "01a2094a-5467-7552-be96-c06359734446",
         "fault": 1,
         "receipts": 1,
         "reconciled": "committed"
       },
       {
-        "attempt": "01a1fef1-375c-764b-9725-d472835a999f",
+        "attempt": "01a2094a-7495-706e-b68c-772fc914d4ce",
         "fault": 2,
         "receipts": 0,
         "reconciled": "rolled_back"
       }
     ],
-    "golden_attempt_id": "c8ab84ea667636a7b6ad1206fa581062f623b09a323be6e03d6de4a9a29e200c",
+    "golden_attempt_id": "4c1cd927a4c89fc93d3209410160adadae663f811773f6d4064bdb9ac40da857",
     "golden_lineage": 16,
     "golden_records": 4,
-    "image_id": "sha256:0a2fab0ae06ff7c5620cf4d92e7e4c3402fd94f1639b456a01395d17c63460cb",
-    "job_id": "01a1fef0-9574-7717-9ce6-c80cc68e0f72",
+    "job_id": "01a20949-9af9-7624-8fd5-5b969def54fa",
     "matching_scores": 3,
     "remote_queries": 10,
     "remote_rerun_equal": true,
     "unsupported_capacity_job_failed": true,
-    "upstream_revision": "ac894b551e6d802e4c4f88422881c6aaac6e4f4b",
-    "writer_exclusion": true
+    "writer_exclusion": true,
+    "upstream_revision": "778dbe023203570f55e1265a91d4ec26885b250a",
+    "image_id": "sha256:acc30cd1eb13dffaf69eaed523cd13ba93f8464eb68810476b1f3865d167e5c6"
   }
 }

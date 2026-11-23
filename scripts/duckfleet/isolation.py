@@ -44,22 +44,21 @@ def run(source, output, image=None):
                     project = f'{project_root}-{index}'
                     token = secrets.token_hex(32)
                     password = secrets.token_hex(32)
-                    dsn = f'host=postgres port=5432 user=duckfleet password={password}'
+                    # Upstream provisions per-component roles from the administrator
+                    # password; the role DSNs come from its compose file.
+                    # Tokens go through upstream's compose variables (see env below):
+                    # an ordinary worker refuses the public token.
                     override = {'services': {
-                        'postgres': {'environment': {'POSTGRES_PASSWORD': password}},
                         'worker-small': {'image': image or project_root + ':isolation', 'environment': {
-                            'DUCKFLEET_TOKEN': token, 'CATALOG_DSN': dsn + ' dbname=lake',
-                            'PLATFORM_DSN': dsn + ' dbname=platform',
                             'DUCKFLEET_HISTORY_RETENTION_DAYS': '1'}},
-                        'server': {'image': image or project_root + ':isolation', 'pull_policy': 'never',
-                            'environment': {'DUCKFLEET_TOKEN': token,
-                                'PLATFORM_DSN': dsn + ' dbname=platform'}}}}
+                        'server': {'image': image or project_root + ':isolation', 'pull_policy': 'never'}}}
                     config = scratch / f'{index}.json'
                     config.write_text(json.dumps(override))
                     config.chmod(0o600)
                     cmd = ['docker', 'compose', '--project-name', project,
                         '--file', str(source / 'compose.yaml'), '--file', str(config)]
-                    env = dict(os.environ, DUCKFLEET_PORT='0',
+                    env = dict(os.environ, DUCKFLEET_PORT='0', DUCKFLEET_POSTGRES_ADMIN_PASSWORD=password,
+                        DUCKFLEET_TOKEN=token, DUCKFLEET_INTERNAL_TOKEN=secrets.token_hex(32),
                         DUCKFLEET_WORKER_URLS='http://worker-small:8080')
                     projects.append((cmd, env))
                     subprocess.run(cmd + ['up', '--detach'] + ([] if image else ['--build']) + ['server'],

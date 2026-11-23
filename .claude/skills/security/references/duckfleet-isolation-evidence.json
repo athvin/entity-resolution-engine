@@ -1,5 +1,5 @@
 {
-  "upstream_revision": "672b3e3e82b61122c9647dd5dc85d32a3cedf09d",
+  "upstream_revision": "778dbe023203570f55e1265a91d4ec26885b250a",
   "scope": "disposable Compose; not live AWS qualification",
   "checks": [
     {
@@ -51,9 +51,7 @@
       "foreign_session_read_delete": "refused"
     }
   ],
-  "image_id": "sha256:bb0261fcec317387c152effc9790297b947af8e8b1f0b0d6cac4ee8937f5555b",
   "independent_catalog_sentinels": "passed",
   "independent_artifact_sentinels": "passed",
-  "credential_history_scrub": "passed",
-  "recorded_at": "2026-11-21T01:10:37.906207+00:00"
+  "credential_history_scrub": "passed"
 }

@@ -1,9 +1,16 @@
 # DuckFleet compatibility discovery — #1128
 
-Decision: **no-go for adopting the assessed DuckFleet build as an interchangeable
-ER execution backend**. Continue the epic's isolated implementation work; do not
-point this build at a customer catalog. This is a discovery result, not a shipped
-remote backend or a claim that the complete pipeline passed.
+Decision: **go** (#1169, 2026-11-23) on the probe surface below. DuckFleet
+`778dbe02` and ER both run DuckDB 2.0.1 with the same extension builds, and a
+same-platform baseline matches the remote worker bit for bit. This is still a
+discovery result over governed SQL replay. It is not a shipped remote backend,
+whole-pipeline qualification (#1170) or a rollout decision (#1134). Do not point
+a customer catalog at it on this evidence alone.
+
+The original #1128 assessment (2026-11-21) was **no-go**, on engine mismatch
+(DuckFleet 1.5.4 vs ER 2.0.0) and a one-ULP scoring difference. #1169 found
+that difference was the baseline's platform: macOS libm against Linux workers.
+The table below keeps both runs.
 
 ## Contents
 
@@ -24,8 +31,13 @@ PYTHON=python3.12 make check-duckfleet-compat
 The runner checks out the exact upstream revision embedded in
 `scripts/duckfleet/run-compatibility.sh`, builds its worker, creates a unique
 Compose project with fresh PostgreSQL/object-store volumes and a dynamically
-allocated loopback port, and installs the pinned discovery-only Python packages
-in a temporary venv. It removes only its own containers/volumes on exit.
+allocated loopback port, and runs the probe client in a digest-pinned
+`python:3.12-slim` container on the Compose network, with the pinned
+discovery-only Python packages. The client never runs on the host, because scores
+are compared bit-for-bit and libm differs between operating systems. The
+`baseline_platform_matches_remote` probe refuses a baseline whose DuckDB
+platform differs from the worker's. The runner removes only its own
+containers/volumes on exit.
 The backend remains Rust; these Python packages are not runtime dependencies.
 
 The report is `artifacts/duckfleet/compatibility.json`. **Exit 1 is the recorded
@@ -46,42 +58,45 @@ for inspection until the disposable stack is removed.
 
 ## Assessed version matrix
 
-Historical assessment, not floating compatibility guidance:
+Recorded assessments, not floating compatibility guidance:
 
-| Component | Embedded baseline / discovery client | Assessed DuckFleet |
+| Component | #1128 (2026-11-21): ER / DuckFleet | #1169 (2026-11-23): ER / DuckFleet |
 |---|---|---|
-| Source | ER `99b0d1a9a8535f6800a681e43f62e31336b06eb8` | `672b3e3e82b61122c9647dd5dc85d32a3cedf09d` |
-| Released DuckDB | 2.0.0 (`duckdb` Rust crate `=1.20000.1`) | 1.5.4 (`duckdb` Rust crate `=1.10504.0`) |
-| Rust Arrow major | 60 | 58 |
-| Discovery decoding | Python DuckDB 2.0.0, PyArrow 23.0.1 | HTTP Arrow IPC from the actual Rust worker |
-| Catalogs tested | fresh local DuckLake metadata + local Parquet | fresh PostgreSQL metadata schema + S3-compatible Parquet |
+| Source | ER `99b0d1a9` / `672b3e3e` | ER after #1171 / `778dbe023203570f55e1265a91d4ec26885b250a` |
+| Released DuckDB | 2.0.0 (`=1.20000.1`) / 1.5.4 (`=1.10504.0`) | 2.0.1 (`=1.20001.0`) / 2.0.1 (`=1.20001.0`) |
+| Rust Arrow major | 60 / 58 | 60 / 60 |
+| Discovery baseline | Python DuckDB 2.0.0 on the macOS host | Python DuckDB 2.0.1 in linux_arm64, glibc 2.41 |
+| Remote extensions | — | aws `9ba41b09a0`, ducklake `08089b16dc`, httpfs `f71cfdb4bf`, postgres_scanner `8b9d0bbe8d`, core v2.0.1 |
+| Decision | no-go | **go**, 12/12 probes |
+
+Both runs tested fresh local DuckLake metadata and local Parquet on the baseline
+side, and a fresh PostgreSQL metadata schema with S3-compatible Parquet on the
+remote side.
 
 The JSON report records loaded extension versions and fixture SHA-256s. The
 upstream build scripts checksum-pin its engine and extension downloads. The
 baseline wheel identifies the released engine but is **not** a substitute for
 our bundled Rust build or `make check`.
 
-The candidate to qualify next is DuckFleet built on **the same released engine
-and compatible extensions as ER**, retaining ER's engine pin. No supported
-interchangeable combination is declared by this experiment. Do not downgrade ER
+#1128 required DuckFleet built on **the same released engine and compatible
+extensions as ER**. #1169 meets that with 2.0.1 on both sides. That is the only
+combination this probe supports; any pin move on either side means rerunning it. Do not downgrade ER
 or change a production catalog to make discovery pass. Arrow IPC interoperated
 for the tested types despite different Rust Arrow majors; this does not establish
 support for every nested or extension type.
 
-The recorded `duckfleet-compatibility-evidence.json` is a synthetic
-fixture run from 2026-11-21 UTC. It is historical evidence; rerun after any pin or
+The recorded `duckfleet-compatibility-evidence.json` is the synthetic
+fixture run from #1169 (2026-11-23 UTC). It is historical evidence; rerun after any pin or
 protocol change.
 
 ## What the probes establish
 
 - Bound BIGINT near the signed limit, quoted text, precise DECIMAL, date,
   microsecond timestamp, boolean and null values survive HTTP/Arrow unchanged.
-- JSON numeric DOUBLE binding does not preserve every input bit. Of the 58
-  distinct floating-point fixture values, the first mismatch is
-  `0.0012033694344163659` sent versus `0.001203369434416366` returned by a plain
-  `SELECT` with a DOUBLE cast. This isolates a transport/binding precision issue
-  without scoring arithmetic. Decimal parameters above use explicit string
-  transport and pass; they must not be mistaken for a floating-point test.
+- Floating-point parameters round-trip bit-exactly: all 58 distinct fixture
+  values (`bound_float_roundtrip`). Under #1128 JSON DOUBLE binding lost bits
+  (`0.0012033694344163659` sent, `0.001203369434416366` returned); that probe
+  now passes against `778dbe02`.
 - Temporary tables survive requests within a session and are absent from another
   session on the same worker.
 - Explicit `METADATA_SCHEMA`, `DATA_PATH`, `AUTOMATIC_MIGRATION false` and disabled
@@ -93,20 +108,28 @@ protocol change.
   `blocked_with_cols.parquet`, produce 1,841 predictions on both engines. Both
   match the prediction golden's exact identifiers/comparison levels and existing
   numeric tolerances (weight 1e-8, probability 1e-10).
-- Exact cross-engine equality fails: the observed maximum absolute differences
-  were 7.105427357601002e-15 in weight and 2.220446049250313e-16 in probability.
-  This is small enough for the historical oracle, but is not evidence of identical
-  scores. Versions and host environments differ, so this experiment cannot assign
-  the cause to the engine upgrade alone. Repeated execution in fresh sessions is
-  checked separately from cross-engine equality.
-- A 61-second deadline is rejected before execution; a 100,001-row response is
-  rejected rather than truncated. These are measured API limits, not timing or
-  capacity benchmarks. Source also bounds encoded results at 16 MiB, SQL text at
-  262,144 bytes and parameters at 10,000 per request.
+- Exact equality holds from a same-platform baseline. Stages 05–07 give 1,841
+  predictions with identical SHA-256, zero weight/probability delta and an exact
+  fresh-session rerun. Under #1128 the maximum differences were 7.1e-15 in
+  weight and 2.2e-16 in probability (one ULP). #1169 reproduced one ULP from a
+  macOS 2.0.1 baseline against the Linux 2.0.1 worker, then zero from linux_arm64:
+  the cause is the baseline's libm, not the engine or DuckFleet.
+- A deadline above 60 seconds is admitted (`long_task_deadline_admission`).
+- Interactive results stay bounded (`bounded_result_policy`). 100,000 rows are
+  returned whole; 100,001 are refused with `retry_safe: false`, never truncated.
+  Bulk data travels through scoped object-store artifacts (#1131). Under #1128
+  this probe was `bulk_result_capacity`, which expected the over-cap result to
+  succeed. That expectation predates the decision to keep the cap. Source also
+  bounds encoded results at 16 MiB, SQL text at 262,144 bytes and parameters at
+  10,000 per request.
 
 ## Adoption conditions and ownership
 
-1. **Version and scoring qualification.** Preserve floating-point parameters
+1. **Version and scoring qualification — met by #1169.** The float round-trip,
+   engine/extension alignment, same-platform baseline and bit-exact scoring all
+   pass. The Rust executor parity is `make check-duckfleet-task`
+   (`embedded_remote_equal`). The original condition follows.
+   Preserve floating-point parameters
    across JSON decoding/binding first (a DuckFleet decoder change or an explicitly
    typed, lossless parameter representation must pass the exact round-trip probe).
    #1130 owns that adapter/upstream contract. Align the worker engine/extensions with

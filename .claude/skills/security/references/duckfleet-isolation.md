@@ -158,7 +158,8 @@ all six directions, and absence of tokens from persisted history. This local
 probe does not establish live AWS IAM or EKS NetworkPolicy behavior.
 
 The reused upstream implementation is pinned to
-[672b3e3](https://github.com/athvin/duck-fleet/tree/672b3e3e82b61122c9647dd5dc85d32a3cedf09d),
+[778dbe0](https://github.com/athvin/duck-fleet/tree/778dbe023203570f55e1265a91d4ec26885b250a)
+(DuckDB 2.0.1; previously 672b3e3),
 including `scripts/provision-namespace.sh`, `infra/helm/duckfleet/templates/network.yaml`,
 `identities.yaml`, and `server/src/credentials.rs`. No shared-deployment
 multi-tenant authorization claim is made. The HTTP adapter (#1130) and task

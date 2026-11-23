@@ -72,7 +72,8 @@ spooling and streaming rather than collecting a dataset in memory. The SQL path
 remains typed Arrow, bounded by the existing response and row limits; data larger
 than the SQL response cap travels through object storage.
 
-Pinned DuckFleet DuckDB v1.5.4 rejects `?versionId=` on an S3 input URL. Therefore
+DuckFleet on DuckDB v1.5.4 rejected `?versionId=` on an S3 input URL (not re-probed
+on 2.0.1; the contract below does not depend on it). Therefore
 this contract uses immutable content-addressed keys, not a purported version pin
 that the worker cannot read. `s3_version_id_pinning` only pins the version first
 observed within a query; it cannot select the older accepted delivery on retry.
