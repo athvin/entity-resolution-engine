@@ -1,14 +1,7 @@
 # DuckFleet account golden-task pilot
 
-## Contents
-
-- [Operator configuration](#operator-configuration)
-- [Deadlines and diagnostics](#deadlines-and-diagnostics)
-- [Qualification and limits](#qualification-and-limits)
-- [DuckDB 2.0.1 requalification](#duckdb-201-requalification)
-
-Only generated reads and this account golden task are remote-qualified; all
-other task paths retain embedded execution or an explicit operator-facing refusal.
+Only generated reads and this account golden task are remote-qualified; every
+other pod task runs embedded, with its reason logged (see [Task routing](#task-routing)).
 
 Issue #1132 selects **account golden-record generation** as the first remote
 write task. The DAG now runs `golden` between `reconcile` and `assemble`;
@@ -26,6 +19,7 @@ The normal work-order, heartbeat, finish and job-settlement channel is retained.
 ## Contents
 
 - [Operator configuration](#operator-configuration)
+- [Task routing](#task-routing)
 - [Deadlines and diagnostics](#deadlines-and-diagnostics)
 - [Qualification and limits](#qualification-and-limits)
 - [DuckDB 2.0.1 requalification](#duckdb-201-requalification)
@@ -33,8 +27,9 @@ The normal work-order, heartbeat, finish and job-settlement channel is retained.
 ## Operator configuration
 
 Task pods use embedded execution unless their operator-owned template sets
-`ER_DUCKFLEET_TASK_POLICY` to an absolute JSON file path. Only the `golden` task
-consults it. Mount the policy, registry and projected credentials read-only into
+`ER_DUCKFLEET_TASK_POLICY` to an absolute JSON file path. With a policy present,
+`er_server::duckfleet_tasks::route` decides each task (see
+[Task routing](#task-routing)); only `run_all`'s `golden` goes remote. Mount the policy, registry and projected credentials read-only into
 the task pod; these paths and compute choices never come from API job parameters.
 No environment enables the pilot by default.
 
@@ -64,6 +59,28 @@ Explicit isolated sizing is checked against the task's `ER_DUCKDB_THREADS` and
 The returned worker placement must exactly match the request. An undersized
 persistent worker is refused, even if it could execute the tiny qualification
 fixture. Production class M therefore cannot silently become the default worker.
+
+## Task routing
+
+`route(kind, task)` names every pod task of every DAG; there is no default arm.
+`every_pod_task_has_an_explicit_route` fails when a DAG gains a task the table
+doesn't name. The same test pins the remote set, so widening it is a reviewed
+decision with qualification evidence, not a table edit. An enrolled pod logs
+each embedded decision (`DuckFleet-enrolled pod runs this task embedded`, with
+`er.task_id`, `job.kind` and `reason`) rather than taking it silently.
+
+| Tasks | Route under a policy | Reason |
+|---|---|---|
+| `golden` in `run_all_full` / `run_all_incremental` | **remote** | Qualified by `make check-duckfleet-task`: parity, rerun, both COMMIT faults, writer exclusion. Person datasets are refused explicitly; there's no fallback. |
+| `golden` in `correct` / `apply_corrections` | embedded | Same body, never qualified remotely. |
+| `ingest`, `standardize`, `match`, `reconcile`, `train`, `profile`, `extract`, `write_back_scan`, `apply_staged` | embedded | No qualified remote adapter. |
+| `reconcile_schema`, `lake_init`, `maintain` | embedded | Lake administration stays with the embedded reconciler, which owns the catalog version policy. |
+| `init`, `assemble`, `finish` | embedded | Run bookkeeping, not a remote workload. |
+
+An embedded task still runs under the dataset's job slot, and the remote-attempt
+fence (`duckfleet-recovery.md`) holds every writer while a remote attempt is
+unresolved, so mixing routes within a run keeps one writer per dataset. Control
+nodes run in the control plane and touch no lake engine.
 
 ## Deadlines and diagnostics
 

@@ -1,37 +1,37 @@
 # DuckFleet execution-path support envelope — #1170
 
 Decision: **remote execution is supported only for generated reads and the
-account golden task on DuckDB 2.0.1**. Every other dispatcher/API execution path
-uses embedded execution by default and is explicitly refused when an operator
-installs `ER_DUCKFLEET_TASK_POLICY`. Nothing silently falls back to embedded
-execution while that policy is present.
+account golden task inside `run_all` on DuckDB 2.0.1**. With
+`ER_DUCKFLEET_TASK_POLICY` installed, every other pod task runs embedded, and
+the pod logs the decision and its reason. Nothing falls back silently: the
+routing is a fixed, exhaustively tested table, not a fallback.
 
 ## Path matrix
 
-| Path | Backend on 2.0.1 | Evidence |
+| Path | Backend with a remote policy | Evidence |
 |---|---|---|
 | Generated dataset reads | **Remote** | `make check-duckfleet-reads`: exact float bits, typed nulls, filtered/keyset snapshots, rollback, cancellation and zero leaked sessions. |
-| Account golden generation | **Remote** | `make check-duckfleet-task`: embedded parity, 4 golden records, 16 lineage rows, 3 scores, 10 correlated statements, rerun equality and writer exclusion. |
-| Account golden publication/recovery | **Remote** | Fence, write-ahead journal and lake receipt. Lost COMMIT reply reconciles `committed`; unsent COMMIT reconciles `rolled_back`. |
-| Ingest | **Refused with remote policy** | `selection_is_operator_only_and_scoped_to_golden` proves the task fails before lake opening. |
-| Standardize | **Refused with remote policy** | Same regression. |
-| Match | **Refused with remote policy** | Same regression. |
-| Reconcile | **Refused with remote policy** | Same regression. |
-| Explicit training (`train`) | **Refused with remote policy** | Same regression. |
-| Correction pass (`correct`, `apply_corrections`) | **Refused with remote policy** | Same regression. |
-| Approval application (`apply_approved`) | **Refused with remote policy** | Same regression. |
-| Maintenance (`lake_maintain`, `profile`) | **Refused with remote policy** | Same regression. |
-| Schema migration (`lake_migrate`) | **Refused with remote policy** | Same regression. |
-| Org/dataset provisioning (`provision`, `dataset_provision`) | **Refused with remote policy** | Same regression. |
-| Extraction (`extract`) | **Refused with remote policy** | Same regression. |
+| Account golden in `run_all_full` / `run_all_incremental` | **Remote** | `make check-duckfleet-task`: embedded parity, 4 golden records, 16 lineage rows, 3 scores, 10 correlated statements, rerun equality and writer exclusion. Person datasets are refused explicitly. |
+| Account golden publication/recovery | **Remote** | Fence, write-ahead journal and lake receipt. A lost COMMIT reply reconciles `committed`; an unsent COMMIT reconciles `rolled_back`. |
+| `golden` in `correct` / `apply_corrections` | Embedded | Same body, never qualified remotely. |
+| `ingest`, `standardize`, `match`, `reconcile`, `train`, `profile`, `extract`, `write_back_scan`, `apply_staged` | Embedded | No qualified remote adapter. |
+| `reconcile_schema`, `lake_init`, `maintain` | Embedded | Lake administration stays with the embedded reconciler (catalog version policy). |
+| `init`, `assemble`, `finish` | Embedded | Run bookkeeping, not a remote workload. |
+| Control nodes (provisioning, approvals, action drains, model registration, cursors) | Control plane | Touch no lake engine. |
 
-`duckfleet_tasks::selected` is the single gate before any embedded lake opens.
-It accepts a policy only for `golden`; every other task returns
-`DuckFleet remote execution is not qualified for task <name>; remove
-ER_DUCKFLEET_TASK_POLICY to use the supported embedded backend`. The unit test
-enumerates every task kind and asserts both the refusal and the supported
-recovery action. Because the error is raised before `open_order_session`, a
-refused path cannot execute SQL and cannot be mistaken for a skip.
+`er_server::duckfleet_tasks::route(kind, task)` is the table, and it has no
+default arm. `every_pod_task_has_an_explicit_route` walks `dag_for(kind)` for
+every `JobKind`, fails on an unrouted pod task, and pins the remote set to
+run_all's golden. An embedded decision under a policy logs `DuckFleet-enrolled
+pod runs this task embedded` with `er.task_id`, `job.kind` and `reason`.
+
+Why embedded rather than refused: the policy is set on the one shared task
+template (`ER_TASK_TEMPLATE_PATH`), so every task pod of an enrolled job carries
+it. #1182 briefly refused every non-golden task. That failed each enrolled
+`run_all` at `init` before `golden` could run; `make check-duckfleet-task` on
+`e82b4582` showed `init: failed` and every stage `upstream_failed` (#1183).
+Embedded tasks keep one writer per dataset: they run under the dataset job slot,
+and the remote-attempt fence holds every writer while an attempt is unresolved.
 
 Removing the policy selects embedded execution for new pods. It does not move an
 existing remote session or reconcile an uncertain write; the account golden
@@ -46,6 +46,5 @@ production rollout, AWS bucket policy, provider economics or every nested type.
 thresholds, operational ownership and the go/no-go decision.
 
 The generated read and account golden paths retain the existing public API and
-embedded default. Refusal is a support-envelope statement, not an error to hide:
-operators and customers can see exactly which path was requested and how to run
-it safely.
+embedded default. The routing log line is the support-envelope statement:
+operators can see which path each task took and why.
