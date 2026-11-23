@@ -14,12 +14,15 @@ preserved the three matching scores, and correlated ten remote statements. This
 is evidence for the account golden operation, not the whole configure → ingest →
 run → retrieve workflow.
 
-A customer-scoped API key cannot complete that whole workflow with remote policy
-installed: ingest, standardize, match, reconcile and training now refuse before a
-lake opens. This is an intentional safe outcome from #1170, not a silent skip or
-an embedded fallback. Generated reads remain available remotely. Consequently
-the full customer-scoped, both-backend acceptance gate is **not passed**, and no
-production enrollment is permitted.
+A customer-scoped API key cannot complete that whole workflow *remotely*: with
+remote policy installed, only the golden step of `run_all_full` and
+`run_all_incremental` goes to DuckFleet. Ingest, standardize, match, reconcile,
+training and every other pod task run embedded, each with its reason logged
+(`duckfleet_tasks::route`, #1183). An earlier version (#1182) refused those tasks
+instead, and that failed every enrolled `run_all` at `init`, because the policy
+sits on one shared task template. Generated reads remain available remotely.
+Consequently the full customer-scoped, both-backend acceptance gate is **not
+passed**, and no production enrollment is permitted.
 
 ## Measured fixtures and pass thresholds
 
