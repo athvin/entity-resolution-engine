@@ -31,6 +31,14 @@ the product and dbt runtime remain Rust. Do not point the clients at an existing
 deployment. `artifacts/duckfleet/compatibility.json` is the machine-readable
 result; a missing or failed probe prevents `go`.
 
+The compatibility client runs in a digest-pinned `python:3.12-slim` container on
+the Compose network, never on the host. Scores are compared bit-for-bit, and libm
+differs between operating systems. A macOS 2.0.1 baseline differed from the Linux
+worker by one ULP in `match_probability`, while a linux_arm64 baseline is
+identical. `baseline_platform_matches_remote` refuses a baseline whose DuckDB
+platform (`PRAGMA platform`) differs from the worker's, so an `osx_arm64` run
+cannot produce `go`.
+
 ## Assessed version matrix
 
 | Component | ER baseline | Qualified DuckFleet |
@@ -39,7 +47,7 @@ result; a missing or failed probe prevents `go`.
 | DuckDB | 2.0.1 (`duckdb` crate `=1.20001.0`) | 2.0.1 (`duckdb` crate `=1.20001.0`) |
 | Rust Arrow major | 60 | 60 |
 | DuckLake catalog | 1.0, no automatic migration | 1.0, no automatic migration |
-| Discovery decode | Python DuckDB 2.0.1, PyArrow 23.0.1 | HTTP Arrow IPC from the actual Rust worker |
+| Discovery decode | Python DuckDB 2.0.1, PyArrow 23.0.1, linux_arm64 (glibc 2.41) | HTTP Arrow IPC from the actual Rust worker, linux_arm64 |
 
 The report records loaded extension versions and fixture SHA-256s. The baseline
 wheel identifies the released engine but is not a substitute for the bundled
@@ -52,9 +60,11 @@ Rust build or `make check`.
   timestamp, boolean and null values also preserve their Arrow types.
 - Captured prediction stages 05–07 produce 1,841 results on both engines and
   match the existing golden tolerances. The observed cross-build maximum deltas
-  were 0 for weight and `6.938893903907228e-18` for probability. Each backend is
-  byte-identical on rerun; cross-build scoring is held to `1e-12`, not presented
-  as bit-for-bit equivalence across builds.
+  are **bit-for-bit identical** from the same-platform baseline (SHA-256
+  `c97212274f86…`, zero delta), and each backend is byte-identical on rerun. #1178
+  briefly held this to a `1e-12` tolerance after a macOS baseline showed
+  `6.9e-18`; #1179 restored exact equality once the difference was traced to the
+  baseline's platform.
 - Fresh local and PostgreSQL DuckLake 1.0 catalogs preserve snapshot, commit,
   rollback and read-only behavior. Startup/probe attachments use
   `DUCKLAKE_VERSION '1.0'`; no `AUTOMATIC_MIGRATION` is enabled.
