@@ -1431,6 +1431,21 @@ impl Task<Session> for Train {
         _input: Self::Input,
     ) -> Result<Outcome<Self::Output>, TaskError> {
         let run = context(ctx, false)?;
+        // Nothing has been standardized yet: a config published before the
+        // first delivery. There is nothing to train on, which is a no-op,
+        // not an engine failure. The active model stays until data exists.
+        // (#1186: this used to fail on the missing table.)
+        let has_records = ctx
+            .session
+            .lake_table_exists("int_std_records")
+            .map_err(|e| engine_error(&format!("train: probing int_std_records: {e:#}")))?;
+        if !has_records {
+            tracing::info!(
+                er.task_id = "train",
+                "no standardized records yet; nothing to train"
+            );
+            return Ok(Outcome::NoOp(Plan(TrainedModel::default())));
+        }
         let training = run.config.training.clone();
         // One label per training run, derived from the run id so two trains
         // cannot collide and so a registry row traces back to the job.
