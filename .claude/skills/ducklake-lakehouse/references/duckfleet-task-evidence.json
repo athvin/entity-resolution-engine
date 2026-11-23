@@ -24,5 +24,28 @@
   "unsupported_capacity_job_failed": true,
   "writer_exclusion": true,
   "upstream_revision": "778dbe023203570f55e1265a91d4ec26885b250a",
-  "image_id": "sha256:acfc972141fb955aa33a85f1bca1f46e62dd965c451793c468597f6b903cf4f3"
+  "image_id": "sha256:acfc972141fb955aa33a85f1bca1f46e62dd965c451793c468597f6b903cf4f3",
+  "deadline": {
+    "elapsed_seconds": 65.2207244578749,
+    "statement_deadline_seconds": 120,
+    "rows": [
+      {
+        "n": 42
+      }
+    ],
+    "out_of_range_601_refused": true,
+    "short_deadline_refused": true,
+    "short_initial_failure": "timeout",
+    "short_final_status": "timed_out",
+    "short_deadline_elapsed_seconds": 65.17474879231304,
+    "scope": "actual DuckDB statement through gateway; delayed synthetic HTTP CSV",
+    "upstream_revision": "778dbe023203570f55e1265a91d4ec26885b250a",
+    "measured_at_utc": "2026-11-23"
+  },
+  "limits": [
+    "Disposable Compose with real DuckFleet, PostgreSQL and object storage; Kubernetes is the existing child-process test double.",
+    "One account fixture and persistent compute only; AWS and isolated production capacity remain unqualified.",
+    "External I/O observes cancellation late; timeout is not proof of rollback or a hard wall-clock kill.",
+    "Rerun equality excludes volatile assembled_at; rollback equality includes it."
+  ]
 }

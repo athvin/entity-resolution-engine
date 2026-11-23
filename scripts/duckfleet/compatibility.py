@@ -170,6 +170,7 @@ EXPECTED_PROBES = {
     'bound_float_roundtrip', 'session_temp_isolation', 'golden_tolerance_parity', 'exact_scoring_parity',
     'baseline_lake_semantics', 'postgres_metadata_schema_and_lake_semantics',
     'native_201_expression_contract', 'long_task_deadline_admission', 'bulk_result_capacity',
+    'baseline_platform_matches_remote',
 }
 
 
@@ -289,22 +290,16 @@ def run(args):
                 return {'rows': a.num_rows, 'baseline_sha256': digest(a), 'remote_sha256': digest(b), 'max_delta': deltas, 'fresh_session_rerun': 'exact', 'golden_tolerances': {'weight': 1e-8, 'probability': 1e-10}}
             probe('golden_tolerance_parity', scores)
 
+            # Bit-for-bit, not a tolerance. A macOS baseline differs from the
+            # Linux workers by one ULP in match_probability because libm differs;
+            # from a same-platform baseline the results are identical. The
+            # platform probe below keeps a cross-platform run from passing here.
             def exact_scores():
                 if len(score_results) != 2:
                     raise AssertionError('scoring did not complete')
-                left, right = score_results
-                if left.schema != right.schema or left.num_rows != right.num_rows:
-                    raise AssertionError('score schema or row count differs')
-                for a, b in zip(left.to_pylist(), right.to_pylist()):
-                    for key, value in a.items():
-                        other = b[key]
-                        if isinstance(value, float):
-                            if abs(value - other) > 1e-12:
-                                raise AssertionError(f'floating-point score delta exceeds 1e-12: {key}: {value} vs {other}')
-                        elif value != other:
-                            raise AssertionError(f'non-numeric score field differs: {key}: {value} vs {other}')
-                return {'rows': left.num_rows, 'floating_point_tolerance': 1e-12,
-                        'repeat_each_backend': 'byte-identical results'}
+                equal(*score_results)
+                return {'rows': score_results[0].num_rows, 'sha256': digest(score_results[0]),
+                        'comparison': 'bit-for-bit', 'repeat_each_backend': 'byte-identical results'}
             probe('exact_scoring_parity', exact_scores)
 
             def local_lake():
@@ -357,6 +352,14 @@ def run(args):
                     raise AssertionError('unbounded result was not refused explicitly: ' + refusal)
                 return {'returned_rows': result.num_rows, 'overflow': 'explicit bounded refusal'}
             probe('bulk_result_capacity', large_result)
+
+            def same_platform():
+                local_platform = scalar(local, 'PRAGMA platform')
+                remote_platform = scalar(remote, 'PRAGMA platform')
+                if local_platform != remote_platform:
+                    raise AssertionError(f'baseline platform {local_platform} differs from remote {remote_platform}')
+                return remote_platform
+            probe('baseline_platform_matches_remote', same_platform)
     except Exception as error:
         report['fatal'] = str(error)
     finally:

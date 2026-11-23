@@ -13,6 +13,13 @@ An attempt-fence check precedes publication. The existing dataset job slot still
 orders writers; the remote branch opens no embedded lake alongside its writer.
 The normal work-order, heartbeat, finish and job-settlement channel is retained.
 
+## Contents
+
+- [Operator configuration](#operator-configuration)
+- [Deadlines and diagnostics](#deadlines-and-diagnostics)
+- [Qualification and limits](#qualification-and-limits)
+- [DuckDB 2.0.1 requalification](#duckdb-201-requalification)
+
 ## Operator configuration
 
 Task pods use embedded execution unless their operator-owned template sets
@@ -90,6 +97,14 @@ Run `make check-duckfleet-task` to build the pinned upstream revision and repeat
 that proof. Recorded `duckfleet-task-evidence.json` evidence identifies the
 source and actual worker image. It records 4 golden records, 16 lineage rows,
 3 matching scores and 10 correlated remote statements (the tenth is the publication receipt).
+
+A separate controlled external-I/O statement (`deadline` in the evidence,
+re-measured at `778dbe02` on DuckDB 2.0.1) completed in 65.221 seconds under a
+120-second deadline; 601 seconds was refused. Under a one-second deadline the
+same I/O settled `timed_out` after 65.175 seconds, so external I/O observes
+cancellation late. Reproduce it with upstream `scripts/test-long-deadline.py
+--image er-duckfleet-task-<rev12>:proof` (the image `make check-duckfleet-task`
+builds), using Python with PyArrow installed.
 
 ## DuckDB 2.0.1 requalification
 
