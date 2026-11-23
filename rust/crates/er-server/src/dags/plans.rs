@@ -77,7 +77,10 @@ impl PlanDoc for SchemaReconciled {
 
 /// `train`'s output: the per-run artifact paths the registry row points at
 /// (§9.1 — the shared-CSV append is deleted with the legacy arm).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// Empty paths mean nothing was trained: the dataset had no standardized
+/// records yet (#1186), and `register_model` registers nothing.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TrainedModel {
     pub model_version: String,
     pub tf_snapshot_id: String,

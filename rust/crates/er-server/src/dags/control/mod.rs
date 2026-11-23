@@ -490,6 +490,12 @@ impl ControlTask<PgClient> for RegisterModel {
         (trained,): Self::Input,
     ) -> Result<Outcome<Self::Output>, TaskError> {
         let trained = trained.0;
+        // `train` found nothing to train on (#1186): nothing to register.
+        if trained.model_path.is_empty() {
+            return Ok(Outcome::NoOp(Plan(ModelRegistered {
+                label: String::new(),
+            })));
+        }
         // The pod wrote the settings document to the shared filesystem; this
         // half reads it and writes the row. Reading a path rather than taking
         // the document through the ledger keeps a multi-kilobyte blob out of

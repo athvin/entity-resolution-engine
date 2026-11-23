@@ -240,14 +240,20 @@ async fn a_tenant_configures_ingests_resolves_and_reads_back_with_its_own_key() 
         Some("succeeded"),
         "{after_publish:?}"
     );
-    // #1186: on a never-ingested dataset the publish-time `train` fails
-    // (no int_std_records yet). It must not block anything that follows;
-    // when #1186 lands this becomes a no-op and this assertion changes.
+    // On a never-ingested dataset there is nothing to train on, so the
+    // publish-time `train` settles as a no-op (#1186), not a failure.
     let train = after_publish.iter().find(|(kind, ..)| kind == "train");
     assert_eq!(
         train.map(|r| r.1.as_str()),
-        Some("failed"),
+        Some("succeeded"),
         "{after_publish:?}"
+    );
+    // ...and registers no model: there was nothing to train.
+    let (status, models) = json_call(&router, "GET", &format!("{base}/models"), &key, None).await;
+    assert_eq!(status, StatusCode::OK, "{models}");
+    assert!(
+        !models.to_string().contains("trained-"),
+        "no-op train registered a model: {models}"
     );
 
     // --- 2. Ingest --------------------------------------------------------
