@@ -5084,8 +5084,30 @@ async fn attempt_finish(
     let current = lineage.into_iter().next().expect("lineage is non-empty");
     match body.state.as_str() {
         "succeeded" | "skipped" => {
-            match er_entities::task_instance::update::finish(
-                &client,
+            // The pod holds no control-plane credential (§6.4), so a
+            // reconcile_schema task's tenant-state report lands here, from its
+            // output document. BOTH receipts that reconcile a lake. `lake_init`
+            // emits `lake_initialized`, and filtering only on
+            // `schema_reconciled` meant a provisioned tenant never got a
+            // `tenant_schema_states` row — the one table the deploy report and
+            // the drift check consult so they do not have to open a lake.
+            let schema_doc = body
+                .output
+                .as_ref()
+                .filter(|o| o["plan"] == "schema_reconciled" || o["plan"] == "lake_initialized")
+                .map(|o| o["doc"].clone());
+            // The finish and the position it reports commit in ONE transaction:
+            // a 200 means both are durable, so dependent reporting can never
+            // observe a settled task whose position is not yet recorded, and a
+            // refused finish publishes nothing. A position write that fails
+            // rolls the finish back too, so the pod's finish protocol retries
+            // rather than losing the report.
+            let tx = match client.transaction().await {
+                Ok(tx) => tx,
+                Err(e) => return pg_err(e),
+            };
+            let finished = er_entities::task_instance::update::finish(
+                &tx,
                 body.state == "skipped",
                 body.outcome.as_deref().unwrap_or("done"),
                 body.output.as_ref(),
@@ -5096,59 +5118,38 @@ async fn attempt_finish(
                 &attempt_id,
                 identity.pod_uid(&body.pod_uid),
             )
-            .await
-            {
-                Ok(rows) => rows.into_iter().next().map_or_else(
-                    || {
-                        detail_err(
-                            StatusCode::CONFLICT,
-                            "stale finish: the attempt is no longer running as this pod",
-                        )
-                    },
-                    |row| {
-                        ops::task_completed(&row);
-                        // The pod holds no control-plane credential (§6.4), so
-                        // a reconcile_schema task's tenant-state report lands
-                        // here, from its output document.
-                        // BOTH receipts that reconcile a lake. `lake_init`
-                        // emits `lake_initialized`, and filtering only on
-                        // `schema_reconciled` meant a provisioned tenant never
-                        // got a `tenant_schema_states` row — the one table the
-                        // deploy report and the drift check consult so they do
-                        // not have to open a lake.
-                        let schema_doc = body
-                            .output
-                            .as_ref()
-                            .filter(|o| {
-                                o["plan"] == "schema_reconciled" || o["plan"] == "lake_initialized"
-                            })
-                            .map(|o| o["doc"].clone());
-                        if let Some(doc) = schema_doc
-                            && let Some(dsn) = state.dsn.clone()
-                        {
-                            let org_id = row.org_id.clone();
-                            let dataset_id = row.dataset_id.clone();
+            .await;
+            match finished {
+                Ok(rows) => match rows.into_iter().next() {
+                    Some(row) => {
+                        if let Some(doc) = schema_doc {
                             let status = doc["status"].as_str().unwrap_or("errored").to_string();
                             let hash = doc["catalog_hash"].as_str().unwrap_or("").to_string();
                             let detail = doc["detail"].as_str().unwrap_or("").to_string();
-                            tokio::spawn(async move {
-                                let Ok(client) = pg::connect(&dsn).await else {
-                                    return;
-                                };
-                                let _ = crate::schema::record_tenant_state(
-                                    &client,
-                                    &org_id,
-                                    dataset_id.as_deref(),
-                                    &status,
-                                    &hash,
-                                    Some(&detail),
-                                )
-                                .await;
-                            });
+                            if let Err(e) = crate::schema::record_tenant_state(
+                                &tx,
+                                &row.org_id,
+                                row.dataset_id.as_deref(),
+                                &status,
+                                &hash,
+                                Some(&detail),
+                            )
+                            .await
+                            {
+                                return pg_err(e);
+                            }
                         }
+                        if let Err(e) = tx.commit().await {
+                            return pg_err(e);
+                        }
+                        ops::task_completed(&row);
                         (StatusCode::OK, Json(json!(row))).into_response()
-                    },
-                ),
+                    }
+                    None => detail_err(
+                        StatusCode::CONFLICT,
+                        "stale finish: the attempt is no longer running as this pod",
+                    ),
+                },
                 Err(e) => pg_err(e),
             }
         }
@@ -5191,39 +5192,52 @@ async fn attempt_finish(
             // words; the task path recorded it only on success. `status` comes
             // from the failure text the same way `schema::tenant_state` derives
             // it, so ERR_SCHEMA_BREAKING reads `breaking` and anything else
-            // `errored`.
-            if matches!(current.task_id.as_str(), "reconcile_schema" | "lake_init")
-                && let Some(dsn) = state.dsn.clone()
-            {
-                let detail = body.error_detail.clone().unwrap_or_default();
-                let status = if detail.contains("ERR_SCHEMA_BREAKING") {
-                    "breaking"
-                } else {
-                    "errored"
-                };
-                let org_id = current.org_id.clone();
-                let dataset_id = current.dataset_id.clone();
-                tokio::spawn(async move {
-                    let Ok(client) = pg::connect(&dsn).await else {
-                        return;
+            // `errored`. The write rides the settlement's OWN transaction: the
+            // archive and the position commit or roll back together, so the
+            // sweep can never settle the task and read a stale position, a
+            // refused (stale) report publishes nothing, and a failed write
+            // leaves the attempt retryable instead of silently dropped.
+            let schema_position =
+                if matches!(current.task_id.as_str(), "reconcile_schema" | "lake_init") {
+                    let detail = body.error_detail.clone().unwrap_or_default();
+                    let status = if detail.contains("ERR_SCHEMA_BREAKING") {
+                        "breaking"
+                    } else {
+                        "errored"
                     };
-                    let _ = crate::schema::record_tenant_state(
-                        &client,
-                        &org_id,
-                        dataset_id.as_deref(),
-                        status,
-                        "",
-                        Some(&detail),
+                    Some((status, detail))
+                } else {
+                    None
+                };
+            let tx = match client.transaction().await {
+                Ok(tx) => tx,
+                Err(e) => return pg_err(e),
+            };
+            match taskpg::fail_or_retry_task_in(&tx, &attempt_id, &failure).await {
+                Ok((Some(archived), successor)) => {
+                    if let Some((status, detail)) = schema_position
+                        && let Err(e) = crate::schema::record_tenant_state(
+                            &tx,
+                            &current.org_id,
+                            current.dataset_id.as_deref(),
+                            status,
+                            "",
+                            Some(&detail),
+                        )
+                        .await
+                    {
+                        return pg_err(e);
+                    }
+                    if let Err(e) = tx.commit().await {
+                        return pg_err(e);
+                    }
+                    taskpg::note_settled(Some(&archived), successor.as_ref());
+                    (
+                        StatusCode::OK,
+                        Json(json!({ "archived": archived, "retry": successor })),
                     )
-                    .await;
-                });
-            }
-            match taskpg::fail_or_retry_task(&mut client, &attempt_id, &failure).await {
-                Ok((Some(archived), successor)) => (
-                    StatusCode::OK,
-                    Json(json!({ "archived": archived, "retry": successor })),
-                )
-                    .into_response(),
+                        .into_response()
+                }
                 Ok((None, _)) => detail_err(
                     StatusCode::CONFLICT,
                     "stale failure report: the attempt is not live under this launch",
