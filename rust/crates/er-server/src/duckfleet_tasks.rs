@@ -31,11 +31,17 @@ fn configuration(message: &str) -> TaskError {
 }
 
 /// A policy path comes from the task-pod deployment, never job parameters.
-pub(crate) fn selected(task: &str, lookup: impl Fn(&str) -> Option<String>) -> Option<PathBuf> {
-    (task == "golden")
-        .then(|| lookup("ER_DUCKFLEET_TASK_POLICY"))
-        .flatten()
-        .map(PathBuf::from)
+pub(crate) fn selected(
+    task: &str,
+    lookup: impl Fn(&str) -> Option<String>,
+) -> Result<Option<PathBuf>, String> {
+    let configured = lookup("ER_DUCKFLEET_TASK_POLICY").map(PathBuf::from);
+    if configured.is_some() && task != "golden" {
+        return Err(format!(
+            "DuckFleet remote execution is not qualified for task {task}; remove ER_DUCKFLEET_TASK_POLICY to use the supported embedded backend"
+        ));
+    }
+    Ok(configured)
 }
 
 /// The task pod as the owner of a remote attempt: its attempt channel and the
@@ -375,12 +381,31 @@ mod tests {
     use super::*;
     #[test]
     fn selection_is_operator_only_and_scoped_to_golden() {
-        assert!(selected("golden", |_| None).is_none());
-        assert!(selected("match", |_| Some("/policy.json".into())).is_none());
+        assert!(selected("golden", |_| None).unwrap().is_none());
         assert_eq!(
-            selected("golden", |_| Some("/policy.json".into())),
+            selected("golden", |_| Some("/policy.json".into())).unwrap(),
             Some(PathBuf::from("/policy.json"))
         );
+        for task in [
+            "ingest",
+            "standardize",
+            "match",
+            "reconcile",
+            "train",
+            "correct",
+            "apply_corrections",
+            "lake_maintain",
+            "profile",
+            "lake_migrate",
+            "provision",
+            "dataset_provision",
+            "apply_approved",
+            "extract",
+        ] {
+            let error = selected(task, |_| Some("/policy.json".into())).unwrap_err();
+            assert!(error.contains("not qualified"), "{task}");
+            assert!(error.contains("embedded backend"), "{task}");
+        }
     }
     #[test]
     fn memory_units_preserve_decimal_and_binary_budgets() {
