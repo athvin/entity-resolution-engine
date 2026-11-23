@@ -161,7 +161,7 @@ EXPECTED_PROBES = {
     'baseline_version_matches_repo', 'engine_version_alignment', 'bound_parameters_and_arrow_types',
     'bound_float_roundtrip', 'session_temp_isolation', 'golden_tolerance_parity', 'exact_scoring_parity',
     'baseline_lake_semantics', 'postgres_metadata_schema_and_lake_semantics',
-    'long_task_deadline_admission', 'bulk_result_capacity',
+    'long_task_deadline_admission', 'bounded_result_policy', 'baseline_platform_matches_remote',
 }
 
 
@@ -295,7 +295,7 @@ def run(args):
             def remote_lake():
                 # Fixed disposable Compose-only credentials, never a customer DSN.
                 suffix = uuid.uuid4().hex
-                attach = f"ATTACH 'ducklake:postgres:host=postgres dbname=lake user=duckfleet password=local-catalog-password' AS compat_lake (DATA_PATH 's3://duckfleet/compat/{suffix}/', METADATA_SCHEMA 'compat_{suffix}', AUTOMATIC_MIGRATION false)"
+                attach = f"ATTACH 'ducklake:postgres:host=postgres dbname=lake user=duckfleet_catalog password=local-lake-catalog-password' AS compat_lake (DATA_PATH 's3://duckfleet/compat/{suffix}/', METADATA_SCHEMA 'compat_{suffix}', AUTOMATIC_MIGRATION false)"
                 return lake_semantics(remote, attach)
             probe('postgres_metadata_schema_and_lake_semantics', remote_lake)
 
@@ -304,12 +304,34 @@ def run(args):
                 return 'accepts a deadline above 60 seconds'
             probe('long_task_deadline_admission', deadline)
 
-            def large_result():
-                result = remote.query('SELECT i FROM range(100001) t(i)')
-                if result.num_rows != 100001:
-                    raise AssertionError('result truncated')
-                return result.num_rows
-            probe('bulk_result_capacity', large_result)
+            # Bulk outputs move through scoped object-store artifacts (#1131); the
+            # interactive response stays bounded. The contract is therefore: a
+            # result at the cap is returned whole, one past it is REFUSED with a
+            # non-retryable error, and never silently truncated.
+            def bounded_results():
+                at_cap = remote.query('SELECT i FROM range(100000) t(i)')
+                if at_cap.num_rows != 100000:
+                    raise AssertionError(f'result at the cap truncated to {at_cap.num_rows}')
+                try:
+                    over = remote.query('SELECT i FROM range(100001) t(i)')
+                except RemoteError as error:
+                    text = str(error)
+                    if 'response limit' not in text or '"retry_safe":false' not in text:
+                        raise AssertionError(f'over-cap refusal is not the explicit limit: {text}')
+                    return {'at_cap_rows': 100000, 'over_cap': 'refused, retry_safe=false'}
+                raise AssertionError(f'over-cap result returned {over.num_rows} rows instead of a refusal')
+            probe('bounded_result_policy', bounded_results)
+
+            # Scores are compared bit-for-bit, and libm differs across operating
+            # systems (a macOS baseline differed from Linux workers by one ULP in
+            # match_probability). Only a same-platform baseline is evidence.
+            def same_platform():
+                local_platform = scalar(local, 'PRAGMA platform')
+                remote_platform = scalar(remote, 'PRAGMA platform')
+                if local_platform != remote_platform:
+                    raise AssertionError(f'baseline platform {local_platform} differs from remote {remote_platform}')
+                return remote_platform
+            probe('baseline_platform_matches_remote', same_platform)
     except Exception as error:
         report['fatal'] = str(error)
     finally:

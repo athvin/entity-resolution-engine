@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PYTHON="${PYTHON:-python3}"
 "$PYTHON" -c 'import sys; assert sys.version_info >= (3, 11), "Python >= 3.11 required"'
-revision=672b3e3e82b61122c9647dd5dc85d32a3cedf09d
+revision=778dbe023203570f55e1265a91d4ec26885b250a
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/er-duckfleet-compat.XXXXXX")"
 project="er-duckfleet-compat-$("$PYTHON" -c 'import uuid; print(uuid.uuid4().hex[:12])')"
 output="${1:-$ROOT/artifacts/duckfleet/compatibility.json}"
@@ -51,9 +51,21 @@ for attempt in range(120):
 else:
     raise SystemExit('disposable DuckFleet did not become healthy')
 READY
-"$PYTHON" -m venv "$scratch/venv"
-"$scratch/venv/bin/pip" install --requirement "$ROOT/scripts/duckfleet/requirements.txt"
-"$scratch/venv/bin/python" -m unittest discover -s "$ROOT/scripts/duckfleet" -p 'test_*.py'
-"$scratch/venv/bin/python" "$ROOT/scripts/duckfleet/compatibility.py" \
-  --url "http://$address" --duckfleet-revision "$revision" \
-  --output "$output" --disposable-compose
+# The client runs in Linux on the Compose network, never on the host. Scores
+# are compared bit-for-bit and libm differs across operating systems: a macOS
+# baseline differed from the Linux workers by one ULP in match_probability,
+# which is a platform difference, not a DuckFleet one. The image is pinned by
+# digest so the baseline's glibc cannot drift between runs.
+baseline_image=python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b
+mkdir -p "$(dirname "$output")"
+docker run --rm --network "${project}_default" --env DUCKFLEET_TOKEN \
+  --volume "$ROOT/scripts/duckfleet:/er/scripts/duckfleet:ro" \
+  --volume "$ROOT/rust/.cargo:/er/rust/.cargo:ro" \
+  --volume "$ROOT/rust/fixtures/golden/fake_1000:/er/rust/fixtures/golden/fake_1000:ro" \
+  --volume "$(cd "$(dirname "$output")" && pwd):/out" \
+  "$baseline_image" sh -euc '
+    pip install --quiet --requirement /er/scripts/duckfleet/requirements.txt
+    python -m unittest discover -s /er/scripts/duckfleet -p "test_*.py"
+    python /er/scripts/duckfleet/compatibility.py --url http://server:8080 \
+      --duckfleet-revision "$0" --output "/out/$1" --disposable-compose
+  ' "$revision" "$(basename "$output")"
