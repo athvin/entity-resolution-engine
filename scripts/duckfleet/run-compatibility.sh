@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PYTHON="${PYTHON:-python3}"
 "$PYTHON" -c 'import sys; assert sys.version_info >= (3, 11), "Python >= 3.11 required"'
-revision=672b3e3e82b61122c9647dd5dc85d32a3cedf09d
+revision=778dbe023203570f55e1265a91d4ec26885b250a
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/er-duckfleet-compat.XXXXXX")"
 project="er-duckfleet-compat-$("$PYTHON" -c 'import uuid; print(uuid.uuid4().hex[:12])')"
 output="${1:-$ROOT/artifacts/duckfleet/compatibility.json}"

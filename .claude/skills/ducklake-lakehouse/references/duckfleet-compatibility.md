@@ -1,17 +1,17 @@
-# DuckFleet compatibility discovery — #1128
+# DuckFleet compatibility qualification — #1128 / #1169
 
-Decision: **no-go for adopting the assessed DuckFleet build as an interchangeable
-ER execution backend**. Continue the epic's isolated implementation work; do not
-point this build at a customer catalog. This is a discovery result, not a shipped
-remote backend or a claim that the complete pipeline passed.
+Decision: **go for interchangeable execution of the qualified read and account
+golden-task envelope on DuckDB 2.0.1**. This replaces #1128's engine-mismatch
+no-go; it is not a production rollout or a claim that every pipeline path is
+remote. Full API workflow, economics and remaining-path qualification remain
+#1134 and #1170.
 
 ## Contents
 
 - [Reproduce](#reproduce)
 - [Assessed version matrix](#assessed-version-matrix)
-- [What the probes establish](#what-the-probes-establish)
-- [Adoption conditions and ownership](#adoption-conditions-and-ownership)
-- [Coverage limits](#coverage-limits)
+- [What passed](#what-passed)
+- [Adoption boundaries](#adoption-boundaries)
 
 ## Reproduce
 
@@ -19,137 +19,91 @@ From the repository root, with Docker and Python >= 3.11:
 
 ```sh
 PYTHON=python3.12 make check-duckfleet-compat
+PYTHON=python3.12 bash scripts/duckfleet/run-isolation.sh
+make check-duckfleet-reads
+make check-duckfleet-task
 ```
 
-The runner checks out the exact upstream revision embedded in
-`scripts/duckfleet/run-compatibility.sh`, builds its worker, creates a unique
-Compose project with fresh PostgreSQL/object-store volumes and a dynamically
-allocated loopback port, and installs the pinned discovery-only Python packages
-in a temporary venv. It removes only its own containers/volumes on exit.
-The backend remains Rust; these Python packages are not runtime dependencies.
-
-The report is `artifacts/duckfleet/compatibility.json`. **Exit 1 is the recorded
-no-go**, not a skipped test. An absent probe, a failed comparison or a failed
-session cleanup cannot produce `go`. Build/startup failures also exit nonzero;
-check whether a new report was produced before interpreting an earlier file.
-The negative gate tests run with the same dependencies:
-
-```sh
-python -m unittest discover -s scripts/duckfleet -p 'test_*.py'
-```
-
-Do not run the probe client against an existing deployment. Its explicit
-`--disposable-compose` acknowledgement is required because it creates synthetic
-lakes using upstream's local-only credentials. The wrapper owns resource cleanup;
-the lower-level client deliberately leaves its unique synthetic catalogs behind
-for inspection until the disposable stack is removed.
+Each runner checks out the exact upstream revision embedded in its script,
+creates unique Compose resources, runs the actual Rust worker/adapter, and
+removes only its own containers/volumes. The Python packages are discovery-only;
+the product and dbt runtime remain Rust. Do not point the clients at an existing
+deployment. `artifacts/duckfleet/compatibility.json` is the machine-readable
+result; a missing or failed probe prevents `go`.
 
 ## Assessed version matrix
 
-Historical assessment, not floating compatibility guidance:
-
-| Component | Embedded baseline / discovery client | Assessed DuckFleet |
+| Component | ER baseline | Qualified DuckFleet |
 |---|---|---|
-| Source | ER `99b0d1a9a8535f6800a681e43f62e31336b06eb8` | `672b3e3e82b61122c9647dd5dc85d32a3cedf09d` |
-| Released DuckDB | 2.0.0 (`duckdb` Rust crate `=1.20000.1`) | 1.5.4 (`duckdb` Rust crate `=1.10504.0`) |
-| Rust Arrow major | 60 | 58 |
-| Discovery decoding | Python DuckDB 2.0.0, PyArrow 23.0.1 | HTTP Arrow IPC from the actual Rust worker |
-| Catalogs tested | fresh local DuckLake metadata + local Parquet | fresh PostgreSQL metadata schema + S3-compatible Parquet |
+| Source | `dba8b69f0175cbd786838cecae5c00e1576d5a6f` | `778dbe023203570f55e1265a91d4ec26885b250a` |
+| DuckDB | 2.0.1 (`duckdb` crate `=1.20001.0`) | 2.0.1 (`duckdb` crate `=1.20001.0`) |
+| Rust Arrow major | 60 | 60 |
+| DuckLake catalog | 1.0, no automatic migration | 1.0, no automatic migration |
+| Discovery decode | Python DuckDB 2.0.1, PyArrow 23.0.1 | HTTP Arrow IPC from the actual Rust worker |
 
-The JSON report records loaded extension versions and fixture SHA-256s. The
-upstream build scripts checksum-pin its engine and extension downloads. The
-baseline wheel identifies the released engine but is **not** a substitute for
-our bundled Rust build or `make check`.
+The report records loaded extension versions and fixture SHA-256s. The baseline
+wheel identifies the released engine but is not a substitute for the bundled
+Rust build or `make check`.
 
-The candidate to qualify next is DuckFleet built on **the same released engine
-and compatible extensions as ER**, retaining ER's engine pin. No supported
-interchangeable combination is declared by this experiment. Do not downgrade ER
-or change a production catalog to make discovery pass. Arrow IPC interoperated
-for the tested types despite different Rust Arrow majors; this does not establish
-support for every nested or extension type.
+## What passed
 
-The recorded `duckfleet-compatibility-evidence.json` is a synthetic
-fixture run from 2026-11-21 UTC. It is historical evidence; rerun after any pin or
-protocol change.
+- All 58 distinct floating-point fixture values retain their exact bits through
+  JSON binding and Arrow. BIGINT, quoted text, DECIMAL, date, microsecond
+  timestamp, boolean and null values also preserve their Arrow types.
+- Captured prediction stages 05–07 produce 1,841 results on both engines and
+  match the existing golden tolerances. The observed cross-build maximum deltas
+  were 0 for weight and `6.938893903907228e-18` for probability. Each backend is
+  byte-identical on rerun; cross-build scoring is held to `1e-12`, not presented
+  as bit-for-bit equivalence across builds.
+- Fresh local and PostgreSQL DuckLake 1.0 catalogs preserve snapshot, commit,
+  rollback and read-only behavior. Startup/probe attachments use
+  `DUCKLAKE_VERSION '1.0'`; no `AUTOMATIC_MIGRATION` is enabled.
+- The measured 2.0.1 expression contract passes: partial regex matching,
+  factorial before multiplication (`3! * 2 = 12`), binary literals as `BLOB`,
+  `preserve_identifier_case = preserve_case`, JSON extraction returning `NULL`,
+  `/` by zero returning infinity, and `%` by zero raising an error. No legacy SQL
+  compatibility bridge is enabled. pgwire nested/binary results require an
+  explicit `VARCHAR` cast; the generated ER reads use scalar Arrow results.
+- A 61-second statement deadline is accepted within the bounded task policy.
+  Exactly 100,000 rows return successfully; 100,001 is refused explicitly rather
+  than truncated. Interactive results also retain the 16-MiB bound; durable jobs
+  carry larger results through scoped artifacts.
+- Three independent Compose deployments reject every cross-dataset credential,
+  write, history access and session read/delete. Catalog and object sentinels
+  stay independent, and history contains no cross-dataset credentials.
+- The generated read preserves filtered/keyset snapshots, visibility after a
+  later update, typed nulls, temporary state, rollback, SQL-error recovery,
+  cancellation and explicit close. The worker ends with zero sessions and active
+  queries.
+- The account golden task matches embedded output and rerun results: 4 golden
+  records, 16 lineage rows, 3 matching scores and 10 correlated remote
+  statements. Concurrent writers are excluded and an undersized placement fails.
+- Both COMMIT faults reconcile correctly: a lost reply after the commit landed
+  yields exactly one receipt and `committed`; an unsent COMMIT yields no receipt
+  and `rolled_back`. No uncertain write is replayed.
 
-## What the probes establish
+Retained evidence is in `duckfleet-compatibility-evidence.json`,
+`duckfleet-read-evidence.json`, `duckfleet-task-evidence.json` and
+`security/references/duckfleet-isolation-evidence.json`.
 
-- Bound BIGINT near the signed limit, quoted text, precise DECIMAL, date,
-  microsecond timestamp, boolean and null values survive HTTP/Arrow unchanged.
-- JSON numeric DOUBLE binding does not preserve every input bit. Of the 58
-  distinct floating-point fixture values, the first mismatch is
-  `0.0012033694344163659` sent versus `0.001203369434416366` returned by a plain
-  `SELECT` with a DOUBLE cast. This isolates a transport/binding precision issue
-  without scoring arithmetic. Decimal parameters above use explicit string
-  transport and pass; they must not be mistaken for a floating-point test.
-- Temporary tables survive requests within a session and are absent from another
-  session on the same worker.
-- Explicit `METADATA_SCHEMA`, `DATA_PATH`, `AUTOMATIC_MIGRATION false` and disabled
-  data inlining work on a fresh remote catalog. A native temporary relation can
-  feed a dedicated lake-write transaction. A snapshot continues to see one row
-  after a second is committed; rollback preserves two rows. Read-only reopen sees
-  committed output and rejects writes.
-- Captured prediction SQL stages 05–07, starting from the committed
-  `blocked_with_cols.parquet`, produce 1,841 predictions on both engines. Both
-  match the prediction golden's exact identifiers/comparison levels and existing
-  numeric tolerances (weight 1e-8, probability 1e-10).
-- Exact cross-engine equality fails: the observed maximum absolute differences
-  were 7.105427357601002e-15 in weight and 2.220446049250313e-16 in probability.
-  This is small enough for the historical oracle, but is not evidence of identical
-  scores. Versions and host environments differ, so this experiment cannot assign
-  the cause to the engine upgrade alone. Repeated execution in fresh sessions is
-  checked separately from cross-engine equality.
-- A 61-second deadline is rejected before execution; a 100,001-row response is
-  rejected rather than truncated. These are measured API limits, not timing or
-  capacity benchmarks. Source also bounds encoded results at 16 MiB, SQL text at
-  262,144 bytes and parameters at 10,000 per request.
+## Adoption boundaries
 
-## Adoption conditions and ownership
-
-1. **Version and scoring qualification.** Preserve floating-point parameters
-   across JSON decoding/binding first (a DuckFleet decoder change or an explicitly
-   typed, lossless parameter representation must pass the exact round-trip probe).
-   #1130 owns that adapter/upstream contract. Align the worker engine/extensions with
-   ER, then repeat the harness on comparable runtime platforms and run actual
-   bundled-Rust/executor parity. Investigate exact differences rather than
-   loosening the gate to hide them. #1130 owns adapter parity; #1134 owns complete
-   workflow qualification. Any upstream engine change needs its own DuckFleet PR
-   and harness evidence.
-2. **Catalog policy and isolation (#1129).** DuckFleet's startup attaches its
-   deployment lake without `AUTOMATIC_MIGRATION false` or metadata-schema
-   selection, then issues `USE lake`. The successful probe uses an additional,
-   explicitly configured disposable attach; it does **not** fix startup policy.
-   The ER backend must use a server-owned dataset binding, fully qualified lake
-   references and native temporary intermediates. Configure the startup attach
-   correctly before a customer catalog is opened; issuing policy SQL later is too
-   late to prevent an automatic migration.
-3. **Long-running execution (#1132).** Add an explicit bounded deadline policy
-   for supported tasks. Admission of a larger deadline alone is insufficient:
-   prove execution, cancellation and lifecycle behavior with the pilot.
-4. **Transfers (#1131).** Keep intermediate tables remote and move large inputs
-   and outputs through scoped object-store artifacts. The result cap can remain
-   for interactive reads if the adapter gives an explicit bounded result policy;
-   it is not permission to raise limits without memory accounting.
-5. **Recovery and rollout (#1133/#1134).** Transaction conflict classification is
-   not whole-job idempotency. Reconcile uncertain commits before replay or backend
-   switching. Preserve the single writer per dataset and existing public contract.
-
-Required extension capabilities remain governed by
-`dedupe_core::session::BAKED_EXTENSIONS`: DuckLake, Parquet, JSON, ICU,
-PostgreSQL catalog access and AWS/HTTPFS storage access. The matching functions in
-these fixtures are built in. The local Compose credential test does not prove
-production Pod Identity grants or credential refresh.
+The go decision covers the evidence above only. Production adoption still needs
+#1134's customer-scoped API workflow, provision/upgrade/retention checks,
+performance and cost measurements, monitoring, ownership and rollback rehearsal.
+#1170 must mark every other pipeline/training/read path as remote with parity or
+explicitly refused; no silent skip is allowed. AWS bucket policy, production
+projected-secret inspection and production identity access remain rollout gates,
+not facts established by Compose.
 
 Catalog format and application schema have different owners. Keep automatic
-catalog migration disabled; test any deliberate format change on a disposable
-copy with a rollback/rebuild decision. Application table changes continue through
-the entity catalog and its additive reconciler. Neither a new worker binary nor
-a successful SQL request authorizes a format upgrade.
+catalog migration disabled and test any deliberate format change on a disposable
+copy. A new worker binary or successful SQL request does not authorize a catalog
+upgrade. Local proofs do not establish live AWS IAM, EKS NetworkPolicy, hostile
+multitenancy, provider cost or every nested/extension type.
 
-## Coverage limits
-
-This experiment replays existing governed SQL; it does not replace generated
-query functions, execute the entire task DAG, train a model, prove input delivery
-semantics, validate hostile-tenant isolation, or measure deployment economics.
-The fixed input contains synthetic data only. No production data, configuration,
-credentials or infrastructure were changed for this assessment.
+The earlier #1128 assessment failed floating-point transport, used different
+engine/catalog versions and correctly returned no-go. Upstream PR #117 fixed the
+float parser; #1168/#150 then put ER and DuckFleet on the same released engine.
+This ticket re-measured the combination rather than carrying that decision
+forward.

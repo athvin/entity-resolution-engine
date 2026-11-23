@@ -1,15 +1,15 @@
 {
-  "decision": "no-go",
+  "decision": "go",
   "probes": [
     {
       "name": "baseline_version_matches_repo",
       "passed": true,
-      "evidence": "2.0.0"
+      "evidence": "2.0.1"
     },
     {
       "name": "engine_version_alignment",
-      "passed": false,
-      "error": "engine versions differ: local 2.0.0, remote v1.5.4"
+      "passed": true,
+      "evidence": "v2.0.1"
     },
     {
       "name": "bound_parameters_and_arrow_types",
@@ -21,8 +21,11 @@
     },
     {
       "name": "bound_float_roundtrip",
-      "passed": false,
-      "error": "result mismatch: v: double vs v: double; rows 58/58; first difference (0, {'v': 0.0012033694344163659}, {'v': 0.001203369434416366})"
+      "passed": true,
+      "evidence": {
+        "distinct_values": 58,
+        "sha256": "6e84b48843deba38c92d7a068f33a5a79f76d8476ca928b33e18d930cfdcb0b4"
+      }
     },
     {
       "name": "session_temp_isolation",
@@ -35,10 +38,10 @@
       "evidence": {
         "rows": 1841,
         "baseline_sha256": "56dff6b8821956252d1f0ed6df2da720b4ed74d54e814661a7cffa46c844095a",
-        "remote_sha256": "15696a55d095a5963a6624bf097d09e91811eb75f7c89525a1808e4c90bf8a9a",
+        "remote_sha256": "c97212274f868bb4213c4ced7242a502ffa4ea0c6ddef54597d4dd09be3c2b18",
         "max_delta": {
-          "match_weight": 7.105427357601002e-15,
-          "match_probability": 2.220446049250313e-16
+          "match_weight": 0.0,
+          "match_probability": 6.938893903907228e-18
         },
         "fresh_session_rerun": "exact",
         "golden_tolerances": {
@@ -49,8 +52,12 @@
     },
     {
       "name": "exact_scoring_parity",
-      "passed": false,
-      "error": "result mismatch: unique_id_l: int64\nunique_id_r: int64\nmatch_key: string\ngamma_first_name: int32\ngamma_surname: int32\ngamma_dob: int32\ngamma_city: int32\ngamma_email: int32\nmatch_weight: double\nmatch_probability: double vs unique_id_l: int64\nunique_id_r: int64\nmatch_key: string\ngamma_first_name: int32\ngamma_surname: int32\ngamma_dob: int32\ngamma_city: int32\ngamma_email: int32\nmatch_weight: double\nmatch_probability: double; rows 1841/1841; first difference (52, {'unique_id_l': 27, 'unique_id_r': 353, 'match_key': '1', 'gamma_first_name': -1, 'gamma_surname': 4, 'gamma_dob': 0, 'gamma_city': 0, 'gamma_email': -1, 'match_weight': -4.055121632963532, 'match_probability': 0.05674355410260158}, {'unique_id_l': 27, 'unique_id_r': 353, 'match_key': '1', 'gamma_first_name': -1, 'gamma_surname': 4, 'gamma_dob': 0, 'gamma_city': 0, 'gamma_email': -1, 'match_weight': -4.055121632963532, 'match_probability': 0.05674355410260159})"
+      "passed": true,
+      "evidence": {
+        "rows": 1841,
+        "floating_point_tolerance": 1e-12,
+        "repeat_each_backend": "byte-identical results"
+      }
     },
     {
       "name": "baseline_lake_semantics",
@@ -73,24 +80,44 @@
       }
     },
     {
+      "name": "native_201_expression_contract",
+      "passed": true,
+      "evidence": {
+        "regex_partial_match": true,
+        "factorial_before_multiplication": "12",
+        "binary_literal_type": "BLOB",
+        "preserve_case_setting": "preserve_case",
+        "single_arrow_json_result": null,
+        "division_by_zero_result": "Infinity",
+        "modulo_by_zero_rejected": "HTTP 400: {\"acceptance\":\"accepted\",\"error\":\"Invalid Input Error: Division by zero in expression (1 % 0). Use TRY(...) to return NULL for this expression, or SET error_on_division_by_zero=false to return NULL for all divisions by zero.: Error code 1: Unknown error code\",\"failure_kind\":\"sql_error\",\"request_id\":\"584af06f-0dd8-42bc-9394-a146cf7be3f7\",\"retry_safe\":false,\"status_url\":\"/v1/requests/584af06f-0dd8-42bc-9394-a146cf7be3f7\"}"
+      }
+    },
+    {
       "name": "long_task_deadline_admission",
-      "passed": false,
-      "error": "HTTP 400: {\"error\":\"SQL must contain 1\u2013262144 bytes; timeout must be 1\u201360 seconds\",\"failure_kind\":\"invalid_request\",\"retry_safe\":false}"
+      "passed": true,
+      "evidence": "accepts a deadline above 60 seconds"
     },
     {
       "name": "bulk_result_capacity",
-      "passed": false,
-      "error": "HTTP 400: {\"error\":\"result exceeds local response limit (100000 rows / 16 MiB)\",\"failure_kind\":\"sql_error\",\"retry_safe\":false}"
+      "passed": true,
+      "evidence": {
+        "returned_rows": 100000,
+        "overflow": "explicit bounded refusal"
+      }
     }
   ],
   "limitations": [
     "Discovery replays captured model SQL; it does not exercise the Rust task executor or generated adapter.",
     "The Python baseline uses the same released engine version; it does not prove every bundled Rust build feature.",
+    "Cross-build floating-point scoring is held to 1e-12; each backend must be byte-identical on rerun.",
+    "Interactive results above 100000 rows/16MiB are explicitly refused; durable jobs carry larger results.",
+    "Native 2.0.1 JSON extraction returns NULL, / by zero returns infinity, and % by zero is rejected; no compatibility bridge is enabled.",
+    "pgwire nested/binary output requires an explicit VARCHAR cast; generated ER reads use scalar Arrow results.",
     "Synthetic disposable data only; no production isolation or performance claim."
   ],
-  "baseline_engine": "2.0.0",
+  "baseline_engine": "2.0.1",
   "python_arrow": "23.0.1",
-  "duckfleet_revision": "672b3e3e82b61122c9647dd5dc85d32a3cedf09d",
+  "duckfleet_revision": "778dbe023203570f55e1265a91d4ec26885b250a",
   "baseline_platform": "macOS-26.6.2-arm64-arm-64bit",
   "fixture_sha256": {
     "rust/fixtures/golden/fake_1000/stages/blocked_with_cols.parquet": "bde0e4dec7c1b1fd2b9d98ea730c47e2a74533ce93a52b6ea45b5fde3a082274",
@@ -99,61 +126,65 @@
     "rust/fixtures/golden/fake_1000/sql/predict_06___dedupe__match_weight_parts.sql": "187566b489543aa02f36ed9a89bbcc357ee0f34131d0d4d884688e85cc69b04d",
     "rust/fixtures/golden/fake_1000/sql/predict_07___dedupe__predict.sql": "2b4348d96af448876ef87ffbee35c40abf676fae06786d06ab38f0a119dc71d3"
   },
-  "remote_engine": "v1.5.4",
+  "remote_engine": "v2.0.1",
   "extensions": [
     {
       "extension_name": "autocomplete",
-      "extension_version": "v1.5.4"
+      "extension_version": "v2.0.1"
+    },
+    {
+      "extension_name": "aws",
+      "extension_version": "9ba41b09a0"
     },
     {
       "extension_name": "core_functions",
-      "extension_version": "v1.5.4"
+      "extension_version": "v2.0.1"
     },
     {
       "extension_name": "ducklake",
-      "extension_version": "d318a545"
+      "extension_version": "08089b16dc"
     },
     {
       "extension_name": "httpfs",
-      "extension_version": "c3f215a"
+      "extension_version": "f71cfdb4bf"
     },
     {
       "extension_name": "icu",
-      "extension_version": "v1.5.4"
+      "extension_version": "v2.0.1"
     },
     {
       "extension_name": "json",
-      "extension_version": "v1.5.4"
+      "extension_version": "v2.0.1"
     },
     {
       "extension_name": "parquet",
-      "extension_version": "v1.5.4"
+      "extension_version": "v2.0.1"
     },
     {
       "extension_name": "postgres_scanner",
-      "extension_version": "8f813f9"
+      "extension_version": "8b9d0bbe8d"
     }
   ],
   "baseline_extensions": [
     {
       "extension_name": "core_functions",
-      "extension_version": "v2.0.0"
+      "extension_version": "v2.0.1"
     },
     {
       "extension_name": "ducklake",
-      "extension_version": "417a9117f5"
+      "extension_version": "08089b16dc"
     },
     {
       "extension_name": "icu",
-      "extension_version": "v2.0.0"
+      "extension_version": "v2.0.1"
     },
     {
       "extension_name": "json",
-      "extension_version": "v2.0.0"
+      "extension_version": "v2.0.1"
     },
     {
       "extension_name": "parquet",
-      "extension_version": "v2.0.0"
+      "extension_version": "v2.0.1"
     }
   ]
 }

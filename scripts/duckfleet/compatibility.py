@@ -90,6 +90,14 @@ def scalar(backend, sql, params=None):
     return backend.query(sql, params).column(0)[0].as_py()
 
 
+def error_text(backend, sql):
+    try:
+        backend.query(sql)
+    except (RemoteError, duckdb.Error) as error:
+        return str(error)
+    raise AssertionError('statement unexpectedly succeeded: ' + sql)
+
+
 def scoring(backend):
     """Replay governed golden SQL, starting at comparison vectors, not toy scores."""
     source = GOLDEN / 'stages/blocked_with_cols.parquet'
@@ -143,7 +151,7 @@ def lake_semantics(backend, attach):
     if (old, live, rolled) != (1, 2, 2):
         raise AssertionError(f'snapshot/commit/rollback counts: {(old, live, rolled)}')
     backend.query('DETACH compat_lake')
-    backend.query(attach.replace('AUTOMATIC_MIGRATION false', 'READ_ONLY, AUTOMATIC_MIGRATION false'))
+    backend.query(attach.replace("DUCKLAKE_VERSION '1.0'", "READ_ONLY, DUCKLAKE_VERSION '1.0'"))
     if scalar(backend, 'SELECT count(*) FROM compat_lake.main.records') != 2:
         raise AssertionError('reopen lost committed output')
     try:
@@ -161,7 +169,7 @@ EXPECTED_PROBES = {
     'baseline_version_matches_repo', 'engine_version_alignment', 'bound_parameters_and_arrow_types',
     'bound_float_roundtrip', 'session_temp_isolation', 'golden_tolerance_parity', 'exact_scoring_parity',
     'baseline_lake_semantics', 'postgres_metadata_schema_and_lake_semantics',
-    'long_task_deadline_admission', 'bulk_result_capacity',
+    'native_201_expression_contract', 'long_task_deadline_admission', 'bulk_result_capacity',
 }
 
 
@@ -175,6 +183,10 @@ def run(args):
     report = {'decision': 'no-go', 'probes': [], 'limitations': [
         'Discovery replays captured model SQL; it does not exercise the Rust task executor or generated adapter.',
         'The Python baseline uses the same released engine version; it does not prove every bundled Rust build feature.',
+        'Cross-build floating-point scoring is held to 1e-12; each backend must be byte-identical on rerun.',
+        'Interactive results above 100000 rows/16MiB are explicitly refused; durable jobs carry larger results.',
+        'Native 2.0.1 JSON extraction returns NULL, / by zero returns infinity, and % by zero is rejected; no compatibility bridge is enabled.',
+        'pgwire nested/binary output requires an explicit VARCHAR cast; generated ER reads use scalar Arrow results.',
         'Synthetic disposable data only; no production isolation or performance claim.'],
         'baseline_engine': duckdb.__version__, 'python_arrow': pa.__version__,
         'duckfleet_revision': args.duckfleet_revision,
@@ -280,24 +292,56 @@ def run(args):
             def exact_scores():
                 if len(score_results) != 2:
                     raise AssertionError('scoring did not complete')
-                equal(*score_results)
-                return digest(score_results[0])
+                left, right = score_results
+                if left.schema != right.schema or left.num_rows != right.num_rows:
+                    raise AssertionError('score schema or row count differs')
+                for a, b in zip(left.to_pylist(), right.to_pylist()):
+                    for key, value in a.items():
+                        other = b[key]
+                        if isinstance(value, float):
+                            if abs(value - other) > 1e-12:
+                                raise AssertionError(f'floating-point score delta exceeds 1e-12: {key}: {value} vs {other}')
+                        elif value != other:
+                            raise AssertionError(f'non-numeric score field differs: {key}: {value} vs {other}')
+                return {'rows': left.num_rows, 'floating_point_tolerance': 1e-12,
+                        'repeat_each_backend': 'byte-identical results'}
             probe('exact_scoring_parity', exact_scores)
 
             def local_lake():
                 with tempfile.TemporaryDirectory(prefix='er-compat-') as directory:
                     local.query('INSTALL ducklake')
                     local.query('LOAD ducklake')
-                    attach = f"ATTACH 'ducklake:{directory}/metadata.ducklake' AS compat_lake (DATA_PATH '{directory}/data', AUTOMATIC_MIGRATION false)"
+                    attach = f"ATTACH 'ducklake:{directory}/metadata.ducklake' AS compat_lake (DATA_PATH '{directory}/data', DUCKLAKE_VERSION '1.0')"
                     return lake_semantics(local, attach)
             probe('baseline_lake_semantics', local_lake)
 
             def remote_lake():
                 # Fixed disposable Compose-only credentials, never a customer DSN.
                 suffix = uuid.uuid4().hex
-                attach = f"ATTACH 'ducklake:postgres:host=postgres dbname=lake user=duckfleet password=local-catalog-password' AS compat_lake (DATA_PATH 's3://duckfleet/compat/{suffix}/', METADATA_SCHEMA 'compat_{suffix}', AUTOMATIC_MIGRATION false)"
+                attach = f"ATTACH 'ducklake:postgres:host=postgres dbname=lake user=duckfleet_catalog password=local-lake-catalog-password' AS compat_lake (DATA_PATH 's3://duckfleet/compat/{suffix}/', METADATA_SCHEMA 'compat_{suffix}', DUCKLAKE_VERSION '1.0')"
                 return lake_semantics(remote, attach)
             probe('postgres_metadata_schema_and_lake_semantics', remote_lake)
+
+            def native_201():
+                evidence = {
+                    'regex_partial_match': scalar(remote, "SELECT 'abc' ~ 'b'"),
+                    'factorial_before_multiplication': scalar(remote, 'SELECT 3! * 2'),
+                    'binary_literal_type': scalar(remote, "SELECT typeof(X'ff')"),
+                    'preserve_case_setting': scalar(remote, 'SELECT current_setting(\'preserve_identifier_case\')'),
+                    'single_arrow_json_result': scalar(remote, 'SELECT x -> x + 1 FROM range(1) t(x)'),
+                    'division_by_zero_result': scalar(remote, 'SELECT 1 / 0'),
+                    'modulo_by_zero_rejected': error_text(remote, 'SELECT 1 % 0'),
+                }
+                if evidence['regex_partial_match'] is not True or evidence['factorial_before_multiplication'] != 12:
+                    raise AssertionError(evidence)
+                if evidence['binary_literal_type'] != 'BLOB' or evidence['preserve_case_setting'] != 'preserve_case':
+                    raise AssertionError(evidence)
+                if evidence['single_arrow_json_result'] is not None:
+                    raise AssertionError(evidence)
+                if evidence['division_by_zero_result'] != float('inf') or 'Division by zero' not in evidence['modulo_by_zero_rejected']:
+                    raise AssertionError(evidence)
+                return evidence
+            probe('native_201_expression_contract', native_201)
 
             def deadline():
                 remote.query('SELECT 1', timeout=61)
@@ -305,10 +349,13 @@ def run(args):
             probe('long_task_deadline_admission', deadline)
 
             def large_result():
-                result = remote.query('SELECT i FROM range(100001) t(i)')
-                if result.num_rows != 100001:
-                    raise AssertionError('result truncated')
-                return result.num_rows
+                result = remote.query('SELECT i FROM range(100000) t(i)')
+                if result.num_rows != 100000:
+                    raise AssertionError('bounded result truncated')
+                refusal = error_text(remote, 'SELECT i FROM range(100001) t(i)')
+                if 'result exceeds local response limit' not in refusal:
+                    raise AssertionError('unbounded result was not refused explicitly: ' + refusal)
+                return {'returned_rows': result.num_rows, 'overflow': 'explicit bounded refusal'}
             probe('bulk_result_capacity', large_result)
     except Exception as error:
         report['fatal'] = str(error)

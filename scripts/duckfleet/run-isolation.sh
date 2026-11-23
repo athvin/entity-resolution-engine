@@ -6,7 +6,7 @@ PYTHON="${PYTHON:-python3}"
 "$PYTHON" -c 'import sys; assert sys.version_info >= (3, 11), "Python >= 3.11 required"'
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/er-duckfleet-isolation-source.XXXXXX")"
 trap 'rm -rf "$scratch"' EXIT
-revision=672b3e3e82b61122c9647dd5dc85d32a3cedf09d
+revision=778dbe023203570f55e1265a91d4ec26885b250a
 git init -q "$scratch/upstream"
 git -C "$scratch/upstream" remote add origin https://github.com/athvin/duck-fleet.git
 git -C "$scratch/upstream" fetch --depth 1 origin "$revision"
