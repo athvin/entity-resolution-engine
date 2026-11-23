@@ -427,7 +427,7 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
     // Remote selection is operator-owned and happens before any embedded lake
     // opens. Both paths settle through the same heartbeat and finish channel.
     let (result, snapshot_end) = if let Some(policy) =
-        crate::duckfleet_tasks::selected(&task_id, env_var)?
+        crate::duckfleet_tasks::selected(kind, &task_id, env_var)
     {
         let journal = crate::duckfleet_tasks::Owner {
             channel: &channel,

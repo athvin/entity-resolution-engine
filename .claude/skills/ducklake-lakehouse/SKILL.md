@@ -202,7 +202,7 @@ the disposable restricted-identity proof and its AWS qualification limit.
 
 The account golden-task pilot and its operator policy are described in
 [references/duckfleet-tasks.md](references/duckfleet-tasks.md). The complete
-remote/refused execution-path matrix is in
+remote/embedded execution-path matrix is in
 [references/duckfleet-paths.md](references/duckfleet-paths.md).
 
 [Account task proof evidence](references/duckfleet-task-evidence.json) records the

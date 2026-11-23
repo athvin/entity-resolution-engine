@@ -1,4 +1,10 @@
-//! Default-off, operator-owned selection for the account golden task.
+//! Default-off, operator-owned selection for remote pod tasks.
+//!
+//! [`route`] is the whole routing policy: every pod task of every DAG maps to
+//! [`Route::Remote`] or to [`Route::Embedded`] with the reason it stays local.
+//! There is no default arm, and `every_pod_task_has_an_explicit_route` fails
+//! when a DAG gains a task this table does not name. An enrolled pod therefore
+//! never runs a task embedded without saying why.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -15,7 +21,7 @@ use er_duckfleet::execution::{Compute, Journal, JournalRefused, Session, TaskOpt
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::dags::{PodTaskRun, edges::Golden, plans::RunPlan};
+use crate::dags::{JobKind, PodTaskRun, edges::Golden, plans::RunPlan};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -30,18 +36,68 @@ fn configuration(message: &str) -> TaskError {
     TaskError::Failed(er_errors::ErError::config(message.to_owned()))
 }
 
+/// Where a pod task runs when its pod is enrolled in a DuckFleet task policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Route {
+    /// Through the remote adapter, with the attempt fence, journal and receipt.
+    Remote,
+    /// In the pod's embedded engine, for the stated reason.
+    Embedded(&'static str),
+}
+
+/// Lake administration: schema reconciliation, catalog creation and
+/// maintenance belong to ER's embedded reconciler, which owns the catalog
+/// version policy (no automatic migration).
+const ADMINISTRATION: &str = "lake administration stays with the embedded reconciler";
+/// Run bookkeeping that brackets the stages: no SQL workload to move.
+const ORCHESTRATION: &str = "run bookkeeping, not a remote workload";
+/// A stage with no qualified remote adapter yet. It runs embedded under the
+/// same job slot, so there is still one writer per dataset.
+const NOT_QUALIFIED: &str = "no qualified remote adapter for this task";
+
+/// The routing table. Remote is granted only where `make check-duckfleet-task`
+/// qualifies it: account golden inside `run_all`. `golden` in the correction
+/// DAGs shares the body but has not been qualified remotely, so it stays
+/// embedded. `None` means the table does not name the task.
+pub(crate) fn route(kind: JobKind, task: &str) -> Option<Route> {
+    use JobKind as K;
+    let run_all = matches!(kind, K::RunAllFull | K::RunAllIncremental);
+    let route = match task {
+        "golden" if run_all => Route::Remote,
+        "golden" if matches!(kind, K::Correct | K::ApplyCorrections) => {
+            Route::Embedded(NOT_QUALIFIED)
+        }
+        "reconcile_schema" | "lake_init" | "maintain" => Route::Embedded(ADMINISTRATION),
+        "init" | "assemble" | "finish" => Route::Embedded(ORCHESTRATION),
+        "ingest" | "standardize" | "match" | "reconcile" | "train" | "profile" | "extract"
+        | "write_back_scan" | "apply_staged" => Route::Embedded(NOT_QUALIFIED),
+        _ => return None,
+    };
+    Some(route)
+}
+
 /// A policy path comes from the task-pod deployment, never job parameters.
+/// Without one, nothing is remote. With one, [`route`] decides, and an
+/// embedded decision is logged with its reason rather than taken silently.
 pub(crate) fn selected(
+    kind: JobKind,
     task: &str,
     lookup: impl Fn(&str) -> Option<String>,
-) -> Result<Option<PathBuf>, String> {
-    let configured = lookup("ER_DUCKFLEET_TASK_POLICY").map(PathBuf::from);
-    if configured.is_some() && task != "golden" {
-        return Err(format!(
-            "DuckFleet remote execution is not qualified for task {task}; remove ER_DUCKFLEET_TASK_POLICY to use the supported embedded backend"
-        ));
+) -> Option<PathBuf> {
+    let policy = lookup("ER_DUCKFLEET_TASK_POLICY").map(PathBuf::from)?;
+    match route(kind, task) {
+        Some(Route::Remote) => Some(policy),
+        Some(Route::Embedded(reason)) => {
+            tracing::info!(
+                er.task_id = task,
+                job.kind = kind.as_str(),
+                reason,
+                "DuckFleet-enrolled pod runs this task embedded"
+            );
+            None
+        }
+        None => None,
     }
-    Ok(configured)
 }
 
 /// The task pod as the owner of a remote attempt: its attempt channel and the
@@ -381,31 +437,55 @@ mod tests {
     use super::*;
     #[test]
     fn selection_is_operator_only_and_scoped_to_golden() {
-        assert!(selected("golden", |_| None).unwrap().is_none());
+        let policy = |_: &str| Some("/policy.json".to_owned());
+        assert!(selected(JobKind::RunAllFull, "golden", |_| None).is_none());
+        assert!(selected(JobKind::RunAllFull, "match", policy).is_none());
         assert_eq!(
-            selected("golden", |_| Some("/policy.json".into())).unwrap(),
+            selected(JobKind::RunAllIncremental, "golden", policy),
             Some(PathBuf::from("/policy.json"))
         );
-        for task in [
-            "ingest",
-            "standardize",
-            "match",
-            "reconcile",
-            "train",
-            "correct",
-            "apply_corrections",
-            "lake_maintain",
-            "profile",
-            "lake_migrate",
-            "provision",
-            "dataset_provision",
-            "apply_approved",
-            "extract",
-        ] {
-            let error = selected(task, |_| Some("/policy.json".into())).unwrap_err();
-            assert!(error.contains("not qualified"), "{task}");
-            assert!(error.contains("embedded backend"), "{task}");
+        // Same task body, but not qualified outside run_all.
+        assert!(selected(JobKind::Correct, "golden", policy).is_none());
+        assert!(selected(JobKind::ApplyCorrections, "golden", policy).is_none());
+    }
+
+    /// The table is exhaustive over the real DAGs: a new pod task, or an
+    /// existing task added to another kind, must be given a route here.
+    /// Control nodes run in the control plane and never touch a lake engine.
+    #[test]
+    fn every_pod_task_has_an_explicit_route() {
+        let mut unrouted = Vec::new();
+        let mut remote = Vec::new();
+        for kind in JobKind::ALL {
+            for node in &crate::dags::dag_for(kind).nodes {
+                if node.kind != er_dag::NodeKind::Pod {
+                    continue;
+                }
+                match route(kind, node.task_id) {
+                    None => unrouted.push(format!("{}/{}", kind.as_str(), node.task_id)),
+                    Some(Route::Remote) => {
+                        remote.push(format!("{}/{}", kind.as_str(), node.task_id));
+                    }
+                    Some(Route::Embedded(reason)) => assert_ne!(reason, ""),
+                }
+            }
         }
+        assert!(
+            unrouted.is_empty(),
+            "pod tasks with no DuckFleet route: {unrouted:?}"
+        );
+        // Widening remote execution is a decision with evidence, not a side
+        // effect of a table edit: change this list only with a qualification.
+        assert_eq!(
+            remote,
+            ["run_all_full/golden", "run_all_incremental/golden"]
+        );
+    }
+
+    #[test]
+    fn a_task_outside_its_kind_has_no_route() {
+        assert_eq!(route(JobKind::Extract, "golden"), None);
+        assert_eq!(route(JobKind::RunAllFull, "not_a_task"), None);
     }
     #[test]
     fn memory_units_preserve_decimal_and_binary_budgets() {
