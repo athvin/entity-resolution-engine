@@ -69,6 +69,7 @@ mod pg_imports;
 mod pg_job_failure;
 mod pg_labels;
 mod pg_lake_catalog_schema;
+mod pg_launch_proof;
 mod pg_lexicon;
 mod pg_mass_update;
 mod pg_merge_group;
