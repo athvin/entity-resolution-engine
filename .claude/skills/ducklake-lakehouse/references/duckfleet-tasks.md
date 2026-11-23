@@ -1,5 +1,15 @@
 # DuckFleet account golden-task pilot
 
+## Contents
+
+- [Operator configuration](#operator-configuration)
+- [Deadlines and diagnostics](#deadlines-and-diagnostics)
+- [Qualification and limits](#qualification-and-limits)
+- [DuckDB 2.0.1 requalification](#duckdb-201-requalification)
+
+Only generated reads and this account golden task are remote-qualified; all
+other task paths retain embedded execution or an explicit operator-facing refusal.
+
 Issue #1132 selects **account golden-record generation** as the first remote
 write task. The DAG now runs `golden` between `reconcile` and `assemble`;
 `assemble` retains reviews, metrics and quality. Person golden generation remains
