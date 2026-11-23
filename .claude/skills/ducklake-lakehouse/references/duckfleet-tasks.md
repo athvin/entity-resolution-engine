@@ -84,14 +84,17 @@ rollback preserves it, while successful-rerun comparisons exclude it.
 
 The fixture's one-thread, 256-MB engine budget fits the persistent worker.
 Production placement, AWS identity and cross-dataset qualification are separate
-#1134 gates. This evidence does not supersede #1128's no-go for interchangeable
-whole-pipeline execution across the differing engine builds.
+#1134 gates. Whole-pipeline remote execution is not claimed by this pilot.
 
 Run `make check-duckfleet-task` to build the pinned upstream revision and repeat
 that proof. Recorded `duckfleet-task-evidence.json` evidence identifies the
 source and actual worker image. It records 4 golden records, 16 lineage rows,
-3 matching scores and 10 correlated remote statements (the tenth is the publication receipt). A separate controlled
-external-I/O query completed in 65.128 seconds under a 120-second deadline;
-601 seconds was refused. Under a one-second deadline, the same I/O settled
-`timed_out` after 65.203 seconds. Reproduce the deadline proof with the pinned
-upstream `scripts/test-long-deadline.py` using Python with PyArrow installed.
+3 matching scores and 10 correlated remote statements (the tenth is the publication receipt).
+
+## DuckDB 2.0.1 requalification
+
+#1169 reruns the complete task proof against upstream `778dbe02` with both
+sides on DuckDB 2.0.1 and DuckLake 1.0. Embedded/remote results and the rerun
+match, writer exclusion and undersized-capacity refusal hold, and both COMMIT
+faults reconcile as documented. The evidence is a qualified account golden-task
+envelope, not proof that every other task is supported remotely.

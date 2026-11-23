@@ -158,10 +158,13 @@ all six directions, and absence of tokens from persisted history. This local
 probe does not establish live AWS IAM or EKS NetworkPolicy behavior.
 
 The reused upstream implementation is pinned to
-[672b3e3](https://github.com/athvin/duck-fleet/tree/672b3e3e82b61122c9647dd5dc85d32a3cedf09d),
+[778dbe02](https://github.com/athvin/duck-fleet/tree/778dbe023203570f55e1265a91d4ec26885b250a),
 including `scripts/provision-namespace.sh`, `infra/helm/duckfleet/templates/network.yaml`,
-`identities.yaml`, and `server/src/credentials.rs`. No shared-deployment
-multi-tenant authorization claim is made. The HTTP adapter (#1130) and task
-integration (#1132) must use the resolver before any remote request. Live
-cross-dataset object/catalog/network probes and production enrollment remain
-release gates in #1134; a static policy test is not live isolation evidence.
+`identities.yaml`, and `server/src/credentials.rs`. #1169 reran the disposable
+proof on DuckDB 2.0.1: every directional credential, write, history and session
+refusal passed, with independent sentinels and no credential in history. No
+shared-deployment multi-tenant authorization claim is made. The HTTP adapter
+(#1130) and task integration (#1132) must use the resolver before any remote
+request. Live cross-dataset object/catalog/network probes and production
+enrollment remain release gates in #1134; a static policy test is not live
+isolation evidence.

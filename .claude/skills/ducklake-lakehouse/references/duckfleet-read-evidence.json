@@ -10,7 +10,7 @@
   "temporary_state_and_rollback": true,
   "typed_null_value_parity": true,
   "worker_sessions_after_close": 0,
-  "upstream_revision": "398ff60c7abe973514707be3e47248a610560ec9",
-  "image_id": "sha256:ea887ed66bcd9f80f8fd467fa798b7b898952193a0add6968ba7f215670d7e38",
+  "upstream_revision": "778dbe023203570f55e1265a91d4ec26885b250a",
+  "image_id": "sha256:58495afefec4cf3cde4607e6b0292d740ae08e95e25fd8f9913d73a11964f53c",
   "scope": "Rust generated read; disposable Compose; not production qualification"
 }

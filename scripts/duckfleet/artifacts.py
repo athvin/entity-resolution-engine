@@ -22,8 +22,10 @@ def run(source, image, output, mc):
     prefix = 'duckfleet/' + ns + '/'
     token = secrets.token_hex(32)
     password = secrets.token_hex(32)
-    dsn = f'host=postgres port=5432 user=duckfleet password={password}'
-    env = dict(os.environ, DUCKFLEET_PORT='0',
+    catalog_dsn = 'host=postgres port=5432 user=duckfleet_catalog password=local-lake-catalog-password dbname=lake'
+    worker_dsn = 'host=postgres port=5432 user=duckfleet_worker password=local-platform-worker-password dbname=platform'
+    gateway_dsn = 'host=postgres port=5432 user=duckfleet_gateway password=local-platform-gateway-password dbname=platform'
+    env = dict(os.environ, DUCKFLEET_PORT='0', DUCKFLEET_POSTGRES_ADMIN_PASSWORD=password,
                DUCKFLEET_WORKER_URLS='http://worker-small:8080')
     with tempfile.TemporaryDirectory(prefix=project) as scratch:
         scratch = Path(scratch)
@@ -32,12 +34,12 @@ def run(source, image, output, mc):
             'postgres': {'environment': {'POSTGRES_PASSWORD': password}},
             'object-store': {'ports': ['127.0.0.1::9000']},
             'worker-small': {'image': image, 'pull_policy': 'never', 'environment': {
-                'DUCKFLEET_TOKEN': token, 'CATALOG_DSN': dsn + ' dbname=lake',
+                'CATALOG_DSN': catalog_dsn,
                 'S3_ACCESS_KEY': users['worker'][0], 'S3_SECRET_KEY': users['worker'][1],
                 'S3_DATA_PATH': 's3://duckfleet/' + prefix + 'lake/',
-                'PLATFORM_DSN': dsn + ' dbname=platform'}},
+                'PLATFORM_DSN': worker_dsn}},
             'server': {'image': image, 'pull_policy': 'never', 'environment': {
-                'DUCKFLEET_TOKEN': token, 'PLATFORM_DSN': dsn + ' dbname=platform'}}}}))
+                'DUCKFLEET_TOKEN': token, 'PLATFORM_DSN': gateway_dsn}}}}))
         override.chmod(0o600)
         command = ['docker', 'compose', '--project-name', project, '--file',
                    str(source / 'compose.yaml'), '--file', str(override)]
@@ -68,7 +70,7 @@ def run(source, image, output, mc):
                 evidence = json.loads(result.stdout.strip().splitlines()[-1])
                 worker = json.loads(subprocess.check_output(command + ['exec', '-T',
                     'worker-small', 'sh', '-c',
-                    'curl -fsS http://localhost:8080/v1/worker -H "Authorization: Bearer $DUCKFLEET_TOKEN"'],
+                    'curl -fsS http://localhost:8080/v1/worker -H "Authorization: Bearer $DUCKFLEET_INTERNAL_TOKEN"'],
                     env=env, text=True))
                 assert worker['open_sessions'] == 0, 'session cleanup leaked a worker session'
                 assert worker['active_queries'] == 0, 'query remained active after cleanup'

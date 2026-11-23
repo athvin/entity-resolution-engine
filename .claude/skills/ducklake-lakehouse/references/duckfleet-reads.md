@@ -66,5 +66,14 @@ establishes this read slice, not live AWS isolation or production equivalence.
 The baseline compatibility probe identified JSON float decoding that changed
 `0.0012033694344163659` by one bit. Upstream DuckFleet #116 / PR #117 enables
 serde_json's round-trip float parser and adds unit plus HTTP/Arrow regressions.
-This resolves that defect; it does not resolve the remaining engine-version
-and deployment-catalog differences recorded by #1128.
+This resolves that defect.
+
+## DuckDB 2.0.1 requalification
+
+#1169 reruns this proof against upstream `778dbe02` with both sides on DuckDB
+2.0.1 and DuckLake 1.0. All snapshot, type, float, state, rollback, recovery,
+cancellation and cleanup checks pass. `local_snapshot` and `remote_snapshot` are
+both 2, and the worker has zero open sessions after close. The retained
+`duckfleet-read-evidence.json` records the upstream source and actual image.
+Compose does not establish live AWS isolation or production equivalence; the
+rollout gates remain in #1134.

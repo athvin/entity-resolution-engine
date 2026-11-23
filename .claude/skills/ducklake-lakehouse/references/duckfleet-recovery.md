@@ -47,8 +47,8 @@ The golden transaction runs
 `CALL lake.set_commit_message('er', 'golden', extra_info => '{"remote_attempt":"<id>"}')`
 before COMMIT. DuckLake writes it into the snapshot row the commit creates, so
 `ducklake_snapshots('lake').commit_extra_info` contains it exactly when the
-transaction committed. Probed on DuckDB 1.5.4 (DuckFleet's engine) and 2.0.0
-(ER's): committed → present, rolled back → absent.
+transaction committed. Requalified on DuckDB 2.0.1 with DuckLake 1.0 on both
+sides: committed → present, rolled back → absent.
 
 ## The failure matrix
 
@@ -121,3 +121,8 @@ the journal records.
   loss. Upstream marks such requests terminal with an `unknown` outcome
   (`interrupt_abandoned`); that is the same row of the matrix as the lost
   COMMIT reply, settled by the receipt.
+
+#1169 reruns the complete proof against upstream `778dbe02` on DuckDB 2.0.1.
+The lost-reply case reconciles `committed` with one receipt; the unsent case
+reconciles `rolled_back` with no receipt. The other fence, journal, owner and
+sweep invariants are unchanged.

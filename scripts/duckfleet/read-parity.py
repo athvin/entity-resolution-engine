@@ -17,8 +17,10 @@ def run(source, image, output):
     output.parent.mkdir(parents=True, exist_ok=True)
     token = secrets.token_hex(32)
     password = secrets.token_hex(32)
-    dsn = f'host=postgres port=5432 user=duckfleet password={password}'
-    env = dict(os.environ, DUCKFLEET_PORT='0',
+    catalog_dsn = 'host=postgres port=5432 user=duckfleet_catalog password=local-lake-catalog-password dbname=lake'
+    worker_dsn = 'host=postgres port=5432 user=duckfleet_worker password=local-platform-worker-password dbname=platform'
+    gateway_dsn = 'host=postgres port=5432 user=duckfleet_gateway password=local-platform-gateway-password dbname=platform'
+    env = dict(os.environ, DUCKFLEET_PORT='0', DUCKFLEET_POSTGRES_ADMIN_PASSWORD=password,
                DUCKFLEET_WORKER_URLS='http://worker-small:8080')
     with tempfile.TemporaryDirectory(prefix=project) as scratch:
         scratch = Path(scratch)
@@ -26,10 +28,10 @@ def run(source, image, output):
         override.write_text(json.dumps({'services': {
             'postgres': {'environment': {'POSTGRES_PASSWORD': password}},
             'worker-small': {'image': image, 'pull_policy': 'never', 'environment': {
-                'DUCKFLEET_TOKEN': token, 'CATALOG_DSN': dsn + ' dbname=lake',
-                'PLATFORM_DSN': dsn + ' dbname=platform'}},
+                'CATALOG_DSN': catalog_dsn,
+                'PLATFORM_DSN': worker_dsn}},
             'server': {'image': image, 'pull_policy': 'never', 'environment': {
-                'DUCKFLEET_TOKEN': token, 'PLATFORM_DSN': dsn + ' dbname=platform'}}}}))
+                'DUCKFLEET_TOKEN': token, 'PLATFORM_DSN': gateway_dsn}}}}))
         override.chmod(0o600)
         command = ['docker', 'compose', '--project-name', project, '--file',
                    str(source / 'compose.yaml'), '--file', str(override)]
@@ -48,7 +50,7 @@ def run(source, image, output):
                 evidence = json.loads(result.stdout.strip().splitlines()[-1])
                 worker = json.loads(subprocess.check_output(command + ['exec', '-T',
                     'worker-small', 'sh', '-c',
-                    'curl -fsS http://localhost:8080/v1/worker -H "Authorization: Bearer $DUCKFLEET_TOKEN"'],
+                    'curl -fsS http://localhost:8080/v1/worker -H "Authorization: Bearer $DUCKFLEET_INTERNAL_TOKEN"'],
                     env=env, text=True))
                 assert worker['open_sessions'] == 0, 'session cleanup leaked a worker session'
                 assert worker['active_queries'] == 0, 'query remained active after cleanup'
@@ -61,6 +63,8 @@ def run(source, image, output):
                 output.write_text(json.dumps(evidence, indent=2) + '\n')
                 print(json.dumps(evidence, indent=2))
             finally:
+                subprocess.run(command + ['logs', 'worker-small'], env=env,
+                               stdout=log, stderr=log, check=False)
                 subprocess.run(command + ['down', '--volumes', '--remove-orphans'],
                                env=env, stdout=log, stderr=log, check=True)
 
