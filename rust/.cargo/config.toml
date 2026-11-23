@@ -1,28 +1,35 @@
 # Supplies the release version label that `libduckdb-sys`'s `bundled` build
 # omits. Without this, every DuckDB extension fetch 404s.
 #
-# The crate vendors released DuckDB 2.0.0 verbatim: its `.duckdb-release` pins
-# `DUCKDB_RELEASE_COMMIT=d54cbbe3df17e8e5ce68312f483b4155836112aa`, which is the
-# `v2.0.0` tag's own commit (`git compare d54cbbe3df...v2.0.0` → identical), and
-# `DUCKDB_RELEASE_VERSION=v2.0.0`. What it does not do is pass that label to the
-# compiler. DuckDB's own release build supplies it as `DUCKDB_EXPLICIT_VERSION`
-# (cmake) and `libduckdb-sys` only wires that up on the `bundled-cmake` path, so
-# a plain `bundled` build falls through to the dev string left in
-# `src/function/table/version/pragma_version.cpp` and reports
+# The crate vendors released DuckDB 2.0.1 verbatim: its `.duckdb-release` pins
+# `DUCKDB_RELEASE_COMMIT=8d78114e90a53823803660bf821f6073ac87da8c`, which is the
+# `v2.0.1` tag's own commit, and `DUCKDB_RELEASE_VERSION=v2.0.1`. What
+# `libduckdb-sys` does not do is pass that label to the compiler. DuckDB's own
+# release build supplies it as `DUCKDB_EXPLICIT_VERSION` (cmake) and
+# `libduckdb-sys` only wires that up on the `bundled-cmake` path. Under 2.0.0 a
+# plain `bundled` build therefore fell through to the dev string left in
+# `src/function/table/version/pragma_version.cpp` and reported
 # `v2.0.0-dev88614`.
+#
+# The 2.0.1 tarball happens to ship that file already stamped (`"v2.0.1"`,
+# patch `"1"`, source id `8d78114e90`), so this override is now redundant
+# rather than corrective — kept because it costs nothing when it agrees and the
+# next vendored tarball may not be stamped. It MUST agree with the pin: a stale
+# value here would make the engine report the wrong version and fetch the
+# wrong extension directory.
 #
 # That string is load-bearing, not cosmetic. DuckDB routes any version
 # containing `-dev` through `source_id` rather than the version tag when it
 # builds an extension URL, so the engine asks
-# `extensions.duckdb.org/d54cbbe3df/<platform>/…` — which does not exist, while
-# `/v2.0.0/` carries every extension `BAKED_EXTENSIONS` names. That is the whole
+# `extensions.duckdb.org/<source_id>/<platform>/…` — which does not exist, while
+# `/v2.0.1/` carries every extension `BAKED_EXTENSIONS` names. That is the whole
 # of the breakage #338 merged red: 18 dedupe-core tests, the DuckLake e2e, the
 # 50k scale goldens and the `er-api` image bake, all `HTTP 404`, none a logic
 # failure.
 #
 # All four version macros in `pragma_version.cpp` are `#ifndef`-guarded, so
 # defining two of them here supplies the missing label without patching the
-# vendored source. `DUCKDB_SOURCE_ID` is already `d54cbbe3df` and correct —
+# vendored source. `DUCKDB_SOURCE_ID` is already `8d78114e90` and correct —
 # that *is* the release commit — and MAJOR/MINOR are already 2 and 0.
 #
 # `CXXFLAGS` is the hook because the bundled sources go through `cc::Build` with
@@ -45,4 +52,4 @@
 # itself (duckdb-rs has since added a `DUCKDB_VERSION` env hook on `main`, but
 # only for `bundled-cmake`, which needs a cmake this repo's build image lacks).
 [env]
-CXXFLAGS = "-DDUCKDB_VERSION=\"v2.0.0\" -DDUCKDB_PATCH_VERSION=\"0\""
+CXXFLAGS = "-DDUCKDB_VERSION=\"v2.0.1\" -DDUCKDB_PATCH_VERSION=\"1\""
