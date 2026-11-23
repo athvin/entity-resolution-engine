@@ -121,7 +121,7 @@ pub fn tenant_state(
 /// # Errors
 /// Propagates the upsert error.
 pub async fn record_tenant_state(
-    client: &tokio_postgres::Client,
+    client: &impl tokio_postgres::GenericClient,
     org_id: &str,
     dataset_id: Option<&str>,
     status: &str,

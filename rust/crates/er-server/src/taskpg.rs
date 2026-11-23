@@ -206,10 +206,26 @@ pub async fn fail_or_retry_task(
     task_instance_id: &str,
     failure: &TaskFailure<'_>,
 ) -> Result<(Option<TaskInstance>, Option<TaskInstance>), PgError> {
-    let truncated: Option<String> = failure.error_detail.map(|d| d.chars().take(2000).collect());
     let tx = client.transaction().await?;
+    let (archived, successor) = fail_or_retry_task_in(&tx, task_instance_id, failure).await?;
+    tx.commit().await?;
+    note_settled(archived.as_ref(), successor.as_ref());
+    Ok((archived, successor))
+}
+
+/// The archive + successor core of [`fail_or_retry_task`], in the caller's
+/// transaction: a settlement and whatever dependent evidence the caller
+/// composes in commit — or roll back — together, so dependent reporting can
+/// never observe one without the other (§4.5). Metrics stay post-commit with
+/// the caller, via [`note_settled`].
+pub async fn fail_or_retry_task_in(
+    tx: &tokio_postgres::Transaction<'_>,
+    task_instance_id: &str,
+    failure: &TaskFailure<'_>,
+) -> Result<(Option<TaskInstance>, Option<TaskInstance>), PgError> {
+    let truncated: Option<String> = failure.error_detail.map(|d| d.chars().take(2000).collect());
     let archived = er_entities::task_instance::update::archive_try(
-        &tx,
+        tx,
         failure.terminal_state,
         failure.retryable,
         failure.exit_code,
@@ -224,7 +240,7 @@ pub async fn fail_or_retry_task(
     .next();
     let successor = match &archived {
         Some(row) if row.live.is_none() => er_entities::task_instance::create::insert_retry_try(
-            &tx,
+            tx,
             failure.escalate,
             failure.backoff.1,
             failure.backoff.0,
@@ -235,8 +251,12 @@ pub async fn fail_or_retry_task(
         .next(),
         _ => None,
     };
-    tx.commit().await?;
-    if let Some(row) = &archived {
+    Ok((archived, successor))
+}
+
+/// The settlement metrics, run by the caller once the settlement has committed.
+pub fn note_settled(archived: Option<&TaskInstance>, successor: Option<&TaskInstance>) {
+    if let Some(row) = archived {
         crate::ops::task_completed(row);
         if successor.is_some() && row.kind == "pod" {
             er_obs::operational::task_retried(er_obs::operational::Class::from_value(
@@ -244,7 +264,6 @@ pub async fn fail_or_retry_task(
             ));
         }
     }
-    Ok((archived, successor))
 }
 
 /// What a clear did (§5.4).
