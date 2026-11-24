@@ -108,19 +108,11 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "active_config_version": {},
-                    "drop_root": {},
-                    "id": {},
-                    "name": {},
-                    "resources": {},
-                    "state": {}
-                  }
+                  "$ref": "#/components/schemas/OrgView"
                 }
               }
             }
@@ -279,8 +271,26 @@
                   "client_secret"
                 ],
                 "properties": {
-                  "api_version": {},
-                  "auth_kind": {},
+                  "api_version": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "auth_kind": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
                   "client_id": {
                     "type": "string"
                   },
@@ -427,10 +437,15 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DatasetView"
+                  }
+                }
               }
             }
           },
@@ -486,10 +501,12 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetView"
+                }
               }
             }
           },
@@ -547,7 +564,16 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "display_name": {}
+                  "display_name": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
                 }
               }
             }
@@ -556,10 +582,12 @@
         },
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetView"
+                }
               }
             }
           },
@@ -711,7 +739,16 @@
                   "kind": {
                     "type": "string"
                   },
-                  "note": {}
+                  "note": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
                 }
               }
             }
@@ -723,7 +760,27 @@
             "description": "Successful response. Payload types are described only at envelope granularity.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "action_id": {},
+                        "pending_until_next_reconcile": {},
+                        "status": {}
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "action_id": {},
+                        "apply_job": {},
+                        "pending_until_next_reconcile": {},
+                        "status": {}
+                      }
+                    }
+                  ]
+                }
               }
             }
           },
@@ -1534,7 +1591,16 @@
                   "kind": {
                     "type": "string"
                   },
-                  "note": {},
+                  "note": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
                   "parent_entity_id": {
                     "type": "string"
                   }
@@ -1913,7 +1979,28 @@
             "description": "Successful response. Payload types are described only at envelope granularity.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "action_ids": {},
+                        "pairs": {},
+                        "pending_until_next_reconcile": {},
+                        "status": {}
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "action_ids": {},
+                        "apply_job": {},
+                        "pairs": {},
+                        "status": {}
+                      }
+                    }
+                  ]
+                }
               }
             }
           },
@@ -2550,7 +2637,16 @@
                   "priority": {
                     "type": "integer"
                   },
-                  "segment": {}
+                  "segment": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
                 }
               }
             }
@@ -2916,8 +3012,26 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "resource_class": {},
-                  "retries": {}
+                  "resource_class": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "retries": {
+                    "anyOf": [
+                      {
+                        "type": "integer"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
                 },
                 "additionalProperties": false
               }
@@ -3127,15 +3241,42 @@
                   "verdict"
                 ],
                 "properties": {
-                  "model_version": {},
-                  "note": {},
+                  "model_version": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "note": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
                   "rec_a_key": {
                     "type": "string"
                   },
                   "rec_b_key": {
                     "type": "string"
                   },
-                  "score_at_label": {},
+                  "score_at_label": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
                   "verdict": {
                     "type": "string"
                   }
@@ -3394,7 +3535,16 @@
                         "entity_id": {
                           "type": "string"
                         },
-                        "value": {}
+                        "value": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
                       }
                     }
                   }
@@ -3682,7 +3832,16 @@
                         "clear": {
                           "type": "boolean"
                         },
-                        "value": {}
+                        "value": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
                       }
                     }
                   },
@@ -3692,7 +3851,16 @@
                       "type": "string"
                     }
                   },
-                  "review_id": {}
+                  "review_id": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
                 }
               }
             }
@@ -3957,9 +4125,34 @@
                   "model_version_label": {
                     "type": "string"
                   },
-                  "name": {},
-                  "provenance": {},
-                  "tf_snapshot_id": {}
+                  "name": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "provenance": {
+                    "anyOf": [
+                      {},
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "tf_snapshot_id": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
                 },
                 "additionalProperties": false
               }
@@ -4521,7 +4714,16 @@
                   "apply_now": {
                     "type": "boolean"
                   },
-                  "record_key": {},
+                  "record_key": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
                   "record_keys": {
                     "type": "array",
                     "items": {
@@ -4539,7 +4741,31 @@
             "description": "Successful response. Payload types are described only at envelope granularity.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "action_id": {},
+                        "action_ids": {},
+                        "count": {},
+                        "pending_until_next_reconcile": {},
+                        "status": {}
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "action_id": {},
+                        "action_ids": {},
+                        "apply_job": {},
+                        "count": {},
+                        "pending_until_next_reconcile": {},
+                        "status": {}
+                      }
+                    }
+                  ]
+                }
               }
             }
           },
@@ -4691,7 +4917,16 @@
                   "apply_now": {
                     "type": "boolean"
                   },
-                  "record_key": {},
+                  "record_key": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
                   "record_keys": {
                     "type": "array",
                     "items": {
@@ -4709,7 +4944,31 @@
             "description": "Successful response. Payload types are described only at envelope granularity.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "action_id": {},
+                        "action_ids": {},
+                        "count": {},
+                        "pending_until_next_reconcile": {},
+                        "status": {}
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "action_id": {},
+                        "action_ids": {},
+                        "apply_job": {},
+                        "count": {},
+                        "pending_until_next_reconcile": {},
+                        "status": {}
+                      }
+                    }
+                  ]
+                }
               }
             }
           },
@@ -4772,7 +5031,16 @@
                   "apply_now": {
                     "type": "boolean"
                   },
-                  "record_key": {},
+                  "record_key": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
                   "record_keys": {
                     "type": "array",
                     "items": {
@@ -4790,7 +5058,31 @@
             "description": "Successful response. Payload types are described only at envelope granularity.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "action_id": {},
+                        "action_ids": {},
+                        "count": {},
+                        "pending_until_next_reconcile": {},
+                        "status": {}
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "action_id": {},
+                        "action_ids": {},
+                        "apply_job": {},
+                        "count": {},
+                        "pending_until_next_reconcile": {},
+                        "status": {}
+                      }
+                    }
+                  ]
+                }
               }
             }
           },
@@ -4853,7 +5145,16 @@
                   "apply_now": {
                     "type": "boolean"
                   },
-                  "record_key": {},
+                  "record_key": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
                   "record_keys": {
                     "type": "array",
                     "items": {
@@ -4871,7 +5172,31 @@
             "description": "Successful response. Payload types are described only at envelope granularity.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "action_id": {},
+                        "action_ids": {},
+                        "count": {},
+                        "pending_until_next_reconcile": {},
+                        "status": {}
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "action_id": {},
+                        "action_ids": {},
+                        "apply_job": {},
+                        "count": {},
+                        "pending_until_next_reconcile": {},
+                        "status": {}
+                      }
+                    }
+                  ]
+                }
               }
             }
           },
@@ -4951,7 +5276,30 @@
             "description": "Successful response. Payload types are described only at envelope granularity.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "action_ids": {},
+                        "entity_id": {},
+                        "pairs": {},
+                        "pending_until_next_reconcile": {},
+                        "status": {}
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "action_ids": {},
+                        "apply_job": {},
+                        "entity_id": {},
+                        "pairs": {},
+                        "status": {}
+                      }
+                    }
+                  ]
+                }
               }
             }
           },
@@ -5014,7 +5362,16 @@
                   "apply_now": {
                     "type": "boolean"
                   },
-                  "record_key": {},
+                  "record_key": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
                   "record_keys": {
                     "type": "array",
                     "items": {
@@ -5032,7 +5389,31 @@
             "description": "Successful response. Payload types are described only at envelope granularity.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "action_id": {},
+                        "action_ids": {},
+                        "count": {},
+                        "pending_until_next_reconcile": {},
+                        "status": {}
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "action_id": {},
+                        "action_ids": {},
+                        "apply_job": {},
+                        "count": {},
+                        "pending_until_next_reconcile": {},
+                        "status": {}
+                      }
+                    }
+                  ]
+                }
               }
             }
           },
@@ -5095,7 +5476,16 @@
                   "apply_now": {
                     "type": "boolean"
                   },
-                  "record_key": {},
+                  "record_key": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
                   "record_keys": {
                     "type": "array",
                     "items": {
@@ -5113,7 +5503,31 @@
             "description": "Successful response. Payload types are described only at envelope granularity.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "action_id": {},
+                        "action_ids": {},
+                        "count": {},
+                        "pending_until_next_reconcile": {},
+                        "status": {}
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "action_id": {},
+                        "action_ids": {},
+                        "apply_job": {},
+                        "count": {},
+                        "pending_until_next_reconcile": {},
+                        "status": {}
+                      }
+                    }
+                  ]
+                }
               }
             }
           },
@@ -5176,8 +5590,26 @@
                   "apply_now": {
                     "type": "boolean"
                   },
-                  "attribute": {},
-                  "record_key": {},
+                  "attribute": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "record_key": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
                   "record_keys": {
                     "type": "array",
                     "items": {
@@ -5195,7 +5627,31 @@
             "description": "Successful response. Payload types are described only at envelope granularity.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "action_id": {},
+                        "action_ids": {},
+                        "count": {},
+                        "pending_until_next_reconcile": {},
+                        "status": {}
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "action_id": {},
+                        "action_ids": {},
+                        "apply_job": {},
+                        "count": {},
+                        "pending_until_next_reconcile": {},
+                        "status": {}
+                      }
+                    }
+                  ]
+                }
               }
             }
           },
@@ -5258,8 +5714,26 @@
                   "apply_now": {
                     "type": "boolean"
                   },
-                  "attribute": {},
-                  "record_key": {},
+                  "attribute": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "record_key": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
                   "record_keys": {
                     "type": "array",
                     "items": {
@@ -5277,7 +5751,31 @@
             "description": "Successful response. Payload types are described only at envelope granularity.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "action_id": {},
+                        "action_ids": {},
+                        "count": {},
+                        "pending_until_next_reconcile": {},
+                        "status": {}
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "action_id": {},
+                        "action_ids": {},
+                        "apply_job": {},
+                        "count": {},
+                        "pending_until_next_reconcile": {},
+                        "status": {}
+                      }
+                    }
+                  ]
+                }
               }
             }
           },
@@ -5341,7 +5839,16 @@
                   "record"
                 ],
                 "properties": {
-                  "limit": {},
+                  "limit": {
+                    "anyOf": [
+                      {
+                        "type": "integer"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
                   "record": {},
                   "source": {
                     "type": "string"
@@ -6145,7 +6652,14 @@
                   "kind": {
                     "type": "string"
                   },
-                  "params": {}
+                  "params": {
+                    "anyOf": [
+                      {},
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
                 }
               }
             }
@@ -6673,7 +7187,22 @@
             "description": "Successful response. Payload types are described only at envelope granularity.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "applied": {}
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "removed": {}
+                      }
+                    }
+                  ]
+                }
               }
             }
           },
@@ -6835,7 +7364,22 @@
             "description": "Successful response. Payload types are described only at envelope granularity.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "applied": {}
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "removed": {}
+                      }
+                    }
+                  ]
+                }
               }
             }
           },
@@ -6944,8 +7488,26 @@
                   "name"
                 ],
                 "properties": {
-                  "apply_min_role": {},
-                  "description": {},
+                  "apply_min_role": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "description": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
                   "name": {
                     "type": "string"
                   }
@@ -7135,7 +7697,16 @@
                       "type": "string"
                     }
                   },
-                  "secret": {},
+                  "secret": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
                   "url": {
                     "type": "string"
                   }
@@ -8126,6 +8697,83 @@
           }
         }
       },
+      "DatasetCreated": {
+        "type": "object",
+        "description": "A dataset created directly: `POST /v1/orgs/{org}/datasets` (201).",
+        "required": [
+          "name",
+          "state"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          }
+        }
+      },
+      "DatasetProvisioning": {
+        "type": "object",
+        "description": "A dataset accepted for provisioning: `POST /v1/orgs/{org}/datasets` (202).",
+        "required": [
+          "name",
+          "state",
+          "job_id"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          }
+        }
+      },
+      "DatasetView": {
+        "type": "object",
+        "description": "One dataset: the body of `GET`/`PATCH /v1/orgs/{org}/datasets/{ds}` and an\nitem of `GET /v1/orgs/{org}/datasets`.",
+        "required": [
+          "name",
+          "entity_type",
+          "state",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "active_config_version": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "entity_type": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        }
+      },
       "EntityLink": {
         "type": "object",
         "description": "A relationship between two resolved entities that is NOT a merge: a household, a corporate hierarchy, a 'these are related but distinct' note. The product has one answer to 'these two records belong together' — merge them — and that answer is wrong for a husband and wife at one address, or a subsidiary and its parent. Merging them loses the distinction and no later run can recover it; refusing to record anything loses the relationship. A link records it without collapsing either side.",
@@ -8993,6 +9641,148 @@
             "type": "string",
             "format": "date-time",
             "description": "Wall-clock last-write time (database default; advanced by mutations once the entity migrates)."
+          }
+        }
+      },
+      "OrgCreated": {
+        "type": "object",
+        "description": "An org registered without auto-provisioning: the other body of `POST /v1/orgs`.",
+        "required": [
+          "name",
+          "starter_model"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "starter_model": {
+            "description": "What seeding the starter model did: `seeded` plus a reason or the version."
+          }
+        }
+      },
+      "OrgItem": {
+        "type": "object",
+        "description": "One org in the operator's registry: an item of `GET /v1/orgs`.",
+        "required": [
+          "id",
+          "name",
+          "state",
+          "created_at"
+        ],
+        "properties": {
+          "active_config_version": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          }
+        }
+      },
+      "OrgProvisioned": {
+        "type": "object",
+        "description": "An org being provisioned, with the admin key shown once: the body of\n`POST /v1/orgs` when auto-provisioning is on (#864 batch 2). Each\nstruct below declares its fields in the order of the `json!` literal it\nreplaced, which is the order the envelope ledger records.",
+        "required": [
+          "name",
+          "config_version",
+          "state",
+          "job_id",
+          "admin_key_id",
+          "admin_key"
+        ],
+        "properties": {
+          "admin_key": {
+            "type": "string"
+          },
+          "admin_key_id": {
+            "type": "string"
+          },
+          "config_version": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "job_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "tenant": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "OrgResources": {
+        "type": "object",
+        "description": "The DuckDB knobs an org's env sets, each `null` when unset.",
+        "properties": {
+          "duckdb_memory_limit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "duckdb_threads": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          }
+        }
+      },
+      "OrgView": {
+        "type": "object",
+        "description": "An org's detail: the body of `GET /v1/orgs/{org}`.",
+        "required": [
+          "id",
+          "name",
+          "state",
+          "resources"
+        ],
+        "properties": {
+          "active_config_version": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "drop_root": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "resources": {
+            "$ref": "#/components/schemas/OrgResources"
+          },
+          "state": {
+            "type": "string"
           }
         }
       },

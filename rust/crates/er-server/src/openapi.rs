@@ -71,6 +71,14 @@ pub struct ApiDoc;
     crate::TaskList,
     crate::ResumeAccepted,
     crate::ClearAccepted,
+    crate::OrgProvisioned,
+    crate::OrgCreated,
+    crate::OrgItem,
+    crate::OrgView,
+    crate::OrgResources,
+    crate::DatasetView,
+    crate::DatasetProvisioning,
+    crate::DatasetCreated,
 )))]
 pub struct ResponseDoc;
 
@@ -196,7 +204,15 @@ fn prepare_utoipa_schema(value: &mut serde_json::Value) {
     if schema.contains_key("$ref") {
         return;
     }
-    schema.entry("type").or_insert(serde_json::Value::Null);
+    // A combinator node must stay typeless: with the `type: null` placeholder
+    // utoipa reads `{anyOf: […]}` as an untyped object and drops the variants,
+    // which is how every response union was published as `{}` until #864.
+    let combinator = ["anyOf", "oneOf", "allOf"]
+        .iter()
+        .any(|key| schema.contains_key(*key));
+    if !combinator {
+        schema.entry("type").or_insert(serde_json::Value::Null);
+    }
     if let Some(properties) = schema
         .get_mut("properties")
         .and_then(serde_json::Value::as_object_mut)
@@ -480,6 +496,24 @@ mod tests {
     }
 
     #[test]
+    fn response_unions_survive_into_the_document() {
+        // Until #864 a `{anyOf: […]}` response lost its variants in the utoipa
+        // round trip and was published as `{}`. A handler with two typed
+        // success bodies must document both.
+        let doc: serde_json::Value =
+            serde_json::from_str(&openapi_json(Audience::Internal)).unwrap();
+        let schema = &doc["paths"]["/v1/orgs/{org}/datasets"]["post"]["responses"]["2XX"]["content"]
+            ["application/json"]["schema"];
+        assert_eq!(
+            schema,
+            &serde_json::json!({"anyOf": [
+                {"$ref": "#/components/schemas/DatasetProvisioning"},
+                {"$ref": "#/components/schemas/DatasetCreated"},
+            ]})
+        );
+    }
+
+    #[test]
     fn get_responses_agree_with_every_committed_envelope_class() {
         let doc: serde_json::Value =
             serde_json::from_str(&openapi_json(Audience::Internal)).unwrap();
@@ -511,8 +545,9 @@ mod tests {
             let resolved = component(schema).unwrap_or_else(|| schema.clone());
             let schema = &resolved;
             match class {
-                // A typed bare value is its entity component, or an array of it.
-                "bare" if typed.is_some() => {}
+                // A typed bare value is its component, or an array of it; a
+                // `scalar` was an unresolved typed value, which now resolves.
+                "bare" | "scalar" if typed.is_some() => {}
                 "bare" | "scalar" => assert_eq!(schema, &serde_json::json!({}), "{route}"),
                 "wrapped" => assert!(
                     schema["properties"]

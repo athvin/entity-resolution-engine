@@ -31,11 +31,11 @@ The decision for every row is **register**, with no retained backlog exception.
 
 Both OpenAPI audiences include these components. Public audience filtering
 selects operations; it does not convert every response into a component
-reference. At the #862 reconciliation, responses remain envelope-level and
-neither committed document contains a `$ref`. Reference-resolution checks alone
-therefore provide no evidence of typed payload coverage. That work belongs to
-[#863](https://github.com/athvin/entity-resolution-engine/issues/863) and
-[#864](https://github.com/athvin/entity-resolution-engine/issues/864).
+reference. At the #862 reconciliation no committed document contained a
+`$ref`. [#864](https://github.com/athvin/entity-resolution-engine/issues/864)
+now types responses one resource family at a time, so a `$ref` shows that the
+handler serializes that type. It does not show that every operation is typed:
+count the operations without one before claiming coverage.
 
 Before referencing a component from a typed response, compare it with what the
 handler actually serializes. In particular:

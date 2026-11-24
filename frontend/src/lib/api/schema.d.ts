@@ -2182,6 +2182,31 @@ export interface components {
              */
             updated_at: string;
         };
+        /** @description A dataset created directly: `POST /v1/orgs/{org}/datasets` (201). */
+        DatasetCreated: {
+            name: string;
+            state: string;
+        };
+        /** @description A dataset accepted for provisioning: `POST /v1/orgs/{org}/datasets` (202). */
+        DatasetProvisioning: {
+            job_id: string;
+            name: string;
+            state: string;
+        };
+        /**
+         * @description One dataset: the body of `GET`/`PATCH /v1/orgs/{org}/datasets/{ds}` and an
+         *     item of `GET /v1/orgs/{org}/datasets`.
+         */
+        DatasetView: {
+            /** Format: int64 */
+            active_config_version?: number | null;
+            created_at: string;
+            display_name?: string | null;
+            entity_type: string;
+            name: string;
+            state: string;
+            updated_at: string;
+        };
         /** @description A relationship between two resolved entities that is NOT a merge: a household, a corporate hierarchy, a 'these are related but distinct' note. The product has one answer to 'these two records belong together' — merge them — and that answer is wrong for a husband and wife at one address, or a subsidiary and its parent. Merging them loses the distinction and no later run can recover it; refusing to record anything loses the relationship. A link records it without collapsing either side. */
         EntityLink: {
             /** @description The entity on the member side — the person in the household, the subsidiary. */
@@ -2633,6 +2658,53 @@ export interface components {
              * @description Wall-clock last-write time (database default; advanced by mutations once the entity migrates).
              */
             updated_at: string;
+        };
+        /** @description An org registered without auto-provisioning: the other body of `POST /v1/orgs`. */
+        OrgCreated: {
+            name: string;
+            /** @description What seeding the starter model did: `seeded` plus a reason or the version. */
+            starter_model: unknown;
+        };
+        /** @description One org in the operator's registry: an item of `GET /v1/orgs`. */
+        OrgItem: {
+            /** Format: int64 */
+            active_config_version?: number | null;
+            created_at: string;
+            id: string;
+            name: string;
+            state: string;
+        };
+        /**
+         * @description An org being provisioned, with the admin key shown once: the body of
+         *     `POST /v1/orgs` when auto-provisioning is on (#864 batch 2). Each
+         *     struct below declares its fields in the order of the `json!` literal it
+         *     replaced, which is the order the envelope ledger records.
+         */
+        OrgProvisioned: {
+            admin_key: string;
+            admin_key_id: string;
+            /** Format: int64 */
+            config_version: number;
+            job_id: string;
+            name: string;
+            state: string;
+            tenant?: string | null;
+        };
+        /** @description The DuckDB knobs an org's env sets, each `null` when unset. */
+        OrgResources: {
+            duckdb_memory_limit?: string | null;
+            /** Format: int64 */
+            duckdb_threads?: number | null;
+        };
+        /** @description An org's detail: the body of `GET /v1/orgs/{org}`. */
+        OrgView: {
+            /** Format: int64 */
+            active_config_version?: number | null;
+            drop_root?: string | null;
+            id: string;
+            name: string;
+            resources: components["schemas"]["OrgResources"];
+            state: string;
         };
         /** @description A human (or model) verdict on one candidate pair — the training signal the engine has always been able to learn from and never had. One row per (org, pair): a re-label corrects the previous verdict rather than stacking another. */
         PairLabel: {
@@ -3315,7 +3387,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    org?: unknown;
+                    org?: string | null;
                     params?: {
                         [key: string]: unknown;
                     };
@@ -3392,17 +3464,17 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    counters?: unknown;
-                    error_class?: unknown;
-                    error_detail?: unknown;
-                    exit_code?: unknown;
-                    outcome?: unknown;
-                    output?: unknown;
+                    counters?: unknown | null;
+                    error_class?: string | null;
+                    error_detail?: string | null;
+                    exit_code?: number | null;
+                    outcome?: string | null;
+                    output?: unknown | null;
                     pod_uid: string;
-                    snapshot_end?: unknown;
-                    snapshot_start?: unknown;
+                    snapshot_end?: number | null;
+                    snapshot_start?: number | null;
                     state: string;
-                    termination_reason?: unknown;
+                    termination_reason?: string | null;
                 };
             };
         };
@@ -3413,7 +3485,10 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": unknown | {
+                        archived?: unknown;
+                        retry?: unknown;
+                    };
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -3441,7 +3516,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    counters?: unknown;
+                    counters?: unknown | null;
                     pod_uid: string;
                 };
             };
@@ -3481,15 +3556,15 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    binding_generation?: unknown;
-                    commit?: unknown;
+                    binding_generation?: number | null;
+                    commit?: boolean | null;
                     id: string;
-                    namespace?: unknown;
+                    namespace?: string | null;
                     op: string;
-                    phase?: unknown;
-                    pod_uid?: unknown;
-                    request_id?: unknown;
-                    session_id?: unknown;
+                    phase?: string | null;
+                    pod_uid?: string | null;
+                    request_id?: string | null;
+                    session_id?: string | null;
                 };
             };
         };
@@ -3530,10 +3605,10 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    image_digest?: unknown;
+                    image_digest?: string | null;
                     k8s_job_name: string;
-                    node_name?: unknown;
-                    pod_name?: unknown;
+                    node_name?: string | null;
+                    pod_name?: string | null;
                     pod_uid: string;
                 };
             };
@@ -3601,13 +3676,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["OrgItem"][];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -3633,25 +3708,25 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    config_path?: unknown;
-                    drop_root?: unknown;
+                    config_path?: string | null;
+                    drop_root?: string | null;
                     env?: {
                         [key: string]: string;
                     };
                     name: string;
-                    s3_ingest_bucket?: unknown;
-                    s3_ingest_prefix?: unknown;
+                    s3_ingest_bucket?: string | null;
+                    s3_ingest_prefix?: string | null;
                 };
             };
         };
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["OrgProvisioned"] | components["schemas"]["OrgCreated"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -3678,20 +3753,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        active_config_version?: unknown;
-                        drop_root?: unknown;
-                        id?: unknown;
-                        name?: unknown;
-                        resources?: unknown;
-                        state?: unknown;
-                    };
+                    "application/json": components["schemas"]["OrgView"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -3864,8 +3932,8 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    api_version?: unknown;
-                    auth_kind?: unknown;
+                    api_version?: string | null;
+                    auth_kind?: string | null;
                     client_id: string;
                     client_secret: string;
                     instance_url: string;
@@ -3950,13 +4018,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["DatasetView"][];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -3984,27 +4052,27 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    config_path?: unknown;
-                    display_name?: unknown;
-                    drop_root?: unknown;
-                    entity_type?: unknown;
+                    config_path?: string | null;
+                    display_name?: string | null;
+                    drop_root?: string | null;
+                    entity_type?: string | null;
                     env?: {
                         [key: string]: string;
                     };
                     name: string;
-                    s3_ingest_bucket?: unknown;
-                    s3_ingest_prefix?: unknown;
+                    s3_ingest_bucket?: string | null;
+                    s3_ingest_prefix?: string | null;
                 };
             };
         };
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["DatasetProvisioning"] | components["schemas"]["DatasetCreated"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -4032,13 +4100,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["DatasetView"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -4067,18 +4135,18 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    display_name?: unknown;
+                    display_name?: string | null;
                 };
             };
         };
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["DatasetView"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -4148,7 +4216,7 @@ export interface operations {
                     apply_now?: boolean;
                     b: string;
                     kind: string;
-                    note?: unknown;
+                    note?: string | null;
                 };
             };
         };
@@ -4159,7 +4227,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": {
+                        action_id?: unknown;
+                        pending_until_next_reconcile?: unknown;
+                        status?: unknown;
+                    } | {
+                        action_id?: unknown;
+                        apply_job?: unknown;
+                        pending_until_next_reconcile?: unknown;
+                        status?: unknown;
+                    };
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -4599,7 +4676,7 @@ export interface operations {
                 "application/json": {
                     child_entity_id: string;
                     kind: string;
-                    note?: unknown;
+                    note?: string | null;
                     parent_entity_id: string;
                 };
             };
@@ -4799,7 +4876,17 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": {
+                        action_ids?: unknown;
+                        pairs?: unknown;
+                        pending_until_next_reconcile?: unknown;
+                        status?: unknown;
+                    } | {
+                        action_ids?: unknown;
+                        apply_job?: unknown;
+                        pairs?: unknown;
+                        status?: unknown;
+                    };
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -5136,7 +5223,7 @@ export interface operations {
                 "application/json": {
                     kind: string;
                     priority?: number;
-                    segment?: unknown;
+                    segment?: string | null;
                 };
             };
         };
@@ -5318,8 +5405,8 @@ export interface operations {
         requestBody?: {
             content: {
                 "application/json": {
-                    resource_class?: unknown;
-                    retries?: unknown;
+                    resource_class?: string | null;
+                    retries?: number | null;
                 };
             };
         };
@@ -5435,11 +5522,11 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    model_version?: unknown;
-                    note?: unknown;
+                    model_version?: string | null;
+                    note?: string | null;
                     rec_a_key: string;
                     rec_b_key: string;
-                    score_at_label?: unknown;
+                    score_at_label?: number | null;
                     verdict: string;
                 };
             };
@@ -5567,7 +5654,7 @@ export interface operations {
                         attribute: string;
                         clear?: boolean;
                         entity_id: string;
-                        value?: unknown;
+                        value?: string | null;
                     }[];
                 };
             };
@@ -5721,10 +5808,10 @@ export interface operations {
                     overrides?: {
                         attribute: string;
                         clear?: boolean;
-                        value?: unknown;
+                        value?: string | null;
                     }[];
                     records: string[];
-                    review_id?: unknown;
+                    review_id?: string | null;
                 };
             };
         };
@@ -5871,9 +5958,9 @@ export interface operations {
                 "application/json": {
                     model_json: string;
                     model_version_label: string;
-                    name?: unknown;
-                    provenance?: unknown;
-                    tf_snapshot_id?: unknown;
+                    name?: string | null;
+                    provenance?: unknown | null;
+                    tf_snapshot_id?: string | null;
                 };
             };
         };
@@ -6172,7 +6259,7 @@ export interface operations {
             content: {
                 "application/json": {
                     apply_now?: boolean;
-                    record_key?: unknown;
+                    record_key?: string | null;
                     record_keys?: string[];
                 };
             };
@@ -6184,7 +6271,20 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": {
+                        action_id?: unknown;
+                        action_ids?: unknown;
+                        count?: unknown;
+                        pending_until_next_reconcile?: unknown;
+                        status?: unknown;
+                    } | {
+                        action_id?: unknown;
+                        action_ids?: unknown;
+                        apply_job?: unknown;
+                        count?: unknown;
+                        pending_until_next_reconcile?: unknown;
+                        status?: unknown;
+                    };
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -6258,7 +6358,7 @@ export interface operations {
             content: {
                 "application/json": {
                     apply_now?: boolean;
-                    record_key?: unknown;
+                    record_key?: string | null;
                     record_keys?: string[];
                 };
             };
@@ -6270,7 +6370,20 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": {
+                        action_id?: unknown;
+                        action_ids?: unknown;
+                        count?: unknown;
+                        pending_until_next_reconcile?: unknown;
+                        status?: unknown;
+                    } | {
+                        action_id?: unknown;
+                        action_ids?: unknown;
+                        apply_job?: unknown;
+                        count?: unknown;
+                        pending_until_next_reconcile?: unknown;
+                        status?: unknown;
+                    };
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -6300,7 +6413,7 @@ export interface operations {
             content: {
                 "application/json": {
                     apply_now?: boolean;
-                    record_key?: unknown;
+                    record_key?: string | null;
                     record_keys?: string[];
                 };
             };
@@ -6312,7 +6425,20 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": {
+                        action_id?: unknown;
+                        action_ids?: unknown;
+                        count?: unknown;
+                        pending_until_next_reconcile?: unknown;
+                        status?: unknown;
+                    } | {
+                        action_id?: unknown;
+                        action_ids?: unknown;
+                        apply_job?: unknown;
+                        count?: unknown;
+                        pending_until_next_reconcile?: unknown;
+                        status?: unknown;
+                    };
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -6342,7 +6468,7 @@ export interface operations {
             content: {
                 "application/json": {
                     apply_now?: boolean;
-                    record_key?: unknown;
+                    record_key?: string | null;
                     record_keys?: string[];
                 };
             };
@@ -6354,7 +6480,20 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": {
+                        action_id?: unknown;
+                        action_ids?: unknown;
+                        count?: unknown;
+                        pending_until_next_reconcile?: unknown;
+                        status?: unknown;
+                    } | {
+                        action_id?: unknown;
+                        action_ids?: unknown;
+                        apply_job?: unknown;
+                        count?: unknown;
+                        pending_until_next_reconcile?: unknown;
+                        status?: unknown;
+                    };
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -6395,7 +6534,19 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": {
+                        action_ids?: unknown;
+                        entity_id?: unknown;
+                        pairs?: unknown;
+                        pending_until_next_reconcile?: unknown;
+                        status?: unknown;
+                    } | {
+                        action_ids?: unknown;
+                        apply_job?: unknown;
+                        entity_id?: unknown;
+                        pairs?: unknown;
+                        status?: unknown;
+                    };
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -6425,7 +6576,7 @@ export interface operations {
             content: {
                 "application/json": {
                     apply_now?: boolean;
-                    record_key?: unknown;
+                    record_key?: string | null;
                     record_keys?: string[];
                 };
             };
@@ -6437,7 +6588,20 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": {
+                        action_id?: unknown;
+                        action_ids?: unknown;
+                        count?: unknown;
+                        pending_until_next_reconcile?: unknown;
+                        status?: unknown;
+                    } | {
+                        action_id?: unknown;
+                        action_ids?: unknown;
+                        apply_job?: unknown;
+                        count?: unknown;
+                        pending_until_next_reconcile?: unknown;
+                        status?: unknown;
+                    };
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -6467,7 +6631,7 @@ export interface operations {
             content: {
                 "application/json": {
                     apply_now?: boolean;
-                    record_key?: unknown;
+                    record_key?: string | null;
                     record_keys?: string[];
                 };
             };
@@ -6479,7 +6643,20 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": {
+                        action_id?: unknown;
+                        action_ids?: unknown;
+                        count?: unknown;
+                        pending_until_next_reconcile?: unknown;
+                        status?: unknown;
+                    } | {
+                        action_id?: unknown;
+                        action_ids?: unknown;
+                        apply_job?: unknown;
+                        count?: unknown;
+                        pending_until_next_reconcile?: unknown;
+                        status?: unknown;
+                    };
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -6509,8 +6686,8 @@ export interface operations {
             content: {
                 "application/json": {
                     apply_now?: boolean;
-                    attribute?: unknown;
-                    record_key?: unknown;
+                    attribute?: string | null;
+                    record_key?: string | null;
                     record_keys?: string[];
                 };
             };
@@ -6522,7 +6699,20 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": {
+                        action_id?: unknown;
+                        action_ids?: unknown;
+                        count?: unknown;
+                        pending_until_next_reconcile?: unknown;
+                        status?: unknown;
+                    } | {
+                        action_id?: unknown;
+                        action_ids?: unknown;
+                        apply_job?: unknown;
+                        count?: unknown;
+                        pending_until_next_reconcile?: unknown;
+                        status?: unknown;
+                    };
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -6552,8 +6742,8 @@ export interface operations {
             content: {
                 "application/json": {
                     apply_now?: boolean;
-                    attribute?: unknown;
-                    record_key?: unknown;
+                    attribute?: string | null;
+                    record_key?: string | null;
                     record_keys?: string[];
                 };
             };
@@ -6565,7 +6755,20 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": {
+                        action_id?: unknown;
+                        action_ids?: unknown;
+                        count?: unknown;
+                        pending_until_next_reconcile?: unknown;
+                        status?: unknown;
+                    } | {
+                        action_id?: unknown;
+                        action_ids?: unknown;
+                        apply_job?: unknown;
+                        count?: unknown;
+                        pending_until_next_reconcile?: unknown;
+                        status?: unknown;
+                    };
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -6594,7 +6797,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    limit?: unknown;
+                    limit?: number | null;
                     record: unknown;
                     source: string;
                 };
@@ -7023,7 +7226,7 @@ export interface operations {
                 "application/json": {
                     cron: string;
                     kind: string;
-                    params?: unknown;
+                    params?: unknown | null;
                 };
             };
         };
@@ -7307,7 +7510,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": {
+                        applied?: unknown;
+                    } | {
+                        removed?: unknown;
+                    };
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -7386,7 +7593,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": {
+                        applied?: unknown;
+                    } | {
+                        removed?: unknown;
+                    };
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -7414,8 +7625,8 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    duckdb_memory_limit?: unknown;
-                    duckdb_threads?: unknown;
+                    duckdb_memory_limit?: string | null;
+                    duckdb_threads?: number | null;
                 };
             };
         };
@@ -7561,8 +7772,8 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    apply_min_role?: unknown;
-                    description?: unknown;
+                    apply_min_role?: string | null;
+                    description?: string | null;
                     name: string;
                 };
             };
@@ -7672,7 +7883,7 @@ export interface operations {
             content: {
                 "application/json": {
                     events?: string[];
-                    secret?: unknown;
+                    secret?: string | null;
                     url: string;
                 };
             };

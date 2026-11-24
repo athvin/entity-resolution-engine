@@ -211,14 +211,14 @@ pub fn classify_envelope(body: &str, source: &str) -> Result<Envelope, String> {
     Err("no Json(...), page_envelope(...) or object literal found".to_string())
 }
 
-/// Whether the first `Json` call serializes an entity wire value directly.
+/// Whether the first `Json` call serializes a typed value directly, with no
+/// wrapper key: a turbofish (`Json::<Vec<OrgItem>>(…)`) or an entity wire
+/// (`Json(NameWire::from(…))`).
 fn wire_value(body: &str) -> bool {
     // `find_call` returns the index just past the needle.
     if let Some(at) = find_call(body, "Json::<") {
-        return body[at..]
-            .split('>')
-            .next()
-            .is_some_and(|ty| ty.contains("Wire"));
+        let ty = body[at..].trim_start();
+        return ty.starts_with("Vec<") || ty.split('>').next().is_some_and(|t| t.ends_with("Wire"));
     }
     let Some(at) = find_call(body, "Json(") else {
         return false;
