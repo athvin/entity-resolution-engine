@@ -122,18 +122,28 @@ The operation contract is generated and gated, with deliberate limits:
   from that same derivation; it has no separate route allowlist. TypeScript still
   uses the complete internal document. OpenAPI 3.1 permits
   role names in a non-OAuth security requirement.
-- **Responses remain envelope-level.** Success uses `2XX`; bare and unresolved
-  typed JSON values stay unconstrained rather than guessing arrays from variable names.
-  Object envelopes name observed properties, pages describe items/cursor, and
-  Arrow uses its actual media type. Immediate `Json(LocalStruct { ... })`
-  constructors resolve fields through `struct_fields` using enclosing source;
-  declaration order determines the keys. This supports that parser's plain
-  multiline local structs. Known local declarations with unsupported syntax,
-  serialization attributes or conditional fields fail generation; variables,
-  helper-produced values and external types remain unresolved. Resolving keys
-  does not type their payloads. Local response helpers contribute write
-  envelopes. Typed payloads and query parameters remain later work; neither a
-  generated path nor its TypeScript type proves those details are complete.
+- **Responses are typed where the handler names a registered type, and
+  envelope-level elsewhere.** Typed responses are being converted resource family
+  by resource family (#864). When every success `Json(…)` a handler can return
+  names a registered component, the operation references it:
+  `Json(Name { … })`, `Json(Owner::from(…))`, `Json(NameWire::from(…))` →
+  `Name`, and `Json::<Vec<T>>(…)` → an array of `T`. Several typed bodies
+  become an `anyOf`. Local response helpers count as part of what the handler
+  returns. A handler that types some success bodies and not others **fails
+  generation**, rather than documenting part of what it returns. Response
+  structs that are not entities register on `ResponseDoc` in `openapi.rs`, not
+  on `ApiDoc`, so the entity-registration guards keep their meaning. Every
+  other operation stays envelope-level. Bare and unresolved values stay
+  unconstrained, object envelopes name observed keys, pages describe
+  items/cursor, and Arrow uses its actual media type. The envelope ledger
+  (`envelopes.json`) is classified independently and must not change when a
+  handler is typed. Declare a record struct's fields in the order the ledger
+  records, which is the order of the `json!` literal it replaces.
+- **A typed body is value-equal, not byte-equal.** The workspace's `serde_json`
+  has no `preserve_order`, so a `json!` object emits its keys sorted while a
+  struct emits declaration order. Prove each conversion by comparing parsed
+  values (`response_shape_tests` in `lib.rs`), and compare parsed values in
+  any test that pinned response bytes. Query parameters remain untyped (#865).
   The detail-shaped application error is documented separately from framework
   request-extractor and infrastructure rejections.
 - **No frontend module imports `schema.d.ts`.** `openapi-fetch` sits in
