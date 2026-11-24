@@ -113,10 +113,12 @@ impl Responses<'_, '_> {
         let syn::Expr::Path(path) = call.func.as_ref() else {
             return;
         };
-        let Some(name) = path.path.get_ident() else {
+        // One segment, generic arguments allowed: `Json::<Name>(value)` names
+        // its body by turbofish, which `get_ident` would reject.
+        let [segment] = path.path.segments.iter().collect::<Vec<_>>()[..] else {
             return;
         };
-        let name = name.to_string();
+        let name = segment.ident.to_string();
         if name == "Json" {
             let snippet = self.source.snippet(call);
             if !object_keys(snippet).iter().any(|key| key == "detail") {

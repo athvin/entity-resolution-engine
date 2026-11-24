@@ -2433,6 +2433,37 @@ pub fn assertions_list(
     }
 }
 
+/// One ingest-batch receipt: what a delivery did to the corpus.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, utoipa::ToSchema)]
+pub struct ImportReceipt {
+    pub id: String,
+    pub run_id: String,
+    pub source_system: String,
+    pub path: String,
+    pub new_count: i64,
+    pub changed_count: i64,
+    pub unchanged_count: i64,
+    pub tombstone_count: i64,
+    pub resurrected_count: i64,
+    pub full_refresh_keys: bool,
+    pub matched_count: Option<i64>,
+    pub review_count: Option<i64>,
+    pub unmatched_count: Option<i64>,
+    /// Naive lake text (`YYYY-MM-DD HH:MM:SS[.ffffff]`), not RFC 3339.
+    #[serde(serialize_with = "er_entities::batch::ser_duckdb_timestamp_opt")]
+    #[schema(value_type = Option<String>)]
+    pub screened_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Naive lake text (`YYYY-MM-DD HH:MM:SS[.ffffff]`), not RFC 3339.
+    #[serde(serialize_with = "er_entities::batch::ser_duckdb_timestamp")]
+    #[schema(value_type = String)]
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+item_from_row!(ImportReceipt, er_entities::ingest_batch::read::RecentRow, {
+    id, run_id, source_system, path, new_count, changed_count, unchanged_count,
+    tombstone_count, resurrected_count, full_refresh_keys, matched_count,
+    review_count, unmatched_count, screened_at, created_at,
+});
+
 /// The most recent ingest-batch receipts, newest first, capped like
 /// [`runs_list`]: a bare array, not a keyset page. Optional `source` filter.
 /// Empty if the `ingest_batches` table is absent.
@@ -2451,11 +2482,11 @@ pub fn imports_recent(
     snapshot: i64,
     source: Option<&str>,
     limit: i64,
-) -> Result<Vec<Value>, String> {
+) -> Result<Vec<ImportReceipt>, String> {
     let limit = limit.clamp(1, MAX_LIMIT);
     let source = source.filter(|s| !s.is_empty());
     match er_entities::ingest_batch::read::recent(session.connection(), snapshot, source, limit) {
-        Ok(rows) => Ok(rows_to_values(&rows)),
+        Ok(rows) => Ok(rows.into_iter().map(ImportReceipt::from).collect()),
         Err(e) => {
             let s = e.to_string();
             if is_missing_table(&s, "ingest_batches") {
@@ -3285,6 +3316,78 @@ pub fn profiled_standardized_columns(
         .collect())
 }
 
+/// One profiling finding; `column_name` is null for a corpus-level one.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, utoipa::ToSchema)]
+pub struct ProfileFinding {
+    pub code: String,
+    pub severity: String,
+    pub column_name: Option<String>,
+    pub message: String,
+    pub detail: Option<Value>,
+}
+
+/// One measured candidate blocking key, cheapest first.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, utoipa::ToSchema)]
+pub struct CandidateKeyItem {
+    pub key_columns: Vec<String>,
+    pub row_count: i64,
+    pub covered_rows: i64,
+    pub distinct_values: i64,
+    pub expected_pairs: i64,
+    pub largest_block_pairs: i64,
+    pub largest_block_rows: i64,
+    pub entropy_bits: f64,
+    pub pair_loss_from_nulls: f64,
+}
+
+/// The latest profile of one corpus stage.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, utoipa::ToSchema)]
+pub struct ProfileReport {
+    /// Always true.
+    pub profiled: bool,
+    pub profile_run_id: String,
+    pub subject: String,
+    pub source_system: String,
+    pub tier: i64,
+    pub data_snapshot: i64,
+    pub corpus_digest: String,
+    pub row_count: i64,
+    pub column_count: i64,
+    pub ingest_batch_id: Option<String>,
+    pub config_hash: Option<String>,
+    pub model_version: Option<String>,
+    /// Whether the figures come from a sample (then `sample_proportion` says
+    /// how much of the corpus it covered).
+    pub sampled: bool,
+    pub sample_proportion: Option<f64>,
+    pub sample_seed: Option<i64>,
+    pub duration_ms: i64,
+    pub captured_at: chrono::DateTime<chrono::Utc>,
+    /// One generated column-profile row per column. Value-bearing fields
+    /// (top values, examples) are redacted below Steward.
+    pub columns: Vec<Value>,
+    pub findings: Vec<ProfileFinding>,
+    /// Empty for a tier-1 run, which does not measure keys.
+    pub candidate_keys: Vec<CandidateKeyItem>,
+}
+
+/// Nothing has profiled this subject and tier yet.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, utoipa::ToSchema)]
+pub struct ProfileNotYet {
+    /// Always false.
+    pub profiled: bool,
+    pub subject: String,
+    pub tier: i64,
+}
+
+/// `GET …/profile`: the latest profile, or that there is none yet.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, utoipa::ToSchema)]
+#[serde(untagged)]
+pub enum Profile {
+    Report(Box<ProfileReport>),
+    NotYet(ProfileNotYet),
+}
+
 /// One corpus stage's profile: the run, every column's shape, and the findings.
 ///
 /// `include_values` gates every field that echoes a value **as stored** — see
@@ -3316,7 +3419,14 @@ pub fn profile(
     source_system: &str,
     tier: i64,
     include_values: bool,
-) -> Result<Value, String> {
+) -> Result<Profile, String> {
+    let not_yet = || {
+        Profile::NotYet(ProfileNotYet {
+            profiled: false,
+            subject: subject.to_string(),
+            tier,
+        })
+    };
     let runs = match er_entities::profile_run::read::latest(
         session.connection(),
         snapshot,
@@ -3327,13 +3437,11 @@ pub fn profile(
         Ok(rows) => rows,
         // The relation is absent until something profiles, and "not yet" is the
         // honest answer to the question rather than a failure.
-        Err(e) if is_missing_relation(&e.to_string()) => {
-            return Ok(json!({ "profiled": false, "subject": subject, "tier": tier }));
-        }
+        Err(e) if is_missing_relation(&e.to_string()) => return Ok(not_yet()),
         Err(e) => return Err(e.to_string()),
     };
     let Some(run) = runs.first() else {
-        return Ok(json!({ "profiled": false, "subject": subject, "tier": tier }));
+        return Ok(not_yet());
     };
 
     let columns =
@@ -3349,67 +3457,71 @@ pub fn profile(
         er_entities::candidate_key::read::for_run(session.connection(), snapshot, &run.id)
             .map_err(|e| e.to_string())?;
 
-    Ok(json!({
-        "profiled": true,
-        "profile_run_id": run.id,
-        "subject": run.subject,
-        "source_system": run.source_system,
-        "tier": run.tier,
-        "data_snapshot": run.snapshot,
-        "corpus_digest": run.corpus_digest,
-        "row_count": run.row_count,
-        "column_count": run.column_count,
-        "ingest_batch_id": run.ingest_batch_id,
-        "config_hash": run.config_hash,
-        "model_version": run.model_version,
+    Ok(Profile::Report(Box::new(ProfileReport {
+        profiled: true,
+        profile_run_id: run.id.clone(),
+        subject: run.subject.clone(),
+        source_system: run.source_system.clone(),
+        tier: run.tier,
+        data_snapshot: run.snapshot,
+        corpus_digest: run.corpus_digest.clone(),
+        row_count: run.row_count,
+        column_count: run.column_count,
+        ingest_batch_id: run.ingest_batch_id.clone(),
+        config_hash: run.config_hash.clone(),
+        model_version: run.model_version.clone(),
         // `sampled` travels with the proportion so a consumer rendering a
         // number knows whether to label it approximate; a figure from a 5%
         // sample shown as exact is worse than no figure.
-        "sampled": run.sampled,
-        "sample_proportion": run.sample_proportion,
-        "sample_seed": run.sample_seed,
-        "duration_ms": run.duration_ms,
-        "captured_at": run.captured_at,
+        sampled: run.sampled,
+        sample_proportion: run.sample_proportion,
+        sample_seed: run.sample_seed,
+        duration_ms: run.duration_ms,
+        captured_at: run.captured_at,
         // Serialize the generated row rather than restating its 26 fields: a
-        // hand-written object here would be one more place to forget a column
-        // the entity gained, and `json!` cannot nest this wide anyway (it hits
-        // its own recursion limit). The gated fields are patched afterwards.
-        "columns": columns.iter().map(|c| {
-            let mut v = serde_json::to_value(c).unwrap_or(Value::Null);
-            if let Some(obj) = v.as_object_mut() {
-                redact_column_values(obj, include_values);
-            }
-            v
-        }).collect::<Vec<_>>(),
-        "findings": findings.iter().map(|f| json!({
-            "code": f.code,
-            "severity": f.severity,
-            // The empty string is the stored sentinel for a corpus-level
-            // finding; it becomes null on the wire so a consumer does not have
-            // to know that, and cannot accidentally match a column named "".
-            "column_name": if f.column_name.is_empty() { Value::Null }
-                           else { Value::String(f.column_name.clone()) },
-            "message": f.message,
-            "detail": f.detail,
-        })).collect::<Vec<_>>(),
+        // hand-written struct here would be one more place to forget a column
+        // the entity gained. The gated fields are patched afterwards.
+        columns: columns
+            .iter()
+            .map(|c| {
+                let mut v = serde_json::to_value(c).unwrap_or(Value::Null);
+                if let Some(obj) = v.as_object_mut() {
+                    redact_column_values(obj, include_values);
+                }
+                v
+            })
+            .collect(),
+        findings: findings
+            .iter()
+            .map(|f| ProfileFinding {
+                code: f.code.clone(),
+                severity: f.severity.clone(),
+                // The empty string is the stored sentinel for a corpus-level
+                // finding; it becomes null on the wire so a consumer does not
+                // have to know that, and cannot match a column named "".
+                column_name: (!f.column_name.is_empty()).then(|| f.column_name.clone()),
+                message: f.message.clone(),
+                detail: f.detail.clone(),
+            })
+            .collect(),
         // Cheapest key first, as the statement ordered them. `key_columns` is
-        // stored chr(31)-joined because the lake has no list type and the IN-list
-        // idiom needs one varchar; it is split back into an array here so a
-        // consumer never has to know that encoding, and so a composite key
-        // renders as two names rather than one string with a control character
-        // in the middle.
-        "candidate_keys": candidate_keys.iter().map(|k| json!({
-            "key_columns": k.key_columns.split('\u{1f}').collect::<Vec<_>>(),
-            "row_count": k.row_count,
-            "covered_rows": k.covered_rows,
-            "distinct_values": k.distinct_values,
-            "expected_pairs": k.expected_pairs,
-            "largest_block_pairs": k.largest_block_pairs,
-            "largest_block_rows": k.largest_block_rows,
-            "entropy_bits": k.entropy_bits,
-            "pair_loss_from_nulls": k.pair_loss_from_nulls,
-        })).collect::<Vec<_>>(),
-    }))
+        // stored chr(31)-joined because the lake has no list type; it is split
+        // back into an array so a consumer never has to know that encoding.
+        candidate_keys: candidate_keys
+            .iter()
+            .map(|k| CandidateKeyItem {
+                key_columns: k.key_columns.split('\u{1f}').map(str::to_string).collect(),
+                row_count: k.row_count,
+                covered_rows: k.covered_rows,
+                distinct_values: k.distinct_values,
+                expected_pairs: k.expected_pairs,
+                largest_block_pairs: k.largest_block_pairs,
+                largest_block_rows: k.largest_block_rows,
+                entropy_bits: k.entropy_bits,
+                pair_loss_from_nulls: k.pair_loss_from_nulls,
+            })
+            .collect(),
+    })))
 }
 
 /// Fields of a `column_profile` row that echo a value **as stored**, and so

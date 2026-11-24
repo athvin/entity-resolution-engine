@@ -98,10 +98,15 @@
         "operationId": "get_audit",
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AuditEntry"
+                  }
+                }
               }
             }
           },
@@ -175,10 +180,12 @@
         },
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/EmailAccepted"
+                }
               }
             }
           },
@@ -226,10 +233,12 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/WorkOrder"
+                }
               }
             }
           },
@@ -384,18 +393,16 @@
         },
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
                 "schema": {
                   "anyOf": [
-                    {},
                     {
-                      "type": "object",
-                      "properties": {
-                        "archived": {},
-                        "retry": {}
-                      }
+                      "$ref": "#/components/schemas/TaskInstance"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AttemptRetried"
                     }
                   ]
                 }
@@ -471,10 +478,12 @@
         },
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/TaskInstance"
+                }
               }
             }
           },
@@ -720,10 +729,12 @@
         },
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/TaskInstance"
+                }
               }
             }
           },
@@ -1158,10 +1169,15 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AuditEntry"
+                  }
+                }
               }
             }
           },
@@ -1209,10 +1225,15 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SalesforceConnectionItem"
+                  }
+                }
               }
             }
           },
@@ -2091,10 +2112,12 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/BlockingEstimate"
+                }
               }
             }
           },
@@ -3470,10 +3493,15 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ImportReceipt"
+                  }
+                }
               }
             }
           },
@@ -4695,10 +4723,12 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/MatchPreviewView"
+                }
               }
             }
           },
@@ -5140,10 +5170,12 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ModelCompiled"
+                }
               }
             }
           },
@@ -5250,10 +5282,12 @@
         },
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ModelSummary"
+                }
               }
             }
           },
@@ -5325,10 +5359,12 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ModelDetail"
+                }
               }
             }
           },
@@ -5483,10 +5519,12 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ModelEvaluation"
+                }
               }
             }
           },
@@ -5542,10 +5580,12 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Profile"
+                }
               }
             }
           },
@@ -6810,10 +6850,12 @@
         },
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ResolveResult"
+                }
               }
             }
           },
@@ -8372,10 +8414,12 @@
         },
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/OrgResources"
+                }
               }
             }
           },
@@ -9286,6 +9330,74 @@
           }
         }
       },
+      "AttemptRetried": {
+        "type": "object",
+        "description": "A failed attempt's settlement: the archived try and, when the task still\nhas tries left, the queued successor.",
+        "required": [
+          "archived"
+        ],
+        "properties": {
+          "archived": {
+            "$ref": "#/components/schemas/TaskInstance"
+          },
+          "retry": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TaskInstance"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "AuditEntry": {
+        "type": "object",
+        "description": "The audit ledger, newest first (`auth.py` `audit_rows`); `before_id` is the\nkeyset cursor. Optional `org` / `action` filters.\n\nReturns `trace_id`, which is the whole point of writing it: the column is the\nJOIN KEY to the span store, and a join key no reader can reach is a column\nthat only looks like attribution. `read/page.sql` has always projected it and\nthe generated `AuditLog` schema has always declared it — this projection was\nthe one layer that dropped it, so the OpenAPI document promised a field the\nAPI did not send.\n\nNull for a row no traced request caused, which is permanent for the\ndispatcher's own bookkeeping and a CLI. See `er_obs::identity`.\n\n# Errors\nPropagates the query error.\nOne audit-ledger entry as the audit feeds serve it.",
+        "required": [
+          "id",
+          "at",
+          "actor",
+          "action",
+          "detail"
+        ],
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "actor": {
+            "type": "string"
+          },
+          "at": {
+            "type": "string",
+            "description": "RFC 3339, microseconds."
+          },
+          "dataset": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "detail": {},
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "org": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "trace_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
       "AuditLog": {
         "type": "object",
         "description": "The append-only audit ledger: one row per authenticated mutation (actor, action, optional org scope, and structured detail). Append-only constrains writes, not lifetime: rows past the deployment retention window (ER_AUDIT_RETENTION_DAYS, floor 400 days per the infra D-RETENTION decision) are retired by the dispatcher's retention sweep through delete/purge_expired.",
@@ -9350,6 +9462,73 @@
             "type": "string",
             "format": "date-time",
             "description": "Wall-clock last-write time (equals created_at; audit rows are append-only)."
+          }
+        }
+      },
+      "BlockingEstimate": {
+        "type": "object",
+        "description": "What a run would cost, before running it.",
+        "required": [
+          "total_possible_pairs",
+          "candidate_pairs",
+          "per_rule",
+          "largest_blocks"
+        ],
+        "properties": {
+          "candidate_pairs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "What the declared rules actually generate: the number that decides the\nrun's cost."
+          },
+          "largest_blocks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LargestBlockEstimate"
+            }
+          },
+          "per_rule": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BlockingRuleEstimate"
+            }
+          },
+          "total_possible_pairs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Every pair the corpus could produce — what resolution would cost with no\nblocking at all."
+          }
+        }
+      },
+      "BlockingRuleEstimate": {
+        "type": "object",
+        "description": "One blocking rule's contribution to the candidate set.",
+        "required": [
+          "blocking_rule",
+          "match_key",
+          "marginal_pairs",
+          "cumulative_pairs",
+          "has_block_breakdown"
+        ],
+        "properties": {
+          "blocking_rule": {
+            "type": "string"
+          },
+          "cumulative_pairs": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "has_block_breakdown": {
+            "type": "boolean",
+            "description": "Whether this rule's largest blocks could be enumerated. False for a rule\ncarrying a filter condition, which has no block breakdown at all.\n\nOn the wire because the alternative is silence: with no flag, a rule\nthat CANNOT be broken down looks exactly like one that was examined and\nfound to have no large blocks, which reads as reassurance about a rule\nnobody measured."
+          },
+          "marginal_pairs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Pairs this rule adds that no earlier rule already generated — the number\nthat says whether the rule is pulling its weight."
+          },
+          "match_key": {
+            "type": "integer",
+            "format": "int64"
           }
         }
       },
@@ -9433,6 +9612,61 @@
             "type": "string",
             "format": "date-time",
             "description": "Run-logical last-write time."
+          }
+        }
+      },
+      "CandidateKeyItem": {
+        "type": "object",
+        "description": "One measured candidate blocking key, cheapest first.",
+        "required": [
+          "key_columns",
+          "row_count",
+          "covered_rows",
+          "distinct_values",
+          "expected_pairs",
+          "largest_block_pairs",
+          "largest_block_rows",
+          "entropy_bits",
+          "pair_loss_from_nulls"
+        ],
+        "properties": {
+          "covered_rows": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "distinct_values": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "entropy_bits": {
+            "type": "number",
+            "format": "double"
+          },
+          "expected_pairs": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "key_columns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "largest_block_pairs": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "largest_block_rows": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "pair_loss_from_nulls": {
+            "type": "number",
+            "format": "double"
+          },
+          "row_count": {
+            "type": "integer",
+            "format": "int64"
           }
         }
       },
@@ -9951,6 +10185,67 @@
           }
         }
       },
+      "ConfusionMetrics": {
+        "type": "object",
+        "description": "Precision, recall, F1 and accuracy from a confusion matrix, or `Null` for any\nratio whose denominator is zero.\n\nNull rather than `0.0`, which is O7a's rule and matters more here than on a\ndashboard tile: a precision of 0.0 says \"the model got every positive wrong\",\nwhile a null says \"it made no positive predictions on this label set\". Those\nare opposite conclusions and a steward acts differently on each.\nA confusion matrix and its rates; a rate is null when its denominator is 0.",
+        "required": [
+          "tp",
+          "fp",
+          "fn",
+          "tn"
+        ],
+        "properties": {
+          "accuracy": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "f1": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Null when either precision or recall is, rather than 0."
+          },
+          "fn": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "fp": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "precision": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "recall": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "tn": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "tp": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
       "ContradictionItem": {
         "type": "object",
         "description": "One CONTRADICTION-1 finding: a `never` pair forced together by `always`\nrules, so the next reconcile cannot honour both.",
@@ -10001,6 +10296,26 @@
             }
           }
         }
+      },
+      "CurvePoint": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ConfusionMetrics"
+          },
+          {
+            "type": "object",
+            "required": [
+              "threshold"
+            ],
+            "properties": {
+              "threshold": {
+                "type": "number",
+                "format": "double"
+              }
+            }
+          }
+        ],
+        "description": "One step of the precision/recall trade-off curve."
       },
       "DataQuality": {
         "type": "object",
@@ -10250,6 +10565,10 @@
           }
         }
       },
+      "EmailAccepted": {
+        "type": "object",
+        "description": "`202` from `POST /v1/email`: queued for delivery. Deliberately empty."
+      },
       "EntityEventItem": {
         "type": "object",
         "description": "One event in an entity's history.",
@@ -10412,6 +10731,34 @@
           "verified": {
             "type": "boolean",
             "description": "An active whole-row steward verification."
+          }
+        }
+      },
+      "EvaluationCounts": {
+        "type": "object",
+        "description": "Which labels the evaluation could and could not use.",
+        "required": [
+          "labels_for_version",
+          "evaluable",
+          "no_score",
+          "not_a_verdict"
+        ],
+        "properties": {
+          "evaluable": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "labels_for_version": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "no_score": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "not_a_verdict": {
+            "type": "integer",
+            "minimum": 0
           }
         }
       },
@@ -10635,6 +10982,92 @@
           }
         ],
         "description": "The golden record of whichever entity type the dataset resolves."
+      },
+      "ImportReceipt": {
+        "type": "object",
+        "description": "One ingest-batch receipt: what a delivery did to the corpus.",
+        "required": [
+          "id",
+          "run_id",
+          "source_system",
+          "path",
+          "new_count",
+          "changed_count",
+          "unchanged_count",
+          "tombstone_count",
+          "resurrected_count",
+          "full_refresh_keys",
+          "created_at"
+        ],
+        "properties": {
+          "changed_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "created_at": {
+            "type": "string",
+            "description": "Naive lake text (`YYYY-MM-DD HH:MM:SS[.ffffff]`), not RFC 3339."
+          },
+          "full_refresh_keys": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "matched_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "new_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "path": {
+            "type": "string"
+          },
+          "resurrected_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "review_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "screened_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Naive lake text (`YYYY-MM-DD HH:MM:SS[.ffffff]`), not RFC 3339."
+          },
+          "source_system": {
+            "type": "string"
+          },
+          "tombstone_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "unchanged_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "unmatched_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          }
+        }
       },
       "IngestBatch": {
         "type": "object",
@@ -11113,6 +11546,49 @@
           }
         }
       },
+      "LabelEvaluation": {
+        "type": "object",
+        "description": "A model version scored against the tenant's own labels.",
+        "required": [
+          "model_version_label",
+          "threshold",
+          "counts",
+          "overall",
+          "by_origin",
+          "curve"
+        ],
+        "properties": {
+          "by_origin": {
+            "type": "object",
+            "description": "Per label origin that has any evaluable label.",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ConfusionMetrics"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "counts": {
+            "$ref": "#/components/schemas/EvaluationCounts"
+          },
+          "curve": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CurvePoint"
+            }
+          },
+          "model_version_label": {
+            "type": "string"
+          },
+          "overall": {
+            "$ref": "#/components/schemas/ConfusionMetrics"
+          },
+          "threshold": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
       "LabelList": {
         "type": "object",
         "description": "`GET …/labels`: the recorded labels, newest first.",
@@ -11182,6 +11658,39 @@
             "type": "number",
             "format": "double",
             "description": "The `auto_merge` threshold the pairs are ordered around."
+          }
+        }
+      },
+      "LargestBlockEstimate": {
+        "type": "object",
+        "description": "A blocking key whose block is large enough to dominate a run.",
+        "required": [
+          "match_key",
+          "key_values",
+          "pairs",
+          "rows"
+        ],
+        "properties": {
+          "key_values": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "match_key": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Which rule this block belongs to, since every rule is now broken down\nrather than only the first."
+          },
+          "pairs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The pairs a run SCORES in this block, under this model's link type."
+          },
+          "rows": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Rows carrying this key value. Reported beside the pairs because the two\nanswer different questions — how much work, and how lopsided the data —\nand because `pairs` is quadratic in `rows`, which is the whole reason one\nvalue can dominate a run."
           }
         }
       },
@@ -11261,6 +11770,36 @@
           },
           "source_system": {
             "type": "string"
+          }
+        }
+      },
+      "MatchPreviewView": {
+        "type": "object",
+        "description": "`GET …/match-preview`: what the active model would do to the current lake.",
+        "required": [
+          "total",
+          "would_auto_merge",
+          "would_review",
+          "sample"
+        ],
+        "properties": {
+          "sample": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PreviewPairView"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "would_auto_merge": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "would_review": {
+            "type": "integer",
+            "minimum": 0
           }
         }
       },
@@ -11631,6 +12170,150 @@
             "format": "int64"
           },
           "snapshot": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "ModelCompiled": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ModelSummary"
+          },
+          {
+            "type": "object",
+            "required": [
+              "notes"
+            ],
+            "properties": {
+              "notes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        ],
+        "description": "`POST …/models/compile`: the compiled version and what the compiler decided."
+      },
+      "ModelDetail": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ModelSummary"
+          },
+          {
+            "type": "object",
+            "required": [
+              "model_json",
+              "weights"
+            ],
+            "properties": {
+              "model_json": {
+                "type": "string",
+                "description": "The stored settings document, as text."
+              },
+              "weights": {
+                "description": "Per comparison level: m/u and the log-odds they imply. Null when the\ndocument does not parse."
+              }
+            }
+          }
+        ],
+        "description": "`GET …/models/{name}/versions/{version}`: the version with its document and\nper-field weights."
+      },
+      "ModelEvaluation": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/LabelEvaluation"
+          },
+          {
+            "type": "object",
+            "required": [
+              "name",
+              "version",
+              "state"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string"
+              },
+              "version": {
+                "type": "integer",
+                "format": "int64"
+              }
+            }
+          }
+        ],
+        "description": "`GET …/models/{name}/versions/{version}/evaluation`."
+      },
+      "ModelSummary": {
+        "type": "object",
+        "description": "The model registry's wire projection. `model_json` is omitted from list\nresponses — it is the largest field by far and a list of twenty versions\nwould be mostly settings documents nobody asked for.\nOne model version in the registry, without its settings document.",
+        "required": [
+          "id",
+          "name",
+          "version",
+          "entity_type",
+          "model_hash",
+          "model_version_label",
+          "state",
+          "provenance",
+          "created_by",
+          "created_at"
+        ],
+        "properties": {
+          "activated_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "RFC 3339, microseconds."
+          },
+          "comparator_algorithm_version": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The comparator algorithm the document was trained with; null when the\nstored document does not parse.",
+            "minimum": 0
+          },
+          "created_at": {
+            "type": "string",
+            "description": "RFC 3339, microseconds."
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "entity_type": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "model_hash": {
+            "type": "string"
+          },
+          "model_version_label": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "provenance": {},
+          "state": {
+            "type": "string"
+          },
+          "tf_snapshot_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "version": {
             "type": "integer",
             "format": "int64"
           }
@@ -12025,6 +12708,48 @@
           }
         }
       },
+      "PreviewPairView": {
+        "type": "object",
+        "description": "One sampled pair from a match preview.",
+        "required": [
+          "rec_a_key",
+          "rec_b_key",
+          "match_probability",
+          "confidence",
+          "evidence"
+        ],
+        "properties": {
+          "confidence": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The display integer of `match_probability`."
+          },
+          "evidence": {
+            "description": "The comparison evidence; null if it was not valid JSON."
+          },
+          "match_probability": {
+            "type": "number",
+            "format": "double"
+          },
+          "rec_a_key": {
+            "type": "string"
+          },
+          "rec_b_key": {
+            "type": "string"
+          }
+        }
+      },
+      "Profile": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/ProfileReport"
+          },
+          {
+            "$ref": "#/components/schemas/ProfileNotYet"
+          }
+        ],
+        "description": "`GET …/profile`: the latest profile, or that there is none yet."
+      },
       "ProfileFinding": {
         "type": "object",
         "description": "One coded observation a profile made about a corpus — a column mostly null, a blocking key dominated by one value, a record id that is not unique. Stored rather than derived at read time because the thresholds that produced a finding belong to the run that applied them: re-deriving later against changed thresholds would silently rewrite history, and a finding is the part of a profile a user is most likely to act on.",
@@ -12075,6 +12800,145 @@
             "type": "string",
             "format": "date-time",
             "description": "Run-logical last-write time."
+          }
+        }
+      },
+      "ProfileNotYet": {
+        "type": "object",
+        "description": "Nothing has profiled this subject and tier yet.",
+        "required": [
+          "profiled",
+          "subject",
+          "tier"
+        ],
+        "properties": {
+          "profiled": {
+            "type": "boolean",
+            "description": "Always false."
+          },
+          "subject": {
+            "type": "string"
+          },
+          "tier": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "ProfileReport": {
+        "type": "object",
+        "description": "The latest profile of one corpus stage.",
+        "required": [
+          "profiled",
+          "profile_run_id",
+          "subject",
+          "source_system",
+          "tier",
+          "data_snapshot",
+          "corpus_digest",
+          "row_count",
+          "column_count",
+          "sampled",
+          "duration_ms",
+          "captured_at",
+          "columns",
+          "findings",
+          "candidate_keys"
+        ],
+        "properties": {
+          "candidate_keys": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CandidateKeyItem"
+            },
+            "description": "Empty for a tier-1 run, which does not measure keys."
+          },
+          "captured_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "column_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "columns": {
+            "type": "array",
+            "items": {},
+            "description": "One generated column-profile row per column. Value-bearing fields\n(top values, examples) are redacted below Steward."
+          },
+          "config_hash": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "corpus_digest": {
+            "type": "string"
+          },
+          "data_snapshot": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "duration_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "findings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProfileFinding"
+            }
+          },
+          "ingest_batch_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "model_version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "profile_run_id": {
+            "type": "string"
+          },
+          "profiled": {
+            "type": "boolean",
+            "description": "Always true."
+          },
+          "row_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "sample_proportion": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "sample_seed": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "sampled": {
+            "type": "boolean",
+            "description": "Whether the figures come from a sample (then `sample_proportion` says\nhow much of the corpus it covered)."
+          },
+          "source_system": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "tier": {
+            "type": "integer",
+            "format": "int64"
           }
         }
       },
@@ -12415,6 +13279,72 @@
           "snapshot": {
             "type": "integer",
             "format": "int64"
+          }
+        }
+      },
+      "ResolveCandidate": {
+        "type": "object",
+        "description": "One candidate entity for an unsaved record.",
+        "required": [
+          "record_key",
+          "match_probability",
+          "confidence",
+          "band",
+          "evidence"
+        ],
+        "properties": {
+          "band": {
+            "type": "string",
+            "description": "Which band the score falls in under the org's thresholds:\n`auto_merge` / `review` / `reject`."
+          },
+          "confidence": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The score as the product shows it: the 1–100 projection's display\ninteger (`dedupe_core::confidence`), so a caller rendering this never\nmaps the probability itself."
+          },
+          "entity_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The entity that record currently belongs to, when it belongs to one. A\nrecord that has never been through reconcile has no entity yet, and\nsaying `null` is more honest than inventing one."
+          },
+          "evidence": {
+            "description": "The per-comparison evidence behind the score — the same waterfall the\nreview queue shows, so a caller can explain the decision it just made."
+          },
+          "match_probability": {
+            "type": "number",
+            "format": "double"
+          },
+          "record_key": {
+            "type": "string",
+            "description": "The record the payload matched."
+          }
+        }
+      },
+      "ResolveResult": {
+        "type": "object",
+        "description": "What resolving an unsaved record returned.",
+        "required": [
+          "candidates",
+          "decision",
+          "snapshot"
+        ],
+        "properties": {
+          "candidates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ResolveCandidate"
+            }
+          },
+          "decision": {
+            "type": "string",
+            "description": "The best candidate's band, or `reject` when there are none — the single\nvalue a form or an ingestion pipeline actually branches on."
+          },
+          "snapshot": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The lake snapshot the corpus was read at, so a caller can tell whether it\nresolved against fresh data."
           }
         }
       },
@@ -12761,6 +13691,38 @@
             "type": "string",
             "format": "date-time",
             "description": "When it was last auto-ingested."
+          }
+        }
+      },
+      "SalesforceConnectionItem": {
+        "type": "object",
+        "description": "One Salesforce connection, without its credentials.",
+        "required": [
+          "id",
+          "name",
+          "instance_url",
+          "auth_kind",
+          "api_version",
+          "active"
+        ],
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "api_version": {
+            "type": "string"
+          },
+          "auth_kind": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "instance_url": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
           }
         }
       },
@@ -14161,6 +15123,120 @@
           },
           "url": {
             "type": "string"
+          }
+        }
+      },
+      "WorkOrder": {
+        "type": "object",
+        "description": "`GET /v1/internal/attempts/{attempt_id}`: everything a remote attempt\nneeds to run its task, read once at pod start.",
+        "required": [
+          "org_id",
+          "job_id",
+          "run_id",
+          "kind",
+          "task_id",
+          "try_number",
+          "state",
+          "trigger_rule",
+          "max_tries",
+          "params",
+          "lineage",
+          "lake_env",
+          "models",
+          "labels",
+          "connection"
+        ],
+        "properties": {
+          "connection": {
+            "description": "Salesforce credentials and watermark for an extract task; null\notherwise."
+          },
+          "dataset_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "drop_root": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "input": {},
+          "job_id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "labels": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "description": "`(rec_a_key, rec_b_key)` verdict pairs, for a train task."
+          },
+          "lake_env": {
+            "description": "The lake connection env the task opens."
+          },
+          "lineage": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The attempt's task chain, current first."
+          },
+          "max_tries": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            },
+            "description": "The tenant's active models, for scoring tasks."
+          },
+          "org_id": {
+            "type": "string"
+          },
+          "params": {},
+          "resource_class": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "segment": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "state": {
+            "type": "string"
+          },
+          "structural_fingerprint": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "task_id": {
+            "type": "string"
+          },
+          "trigger_rule": {
+            "type": "string"
+          },
+          "try_number": {
+            "type": "integer",
+            "format": "int64"
           }
         }
       },

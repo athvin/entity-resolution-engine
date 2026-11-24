@@ -1874,6 +1874,44 @@ export interface components {
              */
             updated_at: string;
         };
+        /**
+         * @description A failed attempt's settlement: the archived try and, when the task still
+         *     has tries left, the queued successor.
+         */
+        AttemptRetried: {
+            archived: components["schemas"]["TaskInstance"];
+            retry?: components["schemas"]["TaskInstance"] | null;
+        };
+        /**
+         * @description The audit ledger, newest first (`auth.py` `audit_rows`); `before_id` is the
+         *     keyset cursor. Optional `org` / `action` filters.
+         *
+         *     Returns `trace_id`, which is the whole point of writing it: the column is the
+         *     JOIN KEY to the span store, and a join key no reader can reach is a column
+         *     that only looks like attribution. `read/page.sql` has always projected it and
+         *     the generated `AuditLog` schema has always declared it — this projection was
+         *     the one layer that dropped it, so the OpenAPI document promised a field the
+         *     API did not send.
+         *
+         *     Null for a row no traced request caused, which is permanent for the
+         *     dispatcher's own bookkeeping and a CLI. See `er_obs::identity`.
+         *
+         *     # Errors
+         *     Propagates the query error.
+         *     One audit-ledger entry as the audit feeds serve it.
+         */
+        AuditEntry: {
+            action: string;
+            actor: string;
+            /** @description RFC 3339, microseconds. */
+            at: string;
+            dataset?: string | null;
+            detail: unknown;
+            /** Format: int64 */
+            id: number;
+            org?: string | null;
+            trace_id?: string | null;
+        };
         /** @description The append-only audit ledger: one row per authenticated mutation (actor, action, optional org scope, and structured detail). Append-only constrains writes, not lifetime: rows past the deployment retention window (ER_AUDIT_RETENTION_DAYS, floor 400 days per the infra D-RETENTION decision) are retired by the dispatcher's retention sweep through delete/purge_expired. */
         AuditLog: {
             /** @description The action name (e.g. steward.mass_update). */
@@ -1908,6 +1946,47 @@ export interface components {
              * @description Wall-clock last-write time (equals created_at; audit rows are append-only).
              */
             updated_at: string;
+        };
+        /** @description What a run would cost, before running it. */
+        BlockingEstimate: {
+            /**
+             * Format: int64
+             * @description What the declared rules actually generate: the number that decides the
+             *     run's cost.
+             */
+            candidate_pairs: number;
+            largest_blocks: components["schemas"]["LargestBlockEstimate"][];
+            per_rule: components["schemas"]["BlockingRuleEstimate"][];
+            /**
+             * Format: int64
+             * @description Every pair the corpus could produce — what resolution would cost with no
+             *     blocking at all.
+             */
+            total_possible_pairs: number;
+        };
+        /** @description One blocking rule's contribution to the candidate set. */
+        BlockingRuleEstimate: {
+            blocking_rule: string;
+            /** Format: int64 */
+            cumulative_pairs: number;
+            /**
+             * @description Whether this rule's largest blocks could be enumerated. False for a rule
+             *     carrying a filter condition, which has no block breakdown at all.
+             *
+             *     On the wire because the alternative is silence: with no flag, a rule
+             *     that CANNOT be broken down looks exactly like one that was examined and
+             *     found to have no large blocks, which reads as reassurance about a rule
+             *     nobody measured.
+             */
+            has_block_breakdown: boolean;
+            /**
+             * Format: int64
+             * @description Pairs this rule adds that no earlier rule already generated — the number
+             *     that says whether the rule is pulling its weight.
+             */
+            marginal_pairs: number;
+            /** Format: int64 */
+            match_key: number;
         };
         /** @description What an equi-join on one column would cost as a blocking key, measured against the corpus rather than inferred from a model. Blocking decides the entire cost of a run, and it is chosen before anything is trained — so the question has to be answerable with no model at all, which is why these numbers come from a GROUP BY over the data and not from a settings document. */
         CandidateKey: {
@@ -1967,6 +2046,26 @@ export interface components {
              * @description Run-logical last-write time.
              */
             updated_at: string;
+        };
+        /** @description One measured candidate blocking key, cheapest first. */
+        CandidateKeyItem: {
+            /** Format: int64 */
+            covered_rows: number;
+            /** Format: int64 */
+            distinct_values: number;
+            /** Format: double */
+            entropy_bits: number;
+            /** Format: int64 */
+            expected_pairs: number;
+            key_columns: string[];
+            /** Format: int64 */
+            largest_block_pairs: number;
+            /** Format: int64 */
+            largest_block_rows: number;
+            /** Format: double */
+            pair_loss_from_nulls: number;
+            /** Format: int64 */
+            row_count: number;
         };
         /**
          * @description A task clear and what each of its arms did: the body of
@@ -2222,6 +2321,37 @@ export interface components {
             yaml: string;
         };
         /**
+         * @description Precision, recall, F1 and accuracy from a confusion matrix, or `Null` for any
+         *     ratio whose denominator is zero.
+         *
+         *     Null rather than `0.0`, which is O7a's rule and matters more here than on a
+         *     dashboard tile: a precision of 0.0 says "the model got every positive wrong",
+         *     while a null says "it made no positive predictions on this label set". Those
+         *     are opposite conclusions and a steward acts differently on each.
+         *     A confusion matrix and its rates; a rate is null when its denominator is 0.
+         */
+        ConfusionMetrics: {
+            /** Format: double */
+            accuracy?: number | null;
+            /**
+             * Format: double
+             * @description Null when either precision or recall is, rather than 0.
+             */
+            f1?: number | null;
+            /** Format: int64 */
+            fn: number;
+            /** Format: int64 */
+            fp: number;
+            /** Format: double */
+            precision?: number | null;
+            /** Format: double */
+            recall?: number | null;
+            /** Format: int64 */
+            tn: number;
+            /** Format: int64 */
+            tp: number;
+        };
+        /**
          * @description One CONTRADICTION-1 finding: a `never` pair forced together by `always`
          *     rules, so the next reconcile cannot honour both.
          */
@@ -2237,6 +2367,11 @@ export interface components {
         /** @description `GET …/assertions/contradictions`: every active contradiction. */
         ContradictionList: {
             contradictions: components["schemas"]["ContradictionItem"][];
+        };
+        /** @description One step of the precision/recall trade-off curve. */
+        CurvePoint: components["schemas"]["ConfusionMetrics"] & {
+            /** Format: double */
+            threshold: number;
         };
         /** @description `GET …/data-quality`: the composite score and its four inputs. */
         DataQuality: {
@@ -2338,6 +2473,8 @@ export interface components {
             delivery_id: string;
             job: components["schemas"]["Job"];
         };
+        /** @description `202` from `POST /v1/email`: queued for delivery. Deliberately empty. */
+        EmailAccepted: Record<string, never>;
         /** @description One event in an entity's history. */
         EntityEventItem: {
             details: unknown;
@@ -2403,6 +2540,13 @@ export interface components {
             source_system: string;
             /** @description An active whole-row steward verification. */
             verified: boolean;
+        };
+        /** @description Which labels the evaluation could and could not use. */
+        EvaluationCounts: {
+            evaluable: number;
+            labels_for_version: number;
+            no_score: number;
+            not_a_verdict: number;
         };
         /** @description `GET …/golden-records/{entity_id}`: one resolved entity, snapshot-pinned. */
         GoldenDetail: {
@@ -2491,6 +2635,34 @@ export interface components {
         };
         /** @description The golden record of whichever entity type the dataset resolves. */
         GoldenRow: components["schemas"]["PersonGolden"] | components["schemas"]["AccountGolden"];
+        /** @description One ingest-batch receipt: what a delivery did to the corpus. */
+        ImportReceipt: {
+            /** Format: int64 */
+            changed_count: number;
+            /** @description Naive lake text (`YYYY-MM-DD HH:MM:SS[.ffffff]`), not RFC 3339. */
+            created_at: string;
+            full_refresh_keys: boolean;
+            id: string;
+            /** Format: int64 */
+            matched_count?: number | null;
+            /** Format: int64 */
+            new_count: number;
+            path: string;
+            /** Format: int64 */
+            resurrected_count: number;
+            /** Format: int64 */
+            review_count?: number | null;
+            run_id: string;
+            /** @description Naive lake text (`YYYY-MM-DD HH:MM:SS[.ffffff]`), not RFC 3339. */
+            screened_at?: string | null;
+            source_system: string;
+            /** Format: int64 */
+            tombstone_count: number;
+            /** Format: int64 */
+            unchanged_count: number;
+            /** Format: int64 */
+            unmatched_count?: number | null;
+        };
         /** @description One delivery receipt (S4.1): per-source landing counts for a batch, including tombstones and resurrections. */
         IngestBatch: {
             /**
@@ -2712,6 +2884,19 @@ export interface components {
             non_matches: number;
             total: number;
         };
+        /** @description A model version scored against the tenant's own labels. */
+        LabelEvaluation: {
+            /** @description Per label origin that has any evaluable label. */
+            by_origin: {
+                [key: string]: components["schemas"]["ConfusionMetrics"];
+            };
+            counts: components["schemas"]["EvaluationCounts"];
+            curve: components["schemas"]["CurvePoint"][];
+            model_version_label: string;
+            overall: components["schemas"]["ConfusionMetrics"];
+            /** Format: double */
+            threshold: number;
+        };
         /** @description `GET …/labels`: the recorded labels, newest first. */
         LabelList: {
             labels: components["schemas"]["PairLabel"][];
@@ -2734,6 +2919,29 @@ export interface components {
              * @description The `auto_merge` threshold the pairs are ordered around.
              */
             threshold: number;
+        };
+        /** @description A blocking key whose block is large enough to dominate a run. */
+        LargestBlockEstimate: {
+            key_values: string[];
+            /**
+             * Format: int64
+             * @description Which rule this block belongs to, since every rule is now broken down
+             *     rather than only the first.
+             */
+            match_key: number;
+            /**
+             * Format: int64
+             * @description The pairs a run SCORES in this block, under this model's link type.
+             */
+            pairs: number;
+            /**
+             * Format: int64
+             * @description Rows carrying this key value. Reported beside the pairs because the two
+             *     answer different questions — how much work, and how lopsided the data —
+             *     and because `pairs` is quadratic in `rows`, which is the whole reason one
+             *     value can dominate a run.
+             */
+            rows: number;
         };
         /** @description `GET …/lexicon`: the dataset's nickname pairs. */
         Lexicon: {
@@ -2760,6 +2968,13 @@ export interface components {
             rule: string;
             source_record_id: string;
             source_system: string;
+        };
+        /** @description `GET …/match-preview`: what the active model would do to the current lake. */
+        MatchPreviewView: {
+            sample: components["schemas"]["PreviewPairView"][];
+            total: number;
+            would_auto_merge: number;
+            would_review: number;
         };
         /** @description An immutable version of a tenant's matching model: the settings document the engine scores against, its hash, provenance and activation state. */
         MatchingModel: {
@@ -2953,6 +3168,59 @@ export interface components {
             /** Format: int64 */
             snapshot: number;
         };
+        /** @description `POST …/models/compile`: the compiled version and what the compiler decided. */
+        ModelCompiled: components["schemas"]["ModelSummary"] & {
+            notes: string[];
+        };
+        /**
+         * @description `GET …/models/{name}/versions/{version}`: the version with its document and
+         *     per-field weights.
+         */
+        ModelDetail: components["schemas"]["ModelSummary"] & {
+            /** @description The stored settings document, as text. */
+            model_json: string;
+            /**
+             * @description Per comparison level: m/u and the log-odds they imply. Null when the
+             *     document does not parse.
+             */
+            weights: unknown;
+        };
+        /** @description `GET …/models/{name}/versions/{version}/evaluation`. */
+        ModelEvaluation: components["schemas"]["LabelEvaluation"] & {
+            name: string;
+            state: string;
+            /** Format: int64 */
+            version: number;
+        };
+        /**
+         * @description The model registry's wire projection. `model_json` is omitted from list
+         *     responses — it is the largest field by far and a list of twenty versions
+         *     would be mostly settings documents nobody asked for.
+         *     One model version in the registry, without its settings document.
+         */
+        ModelSummary: {
+            /** @description RFC 3339, microseconds. */
+            activated_at?: string | null;
+            /**
+             * Format: int32
+             * @description The comparator algorithm the document was trained with; null when the
+             *     stored document does not parse.
+             */
+            comparator_algorithm_version?: number | null;
+            /** @description RFC 3339, microseconds. */
+            created_at: string;
+            created_by: string;
+            entity_type: string;
+            id: string;
+            model_hash: string;
+            model_version_label: string;
+            name: string;
+            provenance: unknown;
+            state: string;
+            tf_snapshot_id?: string | null;
+            /** Format: int64 */
+            version: number;
+        };
         /** @description A tenant: its config pointer, lake env, lifecycle state and active config version. */
         Org: {
             /**
@@ -3095,6 +3363,22 @@ export interface components {
             phone_e164?: string | null;
             survivorship_version: string;
         };
+        /** @description One sampled pair from a match preview. */
+        PreviewPairView: {
+            /**
+             * Format: int64
+             * @description The display integer of `match_probability`.
+             */
+            confidence: number;
+            /** @description The comparison evidence; null if it was not valid JSON. */
+            evidence: unknown;
+            /** Format: double */
+            match_probability: number;
+            rec_a_key: string;
+            rec_b_key: string;
+        };
+        /** @description `GET …/profile`: the latest profile, or that there is none yet. */
+        Profile: components["schemas"]["ProfileReport"] | components["schemas"]["ProfileNotYet"];
         /** @description One coded observation a profile made about a corpus — a column mostly null, a blocking key dominated by one value, a record id that is not unique. Stored rather than derived at read time because the thresholds that produced a finding belong to the run that applied them: re-deriving later against changed thresholds would silently rewrite history, and a finding is the part of a profile a user is most likely to act on. */
         ProfileFinding: {
             /** @description The finding's registry code (P001, P002, …). Codes are append-only and a retired rule keeps its code, so a stored finding stays interpretable after the rule that made it is gone — which is the point of coding them rather than storing only prose. */
@@ -3121,6 +3405,55 @@ export interface components {
              * @description Run-logical last-write time.
              */
             updated_at: string;
+        };
+        /** @description Nothing has profiled this subject and tier yet. */
+        ProfileNotYet: {
+            /** @description Always false. */
+            profiled: boolean;
+            subject: string;
+            /** Format: int64 */
+            tier: number;
+        };
+        /** @description The latest profile of one corpus stage. */
+        ProfileReport: {
+            /** @description Empty for a tier-1 run, which does not measure keys. */
+            candidate_keys: components["schemas"]["CandidateKeyItem"][];
+            /** Format: date-time */
+            captured_at: string;
+            /** Format: int64 */
+            column_count: number;
+            /**
+             * @description One generated column-profile row per column. Value-bearing fields
+             *     (top values, examples) are redacted below Steward.
+             */
+            columns: unknown[];
+            config_hash?: string | null;
+            corpus_digest: string;
+            /** Format: int64 */
+            data_snapshot: number;
+            /** Format: int64 */
+            duration_ms: number;
+            findings: components["schemas"]["ProfileFinding"][];
+            ingest_batch_id?: string | null;
+            model_version?: string | null;
+            profile_run_id: string;
+            /** @description Always true. */
+            profiled: boolean;
+            /** Format: int64 */
+            row_count: number;
+            /** Format: double */
+            sample_proportion?: number | null;
+            /** Format: int64 */
+            sample_seed?: number | null;
+            /**
+             * @description Whether the figures come from a sample (then `sample_proportion` says
+             *     how much of the corpus it covered).
+             */
+            sampled: boolean;
+            source_system: string;
+            subject: string;
+            /** Format: int64 */
+            tier: number;
         };
         /** @description One execution of the dataset profiler over one corpus stage, and the cache key for its result. A profile exists to be looked at repeatedly and compared against the previous delivery, so recomputing it on every view would make the cheap tier expensive for no new information. */
         ProfileRun: {
@@ -3291,6 +3624,51 @@ export interface components {
             /** Format: int64 */
             snapshot: number;
         };
+        /** @description One candidate entity for an unsaved record. */
+        ResolveCandidate: {
+            /**
+             * @description Which band the score falls in under the org's thresholds:
+             *     `auto_merge` / `review` / `reject`.
+             */
+            band: string;
+            /**
+             * Format: int64
+             * @description The score as the product shows it: the 1–100 projection's display
+             *     integer (`dedupe_core::confidence`), so a caller rendering this never
+             *     maps the probability itself.
+             */
+            confidence: number;
+            /**
+             * @description The entity that record currently belongs to, when it belongs to one. A
+             *     record that has never been through reconcile has no entity yet, and
+             *     saying `null` is more honest than inventing one.
+             */
+            entity_id?: string | null;
+            /**
+             * @description The per-comparison evidence behind the score — the same waterfall the
+             *     review queue shows, so a caller can explain the decision it just made.
+             */
+            evidence: unknown;
+            /** Format: double */
+            match_probability: number;
+            /** @description The record the payload matched. */
+            record_key: string;
+        };
+        /** @description What resolving an unsaved record returned. */
+        ResolveResult: {
+            candidates: components["schemas"]["ResolveCandidate"][];
+            /**
+             * @description The best candidate's band, or `reject` when there are none — the single
+             *     value a form or an ingestion pipeline actually branches on.
+             */
+            decision: string;
+            /**
+             * Format: int64
+             * @description The lake snapshot the corpus was read at, so a caller can tell whether it
+             *     resolved against fresh data.
+             */
+            snapshot: number;
+        };
         /** @description A resumed job, requeued: the body of `POST …/jobs/{job_id}/resume`. */
         ResumeAccepted: {
             job_id: string;
@@ -3430,6 +3808,15 @@ export interface components {
              * @description When it was last auto-ingested.
              */
             updated_at: string;
+        };
+        /** @description One Salesforce connection, without its credentials. */
+        SalesforceConnectionItem: {
+            active: boolean;
+            api_version: string;
+            auth_kind: string;
+            id: string;
+            instance_url: string;
+            name: string;
         };
         /** @description A recurring job schedule for a tenant: its kind, cron and source. */
         Schedule: {
@@ -4014,6 +4401,43 @@ export interface components {
             id: string;
             url: string;
         };
+        /**
+         * @description `GET /v1/internal/attempts/{attempt_id}`: everything a remote attempt
+         *     needs to run its task, read once at pod start.
+         */
+        WorkOrder: {
+            /**
+             * @description Salesforce credentials and watermark for an extract task; null
+             *     otherwise.
+             */
+            connection: unknown;
+            dataset_id?: string | null;
+            drop_root?: string | null;
+            input?: unknown;
+            job_id: string;
+            kind: string;
+            /** @description `(rec_a_key, rec_b_key)` verdict pairs, for a train task. */
+            labels: string[][];
+            /** @description The lake connection env the task opens. */
+            lake_env: unknown;
+            /** @description The attempt's task chain, current first. */
+            lineage: string[];
+            /** Format: int64 */
+            max_tries: number;
+            /** @description The tenant's active models, for scoring tasks. */
+            models: Record<string, never>[];
+            org_id: string;
+            params: unknown;
+            resource_class?: string | null;
+            run_id: string;
+            segment?: string | null;
+            state: string;
+            structural_fingerprint?: string | null;
+            task_id: string;
+            trigger_rule: string;
+            /** Format: int64 */
+            try_number: number;
+        };
         /** @description One of the lowest-scoring records. */
         WorstRecord: {
             /** Format: double */
@@ -4112,13 +4536,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AuditEntry"][];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -4154,13 +4578,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["EmailAccepted"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -4187,13 +4611,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["WorkOrder"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -4236,16 +4660,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown | {
-                        archived?: unknown;
-                        retry?: unknown;
-                    };
+                    "application/json": components["schemas"]["TaskInstance"] | components["schemas"]["AttemptRetried"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -4279,13 +4700,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["TaskInstance"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -4371,13 +4792,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["TaskInstance"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -4616,13 +5037,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AuditEntry"][];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -4649,13 +5070,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["SalesforceConnectionItem"][];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -5073,13 +5494,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["BlockingEstimate"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -5781,13 +6202,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ImportReceipt"][];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -6378,13 +6799,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["MatchPreviewView"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -6603,13 +7024,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ModelCompiled"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -6647,13 +7068,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ModelSummary"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -6683,13 +7104,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ModelDetail"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -6760,13 +7181,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ModelEvaluation"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -6794,13 +7215,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Profile"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -7364,13 +7785,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ResolveResult"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -8149,13 +8570,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["OrgResources"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */

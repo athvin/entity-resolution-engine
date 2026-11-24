@@ -1379,13 +1379,27 @@ pub async fn audit(
 ///
 /// # Errors
 /// Propagates the query error.
+/// One audit-ledger entry as the audit feeds serve it.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, utoipa::ToSchema)]
+pub struct AuditEntry {
+    pub id: i64,
+    /// RFC 3339, microseconds.
+    pub at: String,
+    pub actor: String,
+    pub org: Option<String>,
+    pub dataset: Option<String>,
+    pub action: String,
+    pub detail: serde_json::Value,
+    pub trace_id: Option<String>,
+}
+
 pub async fn audit_rows(
     client: &Client,
     org: Option<&str>,
     filters: &AuditFilters<'_>,
     before_id: Option<i64>,
     limit: i64,
-) -> Result<Vec<serde_json::Value>, PgError> {
+) -> Result<Vec<AuditEntry>, PgError> {
     let rows = er_entities::audit_log::read::page(
         client,
         org,
@@ -1400,20 +1414,20 @@ pub async fn audit_rows(
     Ok(rows
         .into_iter()
         .map(|r| {
-            serde_json::json!({
-                "id": r.id,
-                "at": ts(&r.at),
-                "actor": r.actor,
-                "org": r.org,
+            AuditEntry {
+                id: r.id,
+                at: ts(&r.at),
+                actor: r.actor,
+                org: r.org,
                 // Restored alongside the filter work: `page.sql` always
                 // projected it and the schema always declared it, but this
                 // layer dropped it, so a UI could neither show nor filter by
                 // dataset even though the column is populated.
-                "dataset": r.dataset,
-                "action": r.action,
-                "detail": r.detail,
-                "trace_id": r.trace_id,
-            })
+                dataset: r.dataset,
+                action: r.action,
+                detail: r.detail,
+                trace_id: r.trace_id,
+            }
         })
         .collect())
 }

@@ -349,7 +349,7 @@ fn evidence_json(settings: &Settings) -> String {
 }
 
 /// One candidate entity for an unsaved record.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
 pub struct ResolveCandidate {
     /// The record the payload matched.
     pub record_key: String,
@@ -371,7 +371,7 @@ pub struct ResolveCandidate {
 }
 
 /// What resolving an unsaved record returned.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
 pub struct ResolveResult {
     pub candidates: Vec<ResolveCandidate>,
     /// The best candidate's band, or `reject` when there are none — the single
@@ -704,7 +704,7 @@ pub fn estimate_blocking(
 }
 
 /// One blocking rule's contribution to the candidate set.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
 pub struct BlockingRuleEstimate {
     pub blocking_rule: String,
     pub match_key: i64,
@@ -723,7 +723,7 @@ pub struct BlockingRuleEstimate {
 }
 
 /// A blocking key whose block is large enough to dominate a run.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
 pub struct LargestBlockEstimate {
     /// Which rule this block belongs to, since every rule is now broken down
     /// rather than only the first.
@@ -739,7 +739,7 @@ pub struct LargestBlockEstimate {
 }
 
 /// What a run would cost, before running it.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
 pub struct BlockingEstimate {
     /// Every pair the corpus could produce — what resolution would cost with no
     /// blocking at all.
