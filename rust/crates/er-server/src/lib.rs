@@ -5944,7 +5944,7 @@ async fn golden_record_detail(
             },
         };
         match read::entity_detail(session, entity_type, snapshot, &entity_id) {
-            Ok(Some(detail)) => Json(detail).into_response(),
+            Ok(Some(detail)) => Json(read::GoldenDetail::from(detail)).into_response(),
             Ok(None) => detail_err(StatusCode::NOT_FOUND, format!("no entity '{entity_id}'")),
             Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
         }
@@ -7265,6 +7265,15 @@ fn match_preview_blocking(env: &Value, limit: usize) -> Result<Value, String> {
     }))
 }
 
+/// `GET …/records?key=…`: the standardized records found, snapshot-pinned.
+#[derive(Serialize, utoipa::ToSchema)]
+struct RecordsByKey {
+    /// One object per found record: `record_key` plus the dataset entity
+    /// type's standardized columns, so the keys depend on that type.
+    items: Vec<Value>,
+    snapshot: i64,
+}
+
 /// Viewer+: standardized source records by `record_key`
 /// (`GET /v1/orgs/{org}/datasets/{ds}/records?key=…`, `key` repeats, capped at 50). Not
 /// paginated — a bounded lookup. Returns `{ items, snapshot }`.
@@ -7288,7 +7297,7 @@ async fn records_by_key(
         };
         let keys = read::keys_from_query(query.as_deref());
         match read::records_by_key(session, snapshot, &keys) {
-            Ok(items) => Json(json!({ "items": items, "snapshot": snapshot })).into_response(),
+            Ok(items) => Json(RecordsByKey { items, snapshot }).into_response(),
             Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
         }
     })
@@ -7699,6 +7708,14 @@ pub(crate) struct StagedDelivery<'a> {
     pub(crate) action: &'a str,
 }
 
+/// `202` from a source delivery: the published delivery and the run queued
+/// to consume it.
+#[derive(Serialize, utoipa::ToSchema)]
+struct DeliveryAccepted {
+    delivery_id: String,
+    job: er_entities::job::JobWire,
+}
+
 pub(crate) async fn finish_delivery(
     client: &tokio_postgres::Client,
     actor: &str,
@@ -7798,7 +7815,10 @@ pub(crate) async fn finish_delivery(
     }
     (
         StatusCode::ACCEPTED,
-        Json(json!({ "delivery_id": delivery_id, "job": job })),
+        Json(DeliveryAccepted {
+            delivery_id: delivery_id.to_string(),
+            job: er_entities::job::JobWire::from(&job),
+        }),
     )
         .into_response()
 }
@@ -9170,6 +9190,18 @@ struct EntityLinkIn {
     note: Option<String>,
 }
 
+/// `GET …/entities/{entity_id}/links`: the entity's links, either direction.
+#[derive(Serialize, utoipa::ToSchema)]
+struct EntityLinkList {
+    items: Vec<er_entities::entity_link::EntityLinkWire>,
+}
+
+/// `DELETE …/entity-links/{link_id}`: the id of the link removed.
+#[derive(Serialize, utoipa::ToSchema)]
+struct EntityLinkDeleted {
+    deleted: String,
+}
+
 /// Steward+: link two entities WITHOUT merging them
 /// (`POST /v1/orgs/{org}/datasets/{ds}/entity-links`), or correct an existing link of the
 /// same kind.
@@ -9258,7 +9290,18 @@ async fn create_entity_link(
                 &json!({ "parent": parent, "child": child, "kind": body.kind }),
             )
             .await;
-            (StatusCode::CREATED, Json(json!(rows.first()))).into_response()
+            // `upsert` is `INSERT … RETURNING`, so it always yields its row.
+            let Some(link) = rows.first() else {
+                return detail_err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "the link upsert returned no row",
+                );
+            };
+            (
+                StatusCode::CREATED,
+                Json(er_entities::entity_link::EntityLinkWire::from(link)),
+            )
+                .into_response()
         }
         Err(e) => pg_err(e),
     }
@@ -9291,7 +9334,13 @@ async fn entity_links(
         Err(r) => return *r,
     };
     match er_entities::entity_link::read::for_entity(&client, &d.id, &entity_id).await {
-        Ok(rows) => Json(json!({ "items": rows })).into_response(),
+        Ok(rows) => Json(EntityLinkList {
+            items: rows
+                .iter()
+                .map(er_entities::entity_link::EntityLinkWire::from)
+                .collect(),
+        })
+        .into_response(),
         Err(e) => pg_err(e),
     }
 }
@@ -9342,7 +9391,7 @@ async fn delete_entity_link(
             // with one, and the BFF's `forward` parses the response — a bare
             // 204 reaches it as an empty body and throws "Unexpected end of
             // JSON input", which is a BFF crash rather than a failed delete.
-            Json(json!({ "deleted": link_id })).into_response()
+            Json(EntityLinkDeleted { deleted: link_id }).into_response()
         }
         Err(e) => pg_err(e),
     }
@@ -10049,16 +10098,65 @@ async fn steward_stage(
 /// frontend and pinned by tests. `action_id` is carried for the callers that
 /// predate the list — it is the first of `action_ids`, which is the whole
 /// truth.
+/// Per-record steward actions, staged and waiting for an apply.
+#[derive(Serialize, utoipa::ToSchema)]
+struct StagedRecords {
+    /// Always `staged`.
+    status: &'static str,
+    /// The first of `action_ids`: the single-record callers' handle.
+    action_id: Option<String>,
+    action_ids: Vec<String>,
+    /// How many records the call named.
+    count: usize,
+    /// Always false: the actions land on the next apply.
+    pending_until_next_reconcile: bool,
+}
+
+/// Per-record steward actions handed to ONE `apply_corrections` job.
+#[derive(Serialize, utoipa::ToSchema)]
+struct StagedRecordsApplied {
+    /// Always `staged`: the job, not this request, applies them.
+    status: &'static str,
+    action_id: Option<String>,
+    action_ids: Vec<String>,
+    count: usize,
+    pending_until_next_reconcile: bool,
+    apply_job: String,
+}
+
+/// A record unmatch staged as never-rules against its entity.
+#[derive(Serialize, utoipa::ToSchema)]
+struct UnmatchStaged {
+    /// Always `staged`.
+    status: &'static str,
+    entity_id: String,
+    pairs: usize,
+    action_ids: Vec<String>,
+    /// Always true.
+    pending_until_next_reconcile: bool,
+}
+
+/// A record unmatch staged and handed to an `apply_corrections` job.
+#[derive(Serialize, utoipa::ToSchema)]
+struct UnmatchApplied {
+    /// Always `applied`.
+    status: &'static str,
+    entity_id: String,
+    pairs: usize,
+    action_ids: Vec<String>,
+    apply_job: String,
+}
+
 fn staged_batch_response(status: StatusCode, action_ids: &[String]) -> axum::response::Response {
     (
         status,
-        Json(json!({
-            "status": "staged",
-            "action_id": action_ids.first(),
-            "action_ids": action_ids,
-            "count": action_ids.len(),
-            "pending_until_next_reconcile": false,
-        })),
+        Json(StagedRecords {
+            status: "staged",
+            action_id: action_ids.first().cloned(),
+            action_ids: action_ids.to_vec(),
+            count: action_ids.len(),
+            pending_until_next_reconcile: false,
+        }),
     )
         .into_response()
 }
@@ -10431,14 +10529,14 @@ async fn record_batch_actions(
         // to express one decision.
         Ok(job) => (
             StatusCode::CREATED,
-            Json(json!({
-                "status": "staged",
-                "action_id": action_ids.first(),
-                "action_ids": action_ids,
-                "count": keys.len(),
-                "pending_until_next_reconcile": false,
-                "apply_job": job.id,
-            })),
+            Json(StagedRecordsApplied {
+                status: "staged",
+                action_id: action_ids.first().cloned(),
+                count: keys.len(),
+                action_ids,
+                pending_until_next_reconcile: false,
+                apply_job: job.id,
+            }),
         )
             .into_response(),
         Err(e) => pg_err(e),
@@ -11184,13 +11282,13 @@ async fn unmatch_record_route(
     if !body.apply_now {
         return (
             StatusCode::OK,
-            Json(json!({
-                "status": "staged",
-                "entity_id": entity_id,
-                "pairs": pairs,
-                "action_ids": action_ids,
-                "pending_until_next_reconcile": true,
-            })),
+            Json(UnmatchStaged {
+                status: "staged",
+                entity_id,
+                pairs,
+                action_ids,
+                pending_until_next_reconcile: true,
+            }),
         )
             .into_response();
     }
@@ -11218,13 +11316,13 @@ async fn unmatch_record_route(
     {
         Ok(job) => (
             StatusCode::OK,
-            Json(json!({
-                "status": "applied",
-                "entity_id": entity_id,
-                "pairs": pairs,
-                "action_ids": action_ids,
-                "apply_job": job.id,
-            })),
+            Json(UnmatchApplied {
+                status: "applied",
+                entity_id,
+                pairs,
+                action_ids,
+                apply_job: job.id,
+            }),
         )
             .into_response(),
         Err(e) => pg_err(e),
@@ -12867,6 +12965,10 @@ mod response_shape_tests {
         ResumeAccepted, ReviewMergeGroup, Staged, StagedApplied, StagedBatch, StagedBatchApplied,
         UnmergeApplied, UnmergeStaged, enqueue_traced, label_coverage, resources_of,
     };
+    use super::{
+        DeliveryAccepted, EntityLinkDeleted, RecordsByKey, StagedRecords, StagedRecordsApplied,
+        UnmatchApplied, UnmatchStaged,
+    };
     use er_entities::job::JobWire;
     use serde_json::json;
 
@@ -13173,6 +13275,99 @@ mod response_shape_tests {
                 items: items.clone(),
                 total: 3,
                 snapshot: 7,
+            })
+        );
+    }
+
+    #[test]
+    fn record_actions_and_deliveries_keep_their_keys() {
+        let ids = vec!["a1".to_string(), "a2".to_string()];
+        let mut old = json!({
+            "status": "staged",
+            "action_id": ids.first(),
+            "action_ids": ids,
+            "count": 2_usize,
+            "pending_until_next_reconcile": false,
+        });
+        assert_eq!(
+            old,
+            value(&StagedRecords {
+                status: "staged",
+                action_id: ids.first().cloned(),
+                action_ids: ids.clone(),
+                count: 2,
+                pending_until_next_reconcile: false,
+            })
+        );
+        old["apply_job"] = json!("j1");
+        assert_eq!(
+            old,
+            value(&StagedRecordsApplied {
+                status: "staged",
+                action_id: ids.first().cloned(),
+                action_ids: ids.clone(),
+                count: 2,
+                pending_until_next_reconcile: false,
+                apply_job: "j1".into(),
+            })
+        );
+        // An empty batch never reaches here (422), but its `action_id` is null.
+        assert_eq!(
+            value(&StagedRecords {
+                status: "staged",
+                action_id: None,
+                action_ids: Vec::new(),
+                count: 0,
+                pending_until_next_reconcile: false,
+            })["action_id"],
+            json!(Vec::<String>::new().first())
+        );
+        assert_eq!(
+            json!({
+                "status": "staged", "entity_id": "e1", "pairs": 2_usize,
+                "action_ids": ids, "pending_until_next_reconcile": true,
+            }),
+            value(&UnmatchStaged {
+                status: "staged",
+                entity_id: "e1".into(),
+                pairs: 2,
+                action_ids: ids.clone(),
+                pending_until_next_reconcile: true,
+            })
+        );
+        assert_eq!(
+            json!({
+                "status": "applied", "entity_id": "e1", "pairs": 2_usize,
+                "action_ids": ids, "apply_job": "j1",
+            }),
+            value(&UnmatchApplied {
+                status: "applied",
+                entity_id: "e1".into(),
+                pairs: 2,
+                action_ids: ids.clone(),
+                apply_job: "j1".into(),
+            })
+        );
+        let job = job();
+        assert_eq!(
+            json!({ "delivery_id": "d1", "job": job }),
+            value(&DeliveryAccepted {
+                delivery_id: "d1".into(),
+                job: JobWire::from(&job),
+            })
+        );
+        assert_eq!(
+            json!({ "deleted": "l1" }),
+            value(&EntityLinkDeleted {
+                deleted: "l1".into()
+            })
+        );
+        let items = vec![json!({ "record_key": "k" })];
+        assert_eq!(
+            json!({ "items": items, "snapshot": 4 }),
+            value(&RecordsByKey {
+                items: items.clone(),
+                snapshot: 4,
             })
         );
     }

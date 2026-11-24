@@ -96,6 +96,21 @@ pub struct ApiDoc;
     crate::StagedBatchApplied,
     crate::UnmergeStaged,
     crate::UnmergeApplied,
+    crate::read::GoldenDetail,
+    crate::read::GoldenRow,
+    crate::read::PersonGolden,
+    crate::read::AccountGolden,
+    crate::read::LineageItem,
+    crate::read::EntityMember,
+    crate::read::EntityEventItem,
+    crate::RecordsByKey,
+    crate::StagedRecords,
+    crate::StagedRecordsApplied,
+    crate::UnmatchStaged,
+    crate::UnmatchApplied,
+    crate::DeliveryAccepted,
+    crate::EntityLinkList,
+    crate::EntityLinkDeleted,
 )))]
 pub struct ResponseDoc;
 

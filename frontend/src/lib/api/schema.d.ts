@@ -1770,6 +1770,19 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description An account entity's golden record, as of the pinned snapshot. */
+        AccountGolden: {
+            addr_city?: string | null;
+            addr_postal?: string | null;
+            addr_region?: string | null;
+            addr_street?: string | null;
+            company_name?: string | null;
+            domain?: string | null;
+            id: string;
+            metadata?: unknown;
+            phone_e164?: string | null;
+            survivorship_version: string;
+        };
         /** @description Per-attribute survivorship provenance for a resolved account: which record each surviving value came from. */
         AcctGoldenLineage: {
             /** @description The survivable attribute decided (e.g. company_name, domain, address). */
@@ -2207,6 +2220,25 @@ export interface components {
             state: string;
             updated_at: string;
         };
+        /**
+         * @description `202` from a source delivery: the published delivery and the run queued
+         *     to consume it.
+         */
+        DeliveryAccepted: {
+            delivery_id: string;
+            job: components["schemas"]["Job"];
+        };
+        /** @description One event in an entity's history. */
+        EntityEventItem: {
+            details: unknown;
+            event_type: string;
+            id: string;
+            /** @description Naive lake text (`YYYY-MM-DD HH:MM:SS[.ffffff]`), not RFC 3339. */
+            occurred_at: string;
+            run_id: string;
+            /** Format: int64 */
+            seq: number;
+        };
         /** @description A relationship between two resolved entities that is NOT a merge: a household, a corporate hierarchy, a 'these are related but distinct' note. The product has one answer to 'these two records belong together' — merge them — and that answer is wrong for a husband and wife at one address, or a subsidiary and its parent. Merging them loses the distinction and no later run can recover it; refusing to record anything loses the relationship. A link records it without collapsing either side. */
         EntityLink: {
             /** @description The entity on the member side — the person in the household, the subsidiary. */
@@ -2237,6 +2269,37 @@ export interface components {
              * @description When it was last changed.
              */
             updated_at: string;
+        };
+        /** @description `DELETE …/entity-links/{link_id}`: the id of the link removed. */
+        EntityLinkDeleted: {
+            deleted: string;
+        };
+        /** @description `GET …/entities/{entity_id}/links`: the entity's links, either direction. */
+        EntityLinkList: {
+            items: components["schemas"]["EntityLink"][];
+        };
+        /** @description One member record of an entity, with its active steward flags. */
+        EntityMember: {
+            /** @description Naive lake text (`YYYY-MM-DD HH:MM:SS[.ffffff]`), not RFC 3339. */
+            assigned_at: string;
+            /**
+             * @description An active `protect` overlay: the record is master for its entity and
+             *     cannot be deleted or unmatch-peeled until unprotected.
+             */
+            protected: boolean;
+            record_key: string;
+            run_id: string;
+            source_record_id: string;
+            source_system: string;
+            /** @description An active whole-row steward verification. */
+            verified: boolean;
+        };
+        /** @description `GET …/golden-records/{entity_id}`: one resolved entity, snapshot-pinned. */
+        GoldenDetail: {
+            events: components["schemas"]["EntityEventItem"][];
+            golden: components["schemas"]["GoldenRow"];
+            lineage: components["schemas"]["LineageItem"][];
+            members: components["schemas"]["EntityMember"][];
         };
         /** @description Per-attribute survivorship provenance: which record each surviving golden value came from. */
         GoldenLineage: {
@@ -2316,6 +2379,8 @@ export interface components {
              */
             updated_at: string;
         };
+        /** @description The golden record of whichever entity type the dataset resolves. */
+        GoldenRow: components["schemas"]["PersonGolden"] | components["schemas"]["AccountGolden"];
         /** @description One delivery receipt (S4.1): per-source landing counts for a batch, including tombstones and resurrections. */
         IngestBatch: {
             /**
@@ -2508,6 +2573,14 @@ export interface components {
              * @description The `auto_merge` threshold the pairs are ordered around.
              */
             threshold: number;
+        };
+        /** @description Which member supplied one golden attribute, and by which survivorship rule. */
+        LineageItem: {
+            attribute: string;
+            record_key: string;
+            rule: string;
+            source_record_id: string;
+            source_system: string;
         };
         /** @description An immutable version of a tenant's matching model: the settings document the engine scores against, its hash, provenance and activation state. */
         MatchingModel: {
@@ -2810,6 +2883,24 @@ export interface components {
             /** @description Whether these two records are the same entity. Deliberately binary: a labeller who is unsure should skip rather than guess, because a guessed label trains the model on noise and is indistinguishable afterwards from a confident one. */
             verdict: string;
         };
+        /** @description A person entity's golden record, as of the pinned snapshot. */
+        PersonGolden: {
+            addr_city?: string | null;
+            addr_number?: string | null;
+            addr_postal?: string | null;
+            addr_region?: string | null;
+            addr_street?: string | null;
+            addr_unit?: string | null;
+            /** Format: date */
+            birth_date?: string | null;
+            email?: string | null;
+            family_name?: string | null;
+            given_name?: string | null;
+            id: string;
+            metadata?: unknown;
+            phone_e164?: string | null;
+            survivorship_version: string;
+        };
         /** @description One coded observation a profile made about a corpus — a column mostly null, a blocking key dominated by one value, a record id that is not unique. Stored rather than derived at read time because the thresholds that produced a finding belong to the run that applied them: re-deriving later against changed thresholds would silently rewrite history, and a finding is the part of a profile a user is most likely to act on. */
         ProfileFinding: {
             /** @description The finding's registry code (P001, P002, …). Codes are append-only and a retired rule keeps its code, so a stored finding stays interpretable after the rule that made it is gone — which is the point of coding them rather than storing only prose. */
@@ -2949,6 +3040,16 @@ export interface components {
              * @description Fraction of the PRESENT validatable fields that passed standardization. NULL when the record has none of them — a record with no email is already penalised by completeness, and scoring its validity zero would penalise the same absence twice.
              */
             validity?: number | null;
+        };
+        /** @description `GET …/records?key=…`: the standardized records found, snapshot-pinned. */
+        RecordsByKey: {
+            /**
+             * @description One object per found record: `record_key` plus the dataset entity
+             *     type's standardized columns, so the keys depend on that type.
+             */
+            items: unknown[];
+            /** Format: int64 */
+            snapshot: number;
         };
         /** @description A resumed job, requeued: the body of `POST …/jobs/{job_id}/resume`. */
         ResumeAccepted: {
@@ -3111,6 +3212,40 @@ export interface components {
             action_ids: string[];
             apply_job: string;
             /** @description Always `staged`. */
+            status: string;
+        };
+        /**
+         * @description The staged-action response envelope (`_steward_action`): always `staged`
+         *     here, so `pending_until_next_reconcile` is false (immediate apply is the
+         *     infra-bound writer-lock path).
+         *     The staged response for a call that staged SEVERAL actions (O6).
+         *
+         *     A sibling of [`staged_response`] rather than a widening of it: three other
+         *     handlers stage exactly one action, and their response shape is read by the
+         *     frontend and pinned by tests. `action_id` is carried for the callers that
+         *     predate the list — it is the first of `action_ids`, which is the whole
+         *     truth.
+         *     Per-record steward actions, staged and waiting for an apply.
+         */
+        StagedRecords: {
+            /** @description The first of `action_ids`: the single-record callers' handle. */
+            action_id?: string | null;
+            action_ids: string[];
+            /** @description How many records the call named. */
+            count: number;
+            /** @description Always false: the actions land on the next apply. */
+            pending_until_next_reconcile: boolean;
+            /** @description Always `staged`. */
+            status: string;
+        };
+        /** @description Per-record steward actions handed to ONE `apply_corrections` job. */
+        StagedRecordsApplied: {
+            action_id?: string | null;
+            action_ids: string[];
+            apply_job: string;
+            count: number;
+            pending_until_next_reconcile: boolean;
+            /** @description Always `staged`: the job, not this request, applies them. */
             status: string;
         };
         /** @description A steward action staged for review/apply: its payload, state and outcome. */
@@ -3365,6 +3500,25 @@ export interface components {
             run_id: string;
             /** @description Naive lake text (`YYYY-MM-DD HH:MM:SS[.ffffff]`), not RFC 3339. */
             scored_at: string;
+        };
+        /** @description A record unmatch staged and handed to an `apply_corrections` job. */
+        UnmatchApplied: {
+            action_ids: string[];
+            apply_job: string;
+            entity_id: string;
+            pairs: number;
+            /** @description Always `applied`. */
+            status: string;
+        };
+        /** @description A record unmatch staged as never-rules against its entity. */
+        UnmatchStaged: {
+            action_ids: string[];
+            entity_id: string;
+            pairs: number;
+            /** @description Always true. */
+            pending_until_next_reconcile: boolean;
+            /** @description Always `staged`. */
+            status: string;
         };
         /** @description An unmerge staged and handed to an `apply_corrections` job. */
         UnmergeApplied: {
@@ -4818,15 +4972,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        items?: unknown;
-                    };
+                    "application/json": components["schemas"]["EntityLinkList"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -4863,13 +5015,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["EntityLink"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -4898,15 +5050,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        deleted?: unknown;
-                    };
+                    "application/json": components["schemas"]["EntityLinkDeleted"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -5009,13 +5159,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["GoldenDetail"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -5211,16 +5361,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        delivery_id?: unknown;
-                        job?: unknown;
-                    };
+                    "application/json": components["schemas"]["DeliveryAccepted"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -6381,16 +6528,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        items?: unknown;
-                        snapshot?: unknown;
-                    };
+                    "application/json": components["schemas"]["RecordsByKey"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -6426,26 +6570,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        action_id?: unknown;
-                        action_ids?: unknown;
-                        count?: unknown;
-                        pending_until_next_reconcile?: unknown;
-                        status?: unknown;
-                    } | {
-                        action_id?: unknown;
-                        action_ids?: unknown;
-                        apply_job?: unknown;
-                        count?: unknown;
-                        pending_until_next_reconcile?: unknown;
-                        status?: unknown;
-                    };
+                    "application/json": components["schemas"]["StagedRecords"] | components["schemas"]["StagedRecordsApplied"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -6480,16 +6611,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        delivery_id?: unknown;
-                        job?: unknown;
-                    };
+                    "application/json": components["schemas"]["DeliveryAccepted"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -6525,26 +6653,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        action_id?: unknown;
-                        action_ids?: unknown;
-                        count?: unknown;
-                        pending_until_next_reconcile?: unknown;
-                        status?: unknown;
-                    } | {
-                        action_id?: unknown;
-                        action_ids?: unknown;
-                        apply_job?: unknown;
-                        count?: unknown;
-                        pending_until_next_reconcile?: unknown;
-                        status?: unknown;
-                    };
+                    "application/json": components["schemas"]["StagedRecords"] | components["schemas"]["StagedRecordsApplied"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -6580,26 +6695,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        action_id?: unknown;
-                        action_ids?: unknown;
-                        count?: unknown;
-                        pending_until_next_reconcile?: unknown;
-                        status?: unknown;
-                    } | {
-                        action_id?: unknown;
-                        action_ids?: unknown;
-                        apply_job?: unknown;
-                        count?: unknown;
-                        pending_until_next_reconcile?: unknown;
-                        status?: unknown;
-                    };
+                    "application/json": components["schemas"]["StagedRecords"] | components["schemas"]["StagedRecordsApplied"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -6635,26 +6737,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        action_id?: unknown;
-                        action_ids?: unknown;
-                        count?: unknown;
-                        pending_until_next_reconcile?: unknown;
-                        status?: unknown;
-                    } | {
-                        action_id?: unknown;
-                        action_ids?: unknown;
-                        apply_job?: unknown;
-                        count?: unknown;
-                        pending_until_next_reconcile?: unknown;
-                        status?: unknown;
-                    };
+                    "application/json": components["schemas"]["StagedRecords"] | components["schemas"]["StagedRecordsApplied"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -6689,25 +6778,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        action_ids?: unknown;
-                        entity_id?: unknown;
-                        pairs?: unknown;
-                        pending_until_next_reconcile?: unknown;
-                        status?: unknown;
-                    } | {
-                        action_ids?: unknown;
-                        apply_job?: unknown;
-                        entity_id?: unknown;
-                        pairs?: unknown;
-                        status?: unknown;
-                    };
+                    "application/json": components["schemas"]["UnmatchStaged"] | components["schemas"]["UnmatchApplied"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -6743,26 +6820,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        action_id?: unknown;
-                        action_ids?: unknown;
-                        count?: unknown;
-                        pending_until_next_reconcile?: unknown;
-                        status?: unknown;
-                    } | {
-                        action_id?: unknown;
-                        action_ids?: unknown;
-                        apply_job?: unknown;
-                        count?: unknown;
-                        pending_until_next_reconcile?: unknown;
-                        status?: unknown;
-                    };
+                    "application/json": components["schemas"]["StagedRecords"] | components["schemas"]["StagedRecordsApplied"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -6798,26 +6862,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        action_id?: unknown;
-                        action_ids?: unknown;
-                        count?: unknown;
-                        pending_until_next_reconcile?: unknown;
-                        status?: unknown;
-                    } | {
-                        action_id?: unknown;
-                        action_ids?: unknown;
-                        apply_job?: unknown;
-                        count?: unknown;
-                        pending_until_next_reconcile?: unknown;
-                        status?: unknown;
-                    };
+                    "application/json": components["schemas"]["StagedRecords"] | components["schemas"]["StagedRecordsApplied"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -6854,26 +6905,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        action_id?: unknown;
-                        action_ids?: unknown;
-                        count?: unknown;
-                        pending_until_next_reconcile?: unknown;
-                        status?: unknown;
-                    } | {
-                        action_id?: unknown;
-                        action_ids?: unknown;
-                        apply_job?: unknown;
-                        count?: unknown;
-                        pending_until_next_reconcile?: unknown;
-                        status?: unknown;
-                    };
+                    "application/json": components["schemas"]["StagedRecords"] | components["schemas"]["StagedRecordsApplied"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -6910,26 +6948,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        action_id?: unknown;
-                        action_ids?: unknown;
-                        count?: unknown;
-                        pending_until_next_reconcile?: unknown;
-                        status?: unknown;
-                    } | {
-                        action_id?: unknown;
-                        action_ids?: unknown;
-                        apply_job?: unknown;
-                        count?: unknown;
-                        pending_until_next_reconcile?: unknown;
-                        status?: unknown;
-                    };
+                    "application/json": components["schemas"]["StagedRecords"] | components["schemas"]["StagedRecordsApplied"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
