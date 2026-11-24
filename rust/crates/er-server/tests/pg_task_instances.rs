@@ -219,13 +219,16 @@ async fn the_task_ledger_statements_hold_their_contracts() {
         .await
         .unwrap();
     // Capture the old serialized payload, with exactly the declared internal
-    // field removed. Comparing bytes below pins every other field and value,
-    // without deriving the expectation from the wire converter under test.
+    // field removed. Comparing the parsed value below pins every other field
+    // and value, without deriving the expectation from the wire converter
+    // under test. A value, not bytes: the typed response (#864) emits keys in
+    // declaration order where the `json!` this replaced sorted them, and JSON
+    // object order carries no meaning.
     let mut public_rows = serde_json::to_value(&task_rows).unwrap();
     for row in public_rows.as_array_mut().unwrap() {
         row.as_object_mut().unwrap().remove("token_hash");
     }
-    let expected = serde_json::to_vec(&json!({ "tasks": public_rows })).unwrap();
+    let expected = json!({ "tasks": public_rows });
     let resp = app
         .clone()
         .oneshot(
@@ -252,7 +255,7 @@ async fn the_task_ledger_statements_hold_their_contracts() {
         tasks.iter().all(|task| task.get("token_hash").is_none()),
         "the public task list must omit the internal token_hash field"
     );
-    assert_eq!(bytes.as_ref(), expected.as_slice());
+    assert_eq!(listed, expected);
     let resp = app
         .clone()
         .oneshot(
