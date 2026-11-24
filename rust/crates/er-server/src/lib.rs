@@ -9153,6 +9153,50 @@ async fn webhooks_index(
     }
 }
 
+/// `GET /v1/orgs/{org}/tags`: the org's tags (or those on one subject).
+#[derive(Serialize, utoipa::ToSchema)]
+struct TagList {
+    tags: Vec<er_entities::tag::TagWire>,
+}
+
+/// `GET …/tags/{tag_id}/subjects`: what one tag is applied to.
+#[derive(Serialize, utoipa::ToSchema)]
+struct TagSubjects {
+    subjects: Vec<er_entities::tagging::TaggingWire>,
+}
+
+/// `GET …/taggings`: every tagging in a dataset, capped.
+#[derive(Serialize, utoipa::ToSchema)]
+struct TaggingList {
+    taggings: Vec<er_entities::tagging::TaggingWire>,
+    /// True when the cap cut the list: the caller has not seen every tagging.
+    truncated: bool,
+}
+
+/// `POST …/tags/{tag_id}/apply`: always `true` (a missing tag is a 404).
+#[derive(Serialize, utoipa::ToSchema)]
+struct TagApplied {
+    applied: bool,
+}
+
+/// `POST …/tags/{tag_id}/unapply`: always `true` (an absent tagging is a 404).
+#[derive(Serialize, utoipa::ToSchema)]
+struct TagRemoved {
+    removed: bool,
+}
+
+/// `DELETE /v1/orgs/{org}/tags/{tag_id}`: always `true` (unknown is a 404).
+#[derive(Serialize, utoipa::ToSchema)]
+struct TagRetired {
+    retired: bool,
+}
+
+/// `GET …/staged`: how many steward actions await the next reconcile.
+#[derive(Serialize, utoipa::ToSchema)]
+struct StagedCount {
+    pending_count: i64,
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct TagIn {
@@ -9217,7 +9261,10 @@ async fn tags_index(
         (None, None) => pg::list_tags(&client, &org_row.id).await,
     };
     match found {
-        Ok(tags) => Json(json!({ "tags": tags })).into_response(),
+        Ok(tags) => Json(TagList {
+            tags: tags.iter().map(er_entities::tag::TagWire::from).collect(),
+        })
+        .into_response(),
         Err(e) => pg_err(e),
     }
 }
@@ -9299,7 +9346,11 @@ async fn create_tag(
     )
     .await
     {
-        Ok(Some(tag)) => (StatusCode::CREATED, Json(json!(tag))).into_response(),
+        Ok(Some(tag)) => (
+            StatusCode::CREATED,
+            Json(er_entities::tag::TagWire::from(&tag)),
+        )
+            .into_response(),
         // The partial unique index is what rejects a duplicate, so a race
         // between two stewards naming the same tag ends here rather than
         // creating two tags one filter cannot tell apart.
@@ -9361,7 +9412,7 @@ async fn retire_tag(
         // `SyntaxError: Unexpected end of JSON input` — the upstream write
         // succeeds and the UI shows an error. No control-plane mutation here
         // answers 204, and this is why.
-        Ok(true) => Json(json!({ "retired": true })).into_response(),
+        Ok(true) => Json(TagRetired { retired: true }).into_response(),
         Ok(false) => detail_err(StatusCode::NOT_FOUND, "no such tag"),
         Err(e) => pg_err(e),
     }
@@ -9731,9 +9782,9 @@ async fn tag_application(
         // A JSON body rather than 204, for the reason `retire_tag` records.
         Ok(true) => {
             if apply {
-                Json(json!({ "applied": true })).into_response()
+                Json(TagApplied { applied: true }).into_response()
             } else {
-                Json(json!({ "removed": true })).into_response()
+                Json(TagRemoved { removed: true }).into_response()
             }
         }
         // On apply this is "no such tag"; on unapply, "it was not applied".
@@ -9794,7 +9845,13 @@ async fn tag_subjects(
     )
     .await
     {
-        Ok(rows) => Json(json!({ "subjects": rows })).into_response(),
+        Ok(rows) => Json(TagSubjects {
+            subjects: rows
+                .iter()
+                .map(er_entities::tagging::TaggingWire::from)
+                .collect(),
+        })
+        .into_response(),
         Err(e) => pg_err(e),
     }
 }
@@ -9861,7 +9918,14 @@ async fn taggings_index(
             } else {
                 &rows[..]
             };
-            Json(json!({ "taggings": rows, "truncated": truncated })).into_response()
+            Json(TaggingList {
+                taggings: rows
+                    .iter()
+                    .map(er_entities::tagging::TaggingWire::from)
+                    .collect(),
+                truncated,
+            })
+            .into_response()
         }
         Err(e) => pg_err(e),
     }
@@ -11551,7 +11615,7 @@ async fn staged_count(
         Err(r) => return *r,
     };
     match pg::pending_count(&client, &d.id).await {
-        Ok(n) => Json(json!({ "pending_count": n })).into_response(),
+        Ok(n) => Json(StagedCount { pending_count: n }).into_response(),
         Err(e) => pg_err(e),
     }
 }
@@ -13173,6 +13237,9 @@ mod response_shape_tests {
         DeliveryAccepted, EntityLinkDeleted, RecordsByKey, StagedRecords, StagedRecordsApplied,
         UnmatchApplied, UnmatchStaged,
     };
+    use super::{
+        StagedCount, TagApplied, TagList, TagRemoved, TagRetired, TagSubjects, TaggingList,
+    };
     use er_entities::job::JobWire;
     use serde_json::json;
 
@@ -13743,6 +13810,75 @@ mod response_shape_tests {
                     .map(|(event, description)| WebhookEventItem { event, description })
                     .collect(),
             })
+        );
+    }
+
+    #[test]
+    fn tag_bodies_keep_their_keys() {
+        let now = chrono::Utc::now();
+        let tag = er_entities::tag::Tag {
+            id: "t1".into(),
+            org_id: "o".into(),
+            name: "vip".into(),
+            description: None,
+            kind: "label".into(),
+            apply_min_role: Some("steward".into()),
+            active: true,
+            created_by: "u".into(),
+            created_at: now,
+            updated_at: now,
+        };
+        let tagging = er_entities::tagging::Tagging {
+            id: "g1".into(),
+            org_id: "o".into(),
+            dataset_id: "d".into(),
+            tag_id: "t1".into(),
+            subject_type: "entity".into(),
+            subject_id: "e1".into(),
+            created_by: "u".into(),
+            created_at: now,
+            updated_at: now,
+        };
+        assert_eq!(json!(tag), value(&er_entities::tag::TagWire::from(&tag)));
+        let tags = vec![tag];
+        assert_eq!(
+            json!({ "tags": tags }),
+            value(&TagList {
+                tags: tags.iter().map(er_entities::tag::TagWire::from).collect(),
+            })
+        );
+        let rows = vec![tagging];
+        let wires = || {
+            rows.iter()
+                .map(er_entities::tagging::TaggingWire::from)
+                .collect()
+        };
+        assert_eq!(
+            json!({ "subjects": rows }),
+            value(&TagSubjects { subjects: wires() })
+        );
+        assert_eq!(
+            json!({ "taggings": rows, "truncated": true }),
+            value(&TaggingList {
+                taggings: wires(),
+                truncated: true,
+            })
+        );
+        assert_eq!(
+            json!({ "applied": true }),
+            value(&TagApplied { applied: true })
+        );
+        assert_eq!(
+            json!({ "removed": true }),
+            value(&TagRemoved { removed: true })
+        );
+        assert_eq!(
+            json!({ "retired": true }),
+            value(&TagRetired { retired: true })
+        );
+        assert_eq!(
+            json!({ "pending_count": 3 }),
+            value(&StagedCount { pending_count: 3 })
         );
     }
 }

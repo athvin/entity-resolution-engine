@@ -3328,6 +3328,11 @@ export interface components {
             /** @description Always `staged`. */
             status: string;
         };
+        /** @description `GET …/staged`: how many steward actions await the next reconcile. */
+        StagedCount: {
+            /** Format: int64 */
+            pending_count: number;
+        };
         /**
          * @description The staged-action response envelope (`_steward_action`): always `staged`
          *     here, so `pending_until_next_reconcile` is false (immediate apply is the
@@ -3423,6 +3428,26 @@ export interface components {
              */
             updated_at: string;
         };
+        /** @description `POST …/tags/{tag_id}/apply`: always `true` (a missing tag is a 404). */
+        TagApplied: {
+            applied: boolean;
+        };
+        /** @description `GET /v1/orgs/{org}/tags`: the org's tags (or those on one subject). */
+        TagList: {
+            tags: components["schemas"]["Tag"][];
+        };
+        /** @description `POST …/tags/{tag_id}/unapply`: always `true` (an absent tagging is a 404). */
+        TagRemoved: {
+            removed: boolean;
+        };
+        /** @description `DELETE /v1/orgs/{org}/tags/{tag_id}`: always `true` (unknown is a 404). */
+        TagRetired: {
+            retired: boolean;
+        };
+        /** @description `GET …/tags/{tag_id}/subjects`: what one tag is applied to. */
+        TagSubjects: {
+            subjects: components["schemas"]["Tagging"][];
+        };
         /** @description One tag applied to one subject: the attachment, kept apart from the tag so retiring a tag does not rewrite what it was applied to. */
         Tagging: {
             /**
@@ -3449,6 +3474,12 @@ export interface components {
              * @description Wall-clock last-write time.
              */
             updated_at: string;
+        };
+        /** @description `GET …/taggings`: every tagging in a dataset, capped. */
+        TaggingList: {
+            taggings: components["schemas"]["Tagging"][];
+            /** @description True when the cap cut the list: the caller has not seen every tagging. */
+            truncated: boolean;
         };
         /** @description One try of one task of one job (Airflow's task_instance shape): the live try has live = TRUE, archived tries have live NULL and stay in the table as history (batch-orchestration-design §4.2). */
         TaskInstance: {
@@ -7672,15 +7703,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        pending_count?: unknown;
-                    };
+                    "application/json": components["schemas"]["StagedCount"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -7745,16 +7774,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        taggings?: unknown;
-                        truncated?: unknown;
-                    };
+                    "application/json": components["schemas"]["TaggingList"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -7790,17 +7816,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        applied?: unknown;
-                    } | {
-                        removed?: unknown;
-                    };
+                    "application/json": components["schemas"]["TagApplied"] | components["schemas"]["TagRemoved"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -7829,15 +7851,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        subjects?: unknown;
-                    };
+                    "application/json": components["schemas"]["TagSubjects"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -7873,17 +7893,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        applied?: unknown;
-                    } | {
-                        removed?: unknown;
-                    };
+                    "application/json": components["schemas"]["TagApplied"] | components["schemas"]["TagRemoved"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -8022,15 +8038,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        tags?: unknown;
-                    };
+                    "application/json": components["schemas"]["TagList"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -8065,13 +8079,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Tag"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -8099,15 +8113,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        retired?: unknown;
-                    };
+                    "application/json": components["schemas"]["TagRetired"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
