@@ -282,8 +282,8 @@ async fn mixed() { if a { Json(JobWire::from(&job)) } else { Json(json!(job)) } 
         schema("/jobs", "GET"),
         [json!({"$ref": "#/components/schemas/JobList"})]
     );
-    assert_eq!(schema("/jobs", "POST"), [job.clone()]);
-    assert_eq!(schema("/jobs/{id}", "GET"), [job.clone()]);
+    assert_eq!(schema("/jobs", "POST"), std::slice::from_ref(&job));
+    assert_eq!(schema("/jobs/{id}", "GET"), std::slice::from_ref(&job));
     assert_eq!(
         schema("/all", "GET"),
         [json!({"type": "array", "items": job})]
