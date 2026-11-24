@@ -2493,10 +2493,12 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/DataQuality"
+                }
               }
             }
           },
@@ -3530,15 +3532,11 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "series": {},
-                    "snapshot": {}
-                  }
+                  "$ref": "#/components/schemas/InsightSeries"
                 }
               }
             }
@@ -3595,16 +3593,11 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "run_id": {},
-                    "snapshot": {},
-                    "sources": {}
-                  }
+                  "$ref": "#/components/schemas/SourceInsights"
                 }
               }
             }
@@ -5024,10 +5017,12 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Metrics"
+                }
               }
             }
           },
@@ -5679,10 +5674,12 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Quality"
+                }
               }
             }
           },
@@ -9691,6 +9688,31 @@
           }
         }
       },
+      "Completeness": {
+        "type": "object",
+        "description": "Golden-record completeness: overall and per survivable column.",
+        "required": [
+          "overall",
+          "by_attribute"
+        ],
+        "properties": {
+          "by_attribute": {
+            "type": "object",
+            "description": "Non-null fraction per golden column.",
+            "additionalProperties": {
+              "type": "number",
+              "format": "double"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "overall": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
       "ConfigDraftCreated": {
         "type": "object",
         "description": "`POST …/config/versions`: the draft just stored.",
@@ -9929,6 +9951,59 @@
           },
           "yaml": {
             "type": "string"
+          }
+        }
+      },
+      "DataQuality": {
+        "type": "object",
+        "description": "`GET …/data-quality`: the composite score and its four inputs.",
+        "required": [
+          "dq_score",
+          "completeness",
+          "junk_rate",
+          "stale_rate",
+          "duplicate_rate",
+          "records",
+          "entities",
+          "stale_days",
+          "snapshot"
+        ],
+        "properties": {
+          "completeness": {
+            "$ref": "#/components/schemas/Completeness"
+          },
+          "dq_score": {
+            "type": "number",
+            "format": "double",
+            "description": "The mean of completeness and the complements of the three rates."
+          },
+          "duplicate_rate": {
+            "type": "number",
+            "format": "double"
+          },
+          "entities": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "junk_rate": {
+            "type": "number",
+            "format": "double"
+          },
+          "records": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "snapshot": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "stale_days": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "stale_rate": {
+            "type": "number",
+            "format": "double"
           }
         }
       },
@@ -10617,6 +10692,99 @@
             "type": "string",
             "format": "date-time",
             "description": "Run-logical last-write time. Receipts were written once until E9b; the screening pass now updates the row after the match stage, because the verdicts do not exist until the run has scored."
+          }
+        }
+      },
+      "InsightPoint": {
+        "type": "object",
+        "description": "One retained metric snapshot, with the rates derived from it.",
+        "required": [
+          "run_id",
+          "captured_at",
+          "records",
+          "entities",
+          "duplicate_records",
+          "duplicate_groups",
+          "largest_group",
+          "review_backlog",
+          "auto_merge_pairs",
+          "review_band_pairs"
+        ],
+        "properties": {
+          "auto_merge_pairs": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "captured_at": {
+            "type": "string",
+            "description": "chrono's display form (`YYYY-MM-DD HH:MM:SS[.f] UTC`)."
+          },
+          "duplicate_groups": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "duplicate_rate": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Duplicate records over records; null for an empty corpus."
+          },
+          "duplicate_records": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "entities": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "largest_group": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "records": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "records_per_entity": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Records over entities; null when there are none."
+          },
+          "review_backlog": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "review_band_pairs": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "run_id": {
+            "type": "string"
+          }
+        }
+      },
+      "InsightSeries": {
+        "type": "object",
+        "description": "`GET …/insights`: the retained metric series, newest first.",
+        "required": [
+          "snapshot",
+          "series"
+        ],
+        "properties": {
+          "series": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InsightPoint"
+            }
+          },
+          "snapshot": {
+            "type": "integer",
+            "format": "int64"
           }
         }
       },
@@ -11382,6 +11550,44 @@
           }
         }
       },
+      "Metrics": {
+        "type": "object",
+        "description": "`GET …/metrics`: the dashboard counters, snapshot-pinned.",
+        "required": [
+          "records",
+          "entities",
+          "duplicate_groups",
+          "records_in_duplicate_groups",
+          "open_reviews",
+          "snapshot"
+        ],
+        "properties": {
+          "duplicate_groups": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "entities": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "open_reviews": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "records": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "records_in_duplicate_groups": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "snapshot": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
       "Org": {
         "type": "object",
         "description": "A tenant: its config pointer, lake env, lifecycle state and active config version.",
@@ -11939,6 +12145,140 @@
             "type": "string",
             "format": "date-time",
             "description": "Run-logical last-write time. A re-profile of an unchanged snapshot rewrites the row in place rather than appending, so this moves while the rest of the row does not."
+          }
+        }
+      },
+      "Quality": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/QualityReport"
+          },
+          {
+            "$ref": "#/components/schemas/QualityUnconfigured"
+          }
+        ],
+        "description": "`GET …/quality`: the report, or the unconfigured answer."
+      },
+      "QualityBuckets": {
+        "type": "object",
+        "description": "The record-quality score distribution, by band.",
+        "required": [
+          "below_50",
+          "between_50_80",
+          "at_least_80"
+        ],
+        "properties": {
+          "at_least_80": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "below_50": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "between_50_80": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "QualityDimensions": {
+        "type": "object",
+        "description": "The mean of each quality dimension; null when nothing is scored.",
+        "properties": {
+          "completeness": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "freshness": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "validity": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          }
+        }
+      },
+      "QualityReport": {
+        "type": "object",
+        "description": "A configured dataset's record-quality report.",
+        "required": [
+          "configured",
+          "scored",
+          "buckets",
+          "dimensions",
+          "worst"
+        ],
+        "properties": {
+          "buckets": {
+            "$ref": "#/components/schemas/QualityBuckets"
+          },
+          "configured": {
+            "type": "boolean",
+            "description": "Always true."
+          },
+          "dimensions": {
+            "$ref": "#/components/schemas/QualityDimensions"
+          },
+          "max_score": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "mean_score": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "min_score": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "scored": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "worst": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorstRecord"
+            }
+          }
+        }
+      },
+      "QualityUnconfigured": {
+        "type": "object",
+        "description": "A dataset with no quality rules configured: nothing has been scored.",
+        "required": [
+          "scored",
+          "configured"
+        ],
+        "properties": {
+          "configured": {
+            "type": "boolean",
+            "description": "Always false."
+          },
+          "scored": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Always 0."
           }
         }
       },
@@ -12512,6 +12852,77 @@
           },
           "id": {
             "type": "string"
+          }
+        }
+      },
+      "SourceInsight": {
+        "type": "object",
+        "description": "One source's share of a run's duplication.",
+        "required": [
+          "run_id",
+          "source_system",
+          "captured_at",
+          "records",
+          "duplicate_records",
+          "contributed_groups"
+        ],
+        "properties": {
+          "captured_at": {
+            "type": "string",
+            "description": "chrono's display form (`YYYY-MM-DD HH:MM:SS[.f] UTC`)."
+          },
+          "contributed_groups": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "duplicate_rate": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Null when the source contributed no records."
+          },
+          "duplicate_records": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "records": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "source_system": {
+            "type": "string"
+          }
+        }
+      },
+      "SourceInsights": {
+        "type": "object",
+        "description": "`GET …/insights/sources`: each source's share of one run's duplication.",
+        "required": [
+          "snapshot",
+          "sources"
+        ],
+        "properties": {
+          "run_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The run reported on; null (with no sources) before any run retained one."
+          },
+          "snapshot": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SourceInsight"
+            }
           }
         }
       },
@@ -13702,6 +14113,42 @@
           },
           "url": {
             "type": "string"
+          }
+        }
+      },
+      "WorstRecord": {
+        "type": "object",
+        "description": "One of the lowest-scoring records.",
+        "required": [
+          "record_key",
+          "score",
+          "completeness"
+        ],
+        "properties": {
+          "completeness": {
+            "type": "number",
+            "format": "double"
+          },
+          "freshness": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "record_key": {
+            "type": "string"
+          },
+          "score": {
+            "type": "number",
+            "format": "double"
+          },
+          "validity": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
           }
         }
       }

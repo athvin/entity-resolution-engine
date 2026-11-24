@@ -2116,6 +2116,15 @@ export interface components {
              */
             updated_at: string;
         };
+        /** @description Golden-record completeness: overall and per survivable column. */
+        Completeness: {
+            /** @description Non-null fraction per golden column. */
+            by_attribute: {
+                [key: string]: number;
+            };
+            /** Format: double */
+            overall: number;
+        };
         /** @description `POST …/config/versions`: the draft just stored. */
         ConfigDraftCreated: {
             config_hash: string;
@@ -2211,6 +2220,29 @@ export interface components {
             /** Format: int64 */
             version: number;
             yaml: string;
+        };
+        /** @description `GET …/data-quality`: the composite score and its four inputs. */
+        DataQuality: {
+            completeness: components["schemas"]["Completeness"];
+            /**
+             * Format: double
+             * @description The mean of completeness and the complements of the three rates.
+             */
+            dq_score: number;
+            /** Format: double */
+            duplicate_rate: number;
+            /** Format: int64 */
+            entities: number;
+            /** Format: double */
+            junk_rate: number;
+            /** Format: int64 */
+            records: number;
+            /** Format: int64 */
+            snapshot: number;
+            /** Format: int64 */
+            stale_days: number;
+            /** Format: double */
+            stale_rate: number;
         };
         /** @description One of a tenant's resolution domains: its own lake location, config pointer, entity type and lifecycle state. The lake env points at a DuckLake catalog of its own (a METADATA_SCHEMA inside the org's metadata database, or a file catalog locally), so two datasets never share tables. */
         Dataset: {
@@ -2509,6 +2541,44 @@ export interface components {
              * @description Run-logical last-write time. Receipts were written once until E9b; the screening pass now updates the row after the match stage, because the verdicts do not exist until the run has scored.
              */
             updated_at: string;
+        };
+        /** @description One retained metric snapshot, with the rates derived from it. */
+        InsightPoint: {
+            /** Format: int64 */
+            auto_merge_pairs: number;
+            /** @description chrono's display form (`YYYY-MM-DD HH:MM:SS[.f] UTC`). */
+            captured_at: string;
+            /** Format: int64 */
+            duplicate_groups: number;
+            /**
+             * Format: double
+             * @description Duplicate records over records; null for an empty corpus.
+             */
+            duplicate_rate?: number | null;
+            /** Format: int64 */
+            duplicate_records: number;
+            /** Format: int64 */
+            entities: number;
+            /** Format: int64 */
+            largest_group: number;
+            /** Format: int64 */
+            records: number;
+            /**
+             * Format: double
+             * @description Records over entities; null when there are none.
+             */
+            records_per_entity?: number | null;
+            /** Format: int64 */
+            review_backlog: number;
+            /** Format: int64 */
+            review_band_pairs: number;
+            run_id: string;
+        };
+        /** @description `GET …/insights`: the retained metric series, newest first. */
+        InsightSeries: {
+            series: components["schemas"]["InsightPoint"][];
+            /** Format: int64 */
+            snapshot: number;
         };
         /** @description A unit of work on the dispatcher's queue: its kind, params, lifecycle state and retry bookkeeping. */
         Job: {
@@ -2851,6 +2921,21 @@ export interface components {
              */
             updated_at: string;
         };
+        /** @description `GET …/metrics`: the dashboard counters, snapshot-pinned. */
+        Metrics: {
+            /** Format: int64 */
+            duplicate_groups: number;
+            /** Format: int64 */
+            entities: number;
+            /** Format: int64 */
+            open_reviews: number;
+            /** Format: int64 */
+            records: number;
+            /** Format: int64 */
+            records_in_duplicate_groups: number;
+            /** Format: int64 */
+            snapshot: number;
+        };
         /** @description A tenant: its config pointer, lake env, lifecycle state and active config version. */
         Org: {
             /**
@@ -3088,6 +3173,52 @@ export interface components {
              * @description Run-logical last-write time. A re-profile of an unchanged snapshot rewrites the row in place rather than appending, so this moves while the rest of the row does not.
              */
             updated_at: string;
+        };
+        /** @description `GET …/quality`: the report, or the unconfigured answer. */
+        Quality: components["schemas"]["QualityReport"] | components["schemas"]["QualityUnconfigured"];
+        /** @description The record-quality score distribution, by band. */
+        QualityBuckets: {
+            /** Format: int64 */
+            at_least_80: number;
+            /** Format: int64 */
+            below_50: number;
+            /** Format: int64 */
+            between_50_80: number;
+        };
+        /** @description The mean of each quality dimension; null when nothing is scored. */
+        QualityDimensions: {
+            /** Format: double */
+            completeness?: number | null;
+            /** Format: double */
+            freshness?: number | null;
+            /** Format: double */
+            validity?: number | null;
+        };
+        /** @description A configured dataset's record-quality report. */
+        QualityReport: {
+            buckets: components["schemas"]["QualityBuckets"];
+            /** @description Always true. */
+            configured: boolean;
+            dimensions: components["schemas"]["QualityDimensions"];
+            /** Format: double */
+            max_score?: number | null;
+            /** Format: double */
+            mean_score?: number | null;
+            /** Format: double */
+            min_score?: number | null;
+            /** Format: int64 */
+            scored: number;
+            worst: components["schemas"]["WorstRecord"][];
+        };
+        /** @description A dataset with no quality rules configured: nothing has been scored. */
+        QualityUnconfigured: {
+            /** @description Always false. */
+            configured: boolean;
+            /**
+             * Format: int64
+             * @description Always 0.
+             */
+            scored: number;
         };
         /** @description A per-record data-quality score, 0-100, with the three dimensions kept separately. The dimensions are kept because a single number says a record is bad and not what to do about it: complete-but-invalid, valid-but-empty and simply old are three different jobs. */
         RecordQuality: {
@@ -3338,6 +3469,32 @@ export interface components {
         ScheduleToggled: {
             enabled: boolean;
             id: string;
+        };
+        /** @description One source's share of a run's duplication. */
+        SourceInsight: {
+            /** @description chrono's display form (`YYYY-MM-DD HH:MM:SS[.f] UTC`). */
+            captured_at: string;
+            /** Format: int64 */
+            contributed_groups: number;
+            /**
+             * Format: double
+             * @description Null when the source contributed no records.
+             */
+            duplicate_rate?: number | null;
+            /** Format: int64 */
+            duplicate_records: number;
+            /** Format: int64 */
+            records: number;
+            run_id: string;
+            source_system: string;
+        };
+        /** @description `GET …/insights/sources`: each source's share of one run's duplication. */
+        SourceInsights: {
+            /** @description The run reported on; null (with no sources) before any run retained one. */
+            run_id?: string | null;
+            /** Format: int64 */
+            snapshot: number;
+            sources: components["schemas"]["SourceInsight"][];
         };
         /** @description One staged steward correction: recorded, not yet applied to the lake. */
         Staged: {
@@ -3839,6 +3996,18 @@ export interface components {
             events: unknown;
             id: string;
             url: string;
+        };
+        /** @description One of the lowest-scoring records. */
+        WorstRecord: {
+            /** Format: double */
+            completeness: number;
+            /** Format: double */
+            freshness?: number | null;
+            record_key: string;
+            /** Format: double */
+            score: number;
+            /** Format: double */
+            validity?: number | null;
         };
     };
     responses: never;
@@ -5101,13 +5270,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["DataQuality"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -5631,16 +5800,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        series?: unknown;
-                        snapshot?: unknown;
-                    };
+                    "application/json": components["schemas"]["InsightSeries"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -5668,17 +5834,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        run_id?: unknown;
-                        snapshot?: unknown;
-                        sources?: unknown;
-                    };
+                    "application/json": components["schemas"]["SourceInsights"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -6355,13 +6517,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Metrics"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -6691,13 +6853,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Quality"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
