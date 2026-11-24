@@ -138,7 +138,16 @@ The operation contract is generated and gated, with deliberate limits:
   items/cursor, and Arrow uses its actual media type. The envelope ledger
   (`envelopes.json`) is classified independently and must not change when a
   handler is typed. Declare a record struct's fields in the order the ledger
-  records, which is the order of the `json!` literal it replaces.
+  records, which is the order of the `json!` literal it replaces. The
+  classifier refuses a response struct carrying `serde` attributes, so a body
+  that gains a key conditionally becomes one struct per observable form
+  (`StagedBatch` / `StagedBatchApplied`), not one `skip_serializing_if` field.
+  On a write handler, name the type at the constructor, `Json(Name { … })` or
+  `Json(Name::from(…))`; neither classifier reads `Json::<Name>(variable)`.
+  A lake read returns a typed item spelled out beside it in `read.rs`, because
+  generated row names (`PageRow`, `ByIdRow`) repeat across entity modules.
+  Its `From` destructures the row exhaustively, so a new column fails to
+  compile there.
 - **A typed body is value-equal, not byte-equal.** The workspace's `serde_json`
   has no `preserve_order`, so a `json!` object emits its keys sorted while a
   struct emits declaration order. Prove each conversion by comparing parsed
