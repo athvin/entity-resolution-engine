@@ -136,6 +136,9 @@ pub struct ApiDoc;
     crate::TagRemoved,
     crate::TagRetired,
     crate::StagedCount,
+    crate::read::RunItem,
+    crate::read::RunEventItem,
+    crate::RunEventPage,
 )))]
 pub struct ResponseDoc;
 

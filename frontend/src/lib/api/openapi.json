@@ -7330,10 +7330,15 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RunItem"
+                  }
+                }
               }
             }
           },
@@ -7397,17 +7402,11 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "items": {},
-                    "next_cursor": {},
-                    "run_id": {},
-                    "snapshot": {}
-                  }
+                  "$ref": "#/components/schemas/RunEventPage"
                 }
               }
             }
@@ -12182,6 +12181,135 @@
             "type": "integer",
             "format": "int64",
             "description": "Open unscored escalations a probability band hid (0 with no band)."
+          }
+        }
+      },
+      "RunEventItem": {
+        "type": "object",
+        "description": "One entity event a run emitted.",
+        "required": [
+          "id",
+          "seq",
+          "run_id",
+          "entity_id",
+          "event_type",
+          "occurred_at"
+        ],
+        "properties": {
+          "details": {},
+          "entity_id": {
+            "type": "string"
+          },
+          "event_type": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "occurred_at": {
+            "type": "string",
+            "description": "Naive lake text (`YYYY-MM-DD HH:MM:SS[.ffffff]`), not RFC 3339."
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "seq": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The run-local order; the page cursor."
+          }
+        }
+      },
+      "RunEventPage": {
+        "type": "object",
+        "description": "`GET …/runs/{run_id}/entity-events`: one keyset page of a run's events.",
+        "required": [
+          "items",
+          "run_id",
+          "snapshot"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RunEventItem"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "snapshot": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "RunItem": {
+        "type": "object",
+        "description": "One pipeline run in the run ledger, newest first.",
+        "required": [
+          "id",
+          "mode",
+          "status",
+          "started_at",
+          "config_hash"
+        ],
+        "properties": {
+          "auto_merged_pairs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Pairs this run scored at or above the auto-merge threshold. Absent\nwhen the dataset has no readable config, so no count is reported\nagainst the wrong threshold.",
+            "minimum": 0
+          },
+          "config_hash": {
+            "type": "string"
+          },
+          "ended_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string",
+            "description": "`full`, `incremental`, `correct`, …"
+          },
+          "model_version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rebuild_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "started_at": {
+            "type": "string",
+            "description": "Naive lake text (`YYYY-MM-DD HH:MM:SS[.ffffff]`), not RFC 3339."
+          },
+          "status": {
+            "type": "string"
+          },
+          "tf_snapshot_id": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },

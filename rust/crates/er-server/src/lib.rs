@@ -8368,12 +8368,21 @@ async fn runs_list(
             Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}")),
         };
         match read::runs_list(session, snapshot, auto_merge) {
-            Ok(items) => Json(json!(items)).into_response(),
+            Ok(items) => Json::<Vec<read::RunItem>>(items).into_response(),
             Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
         }
     })
     .await
     .unwrap_or_else(|response| *response)
+}
+
+/// `GET …/runs/{run_id}/entity-events`: one keyset page of a run's events.
+#[derive(Serialize, utoipa::ToSchema)]
+struct RunEventPage {
+    items: Vec<read::RunEventItem>,
+    run_id: String,
+    snapshot: i64,
+    next_cursor: Option<String>,
 }
 
 /// Viewer+: one run's entity events
@@ -8422,12 +8431,12 @@ async fn run_entity_events(
             after.as_deref(),
             limit,
         ) {
-            Ok((items, next_cursor)) => Json(json!({
-                "items": items,
-                "run_id": run_id,
-                "snapshot": snapshot,
-                "next_cursor": next_cursor,
-            }))
+            Ok((items, next_cursor)) => Json(RunEventPage {
+                items,
+                run_id,
+                snapshot,
+                next_cursor,
+            })
             .into_response(),
             Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
         }

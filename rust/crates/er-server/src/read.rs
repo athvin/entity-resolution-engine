@@ -1897,6 +1897,38 @@ mod typed_detail_tests {
     }
 
     #[test]
+    fn run_and_run_event_items_match_their_rows() {
+        let run = er_entities::run::read::RecentRow {
+            id: "run1".into(),
+            mode: "full".into(),
+            status: "succeeded".into(),
+            started_at: at(),
+            ended_at: None,
+            config_hash: "h".into(),
+            model_version: Some("m1".into()),
+            tf_snapshot_id: None,
+            rebuild_reason: Some("config".into()),
+        };
+        // No threshold: no `auto_merged_pairs` key at all.
+        same::<_, RunItem>(run.clone());
+        // With one, the count the old map insert added.
+        let mut old = rows_to_values(std::slice::from_ref(&run)).remove(0);
+        old["auto_merged_pairs"] = json!(4_u64);
+        let mut item = RunItem::from(run);
+        item.auto_merged_pairs = Some(4);
+        assert_eq!(old, serde_json::to_value(item).unwrap());
+        same::<_, RunEventItem>(er_entities::entity_event::read::ByRunRow {
+            id: "ev".into(),
+            seq: 9,
+            run_id: "run1".into(),
+            entity_id: "e1".into(),
+            event_type: "created".into(),
+            details: None,
+            occurred_at: at(),
+        });
+    }
+
+    #[test]
     fn the_untagged_golden_row_is_the_bare_record() {
         let person = PersonGolden {
             id: "e1".into(),
@@ -2259,6 +2291,78 @@ pub fn imports_list(
     }
 }
 
+/// One pipeline run in the run ledger, newest first.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, utoipa::ToSchema)]
+pub struct RunItem {
+    pub id: String,
+    /// `full`, `incremental`, `correct`, …
+    pub mode: String,
+    pub status: String,
+    /// Naive lake text (`YYYY-MM-DD HH:MM:SS[.ffffff]`), not RFC 3339.
+    #[serde(serialize_with = "er_entities::batch::ser_duckdb_timestamp")]
+    #[schema(value_type = String)]
+    pub started_at: chrono::DateTime<chrono::Utc>,
+    #[serde(serialize_with = "er_entities::batch::ser_duckdb_timestamp_opt")]
+    #[schema(value_type = Option<String>)]
+    pub ended_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub config_hash: String,
+    pub model_version: Option<String>,
+    pub tf_snapshot_id: Option<String>,
+    pub rebuild_reason: Option<String>,
+    /// Pairs this run scored at or above the auto-merge threshold. Absent
+    /// when the dataset has no readable config, so no count is reported
+    /// against the wrong threshold.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auto_merged_pairs: Option<u64>,
+}
+
+impl From<er_entities::run::read::RecentRow> for RunItem {
+    fn from(row: er_entities::run::read::RecentRow) -> Self {
+        let er_entities::run::read::RecentRow {
+            id,
+            mode,
+            status,
+            started_at,
+            ended_at,
+            config_hash,
+            model_version,
+            tf_snapshot_id,
+            rebuild_reason,
+        } = row;
+        Self {
+            id,
+            mode,
+            status,
+            started_at,
+            ended_at,
+            config_hash,
+            model_version,
+            tf_snapshot_id,
+            rebuild_reason,
+            auto_merged_pairs: None,
+        }
+    }
+}
+
+/// One entity event a run emitted.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, utoipa::ToSchema)]
+pub struct RunEventItem {
+    pub id: String,
+    /// The run-local order; the page cursor.
+    pub seq: i64,
+    pub run_id: String,
+    pub entity_id: String,
+    pub event_type: String,
+    pub details: Option<Value>,
+    /// Naive lake text (`YYYY-MM-DD HH:MM:SS[.ffffff]`), not RFC 3339.
+    #[serde(serialize_with = "er_entities::batch::ser_duckdb_timestamp")]
+    #[schema(value_type = String)]
+    pub occurred_at: chrono::DateTime<chrono::Utc>,
+}
+item_from_row!(RunEventItem, er_entities::entity_event::read::ByRunRow, {
+    id, seq, run_id, entity_id, event_type, details, occurred_at,
+});
+
 /// The most recent runs, newest first, capped at 20 (`readapi.runs_list`): a
 /// bare array (not a keyset page). Empty if the `runs` table is absent.
 ///
@@ -2268,19 +2372,19 @@ pub fn runs_list(
     session: &Session,
     snapshot: i64,
     auto_merge: Option<f64>,
-) -> Result<Vec<Value>, String> {
-    let mut runs: Vec<Value> = match er_entities::run::read::recent(session.connection(), snapshot)
-    {
-        Ok(rows) => rows_to_values(&rows),
-        Err(e) => {
-            let s = e.to_string();
-            return if is_missing_table(&s, "runs") {
-                Ok(Vec::new())
-            } else {
-                Err(s)
-            };
-        }
-    };
+) -> Result<Vec<RunItem>, String> {
+    let mut runs: Vec<RunItem> =
+        match er_entities::run::read::recent(session.connection(), snapshot) {
+            Ok(rows) => rows.into_iter().map(RunItem::from).collect(),
+            Err(e) => {
+                let s = e.to_string();
+                return if is_missing_table(&s, "runs") {
+                    Ok(Vec::new())
+                } else {
+                    Err(s)
+                };
+            }
+        };
     // Per-run auto-merge count (PR 1.5b): pairs this run scored at or above the
     // auto-merge threshold. `match_scores.run_id` is the pipeline run that scored
     // them — a full/incremental run shares one run_id across match + reconcile
@@ -2290,12 +2394,7 @@ pub fn runs_list(
     if let Some(threshold) = auto_merge {
         let counts = run_auto_merge_counts(session, snapshot, threshold)?;
         for run in &mut runs {
-            if let Value::Object(map) = run
-                && let Some(id) = map.get("id").and_then(Value::as_str)
-            {
-                let n = counts.get(id).copied().unwrap_or(0);
-                map.insert("auto_merged_pairs".to_string(), Value::from(n));
-            }
+            run.auto_merged_pairs = Some(counts.get(&run.id).copied().unwrap_or(0));
         }
     }
     Ok(runs)
@@ -2720,7 +2819,7 @@ pub fn entity_events_by_run(
     event_type: Option<&str>,
     after: Option<&str>,
     limit: i64,
-) -> Result<(Vec<Value>, Option<String>), String> {
+) -> Result<(Vec<RunEventItem>, Option<String>), String> {
     let limit = limit.clamp(1, MAX_LIMIT);
     let after_seq = match after {
         Some(raw) => match raw.parse::<i64>() {
@@ -2739,14 +2838,15 @@ pub fn entity_events_by_run(
     ) {
         Ok(rows) => {
             let has_more = rows.len() as i64 > limit;
-            let page = &rows[..rows.len().min(usize::try_from(limit).unwrap_or(0))];
+            let mut rows = rows;
+            rows.truncate(usize::try_from(limit).unwrap_or(0));
             let next = has_more
                 .then(|| {
-                    page.last()
+                    rows.last()
                         .map(|r| encode_cursor(snapshot, &r.seq.to_string()))
                 })
                 .flatten();
-            Ok((rows_to_values(page), next))
+            Ok((rows.into_iter().map(RunEventItem::from).collect(), next))
         }
         Err(e) => {
             let s = e.to_string();
