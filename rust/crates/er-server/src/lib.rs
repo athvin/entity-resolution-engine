@@ -11117,6 +11117,37 @@ fn active_to_assertions(
         .collect()
 }
 
+/// One CONTRADICTION-1 finding: a `never` pair forced together by `always`
+/// rules, so the next reconcile cannot honour both.
+#[derive(Debug, PartialEq, Serialize, utoipa::ToSchema)]
+struct ContradictionItem {
+    rec_a_key: String,
+    rec_b_key: String,
+    never_assertion_id: String,
+    /// The `always` rules whose closure joins the pair.
+    always_assertion_ids: Vec<String>,
+    /// Every record in that `always` closure, ascending.
+    component: Vec<String>,
+}
+
+impl From<er_reconcile::assertions::Contradiction> for ContradictionItem {
+    fn from(c: er_reconcile::assertions::Contradiction) -> Self {
+        Self {
+            rec_a_key: c.rec_a_key,
+            rec_b_key: c.rec_b_key,
+            never_assertion_id: c.never_assertion_id,
+            always_assertion_ids: c.always_assertion_ids,
+            component: c.component.into_iter().collect(),
+        }
+    }
+}
+
+/// `GET …/assertions/contradictions`: every active contradiction.
+#[derive(Serialize, utoipa::ToSchema)]
+struct ContradictionList {
+    contradictions: Vec<ContradictionItem>,
+}
+
 /// Viewer+: the unsatisfiable rule sets (`GET /v1/orgs/{org}/datasets/{ds}/assertions:contradictions`,
 /// normalized to `/assertions/contradictions`): every active `never` whose
 /// endpoints fall inside one `always`-connected component (S4.4.1
@@ -11145,19 +11176,10 @@ async fn assertions_contradictions(
         };
         let findings =
             er_reconcile::assertions::check_contradiction_1(&active_to_assertions(active));
-        let items: Vec<Value> = findings
-            .into_iter()
-            .map(|c| {
-                json!({
-                    "rec_a_key": c.rec_a_key,
-                    "rec_b_key": c.rec_b_key,
-                    "never_assertion_id": c.never_assertion_id,
-                    "always_assertion_ids": c.always_assertion_ids,
-                    "component": c.component.into_iter().collect::<Vec<_>>(),
-                })
-            })
-            .collect();
-        Json(json!({ "contradictions": items })).into_response()
+        Json(ContradictionList {
+            contradictions: findings.into_iter().map(ContradictionItem::from).collect(),
+        })
+        .into_response()
     })
     .await
     .unwrap_or_else(|response| *response)
@@ -13256,6 +13278,7 @@ mod response_shape_tests {
         ConfigDraftCreated, ConfigPublished, ConfigVersionItem, ConfigVersionView, Lexicon,
         LexiconSaved, lexicon_pairs, pg,
     };
+    use super::{ContradictionItem, ContradictionList};
     use super::{
         Deleted, KeyIssued, KeyRevoked, ScheduleCreated, ScheduleItem, ScheduleToggled,
         WebhookCreated, WebhookEventCatalog, WebhookEventItem, WebhookItem, webhook,
@@ -13906,6 +13929,32 @@ mod response_shape_tests {
         assert_eq!(
             json!({ "pending_count": 3 }),
             value(&StagedCount { pending_count: 3 })
+        );
+    }
+
+    #[test]
+    fn contradictions_keep_their_keys() {
+        let c = er_reconcile::assertions::Contradiction {
+            rec_a_key: "a".into(),
+            rec_b_key: "c".into(),
+            never_assertion_id: "n1".into(),
+            always_assertion_ids: vec!["x1".into(), "x2".into()],
+            component: ["c".to_string(), "a".to_string(), "b".to_string()].into(),
+        };
+        let old = json!({
+            "contradictions": [{
+                "rec_a_key": c.rec_a_key,
+                "rec_b_key": c.rec_b_key,
+                "never_assertion_id": c.never_assertion_id,
+                "always_assertion_ids": c.always_assertion_ids,
+                "component": c.component.iter().cloned().collect::<Vec<_>>(),
+            }],
+        });
+        assert_eq!(
+            old,
+            value(&ContradictionList {
+                contradictions: vec![ContradictionItem::from(c)],
+            })
         );
     }
 }

@@ -822,14 +822,11 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "contradictions": {}
-                  }
+                  "$ref": "#/components/schemas/ContradictionList"
                 }
               }
             }
@@ -8615,6 +8612,57 @@
           },
           "yaml": {
             "type": "string"
+          }
+        }
+      },
+      "ContradictionItem": {
+        "type": "object",
+        "description": "One CONTRADICTION-1 finding: a `never` pair forced together by `always`\nrules, so the next reconcile cannot honour both.",
+        "required": [
+          "rec_a_key",
+          "rec_b_key",
+          "never_assertion_id",
+          "always_assertion_ids",
+          "component"
+        ],
+        "properties": {
+          "always_assertion_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The `always` rules whose closure joins the pair."
+          },
+          "component": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Every record in that `always` closure, ascending."
+          },
+          "never_assertion_id": {
+            "type": "string"
+          },
+          "rec_a_key": {
+            "type": "string"
+          },
+          "rec_b_key": {
+            "type": "string"
+          }
+        }
+      },
+      "ContradictionList": {
+        "type": "object",
+        "description": "`GET …/assertions/contradictions`: every active contradiction.",
+        "required": [
+          "contradictions"
+        ],
+        "properties": {
+          "contradictions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ContradictionItem"
+            }
           }
         }
       },
