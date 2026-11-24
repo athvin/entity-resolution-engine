@@ -2472,6 +2472,43 @@ export interface components {
         JobList: {
             jobs: components["schemas"]["Job"][];
         };
+        /** @description The gray band a labelling page was drawn from. */
+        LabelBand: {
+            /** Format: double */
+            max: number;
+            /** Format: double */
+            min: number;
+        };
+        /** @description How much labelled signal a tenant has, split by verdict and origin. */
+        LabelCoverage: {
+            by_origin: components["schemas"]["LabelOrigins"];
+            matches: number;
+            non_matches: number;
+            total: number;
+        };
+        /** @description `GET …/labels`: the recorded labels, newest first. */
+        LabelList: {
+            labels: components["schemas"]["PairLabel"][];
+        };
+        /** @description How many labels a tenant has, by origin. */
+        LabelOrigins: {
+            human: number;
+            llm: number;
+            reviewer: number;
+        };
+        /** @description `GET …/labeling/next`: the next uncertain pairs and the coverage so far. */
+        LabelingQueue: {
+            band: components["schemas"]["LabelBand"];
+            coverage: components["schemas"]["LabelCoverage"];
+            items: components["schemas"]["UncertainPair"][];
+            /** Format: int64 */
+            snapshot: number;
+            /**
+             * Format: double
+             * @description The `auto_merge` threshold the pairs are ordered around.
+             */
+            threshold: number;
+        };
         /** @description An immutable version of a tenant's matching model: the settings document the engine scores against, its hash, provenance and activation state. */
         MatchingModel: {
             /**
@@ -2518,6 +2555,35 @@ export interface components {
              * @description The monotonic version number within (org, name). Versions are immutable: a retrain or a weight override mints the next one rather than editing this.
              */
             version: number;
+        };
+        /**
+         * @description One entity's merge plan (`GET …/merge-plans`): its elected master, the
+         *     golden preview, every member as `source_system:source_record_id`, and the
+         *     same group confidence the duplicates view shows.
+         */
+        MergePlan: {
+            email?: string | null;
+            entity_id: string;
+            family_name?: string | null;
+            given_name?: string | null;
+            /**
+             * Format: int64
+             * @description Null when the group has no within-group scored edge.
+             */
+            group_confidence?: number | null;
+            master_key?: string | null;
+            master_record_key?: string | null;
+            member_confidences: {
+                [key: string]: number;
+            };
+            /** Format: int64 */
+            member_count?: number | null;
+            member_records: string[];
+            phone_e164?: string | null;
+        };
+        /** @description `GET …/merge-plans` (JSON form). */
+        MergePlanList: {
+            items: components["schemas"]["MergePlan"][];
         };
         /** @description One run's resolution metrics, kept so the dashboard can show a TREND rather than only a current value. The dashboard has always computed its numbers live from the lake, which means it can say what is true now and nothing about whether that is better or worse than last week — which is the question an operator actually has. */
         MetricSnapshot: {
@@ -2889,6 +2955,65 @@ export interface components {
             job_id: string;
             state: string;
         };
+        /**
+         * @description One review-queue item: the stored row plus the shipped `confidence`.
+         *
+         *     Spelled out rather than flattened from the generated `PageRow`/`ByIdRow`:
+         *     those names repeat in every entity's `read` module, so registering them
+         *     would collide, and the `From` impls destructure each row exhaustively, so a
+         *     column added to the statement fails to compile here instead of silently
+         *     leaving the wire.
+         */
+        ReviewItem: {
+            /**
+             * Format: int64
+             * @description The display integer of `match_probability`; absent when it is null.
+             */
+            confidence?: number | null;
+            entity_id?: string | null;
+            first_seen_run_id: string;
+            id: string;
+            last_seen_run_id: string;
+            /**
+             * Format: double
+             * @description Null for a structural escalation, which is not a scored pair.
+             */
+            match_probability?: number | null;
+            reason: string;
+            rec_a_key?: string | null;
+            rec_b_key?: string | null;
+            /** @description Naive lake text (`YYYY-MM-DD HH:MM:SS[.ffffff]`), not RFC 3339. */
+            resolved_at?: string | null;
+            resolved_by?: string | null;
+            status: string;
+            /** @description `pair` for a record-pair review, `entity` for an entity-subject one. */
+            subject_type: string;
+            waterfall?: unknown;
+        };
+        /** @description `GET …/reviews/{review_id}/merge-group`: the union of both sides' entities. */
+        ReviewMergeGroup: {
+            /**
+             * @description Records-by-key items (each record's values, keyed by the dataset's
+             *     entity type), each stamped with the `entity_id` it belongs to.
+             */
+            items: unknown[];
+            /** Format: int64 */
+            snapshot: number;
+            /** @description The union's size before the key cap truncated `items`. */
+            total: number;
+        };
+        /** @description `GET …/reviews`: one keyset page of the review queue. */
+        ReviewPage: {
+            items: components["schemas"]["ReviewItem"][];
+            next_cursor?: string | null;
+            /** Format: int64 */
+            snapshot: number;
+            /**
+             * Format: int64
+             * @description Open unscored escalations a probability band hid (0 with no band).
+             */
+            unscored_hidden: number;
+        };
         /** @description What the auto-ingest poller has already read, one row per (org, source). The poller runs on every dispatcher tick and the newest object under a prefix stays the newest until a new one arrives, so without this row the same CSV would be re-ingested every few seconds forever — an unbounded run loop over the tenant's own lake. An upsert rather than a log: the question it answers is 'what is already in', not 'what has ever been in', and the audit log already answers the second. */
         S3IngestCursor: {
             /**
@@ -2954,6 +3079,39 @@ export interface components {
              * @description Wall-clock last-write time (database default; advanced by mutations once the entity migrates).
              */
             updated_at: string;
+        };
+        /** @description One staged steward correction: recorded, not yet applied to the lake. */
+        Staged: {
+            action_id: string;
+            /** @description Always false: the correction lands on the next apply, not the next run. */
+            pending_until_next_reconcile: boolean;
+            /** @description Always `staged`. */
+            status: string;
+        };
+        /** @description One staged correction handed to an `apply_corrections` job (`apply_now`). */
+        StagedApplied: {
+            action_id: string;
+            apply_job: string;
+            /** @description Always false. */
+            pending_until_next_reconcile: boolean;
+            /** @description Always `staged`: the job, not this request, applies it. */
+            status: string;
+        };
+        /** @description Several staged corrections, waiting for an apply. */
+        StagedBatch: {
+            action_ids: string[];
+            /** @description Always `staged`. */
+            status: string;
+        };
+        /**
+         * @description Several staged corrections handed to an `apply_corrections` job
+         *     (`apply_now`). Still `staged`: the job, not this request, applies them.
+         */
+        StagedBatchApplied: {
+            action_ids: string[];
+            apply_job: string;
+            /** @description Always `staged`. */
+            status: string;
         };
         /** @description A steward action staged for review/apply: its payload, state and outcome. */
         StagedStewardAction: {
@@ -3189,6 +3347,42 @@ export interface components {
         /** @description Every try of every task of one job: the body of `GET …/jobs/{job_id}/tasks`. */
         TaskList: {
             tasks: components["schemas"]["TaskInstance"][];
+        };
+        /**
+         * @description One pair the labelling session should look at next: the active score plus
+         *     the shipped `confidence` (always present — every uncertain pair is scored).
+         */
+        UncertainPair: {
+            /** Format: int64 */
+            confidence: number;
+            /** @description The comparison evidence blob (`gamma_*`, `mw_*`, `match_weight`). */
+            evidence: unknown;
+            /** Format: double */
+            match_probability: number;
+            model_version: string;
+            rec_a_key: string;
+            rec_b_key: string;
+            run_id: string;
+            /** @description Naive lake text (`YYYY-MM-DD HH:MM:SS[.ffffff]`), not RFC 3339. */
+            scored_at: string;
+        };
+        /** @description An unmerge staged and handed to an `apply_corrections` job. */
+        UnmergeApplied: {
+            action_ids: string[];
+            apply_job: string;
+            pairs: number;
+            /** @description Always `applied`. */
+            status: string;
+        };
+        /** @description An unmerge staged as never-rules, waiting for the next reconcile. */
+        UnmergeStaged: {
+            action_ids: string[];
+            /** @description How many never-rules were staged (one per peeled record). */
+            pairs: number;
+            /** @description Always true. */
+            pending_until_next_reconcile: boolean;
+            /** @description Always `staged`. */
+            status: string;
         };
         /** @description A tenant webhook endpoint: its URL, subscribed events and signing secret. */
         Webhook: {
@@ -4221,22 +4415,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        action_id?: unknown;
-                        pending_until_next_reconcile?: unknown;
-                        status?: unknown;
-                    } | {
-                        action_id?: unknown;
-                        apply_job?: unknown;
-                        pending_until_next_reconcile?: unknown;
-                        status?: unknown;
-                    };
+                    "application/json": components["schemas"]["Staged"] | components["schemas"]["StagedApplied"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -4301,17 +4486,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        action_id?: unknown;
-                        pending_until_next_reconcile?: unknown;
-                        status?: unknown;
-                    };
+                    "application/json": components["schemas"]["Staged"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -4870,23 +5051,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        action_ids?: unknown;
-                        pairs?: unknown;
-                        pending_until_next_reconcile?: unknown;
-                        status?: unknown;
-                    } | {
-                        action_ids?: unknown;
-                        apply_job?: unknown;
-                        pairs?: unknown;
-                        status?: unknown;
-                    };
+                    "application/json": components["schemas"]["UnmergeStaged"] | components["schemas"]["UnmergeApplied"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -5445,19 +5616,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        band?: unknown;
-                        coverage?: unknown;
-                        items?: unknown;
-                        snapshot?: unknown;
-                        threshold?: unknown;
-                    };
+                    "application/json": components["schemas"]["LabelingQueue"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -5485,15 +5650,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        labels?: unknown;
-                    };
+                    "application/json": components["schemas"]["LabelList"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -5532,13 +5695,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["PairLabel"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -5660,13 +5823,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["StagedBatch"] | components["schemas"]["StagedBatchApplied"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -5766,15 +5929,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        items?: unknown;
-                    };
+                    "application/json": components["schemas"]["MergePlanList"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -5816,13 +5977,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["StagedBatch"] | components["schemas"]["StagedBatchApplied"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -6875,18 +7036,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        items?: unknown;
-                        next_cursor?: unknown;
-                        snapshot?: unknown;
-                        unscored_hidden?: unknown;
-                    };
+                    "application/json": components["schemas"]["ReviewPage"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -6924,13 +7080,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["StagedBatch"] | components["schemas"]["StagedBatchApplied"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -6959,13 +7115,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ReviewItem"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -6994,17 +7150,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        items?: unknown;
-                        snapshot?: unknown;
-                        total?: unknown;
-                    };
+                    "application/json": components["schemas"]["ReviewMergeGroup"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -7039,17 +7191,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        action_id?: unknown;
-                        pending_until_next_reconcile?: unknown;
-                        status?: unknown;
-                    };
+                    "application/json": components["schemas"]["Staged"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
