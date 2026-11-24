@@ -25,6 +25,9 @@ pub struct Operation {
     pub params: Vec<Parameter>,
     pub request: Option<Request>,
     pub responses: Vec<Envelope>,
+    /// Component schemas of the success body, when every success `Json(…)`
+    /// names a registered type; empty for an envelope-level operation.
+    pub response_schemas: Vec<Value>,
 }
 
 pub struct Request {
@@ -123,6 +126,8 @@ pub fn operations(
                 .map_err(|e| format!("{method} {} request: {e}", route.path))?;
             let responses = responses::derive(&parsed, &handler, &method)
                 .map_err(|e| format!("{method} {} response: {e}", route.path))?;
+            let response_schemas = responses::typed(&parsed, &handler, wire_schemas)
+                .map_err(|e| format!("{method} {} response: {e}", route.path))?;
             result.push(Operation {
                 name: tool_name(&method, route.path),
                 method,
@@ -132,6 +137,7 @@ pub fn operations(
                 params: requests::parameters(function, &path_params(route.path))?,
                 request,
                 responses,
+                response_schemas,
             });
         }
     }

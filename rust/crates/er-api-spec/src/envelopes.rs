@@ -196,6 +196,12 @@ pub fn classify_envelope(body: &str, source: &str) -> Result<Envelope, String> {
     if find_call(&src, "Json(json!(").is_some() {
         return Ok(Envelope::Bare);
     }
+    // `Json(NameWire::from(…))` and `Json::<Vec<NameWire>>(…)`: an entity's
+    // wire value serialized directly, which is the typed spelling of
+    // `Json(json!(value))` and so carries no wrapper key either.
+    if wire_value(&src) {
+        return Ok(Envelope::Bare);
+    }
     if let Some(envelope) = typed_object(&src, source)? {
         return Ok(envelope);
     }
@@ -203,6 +209,31 @@ pub fn classify_envelope(body: &str, source: &str) -> Result<Envelope, String> {
         return Ok(Envelope::Scalar);
     }
     Err("no Json(...), page_envelope(...) or object literal found".to_string())
+}
+
+/// Whether the first `Json` call serializes an entity wire value directly.
+fn wire_value(body: &str) -> bool {
+    // `find_call` returns the index just past the needle.
+    if let Some(at) = find_call(body, "Json::<") {
+        return body[at..]
+            .split('>')
+            .next()
+            .is_some_and(|ty| ty.contains("Wire"));
+    }
+    let Some(at) = find_call(body, "Json(") else {
+        return false;
+    };
+    let after = &body[at..];
+    let path: String = after
+        .chars()
+        .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == ':')
+        .collect();
+    path.rsplit_once("::").is_some_and(|(owner, _)| {
+        owner
+            .rsplit("::")
+            .next()
+            .is_some_and(|t| t.ends_with("Wire"))
+    }) && after[path.len()..].starts_with('(')
 }
 
 /// Resolve only an immediate named constructor. A variable or helper call needs

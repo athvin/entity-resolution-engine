@@ -61,11 +61,25 @@ pub enum Audience {
 )]
 pub struct ApiDoc;
 
+/// Response envelopes that are not entities: the local structs handlers return
+/// (`JobList`, …), each a `Serialize + ToSchema` beside its handler in `lib.rs`.
+/// Kept apart from [`ApiDoc`], whose registrations the catalog guards hold to
+/// exactly the `wire: [json]` entities; merged into the document at emission.
+#[derive(OpenApi)]
+#[openapi(components(schemas(
+    crate::JobList,
+    crate::TaskList,
+    crate::ResumeAccepted,
+    crate::ClearAccepted,
+)))]
+pub struct ResponseDoc;
+
 /// The OpenAPI document as pretty-printed JSON — the exact bytes committed to
 /// `frontend/src/lib/api/openapi.json` and pinned by the snapshot test.
 #[must_use]
 pub fn openapi_json(audience: Audience) -> String {
     let mut doc = ApiDoc::openapi();
+    doc.merge(ResponseDoc::openapi());
     add_operations(&mut doc, audience);
     let mut json = doc
         .to_pretty_json()
@@ -127,7 +141,10 @@ fn add_operations(doc: &mut utoipa::openapi::OpenApi, audience: Audience) {
                 // OpenAPI 3.1 permits role names for non-OAuth security schemes.
                 vec![SecurityRequirement::new("bearerAuth", [&derived.role])]
             }))
-            .responses(operation_responses(&derived.responses));
+            .responses(operation_responses(
+                &derived.responses,
+                &derived.response_schemas,
+            ));
         for param in derived.params {
             operation = operation.parameter(
                 ParameterBuilder::new()
@@ -211,6 +228,7 @@ fn json_content(value: serde_json::Value) -> utoipa::openapi::Content {
 
 fn operation_responses(
     envelopes: &[er_api_spec::Envelope],
+    typed: &[serde_json::Value],
 ) -> utoipa::openapi::response::Responses {
     use er_api_spec::Envelope;
     use serde_json::json;
@@ -219,7 +237,13 @@ fn operation_responses(
         "Successful response. Payload types are described only at envelope granularity.",
     );
     let mut schemas = Vec::new();
-    for envelope in envelopes {
+    if !typed.is_empty() {
+        // Every success body names a registered component: reference it rather
+        // than describing the envelope's keys.
+        response = ResponseBuilder::new().description("Successful response.");
+        schemas.extend(typed.iter().cloned());
+    }
+    for envelope in envelopes.iter().filter(|_| typed.is_empty()) {
         let schema = match envelope {
             // A bare or typed JSON value can be an array, object or scalar. Do
             // not guess a payload type from the variable's name.
@@ -473,7 +497,22 @@ mod tests {
             let schema = &content["application/json"]["schema"];
             let class = envelope["envelope"].as_str().unwrap();
             classes.insert(class);
+            // A typed response (#864) references a component; the envelope
+            // class must still hold of the schema it references.
+            let component = |schema: &serde_json::Value| {
+                schema["$ref"].as_str().map(|r| {
+                    let name = r.strip_prefix("#/components/schemas/").unwrap();
+                    let found = &doc["components"]["schemas"][name];
+                    assert!(found.is_object(), "{route}: dangling {r}");
+                    found.clone()
+                })
+            };
+            let typed = component(schema).or_else(|| component(&schema["items"]));
+            let resolved = component(schema).unwrap_or_else(|| schema.clone());
+            let schema = &resolved;
             match class {
+                // A typed bare value is its entity component, or an array of it.
+                "bare" if typed.is_some() => {}
                 "bare" | "scalar" => assert_eq!(schema, &serde_json::json!({}), "{route}"),
                 "wrapped" => assert!(
                     schema["properties"]

@@ -150,3 +150,127 @@ impl<'ast> Visit<'ast> for Responses<'_, '_> {
     fn visit_expr_async(&mut self, _: &'ast syn::ExprAsync) {}
     fn visit_item_fn(&mut self, _: &'ast syn::ItemFn) {}
 }
+
+/// The component schemas a handler's success responses serialize, when every
+/// success `Json(…)` in its body names a registered type:
+///
+/// - `Json(Name { … })` where `Name` is registered → `Name`
+/// - `Json(NameWire::from(…))` (any associated fn) → `Name`, the wire's schema name
+/// - `Json::<NameWire>(…)` / `Json::<Vec<NameWire>>(…)` → `Name` / an array of it
+///
+/// Empty when none is typed: the operation stays envelope-level. A handler that
+/// types some success responses and not others is an error, because the
+/// document would then describe only part of what the handler can return.
+pub(super) fn typed(
+    source: &Source<'_>,
+    name: &str,
+    schemas: &BTreeSet<String>,
+) -> Result<Vec<serde_json::Value>, String> {
+    let function = source
+        .functions
+        .get(name)
+        .ok_or_else(|| format!("missing response helper {name}"))?;
+    let mut calls = JsonCalls {
+        source,
+        schemas,
+        typed: Vec::new(),
+        untyped: Vec::new(),
+    };
+    calls.visit_block(&function.block);
+    if calls.typed.is_empty() {
+        return Ok(Vec::new());
+    }
+    if let Some(untyped) = calls.untyped.first() {
+        return Err(format!(
+            "{name} mixes typed and untyped success responses; untyped: {untyped}"
+        ));
+    }
+    let mut out = Vec::new();
+    for schema in calls.typed {
+        if !out.contains(&schema) {
+            out.push(schema);
+        }
+    }
+    Ok(out)
+}
+
+struct JsonCalls<'a, 's> {
+    source: &'a Source<'s>,
+    schemas: &'a BTreeSet<String>,
+    typed: Vec<serde_json::Value>,
+    untyped: Vec<String>,
+}
+
+impl JsonCalls<'_, '_> {
+    fn reference(&self, type_name: &str) -> Option<serde_json::Value> {
+        let name = type_name.strip_suffix("Wire").unwrap_or(type_name);
+        self.schemas
+            .contains(name)
+            .then(|| serde_json::json!({"$ref": format!("#/components/schemas/{name}")}))
+    }
+
+    /// `NameWire` or `Vec<NameWire>` written as a turbofish on `Json`.
+    fn turbofish(&self, ty: &syn::Type) -> Option<serde_json::Value> {
+        let syn::Type::Path(path) = ty else {
+            return None;
+        };
+        let last = path.path.segments.last()?;
+        if last.ident == "Vec" {
+            let syn::PathArguments::AngleBracketed(args) = &last.arguments else {
+                return None;
+            };
+            let Some(syn::GenericArgument::Type(item)) = args.args.first() else {
+                return None;
+            };
+            let item = self.turbofish(item)?;
+            return Some(serde_json::json!({"type": "array", "items": item}));
+        }
+        self.reference(&last.ident.to_string())
+    }
+
+    fn argument(&self, value: &syn::Expr) -> Option<serde_json::Value> {
+        match value {
+            syn::Expr::Struct(value) => {
+                self.reference(&value.path.segments.last()?.ident.to_string())
+            }
+            syn::Expr::Call(call) => {
+                let syn::Expr::Path(path) = call.func.as_ref() else {
+                    return None;
+                };
+                let segments = &path.path.segments;
+                let owner = segments.iter().rev().nth(1)?.ident.to_string();
+                owner
+                    .ends_with("Wire")
+                    .then(|| self.reference(&owner))
+                    .flatten()
+            }
+            _ => None,
+        }
+    }
+}
+
+impl<'ast> Visit<'ast> for JsonCalls<'_, '_> {
+    fn visit_expr_call(&mut self, call: &'ast syn::ExprCall) {
+        if let syn::Expr::Path(path) = call.func.as_ref()
+            && let Some(last) = path.path.segments.last()
+            && last.ident == "Json"
+            && let Some(value) = call.args.first()
+        {
+            let snippet = self.source.snippet(call);
+            if !object_keys(snippet).iter().any(|key| key == "detail") {
+                let turbofish = match &last.arguments {
+                    syn::PathArguments::AngleBracketed(args) => match args.args.first() {
+                        Some(syn::GenericArgument::Type(ty)) => self.turbofish(ty),
+                        _ => None,
+                    },
+                    _ => None,
+                };
+                match turbofish.or_else(|| self.argument(value)) {
+                    Some(schema) => self.typed.push(schema),
+                    None => self.untyped.push(snippet.chars().take(80).collect()),
+                }
+            }
+        }
+        syn::visit::visit_expr_call(self, call);
+    }
+}
