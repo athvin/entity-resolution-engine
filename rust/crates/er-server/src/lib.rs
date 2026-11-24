@@ -6529,6 +6529,41 @@ async fn match_scores_list(
     .unwrap_or_else(|response| *response)
 }
 
+/// The gray band a labelling page was drawn from.
+#[derive(Serialize, utoipa::ToSchema)]
+struct LabelBand {
+    min: f64,
+    max: f64,
+}
+
+/// How many labels a tenant has, by origin.
+#[derive(Debug, PartialEq, Serialize, utoipa::ToSchema)]
+struct LabelOrigins {
+    human: usize,
+    reviewer: usize,
+    llm: usize,
+}
+
+/// How much labelled signal a tenant has, split by verdict and origin.
+#[derive(Debug, PartialEq, Serialize, utoipa::ToSchema)]
+struct LabelCoverage {
+    total: usize,
+    matches: usize,
+    non_matches: usize,
+    by_origin: LabelOrigins,
+}
+
+/// `GET …/labeling/next`: the next uncertain pairs and the coverage so far.
+#[derive(Serialize, utoipa::ToSchema)]
+struct LabelingQueue {
+    items: Vec<read::UncertainPair>,
+    snapshot: i64,
+    /// The `auto_merge` threshold the pairs are ordered around.
+    threshold: f64,
+    band: LabelBand,
+    coverage: LabelCoverage,
+}
+
 /// Viewer+: what to label next (`GET /v1/orgs/{org}/datasets/{ds}/labeling/next`).
 ///
 /// Serves the pairs the model is LEAST sure about — nearest the decision
@@ -6615,13 +6650,16 @@ async fn labeling_next(
             &labelled,
             limit,
         ) {
-            Ok(items) => Json(json!({
-                "items": items,
-                "snapshot": snapshot,
-                "threshold": threshold,
-                "band": { "min": band_low, "max": band_high },
-                "coverage": coverage,
-            }))
+            Ok(items) => Json(LabelingQueue {
+                items,
+                snapshot,
+                threshold,
+                band: LabelBand {
+                    min: band_low,
+                    max: band_high,
+                },
+                coverage,
+            })
             .into_response(),
             Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
         }
@@ -6635,20 +6673,20 @@ async fn labeling_next(
 /// Counted in Rust rather than aggregated in SQL because a control-plane read
 /// declares `returns: entity`, and the training pass needs the rows whole
 /// anyway.
-fn label_coverage(labels: &[er_entities::pair_label::PairLabel]) -> serde_json::Value {
+fn label_coverage(labels: &[er_entities::pair_label::PairLabel]) -> LabelCoverage {
     let count = |f: &dyn Fn(&er_entities::pair_label::PairLabel) -> bool| {
         labels.iter().filter(|l| f(l)).count()
     };
-    json!({
-        "total": labels.len(),
-        "matches": count(&|l| l.verdict == "match"),
-        "non_matches": count(&|l| l.verdict == "no_match"),
-        "by_origin": {
-            "human": count(&|l| l.origin == "human"),
-            "reviewer": count(&|l| l.origin == "reviewer"),
-            "llm": count(&|l| l.origin == "llm"),
+    LabelCoverage {
+        total: labels.len(),
+        matches: count(&|l| l.verdict == "match"),
+        non_matches: count(&|l| l.verdict == "no_match"),
+        by_origin: LabelOrigins {
+            human: count(&|l| l.origin == "human"),
+            reviewer: count(&|l| l.origin == "reviewer"),
+            llm: count(&|l| l.origin == "llm"),
         },
-    })
+    }
 }
 
 #[derive(Deserialize)]
@@ -6743,10 +6781,20 @@ async fn create_label(
                 &json!({ "pair": [a, b], "verdict": body.verdict }),
             )
             .await;
-            (StatusCode::CREATED, Json(json!(label))).into_response()
+            (
+                StatusCode::CREATED,
+                Json(er_entities::pair_label::PairLabelWire::from(&label)),
+            )
+                .into_response()
         }
         Err(e) => pg_err(e),
     }
+}
+
+/// `GET …/labels`: the recorded labels, newest first.
+#[derive(Serialize, utoipa::ToSchema)]
+struct LabelList {
+    labels: Vec<er_entities::pair_label::PairLabelWire>,
 }
 
 /// Viewer+: the labels a tenant has recorded (`GET /v1/orgs/{org}/datasets/{ds}/labels`),
@@ -6786,7 +6834,13 @@ async fn labels_list(
     )
     .await
     {
-        Ok(rows) => Json(json!({ "labels": rows })).into_response(),
+        Ok(rows) => Json(LabelList {
+            labels: rows
+                .iter()
+                .map(er_entities::pair_label::PairLabelWire::from)
+                .collect(),
+        })
+        .into_response(),
         Err(e) => pg_err(e),
     }
 }
@@ -7272,6 +7326,16 @@ fn page_envelope(r: Result<(Vec<Value>, Option<String>), String>) -> axum::respo
     }
 }
 
+/// `GET …/reviews`: one keyset page of the review queue.
+#[derive(Serialize, utoipa::ToSchema)]
+struct ReviewPage {
+    items: Vec<read::ReviewItem>,
+    snapshot: i64,
+    next_cursor: Option<String>,
+    /// Open unscored escalations a probability band hid (0 with no band).
+    unscored_hidden: i64,
+}
+
 /// Viewer+: the open-review queue (`GET /v1/orgs/{org}/datasets/{ds}/reviews`).
 async fn reviews_list(
     principal: Principal,
@@ -7335,12 +7399,12 @@ async fn reviews_list(
         } else {
             0
         };
-        Json(json!({
-            "items": items,
-            "snapshot": snapshot,
-            "next_cursor": next_cursor,
-            "unscored_hidden": unscored_hidden,
-        }))
+        Json(ReviewPage {
+            items,
+            snapshot,
+            next_cursor,
+            unscored_hidden,
+        })
         .into_response()
     })
     .await
@@ -7366,13 +7430,24 @@ async fn review_detail(
             Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}")),
         };
         match read::review_get(session, snapshot, &review_id) {
-            Ok(Some(r)) => Json(r).into_response(),
+            Ok(Some(r)) => Json(read::ReviewItem::from(r)).into_response(),
             Ok(None) => detail_err(StatusCode::NOT_FOUND, format!("no review '{review_id}'")),
             Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
         }
     })
     .await
     .unwrap_or_else(|response| *response)
+}
+
+/// `GET …/reviews/{review_id}/merge-group`: the union of both sides' entities.
+#[derive(Serialize, utoipa::ToSchema)]
+struct ReviewMergeGroup {
+    /// Records-by-key items (each record's values, keyed by the dataset's
+    /// entity type), each stamped with the `entity_id` it belongs to.
+    items: Vec<Value>,
+    /// The union's size before the key cap truncated `items`.
+    total: usize,
+    snapshot: i64,
 }
 
 /// Viewer+: the review merge dialog's group
@@ -7397,10 +7472,12 @@ async fn review_merge_group(
             Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}")),
         };
         match read::merge_group(session, snapshot, &review_id) {
-            Ok(Some(read::MergeGroup::Group { items, total })) => {
-                Json(json!({ "items": items, "total": total, "snapshot": snapshot }))
-                    .into_response()
-            }
+            Ok(Some(read::MergeGroup::Group { items, total })) => Json(ReviewMergeGroup {
+                items,
+                total,
+                snapshot,
+            })
+            .into_response(),
             Ok(Some(read::MergeGroup::NoPair)) => detail_err(
                 StatusCode::UNPROCESSABLE_ENTITY,
                 "this review is about an entity rather than a pair of records",
@@ -8283,6 +8360,12 @@ async fn org_source_ranks(
         .collect())
 }
 
+/// `GET …/merge-plans` (JSON form).
+#[derive(Serialize, utoipa::ToSchema)]
+struct MergePlanList {
+    items: Vec<read::MergePlan>,
+}
+
 /// Viewer+: merge plans for entities touched by a merge/member-add
 /// (`GET /v1/orgs/{org}/datasets/{ds}/merge-plans`). Query: `policy` (master-election, default
 /// `most_attributes`), `since` (ISO8601), `limit`, `format` (json|csv).
@@ -8341,7 +8424,7 @@ async fn merge_plans(
             )
                 .into_response()
         } else {
-            Json(json!({ "items": items })).into_response()
+            Json(MergePlanList { items }).into_response()
         }
     })
     .await
@@ -9980,14 +10063,75 @@ fn staged_batch_response(status: StatusCode, action_ids: &[String]) -> axum::res
         .into_response()
 }
 
+/// One staged steward correction: recorded, not yet applied to the lake.
+#[derive(Serialize, utoipa::ToSchema)]
+struct Staged {
+    /// Always `staged`.
+    status: &'static str,
+    action_id: String,
+    /// Always false: the correction lands on the next apply, not the next run.
+    pending_until_next_reconcile: bool,
+}
+
+/// One staged correction handed to an `apply_corrections` job (`apply_now`).
+#[derive(Serialize, utoipa::ToSchema)]
+struct StagedApplied {
+    /// Always `staged`: the job, not this request, applies it.
+    status: &'static str,
+    action_id: String,
+    /// Always false.
+    pending_until_next_reconcile: bool,
+    apply_job: String,
+}
+
+/// Several staged corrections, waiting for an apply.
+#[derive(Serialize, utoipa::ToSchema)]
+struct StagedBatch {
+    /// Always `staged`.
+    status: &'static str,
+    action_ids: Vec<String>,
+}
+
+/// Several staged corrections handed to an `apply_corrections` job
+/// (`apply_now`). Still `staged`: the job, not this request, applies them.
+#[derive(Serialize, utoipa::ToSchema)]
+struct StagedBatchApplied {
+    /// Always `staged`.
+    status: &'static str,
+    action_ids: Vec<String>,
+    apply_job: String,
+}
+
+/// An unmerge staged as never-rules, waiting for the next reconcile.
+#[derive(Serialize, utoipa::ToSchema)]
+struct UnmergeStaged {
+    /// Always `staged`.
+    status: &'static str,
+    /// How many never-rules were staged (one per peeled record).
+    pairs: usize,
+    action_ids: Vec<String>,
+    /// Always true.
+    pending_until_next_reconcile: bool,
+}
+
+/// An unmerge staged and handed to an `apply_corrections` job.
+#[derive(Serialize, utoipa::ToSchema)]
+struct UnmergeApplied {
+    /// Always `applied`.
+    status: &'static str,
+    pairs: usize,
+    action_ids: Vec<String>,
+    apply_job: String,
+}
+
 fn staged_response(status: StatusCode, action_id: &str) -> axum::response::Response {
     (
         status,
-        Json(json!({
-            "status": "staged",
-            "action_id": action_id,
-            "pending_until_next_reconcile": false,
-        })),
+        Json(Staged {
+            status: "staged",
+            action_id: action_id.to_string(),
+            pending_until_next_reconcile: false,
+        }),
     )
         .into_response()
 }
@@ -10075,12 +10219,12 @@ async fn add_assertion(
     {
         Ok(job) => (
             StatusCode::CREATED,
-            Json(json!({
-                "status": "staged",
-                "action_id": action_id,
-                "pending_until_next_reconcile": false,
-                "apply_job": job.id,
-            })),
+            Json(StagedApplied {
+                status: "staged",
+                action_id,
+                pending_until_next_reconcile: false,
+                apply_job: job.id,
+            }),
         )
             .into_response(),
         Err(e) => pg_err(e),
@@ -10816,12 +10960,12 @@ async fn unmerge_entity(
     if !body.apply_now {
         return (
             StatusCode::OK,
-            Json(json!({
-                "status": "staged",
-                "pairs": pairs,
-                "action_ids": action_ids,
-                "pending_until_next_reconcile": true,
-            })),
+            Json(UnmergeStaged {
+                status: "staged",
+                pairs,
+                action_ids,
+                pending_until_next_reconcile: true,
+            }),
         )
             .into_response();
     }
@@ -10851,12 +10995,12 @@ async fn unmerge_entity(
     {
         Ok(job) => (
             StatusCode::OK,
-            Json(json!({
-                "status": "applied",
-                "pairs": pairs,
-                "action_ids": action_ids,
-                "apply_job": job.id,
-            })),
+            Json(UnmergeApplied {
+                status: "applied",
+                pairs,
+                action_ids,
+                apply_job: job.id,
+            }),
         )
             .into_response(),
         Err(e) => pg_err(e),
@@ -11262,27 +11406,41 @@ async fn bulk_resolve_reviews(
         &json!({ "count": action_ids.len() }),
     )
     .await;
-    let mut resp = json!({ "status": "staged", "action_ids": action_ids });
-    if body.apply_now {
-        let idem = format!("bulk-resolve-apply:{}", er_ids::new_v7());
-        let params = json!({ "skip_ingest": true });
-        match pg::enqueue(
-            &client,
-            &org_row.id,
-            Some(d.id.as_str()),
-            "apply_corrections",
-            0,
-            Some(&idem),
-            Some(&params),
-            principal.provenance(),
+    if !body.apply_now {
+        return (
+            StatusCode::OK,
+            Json(StagedBatch {
+                status: "staged",
+                action_ids,
+            }),
         )
-        .await
-        {
-            Ok(job) => resp["apply_job"] = json!(job.id),
-            Err(e) => return pg_err(e),
-        }
+            .into_response();
     }
-    (StatusCode::OK, Json(resp)).into_response()
+    let idem = format!("bulk-resolve-apply:{}", er_ids::new_v7());
+    let params = json!({ "skip_ingest": true });
+    match pg::enqueue(
+        &client,
+        &org_row.id,
+        Some(d.id.as_str()),
+        "apply_corrections",
+        0,
+        Some(&idem),
+        Some(&params),
+        principal.provenance(),
+    )
+    .await
+    {
+        Ok(job) => (
+            StatusCode::OK,
+            Json(StagedBatchApplied {
+                status: "staged",
+                action_ids,
+                apply_job: job.id,
+            }),
+        )
+            .into_response(),
+        Err(e) => pg_err(e),
+    }
 }
 
 #[derive(Deserialize)]
@@ -11492,27 +11650,41 @@ async fn merge_group(
         }),
     )
     .await;
-    let mut resp = json!({ "status": "staged", "action_ids": action_ids });
-    if body.apply_now {
-        let idem = format!("merge-group-apply:{}", er_ids::new_v7());
-        let params = json!({ "skip_ingest": true });
-        match pg::enqueue(
-            &client,
-            &org_row.id,
-            Some(d.id.as_str()),
-            "apply_corrections",
-            0,
-            Some(&idem),
-            Some(&params),
-            principal.provenance(),
+    if !body.apply_now {
+        return (
+            StatusCode::OK,
+            Json(StagedBatch {
+                status: "staged",
+                action_ids,
+            }),
         )
-        .await
-        {
-            Ok(job) => resp["apply_job"] = json!(job.id),
-            Err(e) => return pg_err(e),
-        }
+            .into_response();
     }
-    (StatusCode::OK, Json(resp)).into_response()
+    let idem = format!("merge-group-apply:{}", er_ids::new_v7());
+    let params = json!({ "skip_ingest": true });
+    match pg::enqueue(
+        &client,
+        &org_row.id,
+        Some(d.id.as_str()),
+        "apply_corrections",
+        0,
+        Some(&idem),
+        Some(&params),
+        principal.provenance(),
+    )
+    .await
+    {
+        Ok(job) => (
+            StatusCode::OK,
+            Json(StagedBatchApplied {
+                status: "staged",
+                action_ids,
+                apply_job: job.id,
+            }),
+        )
+            .into_response(),
+        Err(e) => pg_err(e),
+    }
 }
 
 /// The 11 overridable golden columns (er-golden SCALAR + ADDRESS); the mass-update
@@ -11641,27 +11813,41 @@ async fn mass_update(
         &json!({ "count": action_ids.len() }),
     )
     .await;
-    let mut resp = json!({ "status": "staged", "action_ids": action_ids });
-    if body.apply_now {
-        let idem = format!("mass-update-apply:{}", er_ids::new_v7());
-        let params = json!({ "skip_ingest": true });
-        match pg::enqueue(
-            &client,
-            &org_row.id,
-            Some(d.id.as_str()),
-            "apply_corrections",
-            0,
-            Some(&idem),
-            Some(&params),
-            principal.provenance(),
+    if !body.apply_now {
+        return (
+            StatusCode::OK,
+            Json(StagedBatch {
+                status: "staged",
+                action_ids,
+            }),
         )
-        .await
-        {
-            Ok(job) => resp["apply_job"] = json!(job.id),
-            Err(e) => return pg_err(e),
-        }
+            .into_response();
     }
-    (StatusCode::OK, Json(resp)).into_response()
+    let idem = format!("mass-update-apply:{}", er_ids::new_v7());
+    let params = json!({ "skip_ingest": true });
+    match pg::enqueue(
+        &client,
+        &org_row.id,
+        Some(d.id.as_str()),
+        "apply_corrections",
+        0,
+        Some(&idem),
+        Some(&params),
+        principal.provenance(),
+    )
+    .await
+    {
+        Ok(job) => (
+            StatusCode::OK,
+            Json(StagedBatchApplied {
+                status: "staged",
+                action_ids,
+                apply_job: job.id,
+            }),
+        )
+            .into_response(),
+        Err(e) => pg_err(e),
+    }
 }
 
 #[derive(Deserialize)]
@@ -12677,7 +12863,9 @@ mod response_shape_tests {
     //! struct's fields are already in sorted order.
     use super::{
         AppState, ClearAccepted, DatasetCreated, DatasetProvisioning, DatasetView, Job, JobList,
-        OrgCreated, OrgItem, OrgProvisioned, OrgView, ResumeAccepted, enqueue_traced, resources_of,
+        LabelBand, LabelCoverage, LabelOrigins, OrgCreated, OrgItem, OrgProvisioned, OrgView,
+        ResumeAccepted, ReviewMergeGroup, Staged, StagedApplied, StagedBatch, StagedBatchApplied,
+        UnmergeApplied, UnmergeStaged, enqueue_traced, label_coverage, resources_of,
     };
     use er_entities::job::JobWire;
     use serde_json::json;
@@ -12847,6 +13035,145 @@ mod response_shape_tests {
                 rotated: 2,
             })
             .unwrap()
+        );
+    }
+
+    fn value<T: serde::Serialize>(v: &T) -> serde_json::Value {
+        serde_json::to_value(v).unwrap()
+    }
+
+    #[test]
+    fn staged_corrections_carry_the_keys_their_json_did() {
+        let ids = vec!["a1".to_string(), "a2".to_string()];
+        assert_eq!(
+            json!({ "status": "staged", "action_id": "a1", "pending_until_next_reconcile": false }),
+            value(&Staged {
+                status: "staged",
+                action_id: "a1".into(),
+                pending_until_next_reconcile: false,
+            })
+        );
+        assert_eq!(
+            json!({
+                "status": "staged",
+                "action_id": "a1",
+                "pending_until_next_reconcile": false,
+                "apply_job": "j1",
+            }),
+            value(&StagedApplied {
+                status: "staged",
+                action_id: "a1".into(),
+                pending_until_next_reconcile: false,
+                apply_job: "j1".into(),
+            })
+        );
+        // The old body was one object that gained `apply_job` only under
+        // `apply_now`; the two structs are its two observable forms.
+        let mut old = json!({ "status": "staged", "action_ids": ids });
+        assert_eq!(
+            old,
+            value(&StagedBatch {
+                status: "staged",
+                action_ids: ids.clone(),
+            })
+        );
+        old["apply_job"] = json!("j1");
+        assert_eq!(
+            old,
+            value(&StagedBatchApplied {
+                status: "staged",
+                action_ids: ids.clone(),
+                apply_job: "j1".into(),
+            })
+        );
+        assert_eq!(
+            json!({
+                "status": "staged",
+                "pairs": 2_usize,
+                "action_ids": ids,
+                "pending_until_next_reconcile": true,
+            }),
+            value(&UnmergeStaged {
+                status: "staged",
+                pairs: 2,
+                action_ids: ids.clone(),
+                pending_until_next_reconcile: true,
+            })
+        );
+        assert_eq!(
+            json!({ "status": "applied", "pairs": 2_usize, "action_ids": ids, "apply_job": "j1" }),
+            value(&UnmergeApplied {
+                status: "applied",
+                pairs: 2,
+                action_ids: ids.clone(),
+                apply_job: "j1".into(),
+            })
+        );
+    }
+
+    #[test]
+    fn labelling_and_merge_group_envelopes_keep_their_shape() {
+        let now = chrono::Utc::now();
+        let label = |verdict: &str, origin: &str| er_entities::pair_label::PairLabel {
+            id: "l".into(),
+            org_id: "o".into(),
+            dataset_id: "d".into(),
+            rec_a_key: "a".into(),
+            rec_b_key: "b".into(),
+            verdict: verdict.into(),
+            origin: origin.into(),
+            labeled_by: "u".into(),
+            model_version: None,
+            score_at_label: Some(0.5),
+            note: None,
+            created_at: now,
+            updated_at: now,
+        };
+        let labels = [
+            label("match", "human"),
+            label("no_match", "reviewer"),
+            label("no_match", "llm"),
+            label("match", "human"),
+        ];
+        assert_eq!(
+            label_coverage(&labels),
+            LabelCoverage {
+                total: 4,
+                matches: 2,
+                non_matches: 2,
+                by_origin: LabelOrigins {
+                    human: 2,
+                    reviewer: 1,
+                    llm: 1,
+                },
+            }
+        );
+        assert_eq!(
+            json!({
+                "total": 4, "matches": 2, "non_matches": 2,
+                "by_origin": { "human": 2, "reviewer": 1, "llm": 1 },
+            }),
+            value(&label_coverage(&labels))
+        );
+        assert_eq!(
+            json!({ "min": 0.2, "max": 1.0 }),
+            value(&LabelBand { min: 0.2, max: 1.0 })
+        );
+        // The entity has no Serialize difference from its wire form.
+        for l in &labels {
+            assert_eq!(
+                json!(l),
+                value(&er_entities::pair_label::PairLabelWire::from(l))
+            );
+        }
+        let items = vec![json!({ "record_key": "k", "entity_id": null })];
+        assert_eq!(
+            json!({ "items": items, "total": 3_usize, "snapshot": 7 }),
+            value(&ReviewMergeGroup {
+                items: items.clone(),
+                total: 3,
+                snapshot: 7,
+            })
         );
     }
 }

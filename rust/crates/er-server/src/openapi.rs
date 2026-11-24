@@ -79,6 +79,23 @@ pub struct ApiDoc;
     crate::DatasetView,
     crate::DatasetProvisioning,
     crate::DatasetCreated,
+    crate::read::ReviewItem,
+    crate::ReviewPage,
+    crate::ReviewMergeGroup,
+    crate::read::MergePlan,
+    crate::MergePlanList,
+    crate::read::UncertainPair,
+    crate::LabelBand,
+    crate::LabelOrigins,
+    crate::LabelCoverage,
+    crate::LabelingQueue,
+    crate::LabelList,
+    crate::Staged,
+    crate::StagedApplied,
+    crate::StagedBatch,
+    crate::StagedBatchApplied,
+    crate::UnmergeStaged,
+    crate::UnmergeApplied,
 )))]
 pub struct ResponseDoc;
 

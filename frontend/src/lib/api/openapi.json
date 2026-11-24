@@ -1904,27 +1904,16 @@
         },
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
                 "schema": {
                   "anyOf": [
                     {
-                      "type": "object",
-                      "properties": {
-                        "action_id": {},
-                        "pending_until_next_reconcile": {},
-                        "status": {}
-                      }
+                      "$ref": "#/components/schemas/Staged"
                     },
                     {
-                      "type": "object",
-                      "properties": {
-                        "action_id": {},
-                        "apply_job": {},
-                        "pending_until_next_reconcile": {},
-                        "status": {}
-                      }
+                      "$ref": "#/components/schemas/StagedApplied"
                     }
                   ]
                 }
@@ -2055,16 +2044,11 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "action_id": {},
-                    "pending_until_next_reconcile": {},
-                    "status": {}
-                  }
+                  "$ref": "#/components/schemas/Staged"
                 }
               }
             }
@@ -3123,28 +3107,16 @@
         },
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
                 "schema": {
                   "anyOf": [
                     {
-                      "type": "object",
-                      "properties": {
-                        "action_ids": {},
-                        "pairs": {},
-                        "pending_until_next_reconcile": {},
-                        "status": {}
-                      }
+                      "$ref": "#/components/schemas/UnmergeStaged"
                     },
                     {
-                      "type": "object",
-                      "properties": {
-                        "action_ids": {},
-                        "apply_job": {},
-                        "pairs": {},
-                        "status": {}
-                      }
+                      "$ref": "#/components/schemas/UnmergeApplied"
                     }
                   ]
                 }
@@ -4249,18 +4221,11 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "band": {},
-                    "coverage": {},
-                    "items": {},
-                    "snapshot": {},
-                    "threshold": {}
-                  }
+                  "$ref": "#/components/schemas/LabelingQueue"
                 }
               }
             }
@@ -4317,14 +4282,11 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "labels": {}
-                  }
+                  "$ref": "#/components/schemas/LabelList"
                 }
               }
             }
@@ -4435,10 +4397,12 @@
         },
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/PairLabel"
+                }
               }
             }
           },
@@ -4703,10 +4667,19 @@
         },
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/StagedBatch"
+                    },
+                    {
+                      "$ref": "#/components/schemas/StagedBatchApplied"
+                    }
+                  ]
+                }
               }
             }
           },
@@ -4887,14 +4860,11 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "items": {}
-                  }
+                  "$ref": "#/components/schemas/MergePlanList"
                 }
               }
             }
@@ -5016,10 +4986,19 @@
         },
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/StagedBatch"
+                    },
+                    {
+                      "$ref": "#/components/schemas/StagedBatchApplied"
+                    }
+                  ]
+                }
               }
             }
           },
@@ -7133,17 +7112,11 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "items": {},
-                    "next_cursor": {},
-                    "snapshot": {},
-                    "unscored_hidden": {}
-                  }
+                  "$ref": "#/components/schemas/ReviewPage"
                 }
               }
             }
@@ -7236,10 +7209,19 @@
         },
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/StagedBatch"
+                    },
+                    {
+                      "$ref": "#/components/schemas/StagedBatchApplied"
+                    }
+                  ]
+                }
               }
             }
           },
@@ -7303,10 +7285,12 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewItem"
+                }
               }
             }
           },
@@ -7370,16 +7354,11 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "items": {},
-                    "snapshot": {},
-                    "total": {}
-                  }
+                  "$ref": "#/components/schemas/ReviewMergeGroup"
                 }
               }
             }
@@ -7462,16 +7441,11 @@
         },
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "action_id": {},
-                    "pending_until_next_reconcile": {},
-                    "status": {}
-                  }
+                  "$ref": "#/components/schemas/Staged"
                 }
               }
             }
@@ -10669,6 +10643,123 @@
           }
         }
       },
+      "LabelBand": {
+        "type": "object",
+        "description": "The gray band a labelling page was drawn from.",
+        "required": [
+          "min",
+          "max"
+        ],
+        "properties": {
+          "max": {
+            "type": "number",
+            "format": "double"
+          },
+          "min": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
+      "LabelCoverage": {
+        "type": "object",
+        "description": "How much labelled signal a tenant has, split by verdict and origin.",
+        "required": [
+          "total",
+          "matches",
+          "non_matches",
+          "by_origin"
+        ],
+        "properties": {
+          "by_origin": {
+            "$ref": "#/components/schemas/LabelOrigins"
+          },
+          "matches": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "non_matches": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "LabelList": {
+        "type": "object",
+        "description": "`GET …/labels`: the recorded labels, newest first.",
+        "required": [
+          "labels"
+        ],
+        "properties": {
+          "labels": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PairLabel"
+            }
+          }
+        }
+      },
+      "LabelOrigins": {
+        "type": "object",
+        "description": "How many labels a tenant has, by origin.",
+        "required": [
+          "human",
+          "reviewer",
+          "llm"
+        ],
+        "properties": {
+          "human": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "llm": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "reviewer": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "LabelingQueue": {
+        "type": "object",
+        "description": "`GET …/labeling/next`: the next uncertain pairs and the coverage so far.",
+        "required": [
+          "items",
+          "snapshot",
+          "threshold",
+          "band",
+          "coverage"
+        ],
+        "properties": {
+          "band": {
+            "$ref": "#/components/schemas/LabelBand"
+          },
+          "coverage": {
+            "$ref": "#/components/schemas/LabelCoverage"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UncertainPair"
+            }
+          },
+          "snapshot": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "threshold": {
+            "type": "number",
+            "format": "double",
+            "description": "The `auto_merge` threshold the pairs are ordered around."
+          }
+        }
+      },
       "MatchingModel": {
         "type": "object",
         "description": "An immutable version of a tenant's matching model: the settings document the engine scores against, its hash, provenance and activation state.",
@@ -10761,6 +10852,102 @@
             "type": "integer",
             "format": "int64",
             "description": "The monotonic version number within (org, name). Versions are immutable: a retrain or a weight override mints the next one rather than editing this."
+          }
+        }
+      },
+      "MergePlan": {
+        "type": "object",
+        "description": "One entity's merge plan (`GET …/merge-plans`): its elected master, the\ngolden preview, every member as `source_system:source_record_id`, and the\nsame group confidence the duplicates view shows.",
+        "required": [
+          "entity_id",
+          "member_records",
+          "member_confidences"
+        ],
+        "properties": {
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "entity_id": {
+            "type": "string"
+          },
+          "family_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "given_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "group_confidence": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Null when the group has no within-group scored edge."
+          },
+          "master_key": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "master_record_key": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "member_confidences": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "member_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "member_records": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "phone_e164": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "MergePlanList": {
+        "type": "object",
+        "description": "`GET …/merge-plans` (JSON form).",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MergePlan"
+            }
           }
         }
       },
@@ -11468,6 +11655,144 @@
           }
         }
       },
+      "ReviewItem": {
+        "type": "object",
+        "description": "One review-queue item: the stored row plus the shipped `confidence`.\n\nSpelled out rather than flattened from the generated `PageRow`/`ByIdRow`:\nthose names repeat in every entity's `read` module, so registering them\nwould collide, and the `From` impls destructure each row exhaustively, so a\ncolumn added to the statement fails to compile here instead of silently\nleaving the wire.",
+        "required": [
+          "id",
+          "subject_type",
+          "reason",
+          "status",
+          "first_seen_run_id",
+          "last_seen_run_id"
+        ],
+        "properties": {
+          "confidence": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The display integer of `match_probability`; absent when it is null."
+          },
+          "entity_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "first_seen_run_id": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "last_seen_run_id": {
+            "type": "string"
+          },
+          "match_probability": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Null for a structural escalation, which is not a scored pair."
+          },
+          "reason": {
+            "type": "string"
+          },
+          "rec_a_key": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rec_b_key": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "resolved_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Naive lake text (`YYYY-MM-DD HH:MM:SS[.ffffff]`), not RFC 3339."
+          },
+          "resolved_by": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string"
+          },
+          "subject_type": {
+            "type": "string",
+            "description": "`pair` for a record-pair review, `entity` for an entity-subject one."
+          },
+          "waterfall": {}
+        }
+      },
+      "ReviewMergeGroup": {
+        "type": "object",
+        "description": "`GET …/reviews/{review_id}/merge-group`: the union of both sides' entities.",
+        "required": [
+          "items",
+          "total",
+          "snapshot"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {},
+            "description": "Records-by-key items (each record's values, keyed by the dataset's\nentity type), each stamped with the `entity_id` it belongs to."
+          },
+          "snapshot": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "total": {
+            "type": "integer",
+            "description": "The union's size before the key cap truncated `items`.",
+            "minimum": 0
+          }
+        }
+      },
+      "ReviewPage": {
+        "type": "object",
+        "description": "`GET …/reviews`: one keyset page of the review queue.",
+        "required": [
+          "items",
+          "snapshot",
+          "unscored_hidden"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReviewItem"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "snapshot": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "unscored_hidden": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Open unscored escalations a probability band hid (0 with no band)."
+          }
+        }
+      },
       "S3IngestCursor": {
         "type": "object",
         "description": "What the auto-ingest poller has already read, one row per (org, source). The poller runs on every dispatcher tick and the newest object under a prefix stays the newest until a new one arrives, so without this row the same CSV would be re-ingested every few seconds forever — an unbounded run loop over the tenant's own lake. An upsert rather than a log: the question it answers is 'what is already in', not 'what has ever been in', and the audit log already answers the second.",
@@ -11595,6 +11920,98 @@
             "type": "string",
             "format": "date-time",
             "description": "Wall-clock last-write time (database default; advanced by mutations once the entity migrates)."
+          }
+        }
+      },
+      "Staged": {
+        "type": "object",
+        "description": "One staged steward correction: recorded, not yet applied to the lake.",
+        "required": [
+          "status",
+          "action_id",
+          "pending_until_next_reconcile"
+        ],
+        "properties": {
+          "action_id": {
+            "type": "string"
+          },
+          "pending_until_next_reconcile": {
+            "type": "boolean",
+            "description": "Always false: the correction lands on the next apply, not the next run."
+          },
+          "status": {
+            "type": "string",
+            "description": "Always `staged`."
+          }
+        }
+      },
+      "StagedApplied": {
+        "type": "object",
+        "description": "One staged correction handed to an `apply_corrections` job (`apply_now`).",
+        "required": [
+          "status",
+          "action_id",
+          "pending_until_next_reconcile",
+          "apply_job"
+        ],
+        "properties": {
+          "action_id": {
+            "type": "string"
+          },
+          "apply_job": {
+            "type": "string"
+          },
+          "pending_until_next_reconcile": {
+            "type": "boolean",
+            "description": "Always false."
+          },
+          "status": {
+            "type": "string",
+            "description": "Always `staged`: the job, not this request, applies it."
+          }
+        }
+      },
+      "StagedBatch": {
+        "type": "object",
+        "description": "Several staged corrections, waiting for an apply.",
+        "required": [
+          "status",
+          "action_ids"
+        ],
+        "properties": {
+          "action_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "type": "string",
+            "description": "Always `staged`."
+          }
+        }
+      },
+      "StagedBatchApplied": {
+        "type": "object",
+        "description": "Several staged corrections handed to an `apply_corrections` job\n(`apply_now`). Still `staged`: the job, not this request, applies them.",
+        "required": [
+          "status",
+          "action_ids",
+          "apply_job"
+        ],
+        "properties": {
+          "action_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "apply_job": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "description": "Always `staged`."
           }
         }
       },
@@ -12094,6 +12511,109 @@
             "items": {
               "$ref": "#/components/schemas/TaskInstance"
             }
+          }
+        }
+      },
+      "UncertainPair": {
+        "type": "object",
+        "description": "One pair the labelling session should look at next: the active score plus\nthe shipped `confidence` (always present — every uncertain pair is scored).",
+        "required": [
+          "rec_a_key",
+          "rec_b_key",
+          "match_probability",
+          "model_version",
+          "evidence",
+          "run_id",
+          "scored_at",
+          "confidence"
+        ],
+        "properties": {
+          "confidence": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "evidence": {
+            "description": "The comparison evidence blob (`gamma_*`, `mw_*`, `match_weight`)."
+          },
+          "match_probability": {
+            "type": "number",
+            "format": "double"
+          },
+          "model_version": {
+            "type": "string"
+          },
+          "rec_a_key": {
+            "type": "string"
+          },
+          "rec_b_key": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "scored_at": {
+            "type": "string",
+            "description": "Naive lake text (`YYYY-MM-DD HH:MM:SS[.ffffff]`), not RFC 3339."
+          }
+        }
+      },
+      "UnmergeApplied": {
+        "type": "object",
+        "description": "An unmerge staged and handed to an `apply_corrections` job.",
+        "required": [
+          "status",
+          "pairs",
+          "action_ids",
+          "apply_job"
+        ],
+        "properties": {
+          "action_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "apply_job": {
+            "type": "string"
+          },
+          "pairs": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "status": {
+            "type": "string",
+            "description": "Always `applied`."
+          }
+        }
+      },
+      "UnmergeStaged": {
+        "type": "object",
+        "description": "An unmerge staged as never-rules, waiting for the next reconcile.",
+        "required": [
+          "status",
+          "pairs",
+          "action_ids",
+          "pending_until_next_reconcile"
+        ],
+        "properties": {
+          "action_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "pairs": {
+            "type": "integer",
+            "description": "How many never-rules were staged (one per peeled record).",
+            "minimum": 0
+          },
+          "pending_until_next_reconcile": {
+            "type": "boolean",
+            "description": "Always true."
+          },
+          "status": {
+            "type": "string",
+            "description": "Always `staged`."
           }
         }
       },
