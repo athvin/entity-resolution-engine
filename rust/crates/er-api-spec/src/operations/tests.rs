@@ -336,7 +336,10 @@ async fn provision(name: &str) -> axum::response::Response {
     let create = ops.iter().find(|o| o.method == "POST").unwrap();
     // The helper's body is part of what the handler returns.
     // The early helper return is visited before the tail expression.
-    assert_eq!(create.response_schemas, [reference("Provisioned"), reference("Created")]);
+    assert_eq!(
+        create.response_schemas,
+        [reference("Provisioned"), reference("Created")]
+    );
     let list = ops.iter().find(|o| o.method == "GET").unwrap();
     assert_eq!(
         list.response_schemas,
@@ -349,7 +352,10 @@ async fn provision(name: &str) -> axum::response::Response {
     );
 
     // A helper still returning `json!` makes the handler mixed, not silently partial.
-    let partial = src.replace("Json(Provisioned { name, key })", "Json(json!({\"name\": name}))");
+    let partial = src.replace(
+        "Json(Provisioned { name, key })",
+        "Json(json!({\"name\": name}))",
+    );
     let error = operations(&partial, &[], &schemas).err().unwrap();
     assert!(error.contains("mixes typed and untyped"), "{error}");
 }

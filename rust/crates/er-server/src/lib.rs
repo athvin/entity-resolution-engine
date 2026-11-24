@@ -1418,20 +1418,18 @@ async fn list_orgs(principal: Principal, State(state): State<AppState>) -> impl 
         Err(r) => return *r,
     };
     match pg::list_orgs(&client).await {
-        Ok(orgs) => {
-            Json::<Vec<OrgItem>>(
-                orgs.into_iter()
-                    .map(|o| OrgItem {
-                        id: o.id,
-                        name: o.name,
-                        state: o.state,
-                        active_config_version: o.active_config_version,
-                        created_at: o.created_at,
-                    })
-                    .collect(),
-            )
-            .into_response()
-        }
+        Ok(orgs) => Json::<Vec<OrgItem>>(
+            orgs.into_iter()
+                .map(|o| OrgItem {
+                    id: o.id,
+                    name: o.name,
+                    state: o.state,
+                    active_config_version: o.active_config_version,
+                    created_at: o.created_at,
+                })
+                .collect(),
+        )
+        .into_response(),
         Err(e) => pg_err(e),
     }
 }
@@ -12679,8 +12677,7 @@ mod response_shape_tests {
     //! struct's fields are already in sorted order.
     use super::{
         AppState, ClearAccepted, DatasetCreated, DatasetProvisioning, DatasetView, Job, JobList,
-        OrgCreated, OrgItem, OrgProvisioned, OrgView, ResumeAccepted, enqueue_traced,
-        resources_of,
+        OrgCreated, OrgItem, OrgProvisioned, OrgView, ResumeAccepted, enqueue_traced, resources_of,
     };
     use er_entities::job::JobWire;
     use serde_json::json;

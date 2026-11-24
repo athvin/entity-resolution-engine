@@ -228,9 +228,12 @@ fn wire_value(body: &str) -> bool {
         .chars()
         .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == ':')
         .collect();
-    path.rsplit_once("::")
-        .is_some_and(|(owner, _)| owner.rsplit("::").next().is_some_and(|t| t.ends_with("Wire")))
-        && after[path.len()..].starts_with('(')
+    path.rsplit_once("::").is_some_and(|(owner, _)| {
+        owner
+            .rsplit("::")
+            .next()
+            .is_some_and(|t| t.ends_with("Wire"))
+    }) && after[path.len()..].starts_with('(')
 }
 
 /// Resolve only an immediate named constructor. A variable or helper call needs

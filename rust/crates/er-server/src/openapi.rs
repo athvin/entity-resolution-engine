@@ -502,8 +502,8 @@ mod tests {
         // success bodies must document both.
         let doc: serde_json::Value =
             serde_json::from_str(&openapi_json(Audience::Internal)).unwrap();
-        let schema = &doc["paths"]["/v1/orgs/{org}/datasets"]["post"]["responses"]["2XX"]
-            ["content"]["application/json"]["schema"];
+        let schema = &doc["paths"]["/v1/orgs/{org}/datasets"]["post"]["responses"]["2XX"]["content"]
+            ["application/json"]["schema"];
         assert_eq!(
             schema,
             &serde_json::json!({"anyOf": [
