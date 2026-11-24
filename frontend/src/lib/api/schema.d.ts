@@ -2116,6 +2116,35 @@ export interface components {
              */
             updated_at: string;
         };
+        /** @description `POST …/config/versions`: the draft just stored. */
+        ConfigDraftCreated: {
+            config_hash: string;
+            org: string;
+            /** @description Always `draft`. */
+            state: string;
+            /** Format: int64 */
+            version: number;
+        };
+        /**
+         * @description `POST …/config/versions/{version}/publish`: what the publish changed and
+         *     queued.
+         */
+        ConfigPublished: {
+            /**
+             * @description What the latest profile says about the config that just went live:
+             *     advice, never a refusal.
+             */
+            advisories: string[];
+            changed_blocks: string[];
+            /** @description The rebuild jobs the tier queued, in order. */
+            jobs_enqueued: string[];
+            org: string;
+            published_by: string;
+            /** @description The rebuild tier the changed blocks required. */
+            tier?: string | null;
+            /** Format: int64 */
+            version: number;
+        };
         /** @description A versioned config document for a tenant: its YAML, hash and publish state. */
         ConfigVersion: {
             /** @description Hash of the canonicalized config. */
@@ -2153,6 +2182,34 @@ export interface components {
              */
             version: number;
             /** @description The config document source. */
+            yaml: string;
+        };
+        /** @description One config version in the history list: the view without its YAML. */
+        ConfigVersionItem: {
+            config_hash: string;
+            created_at: string;
+            created_by: string;
+            published_at?: string | null;
+            state: string;
+            tier?: string | null;
+            /** Format: int64 */
+            version: number;
+        };
+        /**
+         * @description JSON of a full config-version detail.
+         *     One config version with its YAML body.
+         */
+        ConfigVersionView: {
+            config_hash: string;
+            created_at: string;
+            created_by: string;
+            published_at?: string | null;
+            /** @description `draft`, `published` or `superseded`. */
+            state: string;
+            /** @description The rebuild tier the publish chose; null until published. */
+            tier?: string | null;
+            /** Format: int64 */
+            version: number;
             yaml: string;
         };
         /** @description One of a tenant's resolution domains: its own lake location, config pointer, entity type and lifecycle state. The lake env points at a DuckLake catalog of its own (a METADATA_SCHEMA inside the org's metadata database, or a file catalog locally), so two datasets never share tables. */
@@ -2573,6 +2630,24 @@ export interface components {
              * @description The `auto_merge` threshold the pairs are ordered around.
              */
             threshold: number;
+        };
+        /** @description `GET …/lexicon`: the dataset's nickname pairs. */
+        Lexicon: {
+            pairs: components["schemas"]["LexiconPair"][];
+        };
+        /**
+         * @description One nickname equivalence: either variant standardizes to the other. The
+         *     same shape in both directions (`PUT` body and responses).
+         */
+        LexiconPair: {
+            variant_a: string;
+            variant_b: string;
+        };
+        /** @description `PUT …/lexicon`: the saved pairs and the full rebuild they queued. */
+        LexiconSaved: {
+            /** @description The `run_all_full` job that re-standardizes with the new pairs. */
+            apply_job: string;
+            pairs: components["schemas"]["LexiconPair"][];
         };
         /** @description Which member supplied one golden attribute, and by which survivorship rule. */
         LineageItem: {
@@ -4708,13 +4783,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ConfigVersionView"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -4742,13 +4817,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ConfigVersionItem"][];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -4782,18 +4857,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        config_hash?: unknown;
-                        org?: unknown;
-                        state?: unknown;
-                        version?: unknown;
-                    };
+                    "application/json": components["schemas"]["ConfigDraftCreated"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -4822,13 +4892,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ConfigVersionView"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -4857,21 +4927,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        advisories?: unknown;
-                        changed_blocks?: unknown;
-                        jobs_enqueued?: unknown;
-                        org?: unknown;
-                        published_by?: unknown;
-                        tier?: unknown;
-                        version?: unknown;
-                    };
+                    "application/json": components["schemas"]["ConfigPublished"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -5876,15 +5938,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        pairs?: unknown;
-                    };
+                    "application/json": components["schemas"]["Lexicon"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -5921,16 +5981,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        apply_job?: unknown;
-                        pairs?: unknown;
-                    };
+                    "application/json": components["schemas"]["LexiconSaved"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */

@@ -111,6 +111,13 @@ pub struct ApiDoc;
     crate::DeliveryAccepted,
     crate::EntityLinkList,
     crate::EntityLinkDeleted,
+    crate::ConfigVersionView,
+    crate::ConfigVersionItem,
+    crate::ConfigDraftCreated,
+    crate::ConfigPublished,
+    crate::LexiconPair,
+    crate::Lexicon,
+    crate::LexiconSaved,
 )))]
 pub struct ResponseDoc;
 
