@@ -215,7 +215,10 @@ pub fn classify_envelope(body: &str, source: &str) -> Result<Envelope, String> {
 fn wire_value(body: &str) -> bool {
     // `find_call` returns the index just past the needle.
     if let Some(at) = find_call(body, "Json::<") {
-        return body[at..].split('>').next().is_some_and(|ty| ty.contains("Wire"));
+        return body[at..]
+            .split('>')
+            .next()
+            .is_some_and(|ty| ty.contains("Wire"));
     }
     let Some(at) = find_call(body, "Json(") else {
         return false;
@@ -225,9 +228,12 @@ fn wire_value(body: &str) -> bool {
         .chars()
         .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == ':')
         .collect();
-    path.rsplit_once("::")
-        .is_some_and(|(owner, _)| owner.rsplit("::").next().is_some_and(|t| t.ends_with("Wire")))
-        && after[path.len()..].starts_with('(')
+    path.rsplit_once("::").is_some_and(|(owner, _)| {
+        owner
+            .rsplit("::")
+            .next()
+            .is_some_and(|t| t.ends_with("Wire"))
+    }) && after[path.len()..].starts_with('(')
 }
 
 /// Resolve only an immediate named constructor. A variable or helper call needs

@@ -3941,7 +3941,11 @@ async fn create_job(
                     &json!({ "job_id": job.id, "kind": body.kind, "segment": body.segment }),
                 )
                 .await;
-                (StatusCode::ACCEPTED, Json(er_entities::job::JobWire::from(&job))).into_response()
+                (
+                    StatusCode::ACCEPTED,
+                    Json(er_entities::job::JobWire::from(&job)),
+                )
+                    .into_response()
             }
             Err(e) => pg_err(e),
         };
@@ -3953,7 +3957,11 @@ async fn create_job(
         body.priority,
         principal.trace_context.as_deref(),
     );
-    (StatusCode::ACCEPTED, Json(er_entities::job::JobWire::from(&job))).into_response()
+    (
+        StatusCode::ACCEPTED,
+        Json(er_entities::job::JobWire::from(&job)),
+    )
+        .into_response()
 }
 
 /// Enqueue a `queued` job directly (the body of `create_job`, reusable by the
@@ -4225,7 +4233,10 @@ async fn list_jobs(
         .take(usize::try_from(limit).unwrap_or(usize::MAX))
         .collect();
     Json(JobList {
-        jobs: jobs.into_iter().map(er_entities::job::JobWire::from).collect(),
+        jobs: jobs
+            .into_iter()
+            .map(er_entities::job::JobWire::from)
+            .collect(),
     })
     .into_response()
 }
@@ -4254,7 +4265,9 @@ async fn get_job(
             return *r;
         }
         return match pg::get_job(&client, &org_row.id, &job_id).await {
-            Ok(Some(job)) => (StatusCode::OK, Json(er_entities::job::JobWire::from(&job))).into_response(),
+            Ok(Some(job)) => {
+                (StatusCode::OK, Json(er_entities::job::JobWire::from(&job))).into_response()
+            }
             Ok(None) => (
                 StatusCode::NOT_FOUND,
                 Json(json!({ "detail": "no such job" })),
@@ -4317,9 +4330,17 @@ async fn cancel_job(
                     Ok(rows) => match rows.into_iter().next() {
                         Some(updated) if updated.state == "canceled" => {
                             let _ = webhook::emit_job_event(&client, &updated).await;
-                            (StatusCode::OK, Json(er_entities::job::JobWire::from(&updated))).into_response()
+                            (
+                                StatusCode::OK,
+                                Json(er_entities::job::JobWire::from(&updated)),
+                            )
+                                .into_response()
                         }
-                        Some(updated) => (StatusCode::OK, Json(er_entities::job::JobWire::from(&updated))).into_response(),
+                        Some(updated) => (
+                            StatusCode::OK,
+                            Json(er_entities::job::JobWire::from(&updated)),
+                        )
+                            .into_response(),
                         None => detail_err(
                             StatusCode::CONFLICT,
                             "the job is not cancelable (already terminal)",
@@ -4341,7 +4362,11 @@ async fn cancel_job(
                     // the sending, so a slow or dead subscriber cannot hold up
                     // the response to a cancel that is already persisted.
                     let _ = webhook::emit_job_event(&client, &canceled).await;
-                    (StatusCode::OK, Json(er_entities::job::JobWire::from(&canceled))).into_response()
+                    (
+                        StatusCode::OK,
+                        Json(er_entities::job::JobWire::from(&canceled)),
+                    )
+                        .into_response()
                 }
                 Err(e) => pg_err(e),
             },
@@ -5370,9 +5395,10 @@ async fn jobs_global(
     )
     .await
     {
-        Ok(jobs) => {
-            Json::<Vec<er_entities::job::JobWire>>(jobs.iter().map(er_entities::job::JobWire::from).collect()).into_response()
-        }
+        Ok(jobs) => Json::<Vec<er_entities::job::JobWire>>(
+            jobs.iter().map(er_entities::job::JobWire::from).collect(),
+        )
+        .into_response(),
         Err(e) => pg_err(e),
     }
 }
@@ -12574,7 +12600,10 @@ mod response_shape_tests {
 
     #[test]
     fn a_job_serializes_to_the_same_value_as_its_wire() {
-        for job in [job(), enqueue_traced(&AppState::new("t".into()), "o", "train", 0, None)] {
+        for job in [
+            job(),
+            enqueue_traced(&AppState::new("t".into()), "o", "train", 0, None),
+        ] {
             assert_eq!(json!(job), json!(JobWire::from(&job)));
         }
     }

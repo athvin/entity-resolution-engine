@@ -278,15 +278,27 @@ async fn mixed() { if a { Json(JobWire::from(&job)) } else { Json(json!(job)) } 
             .clone()
     };
     let job = json!({"$ref": "#/components/schemas/Job"});
-    assert_eq!(schema("/jobs", "GET"), [json!({"$ref": "#/components/schemas/JobList"})]);
+    assert_eq!(
+        schema("/jobs", "GET"),
+        [json!({"$ref": "#/components/schemas/JobList"})]
+    );
     assert_eq!(schema("/jobs", "POST"), [job.clone()]);
     assert_eq!(schema("/jobs/{id}", "GET"), [job.clone()]);
-    assert_eq!(schema("/all", "GET"), [json!({"type": "array", "items": job})]);
+    assert_eq!(
+        schema("/all", "GET"),
+        [json!({"type": "array", "items": job})]
+    );
 
     // The ledger reads the wire spellings as the bare values they replace.
     let ledger = crate::envelope_ledger(&src).unwrap();
-    assert!(ledger.contains("\"GET /all\": { \"envelope\": \"bare\" }"), "{ledger}");
-    assert!(ledger.contains("\"GET /jobs/{id}\": { \"envelope\": \"bare\" }"), "{ledger}");
+    assert!(
+        ledger.contains("\"GET /all\": { \"envelope\": \"bare\" }"),
+        "{ledger}"
+    );
+    assert!(
+        ledger.contains("\"GET /jobs/{id}\": { \"envelope\": \"bare\" }"),
+        "{ledger}"
+    );
 
     // An unregistered type stays envelope-level rather than inventing a reference.
     let ops = operations(&src, &[], &BTreeSet::new()).unwrap();

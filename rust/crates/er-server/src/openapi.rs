@@ -141,7 +141,10 @@ fn add_operations(doc: &mut utoipa::openapi::OpenApi, audience: Audience) {
                 // OpenAPI 3.1 permits role names for non-OAuth security schemes.
                 vec![SecurityRequirement::new("bearerAuth", [&derived.role])]
             }))
-            .responses(operation_responses(&derived.responses, &derived.response_schemas));
+            .responses(operation_responses(
+                &derived.responses,
+                &derived.response_schemas,
+            ));
         for param in derived.params {
             operation = operation.parameter(
                 ParameterBuilder::new()
