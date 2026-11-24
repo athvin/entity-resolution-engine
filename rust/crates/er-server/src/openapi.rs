@@ -502,7 +502,7 @@ mod tests {
                 ("mail", include_str!("mail.rs")),
                 ("remote_attempts", include_str!("remote_attempts.rs")),
             ],
-            &registered_schemas(),
+            &document_schemas(),
         )
         .unwrap();
         for operation in &source {
@@ -888,6 +888,22 @@ mod tests {
     const JSON_WIRE_WITHOUT_SCHEMA: &[&str] = &[];
 
     /// The component schemas `ApiDoc` actually emits, by schema name.
+    /// Every component the emitted document derives operations against: the
+    /// entities plus the response envelopes, as `add_operations` sees them.
+    /// A handler whose bodies span both (an entity wire and an envelope
+    /// struct) is typed only against the union.
+    fn document_schemas() -> std::collections::BTreeSet<String> {
+        let mut doc = ApiDoc::openapi();
+        doc.merge(ResponseDoc::openapi());
+        doc.components
+            .as_ref()
+            .expect("components present")
+            .schemas
+            .keys()
+            .cloned()
+            .collect()
+    }
+
     fn registered_schemas() -> std::collections::BTreeSet<String> {
         ApiDoc::openapi()
             .components
