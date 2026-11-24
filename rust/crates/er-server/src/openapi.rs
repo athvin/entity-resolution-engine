@@ -96,6 +96,21 @@ pub struct ApiDoc;
     crate::StagedBatchApplied,
     crate::UnmergeStaged,
     crate::UnmergeApplied,
+    crate::read::GoldenDetail,
+    crate::read::GoldenRow,
+    crate::read::PersonGolden,
+    crate::read::AccountGolden,
+    crate::read::LineageItem,
+    crate::read::EntityMember,
+    crate::read::EntityEventItem,
+    crate::RecordsByKey,
+    crate::StagedRecords,
+    crate::StagedRecordsApplied,
+    crate::UnmatchStaged,
+    crate::UnmatchApplied,
+    crate::DeliveryAccepted,
+    crate::EntityLinkList,
+    crate::EntityLinkDeleted,
 )))]
 pub struct ResponseDoc;
 
@@ -620,8 +635,13 @@ mod tests {
             upload["requestBody"]["content"]["multipart/form-data"]["schema"]["required"],
             serde_json::json!(["file"])
         );
+        // A typed delivery (#864): the success body references its struct.
+        assert_eq!(
+            upload["responses"]["2XX"]["content"]["application/json"]["schema"]["$ref"],
+            "#/components/schemas/DeliveryAccepted"
+        );
         assert!(
-            upload["responses"]["2XX"]["content"]["application/json"]["schema"]["properties"]
+            doc["components"]["schemas"]["DeliveryAccepted"]["properties"]
                 .get("delivery_id")
                 .is_some()
         );

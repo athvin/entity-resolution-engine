@@ -2643,14 +2643,11 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "items": {}
-                  }
+                  "$ref": "#/components/schemas/EntityLinkList"
                 }
               }
             }
@@ -2743,10 +2740,12 @@
         },
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/EntityLink"
+                }
               }
             }
           },
@@ -2810,14 +2809,11 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "deleted": {}
-                  }
+                  "$ref": "#/components/schemas/EntityLinkDeleted"
                 }
               }
             }
@@ -3016,10 +3012,12 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/GoldenDetail"
+                }
               }
             }
           },
@@ -3429,15 +3427,11 @@
         },
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "delivery_id": {},
-                    "job": {}
-                  }
+                  "$ref": "#/components/schemas/DeliveryAccepted"
                 }
               }
             }
@@ -5768,15 +5762,11 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "items": {},
-                    "snapshot": {}
-                  }
+                  "$ref": "#/components/schemas/RecordsByKey"
                 }
               }
             }
@@ -5864,31 +5854,16 @@
         },
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
                 "schema": {
                   "anyOf": [
                     {
-                      "type": "object",
-                      "properties": {
-                        "action_id": {},
-                        "action_ids": {},
-                        "count": {},
-                        "pending_until_next_reconcile": {},
-                        "status": {}
-                      }
+                      "$ref": "#/components/schemas/StagedRecords"
                     },
                     {
-                      "type": "object",
-                      "properties": {
-                        "action_id": {},
-                        "action_ids": {},
-                        "apply_job": {},
-                        "count": {},
-                        "pending_until_next_reconcile": {},
-                        "status": {}
-                      }
+                      "$ref": "#/components/schemas/StagedRecordsApplied"
                     }
                   ]
                 }
@@ -5971,15 +5946,11 @@
         },
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "delivery_id": {},
-                    "job": {}
-                  }
+                  "$ref": "#/components/schemas/DeliveryAccepted"
                 }
               }
             }
@@ -6067,31 +6038,16 @@
         },
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
                 "schema": {
                   "anyOf": [
                     {
-                      "type": "object",
-                      "properties": {
-                        "action_id": {},
-                        "action_ids": {},
-                        "count": {},
-                        "pending_until_next_reconcile": {},
-                        "status": {}
-                      }
+                      "$ref": "#/components/schemas/StagedRecords"
                     },
                     {
-                      "type": "object",
-                      "properties": {
-                        "action_id": {},
-                        "action_ids": {},
-                        "apply_job": {},
-                        "count": {},
-                        "pending_until_next_reconcile": {},
-                        "status": {}
-                      }
+                      "$ref": "#/components/schemas/StagedRecordsApplied"
                     }
                   ]
                 }
@@ -6181,31 +6137,16 @@
         },
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
                 "schema": {
                   "anyOf": [
                     {
-                      "type": "object",
-                      "properties": {
-                        "action_id": {},
-                        "action_ids": {},
-                        "count": {},
-                        "pending_until_next_reconcile": {},
-                        "status": {}
-                      }
+                      "$ref": "#/components/schemas/StagedRecords"
                     },
                     {
-                      "type": "object",
-                      "properties": {
-                        "action_id": {},
-                        "action_ids": {},
-                        "apply_job": {},
-                        "count": {},
-                        "pending_until_next_reconcile": {},
-                        "status": {}
-                      }
+                      "$ref": "#/components/schemas/StagedRecordsApplied"
                     }
                   ]
                 }
@@ -6295,31 +6236,16 @@
         },
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
                 "schema": {
                   "anyOf": [
                     {
-                      "type": "object",
-                      "properties": {
-                        "action_id": {},
-                        "action_ids": {},
-                        "count": {},
-                        "pending_until_next_reconcile": {},
-                        "status": {}
-                      }
+                      "$ref": "#/components/schemas/StagedRecords"
                     },
                     {
-                      "type": "object",
-                      "properties": {
-                        "action_id": {},
-                        "action_ids": {},
-                        "apply_job": {},
-                        "count": {},
-                        "pending_until_next_reconcile": {},
-                        "status": {}
-                      }
+                      "$ref": "#/components/schemas/StagedRecordsApplied"
                     }
                   ]
                 }
@@ -6399,30 +6325,16 @@
         },
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
                 "schema": {
                   "anyOf": [
                     {
-                      "type": "object",
-                      "properties": {
-                        "action_ids": {},
-                        "entity_id": {},
-                        "pairs": {},
-                        "pending_until_next_reconcile": {},
-                        "status": {}
-                      }
+                      "$ref": "#/components/schemas/UnmatchStaged"
                     },
                     {
-                      "type": "object",
-                      "properties": {
-                        "action_ids": {},
-                        "apply_job": {},
-                        "entity_id": {},
-                        "pairs": {},
-                        "status": {}
-                      }
+                      "$ref": "#/components/schemas/UnmatchApplied"
                     }
                   ]
                 }
@@ -6512,31 +6424,16 @@
         },
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
                 "schema": {
                   "anyOf": [
                     {
-                      "type": "object",
-                      "properties": {
-                        "action_id": {},
-                        "action_ids": {},
-                        "count": {},
-                        "pending_until_next_reconcile": {},
-                        "status": {}
-                      }
+                      "$ref": "#/components/schemas/StagedRecords"
                     },
                     {
-                      "type": "object",
-                      "properties": {
-                        "action_id": {},
-                        "action_ids": {},
-                        "apply_job": {},
-                        "count": {},
-                        "pending_until_next_reconcile": {},
-                        "status": {}
-                      }
+                      "$ref": "#/components/schemas/StagedRecordsApplied"
                     }
                   ]
                 }
@@ -6626,31 +6523,16 @@
         },
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
                 "schema": {
                   "anyOf": [
                     {
-                      "type": "object",
-                      "properties": {
-                        "action_id": {},
-                        "action_ids": {},
-                        "count": {},
-                        "pending_until_next_reconcile": {},
-                        "status": {}
-                      }
+                      "$ref": "#/components/schemas/StagedRecords"
                     },
                     {
-                      "type": "object",
-                      "properties": {
-                        "action_id": {},
-                        "action_ids": {},
-                        "apply_job": {},
-                        "count": {},
-                        "pending_until_next_reconcile": {},
-                        "status": {}
-                      }
+                      "$ref": "#/components/schemas/StagedRecordsApplied"
                     }
                   ]
                 }
@@ -6750,31 +6632,16 @@
         },
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
                 "schema": {
                   "anyOf": [
                     {
-                      "type": "object",
-                      "properties": {
-                        "action_id": {},
-                        "action_ids": {},
-                        "count": {},
-                        "pending_until_next_reconcile": {},
-                        "status": {}
-                      }
+                      "$ref": "#/components/schemas/StagedRecords"
                     },
                     {
-                      "type": "object",
-                      "properties": {
-                        "action_id": {},
-                        "action_ids": {},
-                        "apply_job": {},
-                        "count": {},
-                        "pending_until_next_reconcile": {},
-                        "status": {}
-                      }
+                      "$ref": "#/components/schemas/StagedRecordsApplied"
                     }
                   ]
                 }
@@ -6874,31 +6741,16 @@
         },
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
                 "schema": {
                   "anyOf": [
                     {
-                      "type": "object",
-                      "properties": {
-                        "action_id": {},
-                        "action_ids": {},
-                        "count": {},
-                        "pending_until_next_reconcile": {},
-                        "status": {}
-                      }
+                      "$ref": "#/components/schemas/StagedRecords"
                     },
                     {
-                      "type": "object",
-                      "properties": {
-                        "action_id": {},
-                        "action_ids": {},
-                        "apply_job": {},
-                        "count": {},
-                        "pending_until_next_reconcile": {},
-                        "status": {}
-                      }
+                      "$ref": "#/components/schemas/StagedRecordsApplied"
                     }
                   ]
                 }
@@ -9259,6 +9111,65 @@
   },
   "components": {
     "schemas": {
+      "AccountGolden": {
+        "type": "object",
+        "description": "An account entity's golden record, as of the pinned snapshot.",
+        "required": [
+          "id",
+          "survivorship_version"
+        ],
+        "properties": {
+          "addr_city": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "addr_postal": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "addr_region": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "addr_street": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "company_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "domain": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "metadata": {},
+          "phone_e164": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "survivorship_version": {
+            "type": "string"
+          }
+        }
+      },
       "AcctGoldenLineage": {
         "type": "object",
         "description": "Per-attribute survivorship provenance for a resolved account: which record each surviving value came from.",
@@ -10092,6 +10003,54 @@
           }
         }
       },
+      "DeliveryAccepted": {
+        "type": "object",
+        "description": "`202` from a source delivery: the published delivery and the run queued\nto consume it.",
+        "required": [
+          "delivery_id",
+          "job"
+        ],
+        "properties": {
+          "delivery_id": {
+            "type": "string"
+          },
+          "job": {
+            "$ref": "#/components/schemas/Job"
+          }
+        }
+      },
+      "EntityEventItem": {
+        "type": "object",
+        "description": "One event in an entity's history.",
+        "required": [
+          "id",
+          "seq",
+          "run_id",
+          "event_type",
+          "details",
+          "occurred_at"
+        ],
+        "properties": {
+          "details": {},
+          "event_type": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "occurred_at": {
+            "type": "string",
+            "description": "Naive lake text (`YYYY-MM-DD HH:MM:SS[.ffffff]`), not RFC 3339."
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "seq": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
       "EntityLink": {
         "type": "object",
         "description": "A relationship between two resolved entities that is NOT a merge: a household, a corporate hierarchy, a 'these are related but distinct' note. The product has one answer to 'these two records belong together' — merge them — and that answer is wrong for a husband and wife at one address, or a subsidiary and its parent. Merging them loses the distinction and no later run can recover it; refusing to record anything loses the relationship. A link records it without collapsing either side.",
@@ -10156,6 +10115,105 @@
             "type": "string",
             "format": "date-time",
             "description": "When it was last changed."
+          }
+        }
+      },
+      "EntityLinkDeleted": {
+        "type": "object",
+        "description": "`DELETE …/entity-links/{link_id}`: the id of the link removed.",
+        "required": [
+          "deleted"
+        ],
+        "properties": {
+          "deleted": {
+            "type": "string"
+          }
+        }
+      },
+      "EntityLinkList": {
+        "type": "object",
+        "description": "`GET …/entities/{entity_id}/links`: the entity's links, either direction.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EntityLink"
+            }
+          }
+        }
+      },
+      "EntityMember": {
+        "type": "object",
+        "description": "One member record of an entity, with its active steward flags.",
+        "required": [
+          "source_system",
+          "source_record_id",
+          "record_key",
+          "assigned_at",
+          "run_id",
+          "protected",
+          "verified"
+        ],
+        "properties": {
+          "assigned_at": {
+            "type": "string",
+            "description": "Naive lake text (`YYYY-MM-DD HH:MM:SS[.ffffff]`), not RFC 3339."
+          },
+          "protected": {
+            "type": "boolean",
+            "description": "An active `protect` overlay: the record is master for its entity and\ncannot be deleted or unmatch-peeled until unprotected."
+          },
+          "record_key": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "source_record_id": {
+            "type": "string"
+          },
+          "source_system": {
+            "type": "string"
+          },
+          "verified": {
+            "type": "boolean",
+            "description": "An active whole-row steward verification."
+          }
+        }
+      },
+      "GoldenDetail": {
+        "type": "object",
+        "description": "`GET …/golden-records/{entity_id}`: one resolved entity, snapshot-pinned.",
+        "required": [
+          "golden",
+          "members",
+          "lineage",
+          "events"
+        ],
+        "properties": {
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EntityEventItem"
+            }
+          },
+          "golden": {
+            "$ref": "#/components/schemas/GoldenRow"
+          },
+          "lineage": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LineageItem"
+            }
+          },
+          "members": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EntityMember"
+            }
           }
         }
       },
@@ -10335,6 +10393,17 @@
             "description": "Run-logical last-write time (equals created_at; the mart is rebuilt whole)."
           }
         }
+      },
+      "GoldenRow": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/PersonGolden"
+          },
+          {
+            "$ref": "#/components/schemas/AccountGolden"
+          }
+        ],
+        "description": "The golden record of whichever entity type the dataset resolves."
       },
       "IngestBatch": {
         "type": "object",
@@ -10757,6 +10826,34 @@
             "type": "number",
             "format": "double",
             "description": "The `auto_merge` threshold the pairs are ordered around."
+          }
+        }
+      },
+      "LineageItem": {
+        "type": "object",
+        "description": "Which member supplied one golden attribute, and by which survivorship rule.",
+        "required": [
+          "attribute",
+          "record_key",
+          "source_system",
+          "source_record_id",
+          "rule"
+        ],
+        "properties": {
+          "attribute": {
+            "type": "string"
+          },
+          "record_key": {
+            "type": "string"
+          },
+          "rule": {
+            "type": "string"
+          },
+          "source_record_id": {
+            "type": "string"
+          },
+          "source_system": {
+            "type": "string"
           }
         }
       },
@@ -11399,6 +11496,90 @@
           }
         }
       },
+      "PersonGolden": {
+        "type": "object",
+        "description": "A person entity's golden record, as of the pinned snapshot.",
+        "required": [
+          "id",
+          "survivorship_version"
+        ],
+        "properties": {
+          "addr_city": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "addr_number": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "addr_postal": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "addr_region": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "addr_street": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "addr_unit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "birth_date": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date"
+          },
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "family_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "given_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "metadata": {},
+          "phone_e164": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "survivorship_version": {
+            "type": "string"
+          }
+        }
+      },
       "ProfileFinding": {
         "type": "object",
         "description": "One coded observation a profile made about a corpus — a column mostly null, a blocking key dominated by one value, a record id that is not unique. Stored rather than derived at read time because the thresholds that produced a finding belong to the run that applied them: re-deriving later against changed thresholds would silently rewrite history, and a finding is the part of a profile a user is most likely to act on.",
@@ -11636,6 +11817,25 @@
             ],
             "format": "double",
             "description": "Fraction of the PRESENT validatable fields that passed standardization. NULL when the record has none of them — a record with no email is already penalised by completeness, and scoring its validity zero would penalise the same absence twice."
+          }
+        }
+      },
+      "RecordsByKey": {
+        "type": "object",
+        "description": "`GET …/records?key=…`: the standardized records found, snapshot-pinned.",
+        "required": [
+          "items",
+          "snapshot"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {},
+            "description": "One object per found record: `record_key` plus the dataset entity\ntype's standardized columns, so the keys depend on that type."
+          },
+          "snapshot": {
+            "type": "integer",
+            "format": "int64"
           }
         }
       },
@@ -12012,6 +12212,83 @@
           "status": {
             "type": "string",
             "description": "Always `staged`."
+          }
+        }
+      },
+      "StagedRecords": {
+        "type": "object",
+        "description": "The staged-action response envelope (`_steward_action`): always `staged`\nhere, so `pending_until_next_reconcile` is false (immediate apply is the\ninfra-bound writer-lock path).\nThe staged response for a call that staged SEVERAL actions (O6).\n\nA sibling of [`staged_response`] rather than a widening of it: three other\nhandlers stage exactly one action, and their response shape is read by the\nfrontend and pinned by tests. `action_id` is carried for the callers that\npredate the list — it is the first of `action_ids`, which is the whole\ntruth.\nPer-record steward actions, staged and waiting for an apply.",
+        "required": [
+          "status",
+          "action_ids",
+          "count",
+          "pending_until_next_reconcile"
+        ],
+        "properties": {
+          "action_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The first of `action_ids`: the single-record callers' handle."
+          },
+          "action_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "count": {
+            "type": "integer",
+            "description": "How many records the call named.",
+            "minimum": 0
+          },
+          "pending_until_next_reconcile": {
+            "type": "boolean",
+            "description": "Always false: the actions land on the next apply."
+          },
+          "status": {
+            "type": "string",
+            "description": "Always `staged`."
+          }
+        }
+      },
+      "StagedRecordsApplied": {
+        "type": "object",
+        "description": "Per-record steward actions handed to ONE `apply_corrections` job.",
+        "required": [
+          "status",
+          "action_ids",
+          "count",
+          "pending_until_next_reconcile",
+          "apply_job"
+        ],
+        "properties": {
+          "action_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "action_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "apply_job": {
+            "type": "string"
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "pending_until_next_reconcile": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "description": "Always `staged`: the job, not this request, applies them."
           }
         }
       },
@@ -12554,6 +12831,73 @@
           "scored_at": {
             "type": "string",
             "description": "Naive lake text (`YYYY-MM-DD HH:MM:SS[.ffffff]`), not RFC 3339."
+          }
+        }
+      },
+      "UnmatchApplied": {
+        "type": "object",
+        "description": "A record unmatch staged and handed to an `apply_corrections` job.",
+        "required": [
+          "status",
+          "entity_id",
+          "pairs",
+          "action_ids",
+          "apply_job"
+        ],
+        "properties": {
+          "action_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "apply_job": {
+            "type": "string"
+          },
+          "entity_id": {
+            "type": "string"
+          },
+          "pairs": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "status": {
+            "type": "string",
+            "description": "Always `applied`."
+          }
+        }
+      },
+      "UnmatchStaged": {
+        "type": "object",
+        "description": "A record unmatch staged as never-rules against its entity.",
+        "required": [
+          "status",
+          "entity_id",
+          "pairs",
+          "action_ids",
+          "pending_until_next_reconcile"
+        ],
+        "properties": {
+          "action_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "entity_id": {
+            "type": "string"
+          },
+          "pairs": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "pending_until_next_reconcile": {
+            "type": "boolean",
+            "description": "Always true."
+          },
+          "status": {
+            "type": "string",
+            "description": "Always `staged`."
           }
         }
       },

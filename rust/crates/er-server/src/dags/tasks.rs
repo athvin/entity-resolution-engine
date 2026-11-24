@@ -886,13 +886,9 @@ impl Task<Session> for WriteBackScan {
             match crate::read::entity_detail(ctx.session, entity_type, snapshot, entity_id) {
                 Ok(Some(detail)) => entities.push(super::plans::WriteBackEntity {
                     entity_id: entity_id.clone(),
-                    master: detail
-                        .get("golden")
-                        .cloned()
-                        .unwrap_or(serde_json::Value::Null),
-                    members: detail
-                        .get("members")
-                        .cloned()
+                    // The same JSON the entity detail endpoint serves.
+                    master: serde_json::to_value(&detail.golden).unwrap_or(serde_json::Value::Null),
+                    members: serde_json::to_value(&detail.members)
                         .unwrap_or(serde_json::Value::Null),
                 }),
                 Ok(None) => {}

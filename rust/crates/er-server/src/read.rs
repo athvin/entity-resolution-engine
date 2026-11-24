@@ -621,6 +621,156 @@ fn edges_by_entity(
     Ok(by_entity)
 }
 
+/// Move every field of a generated lake row into a spelled-out response item.
+/// The row is destructured exhaustively, so a column added to the statement
+/// fails to compile here instead of silently leaving the wire.
+macro_rules! item_from_row {
+    ($item:ty, $row:path, { $($field:ident),* $(,)? }) => {
+        impl From<$row> for $item {
+            fn from(row: $row) -> Self {
+                let $row { $($field),* } = row;
+                Self { $($field),* }
+            }
+        }
+    };
+}
+
+/// A person entity's golden record, as of the pinned snapshot.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, utoipa::ToSchema)]
+pub struct PersonGolden {
+    pub id: String,
+    pub given_name: Option<String>,
+    pub family_name: Option<String>,
+    pub email: Option<String>,
+    pub phone_e164: Option<String>,
+    pub addr_number: Option<String>,
+    pub addr_street: Option<String>,
+    pub addr_unit: Option<String>,
+    pub addr_city: Option<String>,
+    pub addr_region: Option<String>,
+    pub addr_postal: Option<String>,
+    pub birth_date: Option<chrono::NaiveDate>,
+    pub metadata: Option<Value>,
+    pub survivorship_version: String,
+}
+item_from_row!(PersonGolden, er_entities::golden_record::read::ByIdRow, {
+    id, given_name, family_name, email, phone_e164, addr_number, addr_street,
+    addr_unit, addr_city, addr_region, addr_postal, birth_date, metadata,
+    survivorship_version,
+});
+
+/// An account entity's golden record, as of the pinned snapshot.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, utoipa::ToSchema)]
+pub struct AccountGolden {
+    pub id: String,
+    pub company_name: Option<String>,
+    pub domain: Option<String>,
+    pub phone_e164: Option<String>,
+    pub addr_street: Option<String>,
+    pub addr_city: Option<String>,
+    pub addr_region: Option<String>,
+    pub addr_postal: Option<String>,
+    pub metadata: Option<Value>,
+    pub survivorship_version: String,
+}
+item_from_row!(AccountGolden, er_entities::acct_golden_record::read::ByIdRow, {
+    id, company_name, domain, phone_e164, addr_street, addr_city, addr_region,
+    addr_postal, metadata, survivorship_version,
+});
+
+/// The golden record of whichever entity type the dataset resolves.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, utoipa::ToSchema)]
+#[serde(untagged)]
+pub enum GoldenRow {
+    Person(PersonGolden),
+    Account(AccountGolden),
+}
+
+/// Which member supplied one golden attribute, and by which survivorship rule.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, utoipa::ToSchema)]
+pub struct LineageItem {
+    pub attribute: String,
+    pub record_key: String,
+    pub source_system: String,
+    pub source_record_id: String,
+    pub rule: String,
+}
+item_from_row!(LineageItem, er_entities::golden_lineage::read::ByEntityRow, {
+    attribute, record_key, source_system, source_record_id, rule,
+});
+item_from_row!(LineageItem, er_entities::acct_golden_lineage::read::ByEntityRow, {
+    attribute, record_key, source_system, source_record_id, rule,
+});
+
+/// One member record of an entity, with its active steward flags.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, utoipa::ToSchema)]
+pub struct EntityMember {
+    pub source_system: String,
+    pub source_record_id: String,
+    pub record_key: String,
+    /// Naive lake text (`YYYY-MM-DD HH:MM:SS[.ffffff]`), not RFC 3339.
+    #[serde(serialize_with = "er_entities::batch::ser_duckdb_timestamp")]
+    #[schema(value_type = String)]
+    pub assigned_at: chrono::DateTime<chrono::Utc>,
+    pub run_id: String,
+    /// An active `protect` overlay: the record is master for its entity and
+    /// cannot be deleted or unmatch-peeled until unprotected.
+    pub protected: bool,
+    /// An active whole-row steward verification.
+    pub verified: bool,
+}
+
+/// One event in an entity's history.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, utoipa::ToSchema)]
+pub struct EntityEventItem {
+    pub id: String,
+    pub seq: i64,
+    pub run_id: String,
+    pub event_type: String,
+    pub details: Value,
+    /// Naive lake text (`YYYY-MM-DD HH:MM:SS[.ffffff]`), not RFC 3339.
+    #[serde(serialize_with = "er_entities::batch::ser_duckdb_timestamp")]
+    #[schema(value_type = String)]
+    pub occurred_at: chrono::DateTime<chrono::Utc>,
+}
+item_from_row!(EntityEventItem, er_entities::entity_event::read::ByEntityRow, {
+    id, seq, run_id, event_type, details, occurred_at,
+});
+
+/// What [`entity_detail`] read, before it is shaped into a [`GoldenDetail`].
+pub struct EntityDetailRows {
+    pub(crate) golden: GoldenRow,
+    pub(crate) members: Vec<EntityMember>,
+    pub(crate) lineage: Vec<LineageItem>,
+    pub(crate) events: Vec<EntityEventItem>,
+}
+
+/// `GET …/golden-records/{entity_id}`: one resolved entity, snapshot-pinned.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, utoipa::ToSchema)]
+pub struct GoldenDetail {
+    pub golden: GoldenRow,
+    pub members: Vec<EntityMember>,
+    pub lineage: Vec<LineageItem>,
+    pub events: Vec<EntityEventItem>,
+}
+
+impl From<EntityDetailRows> for GoldenDetail {
+    fn from(rows: EntityDetailRows) -> Self {
+        let EntityDetailRows {
+            golden,
+            members,
+            lineage,
+            events,
+        } = rows;
+        Self {
+            golden,
+            members,
+            lineage,
+            events,
+        }
+    }
+}
+
 /// One resolved entity with its members, lineage, and events
 /// (`readapi.entity_detail`), snapshot-pinned. `None` if the entity is absent
 /// at that snapshot (→ 404).
@@ -632,39 +782,49 @@ pub fn entity_detail(
     entity_type: EntityType,
     snapshot: i64,
     entity_id: &str,
-) -> Result<Option<Value>, String> {
+) -> Result<Option<EntityDetailRows>, String> {
     let conn = session.connection();
+    let err = |e: duckdb::Error| e.to_string();
     let golden = match entity_type {
-        EntityType::Person => {
-            let rows = er_entities::golden_record::read::by_id(conn, snapshot, entity_id)
-                .map_err(|e| e.to_string())?;
-            rows_to_values(&rows)
-        }
+        EntityType::Person => er_entities::golden_record::read::by_id(conn, snapshot, entity_id)
+            .map_err(err)?
+            .into_iter()
+            .next()
+            .map(|row| GoldenRow::Person(row.into())),
         EntityType::Account => {
-            let rows = er_entities::acct_golden_record::read::by_id(conn, snapshot, entity_id)
-                .map_err(|e| e.to_string())?;
-            rows_to_values(&rows)
+            er_entities::acct_golden_record::read::by_id(conn, snapshot, entity_id)
+                .map_err(err)?
+                .into_iter()
+                .next()
+                .map(|row| GoldenRow::Account(row.into()))
         }
     };
-    let Some(golden_row) = golden.into_iter().next() else {
+    let Some(golden) = golden else {
         return Ok(None);
     };
-    let members = er_entities::entity_membership::read::by_entity(conn, snapshot, entity_id)
-        .map_err(|e| e.to_string())?;
-    let lineage = match entity_type {
+    let members =
+        er_entities::entity_membership::read::by_entity(conn, snapshot, entity_id).map_err(err)?;
+    let lineage: Vec<LineageItem> = match entity_type {
         EntityType::Person => {
-            let rows = er_entities::golden_lineage::read::by_entity(conn, snapshot, entity_id)
-                .map_err(|e| e.to_string())?;
-            rows_to_values(&rows)
+            er_entities::golden_lineage::read::by_entity(conn, snapshot, entity_id)
+                .map_err(err)?
+                .into_iter()
+                .map(LineageItem::from)
+                .collect()
         }
         EntityType::Account => {
-            let rows = er_entities::acct_golden_lineage::read::by_entity(conn, snapshot, entity_id)
-                .map_err(|e| e.to_string())?;
-            rows_to_values(&rows)
+            er_entities::acct_golden_lineage::read::by_entity(conn, snapshot, entity_id)
+                .map_err(err)?
+                .into_iter()
+                .map(LineageItem::from)
+                .collect()
         }
     };
     let events = er_entities::entity_event::read::by_entity(conn, snapshot, entity_id)
-        .map_err(|e| e.to_string())?;
+        .map_err(err)?
+        .into_iter()
+        .map(EntityEventItem::from)
+        .collect();
     // Per-member steward flags: the entity view's action affordances read
     // these (a protected member cannot be deleted or unmatch-peeled without
     // an explicit unprotect first; a verified member shows the mark).
@@ -680,26 +840,30 @@ pub fn entity_detail(
     let members = members
         .into_iter()
         .map(|m| {
-            let Ok(Value::Object(mut obj)) = serde_json::to_value(&m) else {
-                return json!(m);
-            };
-            obj.insert(
-                "protected".to_string(),
-                Value::from(protected.contains(&m.record_key)),
-            );
-            obj.insert(
-                "verified".to_string(),
-                Value::from(row_verified.contains(&m.record_key)),
-            );
-            Value::Object(obj)
+            let er_entities::entity_membership::read::ByEntityRow {
+                source_system,
+                source_record_id,
+                record_key,
+                assigned_at,
+                run_id,
+            } = m;
+            EntityMember {
+                protected: protected.contains(&record_key),
+                verified: row_verified.contains(&record_key),
+                source_system,
+                source_record_id,
+                record_key,
+                assigned_at,
+                run_id,
+            }
         })
-        .collect::<Vec<Value>>();
-    Ok(Some(json!({
-        "golden": golden_row,
-        "members": members,
-        "lineage": lineage,
-        "events": rows_to_values(&events),
-    })))
+        .collect();
+    Ok(Some(EntityDetailRows {
+        golden,
+        members,
+        lineage,
+        events,
+    }))
 }
 
 /// The member record_keys of one entity at `snapshot`, ascending — empty when
@@ -1660,6 +1824,125 @@ mod typed_item_tests {
              e1,,2,crm:1;erp:2,\"Ann, Jr\",,a@x,,\n\
              e1,,2,crm:1;erp:2,\"Ann, Jr\",,a@x,,91\n"
         );
+    }
+}
+
+#[cfg(test)]
+mod typed_detail_tests {
+    //! #864 batch 4: each spelled-out item serializes to exactly what
+    //! `rows_to_values` made of its generated row (equal as parsed values).
+    use super::*;
+
+    fn at() -> chrono::DateTime<chrono::Utc> {
+        chrono::DateTime::from_timestamp(1_700_000_000, 120_000_000).unwrap()
+    }
+
+    fn same<R: serde::Serialize + Clone, T: From<R> + serde::Serialize>(row: R) {
+        let old = rows_to_values(std::slice::from_ref(&row)).remove(0);
+        assert_eq!(old, serde_json::to_value(T::from(row)).unwrap());
+    }
+
+    #[test]
+    fn golden_lineage_and_event_items_match_their_rows() {
+        same::<_, PersonGolden>(er_entities::golden_record::read::ByIdRow {
+            id: "e1".into(),
+            given_name: Some("Ann".into()),
+            family_name: None,
+            email: Some("a@x".into()),
+            phone_e164: None,
+            addr_number: Some("1".into()),
+            addr_street: None,
+            addr_unit: None,
+            addr_city: Some("Leeds".into()),
+            addr_region: None,
+            addr_postal: None,
+            birth_date: chrono::NaiveDate::from_ymd_opt(1990, 2, 3),
+            metadata: Some(json!({"k": 1})),
+            survivorship_version: "v1".into(),
+        });
+        same::<_, AccountGolden>(er_entities::acct_golden_record::read::ByIdRow {
+            id: "e2".into(),
+            company_name: Some("Acme".into()),
+            domain: Some("acme.test".into()),
+            phone_e164: None,
+            addr_street: None,
+            addr_city: None,
+            addr_region: None,
+            addr_postal: None,
+            metadata: None,
+            survivorship_version: "v1".into(),
+        });
+        same::<_, LineageItem>(er_entities::golden_lineage::read::ByEntityRow {
+            attribute: "email".into(),
+            record_key: "crm:1".into(),
+            source_system: "crm".into(),
+            source_record_id: "1".into(),
+            rule: "most_recent".into(),
+        });
+        same::<_, LineageItem>(er_entities::acct_golden_lineage::read::ByEntityRow {
+            attribute: "domain".into(),
+            record_key: "crm:2".into(),
+            source_system: "crm".into(),
+            source_record_id: "2".into(),
+            rule: "source_priority".into(),
+        });
+        same::<_, EntityEventItem>(er_entities::entity_event::read::ByEntityRow {
+            id: "ev".into(),
+            seq: 3,
+            run_id: "run".into(),
+            event_type: "merged".into(),
+            details: json!({"from": ["a", "b"]}),
+            occurred_at: at(),
+        });
+    }
+
+    #[test]
+    fn the_untagged_golden_row_is_the_bare_record() {
+        let person = PersonGolden {
+            id: "e1".into(),
+            given_name: None,
+            family_name: None,
+            email: None,
+            phone_e164: None,
+            addr_number: None,
+            addr_street: None,
+            addr_unit: None,
+            addr_city: None,
+            addr_region: None,
+            addr_postal: None,
+            birth_date: None,
+            metadata: None,
+            survivorship_version: "v1".into(),
+        };
+        assert_eq!(
+            serde_json::to_value(&person).unwrap(),
+            serde_json::to_value(GoldenRow::Person(person)).unwrap()
+        );
+    }
+
+    #[test]
+    fn a_member_is_its_row_plus_the_two_flags() {
+        let row = er_entities::entity_membership::read::ByEntityRow {
+            source_system: "crm".into(),
+            source_record_id: "1".into(),
+            record_key: "crm:1".into(),
+            assigned_at: at(),
+            run_id: "run".into(),
+        };
+        // The previous build: the row's value with both flags inserted.
+        let mut old = serde_json::to_value(&row).unwrap();
+        old["protected"] = json!(true);
+        old["verified"] = json!(false);
+        let member = EntityMember {
+            source_system: row.source_system,
+            source_record_id: row.source_record_id,
+            record_key: row.record_key,
+            assigned_at: row.assigned_at,
+            run_id: row.run_id,
+            protected: true,
+            verified: false,
+        };
+        assert_eq!(old, serde_json::to_value(member).unwrap());
     }
 }
 
