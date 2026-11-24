@@ -152,6 +152,8 @@ pub struct ApiDoc;
     crate::read::QualityReport,
     crate::read::QualityUnconfigured,
     crate::read::Quality,
+    crate::ContradictionItem,
+    crate::ContradictionList,
 )))]
 pub struct ResponseDoc;
 

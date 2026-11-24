@@ -2221,6 +2221,23 @@ export interface components {
             version: number;
             yaml: string;
         };
+        /**
+         * @description One CONTRADICTION-1 finding: a `never` pair forced together by `always`
+         *     rules, so the next reconcile cannot honour both.
+         */
+        ContradictionItem: {
+            /** @description The `always` rules whose closure joins the pair. */
+            always_assertion_ids: string[];
+            /** @description Every record in that `always` closure, ascending. */
+            component: string[];
+            never_assertion_id: string;
+            rec_a_key: string;
+            rec_b_key: string;
+        };
+        /** @description `GET …/assertions/contradictions`: every active contradiction. */
+        ContradictionList: {
+            contradictions: components["schemas"]["ContradictionItem"][];
+        };
         /** @description `GET …/data-quality`: the composite score and its four inputs. */
         DataQuality: {
             completeness: components["schemas"]["Completeness"];
@@ -4987,15 +5004,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        contradictions?: unknown;
-                    };
+                    "application/json": components["schemas"]["ContradictionList"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
