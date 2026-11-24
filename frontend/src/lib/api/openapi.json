@@ -7901,14 +7901,11 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "pending_count": {}
-                  }
+                  "$ref": "#/components/schemas/StagedCount"
                 }
               }
             }
@@ -8030,15 +8027,11 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "taggings": {},
-                    "truncated": {}
-                  }
+                  "$ref": "#/components/schemas/TaggingList"
                 }
               }
             }
@@ -8126,22 +8119,16 @@
         },
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
                 "schema": {
                   "anyOf": [
                     {
-                      "type": "object",
-                      "properties": {
-                        "applied": {}
-                      }
+                      "$ref": "#/components/schemas/TagApplied"
                     },
                     {
-                      "type": "object",
-                      "properties": {
-                        "removed": {}
-                      }
+                      "$ref": "#/components/schemas/TagRemoved"
                     }
                   ]
                 }
@@ -8208,14 +8195,11 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "subjects": {}
-                  }
+                  "$ref": "#/components/schemas/TagSubjects"
                 }
               }
             }
@@ -8303,22 +8287,16 @@
         },
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
                 "schema": {
                   "anyOf": [
                     {
-                      "type": "object",
-                      "properties": {
-                        "applied": {}
-                      }
+                      "$ref": "#/components/schemas/TagApplied"
                     },
                     {
-                      "type": "object",
-                      "properties": {
-                        "removed": {}
-                      }
+                      "$ref": "#/components/schemas/TagRemoved"
                     }
                   ]
                 }
@@ -8566,14 +8544,11 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "tags": {}
-                  }
+                  "$ref": "#/components/schemas/TagList"
                 }
               }
             }
@@ -8659,10 +8634,12 @@
         },
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Tag"
+                }
               }
             }
           },
@@ -8718,14 +8695,11 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "retired": {}
-                  }
+                  "$ref": "#/components/schemas/TagRetired"
                 }
               }
             }
@@ -12505,6 +12479,19 @@
           }
         }
       },
+      "StagedCount": {
+        "type": "object",
+        "description": "`GET …/staged`: how many steward actions await the next reconcile.",
+        "required": [
+          "pending_count"
+        ],
+        "properties": {
+          "pending_count": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
       "StagedRecords": {
         "type": "object",
         "description": "The staged-action response envelope (`_steward_action`): always `staged`\nhere, so `pending_until_next_reconcile` is false (immediate apply is the\ninfra-bound writer-lock path).\nThe staged response for a call that staged SEVERAL actions (O6).\n\nA sibling of [`staged_response`] rather than a widening of it: three other\nhandlers stage exactly one action, and their response shape is read by the\nfrontend and pinned by tests. `action_id` is carried for the callers that\npredate the list — it is the first of `action_ids`, which is the whole\ntruth.\nPer-record steward actions, staged and waiting for an apply.",
@@ -12710,6 +12697,72 @@
           }
         }
       },
+      "TagApplied": {
+        "type": "object",
+        "description": "`POST …/tags/{tag_id}/apply`: always `true` (a missing tag is a 404).",
+        "required": [
+          "applied"
+        ],
+        "properties": {
+          "applied": {
+            "type": "boolean"
+          }
+        }
+      },
+      "TagList": {
+        "type": "object",
+        "description": "`GET /v1/orgs/{org}/tags`: the org's tags (or those on one subject).",
+        "required": [
+          "tags"
+        ],
+        "properties": {
+          "tags": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Tag"
+            }
+          }
+        }
+      },
+      "TagRemoved": {
+        "type": "object",
+        "description": "`POST …/tags/{tag_id}/unapply`: always `true` (an absent tagging is a 404).",
+        "required": [
+          "removed"
+        ],
+        "properties": {
+          "removed": {
+            "type": "boolean"
+          }
+        }
+      },
+      "TagRetired": {
+        "type": "object",
+        "description": "`DELETE /v1/orgs/{org}/tags/{tag_id}`: always `true` (unknown is a 404).",
+        "required": [
+          "retired"
+        ],
+        "properties": {
+          "retired": {
+            "type": "boolean"
+          }
+        }
+      },
+      "TagSubjects": {
+        "type": "object",
+        "description": "`GET …/tags/{tag_id}/subjects`: what one tag is applied to.",
+        "required": [
+          "subjects"
+        ],
+        "properties": {
+          "subjects": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Tagging"
+            }
+          }
+        }
+      },
       "Tagging": {
         "type": "object",
         "description": "One tag applied to one subject: the attachment, kept apart from the tag so retiring a tag does not rewrite what it was applied to.",
@@ -12762,6 +12815,26 @@
             "type": "string",
             "format": "date-time",
             "description": "Wall-clock last-write time."
+          }
+        }
+      },
+      "TaggingList": {
+        "type": "object",
+        "description": "`GET …/taggings`: every tagging in a dataset, capped.",
+        "required": [
+          "taggings",
+          "truncated"
+        ],
+        "properties": {
+          "taggings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Tagging"
+            }
+          },
+          "truncated": {
+            "type": "boolean",
+            "description": "True when the cap cut the list: the caller has not seen every tagging."
           }
         }
       },

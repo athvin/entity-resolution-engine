@@ -129,6 +129,13 @@ pub struct ApiDoc;
     crate::WebhookDeliveryList,
     crate::WebhookEventItem,
     crate::WebhookEventCatalog,
+    crate::TagList,
+    crate::TagSubjects,
+    crate::TaggingList,
+    crate::TagApplied,
+    crate::TagRemoved,
+    crate::TagRetired,
+    crate::StagedCount,
 )))]
 pub struct ResponseDoc;
 
