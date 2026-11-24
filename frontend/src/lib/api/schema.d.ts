@@ -3207,6 +3207,50 @@ export interface components {
              */
             unscored_hidden: number;
         };
+        /** @description One entity event a run emitted. */
+        RunEventItem: {
+            details?: unknown;
+            entity_id: string;
+            event_type: string;
+            id: string;
+            /** @description Naive lake text (`YYYY-MM-DD HH:MM:SS[.ffffff]`), not RFC 3339. */
+            occurred_at: string;
+            run_id: string;
+            /**
+             * Format: int64
+             * @description The run-local order; the page cursor.
+             */
+            seq: number;
+        };
+        /** @description `GET …/runs/{run_id}/entity-events`: one keyset page of a run's events. */
+        RunEventPage: {
+            items: components["schemas"]["RunEventItem"][];
+            next_cursor?: string | null;
+            run_id: string;
+            /** Format: int64 */
+            snapshot: number;
+        };
+        /** @description One pipeline run in the run ledger, newest first. */
+        RunItem: {
+            /**
+             * Format: int64
+             * @description Pairs this run scored at or above the auto-merge threshold. Absent
+             *     when the dataset has no readable config, so no count is reported
+             *     against the wrong threshold.
+             */
+            auto_merged_pairs?: number | null;
+            config_hash: string;
+            ended_at?: string | null;
+            id: string;
+            /** @description `full`, `incremental`, `correct`, … */
+            mode: string;
+            model_version?: string | null;
+            rebuild_reason?: string | null;
+            /** @description Naive lake text (`YYYY-MM-DD HH:MM:SS[.ffffff]`), not RFC 3339. */
+            started_at: string;
+            status: string;
+            tf_snapshot_id?: string | null;
+        };
         /** @description What the auto-ingest poller has already read, one row per (org, source). The poller runs on every dispatcher tick and the newest object under a prefix stays the newest until a new one arrives, so without this row the same CSV would be re-ingested every few seconds forever — an unbounded run loop over the tenant's own lake. An upsert rather than a log: the question it answers is 'what is already in', not 'what has ever been in', and the audit log already answers the second. */
         S3IngestCursor: {
             /**
@@ -7403,13 +7447,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["RunItem"][];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -7438,18 +7482,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        items?: unknown;
-                        next_cursor?: unknown;
-                        run_id?: unknown;
-                        snapshot?: unknown;
-                    };
+                    "application/json": components["schemas"]["RunEventPage"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
