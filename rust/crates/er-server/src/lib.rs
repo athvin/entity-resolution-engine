@@ -2168,12 +2168,12 @@ async fn create_config_version(
     {
         Ok(version) => (
             StatusCode::CREATED,
-            Json(json!({
-                "org": org,
-                "version": version,
-                "config_hash": hash,
-                "state": "draft",
-            })),
+            Json(ConfigDraftCreated {
+                org,
+                version,
+                config_hash: hash,
+                state: "draft",
+            }),
         )
             .into_response(),
         Err(e) => pg_err(e),
@@ -2897,21 +2897,8 @@ async fn list_config_versions(
     };
     match pg::list_config_versions(&client, &d.id).await {
         Ok(rows) => {
-            let out: Vec<Value> = rows
-                .iter()
-                .map(|r| {
-                    json!({
-                        "version": r.version,
-                        "config_hash": r.config_hash,
-                        "state": r.state,
-                        "tier": r.tier,
-                        "created_by": r.created_by,
-                        "created_at": r.created_at,
-                        "published_at": r.published_at,
-                    })
-                })
-                .collect();
-            Json(json!(out)).into_response()
+            Json::<Vec<ConfigVersionItem>>(rows.iter().map(ConfigVersionItem::from).collect())
+                .into_response()
         }
         Err(e) => pg_err(e),
     }
@@ -2952,7 +2939,7 @@ async fn get_config_version(
         Err(r) => return *r,
     };
     match pg::get_config_version(&client, &d.id, version).await {
-        Ok(Some(d)) => Json(config_detail_json(&d)).into_response(),
+        Ok(Some(d)) => Json(ConfigVersionView::from(&d)).into_response(),
         Ok(None) => config_version_missing(&org, &version.to_string()).into_response(),
         Err(e) => pg_err(e),
     }
@@ -2967,17 +2954,87 @@ fn config_version_missing(org: &str, version: &str) -> (StatusCode, Json<Value>)
 }
 
 /// JSON of a full config-version detail.
-fn config_detail_json(d: &pg::ConfigVersionDetail) -> Value {
-    json!({
-        "version": d.version,
-        "yaml": d.yaml,
-        "config_hash": d.config_hash,
-        "state": d.state,
-        "tier": d.tier,
-        "created_by": d.created_by,
-        "created_at": d.created_at,
-        "published_at": d.published_at,
-    })
+/// One config version with its YAML body.
+#[derive(Debug, PartialEq, Serialize, utoipa::ToSchema)]
+struct ConfigVersionView {
+    version: i64,
+    yaml: String,
+    config_hash: String,
+    /// `draft`, `published` or `superseded`.
+    state: String,
+    /// The rebuild tier the publish chose; null until published.
+    tier: Option<String>,
+    created_by: String,
+    created_at: String,
+    published_at: Option<String>,
+}
+
+impl From<&pg::ConfigVersionDetail> for ConfigVersionView {
+    fn from(d: &pg::ConfigVersionDetail) -> Self {
+        Self {
+            version: d.version,
+            yaml: d.yaml.clone(),
+            config_hash: d.config_hash.clone(),
+            state: d.state.clone(),
+            tier: d.tier.clone(),
+            created_by: d.created_by.clone(),
+            created_at: d.created_at.clone(),
+            published_at: d.published_at.clone(),
+        }
+    }
+}
+
+/// One config version in the history list: the view without its YAML.
+#[derive(Debug, PartialEq, Serialize, utoipa::ToSchema)]
+struct ConfigVersionItem {
+    version: i64,
+    config_hash: String,
+    state: String,
+    tier: Option<String>,
+    created_by: String,
+    created_at: String,
+    published_at: Option<String>,
+}
+
+impl From<&pg::ConfigVersionRow> for ConfigVersionItem {
+    fn from(r: &pg::ConfigVersionRow) -> Self {
+        Self {
+            version: r.version,
+            config_hash: r.config_hash.clone(),
+            state: r.state.clone(),
+            tier: r.tier.clone(),
+            created_by: r.created_by.clone(),
+            created_at: r.created_at.clone(),
+            published_at: r.published_at.clone(),
+        }
+    }
+}
+
+/// `POST …/config/versions`: the draft just stored.
+#[derive(Serialize, utoipa::ToSchema)]
+struct ConfigDraftCreated {
+    org: String,
+    version: i64,
+    config_hash: String,
+    /// Always `draft`.
+    state: &'static str,
+}
+
+/// `POST …/config/versions/{version}/publish`: what the publish changed and
+/// queued.
+#[derive(Serialize, utoipa::ToSchema)]
+struct ConfigPublished {
+    org: String,
+    version: i64,
+    /// The rebuild tier the changed blocks required.
+    tier: Option<String>,
+    changed_blocks: Vec<String>,
+    /// The rebuild jobs the tier queued, in order.
+    jobs_enqueued: Vec<String>,
+    published_by: String,
+    /// What the latest profile says about the config that just went live:
+    /// advice, never a refusal.
+    advisories: Vec<String>,
 }
 
 /// Viewer+: the org's active (published) config (`GET /v1/orgs/{org}/datasets/{ds}/config`),
@@ -3018,7 +3075,7 @@ async fn active_config(
         Err(r) => return *r,
     };
     match pg::get_config_version(&client, &d.id, active).await {
-        Ok(Some(d)) => Json(config_detail_json(&d)).into_response(),
+        Ok(Some(d)) => Json(ConfigVersionView::from(&d)).into_response(),
         Ok(None) => (
             StatusCode::NOT_FOUND,
             Json(json!({ "detail": "no published config" })),
@@ -3054,7 +3111,9 @@ const DEFAULT_LEXICON: [(&str, &str); 12] = [
     ("sue", "susan"),
 ];
 
-#[derive(serde::Deserialize)]
+/// One nickname equivalence: either variant standardizes to the other. The
+/// same shape in both directions (`PUT` body and responses).
+#[derive(Debug, PartialEq, serde::Deserialize, Serialize, utoipa::ToSchema)]
 struct LexiconPair {
     variant_a: String,
     variant_b: String,
@@ -3080,10 +3139,27 @@ fn read_lexicon_pairs(path: &str) -> Vec<(String, String)> {
         .collect()
 }
 
-fn lexicon_pairs_json(pairs: &[(String, String)]) -> Vec<Value> {
+/// `GET …/lexicon`: the dataset's nickname pairs.
+#[derive(Serialize, utoipa::ToSchema)]
+struct Lexicon {
+    pairs: Vec<LexiconPair>,
+}
+
+/// `PUT …/lexicon`: the saved pairs and the full rebuild they queued.
+#[derive(Serialize, utoipa::ToSchema)]
+struct LexiconSaved {
+    pairs: Vec<LexiconPair>,
+    /// The `run_all_full` job that re-standardizes with the new pairs.
+    apply_job: String,
+}
+
+fn lexicon_pairs(pairs: &[(String, String)]) -> Vec<LexiconPair> {
     pairs
         .iter()
-        .map(|(a, b)| json!({ "variant_a": a, "variant_b": b }))
+        .map(|(a, b)| LexiconPair {
+            variant_a: a.clone(),
+            variant_b: b.clone(),
+        })
         .collect()
 }
 
@@ -3129,7 +3205,10 @@ async fn get_lexicon(
             .map(|(a, b)| ((*a).to_string(), (*b).to_string()))
             .collect(),
     };
-    Json(json!({ "pairs": lexicon_pairs_json(&pairs) })).into_response()
+    Json(Lexicon {
+        pairs: lexicon_pairs(&pairs),
+    })
+    .into_response()
 }
 
 /// Steward+: replace the org's nickname lexicon (`PUT /v1/orgs/{org}/datasets/{ds}/lexicon`).
@@ -3266,7 +3345,10 @@ async fn put_lexicon(
     let pairs: Vec<(String, String)> = set.into_iter().collect();
     (
         StatusCode::OK,
-        Json(json!({ "pairs": lexicon_pairs_json(&pairs), "apply_job": apply_job })),
+        Json(LexiconSaved {
+            pairs: lexicon_pairs(&pairs),
+            apply_job,
+        }),
     )
         .into_response()
 }
@@ -3881,18 +3963,17 @@ async fn publish_config_version(
     let advisories = publish_advisories(&state, &org, &ds, &new_config).await;
     (
         StatusCode::OK,
-        Json(json!({
-            "org": org,
-            "version": version,
-            "tier": tier,
-            "changed_blocks": changed,
-            "jobs_enqueued": jobs_enqueued,
-            "published_by": principal.actor,
-            // What the latest profile says about the config that just went
-            // live — advice, never a refusal, and computed AFTER the publish
-            // committed so it cannot affect it even by failing.
-            "advisories": advisories,
-        })),
+        Json(ConfigPublished {
+            org,
+            version,
+            tier: tier.map(str::to_string),
+            changed_blocks: changed,
+            jobs_enqueued,
+            published_by: principal.actor,
+            // Computed AFTER the publish committed, so it cannot affect it
+            // even by failing.
+            advisories,
+        }),
     )
         .into_response()
 }
@@ -12966,6 +13047,10 @@ mod response_shape_tests {
         UnmergeApplied, UnmergeStaged, enqueue_traced, label_coverage, resources_of,
     };
     use super::{
+        ConfigDraftCreated, ConfigPublished, ConfigVersionItem, ConfigVersionView, Lexicon,
+        LexiconSaved, lexicon_pairs, pg,
+    };
+    use super::{
         DeliveryAccepted, EntityLinkDeleted, RecordsByKey, StagedRecords, StagedRecordsApplied,
         UnmatchApplied, UnmatchStaged,
     };
@@ -13368,6 +13453,88 @@ mod response_shape_tests {
             value(&RecordsByKey {
                 items: items.clone(),
                 snapshot: 4,
+            })
+        );
+    }
+
+    #[test]
+    fn config_and_lexicon_bodies_keep_their_keys() {
+        let detail = pg::ConfigVersionDetail {
+            version: 3,
+            yaml: "entity_type: person\n".into(),
+            config_hash: "h".into(),
+            state: "published".into(),
+            tier: Some("rematch".into()),
+            created_by: "u".into(),
+            created_at: "2026-11-24T00:00:00Z".into(),
+            published_at: None,
+        };
+        // The previous `config_detail_json`.
+        assert_eq!(
+            json!({
+                "version": detail.version, "yaml": detail.yaml,
+                "config_hash": detail.config_hash, "state": detail.state,
+                "tier": detail.tier, "created_by": detail.created_by,
+                "created_at": detail.created_at, "published_at": detail.published_at,
+            }),
+            value(&ConfigVersionView::from(&detail))
+        );
+        let row = pg::ConfigVersionRow {
+            version: 2,
+            config_hash: "g".into(),
+            state: "superseded".into(),
+            tier: None,
+            created_by: "u".into(),
+            created_at: "2026-11-23T00:00:00Z".into(),
+            published_at: Some("2026-11-23T01:00:00Z".into()),
+        };
+        assert_eq!(
+            json!({
+                "version": row.version, "config_hash": row.config_hash, "state": row.state,
+                "tier": row.tier, "created_by": row.created_by, "created_at": row.created_at,
+                "published_at": row.published_at,
+            }),
+            value(&ConfigVersionItem::from(&row))
+        );
+        assert_eq!(
+            json!({ "org": "o", "version": 4, "config_hash": "h", "state": "draft" }),
+            value(&ConfigDraftCreated {
+                org: "o".into(),
+                version: 4,
+                config_hash: "h".into(),
+                state: "draft",
+            })
+        );
+        let tier: Option<&str> = Some("rebuild");
+        assert_eq!(
+            json!({
+                "org": "o", "version": 4, "tier": tier,
+                "changed_blocks": ["blocking"], "jobs_enqueued": ["j1", "j2"],
+                "published_by": "u", "advisories": [],
+            }),
+            value(&ConfigPublished {
+                org: "o".into(),
+                version: 4,
+                tier: tier.map(str::to_string),
+                changed_blocks: vec!["blocking".into()],
+                jobs_enqueued: vec!["j1".into(), "j2".into()],
+                published_by: "u".into(),
+                advisories: Vec::new(),
+            })
+        );
+        let pairs = vec![("bob".to_string(), "robert".to_string())];
+        let old_pairs = json!([{ "variant_a": "bob", "variant_b": "robert" }]);
+        assert_eq!(
+            json!({ "pairs": old_pairs }),
+            value(&Lexicon {
+                pairs: lexicon_pairs(&pairs),
+            })
+        );
+        assert_eq!(
+            json!({ "pairs": old_pairs, "apply_job": "j9" }),
+            value(&LexiconSaved {
+                pairs: lexicon_pairs(&pairs),
+                apply_job: "j9".into(),
             })
         );
     }

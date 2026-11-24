@@ -2164,10 +2164,12 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigVersionView"
+                }
               }
             }
           },
@@ -2223,10 +2225,15 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ConfigVersionItem"
+                  }
+                }
               }
             }
           },
@@ -2298,17 +2305,11 @@
         },
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "config_hash": {},
-                    "org": {},
-                    "state": {},
-                    "version": {}
-                  }
+                  "$ref": "#/components/schemas/ConfigDraftCreated"
                 }
               }
             }
@@ -2373,10 +2374,12 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigVersionView"
+                }
               }
             }
           },
@@ -2440,20 +2443,11 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "advisories": {},
-                    "changed_blocks": {},
-                    "jobs_enqueued": {},
-                    "org": {},
-                    "published_by": {},
-                    "tier": {},
-                    "version": {}
-                  }
+                  "$ref": "#/components/schemas/ConfigPublished"
                 }
               }
             }
@@ -4452,14 +4446,11 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "pairs": {}
-                  }
+                  "$ref": "#/components/schemas/Lexicon"
                 }
               }
             }
@@ -4547,15 +4538,11 @@
         },
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "apply_job": {},
-                    "pairs": {}
-                  }
+                  "$ref": "#/components/schemas/LexiconSaved"
                 }
               }
             }
@@ -9760,6 +9747,83 @@
           }
         }
       },
+      "ConfigDraftCreated": {
+        "type": "object",
+        "description": "`POST …/config/versions`: the draft just stored.",
+        "required": [
+          "org",
+          "version",
+          "config_hash",
+          "state"
+        ],
+        "properties": {
+          "config_hash": {
+            "type": "string"
+          },
+          "org": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "description": "Always `draft`."
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "ConfigPublished": {
+        "type": "object",
+        "description": "`POST …/config/versions/{version}/publish`: what the publish changed and\nqueued.",
+        "required": [
+          "org",
+          "version",
+          "changed_blocks",
+          "jobs_enqueued",
+          "published_by",
+          "advisories"
+        ],
+        "properties": {
+          "advisories": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "What the latest profile says about the config that just went live:\nadvice, never a refusal."
+          },
+          "changed_blocks": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "jobs_enqueued": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The rebuild jobs the tier queued, in order."
+          },
+          "org": {
+            "type": "string"
+          },
+          "published_by": {
+            "type": "string"
+          },
+          "tier": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The rebuild tier the changed blocks required."
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
       "ConfigVersion": {
         "type": "object",
         "description": "A versioned config document for a tenant: its YAML, hash and publish state.",
@@ -9833,6 +9897,94 @@
           "yaml": {
             "type": "string",
             "description": "The config document source."
+          }
+        }
+      },
+      "ConfigVersionItem": {
+        "type": "object",
+        "description": "One config version in the history list: the view without its YAML.",
+        "required": [
+          "version",
+          "config_hash",
+          "state",
+          "created_by",
+          "created_at"
+        ],
+        "properties": {
+          "config_hash": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "published_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "state": {
+            "type": "string"
+          },
+          "tier": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "ConfigVersionView": {
+        "type": "object",
+        "description": "JSON of a full config-version detail.\nOne config version with its YAML body.",
+        "required": [
+          "version",
+          "yaml",
+          "config_hash",
+          "state",
+          "created_by",
+          "created_at"
+        ],
+        "properties": {
+          "config_hash": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "published_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "state": {
+            "type": "string",
+            "description": "`draft`, `published` or `superseded`."
+          },
+          "tier": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The rebuild tier the publish chose; null until published."
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "yaml": {
+            "type": "string"
           }
         }
       },
@@ -10826,6 +10978,57 @@
             "type": "number",
             "format": "double",
             "description": "The `auto_merge` threshold the pairs are ordered around."
+          }
+        }
+      },
+      "Lexicon": {
+        "type": "object",
+        "description": "`GET …/lexicon`: the dataset's nickname pairs.",
+        "required": [
+          "pairs"
+        ],
+        "properties": {
+          "pairs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LexiconPair"
+            }
+          }
+        }
+      },
+      "LexiconPair": {
+        "type": "object",
+        "description": "One nickname equivalence: either variant standardizes to the other. The\nsame shape in both directions (`PUT` body and responses).",
+        "required": [
+          "variant_a",
+          "variant_b"
+        ],
+        "properties": {
+          "variant_a": {
+            "type": "string"
+          },
+          "variant_b": {
+            "type": "string"
+          }
+        }
+      },
+      "LexiconSaved": {
+        "type": "object",
+        "description": "`PUT …/lexicon`: the saved pairs and the full rebuild they queued.",
+        "required": [
+          "pairs",
+          "apply_job"
+        ],
+        "properties": {
+          "apply_job": {
+            "type": "string",
+            "description": "The `run_all_full` job that re-standardizes with the new pairs."
+          },
+          "pairs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LexiconPair"
+            }
           }
         }
       },
