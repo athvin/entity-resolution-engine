@@ -118,6 +118,17 @@ pub struct ApiDoc;
     crate::LexiconPair,
     crate::Lexicon,
     crate::LexiconSaved,
+    crate::KeyIssued,
+    crate::KeyRevoked,
+    crate::Deleted,
+    crate::ScheduleItem,
+    crate::ScheduleCreated,
+    crate::ScheduleToggled,
+    crate::WebhookItem,
+    crate::WebhookCreated,
+    crate::WebhookDeliveryList,
+    crate::WebhookEventItem,
+    crate::WebhookEventCatalog,
 )))]
 pub struct ResponseDoc;
 

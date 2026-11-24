@@ -8641,7 +8641,11 @@ async fn create_schedule(
     {
         Ok(schedule_id) => (
             StatusCode::CREATED,
-            Json(json!({ "id": schedule_id, "kind": body.kind, "cron": body.cron })),
+            Json(ScheduleCreated {
+                id: schedule_id,
+                kind: body.kind,
+                cron: body.cron,
+            }),
         )
             .into_response(),
         Err(e) => pg_err(e),
@@ -8675,20 +8679,7 @@ async fn schedules_index(
     };
     match pg::list_schedules(&client, &d.id).await {
         Ok(rows) => {
-            let out: Vec<Value> = rows
-                .iter()
-                .map(|s| {
-                    json!({
-                        "id": s.id,
-                        "kind": s.kind,
-                        "cron": s.cron,
-                        "enabled": s.enabled,
-                        "source": s.source,
-                        "last_enqueued_at": s.last_enqueued_at,
-                    })
-                })
-                .collect();
-            Json(json!(out)).into_response()
+            Json::<Vec<ScheduleItem>>(rows.iter().map(ScheduleItem::from).collect()).into_response()
         }
         Err(e) => pg_err(e),
     }
@@ -8725,7 +8716,11 @@ async fn update_schedule(
     // History images record the acting principal (er.actor).
     let _ = pg::set_actor(&client, &principal.actor).await;
     match pg::set_schedule_enabled(&client, &d.id, &schedule_id, body.enabled).await {
-        Ok(true) => Json(json!({ "id": schedule_id, "enabled": body.enabled })).into_response(),
+        Ok(true) => Json(ScheduleToggled {
+            id: schedule_id,
+            enabled: body.enabled,
+        })
+        .into_response(),
         Ok(false) => detail_err(
             StatusCode::CONFLICT,
             "schedule is unknown, belongs to another org, or is config-owned",
@@ -8762,9 +8757,124 @@ async fn delete_schedule(
     // History images record the acting principal (er.actor).
     let _ = pg::set_actor(&client, &principal.actor).await;
     match pg::delete_schedule(&client, &d.id, &schedule_id).await {
-        Ok(deleted) => Json(json!({ "deleted": deleted })).into_response(),
+        Ok(deleted) => Json(Deleted { deleted }).into_response(),
         Err(e) => pg_err(e),
     }
+}
+
+/// `POST /v1/orgs/{org}/api-keys`: the new key. `key` is the plaintext, shown
+/// exactly once; only its hash is stored.
+#[derive(Serialize, utoipa::ToSchema)]
+struct KeyIssued {
+    id: String,
+    key: String,
+    role: &'static str,
+}
+
+/// `DELETE /v1/orgs/{org}/api-keys/{key_id}`: whether a live key was revoked.
+#[derive(Serialize, utoipa::ToSchema)]
+struct KeyRevoked {
+    revoked: bool,
+}
+
+/// A delete's outcome: false when there was nothing (of this org's) to delete.
+#[derive(Serialize, utoipa::ToSchema)]
+struct Deleted {
+    deleted: bool,
+}
+
+/// One dataset schedule.
+#[derive(Debug, PartialEq, Serialize, utoipa::ToSchema)]
+struct ScheduleItem {
+    id: String,
+    /// The job kind it enqueues.
+    kind: String,
+    cron: String,
+    enabled: bool,
+    /// `api` or `config`: a config-owned schedule is changed by publishing.
+    source: String,
+    last_enqueued_at: Option<String>,
+}
+
+impl From<&pg::ScheduleRow> for ScheduleItem {
+    fn from(s: &pg::ScheduleRow) -> Self {
+        Self {
+            id: s.id.clone(),
+            kind: s.kind.clone(),
+            cron: s.cron.clone(),
+            enabled: s.enabled,
+            source: s.source.clone(),
+            last_enqueued_at: s.last_enqueued_at.clone(),
+        }
+    }
+}
+
+/// `POST …/schedules`: the schedule just created.
+#[derive(Serialize, utoipa::ToSchema)]
+struct ScheduleCreated {
+    id: String,
+    kind: String,
+    cron: String,
+}
+
+/// `PATCH …/schedules/{schedule_id}`: the schedule's new enabled state.
+#[derive(Serialize, utoipa::ToSchema)]
+struct ScheduleToggled {
+    id: String,
+    enabled: bool,
+}
+
+/// One active webhook, without its secret.
+#[derive(Debug, PartialEq, Serialize, utoipa::ToSchema)]
+struct WebhookItem {
+    id: String,
+    url: String,
+    /// Subscribed event names; empty subscribes to all.
+    events: Value,
+    active: bool,
+}
+
+impl From<&er_entities::webhook::WebhookWire> for WebhookItem {
+    fn from(w: &er_entities::webhook::WebhookWire) -> Self {
+        Self {
+            id: w.id.clone(),
+            url: w.url.clone(),
+            events: w.events.clone(),
+            active: w.active,
+        }
+    }
+}
+
+/// `POST /v1/orgs/{org}/webhooks`: the webhook, with its signing secret shown
+/// once.
+#[derive(Serialize, utoipa::ToSchema)]
+struct WebhookCreated {
+    id: String,
+    url: String,
+    events: Vec<String>,
+    /// The HMAC-SHA256 key for `X-ER-Signature`; not returned again.
+    secret: String,
+    /// Always true.
+    active: bool,
+}
+
+/// `GET /v1/orgs/{org}/webhooks/deliveries`: recent delivery attempts.
+#[derive(Serialize, utoipa::ToSchema)]
+struct WebhookDeliveryList {
+    deliveries: Vec<er_entities::webhook_delivery::WebhookDeliveryWire>,
+}
+
+/// One subscribable event.
+#[derive(Serialize, utoipa::ToSchema)]
+struct WebhookEventItem {
+    event: &'static str,
+    description: &'static str,
+}
+
+/// `GET /v1/orgs/{org}/webhooks/events`: every event a webhook can subscribe to.
+#[derive(Serialize, utoipa::ToSchema)]
+struct WebhookEventCatalog {
+    events: Vec<WebhookEventItem>,
 }
 
 #[derive(Deserialize)]
@@ -8798,7 +8908,13 @@ async fn webhook_events_catalog(
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
     }
-    Json(json!({ "events": webhook::catalog_json() })).into_response()
+    Json(WebhookEventCatalog {
+        events: webhook::EVENT_CATALOG
+            .iter()
+            .map(|(event, description)| WebhookEventItem { event, description })
+            .collect(),
+    })
+    .into_response()
 }
 
 /// Viewer+: the segments the active config declares
@@ -8895,7 +9011,13 @@ async fn webhook_deliveries(
     )
     .await
     {
-        Ok(rows) => Json(json!({ "deliveries": rows })).into_response(),
+        Ok(rows) => Json(WebhookDeliveryList {
+            deliveries: rows
+                .iter()
+                .map(er_entities::webhook_delivery::WebhookDeliveryWire::from)
+                .collect(),
+        })
+        .into_response(),
         Err(e) => pg_err(e),
     }
 }
@@ -8988,13 +9110,13 @@ async fn create_webhook(
             .await;
             (
                 StatusCode::CREATED,
-                Json(json!({
-                    "id": webhook_id,
-                    "url": body.url,
-                    "events": events,
-                    "secret": secret,
-                    "active": true,
-                })),
+                Json(WebhookCreated {
+                    id: webhook_id,
+                    url: body.url,
+                    events: body.events,
+                    secret,
+                    active: true,
+                }),
             )
                 .into_response()
         }
@@ -9025,18 +9147,7 @@ async fn webhooks_index(
     };
     match pg::list_webhooks(&client, &org_row.id).await {
         Ok(rows) => {
-            let out: Vec<Value> = rows
-                .iter()
-                .map(|w| {
-                    json!({
-                        "id": w.id,
-                        "url": w.url,
-                        "events": w.events,
-                        "active": w.active,
-                    })
-                })
-                .collect();
-            Json(json!(out)).into_response()
+            Json::<Vec<WebhookItem>>(rows.iter().map(WebhookItem::from).collect()).into_response()
         }
         Err(e) => pg_err(e),
     }
@@ -9791,7 +9902,7 @@ async fn delete_webhook(
                 )
                 .await;
             }
-            Json(json!({ "deleted": deleted })).into_response()
+            Json(Deleted { deleted }).into_response()
         }
         Err(e) => pg_err(e),
     }
@@ -10021,7 +10132,7 @@ async fn delete_salesforce_connection(
                 )
                 .await;
             }
-            Json(json!({ "deleted": deleted })).into_response()
+            Json(Deleted { deleted }).into_response()
         }
         Err(e) => pg_err(e),
     }
@@ -12083,7 +12194,11 @@ async fn create_key(
             .await;
             (
                 StatusCode::CREATED,
-                Json(json!({ "id": key_id, "key": key, "role": role.as_str() })),
+                Json(KeyIssued {
+                    id: key_id,
+                    key,
+                    role: role.as_str(),
+                }),
             )
                 .into_response()
         }
@@ -12129,7 +12244,7 @@ async fn revoke_key(
                 &json!({ "key_id": key_id, "revoked": revoked }),
             )
             .await;
-            (StatusCode::OK, Json(json!({ "revoked": revoked }))).into_response()
+            (StatusCode::OK, Json(KeyRevoked { revoked })).into_response()
         }
         Err(e) => pg_err(e),
     }
@@ -13051,6 +13166,10 @@ mod response_shape_tests {
         LexiconSaved, lexicon_pairs, pg,
     };
     use super::{
+        Deleted, KeyIssued, KeyRevoked, ScheduleCreated, ScheduleItem, ScheduleToggled,
+        WebhookCreated, WebhookEventCatalog, WebhookEventItem, WebhookItem, webhook,
+    };
+    use super::{
         DeliveryAccepted, EntityLinkDeleted, RecordsByKey, StagedRecords, StagedRecordsApplied,
         UnmatchApplied, UnmatchStaged,
     };
@@ -13535,6 +13654,94 @@ mod response_shape_tests {
             value(&LexiconSaved {
                 pairs: lexicon_pairs(&pairs),
                 apply_job: "j9".into(),
+            })
+        );
+    }
+
+    #[test]
+    fn keys_schedules_and_webhooks_keep_their_keys() {
+        assert_eq!(
+            json!({ "id": "k1", "key": "er_live_x", "role": "admin" }),
+            value(&KeyIssued {
+                id: "k1".into(),
+                key: "er_live_x".into(),
+                role: "admin",
+            })
+        );
+        assert_eq!(
+            json!({ "revoked": true }),
+            value(&KeyRevoked { revoked: true })
+        );
+        assert_eq!(
+            json!({ "deleted": false }),
+            value(&Deleted { deleted: false })
+        );
+        let row = super::pg::ScheduleRow {
+            id: "s1".into(),
+            kind: "run_all".into(),
+            cron: "0 * * * *".into(),
+            enabled: true,
+            source: "api".into(),
+            last_enqueued_at: None,
+        };
+        assert_eq!(
+            json!({
+                "id": row.id, "kind": row.kind, "cron": row.cron, "enabled": row.enabled,
+                "source": row.source, "last_enqueued_at": row.last_enqueued_at,
+            }),
+            value(&ScheduleItem::from(&row))
+        );
+        assert_eq!(
+            json!({ "id": "s1", "kind": "run_all", "cron": "0 * * * *" }),
+            value(&ScheduleCreated {
+                id: "s1".into(),
+                kind: "run_all".into(),
+                cron: "0 * * * *".into(),
+            })
+        );
+        assert_eq!(
+            json!({ "id": "s1", "enabled": false }),
+            value(&ScheduleToggled {
+                id: "s1".into(),
+                enabled: false,
+            })
+        );
+        let now = chrono::Utc::now();
+        let hook = er_entities::webhook::WebhookWire {
+            id: "w1".into(),
+            org_id: "o".into(),
+            dataset_id: None,
+            url: "https://example.test/hook".into(),
+            events: json!(["job.succeeded"]),
+            active: true,
+            created_at: now,
+            updated_at: now,
+        };
+        assert_eq!(
+            json!({ "id": hook.id, "url": hook.url, "events": hook.events, "active": hook.active }),
+            value(&WebhookItem::from(&hook))
+        );
+        let events = vec!["job.succeeded".to_string()];
+        assert_eq!(
+            json!({
+                "id": "w1", "url": "https://example.test/hook", "events": json!(events),
+                "secret": "s", "active": true,
+            }),
+            value(&WebhookCreated {
+                id: "w1".into(),
+                url: "https://example.test/hook".into(),
+                events,
+                secret: "s".into(),
+                active: true,
+            })
+        );
+        assert_eq!(
+            json!({ "events": webhook::catalog_json() }),
+            value(&WebhookEventCatalog {
+                events: webhook::EVENT_CATALOG
+                    .iter()
+                    .map(|(event, description)| WebhookEventItem { event, description })
+                    .collect(),
             })
         );
     }
