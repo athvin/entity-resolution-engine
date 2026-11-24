@@ -173,6 +173,7 @@ pub(super) fn typed(
     let mut calls = JsonCalls {
         source,
         schemas,
+        seen: BTreeSet::from([name.to_string()]),
         typed: Vec::new(),
         untyped: Vec::new(),
     };
@@ -197,6 +198,8 @@ pub(super) fn typed(
 struct JsonCalls<'a, 's> {
     source: &'a Source<'s>,
     schemas: &'a BTreeSet<String>,
+    /// Local response helpers already followed, so a recursive helper ends.
+    seen: BTreeSet<String>,
     typed: Vec<serde_json::Value>,
     untyped: Vec<String>,
 }
@@ -237,12 +240,9 @@ impl JsonCalls<'_, '_> {
                 let syn::Expr::Path(path) = call.func.as_ref() else {
                     return None;
                 };
-                let segments = &path.path.segments;
-                let owner = segments.iter().rev().nth(1)?.ident.to_string();
-                owner
-                    .ends_with("Wire")
-                    .then(|| self.reference(&owner))
-                    .flatten()
+                // `Owner::from(…)`, `Owner::new(…)`: the owner names the type.
+                let owner = path.path.segments.iter().rev().nth(1)?.ident.to_string();
+                self.reference(&owner)
             }
             _ => None,
         }
@@ -270,6 +270,20 @@ impl<'ast> Visit<'ast> for JsonCalls<'_, '_> {
                     None => self.untyped.push(snippet.chars().take(80).collect()),
                 }
             }
+        }
+        // A local helper that builds the response (`provision_org(…).await`)
+        // is part of what the handler can return, as the envelope collector
+        // above also treats it.
+        if let syn::Expr::Path(path) = call.func.as_ref()
+            && let Some(helper) = path.path.get_ident().map(ToString::to_string)
+            && let Some(function) = self.source.functions.get(&helper)
+            && {
+                let output = self.source.snippet(&function.sig.output);
+                output.contains("Response") && !output.contains("Result<")
+            }
+            && self.seen.insert(helper)
+        {
+            self.visit_block(&function.block);
         }
         syn::visit::visit_expr_call(self, call);
     }

@@ -304,3 +304,52 @@ async fn mixed() { if a { Json(JobWire::from(&job)) } else { Json(json!(job)) } 
     let ops = operations(&src, &[], &BTreeSet::new()).unwrap();
     assert!(ops.iter().all(|o| o.response_schemas.is_empty()));
 }
+
+#[test]
+fn typed_responses_follow_local_helpers_and_registered_owners() {
+    let src = r#"
+fn router() { Router::new().route("/orgs", get(list).post(create)); }
+struct Created {
+    name: String,
+}
+struct Provisioned {
+    name: String,
+    key: String,
+}
+struct Item {
+    id: String,
+}
+/// Operator: list orgs (`GET /orgs`).
+async fn list() { Json::<Vec<Item>>(rows.iter().map(Item::from).collect()) }
+/// Operator: create an org (`POST /orgs`).
+async fn create() -> impl IntoResponse {
+    if provisioning { return provision(name).await; }
+    (StatusCode::CREATED, Json(Created { name })).into_response()
+}
+async fn provision(name: &str) -> axum::response::Response {
+    (StatusCode::CREATED, Json(Provisioned { name, key })).into_response()
+}
+"#;
+    let schemas: BTreeSet<String> = ["Created", "Provisioned", "Item"].map(String::from).into();
+    let ops = operations(src, &[], &schemas).unwrap();
+    let reference = |name: &str| json!({"$ref": format!("#/components/schemas/{name}")});
+    let create = ops.iter().find(|o| o.method == "POST").unwrap();
+    // The helper's body is part of what the handler returns.
+    // The early helper return is visited before the tail expression.
+    assert_eq!(create.response_schemas, [reference("Provisioned"), reference("Created")]);
+    let list = ops.iter().find(|o| o.method == "GET").unwrap();
+    assert_eq!(
+        list.response_schemas,
+        [json!({"type": "array", "items": reference("Item")})]
+    );
+    assert!(
+        crate::envelope_ledger(src)
+            .unwrap()
+            .contains("\"GET /orgs\": { \"envelope\": \"bare\" }")
+    );
+
+    // A helper still returning `json!` makes the handler mixed, not silently partial.
+    let partial = src.replace("Json(Provisioned { name, key })", "Json(json!({\"name\": name}))");
+    let error = operations(&partial, &[], &schemas).err().unwrap();
+    assert!(error.contains("mixes typed and untyped"), "{error}");
+}

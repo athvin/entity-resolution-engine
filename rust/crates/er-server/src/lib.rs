@@ -823,6 +823,85 @@ async fn readyz(State(state): State<AppState>) -> (StatusCode, Json<Value>) {
     }
 }
 
+/// An org being provisioned, with the admin key shown once: the body of
+/// `POST /v1/orgs` when auto-provisioning is on (#864 batch 2). Each
+/// struct below declares its fields in the order of the `json!` literal it
+/// replaced, which is the order the envelope ledger records.
+#[derive(Serialize, utoipa::ToSchema)]
+struct OrgProvisioned {
+    name: String,
+    tenant: Option<String>,
+    config_version: i64,
+    state: &'static str,
+    job_id: String,
+    admin_key_id: String,
+    admin_key: String,
+}
+
+/// An org registered without auto-provisioning: the other body of `POST /v1/orgs`.
+#[derive(Serialize, utoipa::ToSchema)]
+struct OrgCreated {
+    name: String,
+    /// What seeding the starter model did: `seeded` plus a reason or the version.
+    starter_model: Value,
+}
+
+/// One org in the operator's registry: an item of `GET /v1/orgs`.
+#[derive(Serialize, utoipa::ToSchema)]
+struct OrgItem {
+    id: String,
+    name: String,
+    state: String,
+    active_config_version: Option<i64>,
+    created_at: String,
+}
+
+/// An org's detail: the body of `GET /v1/orgs/{org}`.
+#[derive(Serialize, utoipa::ToSchema)]
+struct OrgView {
+    id: String,
+    name: String,
+    state: String,
+    active_config_version: Option<i64>,
+    drop_root: Option<String>,
+    resources: OrgResources,
+}
+
+/// The DuckDB knobs an org's env sets, each `null` when unset.
+#[derive(Serialize, utoipa::ToSchema)]
+struct OrgResources {
+    duckdb_threads: Option<i64>,
+    duckdb_memory_limit: Option<String>,
+}
+
+/// One dataset: the body of `GET`/`PATCH /v1/orgs/{org}/datasets/{ds}` and an
+/// item of `GET /v1/orgs/{org}/datasets`.
+#[derive(Serialize, utoipa::ToSchema)]
+struct DatasetView {
+    name: String,
+    display_name: Option<String>,
+    entity_type: String,
+    state: String,
+    active_config_version: Option<i64>,
+    created_at: String,
+    updated_at: String,
+}
+
+/// A dataset accepted for provisioning: `POST /v1/orgs/{org}/datasets` (202).
+#[derive(Serialize, utoipa::ToSchema)]
+struct DatasetProvisioning {
+    name: String,
+    state: &'static str,
+    job_id: String,
+}
+
+/// A dataset created directly: `POST /v1/orgs/{org}/datasets` (201).
+#[derive(Serialize, utoipa::ToSchema)]
+struct DatasetCreated {
+    name: String,
+    state: &'static str,
+}
+
 /// Auto-provision a tenant from the declared profile (D8).
 ///
 /// Synchronous half: derive the tenant's paths, record the org as
@@ -1000,15 +1079,15 @@ async fn provision_org(
 
     (
         StatusCode::CREATED,
-        Json(json!({
-            "name": name,
-            "tenant": plan.tenant,
-            "config_version": version,
-            "state": "provisioning",
-            "job_id": job.id,
-            "admin_key_id": admin_key_id,
-            "admin_key": admin_key,
-        })),
+        Json(OrgProvisioned {
+            name: name.to_string(),
+            tenant: plan.tenant,
+            config_version: version,
+            state: "provisioning",
+            job_id: job.id,
+            admin_key_id,
+            admin_key,
+        }),
     )
         .into_response()
 }
@@ -1158,7 +1237,10 @@ async fn create_org(
             let seeded = seed_starter_model(&client, &body.name, &env, &principal.actor).await;
             (
                 StatusCode::CREATED,
-                Json(json!({ "name": body.name, "starter_model": seeded })),
+                Json(OrgCreated {
+                    name: body.name,
+                    starter_model: seeded,
+                }),
             )
                 .into_response()
         }
@@ -1337,19 +1419,18 @@ async fn list_orgs(principal: Principal, State(state): State<AppState>) -> impl 
     };
     match pg::list_orgs(&client).await {
         Ok(orgs) => {
-            let out: Vec<Value> = orgs
-                .iter()
-                .map(|o| {
-                    json!({
-                        "id": o.id,
-                        "name": o.name,
-                        "state": o.state,
-                        "active_config_version": o.active_config_version,
-                        "created_at": o.created_at,
+            Json::<Vec<OrgItem>>(
+                orgs.into_iter()
+                    .map(|o| OrgItem {
+                        id: o.id,
+                        name: o.name,
+                        state: o.state,
+                        active_config_version: o.active_config_version,
+                        created_at: o.created_at,
                     })
-                })
-                .collect();
-            Json(json!(out)).into_response()
+                    .collect(),
+            )
+            .into_response()
         }
         Err(e) => pg_err(e),
     }
@@ -1357,13 +1438,19 @@ async fn list_orgs(principal: Principal, State(state): State<AppState>) -> impl 
 
 /// Project the `resources` view out of an org's `env` map (`api.py`): the
 /// DuckDB thread/memory knobs, each `null` when unset.
-fn resources_of(env: &Value) -> Value {
+fn resources_of(env: &Value) -> OrgResources {
     let threads = env
         .get("ER_DUCKDB_THREADS")
         .and_then(Value::as_str)
         .and_then(|s| s.parse::<i64>().ok());
-    let memory = env.get("ER_DUCKDB_MEMORY_LIMIT").and_then(Value::as_str);
-    json!({ "duckdb_threads": threads, "duckdb_memory_limit": memory })
+    let memory = env
+        .get("ER_DUCKDB_MEMORY_LIMIT")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    OrgResources {
+        duckdb_threads: threads,
+        duckdb_memory_limit: memory,
+    }
 }
 
 /// Viewer+: an org's detail (`GET /v1/orgs/{org}`), 404 if absent.
@@ -1387,14 +1474,14 @@ async fn get_org(
         Err(r) => return *r,
     };
     match pg::get_org(&client, &org).await {
-        Ok(Some(o)) => Json(json!({
-            "id": o.id,
-            "name": o.name,
-            "state": o.state,
-            "active_config_version": o.active_config_version,
-            "drop_root": o.drop_root,
-            "resources": resources_of(&o.env),
-        }))
+        Ok(Some(o)) => Json(OrgView {
+            resources: resources_of(&o.env),
+            id: o.id,
+            name: o.name,
+            state: o.state,
+            active_config_version: o.active_config_version,
+            drop_root: o.drop_root,
+        })
         .into_response(),
         Ok(None) => (
             StatusCode::NOT_FOUND,
@@ -1516,16 +1603,18 @@ async fn dataset_or_404(
 
 /// The tenant-facing dataset shape. `env` and `config_path` stay server-side:
 /// they are lake plumbing the engine reads, not product state.
-fn dataset_json(d: &pg::DatasetDetail) -> Value {
-    json!({
-        "name": d.name,
-        "display_name": d.display_name,
-        "entity_type": d.entity_type,
-        "state": d.state,
-        "active_config_version": d.active_config_version,
-        "created_at": d.created_at,
-        "updated_at": d.updated_at,
-    })
+impl From<&pg::DatasetDetail> for DatasetView {
+    fn from(d: &pg::DatasetDetail) -> Self {
+        Self {
+            name: d.name.clone(),
+            display_name: d.display_name.clone(),
+            entity_type: d.entity_type.clone(),
+            state: d.state.clone(),
+            active_config_version: d.active_config_version,
+            created_at: d.created_at.clone(),
+            updated_at: d.updated_at.clone(),
+        }
+    }
 }
 
 /// The org's default-dataset id, as a best-effort stamp for org-scoped
@@ -1568,8 +1657,7 @@ async fn list_datasets_route(
     };
     match pg::list_datasets(&client, &org_row.id).await {
         Ok(rows) => {
-            let out: Vec<Value> = rows.iter().map(dataset_json).collect();
-            Json(json!(out)).into_response()
+            Json::<Vec<DatasetView>>(rows.iter().map(DatasetView::from).collect()).into_response()
         }
         Err(e) => pg_err(e),
     }
@@ -1781,7 +1869,11 @@ async fn create_dataset(
         .await;
         return (
             StatusCode::ACCEPTED,
-            Json(json!({ "name": body.name, "state": "provisioning", "job_id": job.id })),
+            Json(DatasetProvisioning {
+                name: body.name,
+                state: "provisioning",
+                job_id: job.id,
+            }),
         )
             .into_response();
     };
@@ -1843,7 +1935,10 @@ async fn create_dataset(
             .await;
             (
                 StatusCode::CREATED,
-                Json(json!({ "name": body.name, "state": "active" })),
+                Json(DatasetCreated {
+                    name: body.name,
+                    state: "active",
+                }),
             )
                 .into_response()
         }
@@ -1880,7 +1975,7 @@ async fn get_dataset_route(
         Err(r) => return *r,
     };
     match dataset_or_404(&client, &org_row, &ds).await {
-        Ok(row) => Json(dataset_json(&row)).into_response(),
+        Ok(row) => Json(DatasetView::from(&row)).into_response(),
         Err(r) => *r,
     }
 }
@@ -1925,7 +2020,7 @@ async fn update_dataset(
         .await
     {
         Ok(()) => match dataset_or_404(&client, &org_row, &ds).await {
-            Ok(row) => Json(dataset_json(&row)).into_response(),
+            Ok(row) => Json(DatasetView::from(&row)).into_response(),
             Err(r) => *r,
         },
         Err(e) => pg_err(e),
@@ -12582,7 +12677,11 @@ mod response_shape_tests {
     //! its keys sorted while a struct emits them in declaration order: the
     //! guarantee is equality of the parsed value, and byte equality where the
     //! struct's fields are already in sorted order.
-    use super::{AppState, ClearAccepted, Job, JobList, ResumeAccepted, enqueue_traced};
+    use super::{
+        AppState, ClearAccepted, DatasetCreated, DatasetProvisioning, DatasetView, Job, JobList,
+        OrgCreated, OrgItem, OrgProvisioned, OrgView, ResumeAccepted, enqueue_traced,
+        resources_of,
+    };
     use er_entities::job::JobWire;
     use serde_json::json;
 
@@ -12617,6 +12716,108 @@ mod response_shape_tests {
         assert_eq!(json!({ "jobs": refs }), json!(JobList { jobs: wires() }));
         let global: Vec<JobWire> = jobs.iter().map(JobWire::from).collect();
         assert_eq!(json!(jobs), json!(global));
+    }
+
+    #[test]
+    fn org_and_dataset_bodies_carry_the_same_values() {
+        let env = json!({"ER_DUCKDB_THREADS": "4", "ER_DUCKDB_MEMORY_LIMIT": "2GB"});
+        assert_eq!(
+            json!({ "duckdb_threads": 4, "duckdb_memory_limit": "2GB" }),
+            json!(resources_of(&env))
+        );
+        assert_eq!(
+            json!({ "duckdb_threads": null, "duckdb_memory_limit": null }),
+            json!(resources_of(&json!({})))
+        );
+        assert_eq!(
+            json!({
+                "id": "o1", "name": "acme", "state": "active",
+                "active_config_version": 3, "drop_root": null,
+                "resources": { "duckdb_threads": 4, "duckdb_memory_limit": "2GB" },
+            }),
+            json!(OrgView {
+                id: "o1".into(),
+                name: "acme".into(),
+                state: "active".into(),
+                active_config_version: Some(3),
+                drop_root: None,
+                resources: resources_of(&env),
+            })
+        );
+        assert_eq!(
+            json!({ "id": "o1", "name": "acme", "state": "active",
+                    "active_config_version": null, "created_at": "t" }),
+            json!(OrgItem {
+                id: "o1".into(),
+                name: "acme".into(),
+                state: "active".into(),
+                active_config_version: None,
+                created_at: "t".into(),
+            })
+        );
+        assert_eq!(
+            json!({
+                "name": "acme", "tenant": null, "config_version": 1,
+                "state": "provisioning", "job_id": "j", "admin_key_id": "k",
+                "admin_key": "erk_k_s",
+            }),
+            json!(OrgProvisioned {
+                name: "acme".into(),
+                tenant: None,
+                config_version: 1,
+                state: "provisioning",
+                job_id: "j".into(),
+                admin_key_id: "k".into(),
+                admin_key: "erk_k_s".into(),
+            })
+        );
+        let seeded = json!({ "seeded": false, "reason": "r" });
+        assert_eq!(
+            json!({ "name": "acme", "starter_model": seeded }),
+            json!(OrgCreated {
+                name: "acme".into(),
+                starter_model: seeded.clone(),
+            })
+        );
+        let detail = crate::pg::DatasetDetail {
+            id: "d1".into(),
+            org_id: "o1".into(),
+            name: "default".into(),
+            display_name: Some("Default".into()),
+            entity_type: "person".into(),
+            config_path: "/c".into(),
+            env: json!({}),
+            drop_root: None,
+            s3_ingest_bucket: None,
+            s3_ingest_prefix: None,
+            active_config_version: Some(2),
+            state: "active".into(),
+            created_at: "c".into(),
+            updated_at: "u".into(),
+        };
+        assert_eq!(
+            json!({
+                "name": "default", "display_name": "Default", "entity_type": "person",
+                "state": "active", "active_config_version": 2,
+                "created_at": "c", "updated_at": "u",
+            }),
+            json!(DatasetView::from(&detail))
+        );
+        assert_eq!(
+            json!({ "name": "n", "state": "provisioning", "job_id": "j" }),
+            json!(DatasetProvisioning {
+                name: "n".into(),
+                state: "provisioning",
+                job_id: "j".into(),
+            })
+        );
+        assert_eq!(
+            json!({ "name": "n", "state": "active" }),
+            json!(DatasetCreated {
+                name: "n".into(),
+                state: "active",
+            })
+        );
     }
 
     #[test]
