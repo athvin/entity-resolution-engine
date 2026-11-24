@@ -2277,6 +2277,10 @@ export interface components {
             state: string;
             updated_at: string;
         };
+        /** @description A delete's outcome: false when there was nothing (of this org's) to delete. */
+        Deleted: {
+            deleted: boolean;
+        };
         /**
          * @description `202` from a source delivery: the published delivery and the run queued
          *     to consume it.
@@ -2593,6 +2597,19 @@ export interface components {
         /** @description One dataset's jobs, newest first: the body of `GET …/jobs`. */
         JobList: {
             jobs: components["schemas"]["Job"][];
+        };
+        /**
+         * @description `POST /v1/orgs/{org}/api-keys`: the new key. `key` is the plaintext, shown
+         *     exactly once; only its hash is stored.
+         */
+        KeyIssued: {
+            id: string;
+            key: string;
+            role: string;
+        };
+        /** @description `DELETE /v1/orgs/{org}/api-keys/{key_id}`: whether a live key was revoked. */
+        KeyRevoked: {
+            revoked: boolean;
         };
         /** @description The gray band a labelling page was drawn from. */
         LabelBand: {
@@ -3256,6 +3273,28 @@ export interface components {
              */
             updated_at: string;
         };
+        /** @description `POST …/schedules`: the schedule just created. */
+        ScheduleCreated: {
+            cron: string;
+            id: string;
+            kind: string;
+        };
+        /** @description One dataset schedule. */
+        ScheduleItem: {
+            cron: string;
+            enabled: boolean;
+            id: string;
+            /** @description The job kind it enqueues. */
+            kind: string;
+            last_enqueued_at?: string | null;
+            /** @description `api` or `config`: a config-owned schedule is changed by publishing. */
+            source: string;
+        };
+        /** @description `PATCH …/schedules/{schedule_id}`: the schedule's new enabled state. */
+        ScheduleToggled: {
+            enabled: boolean;
+            id: string;
+        };
         /** @description One staged steward correction: recorded, not yet applied to the lake. */
         Staged: {
             action_id: string;
@@ -3638,6 +3677,19 @@ export interface components {
             /** @description The delivery URL. */
             url: string;
         };
+        /**
+         * @description `POST /v1/orgs/{org}/webhooks`: the webhook, with its signing secret shown
+         *     once.
+         */
+        WebhookCreated: {
+            /** @description Always true. */
+            active: boolean;
+            events: string[];
+            id: string;
+            /** @description The HMAC-SHA256 key for `X-ER-Signature`; not returned again. */
+            secret: string;
+            url: string;
+        };
         /** @description One attempt-tracked delivery of one event to one subscriber. The event is recorded here BEFORE any network call, so a subscriber that is briefly unreachable gets the event late instead of never. */
         WebhookDelivery: {
             /**
@@ -3691,6 +3743,27 @@ export interface components {
             updated_at: string;
             /** @description The subscription being delivered to. */
             webhook_id: string;
+        };
+        /** @description `GET /v1/orgs/{org}/webhooks/deliveries`: recent delivery attempts. */
+        WebhookDeliveryList: {
+            deliveries: components["schemas"]["WebhookDelivery"][];
+        };
+        /** @description `GET /v1/orgs/{org}/webhooks/events`: every event a webhook can subscribe to. */
+        WebhookEventCatalog: {
+            events: components["schemas"]["WebhookEventItem"][];
+        };
+        /** @description One subscribable event. */
+        WebhookEventItem: {
+            description: string;
+            event: string;
+        };
+        /** @description One active webhook, without its secret. */
+        WebhookItem: {
+            active: boolean;
+            /** @description Subscribed event names; empty subscribes to all. */
+            events: unknown;
+            id: string;
+            url: string;
         };
     };
     responses: never;
@@ -4215,17 +4288,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        id?: unknown;
-                        key?: unknown;
-                        role?: unknown;
-                    };
+                    "application/json": components["schemas"]["KeyIssued"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -4253,15 +4322,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        revoked?: unknown;
-                    };
+                    "application/json": components["schemas"]["KeyRevoked"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -4406,15 +4473,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        deleted?: unknown;
-                    };
+                    "application/json": components["schemas"]["Deleted"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -7419,13 +7484,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ScheduleItem"][];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -7461,17 +7526,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        cron?: unknown;
-                        id?: unknown;
-                        kind?: unknown;
-                    };
+                    "application/json": components["schemas"]["ScheduleCreated"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -7500,15 +7561,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        deleted?: unknown;
-                    };
+                    "application/json": components["schemas"]["Deleted"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -7543,16 +7602,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        enabled?: unknown;
-                        id?: unknown;
-                    };
+                    "application/json": components["schemas"]["ScheduleToggled"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -8078,13 +8134,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["WebhookItem"][];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -8119,19 +8175,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        active?: unknown;
-                        events?: unknown;
-                        id?: unknown;
-                        secret?: unknown;
-                        url?: unknown;
-                    };
+                    "application/json": components["schemas"]["WebhookCreated"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -8158,15 +8208,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        deliveries?: unknown;
-                    };
+                    "application/json": components["schemas"]["WebhookDeliveryList"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -8193,15 +8241,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        events?: unknown;
-                    };
+                    "application/json": components["schemas"]["WebhookEventCatalog"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -8229,15 +8275,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        deleted?: unknown;
-                    };
+                    "application/json": components["schemas"]["Deleted"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */

@@ -381,14 +381,11 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "deleted": {}
-                  }
+                  "$ref": "#/components/schemas/Deleted"
                 }
               }
             }
@@ -6394,10 +6391,15 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ScheduleItem"
+                  }
+                }
               }
             }
           },
@@ -6481,16 +6483,11 @@
         },
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "cron": {},
-                    "id": {},
-                    "kind": {}
-                  }
+                  "$ref": "#/components/schemas/ScheduleCreated"
                 }
               }
             }
@@ -6555,14 +6552,11 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "deleted": {}
-                  }
+                  "$ref": "#/components/schemas/Deleted"
                 }
               }
             }
@@ -6643,15 +6637,11 @@
         },
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "enabled": {},
-                    "id": {}
-                  }
+                  "$ref": "#/components/schemas/ScheduleToggled"
                 }
               }
             }
@@ -7448,10 +7438,15 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/WebhookItem"
+                  }
+                }
               }
             }
           },
@@ -7531,18 +7526,11 @@
         },
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "active": {},
-                    "events": {},
-                    "id": {},
-                    "secret": {},
-                    "url": {}
-                  }
+                  "$ref": "#/components/schemas/WebhookCreated"
                 }
               }
             }
@@ -7591,14 +7579,11 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "deliveries": {}
-                  }
+                  "$ref": "#/components/schemas/WebhookDeliveryList"
                 }
               }
             }
@@ -7647,14 +7632,11 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "events": {}
-                  }
+                  "$ref": "#/components/schemas/WebhookEventCatalog"
                 }
               }
             }
@@ -7711,14 +7693,11 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "deleted": {}
-                  }
+                  "$ref": "#/components/schemas/Deleted"
                 }
               }
             }
@@ -8811,6 +8790,18 @@
           }
         }
       },
+      "Deleted": {
+        "type": "object",
+        "description": "A delete's outcome: false when there was nothing (of this org's) to delete.",
+        "required": [
+          "deleted"
+        ],
+        "properties": {
+          "deleted": {
+            "type": "boolean"
+          }
+        }
+      },
       "DeliveryAccepted": {
         "type": "object",
         "description": "`202` from a source delivery: the published delivery and the run queued\nto consume it.",
@@ -9517,6 +9508,38 @@
             "items": {
               "$ref": "#/components/schemas/Job"
             }
+          }
+        }
+      },
+      "KeyIssued": {
+        "type": "object",
+        "description": "`POST /v1/orgs/{org}/api-keys`: the new key. `key` is the plaintext, shown\nexactly once; only its hash is stored.",
+        "required": [
+          "id",
+          "key",
+          "role"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          }
+        }
+      },
+      "KeyRevoked": {
+        "type": "object",
+        "description": "`DELETE /v1/orgs/{org}/api-keys/{key_id}`: whether a live key was revoked.",
+        "required": [
+          "revoked"
+        ],
+        "properties": {
+          "revoked": {
+            "type": "boolean"
           }
         }
       },
@@ -10982,6 +11005,78 @@
           }
         }
       },
+      "ScheduleCreated": {
+        "type": "object",
+        "description": "`POST …/schedules`: the schedule just created.",
+        "required": [
+          "id",
+          "kind",
+          "cron"
+        ],
+        "properties": {
+          "cron": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          }
+        }
+      },
+      "ScheduleItem": {
+        "type": "object",
+        "description": "One dataset schedule.",
+        "required": [
+          "id",
+          "kind",
+          "cron",
+          "enabled",
+          "source"
+        ],
+        "properties": {
+          "cron": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "description": "The job kind it enqueues."
+          },
+          "last_enqueued_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source": {
+            "type": "string",
+            "description": "`api` or `config`: a config-owned schedule is changed by publishing."
+          }
+        }
+      },
+      "ScheduleToggled": {
+        "type": "object",
+        "description": "`PATCH …/schedules/{schedule_id}`: the schedule's new enabled state.",
+        "required": [
+          "id",
+          "enabled"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          }
+        }
+      },
       "Staged": {
         "type": "object",
         "description": "One staged steward correction: recorded, not yet applied to the lake.",
@@ -11871,6 +11966,39 @@
           }
         }
       },
+      "WebhookCreated": {
+        "type": "object",
+        "description": "`POST /v1/orgs/{org}/webhooks`: the webhook, with its signing secret shown\nonce.",
+        "required": [
+          "id",
+          "url",
+          "events",
+          "secret",
+          "active"
+        ],
+        "properties": {
+          "active": {
+            "type": "boolean",
+            "description": "Always true."
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "id": {
+            "type": "string"
+          },
+          "secret": {
+            "type": "string",
+            "description": "The HMAC-SHA256 key for `X-ER-Signature`; not returned again."
+          },
+          "url": {
+            "type": "string"
+          }
+        }
+      },
       "WebhookDelivery": {
         "type": "object",
         "description": "One attempt-tracked delivery of one event to one subscriber. The event is recorded here BEFORE any network call, so a subscriber that is briefly unreachable gets the event late instead of never.",
@@ -11967,6 +12095,76 @@
           "webhook_id": {
             "type": "string",
             "description": "The subscription being delivered to."
+          }
+        }
+      },
+      "WebhookDeliveryList": {
+        "type": "object",
+        "description": "`GET /v1/orgs/{org}/webhooks/deliveries`: recent delivery attempts.",
+        "required": [
+          "deliveries"
+        ],
+        "properties": {
+          "deliveries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WebhookDelivery"
+            }
+          }
+        }
+      },
+      "WebhookEventCatalog": {
+        "type": "object",
+        "description": "`GET /v1/orgs/{org}/webhooks/events`: every event a webhook can subscribe to.",
+        "required": [
+          "events"
+        ],
+        "properties": {
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WebhookEventItem"
+            }
+          }
+        }
+      },
+      "WebhookEventItem": {
+        "type": "object",
+        "description": "One subscribable event.",
+        "required": [
+          "event",
+          "description"
+        ],
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "event": {
+            "type": "string"
+          }
+        }
+      },
+      "WebhookItem": {
+        "type": "object",
+        "description": "One active webhook, without its secret.",
+        "required": [
+          "id",
+          "url",
+          "events",
+          "active"
+        ],
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "events": {
+            "description": "Subscribed event names; empty subscribes to all."
+          },
+          "id": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
           }
         }
       }
