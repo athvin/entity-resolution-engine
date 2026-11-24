@@ -1955,6 +1955,19 @@ export interface components {
              */
             updated_at: string;
         };
+        /**
+         * @description A task clear and what each of its arms did: the body of
+         *     `POST …/jobs/{job_id}/tasks/{task_id}/clear`. Fields are in the order the
+         *     `json!` object this replaced emitted them, which serde_json sorts.
+         */
+        ClearAccepted: {
+            cleared: string[];
+            demanded_upstream: string[];
+            reopened: boolean;
+            reset: number;
+            restarting: number;
+            rotated: number;
+        };
         /** @description One column's shape within one profile run: how full it is, how many distinct values it holds, how long its values are, what types they parse as, and its most frequent values. One row per column rather than per value, because the lake schema language cannot express a partition (there is no partition_by field) and a per-value table would grow with the corpus instead of with the schema. */
         ColumnProfile: {
             /**
@@ -2430,6 +2443,10 @@ export interface components {
              */
             updated_at: string;
         };
+        /** @description One dataset's jobs, newest first: the body of `GET …/jobs`. */
+        JobList: {
+            jobs: components["schemas"]["Job"][];
+        };
         /** @description An immutable version of a tenant's matching model: the settings document the engine scores against, its hash, provenance and activation state. */
         MatchingModel: {
             /**
@@ -2795,6 +2812,11 @@ export interface components {
              */
             validity?: number | null;
         };
+        /** @description A resumed job, requeued: the body of `POST …/jobs/{job_id}/resume`. */
+        ResumeAccepted: {
+            job_id: string;
+            state: string;
+        };
         /** @description What the auto-ingest poller has already read, one row per (org, source). The poller runs on every dispatcher tick and the newest object under a prefix stays the newest until a new one arrives, so without this row the same CSV would be re-ingested every few seconds forever — an unbounded run loop over the tenant's own lake. An upsert rather than a log: the question it answers is 'what is already in', not 'what has ever been in', and the audit log already answers the second. */
         S3IngestCursor: {
             /**
@@ -3091,6 +3113,10 @@ export interface components {
             updated_at: string;
             /** @description Upstream task_ids, a UI projection of the compiled edges. */
             upstream: unknown;
+        };
+        /** @description Every try of every task of one job: the body of `GET …/jobs/{job_id}/tasks`. */
+        TaskList: {
+            tasks: components["schemas"]["TaskInstance"][];
         };
         /** @description A tenant webhook endpoint: its URL, subscribed events and signing secret. */
         Webhook: {
@@ -3544,13 +3570,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Job"][];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -5073,15 +5099,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        jobs?: unknown;
-                    };
+                    "application/json": components["schemas"]["JobList"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -5117,13 +5141,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Job"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -5152,13 +5176,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Job"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -5187,13 +5211,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Job"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -5222,16 +5246,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        job_id?: unknown;
-                        state?: unknown;
-                    };
+                    "application/json": components["schemas"]["ResumeAccepted"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -5260,15 +5281,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        tasks?: unknown;
-                    };
+                    "application/json": components["schemas"]["TaskList"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -5305,20 +5324,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        cleared?: unknown;
-                        demanded_upstream?: unknown;
-                        reopened?: unknown;
-                        reset?: unknown;
-                        restarting?: unknown;
-                        rotated?: unknown;
-                    };
+                    "application/json": components["schemas"]["ClearAccepted"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */

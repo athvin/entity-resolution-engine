@@ -236,3 +236,59 @@ async fn start(Path(id): Path<String>) {
     let ops = operations(src, &[], &BTreeSet::new()).unwrap();
     assert_eq!(ops[0].responses, vec![Envelope::Bare]);
 }
+
+#[test]
+fn registered_response_types_become_component_references() {
+    let src = r#"
+fn router() {
+    Router::new()
+        .route("/jobs", get(list).post(create))
+        .route("/jobs/{id}", get(one))
+        .route("/all", get(all))
+        .route("/mixed", get(mixed));
+}
+struct JobList {
+    jobs: Vec<JobWire>,
+}
+/// Viewer: list jobs (`GET /jobs`).
+async fn list() { Json(JobList { jobs }) }
+/// Steward: create a job (`POST /jobs`).
+async fn create() {
+    if bad { return (StatusCode::BAD_REQUEST, Json(json!({"detail": "no"}))).into_response(); }
+    (StatusCode::ACCEPTED, Json(er_entities::job::JobWire::from(&job))).into_response()
+}
+/// Viewer: one job (`GET /jobs/{id}`).
+async fn one(Path(id): Path<String>) { Json(JobWire::from(&job)) }
+/// Operator: every job (`GET /all`).
+async fn all() { Json::<Vec<JobWire>>(jobs.iter().map(JobWire::from).collect()) }
+/// Viewer: mixed (`GET /mixed`).
+async fn mixed() { if a { Json(JobWire::from(&job)) } else { Json(json!(job)) } }
+"#;
+    let schemas: BTreeSet<String> = ["Job", "JobList"].map(String::from).into();
+    let error = operations(src, &[], &schemas).err().unwrap();
+    assert!(error.contains("mixes typed and untyped"), "{error}");
+
+    let src = src.replace(".route(\"/mixed\", get(mixed))", "");
+    let ops = operations(&src, &[], &schemas).unwrap();
+    let schema = |path: &str, method: &str| {
+        ops.iter()
+            .find(|o| o.path == path && o.method == method)
+            .unwrap()
+            .response_schemas
+            .clone()
+    };
+    let job = json!({"$ref": "#/components/schemas/Job"});
+    assert_eq!(schema("/jobs", "GET"), [json!({"$ref": "#/components/schemas/JobList"})]);
+    assert_eq!(schema("/jobs", "POST"), [job.clone()]);
+    assert_eq!(schema("/jobs/{id}", "GET"), [job.clone()]);
+    assert_eq!(schema("/all", "GET"), [json!({"type": "array", "items": job})]);
+
+    // The ledger reads the wire spellings as the bare values they replace.
+    let ledger = crate::envelope_ledger(&src).unwrap();
+    assert!(ledger.contains("\"GET /all\": { \"envelope\": \"bare\" }"), "{ledger}");
+    assert!(ledger.contains("\"GET /jobs/{id}\": { \"envelope\": \"bare\" }"), "{ledger}");
+
+    // An unregistered type stays envelope-level rather than inventing a reference.
+    let ops = operations(&src, &[], &BTreeSet::new()).unwrap();
+    assert!(ops.iter().all(|o| o.response_schemas.is_empty()));
+}

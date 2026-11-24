@@ -79,7 +79,7 @@ use axum::http::StatusCode;
 use axum::http::request::Parts;
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tower::ServiceExt as _;
 
@@ -3941,7 +3941,7 @@ async fn create_job(
                     &json!({ "job_id": job.id, "kind": body.kind, "segment": body.segment }),
                 )
                 .await;
-                (StatusCode::ACCEPTED, Json(json!(job))).into_response()
+                (StatusCode::ACCEPTED, Json(er_entities::job::JobWire::from(&job))).into_response()
             }
             Err(e) => pg_err(e),
         };
@@ -3953,7 +3953,7 @@ async fn create_job(
         body.priority,
         principal.trace_context.as_deref(),
     );
-    (StatusCode::ACCEPTED, Json(json!(job))).into_response()
+    (StatusCode::ACCEPTED, Json(er_entities::job::JobWire::from(&job))).into_response()
 }
 
 /// Enqueue a `queued` job directly (the body of `create_job`, reusable by the
@@ -4126,6 +4126,38 @@ where
     Ok(Some(completed))
 }
 
+/// One dataset's jobs, newest first: the body of `GET …/jobs`.
+#[derive(Serialize, utoipa::ToSchema)]
+struct JobList {
+    jobs: Vec<er_entities::job::JobWire>,
+}
+
+/// Every try of every task of one job: the body of `GET …/jobs/{job_id}/tasks`.
+#[derive(Serialize, utoipa::ToSchema)]
+struct TaskList {
+    tasks: Vec<er_entities::task_instance::TaskInstanceWire>,
+}
+
+/// A resumed job, requeued: the body of `POST …/jobs/{job_id}/resume`.
+#[derive(Serialize, utoipa::ToSchema)]
+struct ResumeAccepted {
+    job_id: String,
+    state: &'static str,
+}
+
+/// A task clear and what each of its arms did: the body of
+/// `POST …/jobs/{job_id}/tasks/{task_id}/clear`. Fields are in the order the
+/// `json!` object this replaced emitted them, which serde_json sorts.
+#[derive(Serialize, utoipa::ToSchema)]
+struct ClearAccepted {
+    cleared: Vec<String>,
+    demanded_upstream: Vec<String>,
+    reopened: bool,
+    reset: usize,
+    restarting: usize,
+    rotated: usize,
+}
+
 /// Viewer+: list an org's jobs, newest first (`GET /v1/orgs/{org}/datasets/{ds}/jobs`).
 async fn list_jobs(
     principal: Principal,
@@ -4175,7 +4207,10 @@ async fn list_jobs(
         return match pg::list_jobs_all(&client, Some(&org_row.id), state_filter, limit).await {
             Ok(mut jobs) => {
                 jobs.retain(|j| j.dataset_id.as_deref() == Some(d.id.as_str()));
-                Json(json!({ "jobs": jobs })).into_response()
+                Json(JobList {
+                    jobs: jobs.iter().map(er_entities::job::JobWire::from).collect(),
+                })
+                .into_response()
             }
             Err(e) => pg_err(e),
         };
@@ -4189,7 +4224,10 @@ async fn list_jobs(
         .filter(|j| state_filter.is_none_or(|s| j.state == s))
         .take(usize::try_from(limit).unwrap_or(usize::MAX))
         .collect();
-    Json(json!({ "jobs": jobs })).into_response()
+    Json(JobList {
+        jobs: jobs.into_iter().map(er_entities::job::JobWire::from).collect(),
+    })
+    .into_response()
 }
 
 /// Viewer+: one job by id (`GET /v1/orgs/{org}/datasets/{ds}/jobs/{job_id}`), 404 if absent
@@ -4216,7 +4254,7 @@ async fn get_job(
             return *r;
         }
         return match pg::get_job(&client, &org_row.id, &job_id).await {
-            Ok(Some(job)) => (StatusCode::OK, Json(json!(job))).into_response(),
+            Ok(Some(job)) => (StatusCode::OK, Json(er_entities::job::JobWire::from(&job))).into_response(),
             Ok(None) => (
                 StatusCode::NOT_FOUND,
                 Json(json!({ "detail": "no such job" })),
@@ -4231,7 +4269,7 @@ async fn get_job(
         .iter()
         .find(|j| j.org_id == org && j.id == job_id)
     {
-        Some(job) => (StatusCode::OK, Json(json!(job))).into_response(),
+        Some(job) => (StatusCode::OK, Json(er_entities::job::JobWire::from(job))).into_response(),
         None => (
             StatusCode::NOT_FOUND,
             Json(json!({ "detail": "no such job" })),
@@ -4279,9 +4317,9 @@ async fn cancel_job(
                     Ok(rows) => match rows.into_iter().next() {
                         Some(updated) if updated.state == "canceled" => {
                             let _ = webhook::emit_job_event(&client, &updated).await;
-                            (StatusCode::OK, Json(json!(updated))).into_response()
+                            (StatusCode::OK, Json(er_entities::job::JobWire::from(&updated))).into_response()
                         }
-                        Some(updated) => (StatusCode::OK, Json(json!(updated))).into_response(),
+                        Some(updated) => (StatusCode::OK, Json(er_entities::job::JobWire::from(&updated))).into_response(),
                         None => detail_err(
                             StatusCode::CONFLICT,
                             "the job is not cancelable (already terminal)",
@@ -4303,7 +4341,7 @@ async fn cancel_job(
                     // the sending, so a slow or dead subscriber cannot hold up
                     // the response to a cancel that is already persisted.
                     let _ = webhook::emit_job_event(&client, &canceled).await;
-                    (StatusCode::OK, Json(json!(canceled))).into_response()
+                    (StatusCode::OK, Json(er_entities::job::JobWire::from(&canceled))).into_response()
                 }
                 Err(e) => pg_err(e),
             },
@@ -4323,7 +4361,7 @@ async fn cancel_job(
     {
         Some(job) => {
             job.state = "canceled".to_string();
-            (StatusCode::OK, Json(json!(job.clone()))).into_response()
+            (StatusCode::OK, Json(er_entities::job::JobWire::from(&*job))).into_response()
         }
         None => (
             StatusCode::NOT_FOUND,
@@ -4377,7 +4415,10 @@ async fn resume_job(
             .await;
             (
                 StatusCode::OK,
-                Json(json!({ "job_id": job_id, "state": "queued" })),
+                Json(ResumeAccepted {
+                    job_id,
+                    state: "queued",
+                }),
             )
                 .into_response()
         }
@@ -4425,7 +4466,7 @@ async fn list_job_tasks(
                 .iter()
                 .map(er_entities::task_instance::TaskInstanceWire::from)
                 .collect();
-            Json(json!({ "tasks": tasks })).into_response()
+            Json(TaskList { tasks }).into_response()
         }
         Err(e) => pg_err(e),
     }
@@ -4549,24 +4590,24 @@ async fn clear_job_task(
     {
         Ok(cleared) => (
             StatusCode::ACCEPTED,
-            Json(json!({
-                // What was cleared, and what each arm of the clear did —
-                // three arms, because a live row rotates, a terminal row gets
-                // a successor, and a pending row resets in place (§5.4).
-                "cleared": closure,
-                "restarting": cleared.restarting.len(),
-                "rotated": cleared.rotated.len(),
-                "reset": cleared.reset.len(),
-                "reopened": cleared.job.is_some(),
+            // What was cleared, and what each arm of the clear did — three
+            // arms, because a live row rotates, a terminal row gets a
+            // successor, and a pending row resets in place (§5.4).
+            Json(ClearAccepted {
+                cleared: closure,
                 // Empty from this process by construction (see the probe
                 // above); carried anyway so the shape does not change when
                 // the demand resolution gains a lake-side answer.
-                "demanded_upstream": plan
+                demanded_upstream: plan
                     .demanded_upstream
                     .iter()
-                    .map(|&i| dag.nodes[i].task_id)
-                    .collect::<Vec<_>>(),
-            })),
+                    .map(|&i| dag.nodes[i].task_id.to_string())
+                    .collect(),
+                reopened: cleared.job.is_some(),
+                reset: cleared.reset.len(),
+                restarting: cleared.restarting.len(),
+                rotated: cleared.rotated.len(),
+            }),
         )
             .into_response(),
         Err(taskpg::ClearError::Canceling) => detail_err(
@@ -5329,7 +5370,9 @@ async fn jobs_global(
     )
     .await
     {
-        Ok(jobs) => Json(json!(jobs)).into_response(),
+        Ok(jobs) => {
+            Json::<Vec<er_entities::job::JobWire>>(jobs.iter().map(er_entities::job::JobWire::from).collect()).into_response()
+        }
         Err(e) => pg_err(e),
     }
 }
@@ -12502,6 +12545,81 @@ mod tests {
             )
             .as_deref(),
             Some("/v1/orgs/acme/reviews/gray_band%3Acrm%3AC001%3Awebforms%3AW006/resolve"),
+        );
+    }
+}
+
+#[cfg(test)]
+mod response_shape_tests {
+    //! #864: a typed response must carry exactly what the `json!` it replaced
+    //! did. serde_json here has no `preserve_order`, so a `json!` object emits
+    //! its keys sorted while a struct emits them in declaration order: the
+    //! guarantee is equality of the parsed value, and byte equality where the
+    //! struct's fields are already in sorted order.
+    use super::{AppState, ClearAccepted, Job, JobList, ResumeAccepted, enqueue_traced};
+    use er_entities::job::JobWire;
+    use serde_json::json;
+
+    fn job() -> Job {
+        let state = AppState::new("operator-token".to_string());
+        let mut job = enqueue_traced(&state, "org", "run_all", 5, Some("00-trace-01"));
+        // Every nullable column populated in one, so a dropped field shows.
+        job.dataset_id = Some("ds".into());
+        job.params = json!({"segment": "s", "n": 1.5});
+        job.run_id = Some("run".into());
+        job.error_class = Some("config".into());
+        job.started_at = Some(job.created_at);
+        job
+    }
+
+    #[test]
+    fn a_job_serializes_to_the_same_value_as_its_wire() {
+        for job in [job(), enqueue_traced(&AppState::new("t".into()), "o", "train", 0, None)] {
+            assert_eq!(json!(job), json!(JobWire::from(&job)));
+        }
+    }
+
+    #[test]
+    fn job_lists_keep_their_wrapper_and_their_rows() {
+        let jobs = vec![job(), job()];
+        let wires = || jobs.iter().map(JobWire::from).collect();
+        assert_eq!(json!({ "jobs": jobs }), json!(JobList { jobs: wires() }));
+        let refs: Vec<&Job> = jobs.iter().collect();
+        assert_eq!(json!({ "jobs": refs }), json!(JobList { jobs: wires() }));
+        let global: Vec<JobWire> = jobs.iter().map(JobWire::from).collect();
+        assert_eq!(json!(jobs), json!(global));
+    }
+
+    #[test]
+    fn resume_and_clear_bodies_are_byte_identical() {
+        assert_eq!(
+            json!({ "job_id": "j1", "state": "queued" }).to_string(),
+            serde_json::to_string(&ResumeAccepted {
+                job_id: "j1".into(),
+                state: "queued",
+            })
+            .unwrap()
+        );
+        let closure = vec!["standardize".to_string(), "match".to_string()];
+        assert_eq!(
+            json!({
+                "cleared": closure,
+                "restarting": 1_usize,
+                "rotated": 2_usize,
+                "reset": 3_usize,
+                "reopened": true,
+                "demanded_upstream": Vec::<String>::new(),
+            })
+            .to_string(),
+            serde_json::to_string(&ClearAccepted {
+                cleared: closure.clone(),
+                demanded_upstream: Vec::new(),
+                reopened: true,
+                reset: 3,
+                restarting: 1,
+                rotated: 2,
+            })
+            .unwrap()
         );
     }
 }

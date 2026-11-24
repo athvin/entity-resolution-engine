@@ -565,10 +565,15 @@
         "operationId": "get_jobs",
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Job"
+                  }
+                }
               }
             }
           },
@@ -3313,14 +3318,11 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "jobs": {}
-                  }
+                  "$ref": "#/components/schemas/JobList"
                 }
               }
             }
@@ -3397,10 +3399,12 @@
         },
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
               }
             }
           },
@@ -3464,10 +3468,12 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
               }
             }
           },
@@ -3531,10 +3537,12 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
               }
             }
           },
@@ -3598,15 +3606,11 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "job_id": {},
-                    "state": {}
-                  }
+                  "$ref": "#/components/schemas/ResumeAccepted"
                 }
               }
             }
@@ -3671,14 +3675,11 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "tasks": {}
-                  }
+                  "$ref": "#/components/schemas/TaskList"
                 }
               }
             }
@@ -3766,19 +3767,11 @@
         },
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "cleared": {},
-                    "demanded_upstream": {},
-                    "reopened": {},
-                    "reset": {},
-                    "restarting": {},
-                    "rotated": {}
-                  }
+                  "$ref": "#/components/schemas/ClearAccepted"
                 }
               }
             }
@@ -8737,6 +8730,47 @@
           }
         }
       },
+      "ClearAccepted": {
+        "type": "object",
+        "description": "A task clear and what each of its arms did: the body of\n`POST …/jobs/{job_id}/tasks/{task_id}/clear`. Fields are in the order the\n`json!` object this replaced emitted them, which serde_json sorts.",
+        "required": [
+          "cleared",
+          "demanded_upstream",
+          "reopened",
+          "reset",
+          "restarting",
+          "rotated"
+        ],
+        "properties": {
+          "cleared": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "demanded_upstream": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "reopened": {
+            "type": "boolean"
+          },
+          "reset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "restarting": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "rotated": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
       "ColumnProfile": {
         "type": "object",
         "description": "One column's shape within one profile run: how full it is, how many distinct values it holds, how long its values are, what types they parse as, and its most frequent values. One row per column rather than per value, because the lake schema language cannot express a partition (there is no partition_by field) and a per-value table would grow with the corpus instead of with the schema.",
@@ -9647,6 +9681,21 @@
           }
         }
       },
+      "JobList": {
+        "type": "object",
+        "description": "One dataset's jobs, newest first: the body of `GET …/jobs`.",
+        "required": [
+          "jobs"
+        ],
+        "properties": {
+          "jobs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Job"
+            }
+          }
+        }
+      },
       "MatchingModel": {
         "type": "object",
         "description": "An immutable version of a tenant's matching model: the settings document the engine scores against, its hash, provenance and activation state.",
@@ -10288,6 +10337,22 @@
           }
         }
       },
+      "ResumeAccepted": {
+        "type": "object",
+        "description": "A resumed job, requeued: the body of `POST …/jobs/{job_id}/resume`.",
+        "required": [
+          "job_id",
+          "state"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          }
+        }
+      },
       "S3IngestCursor": {
         "type": "object",
         "description": "What the auto-ingest poller has already read, one row per (org, source). The poller runs on every dispatcher tick and the newest object under a prefix stays the newest until a new one arrives, so without this row the same CSV would be re-ingested every few seconds forever — an unbounded run loop over the tenant's own lake. An upsert rather than a log: the question it answers is 'what is already in', not 'what has ever been in', and the audit log already answers the second.",
@@ -10899,6 +10964,21 @@
           },
           "upstream": {
             "description": "Upstream task_ids, a UI projection of the compiled edges."
+          }
+        }
+      },
+      "TaskList": {
+        "type": "object",
+        "description": "Every try of every task of one job: the body of `GET …/jobs/{job_id}/tasks`.",
+        "required": [
+          "tasks"
+        ],
+        "properties": {
+          "tasks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskInstance"
+            }
           }
         }
       },
