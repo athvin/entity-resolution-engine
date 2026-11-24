@@ -160,6 +160,8 @@ fn account_golden_read_serves_acct_projection() {
     let detail = read::entity_detail(&session, EntityType::Account, snapshot, &entity_id)
         .unwrap()
         .expect("entity detail present");
+    // As the endpoint serves it.
+    let detail = serde_json::to_value(read::GoldenDetail::from(detail)).unwrap();
     assert!(
         detail["golden"].get("company_name").is_some(),
         "entity detail golden is the account projection"
