@@ -205,7 +205,10 @@ pub fn classify_envelope(body: &str, source: &str) -> Result<Envelope, String> {
     if let Some(envelope) = typed_object(&src, source)? {
         return Ok(envelope);
     }
-    if src.contains("Json(") {
+    // `Json(value)` and `Json::<Name>(value)` both serialize a value this
+    // classifier cannot see into; the turbofish only names its type, which the
+    // operation derivation reads, not the ledger.
+    if src.contains("Json(") || src.contains("Json::<") {
         return Ok(Envelope::Scalar);
     }
     Err("no Json(...), page_envelope(...) or object literal found".to_string())
@@ -413,6 +416,16 @@ struct EmptyResponse {
         // Each arm, against the shapes the handlers actually use. Without this the
         // classifier's branches are only exercised through whichever form happens
         // to appear first in lib.rs.
+        assert_eq!(
+            classify_envelope("{ Ok(m) => Json(m).into_response() }"),
+            Ok(Envelope::Scalar)
+        );
+        // A turbofish naming a non-wire type over a variable is the same
+        // unresolved value, not a missing response.
+        assert_eq!(
+            classify_envelope("{ Ok(m) => Json::<read::Metrics>(m).into_response() }"),
+            Ok(Envelope::Scalar)
+        );
         assert_eq!(
             classify_envelope("{ Ok(rows) => Json(json!(rows)).into_response() }"),
             Ok(Envelope::Bare)

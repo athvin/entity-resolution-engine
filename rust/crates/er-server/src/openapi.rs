@@ -139,6 +139,19 @@ pub struct ApiDoc;
     crate::read::RunItem,
     crate::read::RunEventItem,
     crate::RunEventPage,
+    crate::read::Metrics,
+    crate::read::Completeness,
+    crate::read::DataQuality,
+    crate::read::InsightPoint,
+    crate::InsightSeries,
+    crate::read::SourceInsight,
+    crate::SourceInsights,
+    crate::read::QualityBuckets,
+    crate::read::QualityDimensions,
+    crate::read::WorstRecord,
+    crate::read::QualityReport,
+    crate::read::QualityUnconfigured,
+    crate::read::Quality,
 )))]
 pub struct ResponseDoc;
 

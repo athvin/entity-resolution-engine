@@ -6053,7 +6053,7 @@ async fn org_metrics(
             Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}")),
         };
         match read::metrics(session, snapshot) {
-            Ok(m) => Json(m).into_response(),
+            Ok(m) => Json::<read::Metrics>(m).into_response(),
             Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
         }
     })
@@ -6088,7 +6088,7 @@ async fn org_data_quality(
             Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}")),
         };
         match read::data_quality(session, snapshot, stale_days) {
-            Ok(m) => Json(m).into_response(),
+            Ok(m) => Json::<read::DataQuality>(m).into_response(),
             Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
         }
     })
@@ -6276,6 +6276,22 @@ async fn duplicates_list(
     .unwrap_or_else(|response| *response)
 }
 
+/// `GET …/insights`: the retained metric series, newest first.
+#[derive(Serialize, utoipa::ToSchema)]
+struct InsightSeries {
+    snapshot: i64,
+    series: Vec<read::InsightPoint>,
+}
+
+/// `GET …/insights/sources`: each source's share of one run's duplication.
+#[derive(Serialize, utoipa::ToSchema)]
+struct SourceInsights {
+    snapshot: i64,
+    /// The run reported on; null (with no sources) before any run retained one.
+    run_id: Option<String>,
+    sources: Vec<read::SourceInsight>,
+}
+
 /// Viewer+: one run's per-source duplicate attribution
 /// (`GET /v1/orgs/{org}/datasets/{ds}/insights/sources`). Query `run_id`; defaults to the
 /// newest snapshot's run.
@@ -6305,12 +6321,14 @@ async fn insight_sources(
         let run_id = match params.get("run_id").map(String::as_str) {
             Some(id) if !id.is_empty() => id.to_string(),
             _ => match read::insights(session, snapshot, 1) {
-                Ok(series) => match series.first().and_then(|r| r["run_id"].as_str()) {
-                    Some(id) => id.to_string(),
+                Ok(series) => match series.into_iter().next() {
+                    Some(newest) => newest.run_id,
                     None => {
-                        return Json(
-                            json!({ "snapshot": snapshot, "run_id": null, "sources": [] }),
-                        )
+                        return Json(SourceInsights {
+                            snapshot,
+                            run_id: None,
+                            sources: Vec::new(),
+                        })
                         .into_response();
                     }
                 },
@@ -6320,11 +6338,11 @@ async fn insight_sources(
             },
         };
         match read::insight_sources(session, snapshot, &run_id) {
-            Ok(sources) => Json(json!({
-                "snapshot": snapshot,
-                "run_id": run_id,
-                "sources": sources,
-            }))
+            Ok(sources) => Json(SourceInsights {
+                snapshot,
+                run_id: Some(run_id),
+                sources,
+            })
             .into_response(),
             Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
         }
@@ -6366,7 +6384,7 @@ async fn insights(
         };
         let limit = read::parse_limit(params.get("limit").map(String::as_str));
         match read::insights(session, snapshot, limit) {
-            Ok(series) => Json(json!({ "snapshot": snapshot, "series": series })).into_response(),
+            Ok(series) => Json(InsightSeries { snapshot, series }).into_response(),
             Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
         }
     })
@@ -6407,7 +6425,7 @@ async fn quality(
         };
         let limit = read::parse_limit(params.get("limit").map(String::as_str));
         match read::quality(session, snapshot, limit) {
-            Ok(body) => Json(body).into_response(),
+            Ok(body) => Json::<read::Quality>(body).into_response(),
             Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
         }
     })

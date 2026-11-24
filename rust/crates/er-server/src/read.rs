@@ -1414,6 +1414,26 @@ pub fn uncertain_pairs(
         .collect())
 }
 
+/// One retained metric snapshot, with the rates derived from it.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, utoipa::ToSchema)]
+pub struct InsightPoint {
+    pub run_id: String,
+    /// chrono's display form (`YYYY-MM-DD HH:MM:SS[.f] UTC`).
+    pub captured_at: String,
+    pub records: i64,
+    pub entities: i64,
+    pub duplicate_records: i64,
+    pub duplicate_groups: i64,
+    pub largest_group: i64,
+    pub review_backlog: i64,
+    pub auto_merge_pairs: i64,
+    pub review_band_pairs: i64,
+    /// Duplicate records over records; null for an empty corpus.
+    pub duplicate_rate: Option<f64>,
+    /// Records over entities; null when there are none.
+    pub records_per_entity: Option<f64>,
+}
+
 /// The retained metric series, newest first, with the derived rates a caller
 /// would otherwise compute wrong.
 ///
@@ -1425,7 +1445,7 @@ pub fn uncertain_pairs(
 ///
 /// # Errors
 /// Propagates the lake query error.
-pub fn insights(session: &Session, snapshot: i64, limit: i64) -> Result<Vec<Value>, String> {
+pub fn insights(session: &Session, snapshot: i64, limit: i64) -> Result<Vec<InsightPoint>, String> {
     let limit = limit.clamp(1, MAX_LIMIT);
     let rows = er_entities::metric_snapshot::read::recent(session.connection(), snapshot, limit)
         .map_err(|e| e.to_string())?;
@@ -1447,22 +1467,79 @@ pub fn insights(session: &Session, snapshot: i64, limit: i64) -> Result<Vec<Valu
                     None
                 }
             };
-            json!({
-                "run_id": r.run_id,
-                "captured_at": r.captured_at.to_string(),
-                "records": r.records,
-                "entities": r.entities,
-                "duplicate_records": r.duplicate_records,
-                "duplicate_groups": r.duplicate_groups,
-                "largest_group": r.largest_group,
-                "review_backlog": r.review_backlog,
-                "auto_merge_pairs": r.auto_merge_pairs,
-                "review_band_pairs": r.review_band_pairs,
-                "duplicate_rate": rate(r.duplicate_records, r.records),
-                "records_per_entity": rate(r.records, r.entities),
-            })
+            InsightPoint {
+                run_id: r.run_id.clone(),
+                captured_at: r.captured_at.to_string(),
+                records: r.records,
+                entities: r.entities,
+                duplicate_records: r.duplicate_records,
+                duplicate_groups: r.duplicate_groups,
+                largest_group: r.largest_group,
+                review_backlog: r.review_backlog,
+                auto_merge_pairs: r.auto_merge_pairs,
+                review_band_pairs: r.review_band_pairs,
+                duplicate_rate: rate(r.duplicate_records, r.records),
+                records_per_entity: rate(r.records, r.entities),
+            }
         })
         .collect())
+}
+
+/// The record-quality score distribution, by band.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, utoipa::ToSchema)]
+pub struct QualityBuckets {
+    pub below_50: i64,
+    pub between_50_80: i64,
+    pub at_least_80: i64,
+}
+
+/// The mean of each quality dimension; null when nothing is scored.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, utoipa::ToSchema)]
+pub struct QualityDimensions {
+    pub completeness: Option<f64>,
+    pub validity: Option<f64>,
+    pub freshness: Option<f64>,
+}
+
+/// One of the lowest-scoring records.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, utoipa::ToSchema)]
+pub struct WorstRecord {
+    pub record_key: String,
+    pub score: f64,
+    pub completeness: f64,
+    pub validity: Option<f64>,
+    pub freshness: Option<f64>,
+}
+
+/// A configured dataset's record-quality report.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, utoipa::ToSchema)]
+pub struct QualityReport {
+    /// Always true.
+    pub configured: bool,
+    pub scored: i64,
+    pub mean_score: Option<f64>,
+    pub min_score: Option<f64>,
+    pub max_score: Option<f64>,
+    pub buckets: QualityBuckets,
+    pub dimensions: QualityDimensions,
+    pub worst: Vec<WorstRecord>,
+}
+
+/// A dataset with no quality rules configured: nothing has been scored.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, utoipa::ToSchema)]
+pub struct QualityUnconfigured {
+    /// Always 0.
+    pub scored: i64,
+    /// Always false.
+    pub configured: bool,
+}
+
+/// `GET …/quality`: the report, or the unconfigured answer.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, utoipa::ToSchema)]
+#[serde(untagged)]
+pub enum Quality {
+    Report(QualityReport),
+    Unconfigured(QualityUnconfigured),
 }
 
 /// The corpus's data-quality distribution and its worst records.
@@ -1474,7 +1551,7 @@ pub fn insights(session: &Session, snapshot: i64, limit: i64) -> Result<Vec<Valu
 /// # Errors
 /// Propagates the lake query error. A lake with no `record_qualities` relation —
 /// quality scoring unconfigured — reads as unscored rather than failing.
-pub fn quality(session: &Session, snapshot: i64, limit: i64) -> Result<Value, String> {
+pub fn quality(session: &Session, snapshot: i64, limit: i64) -> Result<Quality, String> {
     let limit = limit.clamp(1, MAX_LIMIT);
     let dist = match er_entities::record_quality::read::distribution(session.connection(), snapshot)
     {
@@ -1482,7 +1559,10 @@ pub fn quality(session: &Session, snapshot: i64, limit: i64) -> Result<Value, St
         // An unconfigured tenant has no relation at all, and "nothing has been
         // scored" is the honest answer to the question rather than an error.
         Err(e) if is_missing_relation(&e.to_string()) => {
-            return Ok(json!({ "scored": 0, "configured": false }));
+            return Ok(Quality::Unconfigured(QualityUnconfigured {
+                scored: 0,
+                configured: false,
+            }));
         }
         Err(e) => return Err(e.to_string()),
     };
@@ -1490,29 +1570,32 @@ pub fn quality(session: &Session, snapshot: i64, limit: i64) -> Result<Value, St
         er_entities::record_quality::read::worst(session.connection(), snapshot, 100.0, limit)
             .map_err(|e| e.to_string())?;
     let d = dist.first();
-    Ok(json!({
-        "configured": true,
-        "scored": d.and_then(|r| r.scored).unwrap_or(0),
-        "mean_score": d.and_then(|r| r.mean_score),
-        "min_score": d.and_then(|r| r.min_score),
-        "max_score": d.and_then(|r| r.max_score),
-        "buckets": {
-            "below_50": d.and_then(|r| r.below_50).unwrap_or(0),
-            "between_50_80": d.and_then(|r| r.between_50_80).unwrap_or(0),
-            "at_least_80": d.and_then(|r| r.at_least_80).unwrap_or(0),
+    Ok(Quality::Report(QualityReport {
+        configured: true,
+        scored: d.and_then(|r| r.scored).unwrap_or(0),
+        mean_score: d.and_then(|r| r.mean_score),
+        min_score: d.and_then(|r| r.min_score),
+        max_score: d.and_then(|r| r.max_score),
+        buckets: QualityBuckets {
+            below_50: d.and_then(|r| r.below_50).unwrap_or(0),
+            between_50_80: d.and_then(|r| r.between_50_80).unwrap_or(0),
+            at_least_80: d.and_then(|r| r.at_least_80).unwrap_or(0),
         },
-        "dimensions": {
-            "completeness": d.and_then(|r| r.mean_completeness),
-            "validity": d.and_then(|r| r.mean_validity),
-            "freshness": d.and_then(|r| r.mean_freshness),
+        dimensions: QualityDimensions {
+            completeness: d.and_then(|r| r.mean_completeness),
+            validity: d.and_then(|r| r.mean_validity),
+            freshness: d.and_then(|r| r.mean_freshness),
         },
-        "worst": worst.iter().map(|r| json!({
-            "record_key": r.record_key,
-            "score": r.score,
-            "completeness": r.completeness,
-            "validity": r.validity,
-            "freshness": r.freshness,
-        })).collect::<Vec<_>>(),
+        worst: worst
+            .iter()
+            .map(|r| WorstRecord {
+                record_key: r.record_key.clone(),
+                score: r.score,
+                completeness: r.completeness,
+                validity: r.validity,
+                freshness: r.freshness,
+            })
+            .collect(),
     }))
 }
 
@@ -1926,6 +2009,132 @@ mod typed_detail_tests {
             details: None,
             occurred_at: at(),
         });
+    }
+
+    #[test]
+    fn metrics_quality_and_insight_bodies_keep_their_keys() {
+        fn v<T: serde::Serialize>(x: &T) -> Value {
+            serde_json::to_value(x).unwrap()
+        }
+        assert_eq!(
+            json!({
+                "records": 10, "entities": 7, "duplicate_groups": 2,
+                "records_in_duplicate_groups": 5, "open_reviews": 1, "snapshot": 3,
+            }),
+            v(&Metrics {
+                records: 10,
+                entities: 7,
+                duplicate_groups: 2,
+                records_in_duplicate_groups: 5,
+                open_reviews: 1,
+                snapshot: 3,
+            })
+        );
+        let mut by_attribute = serde_json::Map::new();
+        by_attribute.insert("email".into(), json!(0.5));
+        assert_eq!(
+            json!({
+                "dq_score": 0.75,
+                "completeness": { "overall": 0.5, "by_attribute": Value::Object(by_attribute) },
+                "junk_rate": 0.0, "stale_rate": 0.25, "duplicate_rate": 0.5,
+                "records": 10, "entities": 7, "stale_days": 365, "snapshot": 3,
+            }),
+            v(&DataQuality {
+                dq_score: 0.75,
+                completeness: Completeness {
+                    overall: 0.5,
+                    by_attribute: [("email".to_string(), 0.5)].into(),
+                },
+                junk_rate: 0.0,
+                stale_rate: 0.25,
+                duplicate_rate: 0.5,
+                records: 10,
+                entities: 7,
+                stale_days: 365,
+                snapshot: 3,
+            })
+        );
+        assert_eq!(
+            json!({ "scored": 0, "configured": false }),
+            v(&Quality::Unconfigured(QualityUnconfigured {
+                scored: 0,
+                configured: false,
+            }))
+        );
+        assert_eq!(
+            json!({
+                "configured": true, "scored": 4, "mean_score": 71.5,
+                "min_score": 20.0, "max_score": null,
+                "buckets": { "below_50": 1, "between_50_80": 2, "at_least_80": 1 },
+                "dimensions": { "completeness": 0.9, "validity": null, "freshness": 0.4 },
+                "worst": [{
+                    "record_key": "crm:1", "score": 20.0, "completeness": 0.2,
+                    "validity": null, "freshness": 0.1,
+                }],
+            }),
+            v(&Quality::Report(QualityReport {
+                configured: true,
+                scored: 4,
+                mean_score: Some(71.5),
+                min_score: Some(20.0),
+                max_score: None,
+                buckets: QualityBuckets {
+                    below_50: 1,
+                    between_50_80: 2,
+                    at_least_80: 1,
+                },
+                dimensions: QualityDimensions {
+                    completeness: Some(0.9),
+                    validity: None,
+                    freshness: Some(0.4),
+                },
+                worst: vec![WorstRecord {
+                    record_key: "crm:1".into(),
+                    score: 20.0,
+                    completeness: 0.2,
+                    validity: None,
+                    freshness: Some(0.1),
+                }],
+            }))
+        );
+        assert_eq!(
+            json!({
+                "run_id": "r", "captured_at": "2026-11-24 00:00:00 UTC", "records": 10,
+                "entities": 0, "duplicate_records": 4, "duplicate_groups": 2,
+                "largest_group": 3, "review_backlog": 1, "auto_merge_pairs": 5,
+                "review_band_pairs": 6, "duplicate_rate": 0.4, "records_per_entity": null,
+            }),
+            v(&InsightPoint {
+                run_id: "r".into(),
+                captured_at: "2026-11-24 00:00:00 UTC".into(),
+                records: 10,
+                entities: 0,
+                duplicate_records: 4,
+                duplicate_groups: 2,
+                largest_group: 3,
+                review_backlog: 1,
+                auto_merge_pairs: 5,
+                review_band_pairs: 6,
+                duplicate_rate: Some(0.4),
+                records_per_entity: None,
+            })
+        );
+        assert_eq!(
+            json!({
+                "run_id": "r", "source_system": "crm",
+                "captured_at": "2026-11-24 00:00:00 UTC", "records": 0,
+                "duplicate_records": 0, "contributed_groups": 0, "duplicate_rate": null,
+            }),
+            v(&SourceInsight {
+                run_id: "r".into(),
+                source_system: "crm".into(),
+                captured_at: "2026-11-24 00:00:00 UTC".into(),
+                records: 0,
+                duplicate_records: 0,
+                contributed_groups: 0,
+                duplicate_rate: None,
+            })
+        );
     }
 
     #[test]
@@ -2681,6 +2890,17 @@ fn dup_group_stats(session: &Session, snapshot: i64) -> Result<(i64, i64), Strin
     ))
 }
 
+/// `GET …/metrics`: the dashboard counters, snapshot-pinned.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, utoipa::ToSchema)]
+pub struct Metrics {
+    pub records: i64,
+    pub entities: i64,
+    pub duplicate_groups: i64,
+    pub records_in_duplicate_groups: i64,
+    pub open_reviews: i64,
+    pub snapshot: i64,
+}
+
 /// Dashboard counters (`readapi.metrics`), snapshot-pinned: record/entity totals
 /// and duplicate-group sizing, plus the open-review count (0 when the lake has
 /// no `review_queue` yet — that table is written by the review stage, not the
@@ -2688,7 +2908,7 @@ fn dup_group_stats(session: &Session, snapshot: i64) -> Result<(i64, i64), Strin
 ///
 /// # Errors
 /// Propagates a lake query error (other than a missing `review_queue`).
-pub fn metrics(session: &Session, snapshot: i64) -> Result<Value, String> {
+pub fn metrics(session: &Session, snapshot: i64) -> Result<Metrics, String> {
     let records = std_record_count(session, snapshot)?;
     let entities = golden_record_count(session, snapshot)?;
     let (duplicate_groups, records_in_dupes) = dup_group_stats(session, snapshot)?;
@@ -2697,14 +2917,37 @@ pub fn metrics(session: &Session, snapshot: i64) -> Result<Value, String> {
         .ok()
         .and_then(|rows| rows.first().and_then(|r| r.n))
         .unwrap_or(0);
-    Ok(json!({
-        "records": records,
-        "entities": entities,
-        "duplicate_groups": duplicate_groups,
-        "records_in_duplicate_groups": records_in_dupes,
-        "open_reviews": open_reviews,
-        "snapshot": snapshot,
-    }))
+    Ok(Metrics {
+        records,
+        entities,
+        duplicate_groups,
+        records_in_duplicate_groups: records_in_dupes,
+        open_reviews,
+        snapshot,
+    })
+}
+
+/// Golden-record completeness: overall and per survivable column.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, utoipa::ToSchema)]
+pub struct Completeness {
+    pub overall: f64,
+    /// Non-null fraction per golden column.
+    pub by_attribute: std::collections::BTreeMap<String, f64>,
+}
+
+/// `GET …/data-quality`: the composite score and its four inputs.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, utoipa::ToSchema)]
+pub struct DataQuality {
+    /// The mean of completeness and the complements of the three rates.
+    pub dq_score: f64,
+    pub completeness: Completeness,
+    pub junk_rate: f64,
+    pub stale_rate: f64,
+    pub duplicate_rate: f64,
+    pub records: i64,
+    pub entities: i64,
+    pub stale_days: i64,
+    pub snapshot: i64,
 }
 
 /// Data-quality scores (`readapi.data_quality`), snapshot-pinned and READ-ONLY —
@@ -2724,7 +2967,11 @@ pub fn metrics(session: &Session, snapshot: i64) -> Result<Value, String> {
 /// # Errors
 /// Propagates a lake query error (the core tables must exist — i.e. the org has
 /// had at least one run).
-pub fn data_quality(session: &Session, snapshot: i64, stale_days: i64) -> Result<Value, String> {
+pub fn data_quality(
+    session: &Session,
+    snapshot: i64,
+    stale_days: i64,
+) -> Result<DataQuality, String> {
     let conn = session.connection();
     let records = std_record_count(session, snapshot)?;
     let entities = golden_record_count(session, snapshot)?;
@@ -2750,13 +2997,13 @@ pub fn data_quality(session: &Session, snapshot: i64, stale_days: i64) -> Result
         ("addr_postal", comp.c_addr_postal),
         ("birth_date", comp.c_birth_date),
     ];
-    let mut by_attribute = serde_json::Map::new();
+    let mut by_attribute = std::collections::BTreeMap::new();
     let mut comp_sum = 0.0;
     for (name, count) in counts {
         let cnt = count.unwrap_or(0) as f64;
         let frac = if n_golden > 0.0 { cnt / n_golden } else { 0.0 };
         comp_sum += frac;
-        by_attribute.insert(name.to_string(), json!(frac));
+        by_attribute.insert(name.to_string(), frac);
     }
     let completeness = comp_sum / counts.len() as f64;
 
@@ -2784,17 +3031,20 @@ pub fn data_quality(session: &Session, snapshot: i64, stale_days: i64) -> Result
     let dq_score =
         (completeness + (1.0 - junk_rate) + (1.0 - stale_rate) + (1.0 - duplicate_rate)) / 4.0;
 
-    Ok(json!({
-        "dq_score": dq_score,
-        "completeness": { "overall": completeness, "by_attribute": Value::Object(by_attribute) },
-        "junk_rate": junk_rate,
-        "stale_rate": stale_rate,
-        "duplicate_rate": duplicate_rate,
-        "records": records,
-        "entities": entities,
-        "stale_days": stale_days,
-        "snapshot": snapshot,
-    }))
+    Ok(DataQuality {
+        dq_score,
+        completeness: Completeness {
+            overall: completeness,
+            by_attribute,
+        },
+        junk_rate,
+        stale_rate,
+        duplicate_rate,
+        records,
+        entities,
+        stale_days,
+        snapshot,
+    })
 }
 
 /// One keyset page of a run's entity events, oldest first — the detail behind
@@ -2914,6 +3164,20 @@ pub fn unscored_open_reviews(session: &Session, snapshot: i64) -> Result<i64, St
     }
 }
 
+/// One source's share of a run's duplication.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, utoipa::ToSchema)]
+pub struct SourceInsight {
+    pub run_id: String,
+    pub source_system: String,
+    /// chrono's display form (`YYYY-MM-DD HH:MM:SS[.f] UTC`).
+    pub captured_at: String,
+    pub records: i64,
+    pub duplicate_records: i64,
+    pub contributed_groups: i64,
+    /// Null when the source contributed no records.
+    pub duplicate_rate: Option<f64>,
+}
+
 /// One run's per-source duplicate attribution, worst first (O7b-2).
 ///
 /// The corpus-wide duplicate rate says a tenant has a problem; it does not say
@@ -2928,7 +3192,7 @@ pub fn insight_sources(
     session: &Session,
     snapshot: i64,
     run_id: &str,
-) -> Result<Vec<Value>, String> {
+) -> Result<Vec<SourceInsight>, String> {
     match er_entities::metric_snapshot_source::read::by_run(session.connection(), snapshot, run_id)
     {
         Ok(rows) => Ok(rows
@@ -2944,15 +3208,15 @@ pub fn insight_sources(
                 } else {
                     None
                 };
-                json!({
-                    "run_id": r.run_id,
-                    "source_system": r.source_system,
-                    "captured_at": r.captured_at.to_string(),
-                    "records": r.records,
-                    "duplicate_records": r.duplicate_records,
-                    "contributed_groups": r.contributed_groups,
-                    "duplicate_rate": rate,
-                })
+                SourceInsight {
+                    run_id: r.run_id.clone(),
+                    source_system: r.source_system.clone(),
+                    captured_at: r.captured_at.to_string(),
+                    records: r.records,
+                    duplicate_records: r.duplicate_records,
+                    contributed_groups: r.contributed_groups,
+                    duplicate_rate: rate,
+                }
             })
             .collect()),
         Err(e) => {
