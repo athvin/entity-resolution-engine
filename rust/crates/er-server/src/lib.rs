@@ -7050,8 +7050,11 @@ async fn dataset_profile_run(
 #[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 struct ExportIn {
-    /// `golden` (one row per golden record) or `duplicates` (one row per
-    /// duplicate group).
+    /// `golden` (one row per golden record), `duplicates` (one row per
+    /// duplicate group) or `lineage` (one row per source record: its
+    /// `source_system`, `source_record_id` and the `entity_id` it resolved to).
+    /// Join `lineage` to `golden` on `entity_id = id` to map every golden
+    /// record back to the keys in your own systems, at the same snapshot.
     kind: String,
     /// `csv` or `jsonl`. Duplicates export as `jsonl` only.
     format: String,

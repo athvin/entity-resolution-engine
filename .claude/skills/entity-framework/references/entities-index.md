@@ -30,7 +30,7 @@ statements is read or written only through the engine's own stage SQL, not
 through a typed query function.
 
 <!-- BEGIN GENERATED: entities-index -->
-**54 entities, 280 declared statements.**
+**54 entities, 281 declared statements.**
 
 | Entity | Relation | Store | Key | Natural key | History |
 |---|---|---|---|---|---|
@@ -106,7 +106,7 @@ Declared statements per entity and operation:
 | `ddl_log` | 0 | 1 | 0 | 0 |
 | `entity_event` | 1 | 3 | 0 | 1 |
 | `entity_link` | 1 | 1 | 0 | 1 |
-| `entity_membership` | 0 | 7 | 1 | 1 |
+| `entity_membership` | 0 | 8 | 1 | 1 |
 | `fixup` | 1 | 1 | 0 | 0 |
 | `golden_lineage` | 0 | 1 | 0 | 0 |
 | `golden_override` | 1 | 0 | 0 | 1 |

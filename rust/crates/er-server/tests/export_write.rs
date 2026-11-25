@@ -12,7 +12,10 @@
 //! 4. an empty lake (the snapshot before any run): a zero-row artifact, not an
 //!    error, so "nothing yet" and "failed" stay different answers;
 //! 5. the row ceiling: the export fails naming it, and leaves no file and no
-//!    `.partial` behind, so a failed export can never be downloaded.
+//!    `.partial` behind, so a failed export can never be downloaded;
+//! 6. lineage (#1231), the join a customer makes back to their own keys: every
+//!    source record of a file-ingested (non-Salesforce) dataset appears exactly
+//!    once, and the entities it names are exactly the golden export's.
 
 use std::path::{Path, PathBuf};
 
@@ -183,6 +186,70 @@ fn an_export_writes_every_page_of_its_pinned_snapshot() {
         .filter(|n| n.ends_with(".partial"))
         .collect();
     assert!(leftovers.is_empty(), "partial files left: {leftovers:?}");
+
+    // 6. Lineage at R, as CSV and JSONL: the seven source records (four crm,
+    //    three vendors), each once, joined to R's four golden records.
+    let (report, path) = write(
+        "lineage.csv",
+        &request(ExportKind::Lineage, ExportFormat::Csv, r),
+        exports::MAX_ROWS,
+    );
+    assert_eq!(report.unwrap().rows, 7);
+    let lineage = lines(&path);
+    assert_eq!(
+        lineage[0],
+        "record_key,source_system,source_record_id,entity_id"
+    );
+    let rows: Vec<Vec<&str>> = lineage[1..]
+        .iter()
+        .map(|l| l.split(',').collect())
+        .collect();
+    let mut sources: Vec<(String, String)> = rows
+        .iter()
+        .map(|r| (r[1].to_string(), r[2].to_string()))
+        .collect();
+    sources.sort();
+    let mut expected: Vec<(String, String)> = crm
+        .lines()
+        .skip(1)
+        .map(|l| ("crm".to_string(), l.split(',').next().unwrap().to_string()))
+        .chain(vendors.lines().skip(1).map(|l| {
+            (
+                "vendors".to_string(),
+                l.split(',').next().unwrap().to_string(),
+            )
+        }))
+        .collect();
+    expected.sort();
+    assert_eq!(sources, expected, "every source record, exactly once");
+    let entities: std::collections::BTreeSet<&str> = rows.iter().map(|r| r[3]).collect();
+    let (report, path) = write(
+        "golden-r.jsonl",
+        &request(ExportKind::Golden, ExportFormat::Jsonl, r),
+        exports::MAX_ROWS,
+    );
+    assert_eq!(report.unwrap().rows, 4);
+    let golden: std::collections::BTreeSet<String> = lines(&path)
+        .iter()
+        .map(|l| {
+            serde_json::from_str::<serde_json::Value>(l).unwrap()["id"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        })
+        .collect();
+    assert_eq!(
+        entities,
+        golden.iter().map(String::as_str).collect(),
+        "the lineage's entities are exactly the golden records"
+    );
+    let (report, path) = write(
+        "lineage.jsonl",
+        &request(ExportKind::Lineage, ExportFormat::Jsonl, r),
+        exports::MAX_ROWS,
+    );
+    assert_eq!(report.unwrap().rows, 7);
+    assert_eq!(lines(&path).len(), 7);
 
     let _ = std::fs::remove_dir_all(&tmp);
 }
