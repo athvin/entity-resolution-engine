@@ -147,6 +147,14 @@ The operation contract is generated and gated, with deliberate limits:
   variable and passed as `Json::<Name>(body)` classifies as an unresolved
   scalar, so a struct with `#[serde(flatten)]` (`ModelCompiled`) is served that
   way.
+  An **Arrow** read is binary to OpenAPI, so its rows are named in
+  `ARROW_ROWS` in `openapi.rs` (`x-er-arrow-rows`, plus the `x-er-snapshot`
+  and `x-er-next-cursor` headers). The named components are tested to equal
+  the entity's Arrow schema field for field, and an Arrow operation missing
+  from the table fails generation's tests. A response typed per entity type is
+  one struct per type (`PersonDuplicatesPage` / `AccountDuplicatesPage`), which
+  documents as an `anyOf`. `every_public_result_read_documents_its_payload`
+  holds E11's result reads to a real schema (#1234).
   A lake read returns a typed item spelled out beside it in `read.rs`, because
   generated row names (`PageRow`, `ByIdRow`) repeat across entity modules.
   Its `From` destructures the row exhaustively, so a new column fails to

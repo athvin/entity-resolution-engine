@@ -184,6 +184,8 @@ fn account_golden_read_serves_acct_projection() {
         50,
     )
     .unwrap();
+    // The wire JSON, which is what a client reads.
+    let groups = groups.to_values();
     assert_eq!(
         groups.len(),
         3,
