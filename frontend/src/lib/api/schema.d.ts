@@ -4529,7 +4529,24 @@ export interface operations {
     };
     get_audit: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Only entries with this action. */
+                action?: string;
+                /** @description Only entries by this actor. */
+                actor?: string;
+                /** @description Keyset cursor: only entries with a smaller id; an integer. */
+                before_id?: string;
+                /** @description `csv` for a text/csv export; JSON otherwise. */
+                format?: string;
+                /** @description Maximum items to return; an integer, clamped to the endpoint's range when out of it. */
+                limit?: string;
+                /** @description Only this org's entries (operator feed). */
+                org?: string;
+                /** @description Inclusive lower bound on the timestamp (any form `timestamptz` accepts). */
+                since?: string;
+                /** @description Exclusive upper bound on the timestamp. */
+                until?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4816,7 +4833,14 @@ export interface operations {
     };
     get_jobs: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Maximum items to return; an integer, clamped to the endpoint's range when out of it. */
+                limit?: string;
+                /** @description Only this org's entries (operator feed). */
+                org?: string;
+                /** @description Only items in this state. */
+                state?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5028,7 +5052,22 @@ export interface operations {
     };
     get_orgs_by_org_audit: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Only entries with this action. */
+                action?: string;
+                /** @description Only entries by this actor. */
+                actor?: string;
+                /** @description Keyset cursor: only entries with a smaller id; an integer. */
+                before_id?: string;
+                /** @description `csv` for a text/csv export; JSON otherwise. */
+                format?: string;
+                /** @description Maximum items to return; an integer, clamped to the endpoint's range when out of it. */
+                limit?: string;
+                /** @description Inclusive lower bound on the timestamp (any form `timestamptz` accepts). */
+                since?: string;
+                /** @description Exclusive upper bound on the timestamp. */
+                until?: string;
+            };
             header?: never;
             path: {
                 org: string;
@@ -5334,7 +5373,14 @@ export interface operations {
     };
     get_orgs_by_org_datasets_by_ds_assertions: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description The opaque `next_cursor` of the previous page; omit for the first page. */
+                cursor?: string;
+                /** @description `true` to include retracted assertions. */
+                include_retracted?: string;
+                /** @description Maximum items to return; an integer, clamped to the endpoint's range when out of it. */
+                limit?: string;
+            };
             header?: never;
             path: {
                 org: string;
@@ -5484,7 +5530,10 @@ export interface operations {
     };
     get_orgs_by_org_datasets_by_ds_blocking_estimate: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description How many of the largest blocks to report; an integer. */
+                largest?: string;
+            };
             header?: never;
             path: {
                 org: string;
@@ -5696,7 +5745,10 @@ export interface operations {
     };
     get_orgs_by_org_datasets_by_ds_data_quality: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description A record not updated in this many days counts as stale; an integer. */
+                stale_days?: string;
+            };
             header?: never;
             path: {
                 org: string;
@@ -5730,7 +5782,32 @@ export interface operations {
     };
     get_orgs_by_org_datasets_by_ds_duplicates: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description The opaque `next_cursor` of the previous page; omit for the first page. */
+                cursor?: string;
+                /** @description Exclude groups carrying this tag. */
+                exclude_tag?: string;
+                /** @description Maximum items to return; an integer, clamped to the endpoint's range when out of it. */
+                limit?: string;
+                /** @description Only groups matched by this model version. */
+                matched_by?: string;
+                /** @description Only groups whose evidence names this comparison column. */
+                matched_on?: string;
+                /** @description Upper bound on group confidence (0–100); an integer. */
+                max_confidence?: string;
+                /** @description Upper bound on group size; an integer. */
+                max_members?: string;
+                /** @description Jump to the group containing this record key. */
+                member?: string;
+                /** @description Lower bound on group confidence (0–100); an integer. */
+                min_confidence?: string;
+                /** @description Lower bound on group size; an integer. */
+                min_members?: string;
+                /** @description Only groups carrying this tag. */
+                tag?: string;
+                /** @description `true` or `false`: only (un)verified groups. */
+                verified?: string;
+            };
             header?: never;
             path: {
                 org: string;
@@ -5921,7 +5998,14 @@ export interface operations {
     };
     get_orgs_by_org_datasets_by_ds_golden_records: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description The opaque `next_cursor` of the previous page; omit for the first page. */
+                cursor?: string;
+                /** @description Maximum items to return; an integer, clamped to the endpoint's range when out of it. */
+                limit?: string;
+                /** @description Free-text search over the golden record. */
+                q?: string;
+            };
             header?: never;
             path: {
                 org: string;
@@ -5955,7 +6039,9 @@ export interface operations {
     };
     get_orgs_by_org_datasets_by_ds_golden_records_by_entity_id: {
         parameters: {
-            query?: never;
+            query?: {
+                snapshot?: number;
+            };
             header?: never;
             path: {
                 org: string;
@@ -6114,7 +6200,14 @@ export interface operations {
     };
     get_orgs_by_org_datasets_by_ds_imports: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description The opaque `next_cursor` of the previous page; omit for the first page. */
+                cursor?: string;
+                /** @description Maximum items to return; an integer, clamped to the endpoint's range when out of it. */
+                limit?: string;
+                /** @description The source system. */
+                source?: string;
+            };
             header?: never;
             path: {
                 org: string;
@@ -6151,7 +6244,10 @@ export interface operations {
     };
     post_orgs_by_org_datasets_by_ds_imports: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description The source system. */
+                source?: string;
+            };
             header?: never;
             path: {
                 org: string;
@@ -6192,7 +6288,12 @@ export interface operations {
     };
     get_orgs_by_org_datasets_by_ds_imports_recent: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Maximum items to return; an integer, clamped to the endpoint's range when out of it. */
+                limit?: string;
+                /** @description The source system. */
+                source?: string;
+            };
             header?: never;
             path: {
                 org: string;
@@ -6226,7 +6327,10 @@ export interface operations {
     };
     get_orgs_by_org_datasets_by_ds_insights: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Maximum items to return; an integer, clamped to the endpoint's range when out of it. */
+                limit?: string;
+            };
             header?: never;
             path: {
                 org: string;
@@ -6260,7 +6364,10 @@ export interface operations {
     };
     get_orgs_by_org_datasets_by_ds_insights_sources: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description The run to report on; the newest when omitted. */
+                run_id?: string;
+            };
             header?: never;
             path: {
                 org: string;
@@ -6294,7 +6401,12 @@ export interface operations {
     };
     get_orgs_by_org_datasets_by_ds_jobs: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Maximum items to return; an integer, clamped to the endpoint's range when out of it. */
+                limit?: string;
+                /** @description Only items in this state. */
+                state?: string;
+            };
             header?: never;
             path: {
                 org: string;
@@ -6553,7 +6665,14 @@ export interface operations {
     };
     get_orgs_by_org_datasets_by_ds_labeling_next: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Maximum items to return; an integer, clamped to the endpoint's range when out of it. */
+                limit?: string;
+                /** @description Upper bound on the probability band (0–1); a number. */
+                max?: string;
+                /** @description Lower bound on the probability band (0–1); a number, not below the review floor. */
+                min?: string;
+            };
             header?: never;
             path: {
                 org: string;
@@ -6587,7 +6706,14 @@ export interface operations {
     };
     get_orgs_by_org_datasets_by_ds_labels: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Maximum items to return; an integer, clamped to the endpoint's range when out of it. */
+                limit?: string;
+                /** @description Only labels from this origin (`human`, `reviewer`, `llm`). */
+                origin?: string;
+                /** @description Only labels with this verdict (`match`, `no_match`). */
+                verdict?: string;
+            };
             header?: never;
             path: {
                 org: string;
@@ -6789,7 +6915,10 @@ export interface operations {
     };
     get_orgs_by_org_datasets_by_ds_match_preview: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Maximum items to return; an integer, clamped to the endpoint's range when out of it. */
+                limit?: string;
+            };
             header?: never;
             path: {
                 org: string;
@@ -6823,7 +6952,16 @@ export interface operations {
     };
     get_orgs_by_org_datasets_by_ds_match_scores: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Upper bound on match probability (0–1); a number. */
+                band_high?: string;
+                /** @description Lower bound on match probability (0–1); a number. */
+                band_low?: string;
+                /** @description The opaque `next_cursor` of the previous page; omit for the first page. */
+                cursor?: string;
+                /** @description Maximum items to return; an integer, clamped to the endpoint's range when out of it. */
+                limit?: string;
+            };
             header?: never;
             path: {
                 org: string;
@@ -6861,7 +6999,16 @@ export interface operations {
     };
     get_orgs_by_org_datasets_by_ds_merge_plans: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description `csv` for a text/csv export; JSON otherwise. */
+                format?: string;
+                /** @description Maximum items to return; an integer, clamped to the endpoint's range when out of it. */
+                limit?: string;
+                /** @description The master-election policy (default `most_attributes`). */
+                policy?: string;
+                /** @description Inclusive lower bound on the timestamp (any form `timestamptz` accepts). */
+                since?: string;
+            };
             header?: never;
             path: {
                 org: string;
@@ -7169,7 +7316,10 @@ export interface operations {
     };
     get_orgs_by_org_datasets_by_ds_models_by_name_versions_by_version_evaluation: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description The cut to evaluate at (0–1); the configured auto-merge threshold when omitted. */
+                threshold?: string;
+            };
             header?: never;
             path: {
                 org: string;
@@ -7205,7 +7355,14 @@ export interface operations {
     };
     get_orgs_by_org_datasets_by_ds_profile: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description The source system. */
+                source?: string;
+                /** @description The corpus stage profiled. */
+                subject?: string;
+                /** @description Profile tier, 1 or 2; an integer (default 1). */
+                tier?: string;
+            };
             header?: never;
             path: {
                 org: string;
@@ -7279,7 +7436,10 @@ export interface operations {
     };
     get_orgs_by_org_datasets_by_ds_quality: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Maximum items to return; an integer, clamped to the endpoint's range when out of it. */
+                limit?: string;
+            };
             header?: never;
             path: {
                 org: string;
@@ -7846,7 +8006,20 @@ export interface operations {
     };
     get_orgs_by_org_datasets_by_ds_reviews: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description The opaque `next_cursor` of the previous page; omit for the first page. */
+                cursor?: string;
+                /** @description Maximum items to return; an integer, clamped to the endpoint's range when out of it. */
+                limit?: string;
+                /** @description Upper bound on match probability (0–1); a number. */
+                max_probability?: string;
+                /** @description Lower bound on match probability (0–1); a number. */
+                min_probability?: string;
+                /** @description Only reviews escalated for this reason. */
+                reason?: string;
+                /** @description Only reviews in this status. */
+                status?: string;
+            };
             header?: never;
             path: {
                 org: string;
@@ -8069,7 +8242,14 @@ export interface operations {
     };
     get_orgs_by_org_datasets_by_ds_runs_by_run_id_entity_events: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description The opaque `next_cursor` of the previous page; omit for the first page. */
+                cursor?: string;
+                /** @description Only events of this type. */
+                event_type?: string;
+                /** @description Maximum items to return; an integer, clamped to the endpoint's range when out of it. */
+                limit?: string;
+            };
             header?: never;
             path: {
                 org: string;
@@ -8401,7 +8581,10 @@ export interface operations {
     };
     get_orgs_by_org_datasets_by_ds_taggings: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description The subject kind (`entity`, `record`, …). */
+                subject_type?: string;
+            };
             header?: never;
             path: {
                 org: string;
@@ -8477,7 +8660,12 @@ export interface operations {
     };
     get_orgs_by_org_datasets_by_ds_tags_by_tag_id_subjects: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Maximum items to return; an integer, clamped to the endpoint's range when out of it. */
+                limit?: string;
+                /** @description The subject kind (`entity`, `record`, …). */
+                subject_type?: string;
+            };
             header?: never;
             path: {
                 org: string;
@@ -8666,7 +8854,12 @@ export interface operations {
     };
     get_orgs_by_org_tags: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description With `subject_type`: only tags applied to this subject. */
+                subject_id?: string;
+                /** @description The subject kind (`entity`, `record`, …). */
+                subject_type?: string;
+            };
             header?: never;
             path: {
                 org: string;
@@ -8848,7 +9041,11 @@ export interface operations {
     };
     get_orgs_by_org_webhooks_deliveries: {
         parameters: {
-            query?: never;
+            query?: {
+                webhook_id?: string;
+                state?: string;
+                limit?: number;
+            };
             header?: never;
             path: {
                 org: string;

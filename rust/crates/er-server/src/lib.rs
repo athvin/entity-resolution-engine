@@ -66,7 +66,7 @@ pub mod urlguard;
 pub mod webhook;
 pub mod writeback;
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 
 use er_config::{Config, config_hash, load_config_str};
@@ -2837,6 +2837,13 @@ fn label_evaluation(
     }
 }
 
+/// The query parameters of `model_version_evaluation`.
+#[derive(Debug, Clone, Default, Deserialize)]
+struct ModelVersionEvaluationQuery {
+    /// The cut to evaluate at (0–1); the configured auto-merge threshold when omitted.
+    threshold: Option<String>,
+}
+
 /// Viewer+: how a model version scored against its own labels
 /// (`GET /v1/orgs/{org}/datasets/{ds}/models/{name}/versions/{version}/evaluation`).
 ///
@@ -2848,7 +2855,7 @@ async fn model_version_evaluation(
     principal: Principal,
     State(state): State<AppState>,
     Path((org, ds, name, version)): Path<(String, String, String, i64)>,
-    Query(params): Query<HashMap<String, String>>,
+    Query(params): Query<ModelVersionEvaluationQuery>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
@@ -2879,7 +2886,7 @@ async fn model_version_evaluation(
         }
         Err(e) => return pg_err(e),
     };
-    let threshold = match read::parse_f64(params.get("threshold").map(String::as_str)) {
+    let threshold = match read::parse_f64(params.threshold.as_deref()) {
         Some(t) if (0.0..=1.0).contains(&t) => t,
         Some(_) => {
             return detail_err(
@@ -4469,12 +4476,21 @@ struct ClearAccepted {
     rotated: usize,
 }
 
+/// The query parameters of `list_jobs`.
+#[derive(Debug, Clone, Default, Deserialize)]
+struct ListJobsQuery {
+    /// Maximum items to return; an integer, clamped to the endpoint's range when out of it.
+    limit: Option<String>,
+    /// Only items in this state.
+    state: Option<String>,
+}
+
 /// Viewer+: list an org's jobs, newest first (`GET /v1/orgs/{org}/datasets/{ds}/jobs`).
 async fn list_jobs(
     principal: Principal,
     State(state): State<AppState>,
     Path((org, ds)): Path<(String, String)>,
-    Query(params): Query<HashMap<String, String>>,
+    Query(params): Query<ListJobsQuery>,
 ) -> axum::response::Response {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
@@ -4488,7 +4504,7 @@ async fn list_jobs(
     //
     // Validated and parsed the same way `jobs_global` does, so the two job views
     // answer the same query the same way.
-    if let Some(s) = params.get("state")
+    if let Some(s) = params.state.as_ref()
         && !JOB_STATES.contains(&s.as_str())
     {
         return detail_err(
@@ -4496,8 +4512,8 @@ async fn list_jobs(
             format!("unknown state '{s}'"),
         );
     }
-    let limit = read::parse_limit(params.get("limit").map(String::as_str));
-    let state_filter = params.get("state").map(String::as_str);
+    let limit = read::parse_limit(params.limit.as_deref());
+    let state_filter = params.state.as_deref();
     if let Some(dsn) = &state.dsn {
         let client = match connect_pg(dsn).await {
             Ok(c) => c,
@@ -5724,17 +5740,28 @@ const JOB_STATES: [&str; 7] = [
     "canceled",
 ];
 
+/// The query parameters of `jobs_global`.
+#[derive(Debug, Clone, Default, Deserialize)]
+struct JobsGlobalQuery {
+    /// Maximum items to return; an integer, clamped to the endpoint's range when out of it.
+    limit: Option<String>,
+    /// Only this org's entries (operator feed).
+    org: Option<String>,
+    /// Only items in this state.
+    state: Option<String>,
+}
+
 /// Operator: the cross-org queue view (`GET /v1/jobs`), optional `org`/`state`
 /// filters, newest first. A bare array.
 async fn jobs_global(
     principal: Principal,
     State(state): State<AppState>,
-    Query(params): Query<HashMap<String, String>>,
+    Query(params): Query<JobsGlobalQuery>,
 ) -> impl IntoResponse {
     if let Err(e) = operator_only(&principal) {
         return e.into_response();
     }
-    if let Some(s) = params.get("state")
+    if let Some(s) = params.state.as_ref()
         && !JOB_STATES.contains(&s.as_str())
     {
         return detail_err(
@@ -5749,10 +5776,10 @@ async fn jobs_global(
         Ok(c) => c,
         Err(r) => return *r,
     };
-    let limit = read::parse_limit(params.get("limit").map(String::as_str));
+    let limit = read::parse_limit(params.limit.as_deref());
     // The ?org= filter is the org NAME (the console's handle); resolve it to the
     // id child rows carry. An unknown name filters to nothing, like before.
-    let org_filter = match params.get("org") {
+    let org_filter = match params.org.as_ref() {
         Some(name) => match pg::get_org(&client, name).await {
             Ok(Some(o)) => Some(o.id),
             Ok(None) => Some(String::from("\u{0}no-such-org")),
@@ -5763,7 +5790,7 @@ async fn jobs_global(
     match pg::list_jobs_all(
         &client,
         org_filter.as_deref(),
-        params.get("state").map(String::as_str),
+        params.state.as_deref(),
         limit,
     )
     .await
@@ -5780,17 +5807,21 @@ async fn jobs_global(
 async fn audit_feed(
     client: &tokio_postgres::Client,
     org: Option<&str>,
-    params: &HashMap<String, String>,
+    params: &AuditIndexQuery,
 ) -> Result<Vec<pg::AuditEntry>, Box<axum::response::Response>> {
     let filters = pg::AuditFilters {
-        action: params.get("action").map(String::as_str),
-        actor: params.get("actor").map(String::as_str),
-        since: params.get("since").map(String::as_str),
-        until: params.get("until").map(String::as_str),
+        action: params.action.as_deref(),
+        actor: params.actor.as_deref(),
+        since: params.since.as_deref(),
+        until: params.until.as_deref(),
     };
-    let before_id = params.get("before_id").and_then(|s| s.parse::<i64>().ok());
+    let before_id = params
+        .before_id
+        .as_ref()
+        .and_then(|s| s.parse::<i64>().ok());
     let limit = params
-        .get("limit")
+        .limit
+        .as_ref()
         .and_then(|s| s.parse::<i64>().ok())
         .unwrap_or(100)
         .clamp(1, 500);
@@ -5816,13 +5847,34 @@ fn audit_csv_response(rows: &[pg::AuditEntry]) -> axum::response::Response {
         .into_response()
 }
 
+/// The query parameters of `audit_global`.
+#[derive(Debug, Clone, Default, Deserialize)]
+struct AuditGlobalQuery {
+    /// Only entries with this action.
+    action: Option<String>,
+    /// Only entries by this actor.
+    actor: Option<String>,
+    /// Keyset cursor: only entries with a smaller id; an integer.
+    before_id: Option<String>,
+    /// `csv` for a text/csv export; JSON otherwise.
+    format: Option<String>,
+    /// Maximum items to return; an integer, clamped to the endpoint's range when out of it.
+    limit: Option<String>,
+    /// Only this org's entries (operator feed).
+    org: Option<String>,
+    /// Inclusive lower bound on the timestamp (any form `timestamptz` accepts).
+    since: Option<String>,
+    /// Exclusive upper bound on the timestamp.
+    until: Option<String>,
+}
+
 /// Operator: the cross-tenant audit feed (`GET /v1/audit`), optional
 /// `org`/`action`/`actor`/`since`/`until`/`before_id` filters; `format=csv`
 /// exports the same page.
 async fn audit_global(
     principal: Principal,
     State(state): State<AppState>,
-    Query(params): Query<HashMap<String, String>>,
+    Query(params): Query<AuditGlobalQuery>,
 ) -> impl IntoResponse {
     if let Err(e) = operator_only(&principal) {
         return e.into_response();
@@ -5834,15 +5886,43 @@ async fn audit_global(
         Ok(c) => c,
         Err(r) => return *r,
     };
-    match audit_feed(&client, params.get("org").map(String::as_str), &params).await {
+    let feed = AuditIndexQuery {
+        action: params.action.clone(),
+        actor: params.actor.clone(),
+        before_id: params.before_id.clone(),
+        format: params.format.clone(),
+        limit: params.limit.clone(),
+        since: params.since.clone(),
+        until: params.until.clone(),
+    };
+    match audit_feed(&client, params.org.as_deref(), &feed).await {
         Ok(rows) => {
-            if params.get("format").map(String::as_str) == Some("csv") {
+            if params.format.as_deref() == Some("csv") {
                 return audit_csv_response(&rows);
             }
             Json::<Vec<pg::AuditEntry>>(rows).into_response()
         }
         Err(r) => *r,
     }
+}
+
+/// The query parameters of `audit_index`.
+#[derive(Debug, Clone, Default, Deserialize)]
+struct AuditIndexQuery {
+    /// Only entries with this action.
+    action: Option<String>,
+    /// Only entries by this actor.
+    actor: Option<String>,
+    /// Keyset cursor: only entries with a smaller id; an integer.
+    before_id: Option<String>,
+    /// `csv` for a text/csv export; JSON otherwise.
+    format: Option<String>,
+    /// Maximum items to return; an integer, clamped to the endpoint's range when out of it.
+    limit: Option<String>,
+    /// Inclusive lower bound on the timestamp (any form `timestamptz` accepts).
+    since: Option<String>,
+    /// Exclusive upper bound on the timestamp.
+    until: Option<String>,
 }
 
 /// Admin+: an org's audit feed (`GET /v1/orgs/{org}/audit`), optional
@@ -5852,7 +5932,7 @@ async fn audit_index(
     principal: Principal,
     State(state): State<AppState>,
     Path(org): Path<String>,
-    Query(params): Query<HashMap<String, String>>,
+    Query(params): Query<AuditIndexQuery>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Admin) {
         return e.into_response();
@@ -5871,7 +5951,7 @@ async fn audit_index(
     }
     match audit_feed(&client, Some(&org), &params).await {
         Ok(rows) => {
-            if params.get("format").map(String::as_str) == Some("csv") {
+            if params.format.as_deref() == Some("csv") {
                 return audit_csv_response(&rows);
             }
             Json::<Vec<pg::AuditEntry>>(rows).into_response()
@@ -6040,6 +6120,17 @@ fn auto_merge_from_env(env: &Value) -> Option<f64> {
         .map(|c| c.thresholds.auto_merge)
 }
 
+/// The query parameters of `golden_records_list`.
+#[derive(Debug, Clone, Default, Deserialize)]
+struct GoldenRecordsListQuery {
+    /// The opaque `next_cursor` of the previous page; omit for the first page.
+    cursor: Option<String>,
+    /// Maximum items to return; an integer, clamped to the endpoint's range when out of it.
+    limit: Option<String>,
+    /// Free-text search over the golden record.
+    q: Option<String>,
+}
+
 /// Viewer+: a keyset page of the org's golden (resolved) records
 /// (`GET /v1/orgs/{org}/datasets/{ds}/golden-records`). Query: `q` (contains-search), `cursor`
 /// (opaque), `limit` (<=200). Reads the org's DuckLake at a pinned snapshot.
@@ -6047,7 +6138,7 @@ async fn golden_records_list(
     principal: Principal,
     State(state): State<AppState>,
     Path((org, ds)): Path<(String, String)>,
-    Query(params): Query<HashMap<String, String>>,
+    Query(params): Query<GoldenRecordsListQuery>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
@@ -6110,8 +6201,7 @@ async fn golden_records_list(
                 Ok(session) => session,
                 Err(error) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, error),
             };
-            let start =
-                duckfleet_reads::page_start(&session, params.get("cursor").map(String::as_str));
+            let start = duckfleet_reads::page_start(&session, params.cursor.as_deref());
             let page = golden_records_page(&session, &dataset, &params, start);
             if let Err(error) = session.close() {
                 tracing::error!(error = %error, "remote lake read cleanup failed");
@@ -6126,7 +6216,7 @@ async fn golden_records_list(
         .unwrap_or_else(|_| detail_err(StatusCode::SERVICE_UNAVAILABLE, "lake read failed"));
     }
     with_dataset_lake(dataset, move |session, dataset| {
-        let start = read::page_start(session, params.get("cursor").map(String::as_str));
+        let start = read::page_start(session, params.cursor.as_deref());
         respond(golden_records_page(
             session.connection(),
             dataset,
@@ -6141,7 +6231,7 @@ async fn golden_records_list(
 fn golden_records_page<E: er_entities::execution::Executor>(
     executor: &E,
     dataset: &pg::DatasetDetail,
-    params: &HashMap<String, String>,
+    params: &GoldenRecordsListQuery,
     page_start: Result<(i64, Option<String>), read::PageStartError>,
 ) -> Result<(i64, read::GoldenArrowPage), Box<axum::response::Response>> {
     let entity_type = match dataset.entity_type.as_str() {
@@ -6163,12 +6253,12 @@ fn golden_records_page<E: er_entities::execution::Executor>(
             )));
         }
     };
-    let limit = read::parse_limit(params.get("limit").map(String::as_str));
+    let limit = read::parse_limit(params.limit.as_deref());
     let page = match read::golden_arrow_page_with_executor(
         executor,
         entity_type,
         snapshot,
-        params.get("q").map(String::as_str),
+        params.q.as_deref(),
         after.as_deref(),
         limit,
     ) {
@@ -6264,6 +6354,13 @@ async fn org_metrics(
     .unwrap_or_else(|response| *response)
 }
 
+/// The query parameters of `org_data_quality`.
+#[derive(Debug, Clone, Default, Deserialize)]
+struct OrgDataQualityQuery {
+    /// A record not updated in this many days counts as stale; an integer.
+    stale_days: Option<String>,
+}
+
 /// Viewer+: data-quality scores over the org's lake
 /// (`GET /v1/orgs/{org}/datasets/{ds}/data-quality?stale_days=N`). Read-only analytics;
 /// `stale_days` (default 365) is a presentation parameter, never config.
@@ -6271,13 +6368,14 @@ async fn org_data_quality(
     principal: Principal,
     State(state): State<AppState>,
     Path((org, ds)): Path<(String, String)>,
-    Query(params): Query<HashMap<String, String>>,
+    Query(params): Query<OrgDataQualityQuery>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
     }
     let stale_days = params
-        .get("stale_days")
+        .stale_days
+        .as_ref()
         .and_then(|s| s.parse::<i64>().ok())
         .unwrap_or(365)
         .clamp(1, 36_500);
@@ -6299,6 +6397,35 @@ async fn org_data_quality(
     .unwrap_or_else(|response| *response)
 }
 
+/// The query parameters of `duplicates_list`.
+#[derive(Debug, Clone, Default, Deserialize)]
+struct DuplicatesListQuery {
+    /// The opaque `next_cursor` of the previous page; omit for the first page.
+    cursor: Option<String>,
+    /// Exclude groups carrying this tag.
+    exclude_tag: Option<String>,
+    /// Maximum items to return; an integer, clamped to the endpoint's range when out of it.
+    limit: Option<String>,
+    /// Only groups matched by this model version.
+    matched_by: Option<String>,
+    /// Only groups whose evidence names this comparison column.
+    matched_on: Option<String>,
+    /// Upper bound on group confidence (0–100); an integer.
+    max_confidence: Option<String>,
+    /// Upper bound on group size; an integer.
+    max_members: Option<String>,
+    /// Jump to the group containing this record key.
+    member: Option<String>,
+    /// Lower bound on group confidence (0–100); an integer.
+    min_confidence: Option<String>,
+    /// Lower bound on group size; an integer.
+    min_members: Option<String>,
+    /// Only groups carrying this tag.
+    tag: Option<String>,
+    /// `true` or `false`: only (un)verified groups.
+    verified: Option<String>,
+}
+
 /// Viewer+: duplicate groups (entities with >=2 members)
 /// (`GET /v1/orgs/{org}/datasets/{ds}/duplicates`). Keyset page; query `cursor`,
 /// `limit`, and the filter bar's parameters: `member` (a record key whose group
@@ -6309,7 +6436,7 @@ async fn duplicates_list(
     principal: Principal,
     State(state): State<AppState>,
     Path((org, ds)): Path<(String, String)>,
-    Query(params): Query<HashMap<String, String>>,
+    Query(params): Query<DuplicatesListQuery>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
@@ -6318,12 +6445,10 @@ async fn duplicates_list(
         Ok(dataset) => dataset,
         Err(response) => return *response,
     };
-    let limit = read::parse_limit(params.get("limit").map(String::as_str));
-    let number = |key: &str| params.get(key).and_then(|v| v.trim().parse::<i64>().ok());
-    let text = |key: &str| {
-        params
-            .get(key)
-            .map(String::as_str)
+    let limit = read::parse_limit(params.limit.as_deref());
+    let number = |v: Option<&String>| v.and_then(|v| v.trim().parse::<i64>().ok());
+    let text = |v: Option<&String>| {
+        v.map(String::as_str)
             .map(str::trim)
             .filter(|v| !v.is_empty())
             .map(str::to_string)
@@ -6331,13 +6456,13 @@ async fn duplicates_list(
     let mut filters = read::DuplicateFilters {
         // The clusters an over-merge hides in are the LARGE ones, and a page
         // ordered by entity id will not surface them on its own.
-        min_members: number("min_members"),
-        max_members: number("max_members"),
-        min_confidence: number("min_confidence"),
-        max_confidence: number("max_confidence"),
-        model_version: text("matched_by"),
-        matched_on: text("matched_on"),
-        verified: params.get("verified").and_then(|v| match v.trim() {
+        min_members: number(params.min_members.as_ref()),
+        max_members: number(params.max_members.as_ref()),
+        min_confidence: number(params.min_confidence.as_ref()),
+        max_confidence: number(params.max_confidence.as_ref()),
+        model_version: text(params.matched_by.as_ref()),
+        matched_on: text(params.matched_on.as_ref()),
+        verified: params.verified.as_ref().and_then(|v| match v.trim() {
             "true" => Some(true),
             "false" => Some(false),
             _ => None,
@@ -6366,7 +6491,7 @@ async fn duplicates_list(
     // Tag include/exclude: the taggings live in the control-plane Postgres,
     // so these are the one filter dimension that leaves the lake. Resolved
     // to entity-id sets here; the read filters by membership.
-    let (tag, exclude_tag) = (text("tag"), text("exclude_tag"));
+    let (tag, exclude_tag) = (text(params.tag.as_ref()), text(params.exclude_tag.as_ref()));
     if tag.is_some() || exclude_tag.is_some() {
         let Some(dsn) = &state.dsn else {
             return detail_err(StatusCode::NOT_IMPLEMENTED, "tags require Postgres");
@@ -6423,22 +6548,21 @@ async fn duplicates_list(
             *slot = Some(ids);
         }
     }
-    let member = text("member");
+    let member = text(params.member.as_ref());
     with_dataset_lake(dataset, move |session, dataset| {
         let entity_type = match dataset.entity_type.as_str() {
             "account" => er_config::EntityType::Account,
             _ => er_config::EntityType::Person,
         };
-        let (snapshot, after) =
-            match read::page_start(session, params.get("cursor").map(String::as_str)) {
-                Ok(x) => x,
-                Err(read::PageStartError::BadCursor) => {
-                    return detail_err(StatusCode::UNPROCESSABLE_ENTITY, "invalid cursor");
-                }
-                Err(read::PageStartError::Lake(e)) => {
-                    return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}"));
-                }
-            };
+        let (snapshot, after) = match read::page_start(session, params.cursor.as_deref()) {
+            Ok(x) => x,
+            Err(read::PageStartError::BadCursor) => {
+                return detail_err(StatusCode::UNPROCESSABLE_ENTITY, "invalid cursor");
+            }
+            Err(read::PageStartError::Lake(e)) => {
+                return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}"));
+            }
+        };
         // The member-record search: resolve the key to its entity and pin the
         // list to it, so the group payload is assembled identically on both
         // paths. An unknown key is an empty result, not an error.
@@ -6495,6 +6619,13 @@ struct SourceInsights {
     sources: Vec<read::SourceInsight>,
 }
 
+/// The query parameters of `insight_sources`.
+#[derive(Debug, Clone, Default, Deserialize)]
+struct InsightSourcesQuery {
+    /// The run to report on; the newest when omitted.
+    run_id: Option<String>,
+}
+
 /// Viewer+: one run's per-source duplicate attribution
 /// (`GET /v1/orgs/{org}/datasets/{ds}/insights/sources`). Query `run_id`; defaults to the
 /// newest snapshot's run.
@@ -6505,7 +6636,7 @@ async fn insight_sources(
     principal: Principal,
     State(state): State<AppState>,
     Path((org, ds)): Path<(String, String)>,
-    Query(params): Query<HashMap<String, String>>,
+    Query(params): Query<InsightSourcesQuery>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
@@ -6521,7 +6652,7 @@ async fn insight_sources(
         };
         // Default to the newest run rather than making the caller know one:
         // "which source is causing this" is a question asked about now.
-        let run_id = match params.get("run_id").map(String::as_str) {
+        let run_id = match params.run_id.as_deref() {
             Some(id) if !id.is_empty() => id.to_string(),
             _ => match read::insights(session, snapshot, 1) {
                 Ok(series) => match series.into_iter().next() {
@@ -6554,6 +6685,13 @@ async fn insight_sources(
     .unwrap_or_else(|response| *response)
 }
 
+/// The query parameters of `insights`.
+#[derive(Debug, Clone, Default, Deserialize)]
+struct InsightsQuery {
+    /// Maximum items to return; an integer, clamped to the endpoint's range when out of it.
+    limit: Option<String>,
+}
+
 /// Viewer+: the resolution metrics over time (`GET /v1/orgs/{org}/datasets/{ds}/insights`).
 ///
 /// Every dashboard number has always been computed live, so it could say what
@@ -6566,7 +6704,7 @@ async fn insights(
     principal: Principal,
     State(state): State<AppState>,
     Path((org, ds)): Path<(String, String)>,
-    Query(params): Query<HashMap<String, String>>,
+    Query(params): Query<InsightsQuery>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
@@ -6585,7 +6723,7 @@ async fn insights(
                 return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}"));
             }
         };
-        let limit = read::parse_limit(params.get("limit").map(String::as_str));
+        let limit = read::parse_limit(params.limit.as_deref());
         match read::insights(session, snapshot, limit) {
             Ok(series) => Json(InsightSeries { snapshot, series }).into_response(),
             Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
@@ -6593,6 +6731,13 @@ async fn insights(
     })
     .await
     .unwrap_or_else(|response| *response)
+}
+
+/// The query parameters of `quality`.
+#[derive(Debug, Clone, Default, Deserialize)]
+struct QualityQuery {
+    /// Maximum items to return; an integer, clamped to the endpoint's range when out of it.
+    limit: Option<String>,
 }
 
 /// Viewer+: the corpus's data-quality picture (`GET /v1/orgs/{org}/datasets/{ds}/quality`).
@@ -6607,7 +6752,7 @@ async fn quality(
     principal: Principal,
     State(state): State<AppState>,
     Path((org, ds)): Path<(String, String)>,
-    Query(params): Query<HashMap<String, String>>,
+    Query(params): Query<QualityQuery>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
@@ -6626,7 +6771,7 @@ async fn quality(
                 return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}"));
             }
         };
-        let limit = read::parse_limit(params.get("limit").map(String::as_str));
+        let limit = read::parse_limit(params.limit.as_deref());
         match read::quality(session, snapshot, limit) {
             Ok(body) => Json::<read::Quality>(body).into_response(),
             Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
@@ -6634,6 +6779,17 @@ async fn quality(
     })
     .await
     .unwrap_or_else(|response| *response)
+}
+
+/// The query parameters of `dataset_profile`.
+#[derive(Debug, Clone, Default, Deserialize)]
+struct DatasetProfileQuery {
+    /// The source system.
+    source: Option<String>,
+    /// The corpus stage profiled.
+    subject: Option<String>,
+    /// Profile tier, 1 or 2; an integer (default 1).
+    tier: Option<String>,
 }
 
 /// Viewer+: a corpus stage's profile
@@ -6660,19 +6816,20 @@ async fn dataset_profile(
     principal: Principal,
     State(state): State<AppState>,
     Path((org, ds)): Path<(String, String)>,
-    Query(params): Query<HashMap<String, String>>,
+    Query(params): Query<DatasetProfileQuery>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
     }
     let subject = params
-        .get("subject")
+        .subject
+        .as_ref()
         .map_or("standardized", String::as_str)
         .to_string();
     let request = match crate::profile_params::ProfileRequest::from_params(&json!({
         "subject": subject,
-        "source": params.get("source"),
-        "tier": params.get("tier").and_then(|t| t.parse::<i64>().ok()).unwrap_or(1),
+        "source": params.source.as_ref(),
+        "tier": params.tier.as_ref().and_then(|t| t.parse::<i64>().ok()).unwrap_or(1),
     })) {
         Ok(r) => r,
         // The same parser the writer uses, so a subject this endpoint accepts
@@ -6778,6 +6935,19 @@ async fn dataset_profile_run(
     }
 }
 
+/// The query parameters of `match_scores_list`.
+#[derive(Debug, Clone, Default, Deserialize)]
+struct MatchScoresListQuery {
+    /// Upper bound on match probability (0–1); a number.
+    band_high: Option<String>,
+    /// Lower bound on match probability (0–1); a number.
+    band_low: Option<String>,
+    /// The opaque `next_cursor` of the previous page; omit for the first page.
+    cursor: Option<String>,
+    /// Maximum items to return; an integer, clamped to the endpoint's range when out of it.
+    limit: Option<String>,
+}
+
 /// Viewer+: active pairwise match scores (`GET /v1/orgs/{org}/datasets/{ds}/match-scores`).
 /// Keyset page; query `cursor`, `limit`, `band_low`/`band_high` (probability
 /// band). The band names must match what the BFF forwards
@@ -6787,7 +6957,7 @@ async fn match_scores_list(
     principal: Principal,
     State(state): State<AppState>,
     Path((org, ds)): Path<(String, String)>,
-    Query(params): Query<HashMap<String, String>>,
+    Query(params): Query<MatchScoresListQuery>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
@@ -6797,19 +6967,18 @@ async fn match_scores_list(
         Err(response) => return *response,
     };
     with_dataset_lake(dataset, move |session, _dataset| {
-        let (snapshot, after) =
-            match read::page_start(session, params.get("cursor").map(String::as_str)) {
-                Ok(x) => x,
-                Err(read::PageStartError::BadCursor) => {
-                    return detail_err(StatusCode::UNPROCESSABLE_ENTITY, "invalid cursor");
-                }
-                Err(read::PageStartError::Lake(e)) => {
-                    return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}"));
-                }
-            };
-        let limit = read::parse_limit(params.get("limit").map(String::as_str));
-        let band_low = read::parse_f64(params.get("band_low").map(String::as_str));
-        let band_high = read::parse_f64(params.get("band_high").map(String::as_str));
+        let (snapshot, after) = match read::page_start(session, params.cursor.as_deref()) {
+            Ok(x) => x,
+            Err(read::PageStartError::BadCursor) => {
+                return detail_err(StatusCode::UNPROCESSABLE_ENTITY, "invalid cursor");
+            }
+            Err(read::PageStartError::Lake(e)) => {
+                return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}"));
+            }
+        };
+        let limit = read::parse_limit(params.limit.as_deref());
+        let band_low = read::parse_f64(params.band_low.as_deref());
+        let band_high = read::parse_f64(params.band_high.as_deref());
         match read::match_scores_list(
             session,
             snapshot,
@@ -6866,6 +7035,17 @@ struct LabelingQueue {
     coverage: LabelCoverage,
 }
 
+/// The query parameters of `labeling_next`.
+#[derive(Debug, Clone, Default, Deserialize)]
+struct LabelingNextQuery {
+    /// Maximum items to return; an integer, clamped to the endpoint's range when out of it.
+    limit: Option<String>,
+    /// Upper bound on the probability band (0–1); a number.
+    max: Option<String>,
+    /// Lower bound on the probability band (0–1); a number, not below the review floor.
+    min: Option<String>,
+}
+
 /// Viewer+: what to label next (`GET /v1/orgs/{org}/datasets/{ds}/labeling/next`).
 ///
 /// Serves the pairs the model is LEAST sure about — nearest the decision
@@ -6886,7 +7066,7 @@ async fn labeling_next(
     principal: Principal,
     State(state): State<AppState>,
     Path((org, ds)): Path<(String, String)>,
-    Query(params): Query<HashMap<String, String>>,
+    Query(params): Query<LabelingNextQuery>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
@@ -6939,11 +7119,11 @@ async fn labeling_next(
         // pair at all, so neither end teaches it anything. A caller may narrow
         // further but not widen past what was scored.
         let threshold = config.thresholds.auto_merge;
-        let band_low = read::parse_f64(params.get("min").map(String::as_str))
+        let band_low = read::parse_f64(params.min.as_deref())
             .unwrap_or(config.thresholds.review_low)
             .max(config.thresholds.review_low);
-        let band_high = read::parse_f64(params.get("max").map(String::as_str)).unwrap_or(1.0);
-        let limit = read::parse_limit(params.get("limit").map(String::as_str));
+        let band_high = read::parse_f64(params.max.as_deref()).unwrap_or(1.0);
+        let limit = read::parse_limit(params.limit.as_deref());
         match read::uncertain_pairs(
             session,
             snapshot,
@@ -7099,13 +7279,24 @@ struct LabelList {
     labels: Vec<er_entities::pair_label::PairLabelWire>,
 }
 
+/// The query parameters of `labels_list`.
+#[derive(Debug, Clone, Default, Deserialize)]
+struct LabelsListQuery {
+    /// Maximum items to return; an integer, clamped to the endpoint's range when out of it.
+    limit: Option<String>,
+    /// Only labels from this origin (`human`, `reviewer`, `llm`).
+    origin: Option<String>,
+    /// Only labels with this verdict (`match`, `no_match`).
+    verdict: Option<String>,
+}
+
 /// Viewer+: the labels a tenant has recorded (`GET /v1/orgs/{org}/datasets/{ds}/labels`),
 /// newest first, filterable by `verdict` and `origin`.
 async fn labels_list(
     principal: Principal,
     State(state): State<AppState>,
     Path((org, ds)): Path<(String, String)>,
-    Query(params): Query<HashMap<String, String>>,
+    Query(params): Query<LabelsListQuery>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
@@ -7126,12 +7317,12 @@ async fn labels_list(
         Ok(row) => row,
         Err(r) => return *r,
     };
-    let limit = read::parse_limit(params.get("limit").map(String::as_str));
+    let limit = read::parse_limit(params.limit.as_deref());
     match er_entities::pair_label::read::page(
         &client,
         &d.id,
-        params.get("verdict").map(String::as_str),
-        params.get("origin").map(String::as_str),
+        params.verdict.as_deref(),
+        params.origin.as_deref(),
         limit,
     )
     .await
@@ -7199,6 +7390,13 @@ async fn record_label(
         .expect("the upsert always returns its row"))
 }
 
+/// The query parameters of `match_preview`.
+#[derive(Debug, Clone, Default, Deserialize)]
+struct MatchPreviewQuery {
+    /// Maximum items to return; an integer, clamped to the endpoint's range when out of it.
+    limit: Option<String>,
+}
+
 /// Steward+: a READ-ONLY score-only match preview (frontend §7.16,
 /// `GET /v1/orgs/{org}/datasets/{ds}/match-preview`). Runs the committed model over the current
 /// corpus and returns the pairs it WOULD score, bucketed by the config
@@ -7210,7 +7408,7 @@ async fn match_preview(
     principal: Principal,
     State(state): State<AppState>,
     Path((org, ds)): Path<(String, String)>,
-    Query(params): Query<HashMap<String, String>>,
+    Query(params): Query<MatchPreviewQuery>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Steward) {
         return e.into_response();
@@ -7240,7 +7438,7 @@ async fn match_preview(
         Ok(d) => d.env,
         Err(r) => return *r,
     };
-    let limit = read::parse_limit(params.get("limit").map(String::as_str))
+    let limit = read::parse_limit(params.limit.as_deref())
         .try_into()
         .unwrap_or(50usize);
 
@@ -7402,6 +7600,13 @@ fn load_lexicon_file(path: &str) -> Vec<(String, String)> {
         .collect()
 }
 
+/// The query parameters of `blocking_estimate`.
+#[derive(Debug, Clone, Default, Deserialize)]
+struct BlockingEstimateQuery {
+    /// How many of the largest blocks to report; an integer.
+    largest: Option<String>,
+}
+
 /// Viewer+: what a run would cost before it runs
 /// (`GET /v1/orgs/{org}/datasets/{ds}/blocking-estimate`). Query: `largest` (how many
 /// pathological blocks to name, default 5).
@@ -7419,7 +7624,7 @@ async fn blocking_estimate(
     principal: Principal,
     State(state): State<AppState>,
     Path((org, ds)): Path<(String, String)>,
-    Query(params): Query<HashMap<String, String>>,
+    Query(params): Query<BlockingEstimateQuery>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
@@ -7453,7 +7658,8 @@ async fn blocking_estimate(
         Err(r) => return *r,
     };
     let largest = params
-        .get("largest")
+        .largest
+        .as_ref()
         .and_then(|v| v.parse::<usize>().ok())
         .unwrap_or(5)
         .min(50);
@@ -7669,12 +7875,29 @@ struct ReviewPage {
     unscored_hidden: i64,
 }
 
+/// The query parameters of `reviews_list`.
+#[derive(Debug, Clone, Default, Deserialize)]
+struct ReviewsListQuery {
+    /// The opaque `next_cursor` of the previous page; omit for the first page.
+    cursor: Option<String>,
+    /// Maximum items to return; an integer, clamped to the endpoint's range when out of it.
+    limit: Option<String>,
+    /// Upper bound on match probability (0–1); a number.
+    max_probability: Option<String>,
+    /// Lower bound on match probability (0–1); a number.
+    min_probability: Option<String>,
+    /// Only reviews escalated for this reason.
+    reason: Option<String>,
+    /// Only reviews in this status.
+    status: Option<String>,
+}
+
 /// Viewer+: the open-review queue (`GET /v1/orgs/{org}/datasets/{ds}/reviews`).
 async fn reviews_list(
     principal: Principal,
     State(state): State<AppState>,
     Path((org, ds)): Path<(String, String)>,
-    Query(params): Query<HashMap<String, String>>,
+    Query(params): Query<ReviewsListQuery>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
@@ -7684,27 +7907,23 @@ async fn reviews_list(
         Err(response) => return *response,
     };
     with_dataset_lake(dataset, move |session, _dataset| {
-        let (snapshot, after) = match page_or_err(session, params.get("cursor").map(String::as_str))
-        {
+        let (snapshot, after) = match page_or_err(session, params.cursor.as_deref()) {
             Ok(x) => x,
             Err(r) => return *r,
         };
-        let limit = read::parse_limit(params.get("limit").map(String::as_str));
+        let limit = read::parse_limit(params.limit.as_deref());
         // The confidence band (O6). A steward with a 40,000-item queue wants the
         // high-confidence tail first — it clears fastest — and the queue was FIFO
         // by id with no way to say so.
-        let probability = |key: &str| params.get(key).and_then(|v| v.trim().parse::<f64>().ok());
-        let text = |key: &str| {
-            params
-                .get(key)
-                .map(String::as_str)
-                .filter(|v| !v.trim().is_empty())
-        };
+        let probability = |v: Option<&String>| v.and_then(|v| v.trim().parse::<f64>().ok());
+        fn text(v: Option<&String>) -> Option<&str> {
+            v.map(String::as_str).filter(|v| !v.trim().is_empty())
+        }
         let filters = read::ReviewFilters {
-            status: text("status"),
-            reason: text("reason"),
-            min_probability: probability("min_probability"),
-            max_probability: probability("max_probability"),
+            status: text(params.status.as_ref()),
+            reason: text(params.reason.as_ref()),
+            min_probability: probability(params.min_probability.as_ref()),
+            max_probability: probability(params.max_probability.as_ref()),
         };
         let band = (filters.min_probability, filters.max_probability);
         if let (Some(lo), Some(hi)) = band
@@ -7823,13 +8042,24 @@ async fn review_merge_group(
     .unwrap_or_else(|response| *response)
 }
 
+/// The query parameters of `assertions_list`.
+#[derive(Debug, Clone, Default, Deserialize)]
+struct AssertionsListQuery {
+    /// The opaque `next_cursor` of the previous page; omit for the first page.
+    cursor: Option<String>,
+    /// `true` to include retracted assertions.
+    include_retracted: Option<String>,
+    /// Maximum items to return; an integer, clamped to the endpoint's range when out of it.
+    limit: Option<String>,
+}
+
 /// Viewer+: the assertion ledger (`GET /v1/orgs/{org}/datasets/{ds}/assertions`), active-only
 /// unless `?include_retracted=true`.
 async fn assertions_list(
     principal: Principal,
     State(state): State<AppState>,
     Path((org, ds)): Path<(String, String)>,
-    Query(params): Query<HashMap<String, String>>,
+    Query(params): Query<AssertionsListQuery>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
@@ -7839,16 +8069,12 @@ async fn assertions_list(
         Err(response) => return *response,
     };
     with_dataset_lake(dataset, move |session, _dataset| {
-        let (snapshot, after) = match page_or_err(session, params.get("cursor").map(String::as_str))
-        {
+        let (snapshot, after) = match page_or_err(session, params.cursor.as_deref()) {
             Ok(x) => x,
             Err(r) => return *r,
         };
-        let include_retracted = matches!(
-            params.get("include_retracted").map(String::as_str),
-            Some("true" | "1")
-        );
-        let limit = read::parse_limit(params.get("limit").map(String::as_str));
+        let include_retracted = matches!(params.include_retracted.as_deref(), Some("true" | "1"));
+        let limit = read::parse_limit(params.limit.as_deref());
         page_envelope(read::assertions_list(
             session,
             snapshot,
@@ -8299,6 +8525,13 @@ fn csv_cell(value: Option<&Value>) -> String {
 /// this body is buffered and parsed in memory, while the upload path streams.
 const MAX_PUSHED_RECORDS: usize = 10_000;
 
+/// The query parameters of `upload_import`.
+#[derive(Debug, Clone, Default, Deserialize)]
+struct UploadImportQuery {
+    /// The source system.
+    source: Option<String>,
+}
+
 /// Steward+: upload one source's delivery
 /// (`POST /v1/orgs/{org}/datasets/{ds}/imports?source=<source>`), then enqueue the run that
 /// picks it up.
@@ -8318,7 +8551,7 @@ async fn upload_import(
     principal: Principal,
     State(state): State<AppState>,
     Path((org, ds)): Path<(String, String)>,
-    Query(params): Query<HashMap<String, String>>,
+    Query(params): Query<UploadImportQuery>,
     mut multipart: axum::extract::Multipart,
 ) -> impl IntoResponse {
     use tokio::io::AsyncWriteExt;
@@ -8327,11 +8560,7 @@ async fn upload_import(
     if let Err(e) = guard(&principal, &org, Role::Steward) {
         return e.into_response();
     }
-    let Some(source) = params
-        .get("source")
-        .map(String::as_str)
-        .filter(|s| !s.is_empty())
-    else {
+    let Some(source) = params.source.as_deref().filter(|s| !s.is_empty()) else {
         return detail_err(StatusCode::UNPROCESSABLE_ENTITY, "source is required");
     };
     let Some(dsn) = &state.dsn else {
@@ -8448,13 +8677,24 @@ async fn upload_import(
     .await
 }
 
+/// The query parameters of `imports_list`.
+#[derive(Debug, Clone, Default, Deserialize)]
+struct ImportsListQuery {
+    /// The opaque `next_cursor` of the previous page; omit for the first page.
+    cursor: Option<String>,
+    /// Maximum items to return; an integer, clamped to the endpoint's range when out of it.
+    limit: Option<String>,
+    /// The source system.
+    source: Option<String>,
+}
+
 /// Viewer+: ingest-batch receipts (`GET /v1/orgs/{org}/datasets/{ds}/imports`), optional
 /// `?source` filter.
 async fn imports_list(
     principal: Principal,
     State(state): State<AppState>,
     Path((org, ds)): Path<(String, String)>,
-    Query(params): Query<HashMap<String, String>>,
+    Query(params): Query<ImportsListQuery>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
@@ -8464,22 +8704,30 @@ async fn imports_list(
         Err(response) => return *response,
     };
     with_dataset_lake(dataset, move |session, _dataset| {
-        let (snapshot, after) = match page_or_err(session, params.get("cursor").map(String::as_str))
-        {
+        let (snapshot, after) = match page_or_err(session, params.cursor.as_deref()) {
             Ok(x) => x,
             Err(r) => return *r,
         };
-        let limit = read::parse_limit(params.get("limit").map(String::as_str));
+        let limit = read::parse_limit(params.limit.as_deref());
         page_envelope(read::imports_list(
             session,
             snapshot,
-            params.get("source").map(String::as_str),
+            params.source.as_deref(),
             after.as_deref(),
             limit,
         ))
     })
     .await
     .unwrap_or_else(|response| *response)
+}
+
+/// The query parameters of `imports_recent`.
+#[derive(Debug, Clone, Default, Deserialize)]
+struct ImportsRecentQuery {
+    /// Maximum items to return; an integer, clamped to the endpoint's range when out of it.
+    limit: Option<String>,
+    /// The source system.
+    source: Option<String>,
 }
 
 /// Viewer+: the most recent ingest-batch receipts
@@ -8496,7 +8744,7 @@ async fn imports_recent(
     principal: Principal,
     State(state): State<AppState>,
     Path((org, ds)): Path<(String, String)>,
-    Query(params): Query<HashMap<String, String>>,
+    Query(params): Query<ImportsRecentQuery>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
@@ -8510,13 +8758,8 @@ async fn imports_recent(
             Ok(s) => s,
             Err(e) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}")),
         };
-        let limit = read::parse_limit(params.get("limit").map(String::as_str));
-        match read::imports_recent(
-            session,
-            snapshot,
-            params.get("source").map(String::as_str),
-            limit,
-        ) {
+        let limit = read::parse_limit(params.limit.as_deref());
+        match read::imports_recent(session, snapshot, params.source.as_deref(), limit) {
             Ok(items) => Json::<Vec<read::ImportReceipt>>(items).into_response(),
             Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
         }
@@ -8628,6 +8871,17 @@ struct RunEventPage {
     next_cursor: Option<String>,
 }
 
+/// The query parameters of `run_entity_events`.
+#[derive(Debug, Clone, Default, Deserialize)]
+struct RunEntityEventsQuery {
+    /// The opaque `next_cursor` of the previous page; omit for the first page.
+    cursor: Option<String>,
+    /// Only events of this type.
+    event_type: Option<String>,
+    /// Maximum items to return; an integer, clamped to the endpoint's range when out of it.
+    limit: Option<String>,
+}
+
 /// Viewer+: one run's entity events
 /// (`GET /v1/orgs/{org}/datasets/{ds}/runs/{run_id}/entity-events`). Keyset page; query
 /// `event_type`, `cursor`, `limit`.
@@ -8642,7 +8896,7 @@ async fn run_entity_events(
     principal: Principal,
     State(state): State<AppState>,
     Path((org, ds, run_id)): Path<(String, String, String)>,
-    Query(params): Query<HashMap<String, String>>,
+    Query(params): Query<RunEntityEventsQuery>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
@@ -8652,25 +8906,21 @@ async fn run_entity_events(
         Err(response) => return *response,
     };
     with_dataset_lake(dataset, move |session, _dataset| {
-        let (snapshot, after) =
-            match read::page_start(session, params.get("cursor").map(String::as_str)) {
-                Ok(x) => x,
-                Err(read::PageStartError::BadCursor) => {
-                    return detail_err(StatusCode::UNPROCESSABLE_ENTITY, "invalid cursor");
-                }
-                Err(read::PageStartError::Lake(e)) => {
-                    return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}"));
-                }
-            };
-        let limit = read::parse_limit(params.get("limit").map(String::as_str));
+        let (snapshot, after) = match read::page_start(session, params.cursor.as_deref()) {
+            Ok(x) => x,
+            Err(read::PageStartError::BadCursor) => {
+                return detail_err(StatusCode::UNPROCESSABLE_ENTITY, "invalid cursor");
+            }
+            Err(read::PageStartError::Lake(e)) => {
+                return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}"));
+            }
+        };
+        let limit = read::parse_limit(params.limit.as_deref());
         match read::entity_events_by_run(
             session,
             snapshot,
             &run_id,
-            params
-                .get("event_type")
-                .map(String::as_str)
-                .filter(|v| !v.is_empty()),
+            params.event_type.as_deref().filter(|v| !v.is_empty()),
             after.as_deref(),
             limit,
         ) {
@@ -8719,6 +8969,19 @@ struct MergePlanList {
     items: Vec<read::MergePlan>,
 }
 
+/// The query parameters of `merge_plans`.
+#[derive(Debug, Clone, Default, Deserialize)]
+struct MergePlansQuery {
+    /// `csv` for a text/csv export; JSON otherwise.
+    format: Option<String>,
+    /// Maximum items to return; an integer, clamped to the endpoint's range when out of it.
+    limit: Option<String>,
+    /// The master-election policy (default `most_attributes`).
+    policy: Option<String>,
+    /// Inclusive lower bound on the timestamp (any form `timestamptz` accepts).
+    since: Option<String>,
+}
+
 /// Viewer+: merge plans for entities touched by a merge/member-add
 /// (`GET /v1/orgs/{org}/datasets/{ds}/merge-plans`). Query: `policy` (master-election, default
 /// `most_attributes`), `since` (ISO8601), `limit`, `format` (json|csv).
@@ -8726,13 +8989,14 @@ async fn merge_plans(
     principal: Principal,
     State(state): State<AppState>,
     Path((org, ds)): Path<(String, String)>,
-    Query(params): Query<HashMap<String, String>>,
+    Query(params): Query<MergePlansQuery>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
     }
     let policy = params
-        .get("policy")
+        .policy
+        .as_ref()
         .map_or(er_golden::DEFAULT_MASTER_ELECTION_POLICY, String::as_str);
     if !er_golden::MASTER_ELECTION_POLICIES.contains(&policy) {
         return detail_err(
@@ -8755,11 +9019,11 @@ async fn merge_plans(
         Err(response) => return *response,
     };
     with_dataset_lake(dataset, move |session, _dataset| {
-        let limit = read::parse_limit(params.get("limit").map(String::as_str));
+        let limit = read::parse_limit(params.limit.as_deref());
         let items = match read::merge_plans(
             session,
             &policy,
-            params.get("since").map(String::as_str),
+            params.since.as_deref(),
             source_ranks.as_ref(),
             limit,
         ) {
@@ -8768,7 +9032,7 @@ async fn merge_plans(
                 return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}"));
             }
         };
-        if params.get("format").map(String::as_str) == Some("csv") {
+        if params.format.as_deref() == Some("csv") {
             let csv = read::merge_plans_csv(&items);
             (
                 StatusCode::OK,
@@ -9461,6 +9725,15 @@ struct TagIn {
     apply_min_role: Option<String>,
 }
 
+/// The query parameters of `tags_index`.
+#[derive(Debug, Clone, Default, Deserialize)]
+struct TagsIndexQuery {
+    /// With `subject_type`: only tags applied to this subject.
+    subject_id: Option<String>,
+    /// The subject kind (`entity`, `record`, …).
+    subject_type: Option<String>,
+}
+
 /// Viewer+: the tenant's tag vocabulary, or the tags on one subject
 /// (`GET /v1/orgs/{org}/tags`, optionally `?subject_type=&subject_id=`).
 ///
@@ -9471,7 +9744,7 @@ async fn tags_index(
     principal: Principal,
     State(state): State<AppState>,
     Path(org): Path<String>,
-    Query(params): Query<HashMap<String, String>>,
+    Query(params): Query<TagsIndexQuery>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
@@ -9487,10 +9760,7 @@ async fn tags_index(
         Ok(r) => r,
         Err(r) => return *r,
     };
-    let subject = (
-        params.get("subject_type").map(String::as_str),
-        params.get("subject_id").map(String::as_str),
-    );
+    let subject = (params.subject_type.as_deref(), params.subject_id.as_deref());
     let found = match subject {
         (Some(kind), Some(id)) => {
             if !pg::is_tag_subject(kind) {
@@ -10053,17 +10323,26 @@ async fn tag_application(
     }
 }
 
+/// The query parameters of `tag_subjects`.
+#[derive(Debug, Clone, Default, Deserialize)]
+struct TagSubjectsQuery {
+    /// Maximum items to return; an integer, clamped to the endpoint's range when out of it.
+    limit: Option<String>,
+    /// The subject kind (`entity`, `record`, …).
+    subject_type: Option<String>,
+}
+
 /// Viewer+: what carries a tag (`GET /v1/orgs/{org}/datasets/{ds}/tags/{tag_id}/subjects`).
 async fn tag_subjects(
     principal: Principal,
     State(state): State<AppState>,
     Path((org, ds, tag_id)): Path<(String, String, String)>,
-    Query(params): Query<HashMap<String, String>>,
+    Query(params): Query<TagSubjectsQuery>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
     }
-    if let Some(kind) = params.get("subject_type")
+    if let Some(kind) = params.subject_type.as_ref()
         && !pg::is_tag_subject(kind)
     {
         return detail_err(
@@ -10087,12 +10366,12 @@ async fn tag_subjects(
         Ok(row) => row,
         Err(r) => return *r,
     };
-    let limit = read::parse_limit(params.get("limit").map(String::as_str));
+    let limit = read::parse_limit(params.limit.as_deref());
     match pg::subjects_for_tag(
         &client,
         &d.id,
         &tag_id,
-        params.get("subject_type").map(String::as_str),
+        params.subject_type.as_deref(),
         limit,
     )
     .await
@@ -10108,6 +10387,13 @@ async fn tag_subjects(
     }
 }
 
+/// The query parameters of `taggings_index`.
+#[derive(Debug, Clone, Default, Deserialize)]
+struct TaggingsIndexQuery {
+    /// The subject kind (`entity`, `record`, …).
+    subject_type: Option<String>,
+}
+
 /// Viewer+: every tagging of one subject kind in one dataset
 /// (`GET /v1/orgs/{org}/datasets/{ds}/taggings?subject_type=entity`).
 ///
@@ -10120,7 +10406,7 @@ async fn taggings_index(
     principal: Principal,
     State(state): State<AppState>,
     Path((org, ds)): Path<(String, String)>,
-    Query(params): Query<HashMap<String, String>>,
+    Query(params): Query<TaggingsIndexQuery>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Viewer) {
         return e.into_response();
@@ -10128,7 +10414,7 @@ async fn taggings_index(
     // The kind is required rather than defaulted: the only bulk caller today
     // wants entities, and a default would make a caller who forgot the param
     // believe it had everything.
-    let Some(subject_type) = params.get("subject_type").map(String::as_str) else {
+    let Some(subject_type) = params.subject_type.as_deref() else {
         return detail_err(
             StatusCode::UNPROCESSABLE_ENTITY,
             format!(
@@ -14314,5 +14600,88 @@ mod response_shape_tests {
                 retry: None,
             })
         );
+    }
+}
+
+#[cfg(test)]
+mod query_param_tests {
+    //! #865: the named query structs keep the `HashMap` bag's behaviour on every
+    //! boundary a caller can reach, except one stated change: a repeated key.
+    use super::*;
+    use axum::extract::Query;
+
+    fn parse<T: serde::de::DeserializeOwned>(query: &str) -> Result<T, String> {
+        let uri: axum::http::Uri = format!("/x?{query}").parse().unwrap();
+        Query::<T>::try_from_uri(&uri)
+            .map(|Query(q)| q)
+            .map_err(|e| e.to_string())
+    }
+
+    macro_rules! boundaries {
+        ($($ty:ident),* $(,)?) => {$(
+            // Missing: no parameter is required (each was a `HashMap` lookup).
+            parse::<$ty>("").unwrap_or_else(|e| panic!("{}: empty query: {e}", stringify!($ty)));
+            // Unknown: ignored, as the bag ignored keys nobody read.
+            parse::<$ty>("definitely_not_a_param=1")
+                .unwrap_or_else(|e| panic!("{}: unknown key: {e}", stringify!($ty)));
+        )*};
+    }
+
+    #[test]
+    fn every_query_struct_accepts_missing_and_unknown_parameters() {
+        boundaries!(
+            ModelVersionEvaluationQuery,
+            ListJobsQuery,
+            JobsGlobalQuery,
+            AuditGlobalQuery,
+            AuditIndexQuery,
+            GoldenRecordsListQuery,
+            OrgDataQualityQuery,
+            DuplicatesListQuery,
+            InsightSourcesQuery,
+            InsightsQuery,
+            QualityQuery,
+            DatasetProfileQuery,
+            MatchScoresListQuery,
+            LabelingNextQuery,
+            LabelsListQuery,
+            MatchPreviewQuery,
+            BlockingEstimateQuery,
+            ReviewsListQuery,
+            AssertionsListQuery,
+            UploadImportQuery,
+            ImportsListQuery,
+            ImportsRecentQuery,
+            RunEntityEventsQuery,
+            MergePlansQuery,
+            TagsIndexQuery,
+            TagSubjectsQuery,
+            TaggingsIndexQuery,
+        );
+    }
+
+    #[test]
+    fn values_arrive_as_the_bag_delivered_them() {
+        // Present-but-empty stays `Some("")`, so `parse_limit("")` and friends
+        // see exactly what they saw from the bag; text is not trimmed here.
+        let q: ReviewsListQuery = parse("limit=&cursor=abc&status=%20open%20").unwrap();
+        assert_eq!(q.limit.as_deref(), Some(""));
+        assert_eq!(q.cursor.as_deref(), Some("abc"));
+        assert_eq!(q.status.as_deref(), Some(" open "));
+        // A non-numeric number is still the handler's to ignore, not a 400.
+        let q: DuplicatesListQuery = parse("min_members=lots&limit=-3").unwrap();
+        assert_eq!(q.min_members.as_deref(), Some("lots"));
+        assert_eq!(q.limit.as_deref(), Some("-3"));
+    }
+
+    #[test]
+    fn a_repeated_key_is_now_refused_where_the_bag_kept_the_last() {
+        // The one behaviour change: `HashMap` kept the last of `?tag=a&tag=b`
+        // silently; a struct field refuses the duplicate (axum answers 400).
+        let bag: std::collections::HashMap<String, String> =
+            parse("tag=a&tag=b").expect("the bag kept a value");
+        assert_eq!(bag.get("tag").map(String::as_str), Some("b"));
+        let err = parse::<DuplicatesListQuery>("tag=a&tag=b").unwrap_err();
+        assert!(err.contains("duplicate field"), "{err}");
     }
 }

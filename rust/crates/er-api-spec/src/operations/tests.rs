@@ -367,3 +367,61 @@ async fn provision(name: &str) -> axum::response::Response {
     let error = operations(&partial, &[], &schemas).err().unwrap();
     assert!(error.contains("mixes typed and untyped"), "{error}");
 }
+
+#[test]
+fn query_structs_become_documented_query_parameters() {
+    let src = r#"
+fn router() { Router::new().route("/things/{id}/items", get(list)); }
+#[derive(Deserialize)]
+struct ListQuery {
+    /// The opaque `next_cursor` of the previous page.
+    cursor: Option<String>,
+    /// Maximum items to return.
+    /// Clamped to the range.
+    limit: Option<i64>,
+    #[serde(default)]
+    verbose: bool,
+    kind: String,
+}
+/// Viewer+: list items (`GET /things/{id}/items`).
+async fn list(Path(id): Path<String>, Query(params): Query<ListQuery>) { Json(json!({"items": items})) }
+"#;
+    let ops = operations(src, &[], &BTreeSet::new()).unwrap();
+    let params = &ops[0].params;
+    let by = |name: &str| params.iter().find(|p| p.name == name).unwrap();
+    // Path first, then the struct's fields in declaration order.
+    assert_eq!(
+        params
+            .iter()
+            .map(|p| (p.name.as_str(), p.location))
+            .collect::<Vec<_>>(),
+        [
+            ("id", "path"),
+            ("cursor", "query"),
+            ("limit", "query"),
+            ("verbose", "query"),
+            ("kind", "query")
+        ]
+    );
+    assert!(by("id").required);
+    assert!(!by("cursor").required, "Option is optional");
+    assert!(!by("verbose").required, "#[serde(default)] is optional");
+    assert!(by("kind").required, "a bare field is a 400 when absent");
+    assert_eq!(by("limit").schema, json!({"type":"integer"}));
+    assert_eq!(
+        by("limit").description.as_deref(),
+        Some("Maximum items to return. Clamped to the range.")
+    );
+    assert_eq!(by("kind").description, None);
+}
+
+#[test]
+fn an_untyped_query_bag_fails_generation() {
+    let src = r#"
+fn router() { Router::new().route("/things", get(list)); }
+/// Viewer+: list (`GET /things`).
+async fn list(Query(params): Query<HashMap<String, String>>) { Json(json!({"items": items})) }
+"#;
+    let error = operations(src, &[], &BTreeSet::new()).err().unwrap();
+    assert!(error.contains("untyped Query<HashMap"), "{error}");
+}

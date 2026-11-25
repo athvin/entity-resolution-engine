@@ -4,9 +4,60 @@
 use super::{Parameter, Request, Source};
 
 pub(super) fn parameters(
+    source: &Source<'_>,
     function: &syn::ItemFn,
     names: &[String],
 ) -> Result<Vec<Parameter>, String> {
+    let mut params = path_parameters(function, names)?;
+    params.extend(query_parameters(source, function)?);
+    Ok(params)
+}
+
+/// `Query<T>`'s fields as `in: query` parameters. `T` must be a named local
+/// struct: a `Query<HashMap<…>>` bag documents nothing (no cursor, no limit,
+/// no filter), so it fails generation rather than publishing an operation
+/// that looks parameterless.
+fn query_parameters(source: &Source<'_>, function: &syn::ItemFn) -> Result<Vec<Parameter>, String> {
+    let Some(query) = function.sig.inputs.iter().find_map(|argument| {
+        let syn::FnArg::Typed(argument) = argument else {
+            return None;
+        };
+        generic(&argument.ty, "Query")
+    }) else {
+        return Ok(Vec::new());
+    };
+    let name = type_name(query)
+        .ok_or_else(|| format!("unsupported query type in {}", function.sig.ident))?;
+    if name == "HashMap" || name == "BTreeMap" {
+        return Err(format!(
+            "{} takes an untyped Query<{name}<…>>: name its parameters in a struct",
+            function.sig.ident
+        ));
+    }
+    let fields = crate::manifest::struct_fields(source.text, &name).ok_or_else(|| {
+        format!(
+            "query struct {name} of {} is not a local struct",
+            function.sig.ident
+        )
+    })?;
+    fields
+        .into_iter()
+        .map(|field| {
+            let schema = crate::manifest::type_schema(&field.ty)
+                .and_then(|s| serde_json::from_str(&s).ok())
+                .ok_or_else(|| format!("unsupported query field {name}.{}", field.name))?;
+            Ok(Parameter {
+                location: "query",
+                required: !field.optional,
+                description: (!field.doc.is_empty()).then_some(field.doc),
+                name: field.name.trim_start_matches("r#").to_string(),
+                schema,
+            })
+        })
+        .collect()
+}
+
+fn path_parameters(function: &syn::ItemFn, names: &[String]) -> Result<Vec<Parameter>, String> {
     let path_type = function.sig.inputs.iter().find_map(|argument| {
         let syn::FnArg::Typed(argument) = argument else {
             return None;
@@ -36,7 +87,10 @@ pub(super) fn parameters(
             };
             Ok(Parameter {
                 name: name.clone(),
+                location: "path",
+                required: true,
                 schema,
+                description: None,
             })
         })
         .collect()

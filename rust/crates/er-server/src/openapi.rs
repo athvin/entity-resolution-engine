@@ -258,8 +258,17 @@ fn add_operations(doc: &mut utoipa::openapi::OpenApi, audience: Audience) {
             operation = operation.parameter(
                 ParameterBuilder::new()
                     .name(param.name)
-                    .parameter_in(ParameterIn::Path)
-                    .required(Required::True)
+                    .parameter_in(if param.location == "query" {
+                        ParameterIn::Query
+                    } else {
+                        ParameterIn::Path
+                    })
+                    .required(if param.required {
+                        Required::True
+                    } else {
+                        Required::False
+                    })
+                    .description(param.description)
                     .schema(Some(json_schema(param.schema)))
                     .build(),
             );

@@ -155,7 +155,15 @@ The operation contract is generated and gated, with deliberate limits:
   has no `preserve_order`, so a `json!` object emits its keys sorted while a
   struct emits declaration order. Prove each conversion by comparing parsed
   values (`response_shape_tests` in `lib.rs`), and compare parsed values in
-  any test that pinned response bytes. Query parameters remain untyped (#865).
+  any test that pinned response bytes.
+- **Query parameters are a named struct per handler.** A `Query<HashMap<…>>`
+  fails generation. A `Query<Name>`'s fields become `in: query` parameters,
+  each field's `///` doc becomes the parameter's description, and a field is
+  required unless it is `Option` or `#[serde(default)]` (#865). Keep fields
+  `Option<String>` where the handler parses leniently: typing `limit` as `i64`
+  turns today's silent fallback into a 400. Unlike the old bag, a struct
+  refuses a repeated key (`?tag=a&tag=b`), so a list-valued parameter needs
+  its own design, not a second occurrence.
   The detail-shaped application error is documented separately from framework
   request-extractor and infrastructure rejections.
 - **No frontend module imports `schema.d.ts`.** `openapi-fetch` sits in

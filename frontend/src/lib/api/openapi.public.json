@@ -157,6 +157,69 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "action",
+            "in": "query",
+            "description": "Only entries with this action.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "actor",
+            "in": "query",
+            "description": "Only entries by this actor.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "before_id",
+            "in": "query",
+            "description": "Keyset cursor: only entries with a smaller id; an integer.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "description": "`csv` for a text/csv export; JSON otherwise.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum items to return; an integer, clamped to the endpoint's range when out of it.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "description": "Inclusive lower bound on the timestamp (any form `timestamptz` accepts).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "description": "Exclusive upper bound on the timestamp.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -646,6 +709,33 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "The opaque `next_cursor` of the previous page; omit for the first page.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "include_retracted",
+            "in": "query",
+            "description": "`true` to include retracted assertions.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum items to return; an integer, clamped to the endpoint's range when out of it.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -955,6 +1045,15 @@
             "name": "ds",
             "in": "path",
             "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "largest",
+            "in": "query",
+            "description": "How many of the largest blocks to report; an integer.",
+            "required": false,
             "schema": {
               "type": "string"
             }
@@ -1359,6 +1458,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "stale_days",
+            "in": "query",
+            "description": "A record not updated in this many days counts as stale; an integer.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -1417,6 +1525,114 @@
             "name": "ds",
             "in": "path",
             "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "The opaque `next_cursor` of the previous page; omit for the first page.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "exclude_tag",
+            "in": "query",
+            "description": "Exclude groups carrying this tag.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum items to return; an integer, clamped to the endpoint's range when out of it.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "matched_by",
+            "in": "query",
+            "description": "Only groups matched by this model version.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "matched_on",
+            "in": "query",
+            "description": "Only groups whose evidence names this comparison column.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "max_confidence",
+            "in": "query",
+            "description": "Upper bound on group confidence (0–100); an integer.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "max_members",
+            "in": "query",
+            "description": "Upper bound on group size; an integer.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "member",
+            "in": "query",
+            "description": "Jump to the group containing this record key.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "min_confidence",
+            "in": "query",
+            "description": "Lower bound on group confidence (0–100); an integer.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "min_members",
+            "in": "query",
+            "description": "Lower bound on group size; an integer.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "tag",
+            "in": "query",
+            "description": "Only groups carrying this tag.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "verified",
+            "in": "query",
+            "description": "`true` or `false`: only (un)verified groups.",
+            "required": false,
             "schema": {
               "type": "string"
             }
@@ -1793,6 +2009,33 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "The opaque `next_cursor` of the previous page; omit for the first page.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum items to return; an integer, clamped to the endpoint's range when out of it.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Free-text search over the golden record.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -1862,6 +2105,14 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "snapshot",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
             }
           }
         ],
@@ -2184,6 +2435,33 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "The opaque `next_cursor` of the previous page; omit for the first page.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum items to return; an integer, clamped to the endpoint's range when out of it.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "description": "The source system.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -2256,6 +2534,15 @@
             "name": "ds",
             "in": "path",
             "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "description": "The source system.",
+            "required": false,
             "schema": {
               "type": "string"
             }
@@ -2339,6 +2626,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum items to return; an integer, clamped to the endpoint's range when out of it.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "description": "The source system.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -2403,6 +2708,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum items to return; an integer, clamped to the endpoint's range when out of it.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -2464,6 +2778,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "run_id",
+            "in": "query",
+            "description": "The run to report on; the newest when omitted.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -2522,6 +2845,24 @@
             "name": "ds",
             "in": "path",
             "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum items to return; an integer, clamped to the endpoint's range when out of it.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "description": "Only items in this state.",
+            "required": false,
             "schema": {
               "type": "string"
             }
@@ -3062,6 +3403,33 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum items to return; an integer, clamped to the endpoint's range when out of it.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "max",
+            "in": "query",
+            "description": "Upper bound on the probability band (0–1); a number.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "min",
+            "in": "query",
+            "description": "Lower bound on the probability band (0–1); a number, not below the review floor.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -3120,6 +3488,33 @@
             "name": "ds",
             "in": "path",
             "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum items to return; an integer, clamped to the endpoint's range when out of it.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "origin",
+            "in": "query",
+            "description": "Only labels from this origin (`human`, `reviewer`, `llm`).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "verdict",
+            "in": "query",
+            "description": "Only labels with this verdict (`match`, `no_match`).",
+            "required": false,
             "schema": {
               "type": "string"
             }
@@ -3569,6 +3964,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum items to return; an integer, clamped to the endpoint's range when out of it.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -3627,6 +4031,42 @@
             "name": "ds",
             "in": "path",
             "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "band_high",
+            "in": "query",
+            "description": "Upper bound on match probability (0–1); a number.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "band_low",
+            "in": "query",
+            "description": "Lower bound on match probability (0–1); a number.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "The opaque `next_cursor` of the previous page; omit for the first page.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum items to return; an integer, clamped to the endpoint's range when out of it.",
+            "required": false,
             "schema": {
               "type": "string"
             }
@@ -3693,6 +4133,42 @@
             "name": "ds",
             "in": "path",
             "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "description": "`csv` for a text/csv export; JSON otherwise.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum items to return; an integer, clamped to the endpoint's range when out of it.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "policy",
+            "in": "query",
+            "description": "The master-election policy (default `most_attributes`).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "description": "Inclusive lower bound on the timestamp (any form `timestamptz` accepts).",
+            "required": false,
             "schema": {
               "type": "string"
             }
@@ -4365,6 +4841,15 @@
             "schema": {
               "type": "integer"
             }
+          },
+          {
+            "name": "threshold",
+            "in": "query",
+            "description": "The cut to evaluate at (0–1); the configured auto-merge threshold when omitted.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -4423,6 +4908,33 @@
             "name": "ds",
             "in": "path",
             "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "description": "The source system.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "subject",
+            "in": "query",
+            "description": "The corpus stage profiled.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "tier",
+            "in": "query",
+            "description": "Profile tier, 1 or 2; an integer (default 1).",
+            "required": false,
             "schema": {
               "type": "string"
             }
@@ -4554,6 +5066,15 @@
             "name": "ds",
             "in": "path",
             "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum items to return; an integer, clamped to the endpoint's range when out of it.",
+            "required": false,
             "schema": {
               "type": "string"
             }
@@ -5822,6 +6343,60 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "The opaque `next_cursor` of the previous page; omit for the first page.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum items to return; an integer, clamped to the endpoint's range when out of it.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "max_probability",
+            "in": "query",
+            "description": "Upper bound on match probability (0–1); a number.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "min_probability",
+            "in": "query",
+            "description": "Lower bound on match probability (0–1); a number.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "reason",
+            "in": "query",
+            "description": "Only reviews escalated for this reason.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "description": "Only reviews in this status.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -6281,6 +6856,33 @@
             "name": "run_id",
             "in": "path",
             "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "The opaque `next_cursor` of the previous page; omit for the first page.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "event_type",
+            "in": "query",
+            "description": "Only events of this type.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum items to return; an integer, clamped to the endpoint's range when out of it.",
+            "required": false,
             "schema": {
               "type": "string"
             }
@@ -6908,6 +7510,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "subject_type",
+            "in": "query",
+            "description": "The subject kind (`entity`, `record`, …).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -7076,6 +7687,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum items to return; an integer, clamped to the endpoint's range when out of it.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "subject_type",
+            "in": "query",
+            "description": "The subject kind (`entity`, `record`, …).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -7225,6 +7854,24 @@
             "name": "org",
             "in": "path",
             "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "subject_id",
+            "in": "query",
+            "description": "With `subject_type`: only tags applied to this subject.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "subject_type",
+            "in": "query",
+            "description": "The subject kind (`entity`, `record`, …).",
+            "required": false,
             "schema": {
               "type": "string"
             }
@@ -7572,6 +8219,30 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "webhook_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
             }
           }
         ],

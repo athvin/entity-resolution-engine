@@ -38,7 +38,14 @@ pub struct Request {
 
 pub struct Parameter {
     pub name: String,
+    /// `path` or `query`.
+    pub location: &'static str,
+    /// Always true for a path parameter; a query parameter is required only
+    /// when its field is neither `Option` nor `#[serde(default)]`.
+    pub required: bool,
     pub schema: Value,
+    /// The query field's doc comment; none for a path parameter.
+    pub description: Option<String>,
 }
 
 struct Source<'a> {
@@ -134,7 +141,7 @@ pub fn operations(
                 path: route.path.to_string(),
                 role: role.to_string(),
                 summary,
-                params: requests::parameters(function, &path_params(route.path))?,
+                params: requests::parameters(&parsed, function, &path_params(route.path))?,
                 request,
                 responses,
                 response_schemas,
