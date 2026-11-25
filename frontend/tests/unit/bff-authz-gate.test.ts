@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -149,6 +149,48 @@ describe("BFF authorization gate", () => {
     const frontend = path.resolve(import.meta.dirname, "..", "..");
     expect(countRoutes(frontend)).toBeGreaterThan(40);
     expect(findUnauthorizedRoutes(frontend)).toEqual([]);
+  });
+});
+
+describe("the #866 key routes and the #867 spec route (#868)", () => {
+  const REAL = path.resolve(import.meta.dirname, "..", "..", "src", "app", "api");
+  const KEY_ROUTES = [
+    path.join("orgs", "[org]", "api-keys", "route.ts"),
+    path.join("orgs", "[org]", "api-keys", "[keyId]", "route.ts"),
+  ];
+
+  it("refuses the real key routes once their guard is taken out", () => {
+    // The real sources, with only the guard renamed away: every handler they
+    // export (GET, POST, DELETE) must then be reported. A gate that passed
+    // them would let any signed-in user mint, list or revoke keys.
+    const dir = tree();
+    for (const rel of KEY_ROUTES) {
+      const source = readFileSync(path.join(REAL, rel), "utf8");
+      expect(source).toContain('requireOrgAccess(org, "admin")');
+      route(
+        path.join(dir, "src", "app", "api"),
+        rel,
+        source.replaceAll("requireOrgAccess", "unguarded"),
+      );
+    }
+    const reported = findUnauthorizedRoutes(dir)
+      .map((v) => `${v.file}: ${v.methods.join(",")}`)
+      .sort();
+    const api = path.join("src", "app", "api");
+    expect(reported).toEqual(
+      [
+        `${path.join(api, KEY_ROUTES[0] ?? "")}: GET,POST`,
+        `${path.join(api, KEY_ROUTES[1] ?? "")}: DELETE`,
+      ].sort(),
+    );
+  });
+
+  it("holds against the real key routes as written", () => {
+    const dir = tree();
+    for (const rel of KEY_ROUTES) {
+      route(path.join(dir, "src", "app", "api"), rel, readFileSync(path.join(REAL, rel), "utf8"));
+    }
+    expect(findUnauthorizedRoutes(dir)).toEqual([]);
   });
 });
 

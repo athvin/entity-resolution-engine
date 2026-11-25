@@ -114,4 +114,5 @@ mod response_envelopes;
 mod salesforce_mock;
 mod settle_consequences;
 mod telemetry_trace_continuation;
+mod wire_serialization;
 mod writeback_proposals;
