@@ -54,6 +54,10 @@ pub struct CapturedSpan {
     pub parent_is_remote: bool,
     /// Whether this span began a trace rather than continuing one.
     pub is_root: bool,
+    /// Every attribute the span exported, as `(key, value)` with the value
+    /// rendered as a string. What a PII assertion reads: the span store sees
+    /// exactly these.
+    pub attributes: Vec<(String, String)>,
 }
 
 fn to_captured(span: opentelemetry_sdk::trace::SpanData) -> CapturedSpan {
@@ -63,6 +67,11 @@ fn to_captured(span: opentelemetry_sdk::trace::SpanData) -> CapturedSpan {
         parent_span_id: span.parent_span_id.to_string(),
         parent_is_remote: span.parent_span_is_remote,
         is_root: span.parent_span_id == SpanId::INVALID,
+        attributes: span
+            .attributes
+            .iter()
+            .map(|kv| (kv.key.to_string(), kv.value.to_string()))
+            .collect(),
     }
 }
 

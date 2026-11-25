@@ -88,7 +88,12 @@ export function ApiKeysView(props: ApiKeysViewProps) {
                 ))}
               </select>
             </div>
-            <Button data-testid="api-key-create" disabled={props.busy} onClick={props.onCreate}>
+            <Button
+              data-testid="api-key-create"
+              data-er-action="keys.mint"
+              disabled={props.busy}
+              onClick={props.onCreate}
+            >
               <Plus /> {props.busy ? "Creating…" : "Create key"}
             </Button>
           </div>
@@ -191,6 +196,7 @@ export function ApiKeysView(props: ApiKeysViewProps) {
                           variant="ghost"
                           size="sm"
                           data-testid={`api-key-revoke-${k.id}`}
+                          data-er-action="keys.revoke"
                           disabled={props.busy}
                           onClick={() => {
                             props.onRevoke(k.id);

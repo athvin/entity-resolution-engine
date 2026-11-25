@@ -15,7 +15,7 @@ const LIB: &str = include_str!("../src/lib.rs");
 
 /// The source with every `#[cfg(test)] mod … { … }` block removed, so test
 /// code that compares `json!(entity)` against its wire form does not count.
-fn product_source(src: &str) -> String {
+pub(crate) fn product_source(src: &str) -> String {
     let mut out = String::with_capacity(src.len());
     let mut rest = src;
     while let Some(at) = rest.find("#[cfg(test)]\nmod ") {

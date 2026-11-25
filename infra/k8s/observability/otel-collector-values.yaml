@@ -177,7 +177,7 @@ config:
               keep_keys(span.attributes, [
                 "er.statement", "er.generator", "er.rows", "er.outcome",
                 "er.org", "er.dataset", "er.run_id", "er.stage",
-                "er.action", "er.actor", "er.role", "er.request_id",
+                "er.action", "er.role", "er.request_id", "er.key_id", "er.key_role",
                 "er.attempt", "er.duration_ms", "er.job_id", "er.job_kind",
                 "er.members", "er.mode", "er.model_version",
                 "er.query_id", "er.task_id", "er.task_instance_id",

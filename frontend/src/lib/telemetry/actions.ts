@@ -98,6 +98,13 @@ export const UI_ACTIONS = [
 
   // --- tenancy ----------------------------------------------------------
   "dataset.create",
+
+  // --- credentials -------------------------------------------------------
+  // The one click that mints a credential, and the one that kills it (#869).
+  // The trace runs from the button to the `key.issue` / `key.revoke` audit row
+  // through `trace_id`; the request span carries `er.key_id`, never the key.
+  "keys.mint",
+  "keys.revoke",
 ] as const;
 
 /**

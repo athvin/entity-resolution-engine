@@ -223,6 +223,18 @@ stale:
 - A request span records `url.path` and never `url.query`, because the
   golden-records search takes a contains-query over record values.
 
+- A credential crosses handler code with a span open exactly once: the key
+  mint, which holds the plaintext between `pg::issue_key` and the response
+  body. The request span carries `er.key_id` and `er.key_role`; the plaintext
+  and the hash are `Pii::Never` (`er.api_key`, `er.api_key_hash`). There is no
+  `er.actor` on it either, because the actor string embeds the acting user's
+  email. `tests/telemetry_secrets.rs` is the shape gate and
+  `tests/pg_key_telemetry.rs` the runtime one; the shape gate exists because a
+  `record` on an undeclared field is a no-op that the runtime test cannot see.
+- The public `/docs/api` page and `/api/openapi` get **no counter**: a page view
+  is not an engine metric, and nothing would be answered by one (#869). They
+  make no upstream call, so there is no trace to continue either.
+
 When adding a field, ask what it holds on a bad day, not a good one. A clean
 verification run cannot find a leak that only a constraint violation produces.
 
