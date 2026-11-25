@@ -1054,6 +1054,7 @@ impl Task<Session> for ExportResults {
             &request,
             &path,
             crate::read::MAX_LIMIT,
+            crate::exports::MAX_ROWS,
         ) {
             Ok(report) => Ok(Outcome::Done(
                 Plan(ExportReport {

@@ -170,7 +170,9 @@ pub struct ExportReport {
 }
 
 /// Write `request`'s artifact to `path`, walking every page at its snapshot.
-/// `page` is the page size, a parameter so a test can force several pages.
+/// `page` is the page size and `max_rows` the ceiling ([`MAX_ROWS`] in
+/// production); both are parameters so a test can force several pages and hit
+/// the ceiling without a million rows.
 ///
 /// # Errors
 /// A lake read failure, the [`MAX_ROWS`] ceiling, or an I/O failure. On any
@@ -181,6 +183,7 @@ pub fn write(
     request: &ExportRequest,
     path: &Path,
     page: i64,
+    max_rows: usize,
 ) -> Result<ExportReport, String> {
     let snapshot = request
         .snapshot
@@ -192,7 +195,15 @@ pub fn write(
         "{}.partial",
         path.extension().and_then(|e| e.to_str()).unwrap_or("out")
     ));
-    let result = write_to(session, entity_type, request, snapshot, &partial, page);
+    let result = write_to(
+        session,
+        entity_type,
+        request,
+        snapshot,
+        &partial,
+        page,
+        max_rows,
+    );
     match result {
         Ok(rows) => {
             std::fs::rename(&partial, path).map_err(|e| format!("export publish: {e}"))?;
@@ -215,14 +226,15 @@ fn write_to(
     snapshot: i64,
     partial: &Path,
     page: i64,
+    max_rows: usize,
 ) -> Result<usize, String> {
     let file = std::fs::File::create(partial).map_err(|e| format!("export file: {e}"))?;
     let mut out = std::io::BufWriter::new(file);
     let mut rows = 0usize;
     let ceiling = |rows: usize| {
-        if rows > MAX_ROWS {
+        if rows > max_rows {
             Err(format!(
-                "the export exceeds the {MAX_ROWS}-row ceiling; narrow it, or ask for a higher bound"
+                "the export exceeds the {max_rows}-row ceiling; narrow it, or ask for a higher bound"
             ))
         } else {
             Ok(())
@@ -253,14 +265,18 @@ fn write_to(
         ExportKind::Duplicates => {
             let mut after: Option<String> = None;
             loop {
-                let (groups, next) = crate::read::duplicates(
+                let (groups, next) = match crate::read::duplicates(
                     session,
                     entity_type,
                     snapshot,
                     after.as_deref(),
                     &crate::read::DuplicateFilters::default(),
                     page,
-                )?;
+                ) {
+                    Ok(found) => found,
+                    Err(e) if after.is_none() && not_yet_written(&e) => break,
+                    Err(e) => return Err(e),
+                };
                 for group in groups.to_values() {
                     rows += 1;
                     ceiling(rows)?;
@@ -286,6 +302,14 @@ fn write_to(
     Ok(rows)
 }
 
+/// Whether a first-page read failed because the relation it reads does not
+/// exist at the export's snapshot: a lake no run has finished in. That is an
+/// empty result, a zero-row artifact, not a failure, so "nothing yet" and
+/// "the export broke" stay different answers.
+fn not_yet_written(error: &str) -> bool {
+    error.contains("Catalog Error: Table with name ") && error.contains(" does not exist")
+}
+
 /// Walk every golden page at `snapshot`, handing each batch to `each`.
 fn golden_pages(
     session: &Session,
@@ -296,14 +320,18 @@ fn golden_pages(
 ) -> Result<(), String> {
     let mut after: Option<String> = None;
     loop {
-        let chunk = crate::read::golden_arrow_page(
+        let chunk = match crate::read::golden_arrow_page(
             session,
             entity_type,
             snapshot,
             None,
             after.as_deref(),
             page,
-        )?;
+        ) {
+            Ok(chunk) => chunk,
+            Err(e) if after.is_none() && not_yet_written(&e) => return Ok(()),
+            Err(e) => return Err(e),
+        };
         for batch in &chunk.batches {
             each(batch)?;
         }
