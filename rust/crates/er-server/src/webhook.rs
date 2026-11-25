@@ -32,7 +32,10 @@ pub const EVENT_CATALOG: [(&str, &str); 13] = [
         "job.succeeded",
         "A queued job finished successfully. Fired once per OUTCOME, not per \
          attempt — a job that failed twice and then succeeded delivers one \
-         success.",
+         success. A run carries `run_id`, the `snapshot` holding its results \
+         and `links` that read exactly that snapshot; an export carries \
+         `export_id` and its download link. Missed it? `GET …/runs` serves \
+         each run's `snapshot`, so the same results are a poll away.",
     ),
     (
         "job.failed",
@@ -452,6 +455,65 @@ pub async fn drain(
     Ok(settled)
 }
 
+/// A `job.*` event's `data` (#1232): the job, plus what a subscriber needs to
+/// fetch the results WITHOUT a second lookup. A succeeded run names its
+/// `run_id` and the `snapshot` holding its results, with links that read
+/// exactly that snapshot; a succeeded export names its `export_id`, snapshot
+/// and status/download links. Links are paths relative to the API origin.
+///
+/// The recovery path for a missed delivery is the same data by polling:
+/// `GET …/runs` serves each run's `snapshot` (#1229), and `GET …/exports/{id}`
+/// an export's state, so nothing has to re-run.
+#[must_use]
+pub fn job_event_data(
+    job: &crate::Job,
+    org: &str,
+    dataset: Option<&str>,
+    run_snapshot: Option<i64>,
+) -> serde_json::Value {
+    let mut data = json!({
+        "job_id": job.id,
+        "kind": job.kind,
+        "state": job.state,
+    });
+    let Some(ds) = dataset else {
+        return data;
+    };
+    let base = format!("/v1/orgs/{org}/datasets/{ds}");
+    let succeeded = job.state == "succeeded";
+    let is_run = matches!(
+        job.kind.as_str(),
+        "run_all_full" | "run_all_incremental" | "correct" | "apply_corrections"
+    );
+    if is_run {
+        data["run_id"] = json!(job.run_id.as_deref().unwrap_or(&job.id));
+        if let (true, Some(snapshot)) = (succeeded, run_snapshot) {
+            data["snapshot"] = json!(snapshot);
+            data["links"] = json!({
+                "golden_records": format!("{base}/golden-records?snapshot={snapshot}"),
+                "duplicates": format!("{base}/duplicates?snapshot={snapshot}"),
+                "runs": format!("{base}/runs"),
+            });
+        }
+    } else if job.kind == "export" {
+        data["export_id"] = json!(job.id);
+        if let Some(snapshot) = job
+            .params
+            .get("snapshot")
+            .and_then(serde_json::Value::as_i64)
+        {
+            data["snapshot"] = json!(snapshot);
+        }
+        let status = format!("{base}/exports/{}", job.id);
+        data["links"] = if succeeded {
+            json!({ "status": status, "download": format!("{status}/download") })
+        } else {
+            json!({ "status": status })
+        };
+    }
+    data
+}
+
 /// Record the `job.<state>` event for a settled job against the org's
 /// subscribers. Delivery happens later, in [`drain_once`].
 ///
@@ -460,18 +522,23 @@ pub async fn drain(
 pub async fn emit_job_event(
     pg_client: &tokio_postgres::Client,
     job: &crate::Job,
+    run_snapshot: Option<i64>,
 ) -> Result<Vec<er_entities::webhook_delivery::WebhookDelivery>, tokio_postgres::Error> {
     let event_type = format!("job.{}", job.state);
-    let data = json!({
-        "job_id": job.id,
-        "kind": job.kind,
-        "state": job.state,
-    });
     // Subscribers key on the org's id; the payload names the org (the public
     // handle), resolved from the job's org_id.
     let org_name = crate::pg::get_org_by_id(pg_client, &job.org_id)
         .await?
         .map_or_else(|| job.org_id.clone(), |o| o.name);
+    let dataset_name = match job.dataset_id.as_deref() {
+        Some(id) => crate::pg::get_dataset_by_id(pg_client, id)
+            .await
+            .ok()
+            .flatten()
+            .map(|d| d.name),
+        None => None,
+    };
+    let data = job_event_data(job, &org_name, dataset_name.as_deref(), run_snapshot);
     emit(
         pg_client,
         &job.org_id,
@@ -481,4 +548,123 @@ pub async fn emit_job_event(
         &data,
     )
     .await
+}
+
+#[cfg(test)]
+mod job_event_data_tests {
+    //! #1232: a `job.*` payload carries what a subscriber needs to fetch the
+    //! results, and nothing it would have to guess.
+    use super::job_event_data;
+    use serde_json::json;
+
+    fn job(kind: &str, state: &str, params: serde_json::Value) -> crate::Job {
+        let at = "2026-01-02T03:04:05Z".parse().expect("a fixed timestamp");
+        crate::Job {
+            id: "01JOB".to_string(),
+            org_id: "uuid-acme".to_string(),
+            dataset_id: Some("uuid-ds".to_string()),
+            kind: kind.to_string(),
+            params,
+            state: state.to_string(),
+            priority: 0,
+            idempotency_key: None,
+            run_id: Some("01RUN".to_string()),
+            attempt: 1,
+            max_attempts: 3,
+            error_class: None,
+            error_detail: None,
+            not_before: None,
+            created_by: None,
+            schedule_id: None,
+            resource_class: None,
+            trace_context: None,
+            structural_fingerprint: None,
+            policy_hash: None,
+            image_digest: None,
+            clear_number: None,
+            owner_epoch: None,
+            created_at: at,
+            updated_at: at,
+            started_at: None,
+            finished_at: None,
+        }
+    }
+
+    #[test]
+    fn a_succeeded_run_links_the_snapshot_holding_its_results() {
+        let data = job_event_data(
+            &job("run_all_full", "succeeded", json!({})),
+            "acme",
+            Some("default"),
+            Some(41),
+        );
+        assert_eq!(
+            data,
+            json!({
+                "job_id": "01JOB",
+                "kind": "run_all_full",
+                "state": "succeeded",
+                "run_id": "01RUN",
+                "snapshot": 41,
+                "links": {
+                    "golden_records": "/v1/orgs/acme/datasets/default/golden-records?snapshot=41",
+                    "duplicates": "/v1/orgs/acme/datasets/default/duplicates?snapshot=41",
+                    "runs": "/v1/orgs/acme/datasets/default/runs",
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn a_failed_run_names_itself_and_promises_no_results() {
+        let data = job_event_data(
+            &job("run_all_full", "failed", json!({})),
+            "acme",
+            Some("default"),
+            None,
+        );
+        assert_eq!(data["run_id"], "01RUN");
+        assert!(data.get("snapshot").is_none() && data.get("links").is_none());
+    }
+
+    #[test]
+    fn an_export_links_its_download_only_once_it_succeeded() {
+        let params = json!({"kind": "golden", "format": "csv", "snapshot": 7});
+        let done = job_event_data(
+            &job("export", "succeeded", params.clone()),
+            "acme",
+            Some("default"),
+            None,
+        );
+        assert_eq!(done["export_id"], "01JOB");
+        assert_eq!(done["snapshot"], 7);
+        assert_eq!(
+            done["links"]["download"],
+            "/v1/orgs/acme/datasets/default/exports/01JOB/download"
+        );
+        let failed = job_event_data(
+            &job("export", "failed", params),
+            "acme",
+            Some("default"),
+            None,
+        );
+        assert_eq!(
+            failed["links"],
+            json!({ "status": "/v1/orgs/acme/datasets/default/exports/01JOB" })
+        );
+    }
+
+    #[test]
+    fn a_job_with_no_dataset_is_the_bare_outcome() {
+        let data = job_event_data(
+            &job("provision", "succeeded", json!({})),
+            "acme",
+            None,
+            None,
+        );
+        assert_eq!(
+            data,
+            json!({"job_id": "01JOB", "kind": "provision", "state": "succeeded"})
+        );
+    }
 }

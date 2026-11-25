@@ -429,7 +429,17 @@ impl Executor {
                 er.state = %settled.state,
                 "the job settled"
             );
-            let _ = webhook::emit_job_event(&self.client, &settled).await;
+            // The snapshot holding a run's results crosses in `finish`'s
+            // output for the same reason the counts below do: this process
+            // cannot open a lake (#1232).
+            let finish_doc = live
+                .get("finish")
+                .and_then(|row| row.output.as_ref())
+                .and_then(|out| out.get("doc"));
+            let run_snapshot = finish_doc
+                .and_then(|doc| doc.get("snapshot"))
+                .and_then(serde_json::Value::as_i64);
+            let _ = webhook::emit_job_event(&self.client, &settled, run_snapshot).await;
             // The entity-event aggregate (O3c-2), which the legacy arm emitted
             // from `run_job`'s tail. It is NOT part of `emit_job_event`: that
             // sends one `job.*` per outcome, while this sends at most one

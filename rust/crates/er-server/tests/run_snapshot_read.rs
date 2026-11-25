@@ -121,6 +121,22 @@ fn a_runs_results_read_at_its_snapshot_after_a_newer_run() {
          before finish's own commit"
     );
     assert!(r < r1, "run R's snapshot {r} must precede R+1's {r1}");
+    // The two routes to that number agree (#1232): what `finish` returns, and
+    // so what `job.succeeded` announces, is what `GET …/runs` serves to a
+    // subscriber recovering from a missed delivery. Re-finishing R+1 stamps
+    // the then-latest snapshot; the polled run row must carry that value.
+    let announced = er_cli::write_run_end(
+        &session,
+        "01RUNSNAPR1000000000000000",
+        "2026-03-06 00:00:00",
+    )
+    .unwrap();
+    let polled = read::runs_list(&session, read::latest_snapshot(&session).unwrap(), None)
+        .unwrap()
+        .into_iter()
+        .find(|run| run.id == "01RUNSNAPR1000000000000000")
+        .and_then(|run| run.snapshot);
+    assert_eq!(polled, Some(announced), "the event and the poll disagree");
 
     // 2. R's results at R's snapshot; R+1's at the latest.
     assert_eq!(
