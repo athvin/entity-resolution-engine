@@ -70,7 +70,10 @@ fn the_detector_sees_the_wholesale_shape_and_only_it() {
         wholesale("Ok(rows) => Json(json!(rows)).into_response(),"),
         ["Json(json!(rows))"]
     );
-    assert_eq!(wholesale("Json(json!(self.row))"), ["Json(json!(self.row))"]);
+    assert_eq!(
+        wholesale("Json(json!(self.row))"),
+        ["Json(json!(self.row))"]
+    );
     // Spelled-out keys and a detail body are fine.
     assert!(wholesale(r#"Json(json!({ "items": items }))"#).is_empty());
     assert!(wholesale(r#"Json(json!({ "detail": msg }))"#).is_empty());
@@ -84,7 +87,10 @@ fn the_detector_sees_the_wholesale_shape_and_only_it() {
 fn no_handler_serializes_a_bare_value_onto_the_wire() {
     let product = product_source(LIB);
     // A floor, so a source that stopped being read cannot pass vacuously.
-    assert!(product.contains("async fn create_key("), "lib.rs was not read");
+    assert!(
+        product.contains("async fn create_key("),
+        "lib.rs was not read"
+    );
     assert_eq!(
         wholesale(&product),
         Vec::<String>::new(),

@@ -876,8 +876,7 @@ mod tests {
     /// once per arm before landing (evidence in #868's PR).
     #[test]
     fn the_public_document_exposes_no_internal_surface() {
-        let doc: serde_json::Value =
-            serde_json::from_str(&openapi_json(Audience::Public)).unwrap();
+        let doc: serde_json::Value = serde_json::from_str(&openapi_json(Audience::Public)).unwrap();
         let paths = doc["paths"].as_object().expect("paths");
         assert!(paths.len() > 50, "a vacuous public document proves nothing");
         for (path, item) in paths {
