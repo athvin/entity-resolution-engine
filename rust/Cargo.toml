@@ -20,7 +20,7 @@ edition = "2024"
 # every CI job installs stable, and the image is `rust:1-bookworm`. The field's
 # live effect is on dependency resolution, where a higher floor lets cargo pick
 # newer and safer versions.
-rust-version = "1.89"
+rust-version = "1.95"
 license = "MIT"
 repository = "https://github.com/athvin/dedupe-engine"
 

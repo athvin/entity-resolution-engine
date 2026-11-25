@@ -72,7 +72,7 @@ Pinned versions that carry a reason (from `rust/Cargo.toml`):
 
 ```toml
 edition = "2024"
-rust-version = "1.89"
+rust-version = "1.95"
 duckdb = { version = "=1.20001.0", features = ["bundled"] }
 sqlparser = { version = "0.64", features = ["visitor"] }
 thiserror = "2"

@@ -11,7 +11,7 @@ description = "The Kubernetes half of batch-orchestration-design §6: the PodApi
 # kube 5.0.x, with the workspace floor raised to 1.89 for it (design §11 Phase 0
 # named that raise as the recorded dependency decision). It must never pull
 # aws-lc-rs — rustls/ring is the one crypto stack this image links.
-kube = { version = "=5.0.0", default-features = false, features = ["client", "rustls-tls", "ring", "runtime"] }
+kube = { version = "=5.2.0", default-features = false, features = ["client", "rustls-tls", "ring", "runtime"] }
 # 0.29 is what kube 5.0 pins; the two must move together, or the build carries
 # two copies of every API type. v1_33 serves a 1.36 cluster fine for the stable
 # batch/v1 + core/v1 surface this crate touches.
