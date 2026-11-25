@@ -1098,10 +1098,14 @@ impl Task<Session> for Maintain {
             .and_then(serde_json::Value::as_str)
             .unwrap_or("7 days")
             .to_string();
+        // Expired export artifacts go with expired snapshots (#1230): both
+        // are retention, and this is the dataset's retention pass.
+        let swept = crate::exports::sweep(&ctx.order.lake_env, std::time::SystemTime::now())
+            .map_err(|e| engine_error(&e))?;
         match er_cli::run_maintain(ctx.session, &expire) {
             Ok(report) => Ok(Outcome::Done(
                 Plan(MaintenanceReport { report }),
-                er_dag::Counters::default(),
+                er_dag::Counters(serde_json::json!({ "exports_swept": swept })),
             )),
             Err(e) => Err(engine_error(&format!("{e:#}"))),
         }

@@ -162,6 +162,52 @@ pub fn expires_at(finished_at: chrono::DateTime<chrono::Utc>) -> chrono::DateTim
     finished_at + RETENTION
 }
 
+/// Delete the dataset's expired artifacts: finished files older than
+/// [`RETENTION`], and `.partial` files older than a day (an export that died
+/// mid-write). Returns how many were removed. Called by `lake_maintain`; the
+/// download refuses an expired export by its job's `finished_at` regardless,
+/// so the sweep reclaims space rather than enforcing anything.
+///
+/// A missing exports directory is nothing to sweep, and an S3-backed lake has
+/// no local artifacts.
+///
+/// # Errors
+/// A directory that exists but cannot be read, or a file that cannot be removed.
+pub fn sweep(lake_env: &Value, now: std::time::SystemTime) -> Result<usize, String> {
+    let Ok(probe) = artifact_path(lake_env, "sweep", ExportFormat::Csv) else {
+        return Ok(0);
+    };
+    let Some(dir) = probe.parent() else {
+        return Ok(0);
+    };
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(e) => return Err(format!("exports dir: {e}")),
+    };
+    let retention = RETENTION.to_std().unwrap_or_default();
+    let partial_limit = std::time::Duration::from_hours(24);
+    let mut removed = 0;
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("exports dir: {e}"))?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let limit = if name.ends_with(".partial") {
+            partial_limit
+        } else {
+            retention
+        };
+        let modified = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .map_err(|e| format!("export stat {name}: {e}"))?;
+        if now.duration_since(modified).unwrap_or_default() > limit {
+            std::fs::remove_file(entry.path()).map_err(|e| format!("export sweep {name}: {e}"))?;
+            removed += 1;
+        }
+    }
+    Ok(removed)
+}
+
 /// What [`write`] produced.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExportReport {
@@ -383,6 +429,42 @@ mod tests {
             artifact_path(&env, "0193-abc", ExportFormat::Csv).unwrap(),
             PathBuf::from("/efs/acme/default/lake/exports/0193-abc.csv")
         );
+    }
+
+    #[test]
+    fn the_sweep_removes_only_what_has_expired() {
+        let root = std::env::temp_dir().join(format!("er_export_sweep_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let dir = root.join("lake/exports");
+        std::fs::create_dir_all(&dir).unwrap();
+        let env = json!({"ER_LAKE_DATA_PATH": root.join("lake/data").to_string_lossy()});
+        let now = std::time::SystemTime::now();
+        let aged = |name: &str, age: std::time::Duration| {
+            let f = std::fs::File::create(dir.join(name)).unwrap();
+            f.set_modified(now - age).unwrap();
+        };
+        let day = std::time::Duration::from_hours(24);
+        aged("fresh.csv", day);
+        aged("old.csv", day * 8);
+        aged("fresh.jsonl.partial", std::time::Duration::from_hours(2));
+        aged("dead.jsonl.partial", day * 2);
+        assert_eq!(sweep(&env, now), Ok(2));
+        let mut left: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        left.sort();
+        assert_eq!(left, vec!["fresh.csv", "fresh.jsonl.partial"]);
+        // Nothing to sweep is not an error.
+        assert_eq!(
+            sweep(&json!({"ER_LAKE_DATA_PATH": "/nonexistent/lake/data"}), now),
+            Ok(0)
+        );
+        assert_eq!(
+            sweep(&json!({"ER_LAKE_DATA_PATH": "s3://b/p/"}), now),
+            Ok(0)
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
