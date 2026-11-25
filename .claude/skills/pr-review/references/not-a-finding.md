@@ -37,6 +37,7 @@ review finding is a build failure the author has not reached yet.
 | `er-server/tests/egress_guard.rs` | The posterity gate for the outbound-URL guard. | `make check` |
 | `er-server/tests/no_second_executor.rs` | The posterity gate for the one-executor rule (§11): the Kubernetes test double lives in `tests/`, and this scan is what keeps it there. | `make check` |
 | `er-server/tests/pg_serial.rs` | Every `pg_*.rs` integration test must be ONE `#[tokio::test]`. | `make check` |
+| `er-server/tests/telemetry_secrets.rs` | #869: no telemetry call in er-server's product source names a secret. | `make check` |
 
 Every row above fails with the offending **file and line** in the
 message. A finding that restates one is not a false positive — it is
