@@ -213,13 +213,17 @@ fn the_detector_catches_a_recorded_secret_and_passes_an_identifier() {
     // What the handlers do record: ids and roles. The message text and a
     // comment are not code.
     let issued = r#"tracing::info!(org = %org, key_id = %key_id, role = role.as_str(), "api key issued"); // the key stays in the body"#;
-    assert!(offenders(issued).is_empty());
-    assert!(key_surface_offenders(issued).is_empty());
-    assert!(
-        key_surface_offenders("span.record(er_span::attr::KEY_ID, key_id.as_str());").is_empty()
+    assert_eq!(offenders(issued), Vec::<String>::new());
+    assert_eq!(key_surface_offenders(issued), Vec::<String>::new());
+    assert_eq!(
+        key_surface_offenders("span.record(er_span::attr::KEY_ID, key_id.as_str());"),
+        Vec::<String>::new()
     );
     // Elsewhere `key` is a record or object key, which spans may carry.
-    assert!(offenders("tracing::warn!(er.record_key = %key, \"lookup failed\");").is_empty());
+    assert_eq!(
+        offenders("tracing::warn!(er.record_key = %key, \"lookup failed\");"),
+        Vec::<String>::new()
+    );
 }
 
 #[test]
