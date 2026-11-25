@@ -96,6 +96,11 @@ export const TRIAGE_ORGS = [
   "webhooks-dev",
   "webhooks-ios",
   "webhooks-android",
+  // Minting and revoking both mutate the key list, so the API-keys page gets
+  // one org per device project too.
+  "keys-dev",
+  "keys-ios",
+  "keys-android",
 ] as const;
 
 export async function installTestFixtures(db: Db): Promise<void> {

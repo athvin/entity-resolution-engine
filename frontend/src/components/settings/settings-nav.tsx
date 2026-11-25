@@ -16,6 +16,7 @@ export function SettingsNav({ org }: { org: string }) {
     { href: `/${org}/${ds}/settings/config`, label: "Config studio" },
     { href: `/${org}/${ds}/settings/models`, label: "Models" },
     { href: `/${org}/settings/webhooks`, label: "Webhooks" },
+    { href: `/${org}/settings/api-keys`, label: "API keys" },
     { href: `/${org}/settings/ai`, label: "AI" },
     { href: `/${org}/settings/members`, label: "Members" },
     { href: `/${org}/settings/profile`, label: "Profile" },

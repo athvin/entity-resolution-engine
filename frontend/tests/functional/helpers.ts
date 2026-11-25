@@ -160,3 +160,16 @@ export async function hydratedFill(
     await expect(page.getByTestId(enablesTestId)).toBeEnabled({ timeout: 500 });
   }).toPass({ timeout: 15_000 });
 }
+
+/** The API-keys page's own org per project: minting and revoking both mutate
+ * the list, and all three projects share one mock server. */
+export function apiKeyOrg(projectName: string): string {
+  const byProject: Record<string, string> = {
+    "desktop-chromium": "keys-dev",
+    "mobile-safari": "keys-ios",
+    "mobile-chrome": "keys-android",
+  };
+  const org = byProject[projectName];
+  if (!org) throw new Error(`no api-keys org for project ${projectName}`);
+  return org;
+}
