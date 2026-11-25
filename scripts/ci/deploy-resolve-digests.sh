@@ -27,8 +27,12 @@ for repo in er-api er-web; do
 		# "the newest" is one digest per page, the output line splits, and
 		# GitHub rejects the stray line (#1223). JSON output aggregates every
 		# page before the query runs, so this is the true newest.
+		#
+		# Tagged images only (#1225): an untagged digest is a platform child
+		# of a tagged index, and it carries no sha, so the staleness guard
+		# below could not verify it and would silently abstain.
 		d="$(aws ecr describe-images --repository-name "$repo" \
-			--query 'reverse(sort_by(imageDetails,&imagePushedAt))[0].imageDigest' \
+			--query 'reverse(sort_by(imageDetails[?imageTags],&imagePushedAt))[0].imageDigest' \
 			--output json 2>/dev/null | tr -d '"' || true)"
 		# A WARNING, not just a log line. Reusing a digest is correct when
 		# that tree genuinely did not change — but it also happens when the
