@@ -6638,6 +6638,16 @@ async fn duplicates_list(
     .unwrap_or_else(|response| *response)
 }
 
+/// A page of active pairwise match scores, at a pinned snapshot.
+#[derive(Serialize, utoipa::ToSchema)]
+struct MatchScoresPage {
+    items: Vec<read::ScoredPair>,
+    /// The lake snapshot every page of this walk reads; the cursor pins it.
+    snapshot: i64,
+    /// Pass as `cursor` for the next page; null on the last page.
+    next_cursor: Option<String>,
+}
+
 /// A page of a person dataset's duplicate groups, at a pinned snapshot.
 #[derive(Serialize, utoipa::ToSchema)]
 struct PersonDuplicatesPage {
@@ -7042,11 +7052,11 @@ async fn match_scores_list(
             band_high,
             limit,
         ) {
-            Ok((items, next_cursor)) => Json(json!({
-                "items": items,
-                "snapshot": snapshot,
-                "next_cursor": next_cursor,
-            }))
+            Ok((items, next_cursor)) => Json(MatchScoresPage {
+                items,
+                snapshot,
+                next_cursor,
+            })
             .into_response(),
             Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
         }

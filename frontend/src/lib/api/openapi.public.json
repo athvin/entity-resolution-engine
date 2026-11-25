@@ -4283,16 +4283,11 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "items": {},
-                    "next_cursor": {},
-                    "snapshot": {}
-                  }
+                  "$ref": "#/components/schemas/MatchScoresPage"
                 }
               }
             }
@@ -11467,6 +11462,34 @@
           }
         }
       },
+      "MatchScoresPage": {
+        "type": "object",
+        "description": "A page of active pairwise match scores, at a pinned snapshot.",
+        "required": [
+          "items",
+          "snapshot"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ScoredPair"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Pass as `cursor` for the next page; null on the last page."
+          },
+          "snapshot": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The lake snapshot every page of this walk reads; the cursor pins it."
+          }
+        }
+      },
       "MatchingModel": {
         "type": "object",
         "description": "An immutable version of a tenant's matching model: the settings document the engine scores against, its hash, provenance and activation state.",
@@ -13650,6 +13673,49 @@
           },
           "id": {
             "type": "string"
+          }
+        }
+      },
+      "ScoredPair": {
+        "type": "object",
+        "description": "One active pairwise score (`GET …/match-scores`): the pair, its probability\nand evidence, and the shipped `confidence` (#1234). The same columns as an\n[`UncertainPair`], read by a different statement.",
+        "required": [
+          "rec_a_key",
+          "rec_b_key",
+          "match_probability",
+          "model_version",
+          "evidence",
+          "run_id",
+          "scored_at",
+          "confidence"
+        ],
+        "properties": {
+          "confidence": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "evidence": {
+            "description": "The comparison evidence blob (`gamma_*`, `mw_*`, `match_weight`)."
+          },
+          "match_probability": {
+            "type": "number",
+            "format": "double"
+          },
+          "model_version": {
+            "type": "string"
+          },
+          "rec_a_key": {
+            "type": "string"
+          },
+          "rec_b_key": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "scored_at": {
+            "type": "string",
+            "description": "Naive lake text (`YYYY-MM-DD HH:MM:SS[.ffffff]`), not RFC 3339."
           }
         }
       },

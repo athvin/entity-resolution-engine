@@ -3032,6 +3032,17 @@ export interface components {
             would_auto_merge: number;
             would_review: number;
         };
+        /** @description A page of active pairwise match scores, at a pinned snapshot. */
+        MatchScoresPage: {
+            items: components["schemas"]["ScoredPair"][];
+            /** @description Pass as `cursor` for the next page; null on the last page. */
+            next_cursor?: string | null;
+            /**
+             * Format: int64
+             * @description The lake snapshot every page of this walk reads; the cursor pins it.
+             */
+            snapshot: number;
+        };
         /** @description An immutable version of a tenant's matching model: the settings document the engine scores against, its hash, provenance and activation state. */
         MatchingModel: {
             /**
@@ -3978,6 +3989,25 @@ export interface components {
         ScheduleToggled: {
             enabled: boolean;
             id: string;
+        };
+        /**
+         * @description One active pairwise score (`GET …/match-scores`): the pair, its probability
+         *     and evidence, and the shipped `confidence` (#1234). The same columns as an
+         *     [`UncertainPair`], read by a different statement.
+         */
+        ScoredPair: {
+            /** Format: int64 */
+            confidence: number;
+            /** @description The comparison evidence blob (`gamma_*`, `mw_*`, `match_weight`). */
+            evidence: unknown;
+            /** Format: double */
+            match_probability: number;
+            model_version: string;
+            rec_a_key: string;
+            rec_b_key: string;
+            run_id: string;
+            /** @description Naive lake text (`YYYY-MM-DD HH:MM:SS[.ffffff]`), not RFC 3339. */
+            scored_at: string;
         };
         /** @description One source's share of a run's duplication. */
         SourceInsight: {
@@ -7109,17 +7139,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        items?: unknown;
-                        next_cursor?: unknown;
-                        snapshot?: unknown;
-                    };
+                    "application/json": components["schemas"]["MatchScoresPage"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */

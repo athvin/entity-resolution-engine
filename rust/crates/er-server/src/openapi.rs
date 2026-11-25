@@ -185,6 +185,8 @@ pub struct ApiDoc;
     crate::AccountDuplicatesPage,
     crate::read::PersonDuplicateGroup,
     crate::read::AccountDuplicateGroup,
+    crate::MatchScoresPage,
+    crate::read::ScoredPair,
 )))]
 pub struct ResponseDoc;
 
@@ -559,6 +561,39 @@ mod tests {
 
     const COMMITTED: &str = include_str!("../../../../frontend/src/lib/api/openapi.json");
 
+    /// The public result reads E11 promises customers (#521, #1234) each
+    /// document their payload: a typed schema or a named Arrow row, never the
+    /// envelope-granularity fallback.
+    #[test]
+    fn every_public_result_read_documents_its_payload() {
+        const RESULT_READS: &[&str] = &[
+            "/v1/orgs/{org}/datasets/{ds}/golden-records",
+            "/v1/orgs/{org}/datasets/{ds}/golden-records/{entity_id}",
+            "/v1/orgs/{org}/datasets/{ds}/duplicates",
+            "/v1/orgs/{org}/datasets/{ds}/match-scores",
+            "/v1/orgs/{org}/datasets/{ds}/merge-plans",
+            "/v1/orgs/{org}/datasets/{ds}/runs",
+            "/v1/orgs/{org}/datasets/{ds}/runs/{run_id}/entity-events",
+        ];
+        let doc: serde_json::Value = serde_json::from_str(&openapi_json(Audience::Public)).unwrap();
+        let opaque: Vec<&str> = RESULT_READS
+            .iter()
+            .copied()
+            .filter(|path| {
+                let ok = &doc["paths"][*path]["get"]["responses"]["2XX"];
+                assert!(ok.is_object(), "{path} is not a public GET");
+                ok["description"]
+                    .as_str()
+                    .is_none_or(|d| d.contains("envelope granularity"))
+            })
+            .collect();
+        assert_eq!(
+            opaque,
+            Vec::<&str>::new(),
+            "these public result reads document no payload schema"
+        );
+    }
+
     /// Every operation the derivation classifies as an Arrow stream names its
     /// row components, so a new Arrow read cannot ship as an opaque binary.
     #[test]
@@ -797,43 +832,51 @@ mod tests {
                     found.clone()
                 })
             };
-            let typed = component(schema).or_else(|| component(&schema["items"]));
-            let resolved = component(schema).unwrap_or_else(|| schema.clone());
-            let schema = &resolved;
-            match class {
-                // A typed bare value is its component, or an array of it; a
-                // `scalar` was an unresolved typed value, which now resolves.
-                "bare" | "scalar" if typed.is_some() => {}
-                "bare" | "scalar" => assert_eq!(schema, &serde_json::json!({}), "{route}"),
-                "wrapped" => assert!(
-                    schema["properties"]
-                        .get(envelope["key"].as_str().unwrap())
-                        .is_some(),
-                    "{route}"
-                ),
-                "record" => {
-                    for key in envelope["keys"].as_array().unwrap() {
-                        assert!(
-                            schema["properties"].get(key.as_str().unwrap()).is_some(),
-                            "{route}"
+            // A response typed per entity type (#1234, duplicates) is an
+            // `anyOf` of components: the class must hold of every branch.
+            let branches: Vec<serde_json::Value> = schema["anyOf"]
+                .as_array()
+                .cloned()
+                .unwrap_or_else(|| vec![schema.clone()]);
+            for schema in &branches {
+                let typed = component(schema).or_else(|| component(&schema["items"]));
+                let resolved = component(schema).unwrap_or_else(|| schema.clone());
+                let schema = &resolved;
+                match class {
+                    // A typed bare value is its component, or an array of it; a
+                    // `scalar` was an unresolved typed value, which now resolves.
+                    "bare" | "scalar" if typed.is_some() => {}
+                    "bare" | "scalar" => assert_eq!(schema, &serde_json::json!({}), "{route}"),
+                    "wrapped" => assert!(
+                        schema["properties"]
+                            .get(envelope["key"].as_str().unwrap())
+                            .is_some(),
+                        "{route}"
+                    ),
+                    "record" => {
+                        for key in envelope["keys"].as_array().unwrap() {
+                            assert!(
+                                schema["properties"].get(key.as_str().unwrap()).is_some(),
+                                "{route}"
+                            );
+                        }
+                    }
+                    "page" => {
+                        assert_eq!(schema["properties"]["items"]["type"], "array");
+                        assert_eq!(
+                            schema["properties"]["next_cursor"]["type"],
+                            serde_json::json!(["string", "null"])
                         );
                     }
+                    "arrow" => {
+                        assert!(content.get("application/json").is_none());
+                        assert_eq!(
+                            content["application/vnd.apache.arrow.stream"]["schema"]["format"],
+                            "binary"
+                        );
+                    }
+                    other => panic!("unsupported ledger class {other}"),
                 }
-                "page" => {
-                    assert_eq!(schema["properties"]["items"]["type"], "array");
-                    assert_eq!(
-                        schema["properties"]["next_cursor"]["type"],
-                        serde_json::json!(["string", "null"])
-                    );
-                }
-                "arrow" => {
-                    assert!(content.get("application/json").is_none());
-                    assert_eq!(
-                        content["application/vnd.apache.arrow.stream"]["schema"]["format"],
-                        "binary"
-                    );
-                }
-                other => panic!("unsupported ledger class {other}"),
             }
         }
         assert_eq!(

@@ -311,6 +311,10 @@ fn rows_to_values<T: serde::Serialize>(rows: &[T]) -> Vec<Value> {
 /// client ever maps a score itself. Items with no score (a structural
 /// escalation is not a scored pair) get no field, matching how their
 /// `match_probability` reads null.
+///
+/// No handler calls it since #1234: every scored item is typed. It stays as the
+/// oracle the typed-item tests compare against, which is why it is test-only.
+#[cfg(test)]
 fn with_confidence(items: &mut [Value]) {
     for item in items {
         let Some(p) = item.get("match_probability").and_then(Value::as_f64) else {
@@ -442,6 +446,49 @@ pub struct UncertainPair {
 impl From<er_entities::match_score::read::UncertainPageRow> for UncertainPair {
     fn from(row: er_entities::match_score::read::UncertainPageRow) -> Self {
         let er_entities::match_score::read::UncertainPageRow {
+            rec_a_key,
+            rec_b_key,
+            match_probability,
+            model_version,
+            evidence,
+            run_id,
+            scored_at,
+        } = row;
+        Self {
+            confidence: confidence_of(match_probability),
+            rec_a_key,
+            rec_b_key,
+            match_probability,
+            model_version,
+            evidence,
+            run_id,
+            scored_at,
+        }
+    }
+}
+
+/// One active pairwise score (`GET …/match-scores`): the pair, its probability
+/// and evidence, and the shipped `confidence` (#1234). The same columns as an
+/// [`UncertainPair`], read by a different statement.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, utoipa::ToSchema)]
+pub struct ScoredPair {
+    pub rec_a_key: String,
+    pub rec_b_key: String,
+    pub match_probability: f64,
+    pub model_version: String,
+    /// The comparison evidence blob (`gamma_*`, `mw_*`, `match_weight`).
+    pub evidence: Value,
+    pub run_id: String,
+    /// Naive lake text (`YYYY-MM-DD HH:MM:SS[.ffffff]`), not RFC 3339.
+    #[serde(serialize_with = "er_entities::batch::ser_duckdb_timestamp")]
+    #[schema(value_type = String)]
+    pub scored_at: chrono::DateTime<chrono::Utc>,
+    pub confidence: i64,
+}
+
+impl From<er_entities::match_score::read::ActivePageRow> for ScoredPair {
+    fn from(row: er_entities::match_score::read::ActivePageRow) -> Self {
+        let er_entities::match_score::read::ActivePageRow {
             rec_a_key,
             rec_b_key,
             match_probability,
@@ -1397,7 +1444,7 @@ pub fn match_scores_list(
     min_prob: Option<f64>,
     max_prob: Option<f64>,
     limit: i64,
-) -> Result<(Vec<Value>, Option<String>), String> {
+) -> Result<(Vec<ScoredPair>, Option<String>), String> {
     let limit = limit.clamp(1, MAX_LIMIT);
     // The composite cursor splits into the statement's expanded tuple predicate
     // ($after_a/$after_b: `a > ka OR (a = ka AND b > kb)`).
@@ -1414,8 +1461,6 @@ pub fn match_scores_list(
     .map_err(|e| e.to_string())?;
     let has_more = rows.len() as i64 > limit;
     let page = &rows[..rows.len().min(usize::try_from(limit).unwrap_or(0))];
-    let mut items = rows_to_values(page);
-    with_confidence(&mut items);
     let next_cursor = has_more
         .then(|| {
             page.last().map(|r| {
@@ -1426,6 +1471,7 @@ pub fn match_scores_list(
             })
         })
         .flatten();
+    let items = page.iter().cloned().map(ScoredPair::from).collect();
     Ok((items, next_cursor))
 }
 
@@ -3846,5 +3892,28 @@ mod duplicate_group_tests {
                 "domain": null,
             })]
         );
+    }
+}
+
+#[cfg(test)]
+mod scored_pair_tests {
+    //! #1234: a typed match-score item is exactly what `rows_to_values` +
+    //! `with_confidence` made of its row (equal as parsed values).
+    use super::*;
+
+    #[test]
+    fn a_scored_pair_is_the_row_plus_its_confidence() {
+        let row = er_entities::match_score::read::ActivePageRow {
+            rec_a_key: "crm:1".into(),
+            rec_b_key: "erp:9".into(),
+            match_probability: 0.912,
+            model_version: "m1".into(),
+            evidence: json!({"gamma_email": 2, "match_weight": 7.5}),
+            run_id: "run1".into(),
+            scored_at: chrono::DateTime::from_timestamp(1_700_000_000, 120_000_000).unwrap(),
+        };
+        let mut old = rows_to_values(std::slice::from_ref(&row));
+        with_confidence(&mut old);
+        assert_eq!(old[0], serde_json::to_value(ScoredPair::from(row)).unwrap());
     }
 }
