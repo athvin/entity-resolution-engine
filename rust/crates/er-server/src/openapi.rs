@@ -870,6 +870,60 @@ mod tests {
         }
     }
 
+    /// #868: everything the public document must NOT show, in one place and
+    /// derived rather than listed: no internal path, no operator operation,
+    /// and no entity column whose visibility is not `public`. Observed failing
+    /// once per arm before landing (evidence in #868's PR).
+    #[test]
+    fn the_public_document_exposes_no_internal_surface() {
+        let doc: serde_json::Value =
+            serde_json::from_str(&openapi_json(Audience::Public)).unwrap();
+        let paths = doc["paths"].as_object().expect("paths");
+        assert!(paths.len() > 50, "a vacuous public document proves nothing");
+        for (path, item) in paths {
+            assert!(
+                !path.starts_with("/v1/internal/"),
+                "internal path {path} is in the public document"
+            );
+            for (method, op) in item.as_object().expect("path item") {
+                let roles: Vec<&str> = op["security"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|s| s["bearerAuth"].as_array())
+                    .flatten()
+                    .filter_map(serde_json::Value::as_str)
+                    .collect();
+                assert!(
+                    !roles.contains(&"operator"),
+                    "operator operation {method} {path} is in the public document"
+                );
+            }
+        }
+        let schemas = doc["components"]["schemas"].as_object().expect("schemas");
+        let mut checked = 0;
+        for entity in er_entities::catalog::catalog().entities() {
+            let name = er_entity_gen::casing::to_pascal_case(&entity.name);
+            let Some(schema) = schemas.get(&name) else {
+                continue;
+            };
+            let properties = schema["properties"].as_object().expect("properties");
+            for column in &entity.columns {
+                if column.visibility != er_entity_spec::Visibility::Public {
+                    checked += 1;
+                    assert!(
+                        !properties.contains_key(&column.name),
+                        "{name}.{} ({:?}) is in the public document",
+                        column.name,
+                        column.visibility
+                    );
+                }
+            }
+        }
+        // ApiKey.key_hash, Webhook.secret, TaskInstance.token_hash at least.
+        assert!(checked >= 3, "no non-public column was checked: {checked}");
+    }
+
     #[test]
     fn openapi_json_matches_the_committed_document() {
         assert_eq!(
