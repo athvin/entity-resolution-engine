@@ -238,3 +238,47 @@
     padding: 12px 8px;
   }
 }
+
+/* /docs/api (#867): the method label carries no hue. A read is plain, a write
+   is heavier, and a delete is boxed, because it cannot be taken back. */
+.docs-api-method {
+  display: inline-block;
+  min-width: 4.5rem;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--muted-foreground);
+}
+.docs-api-method-write {
+  font-weight: 700;
+  color: var(--foreground);
+}
+.docs-api-method-delete {
+  font-weight: 700;
+  color: var(--foreground);
+  outline: 1px solid var(--foreground);
+  outline-offset: 2px;
+  border-radius: 2px;
+  min-width: 4rem;
+  text-align: center;
+}
+.docs-api-fields {
+  width: 100%;
+  margin: 12px 0;
+  font-size: 13px;
+}
+.docs-api-fields caption {
+  text-align: left;
+  font-weight: 600;
+  padding-bottom: 4px;
+}
+.docs-api-fields td {
+  vertical-align: top;
+}
+.docs-api-response {
+  margin-top: 12px;
+}
+.docs-api-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+}

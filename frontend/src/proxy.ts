@@ -23,6 +23,9 @@ const PUBLIC_PATHS = [
   // to expose because the handler answers a boolean and a reason class only; see
   // src/app/api/healthz/route.ts for what it deliberately does not check.
   "/api/healthz",
+  // The public OpenAPI document (#867): no session, no credential, the same
+  // contract /docs/api renders. See src/app/api/openapi/route.ts.
+  "/api/openapi",
   // O11's embeddable widget. Both halves are public because the signed,
   // record-scoped, expiring token in the path IS the credential — a redirect to
   // /login would break the iframe for the tenant who embedded it deliberately.

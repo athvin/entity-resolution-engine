@@ -45,6 +45,7 @@ export const PAGE_UPDATED: Readonly<Record<string, string>> = {
   "/about": "2026-11-20",
   "/contact": "2026-11-20",
   "/docs": "2026-11-20",
+  "/docs/api": "2026-11-25",
 };
 
 /** Solution pages share one template and one date. */
@@ -94,6 +95,7 @@ const SECTION_LABELS: Readonly<Record<string, string>> = {
 function sectionFor(path: string): Crumb | null {
   if (path.startsWith("/features/") || path === "/integrations")
     return { href: "/product", label: "Product" };
+  if (path.startsWith("/docs/")) return { href: "/docs", label: "Docs" };
   for (const href of ["/solutions", "/resources", "/blog"]) {
     if (path.startsWith(`${href}/`)) return { href, label: SECTION_LABELS[href] ?? href };
   }

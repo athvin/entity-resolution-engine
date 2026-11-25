@@ -79,6 +79,7 @@ export const MARKETING_PATHS: readonly string[] = [
   "/about",
   "/contact",
   "/docs",
+  "/docs/api",
 ];
 
 /**

@@ -46,6 +46,16 @@ const SCREENS: {
     },
   },
   {
+    // Listed in the change that adds it (#867): the public API reference,
+    // anonymous like the guide it sits under.
+    name: "api-docs",
+    path: "/docs/api",
+    anonymous: true,
+    ready: async (page) => {
+      await expect(page.getByTestId("api-docs")).toBeVisible();
+    },
+  },
+  {
     name: "pricing",
     path: "/pricing",
     anonymous: true,

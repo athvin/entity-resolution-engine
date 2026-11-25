@@ -107,6 +107,7 @@ export const FOOTER_COLUMNS: readonly FooterColumn[] = [
       { href: "/blog", label: "Blog" },
       { href: "/faq", label: "FAQ" },
       { href: "/docs", label: "Developer docs" },
+      { href: "/docs/api", label: "API reference" },
       { href: "/pricing", label: "Pricing" },
       { href: ROI_CALCULATOR_HREF, label: "ROI calculator" },
     ],
