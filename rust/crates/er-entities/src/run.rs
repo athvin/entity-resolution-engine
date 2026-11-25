@@ -40,7 +40,7 @@ pub struct Run {
     pub rebuild_reason: Option<String>,
     /// First lake snapshot version the run produced.
     pub snapshot_start: Option<i64>,
-    /// Last lake snapshot version the run produced.
+    /// The lake snapshot holding the run's committed results, stamped by `finish` (#1229). Read the run's results at this version. NULL for a run that has not finished, and for every run finished before #1229.
     pub snapshot_end: Option<i64>,
     /// Run-logical creation time (the run's start stamp).
     pub created_at: ::chrono::DateTime<::chrono::Utc>,
@@ -439,6 +439,7 @@ LIMIT 1
         pub model_version: Option<String>,
         pub tf_snapshot_id: Option<String>,
         pub rebuild_reason: Option<String>,
+        pub snapshot_end: Option<i64>,
     }
 
     impl RecentRow {
@@ -467,6 +468,7 @@ LIMIT 1
                 ("model_version", ::arrow::datatypes::DataType::Utf8),
                 ("tf_snapshot_id", ::arrow::datatypes::DataType::Utf8),
                 ("rebuild_reason", ::arrow::datatypes::DataType::Utf8),
+                ("snapshot_end", ::arrow::datatypes::DataType::Int64),
             ]
         }
 
@@ -493,6 +495,7 @@ LIMIT 1
                     crate::batch::col(batch, 7, "tf_snapshot_id")?;
                 let c8: &::arrow::array::StringArray =
                     crate::batch::col(batch, 8, "rebuild_reason")?;
+                let c9: &::arrow::array::Int64Array = crate::batch::col(batch, 9, "snapshot_end")?;
                 for i in 0..batch.num_rows() {
                     out.push(Self {
                         id: crate::batch::req(crate::batch::opt_str(c0, i), "id", i)?,
@@ -512,6 +515,7 @@ LIMIT 1
                         model_version: crate::batch::opt_str(c6, i),
                         tf_snapshot_id: crate::batch::opt_str(c7, i),
                         rebuild_reason: crate::batch::opt_str(c8, i),
+                        snapshot_end: crate::batch::opt_i64(c9, i),
                     });
                 }
             }
@@ -523,7 +527,7 @@ LIMIT 1
     pub fn recent(conn: &::duckdb::Connection, snapshot: i64) -> ::duckdb::Result<Vec<RecentRow>> {
         const SQL: &str =
             "SELECT id, mode, status, started_at, ended_at, config_hash, model_version,
-       tf_snapshot_id, rebuild_reason
+       tf_snapshot_id, rebuild_reason, snapshot_end
 FROM lake.main.runs AT (VERSION => {snapshot})
 ORDER BY started_at DESC
 LIMIT 20
@@ -566,16 +570,17 @@ WHERE id = $3
         Ok(__n)
     }
 
-    /// Close the run ledger row on success, stamping ended_at.
+    /// Close the run ledger row on success, stamping ended_at and snapshot_end: the lake snapshot holding the run's committed results, which is the snapshot a customer reads the run's results at (#1229).
     pub fn finish(
         conn: &::duckdb::Connection,
         ended_at: &str,
+        snapshot_end: i64,
         run_id: &str,
     ) -> ::duckdb::Result<usize> {
         const SQL: &str =
             "UPDATE lake.main.runs SET status = 'succeeded', ended_at = $1::timestamp,
-    updated_at = $1::timestamp
-WHERE id = $2
+    snapshot_end = $2, updated_at = $1::timestamp
+WHERE id = $3
 ";
         let __span = ::er_span::sql_span(
             ::er_span::Store::Lake,
@@ -588,7 +593,7 @@ WHERE id = $2
         let __entered = __span.enter();
         let __n = ::er_span::check(
             &__span,
-            conn.execute(SQL, ::duckdb::params![ended_at, run_id]),
+            conn.execute(SQL, ::duckdb::params![ended_at, snapshot_end, run_id]),
         )?;
         ::er_span::rows(&__span, __n as u64);
         drop(__entered);

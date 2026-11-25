@@ -2094,11 +2094,23 @@ mod typed_detail_tests {
             model_version: Some("m1".into()),
             tf_snapshot_id: None,
             rebuild_reason: Some("config".into()),
+            snapshot_end: Some(7),
+        };
+        // The row's `snapshot_end` is served as `snapshot` (#1229), the name
+        // the result reads take it back under; every other key is the row's.
+        let row_as_served = |run: &er_entities::run::read::RecentRow| {
+            let mut old = rows_to_values(std::slice::from_ref(run)).remove(0);
+            let snapshot = old.as_object_mut().unwrap().remove("snapshot_end").unwrap();
+            old["snapshot"] = snapshot;
+            old
         };
         // No threshold: no `auto_merged_pairs` key at all.
-        same::<_, RunItem>(run.clone());
+        assert_eq!(
+            row_as_served(&run),
+            serde_json::to_value(RunItem::from(run.clone())).unwrap()
+        );
         // With one, the count the old map insert added.
-        let mut old = rows_to_values(std::slice::from_ref(&run)).remove(0);
+        let mut old = row_as_served(&run);
         old["auto_merged_pairs"] = json!(4_u64);
         let mut item = RunItem::from(run);
         item.auto_merged_pairs = Some(4);
@@ -2652,6 +2664,11 @@ pub struct RunItem {
     pub model_version: Option<String>,
     pub tf_snapshot_id: Option<String>,
     pub rebuild_reason: Option<String>,
+    /// The lake snapshot holding this run's results: pass it as `snapshot` to
+    /// a result read to read THIS run's output after a newer run has moved
+    /// the lake. Null while the run is unfinished, and for runs finished
+    /// before #1229, which never recorded one.
+    pub snapshot: Option<i64>,
     /// Pairs this run scored at or above the auto-merge threshold. Absent
     /// when the dataset has no readable config, so no count is reported
     /// against the wrong threshold.
@@ -2671,6 +2688,7 @@ impl From<er_entities::run::read::RecentRow> for RunItem {
             model_version,
             tf_snapshot_id,
             rebuild_reason,
+            snapshot_end,
         } = row;
         Self {
             id,
@@ -2682,6 +2700,7 @@ impl From<er_entities::run::read::RecentRow> for RunItem {
             model_version,
             tf_snapshot_id,
             rebuild_reason,
+            snapshot: snapshot_end,
             auto_merged_pairs: None,
         }
     }

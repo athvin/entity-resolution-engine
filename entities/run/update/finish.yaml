@@ -1,8 +1,9 @@
 kind: statement
 operation: update
 mode: partial
-description: "Close the run ledger row on success, stamping ended_at."
+description: "Close the run ledger row on success, stamping ended_at and snapshot_end: the lake snapshot holding the run's committed results, which is the snapshot a customer reads the run's results at (#1229)."
 params:
   - { name: ended_at, type: varchar }
+  - { name: snapshot_end, type: bigint }
   - { name: run_id, type: varchar }
 returns: none
