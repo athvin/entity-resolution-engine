@@ -151,6 +151,9 @@ pub struct Field {
     pub ty: String,
     /// `#[serde(default)]` — absent is legal, so the field is not required.
     pub optional: bool,
+    /// The field's `///` doc comment, lines joined with a space; empty when
+    /// it has none.
+    pub doc: String,
 }
 
 /// Parse `struct <name> { … }` out of the server source.
@@ -163,9 +166,14 @@ pub fn struct_fields(src: &str, name: &str) -> Option<Vec<Field>> {
     let end = start + src[start..].find("\n}\n")?;
     let mut fields = Vec::new();
     let mut defaulted = false;
+    let mut doc: Vec<&str> = Vec::new();
     for raw in src[start..end].lines() {
         let line = raw.trim();
-        if line.starts_with("///") || line.starts_with("//") || line.is_empty() {
+        if let Some(text) = line.strip_prefix("///") {
+            doc.push(text.trim());
+            continue;
+        }
+        if line.starts_with("//") || line.is_empty() {
             continue;
         }
         if line.starts_with("#[") {
@@ -180,8 +188,10 @@ pub fn struct_fields(src: &str, name: &str) -> Option<Vec<Field>> {
             name: field.trim().trim_start_matches("pub ").to_string(),
             ty: ty.trim().to_string(),
             optional: defaulted || ty.trim().starts_with("Option<"),
+            doc: doc.join(" "),
         });
         defaulted = false;
+        doc.clear();
     }
     Some(fields)
 }
