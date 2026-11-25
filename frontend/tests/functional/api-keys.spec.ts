@@ -69,7 +69,9 @@ test.describe("api keys", () => {
 
   test("a non-admin is told the page is admin-only", async ({ page }, testInfo) => {
     const org = apiKeyOrg(testInfo.project.name);
-    await login(page, USERS.viewer);
+    // The steward: a member of these per-project orgs (the viewer is not),
+    // and below admin, which is the case this asserts.
+    await login(page, USERS.steward);
     await page.goto(`/${org}/settings/api-keys`);
     await expect(page.getByTestId("api-keys-admin-only")).toBeVisible();
     // ...and the BFF agrees: membership is not enough to list keys.

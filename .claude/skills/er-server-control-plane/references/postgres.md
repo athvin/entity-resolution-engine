@@ -105,6 +105,15 @@ not argon2 is in the SKILL body.
 `lookup_key` resolves a presented key to its org and role. Revocation is scoped
 by org, so one org's admin cannot revoke another's key.
 
+Minting, listing and revoking are **org Admin** routes (`guard(…, Role::Admin)`),
+not operator-only (#866). The operator passes every org guard, so its paths
+still work. The minted role is capped at the minter's own, and `operator` is
+never mintable (`parse_key_role`, 422). `GET /v1/orgs/{org}/api-keys` lists the
+`api_key` `read by_org` statement through `ApiKeyWire`, which has no `key_hash`
+field, so the list cannot leak the hash. The web app's own per-org service keys
+appear in that list too; the BFF marks them and refuses to revoke them (see
+`frontend-bff`). er-mcp does not offer the `/api-keys` routes to agents.
+
 ## Timestamps on the wire
 
 Timestamps render as **RFC 3339 microseconds UTC** via a local `ts` helper, to

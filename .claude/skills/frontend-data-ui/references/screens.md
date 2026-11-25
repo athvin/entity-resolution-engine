@@ -73,6 +73,7 @@ false the moment a screen renders different markup below `lg`.
 - `/[org]/[ds]/sources`
 - `/[org]/[ds]/sources/new`
 - `/[org]/settings/ai`
+- `/[org]/settings/api-keys`
 - `/[org]/settings/audit`
 - `/[org]/settings/members`
 - `/[org]/settings/profile`

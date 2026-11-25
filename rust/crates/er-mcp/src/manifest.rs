@@ -58,6 +58,12 @@ const TOOLS_JSON: &str = include_str!("../tools.json");
 /// Offering them would mean either handing an agent an operator credential, or
 /// advertising tools that always 403.
 ///
+/// **API-key management** (`/api-keys`). An admin may mint, list and revoke
+/// keys (#866), but an agent should not: a prompt-injected agent holding an
+/// admin key could mint a durable credential and leak it, which outlives the
+/// session the agent was trusted for. Credentials are managed by a person, in
+/// the settings page or over the API directly.
+///
 /// # Errors
 /// Panics at startup if the committed manifest does not parse, which is a
 /// build-time fact rather than a runtime one.
@@ -68,8 +74,13 @@ pub fn offered() -> Vec<Tool> {
     manifest
         .tools
         .into_iter()
-        .filter(|t| !t.needs_body && t.role != "operator")
+        .filter(|t| !t.needs_body && t.role != "operator" && !manages_credentials(t))
         .collect()
+}
+
+/// Whether a tool mints, lists or revokes API keys.
+fn manages_credentials(tool: &Tool) -> bool {
+    tool.path.contains("/api-keys")
 }
 
 /// Whether a tool only reads.
@@ -160,6 +171,15 @@ mod tests {
             assert!(!tool.needs_body, "{tool:?} needs a body it cannot describe");
             assert_ne!(tool.role, "operator", "{tool:?} is fleet-wide");
         }
+    }
+
+    #[test]
+    fn credential_management_is_never_offered() {
+        // The manifest does carry the key routes (admin since #866)...
+        let all: Manifest = serde_json::from_str(TOOLS_JSON).unwrap();
+        assert!(all.tools.iter().any(|t| t.path.contains("/api-keys") && t.role == "admin"));
+        // ...and an agent is offered none of them.
+        assert!(offered().iter().all(|t| !t.path.contains("/api-keys")));
     }
 
     #[test]
