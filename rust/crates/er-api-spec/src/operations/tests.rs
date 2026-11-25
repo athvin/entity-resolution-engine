@@ -245,6 +245,7 @@ fn router() {
         .route("/jobs", get(list).post(create))
         .route("/jobs/{id}", get(one))
         .route("/all", get(all))
+        .route("/resolve", post(resolve))
         .route("/mixed", get(mixed));
 }
 struct JobList {
@@ -261,6 +262,8 @@ async fn create() {
 async fn one(Path(id): Path<String>) { Json(JobWire::from(&job)) }
 /// Operator: every job (`GET /all`).
 async fn all() { Json::<Vec<JobWire>>(jobs.iter().map(JobWire::from).collect()) }
+/// Steward: a write that names its body by turbofish (`POST /resolve`).
+async fn resolve() { match go() { Ok(body) => Json::<JobList>(body).into_response(), Err(e) => e } }
 /// Viewer: mixed (`GET /mixed`).
 async fn mixed() { if a { Json(JobWire::from(&job)) } else { Json(json!(job)) } }
 "#;
@@ -287,6 +290,11 @@ async fn mixed() { if a { Json(JobWire::from(&job)) } else { Json(json!(job)) } 
     assert_eq!(
         schema("/all", "GET"),
         [json!({"type": "array", "items": job})]
+    );
+    // A write handler's turbofish over a variable names its body too.
+    assert_eq!(
+        schema("/resolve", "POST"),
+        [json!({"$ref": "#/components/schemas/JobList"})]
     );
 
     // The ledger reads the wire spellings as the bare values they replace.

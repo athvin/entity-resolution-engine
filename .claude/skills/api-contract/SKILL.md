@@ -123,11 +123,12 @@ The operation contract is generated and gated, with deliberate limits:
   uses the complete internal document. OpenAPI 3.1 permits
   role names in a non-OAuth security requirement.
 - **Responses are typed where the handler names a registered type, and
-  envelope-level elsewhere.** Typed responses are being converted resource family
-  by resource family (#864). When every success `Json(…)` a handler can return
-  names a registered component, the operation references it:
-  `Json(Name { … })`, `Json(Owner::from(…))`, `Json(NameWire::from(…))` →
-  `Name`, and `Json::<Vec<T>>(…)` → an array of `T`. Several typed bodies
+  envelope-level elsewhere.** Every success body has either a real schema
+  or a recorded envelope shape (#864). When every success `Json(…)` a
+  handler can return names a registered component, the operation references
+  it: `Json(Name { … })`, `Json(Owner::from(…))`, `Json(NameWire::from(…))`
+  and `Json::<Name>(value)` → `Name`, and `Json::<Vec<T>>(…)` → an array of
+  `T`. Several typed bodies
   become an `anyOf`. Local response helpers count as part of what the handler
   returns. A handler that types some success bodies and not others **fails
   generation**, rather than documenting part of what it returns. Response
@@ -142,8 +143,10 @@ The operation contract is generated and gated, with deliberate limits:
   classifier refuses a response struct carrying `serde` attributes, so a body
   that gains a key conditionally becomes one struct per observable form
   (`StagedBatch` / `StagedBatchApplied`), not one `skip_serializing_if` field.
-  On a write handler, name the type at the constructor, `Json(Name { … })` or
-  `Json(Name::from(…))`; neither classifier reads `Json::<Name>(variable)`.
+  That check reads only a struct built at the `Json(…)` call. A body bound to a
+  variable and passed as `Json::<Name>(body)` classifies as an unresolved
+  scalar, so a struct with `#[serde(flatten)]` (`ModelCompiled`) is served that
+  way.
   A lake read returns a typed item spelled out beside it in `read.rs`, because
   generated row names (`PageRow`, `ByIdRow`) repeat across entity modules.
   Its `From` destructures the row exhaustively, so a new column fails to

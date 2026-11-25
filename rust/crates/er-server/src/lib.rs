@@ -1343,6 +1343,10 @@ async fn seed_starter_model(
     }
 }
 
+/// `202` from `POST /v1/email`: queued for delivery. Deliberately empty.
+#[derive(Serialize, utoipa::ToSchema)]
+struct EmailAccepted {}
+
 /// Operator: send one transactional email (`POST /v1/email`).
 ///
 /// The BFF's only mail path (`frontend/src/lib/bff/relay.ts`), so the platform
@@ -1372,7 +1376,7 @@ async fn send_email(
             .into_response();
     }
     match state.mail.send(&body).await {
-        Ok(()) => (StatusCode::ACCEPTED, Json(json!({}))).into_response(),
+        Ok(()) => (StatusCode::ACCEPTED, Json(EmailAccepted {})).into_response(),
         Err(e @ mail::MailError::Invalid(_)) => (
             StatusCode::UNPROCESSABLE_ENTITY,
             Json(json!({ "detail": e.to_string() })),
@@ -1436,6 +1440,13 @@ async fn list_orgs(principal: Principal, State(state): State<AppState>) -> impl 
 
 /// Project the `resources` view out of an org's `env` map (`api.py`): the
 /// DuckDB thread/memory knobs, each `null` when unset.
+impl OrgResources {
+    /// The `resources` view of an org's `env` map.
+    fn of(env: &Value) -> Self {
+        resources_of(env)
+    }
+}
+
 fn resources_of(env: &Value) -> OrgResources {
     let threads = env
         .get("ER_DUCKDB_THREADS")
@@ -2183,7 +2194,56 @@ async fn create_config_version(
 /// The model registry's wire projection. `model_json` is omitted from list
 /// responses — it is the largest field by far and a list of twenty versions
 /// would be mostly settings documents nobody asked for.
-fn model_summary(m: &er_entities::matching_model::MatchingModel) -> Value {
+/// One model version in the registry, without its settings document.
+#[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
+struct ModelSummary {
+    id: String,
+    name: String,
+    version: i64,
+    entity_type: String,
+    model_hash: String,
+    model_version_label: String,
+    /// The comparator algorithm the document was trained with; null when the
+    /// stored document does not parse.
+    comparator_algorithm_version: Option<u32>,
+    tf_snapshot_id: Option<String>,
+    state: String,
+    provenance: Value,
+    created_by: String,
+    /// RFC 3339, microseconds.
+    activated_at: Option<String>,
+    /// RFC 3339, microseconds.
+    created_at: String,
+}
+
+/// `POST …/models/compile`: the compiled version and what the compiler decided.
+#[derive(Serialize, utoipa::ToSchema)]
+struct ModelCompiled {
+    #[serde(flatten)]
+    summary: ModelSummary,
+    notes: Vec<String>,
+}
+
+/// `GET …/models/{name}/versions/{version}`: the version with its document and
+/// per-field weights.
+#[derive(Serialize, utoipa::ToSchema)]
+struct ModelDetail {
+    #[serde(flatten)]
+    summary: ModelSummary,
+    /// The stored settings document, as text.
+    model_json: String,
+    /// Per comparison level: m/u and the log-odds they imply. Null when the
+    /// document does not parse.
+    weights: Value,
+}
+
+impl From<&er_entities::matching_model::MatchingModel> for ModelSummary {
+    fn from(m: &er_entities::matching_model::MatchingModel) -> Self {
+        model_summary(m)
+    }
+}
+
+fn model_summary(m: &er_entities::matching_model::MatchingModel) -> ModelSummary {
     // The recorded comparator algorithm version, derived from the stored
     // document the `model_weights` way rather than duplicated into a column,
     // so it cannot drift from what the engine loads. Absent in the document
@@ -2193,21 +2253,21 @@ fn model_summary(m: &er_entities::matching_model::MatchingModel) -> Value {
         dedupe_core::settings::json::SettingsJson::from_json_str(&m.model_json)
             .ok()
             .map(|s| s.comparator_algorithm_version());
-    json!({
-        "id": m.id,
-        "name": m.name,
-        "version": m.version,
-        "entity_type": m.entity_type,
-        "model_hash": m.model_hash,
-        "model_version_label": m.model_version_label,
-        "comparator_algorithm_version": comparator_algorithm_version,
-        "tf_snapshot_id": m.tf_snapshot_id,
-        "state": m.state,
-        "provenance": m.provenance,
-        "created_by": m.created_by,
-        "activated_at": m.activated_at.as_ref().map(pg::ts),
-        "created_at": pg::ts(&m.created_at),
-    })
+    ModelSummary {
+        id: m.id.clone(),
+        name: m.name.clone(),
+        version: m.version,
+        entity_type: m.entity_type.clone(),
+        model_hash: m.model_hash.clone(),
+        model_version_label: m.model_version_label.clone(),
+        comparator_algorithm_version,
+        tf_snapshot_id: m.tf_snapshot_id.clone(),
+        state: m.state.clone(),
+        provenance: m.provenance.clone(),
+        created_by: m.created_by.clone(),
+        activated_at: m.activated_at.as_ref().map(pg::ts),
+        created_at: pg::ts(&m.created_at),
+    }
 }
 
 /// A model version's per-field weights: for each comparison, each level's
@@ -2353,9 +2413,13 @@ async fn compile_model_version(
                 &json!({ "name": m.name, "version": m.version, "model_hash": m.model_hash }),
             )
             .await;
-            let mut body = model_summary(&m);
-            body["notes"] = json!(compiled.notes);
-            (StatusCode::CREATED, Json(body)).into_response()
+            // Bound first: a flattened struct is named by turbofish, because
+            // the envelope classifier refuses serde attributes at a constructor.
+            let body = ModelCompiled {
+                summary: model_summary(&m),
+                notes: compiled.notes,
+            };
+            (StatusCode::CREATED, Json::<ModelCompiled>(body)).into_response()
         }
         Err(e) => pg_err(e),
     }
@@ -2527,7 +2591,7 @@ async fn create_model_version(
                 &json!({ "name": m.name, "version": m.version, "model_hash": m.model_hash }),
             )
             .await;
-            (StatusCode::CREATED, Json(model_summary(&m))).into_response()
+            (StatusCode::CREATED, Json(ModelSummary::from(&m))).into_response()
         }
         Err(e) => pg_err(e),
     }
@@ -2561,10 +2625,12 @@ async fn get_model_version(
     };
     match pg::model_version(&client, &d.id, &name, version).await {
         Ok(Some(m)) => {
-            let mut body = model_summary(&m);
-            body["model_json"] = json!(m.model_json);
-            body["weights"] = model_weights(&m.model_json).unwrap_or(Value::Null);
-            Json(body).into_response()
+            let body = ModelDetail {
+                summary: model_summary(&m),
+                weights: model_weights(&m.model_json).unwrap_or(Value::Null),
+                model_json: m.model_json,
+            };
+            Json::<ModelDetail>(body).into_response()
         }
         Ok(None) => detail_err(
             StatusCode::NOT_FOUND,
@@ -2581,28 +2647,85 @@ async fn get_model_version(
 /// dashboard tile: a precision of 0.0 says "the model got every positive wrong",
 /// while a null says "it made no positive predictions on this label set". Those
 /// are opposite conclusions and a steward acts differently on each.
-fn confusion_metrics(tp: u64, fp: u64, fn_: u64, tn: u64) -> Value {
-    let ratio = |num: u64, den: u64| -> Value {
+/// A confusion matrix and its rates; a rate is null when its denominator is 0.
+#[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
+struct ConfusionMetrics {
+    tp: u64,
+    fp: u64,
+    #[serde(rename = "fn")]
+    fn_: u64,
+    tn: u64,
+    precision: Option<f64>,
+    recall: Option<f64>,
+    /// Null when either precision or recall is, rather than 0.
+    f1: Option<f64>,
+    accuracy: Option<f64>,
+}
+
+/// One step of the precision/recall trade-off curve.
+#[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
+struct CurvePoint {
+    #[serde(flatten)]
+    metrics: ConfusionMetrics,
+    threshold: f64,
+}
+
+/// Which labels the evaluation could and could not use.
+#[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
+struct EvaluationCounts {
+    labels_for_version: usize,
+    evaluable: usize,
+    no_score: usize,
+    not_a_verdict: usize,
+}
+
+/// A model version scored against the tenant's own labels.
+#[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
+struct LabelEvaluation {
+    model_version_label: String,
+    threshold: f64,
+    counts: EvaluationCounts,
+    overall: ConfusionMetrics,
+    /// Per label origin that has any evaluable label.
+    by_origin: std::collections::BTreeMap<String, ConfusionMetrics>,
+    curve: Vec<CurvePoint>,
+}
+
+/// `GET …/models/{name}/versions/{version}/evaluation`.
+#[derive(Serialize, utoipa::ToSchema)]
+struct ModelEvaluation {
+    #[serde(flatten)]
+    evaluation: LabelEvaluation,
+    name: String,
+    version: i64,
+    state: String,
+}
+
+fn confusion_metrics(tp: u64, fp: u64, fn_: u64, tn: u64) -> ConfusionMetrics {
+    let ratio = |num: u64, den: u64| -> Option<f64> {
         if den == 0 {
-            Value::Null
+            None
         } else {
-            json!(num as f64 / den as f64)
+            Some(num as f64 / den as f64)
         }
     };
     let precision = ratio(tp, tp + fp);
     let recall = ratio(tp, tp + fn_);
     // F1 needs both halves; it is null when either is, rather than 0.
-    let f1 = match (precision.as_f64(), recall.as_f64()) {
-        (Some(p), Some(r)) if p + r > 0.0 => json!(2.0 * p * r / (p + r)),
-        _ => Value::Null,
+    let f1 = match (precision, recall) {
+        (Some(p), Some(r)) if p + r > 0.0 => Some(2.0 * p * r / (p + r)),
+        _ => None,
     };
-    json!({
-        "tp": tp, "fp": fp, "fn": fn_, "tn": tn,
-        "precision": precision,
-        "recall": recall,
-        "f1": f1,
-        "accuracy": ratio(tp + tn, tp + fp + fn_ + tn),
-    })
+    ConfusionMetrics {
+        tp,
+        fp,
+        fn_,
+        tn,
+        precision,
+        recall,
+        f1,
+        accuracy: ratio(tp + tn, tp + fp + fn_ + tn),
+    }
 }
 
 /// The confusion matrix over `labels` at `threshold`, as `(tp, fp, fn, tn)`.
@@ -2650,7 +2773,7 @@ fn label_evaluation(
     labels: &[er_entities::pair_label::PairLabel],
     model_version_label: &str,
     threshold: f64,
-) -> Value {
+) -> LabelEvaluation {
     let for_version: Vec<&er_entities::pair_label::PairLabel> = labels
         .iter()
         .filter(|l| l.model_version.as_deref() == Some(model_version_label))
@@ -2665,15 +2788,18 @@ fn label_evaluation(
 
     // Reported beside the metrics, never silently dropped: a figure computed
     // over three labels has to be distinguishable from one over three hundred.
-    let excluded = json!({
-        "labels_for_version": for_version.len(),
-        "evaluable": evaluable.len(),
-        "no_score": for_version.iter().filter(|l| l.score_at_label.is_none()).count(),
-        "not_a_verdict": for_version.iter().filter(|l| !is_verdict(l)).count(),
-    });
+    let excluded = EvaluationCounts {
+        labels_for_version: for_version.len(),
+        evaluable: evaluable.len(),
+        no_score: for_version
+            .iter()
+            .filter(|l| l.score_at_label.is_none())
+            .count(),
+        not_a_verdict: for_version.iter().filter(|l| !is_verdict(l)).count(),
+    };
 
     let (tp, fp, fn_, tn) = confusion_at(&evaluable, threshold);
-    let mut by_origin = serde_json::Map::new();
+    let mut by_origin = std::collections::BTreeMap::new();
     for origin in ["human", "reviewer", "llm"] {
         let subset: Vec<&er_entities::pair_label::PairLabel> = evaluable
             .iter()
@@ -2690,24 +2816,25 @@ fn label_evaluation(
     // The trade-off curve, computed exactly at each step rather than from a
     // histogram: every label is already in memory, so there is no reason to
     // approximate at bucket edges.
-    let curve: Vec<Value> = (0..=20)
+    let curve: Vec<CurvePoint> = (0..=20)
         .map(|i| {
             let cut = f64::from(i) / 20.0;
             let (tp, fp, misses, tn) = confusion_at(&evaluable, cut);
-            let mut point = confusion_metrics(tp, fp, misses, tn);
-            point["threshold"] = json!(cut);
-            point
+            CurvePoint {
+                metrics: confusion_metrics(tp, fp, misses, tn),
+                threshold: cut,
+            }
         })
         .collect();
 
-    json!({
-        "model_version_label": model_version_label,
-        "threshold": threshold,
-        "counts": excluded,
-        "overall": confusion_metrics(tp, fp, fn_, tn),
-        "by_origin": Value::Object(by_origin),
-        "curve": curve,
-    })
+    LabelEvaluation {
+        model_version_label: model_version_label.to_string(),
+        threshold,
+        counts: excluded,
+        overall: confusion_metrics(tp, fp, fn_, tn),
+        by_origin,
+        curve,
+    }
 }
 
 /// Viewer+: how a model version scored against its own labels
@@ -2769,11 +2896,13 @@ async fn model_version_evaluation(
         Ok(l) => l,
         Err(e) => return pg_err(e),
     };
-    let mut body = label_evaluation(&labels, &model.model_version_label, threshold);
-    body["name"] = json!(name);
-    body["version"] = json!(version);
-    body["state"] = json!(model.state);
-    Json(body).into_response()
+    let body = ModelEvaluation {
+        evaluation: label_evaluation(&labels, &model.model_version_label, threshold),
+        name,
+        version,
+        state: model.state,
+    };
+    Json::<ModelEvaluation>(body).into_response()
 }
 
 /// Admin+: activate a model version
@@ -4928,6 +5057,41 @@ async fn attempt_authorized(
     Ok((lineage, AttemptIdentity::Fallback))
 }
 
+/// `GET /v1/internal/attempts/{attempt_id}`: everything a remote attempt
+/// needs to run its task, read once at pod start.
+#[derive(Serialize, utoipa::ToSchema)]
+struct WorkOrder {
+    org_id: String,
+    dataset_id: Option<String>,
+    job_id: String,
+    run_id: String,
+    kind: String,
+    task_id: String,
+    try_number: i64,
+    state: String,
+    resource_class: Option<String>,
+    segment: Option<String>,
+    trigger_rule: String,
+    max_tries: i64,
+    input: Option<Value>,
+    params: Value,
+    structural_fingerprint: Option<String>,
+    /// The attempt's task chain, current first.
+    lineage: Vec<String>,
+    /// The lake connection env the task opens.
+    lake_env: Value,
+    drop_root: Option<String>,
+    /// The tenant's active models, for scoring tasks.
+    #[schema(value_type = Vec<Object>)]
+    models: Vec<crate::runctx::ActiveModelSpec>,
+    /// `(rec_a_key, rec_b_key)` verdict pairs, for a train task.
+    #[schema(value_type = Vec<Vec<String>>)]
+    labels: Vec<(String, String)>,
+    /// Salesforce credentials and watermark for an extract task; null
+    /// otherwise.
+    connection: Value,
+}
+
 /// The work order for one claimed attempt
 /// (`GET /v1/internal/attempts/{attempt_id}`): identity, the pinned input, the
 /// job's params, the retry lineage the ledger probe matches on, and the
@@ -5079,33 +5243,33 @@ async fn attempt_work_order(
     } else {
         Value::Null
     };
-    let order = json!({
-        "org_id": current.org_id,
-        "dataset_id": job.dataset_id,
-        "job_id": current.job_id,
+    let order = WorkOrder {
+        org_id: current.org_id.clone(),
+        dataset_id: job.dataset_id.clone(),
+        job_id: current.job_id.clone(),
         // jobs.id == run_id is load-bearing (§4.1); planning writes it.
-        "run_id": job.run_id.clone().unwrap_or_else(|| job.id.clone()),
-        "kind": job.kind,
-        "task_id": current.task_id,
-        "try_number": current.try_number,
-        "state": current.state,
-        "resource_class": current.resource_class,
-        "segment": current.segment,
-        "trigger_rule": current.trigger_rule,
-        "max_tries": current.max_tries,
-        "input": current.input,
-        "params": job.params,
-        "structural_fingerprint": job.structural_fingerprint,
-        "lineage": lineage.iter().map(|t| t.id.clone()).collect::<Vec<_>>(),
-        "lake_env": lake_env,
+        run_id: job.run_id.clone().unwrap_or_else(|| job.id.clone()),
+        kind: job.kind.clone(),
+        task_id: current.task_id.clone(),
+        try_number: current.try_number,
+        state: current.state.clone(),
+        resource_class: current.resource_class.clone(),
+        segment: current.segment.clone(),
+        trigger_rule: current.trigger_rule.clone(),
+        max_tries: current.max_tries,
+        input: current.input.clone(),
+        params: job.params.clone(),
+        structural_fingerprint: job.structural_fingerprint.clone(),
+        lineage: lineage.iter().map(|t| t.id.clone()).collect(),
+        lake_env,
         // The delivery root is a dataset/org COLUMN, not an env key, so it
         // rides beside the env rather than inside it.
-        "drop_root": drop_root,
-        "models": models,
-        "labels": labels,
-        "connection": connection,
-    });
-    (StatusCode::OK, Json(json!(order))).into_response()
+        drop_root,
+        models,
+        labels,
+        connection,
+    };
+    (StatusCode::OK, Json::<WorkOrder>(order)).into_response()
 }
 
 #[derive(Deserialize)]
@@ -5170,7 +5334,13 @@ async fn attempt_start(
                     "stale start: the attempt is not queued under this launch",
                 )
             },
-            |row| (StatusCode::OK, Json(json!(row))).into_response(),
+            |row| {
+                (
+                    StatusCode::OK,
+                    Json(er_entities::task_instance::TaskInstanceWire::from(&row)),
+                )
+                    .into_response()
+            },
         ),
         Err(e) => pg_err(e),
     }
@@ -5223,7 +5393,13 @@ async fn attempt_heartbeat(
                     "fenced: the attempt is no longer running as this pod",
                 )
             },
-            |row| (StatusCode::OK, Json(json!(row))).into_response(),
+            |row| {
+                (
+                    StatusCode::OK,
+                    Json(er_entities::task_instance::TaskInstanceWire::from(&row)),
+                )
+                    .into_response()
+            },
         ),
         Err(e) => pg_err(e),
     }
@@ -5292,6 +5468,14 @@ struct AttemptFinish {
     error_detail: Option<String>,
     #[serde(default)]
     termination_reason: Option<String>,
+}
+
+/// A failed attempt's settlement: the archived try and, when the task still
+/// has tries left, the queued successor.
+#[derive(Serialize, utoipa::ToSchema)]
+struct AttemptRetried {
+    archived: er_entities::task_instance::TaskInstanceWire,
+    retry: Option<er_entities::task_instance::TaskInstanceWire>,
 }
 
 /// The pod's terminal report
@@ -5383,7 +5567,11 @@ async fn attempt_finish(
                             return pg_err(e);
                         }
                         ops::task_completed(&row);
-                        (StatusCode::OK, Json(json!(row))).into_response()
+                        (
+                            StatusCode::OK,
+                            Json(er_entities::task_instance::TaskInstanceWire::from(&row)),
+                        )
+                            .into_response()
                     }
                     None => detail_err(
                         StatusCode::CONFLICT,
@@ -5474,7 +5662,12 @@ async fn attempt_finish(
                     taskpg::note_settled(Some(&archived), successor.as_ref());
                     (
                         StatusCode::OK,
-                        Json(json!({ "archived": archived, "retry": successor })),
+                        Json(AttemptRetried {
+                            archived: er_entities::task_instance::TaskInstanceWire::from(&archived),
+                            retry: successor
+                                .as_ref()
+                                .map(er_entities::task_instance::TaskInstanceWire::from),
+                        }),
                     )
                         .into_response()
                 }
@@ -5502,7 +5695,13 @@ async fn attempt_finish(
                             "stale interruption: the attempt is not live as this pod",
                         )
                     },
-                    |row| (StatusCode::OK, Json(json!(row))).into_response(),
+                    |row| {
+                        (
+                            StatusCode::OK,
+                            Json(er_entities::task_instance::TaskInstanceWire::from(&row)),
+                        )
+                            .into_response()
+                    },
                 ),
                 Err(e) => pg_err(e),
             }
@@ -5582,7 +5781,7 @@ async fn audit_feed(
     client: &tokio_postgres::Client,
     org: Option<&str>,
     params: &HashMap<String, String>,
-) -> Result<Vec<Value>, Box<axum::response::Response>> {
+) -> Result<Vec<pg::AuditEntry>, Box<axum::response::Response>> {
     let filters = pg::AuditFilters {
         action: params.get("action").map(String::as_str),
         actor: params.get("actor").map(String::as_str),
@@ -5604,11 +5803,15 @@ async fn audit_feed(
 /// list, as text/csv. Split from the handlers so both share one export; the
 /// JSON arm stays inline in each handler because the envelope gate classifies
 /// handlers by reading their own `Json(...)` call.
-fn audit_csv_response(rows: &[Value]) -> axum::response::Response {
+fn audit_csv_response(rows: &[pg::AuditEntry]) -> axum::response::Response {
+    let rows: Vec<Value> = rows
+        .iter()
+        .map(|r| serde_json::to_value(r).unwrap_or(Value::Null))
+        .collect();
     (
         StatusCode::OK,
         [(axum::http::header::CONTENT_TYPE, "text/csv; charset=utf-8")],
-        read::audit_csv(rows),
+        read::audit_csv(&rows),
     )
         .into_response()
 }
@@ -5636,7 +5839,7 @@ async fn audit_global(
             if params.get("format").map(String::as_str) == Some("csv") {
                 return audit_csv_response(&rows);
             }
-            Json(json!(rows)).into_response()
+            Json::<Vec<pg::AuditEntry>>(rows).into_response()
         }
         Err(r) => *r,
     }
@@ -5671,7 +5874,7 @@ async fn audit_index(
             if params.get("format").map(String::as_str) == Some("csv") {
                 return audit_csv_response(&rows);
             }
-            Json(json!(rows)).into_response()
+            Json::<Vec<pg::AuditEntry>>(rows).into_response()
         }
         Err(r) => *r,
     }
@@ -5734,7 +5937,7 @@ async fn update_resources(
         return env_write_err(e);
     }
     match pg::get_org(&client, &org).await {
-        Ok(Some(o)) => Json(resources_of(&o.env)).into_response(),
+        Ok(Some(o)) => Json(OrgResources::of(&o.env)).into_response(),
         Ok(None) => detail_err(StatusCode::NOT_FOUND, format!("no org '{org}'")),
         Err(e) => pg_err(e),
     }
@@ -6503,7 +6706,7 @@ async fn dataset_profile(
             request.tier,
             include_values,
         ) {
-            Ok(body) => Json(body).into_response(),
+            Ok(body) => Json::<read::Profile>(body).into_response(),
             Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
         }
     })
@@ -7042,7 +7245,7 @@ async fn match_preview(
         .unwrap_or(50usize);
 
     match er_obs::spawn_blocking_in_span(move || match_preview_blocking(&env, limit)).await {
-        Ok(Ok(body)) => Json(body).into_response(),
+        Ok(Ok(body)) => Json::<MatchPreviewView>(body).into_response(),
         Ok(Err(msg)) => detail_err(StatusCode::CONFLICT, msg),
         Err(e) => detail_err(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -7127,7 +7330,7 @@ async fn resolve_record(
     match er_obs::spawn_blocking_in_span(move || resolve_blocking(&env, &source, &record, limit))
         .await
     {
-        Ok(Ok(body)) => Json(body).into_response(),
+        Ok(Ok(body)) => Json::<er_cli::ResolveResult>(body).into_response(),
         Ok(Err(msg)) => detail_err(StatusCode::CONFLICT, msg),
         Err(e) => detail_err(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -7142,7 +7345,7 @@ fn resolve_blocking(
     source: &str,
     record: &Value,
     limit: usize,
-) -> Result<Value, String> {
+) -> Result<er_cli::ResolveResult, String> {
     let s = |k: &str| env.get(k).and_then(Value::as_str).filter(|v| !v.is_empty());
     let model_path =
         s("ER_MODEL_PATH").ok_or("no model yet (ER_MODEL_PATH); run a full run first")?;
@@ -7168,7 +7371,7 @@ fn resolve_blocking(
         model_version: s("ER_MODEL_VERSION").unwrap_or("v0001"),
         tf_snapshot_id: s("ER_TF_SNAPSHOT_ID").unwrap_or("tf"),
     };
-    let result = er_cli::resolve_record(
+    er_cli::resolve_record(
         &session,
         &config,
         &model,
@@ -7180,8 +7383,7 @@ fn resolve_blocking(
         },
         limit,
     )
-    .map_err(|e| format!("{e:#}"))?;
-    serde_json::to_value(&result).map_err(|e| format!("rendering the result: {e}"))
+    .map_err(|e| format!("{e:#}"))
 }
 
 /// Read a nickname lexicon CSV the way the dispatcher does. Resolve needs the
@@ -7257,7 +7459,7 @@ async fn blocking_estimate(
         .min(50);
 
     match er_obs::spawn_blocking_in_span(move || blocking_estimate_blocking(&env, largest)).await {
-        Ok(Ok(body)) => Json(body).into_response(),
+        Ok(Ok(body)) => Json::<er_cli::BlockingEstimate>(body).into_response(),
         Ok(Err(msg)) => detail_err(StatusCode::CONFLICT, msg),
         Err(e) => detail_err(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -7272,7 +7474,10 @@ async fn blocking_estimate(
 /// The rules come from the model rather than the config because the model is
 /// what executes — asking the config would estimate a run nobody is going to
 /// perform.
-fn blocking_estimate_blocking(env: &Value, largest: usize) -> Result<Value, String> {
+fn blocking_estimate_blocking(
+    env: &Value,
+    largest: usize,
+) -> Result<er_cli::BlockingEstimate, String> {
     let s = |k: &str| env.get(k).and_then(Value::as_str).filter(|v| !v.is_empty());
     let model_path =
         s("ER_MODEL_PATH").ok_or("no model yet (ER_MODEL_PATH); publish or compile one first")?;
@@ -7304,16 +7509,15 @@ fn blocking_estimate_blocking(env: &Value, largest: usize) -> Result<Value, Stri
     }
 
     let session = crate::schema::open_lake_env(env)?;
-    let estimate = er_cli::estimate_blocking(&session, &settings_json, &rules, largest)
-        .map_err(|e| format!("{e:#}"))?;
-    serde_json::to_value(&estimate).map_err(|e| format!("rendering the estimate: {e}"))
+    er_cli::estimate_blocking(&session, &settings_json, &rules, largest)
+        .map_err(|e| format!("{e:#}"))
 }
 
 /// The blocking half of [`match_preview`]: open the org lake + frozen model from
 /// its env, read the thresholds from its config, run the read-only
 /// `er_cli::preview_match`, and render the JSON body. Any missing input (no
 /// trained model yet) returns a human string the handler maps to 409.
-fn match_preview_blocking(env: &Value, limit: usize) -> Result<Value, String> {
+fn match_preview_blocking(env: &Value, limit: usize) -> Result<MatchPreviewView, String> {
     let s = |k: &str| env.get(k).and_then(Value::as_str).filter(|v| !v.is_empty());
     let model_path =
         s("ER_MODEL_PATH").ok_or("no trained model yet (ER_MODEL_PATH); run a full run first")?;
@@ -7343,25 +7547,46 @@ fn match_preview_blocking(env: &Value, limit: usize) -> Result<Value, String> {
     )
     .map_err(|e| format!("preview: {e:#}"))?;
 
-    let sample: Vec<Value> = preview
-        .sample
-        .iter()
-        .map(|p| {
-            json!({
-                "rec_a_key": p.rec_a_key,
-                "rec_b_key": p.rec_b_key,
-                "match_probability": p.match_probability,
-                "confidence": dedupe_core::confidence::Confidence::from_probability(p.match_probability).display(),
-                "evidence": serde_json::from_str::<Value>(&p.evidence).unwrap_or(Value::Null),
-            })
-        })
-        .collect();
-    Ok(json!({
-        "total": preview.total,
-        "would_auto_merge": preview.would_auto_merge,
-        "would_review": preview.would_review,
-        "sample": sample,
-    }))
+    Ok(MatchPreviewView {
+        total: preview.total,
+        would_auto_merge: preview.would_auto_merge,
+        would_review: preview.would_review,
+        sample: preview.sample.iter().map(PreviewPairView::from).collect(),
+    })
+}
+
+/// One sampled pair from a match preview.
+#[derive(Debug, PartialEq, Serialize, utoipa::ToSchema)]
+struct PreviewPairView {
+    rec_a_key: String,
+    rec_b_key: String,
+    match_probability: f64,
+    /// The display integer of `match_probability`.
+    confidence: i64,
+    /// The comparison evidence; null if it was not valid JSON.
+    evidence: Value,
+}
+
+impl From<&er_cli::PreviewPair> for PreviewPairView {
+    fn from(p: &er_cli::PreviewPair) -> Self {
+        Self {
+            rec_a_key: p.rec_a_key.clone(),
+            rec_b_key: p.rec_b_key.clone(),
+            match_probability: p.match_probability,
+            confidence: dedupe_core::confidence::Confidence::from_probability(p.match_probability)
+                .display(),
+            evidence: serde_json::from_str::<Value>(&p.evidence).unwrap_or(Value::Null),
+        }
+    }
+}
+
+/// `GET …/match-preview`: what the active model would do to the current lake.
+#[derive(Debug, PartialEq, Serialize, utoipa::ToSchema)]
+struct MatchPreviewView {
+    total: usize,
+    would_auto_merge: usize,
+    would_review: usize,
+    sample: Vec<PreviewPairView>,
 }
 
 /// `GET …/records?key=…`: the standardized records found, snapshot-pinned.
@@ -8292,7 +8517,7 @@ async fn imports_recent(
             params.get("source").map(String::as_str),
             limit,
         ) {
-            Ok(items) => Json(json!(items)).into_response(),
+            Ok(items) => Json::<Vec<read::ImportReceipt>>(items).into_response(),
             Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
         }
     })
@@ -10145,6 +10370,30 @@ async fn create_salesforce_connection(
     }
 }
 
+/// One Salesforce connection, without its credentials.
+#[derive(Debug, PartialEq, Serialize, utoipa::ToSchema)]
+struct SalesforceConnectionItem {
+    id: String,
+    name: String,
+    instance_url: String,
+    auth_kind: String,
+    api_version: String,
+    active: bool,
+}
+
+impl From<&pg::SalesforceConnectionRow> for SalesforceConnectionItem {
+    fn from(c: &pg::SalesforceConnectionRow) -> Self {
+        Self {
+            id: c.id.clone(),
+            name: c.name.clone(),
+            instance_url: c.instance_url.clone(),
+            auth_kind: c.auth_kind.clone(),
+            api_version: c.api_version.clone(),
+            active: c.active,
+        }
+    }
+}
+
 /// Viewer+: list an org's active Salesforce connections
 /// (`GET /v1/orgs/{org}/connections`); the client secret is never listed.
 async fn salesforce_connections_index(
@@ -10167,22 +10416,10 @@ async fn salesforce_connections_index(
         Err(r) => return *r,
     };
     match pg::list_salesforce_connections(&client, &org_row.id).await {
-        Ok(rows) => {
-            let out: Vec<Value> = rows
-                .iter()
-                .map(|c| {
-                    json!({
-                        "id": c.id,
-                        "name": c.name,
-                        "instance_url": c.instance_url,
-                        "auth_kind": c.auth_kind,
-                        "api_version": c.api_version,
-                        "active": c.active,
-                    })
-                })
-                .collect();
-            Json(json!(out)).into_response()
-        }
+        Ok(rows) => Json::<Vec<SalesforceConnectionItem>>(
+            rows.iter().map(SalesforceConnectionItem::from).collect(),
+        )
+        .into_response(),
         Err(e) => pg_err(e),
     }
 }
@@ -12870,11 +13107,11 @@ mod evaluation_tests {
     fn a_ratio_with_no_denominator_is_null_not_zero() {
         // The distinction a steward acts on: "got every positive wrong" vs
         // "made no positive predictions at all".
-        let m = confusion_metrics(0, 0, 3, 5);
+        let m = serde_json::to_value(confusion_metrics(0, 0, 3, 5)).unwrap();
         assert!(m["precision"].is_null(), "{m}");
         assert_eq!(m["recall"], serde_json::json!(0.0));
         assert!(m["f1"].is_null(), "{m}");
-        let empty = confusion_metrics(0, 0, 0, 0);
+        let empty = serde_json::to_value(confusion_metrics(0, 0, 0, 0)).unwrap();
         assert!(empty["accuracy"].is_null(), "{empty}");
     }
 
@@ -12885,7 +13122,7 @@ mod evaluation_tests {
             label("match", "human", Some("v1"), Some(0.96)),
             label("no_match", "human", Some("v1"), Some(0.10)),
         ];
-        let out = label_evaluation(&labels, "v1", 0.95);
+        let out = serde_json::to_value(label_evaluation(&labels, "v1", 0.95)).unwrap();
         assert_eq!(out["overall"]["precision"], serde_json::json!(1.0));
         assert_eq!(out["overall"]["recall"], serde_json::json!(1.0));
         assert_eq!(out["overall"]["f1"], serde_json::json!(1.0));
@@ -12900,11 +13137,11 @@ mod evaluation_tests {
         ];
         // At 0.95 neither is predicted a match: one false negative, one true
         // negative, and no positive predictions at all.
-        let strict = label_evaluation(&labels, "v1", 0.95);
+        let strict = serde_json::to_value(label_evaluation(&labels, "v1", 0.95)).unwrap();
         assert!(strict["overall"]["precision"].is_null(), "{strict}");
         assert_eq!(strict["overall"]["fn"], serde_json::json!(1));
         // At 0.5 both are: one true positive, one false positive.
-        let loose = label_evaluation(&labels, "v1", 0.5);
+        let loose = serde_json::to_value(label_evaluation(&labels, "v1", 0.5)).unwrap();
         assert_eq!(loose["overall"]["tp"], serde_json::json!(1));
         assert_eq!(loose["overall"]["fp"], serde_json::json!(1));
         assert_eq!(loose["overall"]["precision"], serde_json::json!(0.5));
@@ -12919,7 +13156,7 @@ mod evaluation_tests {
             label("match", "human", Some("v1"), Some(0.99)),
             label("no_match", "human", Some("v2"), Some(0.99)),
         ];
-        let out = label_evaluation(&labels, "v1", 0.95);
+        let out = serde_json::to_value(label_evaluation(&labels, "v1", 0.95)).unwrap();
         assert_eq!(out["counts"]["labels_for_version"], serde_json::json!(1));
         assert_eq!(out["overall"]["tp"], serde_json::json!(1));
         assert_eq!(out["overall"]["fp"], serde_json::json!(0));
@@ -12935,7 +13172,7 @@ mod evaluation_tests {
             label("match", "reviewer", Some("v1"), None),
             label("dismiss", "human", Some("v1"), Some(0.40)),
         ];
-        let out = label_evaluation(&labels, "v1", 0.95);
+        let out = serde_json::to_value(label_evaluation(&labels, "v1", 0.95)).unwrap();
         assert_eq!(out["counts"]["labels_for_version"], serde_json::json!(3));
         assert_eq!(out["counts"]["evaluable"], serde_json::json!(1));
         assert_eq!(out["counts"]["no_score"], serde_json::json!(1));
@@ -12951,7 +13188,7 @@ mod evaluation_tests {
             label("match", "human", Some("v1"), Some(0.99)),
             label("no_match", "llm", Some("v1"), Some(0.99)),
         ];
-        let out = label_evaluation(&labels, "v1", 0.95);
+        let out = serde_json::to_value(label_evaluation(&labels, "v1", 0.95)).unwrap();
         assert_eq!(
             out["by_origin"]["human"]["precision"],
             serde_json::json!(1.0)
@@ -12969,7 +13206,7 @@ mod evaluation_tests {
             label("match", "human", Some("v1"), Some(0.5)),
             label("no_match", "human", Some("v1"), Some(0.1)),
         ];
-        let out = label_evaluation(&labels, "v1", 0.95);
+        let out = serde_json::to_value(label_evaluation(&labels, "v1", 0.95)).unwrap();
         let curve = out["curve"].as_array().expect("curve").clone();
         assert_eq!(curve.len(), 21);
         assert_eq!(curve[0]["threshold"], serde_json::json!(0.0));
@@ -12990,7 +13227,7 @@ mod evaluation_tests {
 
     #[test]
     fn no_labels_for_a_version_reports_nothing_rather_than_zero() {
-        let out = label_evaluation(&[], "v1", 0.95);
+        let out = serde_json::to_value(label_evaluation(&[], "v1", 0.95)).unwrap();
         assert_eq!(out["counts"]["evaluable"], serde_json::json!(0));
         assert!(out["overall"]["precision"].is_null(), "{out}");
         assert!(out["overall"]["accuracy"].is_null(), "{out}");
@@ -13273,6 +13510,10 @@ mod response_shape_tests {
         LabelBand, LabelCoverage, LabelOrigins, OrgCreated, OrgItem, OrgProvisioned, OrgView,
         ResumeAccepted, ReviewMergeGroup, Staged, StagedApplied, StagedBatch, StagedBatchApplied,
         UnmergeApplied, UnmergeStaged, enqueue_traced, label_coverage, resources_of,
+    };
+    use super::{
+        AttemptRetried, EmailAccepted, ModelSummary, PreviewPairView, SalesforceConnectionItem,
+        model_summary,
     };
     use super::{
         ConfigDraftCreated, ConfigPublished, ConfigVersionItem, ConfigVersionView, Lexicon,
@@ -13954,6 +14195,123 @@ mod response_shape_tests {
             old,
             value(&ContradictionList {
                 contradictions: vec![ContradictionItem::from(c)],
+            })
+        );
+    }
+
+    #[test]
+    fn the_last_seventeen_keep_their_keys() {
+        let now = chrono::Utc::now();
+        let m = er_entities::matching_model::MatchingModel {
+            id: "m1".into(),
+            org_id: "o".into(),
+            dataset_id: "d".into(),
+            name: "default".into(),
+            version: 3,
+            entity_type: "person".into(),
+            model_json: "not json".into(),
+            model_hash: "h".into(),
+            model_version_label: "v0003".into(),
+            tf_snapshot_id: None,
+            state: "active".into(),
+            provenance: json!({"origin": "compiled"}),
+            created_by: "u".into(),
+            activated_at: Some(now),
+            created_at: now,
+            updated_at: now,
+        };
+        // The previous `model_summary` json!, with the unparseable document's
+        // null algorithm version.
+        assert_eq!(
+            json!({
+                "id": m.id, "name": m.name, "version": m.version,
+                "entity_type": m.entity_type, "model_hash": m.model_hash,
+                "model_version_label": m.model_version_label,
+                "comparator_algorithm_version": null, "tf_snapshot_id": m.tf_snapshot_id,
+                "state": m.state, "provenance": m.provenance, "created_by": m.created_by,
+                "activated_at": m.activated_at.as_ref().map(super::pg::ts),
+                "created_at": super::pg::ts(&m.created_at),
+            }),
+            value(&model_summary(&m))
+        );
+        assert_eq!(value(&ModelSummary::from(&m)), value(&model_summary(&m)));
+        assert_eq!(json!({}), value(&EmailAccepted {}));
+        let conn = super::pg::SalesforceConnectionRow {
+            id: "c1".into(),
+            name: "prod".into(),
+            instance_url: "https://x.my.salesforce.com".into(),
+            auth_kind: "client_credentials".into(),
+            api_version: "v62.0".into(),
+            active: true,
+        };
+        assert_eq!(
+            json!({
+                "id": conn.id, "name": conn.name, "instance_url": conn.instance_url,
+                "auth_kind": conn.auth_kind, "api_version": conn.api_version, "active": conn.active,
+            }),
+            value(&SalesforceConnectionItem::from(&conn))
+        );
+        let pair = er_cli::PreviewPair {
+            rec_a_key: "a".into(),
+            rec_b_key: "b".into(),
+            match_probability: 0.9,
+            evidence: "{\"mw_email\": 2.0}".into(),
+        };
+        assert_eq!(
+            json!({
+                "rec_a_key": "a", "rec_b_key": "b", "match_probability": 0.9,
+                "confidence": dedupe_core::confidence::Confidence::from_probability(0.9).display(),
+                "evidence": {"mw_email": 2.0},
+            }),
+            value(&PreviewPairView::from(&pair))
+        );
+        let audit = super::pg::AuditEntry {
+            id: 7,
+            at: "2026-11-24T00:00:00.000000Z".into(),
+            actor: "u".into(),
+            org: Some("o".into()),
+            dataset: None,
+            action: "label.record".into(),
+            detail: json!({"n": 1}),
+            trace_id: None,
+        };
+        assert_eq!(
+            json!({
+                "id": 7, "at": audit.at, "actor": "u", "org": "o", "dataset": null,
+                "action": "label.record", "detail": {"n": 1}, "trace_id": null,
+            }),
+            value(&audit)
+        );
+        // The attempt bodies serialize each task through its wire, which
+        // leaves out the attempt's `token_hash` and nothing else.
+        let task: er_entities::task_instance::TaskInstance = serde_json::from_str(
+            r#"{
+            "id": "t1", "org_id": "o", "dataset_id": "d", "job_id": "j", "task_id": "match",
+            "seq": 1, "try_number": 1, "live": true, "archived_reason": null, "kind": "match",
+            "state": "failed", "trigger_rule": "all_success", "upstream": [], "teardown": false,
+            "segment": null, "resource_class": null, "next_resource_class": null,
+            "escalated_from": null, "max_tries": 3, "launches": 1, "max_launches": 3,
+            "not_before": null, "input": null, "output": null, "outcome": null,
+            "exit_code": 1, "termination_reason": null, "error_class": "data",
+            "error_detail": "boom", "owner_epoch": null, "k8s_job_name": null,
+            "pod_name": null, "pod_uid": "p", "node_name": null, "image_digest": null,
+            "snapshot_start": null, "snapshot_end": null, "counters": null,
+            "trace_context": null, "token_hash": "secret-hash", "scheduled_at": null,
+            "queued_at": null, "started_at": null, "heartbeat_at": null,
+            "finished_at": null, "created_at": "2026-11-24T00:00:00Z",
+            "updated_at": "2026-11-24T00:00:00Z"
+        }"#,
+        )
+        .unwrap();
+        let mut old = json!(task);
+        old.as_object_mut().unwrap().remove("token_hash");
+        let wire = er_entities::task_instance::TaskInstanceWire::from(&task);
+        assert_eq!(old, value(&wire));
+        assert_eq!(
+            json!({ "archived": old, "retry": null }),
+            value(&AttemptRetried {
+                archived: wire,
+                retry: None,
             })
         );
     }
