@@ -456,6 +456,24 @@ fn operation_responses(
                     );
                 continue;
             }
+            Envelope::File => {
+                // The one file download is an export's artifact, whose media
+                // type is the export's format.
+                response = response
+                    .description(
+                        "Successful response: the export's artifact as an attachment, CSV \
+                         or JSON Lines as the export's `format` says.",
+                    )
+                    .content(
+                        "text/csv",
+                        json_content(json!({"type": "string", "format": "binary"})),
+                    )
+                    .content(
+                        "application/x-ndjson",
+                        json_content(json!({"type": "string", "format": "binary"})),
+                    );
+                continue;
+            }
         };
         if !schemas.contains(&schema) {
             schemas.push(schema);
@@ -875,6 +893,10 @@ mod tests {
                             "binary"
                         );
                     }
+                    "file" => {
+                        assert!(content.get("application/json").is_none());
+                        assert_eq!(content["text/csv"]["schema"]["format"], "binary");
+                    }
                     other => panic!("unsupported ledger class {other}"),
                 }
             }
@@ -882,7 +904,7 @@ mod tests {
         assert_eq!(
             classes,
             std::collections::BTreeSet::from([
-                "bare", "wrapped", "record", "page", "scalar", "arrow"
+                "bare", "wrapped", "record", "page", "scalar", "arrow", "file"
             ])
         );
     }

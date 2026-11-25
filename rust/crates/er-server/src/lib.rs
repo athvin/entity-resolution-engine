@@ -42,6 +42,7 @@ mod duckfleet_tasks;
 pub mod errfmt;
 pub mod exec_task;
 pub mod executor;
+pub mod exports;
 pub mod extract_params;
 pub(crate) mod fixups;
 mod lake_reads;
@@ -7045,6 +7046,295 @@ async fn dataset_profile_run(
     }
 }
 
+/// `POST …/exports`'s body: what to export, and optionally at which snapshot.
+#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+struct ExportIn {
+    /// `golden` (one row per golden record) or `duplicates` (one row per
+    /// duplicate group).
+    kind: String,
+    /// `csv` or `jsonl`. Duplicates export as `jsonl` only.
+    format: String,
+    /// The lake snapshot to export: a run's `snapshot`, to export that run's
+    /// results. Omitted, the latest is pinned and returned.
+    #[serde(default)]
+    snapshot: Option<i64>,
+}
+
+/// An export accepted: its id, and the snapshot it will read.
+#[derive(Serialize, utoipa::ToSchema)]
+struct ExportQueued {
+    export_id: String,
+    snapshot: i64,
+    state: String,
+}
+
+/// One export's status (`GET …/exports/{export_id}`).
+#[derive(Serialize, utoipa::ToSchema)]
+struct ExportStatus {
+    export_id: String,
+    /// The job's state: `queued`, `running`, `succeeded`, `failed`, `canceled`.
+    state: String,
+    kind: String,
+    format: String,
+    /// The lake snapshot the export reads; every row in the artifact is as of it.
+    snapshot: Option<i64>,
+    /// Rows written, once the export has succeeded.
+    rows: Option<i64>,
+    /// Why it failed: `precondition` (for example the row ceiling) or an
+    /// engine class.
+    error_class: Option<String>,
+    #[schema(value_type = String)]
+    created_at: chrono::DateTime<chrono::Utc>,
+    #[schema(value_type = Option<String>)]
+    finished_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// When the artifact stops being downloadable: seven days after it finished.
+    #[schema(value_type = Option<String>)]
+    expires_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+/// Steward+: export the dataset's golden records or duplicate groups at one
+/// pinned snapshot, as one CSV or JSON Lines artifact
+/// (`POST /v1/orgs/{org}/datasets/{ds}/exports`). Asynchronous: poll
+/// `GET …/exports/{export_id}`, then download. The snapshot is fixed here, so
+/// a newer run cannot change what the export contains.
+async fn create_export(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, ds)): Path<(String, String)>,
+    Json(body): Json<ExportIn>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Steward) {
+        return e.into_response();
+    }
+    let request = match exports::ExportRequest::from_params(&json!({
+        "kind": body.kind,
+        "format": body.format,
+        "snapshot": body.snapshot,
+    })) {
+        Ok(request) => request,
+        Err(message) => return detail_err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+    let dataset = match dataset_for_lake(&state, &org, &ds).await {
+        Ok(dataset) => dataset,
+        Err(response) => return *response,
+    };
+    // Refuse a lake the download could never serve, before queueing work.
+    if let Err(message) = exports::artifact_path(&dataset.env, "probe", request.format) {
+        return detail_err(StatusCode::NOT_IMPLEMENTED, message);
+    }
+    let requested = request.snapshot;
+    let pinned = with_dataset_lake(dataset.clone(), move |session, _| {
+        pinned_page_start(read::page_start(session, None), requested, || {
+            session.snapshot_bounds().map_err(|e| e.to_string())
+        })
+    })
+    .await;
+    let snapshot = match pinned {
+        Ok(Ok((snapshot, _))) => snapshot,
+        Ok(Err(response)) | Err(response) => return *response,
+    };
+    let Some(dsn) = &state.dsn else {
+        return detail_err(StatusCode::NOT_IMPLEMENTED, "exports require Postgres");
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let params = json!({
+        "kind": request.kind,
+        "format": request.format,
+        "snapshot": snapshot,
+    });
+    match pg::enqueue(
+        &client,
+        &dataset.org_id,
+        Some(dataset.id.as_str()),
+        "export",
+        0,
+        None,
+        Some(&params),
+        principal.provenance(),
+    )
+    .await
+    {
+        Ok(job) => {
+            let _ = pg::audit(
+                &client,
+                &principal.actor,
+                Some(&org),
+                Some(&ds),
+                "export.create",
+                &json!({ "export_id": job.id, "snapshot": snapshot, "kind": request.kind, "format": request.format }),
+            )
+            .await;
+            (
+                StatusCode::ACCEPTED,
+                Json(ExportQueued {
+                    export_id: job.id,
+                    snapshot,
+                    state: job.state,
+                }),
+            )
+                .into_response()
+        }
+        Err(e) => pg_err(e),
+    }
+}
+
+/// The export job `export_id` of dataset `ds`, or the 404 for anything else:
+/// another org's, another dataset's, or a job that is not an export.
+async fn export_job(
+    state: &AppState,
+    org: &str,
+    ds: &str,
+    export_id: &str,
+) -> Result<
+    (
+        pg::DatasetDetail,
+        er_entities::job::Job,
+        tokio_postgres::Client,
+    ),
+    Box<axum::response::Response>,
+> {
+    let dataset = dataset_for_lake(state, org, ds).await?;
+    let Some(dsn) = &state.dsn else {
+        return Err(Box::new(detail_err(
+            StatusCode::NOT_IMPLEMENTED,
+            "exports require Postgres",
+        )));
+    };
+    let client = connect_pg(dsn).await?;
+    match pg::get_job(&client, &dataset.org_id, export_id).await {
+        Ok(Some(job))
+            if job.kind == "export" && job.dataset_id.as_deref() == Some(dataset.id.as_str()) =>
+        {
+            Ok((dataset, job, client))
+        }
+        Ok(_) => Err(Box::new(detail_err(
+            StatusCode::NOT_FOUND,
+            format!("no export '{export_id}'"),
+        ))),
+        Err(e) => Err(Box::new(pg_err(e))),
+    }
+}
+
+/// Viewer+: one export's state, row count and expiry
+/// (`GET /v1/orgs/{org}/datasets/{ds}/exports/{export_id}`).
+async fn export_status(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, ds, export_id)): Path<(String, String, String)>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let (_, job, client) = match export_job(&state, &org, &ds, &export_id).await {
+        Ok(found) => found,
+        Err(response) => return *response,
+    };
+    let rows = er_entities::task_instance::read::by_job(&client, &job.org_id, &job.id)
+        .await
+        .ok()
+        .and_then(|tasks| {
+            tasks.iter().find_map(|t| {
+                t.counters
+                    .as_ref()
+                    .and_then(|c| c.get("rows"))
+                    .and_then(Value::as_i64)
+            })
+        });
+    let field = |key: &str| {
+        job.params
+            .get(key)
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string()
+    };
+    Json(ExportStatus {
+        export_id: job.id.clone(),
+        state: job.state.clone(),
+        kind: field("kind"),
+        format: field("format"),
+        snapshot: job.params.get("snapshot").and_then(Value::as_i64),
+        rows,
+        error_class: job.error_class.clone(),
+        created_at: job.created_at,
+        finished_at: job.finished_at,
+        expires_at: job.finished_at.map(exports::expires_at),
+    })
+    .into_response()
+}
+
+/// Viewer+: download a finished export's artifact
+/// (`GET /v1/orgs/{org}/datasets/{ds}/exports/{export_id}/download`). A 409
+/// until it has succeeded, and a 410 once its seven days are up.
+async fn export_download(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, ds, export_id)): Path<(String, String, String)>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let (dataset, job, _client) = match export_job(&state, &org, &ds, &export_id).await {
+        Ok(found) => found,
+        Err(response) => return *response,
+    };
+    if job.state != "succeeded" {
+        return detail_err(
+            StatusCode::CONFLICT,
+            format!("export '{export_id}' is {}, not succeeded", job.state),
+        );
+    }
+    let expired = job
+        .finished_at
+        .is_none_or(|at| chrono::Utc::now() >= exports::expires_at(at));
+    if expired {
+        return detail_err(
+            StatusCode::GONE,
+            format!("export '{export_id}' has expired; create a new one"),
+        );
+    }
+    let request = match exports::ExportRequest::from_params(&job.params) {
+        Ok(request) => request,
+        Err(message) => return detail_err(StatusCode::INTERNAL_SERVER_ERROR, message),
+    };
+    let path = match exports::artifact_path(&dataset.env, &job.id, request.format) {
+        Ok(path) => path,
+        Err(message) => return detail_err(StatusCode::NOT_IMPLEMENTED, message),
+    };
+    // A missing file on an unexpired export is a 410 too: the retention sweep
+    // may have reached it first.
+    let file = match tokio::fs::File::open(&path).await {
+        Ok(file) => file,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return detail_err(
+                StatusCode::GONE,
+                format!("export '{export_id}' is no longer retained; create a new one"),
+            );
+        }
+        Err(e) => {
+            return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("export read: {e}"));
+        }
+    };
+    let stream = tokio_util::io::ReaderStream::new(file);
+    let disposition = format!(
+        "attachment; filename=\"{export_id}.{}\"",
+        request.format.extension()
+    );
+    let mut response = axum::response::Response::new(axum::body::Body::from_stream(stream));
+    let headers = response.headers_mut();
+    headers.insert(
+        axum::http::header::CONTENT_TYPE,
+        axum::http::HeaderValue::from_static(request.format.content_type()),
+    );
+    if let Ok(value) = axum::http::HeaderValue::from_str(&disposition) {
+        headers.insert(axum::http::header::CONTENT_DISPOSITION, value);
+    }
+    response
+}
+
 /// The query parameters of `match_scores_list`.
 #[derive(Debug, Clone, Default, Deserialize)]
 struct MatchScoresListQuery {
@@ -13393,6 +13683,15 @@ fn build_routes(state: AppState) -> Router {
         .route(
             "/v1/orgs/{org}/datasets/{ds}/profile",
             get(dataset_profile).post(dataset_profile_run),
+        )
+        .route("/v1/orgs/{org}/datasets/{ds}/exports", post(create_export))
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/exports/{export_id}",
+            get(export_status),
+        )
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/exports/{export_id}/download",
+            get(export_download),
         )
         .route(
             "/v1/orgs/{org}/datasets/{ds}/segments",

@@ -419,3 +419,17 @@ mod finish_report_tests {
         assert!(report.entity_counts.is_empty());
     }
 }
+
+/// `export`'s record of the artifact it wrote (#1230): which file, how many
+/// rows, at which snapshot. The download reads the path back from the job, not
+/// from this plan, so the plan is the evidence the task ran, not a pointer.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExportReport {
+    pub snapshot: i64,
+    pub rows: usize,
+    pub bytes: u64,
+}
+
+impl PlanDoc for ExportReport {
+    const STABLE_NAME: &'static str = "export_report";
+}

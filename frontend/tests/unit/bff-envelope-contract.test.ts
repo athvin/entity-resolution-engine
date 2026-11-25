@@ -53,7 +53,7 @@ const API_DIR = path.join(REPO, "frontend/src/app/api");
 const LEDGER_PATH = path.join(REPO, "frontend/src/lib/api/envelopes.json");
 
 interface LedgerEntry {
-  envelope: "bare" | "wrapped" | "record" | "scalar" | "page" | "arrow";
+  envelope: "bare" | "wrapped" | "record" | "scalar" | "page" | "arrow" | "file";
   key?: string;
   keys?: string[];
   cursor_in?: string;

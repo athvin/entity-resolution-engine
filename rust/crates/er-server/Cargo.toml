@@ -145,6 +145,7 @@ er-api-spec = { version = "0.1.0", path = "../er-api-spec" }
 clap = { workspace = true, features = ["derive"] }
 er-duckfleet = { version = "0.1.0", path = "../er-duckfleet" }
 tempfile = "3"
+tokio-util = { version = "0.7.20", features = ["io"] }
 
 [lints]
 workspace = true

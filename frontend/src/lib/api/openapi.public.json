@@ -2111,6 +2111,262 @@
         ]
       }
     },
+    "/v1/orgs/{org}/datasets/{ds}/exports": {
+      "post": {
+        "summary": "export the dataset's golden records or duplicate groups at one pinned snapshot, as one CSV or JSON Lines artifact",
+        "operationId": "post_orgs_by_org_datasets_by_ds_exports",
+        "parameters": [
+          {
+            "name": "org",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ds",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "kind",
+                  "format"
+                ],
+                "properties": {
+                  "format": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string"
+                  },
+                  "snapshot": {
+                    "anyOf": [
+                      {
+                        "type": "integer"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "2XX": {
+            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "export_id": {},
+                    "snapshot": {},
+                    "state": {}
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "detail"
+                  ],
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "steward"
+            ]
+          }
+        ]
+      }
+    },
+    "/v1/orgs/{org}/datasets/{ds}/exports/{export_id}": {
+      "get": {
+        "summary": "one export's state, row count and expiry",
+        "operationId": "get_orgs_by_org_datasets_by_ds_exports_by_export_id",
+        "parameters": [
+          {
+            "name": "org",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ds",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "export_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "2XX": {
+            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "created_at": {},
+                    "error_class": {},
+                    "expires_at": {},
+                    "export_id": {},
+                    "finished_at": {},
+                    "format": {},
+                    "kind": {},
+                    "rows": {},
+                    "snapshot": {},
+                    "state": {}
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "detail"
+                  ],
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "viewer"
+            ]
+          }
+        ]
+      }
+    },
+    "/v1/orgs/{org}/datasets/{ds}/exports/{export_id}/download": {
+      "get": {
+        "summary": "download a finished export's artifact",
+        "operationId": "get_orgs_by_org_datasets_by_ds_exports_by_export_id_download",
+        "parameters": [
+          {
+            "name": "org",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ds",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "export_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "2XX": {
+            "description": "Successful response: the export's artifact as an attachment, CSV or JSON Lines as the export's `format` says.",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "application/x-ndjson": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "detail"
+                  ],
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "viewer"
+            ]
+          }
+        ]
+      }
+    },
     "/v1/orgs/{org}/datasets/{ds}/extract": {
       "post": {
         "summary": "pull an sObject from Salesforce into this dataset",

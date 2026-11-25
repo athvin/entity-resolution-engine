@@ -550,6 +550,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/orgs/{org}/datasets/{ds}/exports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** export the dataset's golden records or duplicate groups at one pinned snapshot, as one CSV or JSON Lines artifact */
+        post: operations["post_orgs_by_org_datasets_by_ds_exports"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/orgs/{org}/datasets/{ds}/exports/{export_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** one export's state, row count and expiry */
+        get: operations["get_orgs_by_org_datasets_by_ds_exports_by_export_id"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/orgs/{org}/datasets/{ds}/exports/{export_id}/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** download a finished export's artifact */
+        get: operations["get_orgs_by_org_datasets_by_ds_exports_by_export_id_download"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/orgs/{org}/datasets/{ds}/extract": {
         parameters: {
             query?: never;
@@ -6115,6 +6166,134 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EntityLinkDeleted"];
+                };
+            };
+            /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        detail: string;
+                    };
+                };
+            };
+        };
+    };
+    post_orgs_by_org_datasets_by_ds_exports: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+                ds: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    format: string;
+                    kind: string;
+                    snapshot?: number | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful response. Payload types are described only at envelope granularity. */
+            "2XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        export_id?: unknown;
+                        snapshot?: unknown;
+                        state?: unknown;
+                    };
+                };
+            };
+            /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        detail: string;
+                    };
+                };
+            };
+        };
+    };
+    get_orgs_by_org_datasets_by_ds_exports_by_export_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+                ds: string;
+                export_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful response. Payload types are described only at envelope granularity. */
+            "2XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        created_at?: unknown;
+                        error_class?: unknown;
+                        expires_at?: unknown;
+                        export_id?: unknown;
+                        finished_at?: unknown;
+                        format?: unknown;
+                        kind?: unknown;
+                        rows?: unknown;
+                        snapshot?: unknown;
+                        state?: unknown;
+                    };
+                };
+            };
+            /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        detail: string;
+                    };
+                };
+            };
+        };
+    };
+    get_orgs_by_org_datasets_by_ds_exports_by_export_id_download: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+                ds: string;
+                export_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful response: the export's artifact as an attachment, CSV or JSON Lines as the export's `format` says. */
+            "2XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                    "application/x-ndjson": string;
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */

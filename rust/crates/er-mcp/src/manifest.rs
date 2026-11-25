@@ -74,13 +74,22 @@ pub fn offered() -> Vec<Tool> {
     manifest
         .tools
         .into_iter()
-        .filter(|t| !t.needs_body && t.role != "operator" && !manages_credentials(t))
+        .filter(|t| {
+            !t.needs_body && t.role != "operator" && !manages_credentials(t) && !streams_a_file(t)
+        })
         .collect()
 }
 
 /// Whether a tool mints, lists or revokes API keys.
 fn manages_credentials(tool: &Tool) -> bool {
     tool.path.contains("/api-keys")
+}
+
+/// Whether a tool streams a whole artifact (an export's download, #1230). Up to
+/// a million rows is not a tool result an agent can read; it polls the export
+/// and hands the human the link instead.
+fn streams_a_file(tool: &Tool) -> bool {
+    tool.path.ends_with("/download")
 }
 
 /// Whether a tool only reads.
@@ -184,6 +193,25 @@ mod tests {
         );
         // ...and an agent is offered none of them.
         assert!(offered().iter().all(|t| !t.path.contains("/api-keys")));
+    }
+
+    #[test]
+    fn a_file_download_is_never_offered() {
+        // The manifest carries the export download (#1230)...
+        let all: Manifest = serde_json::from_str(TOOLS_JSON).unwrap();
+        assert!(
+            all.tools
+                .iter()
+                .any(|t| t.path.ends_with("/exports/{export_id}/download"))
+        );
+        // ...and an agent is offered the status, never the bytes.
+        let offered = offered();
+        assert!(offered.iter().all(|t| !t.path.ends_with("/download")));
+        assert!(
+            offered
+                .iter()
+                .any(|t| t.path.ends_with("/exports/{export_id}"))
+        );
     }
 
     #[test]
