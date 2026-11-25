@@ -78,6 +78,10 @@ export function requireDatasetSlug(dataset: string): void {
 export class BffFailure extends Error {
   readonly body: BffError;
   readonly status: number;
+  /** The control plane's own status, when this failure maps one. Lets a route
+   * tell an upstream 501 ("this deployment has no such store") from a fault
+   * without sniffing the detail text — see `forwardUnlessNotImplemented`. */
+  upstream?: number;
 
   constructor(status: number, code: BffErrorCode, message: string, extra?: Partial<BffError>) {
     super(message);
@@ -245,7 +249,9 @@ async function rawFetch(
     } catch {
       // non-JSON upstream error body; the status is enough
     }
-    throw mapUpstreamError(response.status, detail);
+    const failure = mapUpstreamError(response.status, detail);
+    failure.upstream = response.status;
+    throw failure;
   }
   const method = options.method ?? "GET";
   if (method !== "GET" && access.identity.impersonating) {
@@ -265,6 +271,28 @@ export async function forward<T>(
 ): Promise<T> {
   const response = await rawFetch(access, path, options);
   return (await response.json()) as T;
+}
+
+/** `forward`, except that an upstream **501** — er-server booted without the
+ * store this read needs, such as a Postgres-less server asked for tags — is
+ * `null` rather than a failure (#896).
+ *
+ * For an optional column of a larger answer, never for the answer itself: a
+ * caller that cannot do without the value must use `forward`, so a lost DSN
+ * stays loud everywhere it matters. Every other status maps exactly as
+ * `forward` maps it.
+ */
+export async function forwardUnlessNotImplemented<T>(
+  access: EffectiveOrgAccess,
+  path: string,
+  options: ForwardOptions = {},
+): Promise<T | null> {
+  try {
+    return await forward<T>(access, path, options);
+  } catch (error) {
+    if (error instanceof BffFailure && error.upstream === 501) return null;
+    throw error;
+  }
 }
 
 /** An Arrow data-lane pass-through: the upstream body as a byte stream plus the

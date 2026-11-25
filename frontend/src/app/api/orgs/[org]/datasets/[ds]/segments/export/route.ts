@@ -5,7 +5,12 @@ import { csvFilename, csvRow } from "@/lib/bff/csv";
 import { tagsByEntityId } from "@/lib/bff/export-tags";
 import { EXPORT_REQUIREMENTS, exportSummary, isExportable } from "@/lib/bff/exportable";
 import { forwardGoldenPage } from "@/lib/bff/golden";
-import { BffFailure, forward, requireDatasetAccess, respond } from "@/lib/bff/proxy";
+import {
+  BffFailure,
+  forwardUnlessNotImplemented,
+  requireDatasetAccess,
+  respond,
+} from "@/lib/bff/proxy";
 import type { Tag } from "@/lib/entities/bindings/Tag";
 import type { Tagging } from "@/lib/entities/bindings/Tagging";
 
@@ -62,15 +67,20 @@ export async function POST(
     // here exactly as it stops appearing as a chip. A truncated prequery
     // (past er-server's cap) is reported in the summary header, never
     // exported past silently.
+    //
+    // A Postgres-less er-server answers both reads 501: it has no tag store,
+    // so the honest column is empty rather than the export failing wholesale
+    // (#896). Only this optional column tolerates it; the rows below still
+    // fail loudly on anything else.
     const [vocabulary, taggings] = await Promise.all([
-      forward<{ tags: Tag[] }>(access, `/v1/orgs/${org}/tags`),
-      forward<{ taggings: Tagging[]; truncated: boolean }>(
+      forwardUnlessNotImplemented<{ tags: Tag[] }>(access, `/v1/orgs/${org}/tags`),
+      forwardUnlessNotImplemented<{ taggings: Tagging[]; truncated: boolean }>(
         access,
         `/v1/orgs/${org}/datasets/${ds}/taggings`,
         { searchParams: new URLSearchParams({ subject_type: "entity" }) },
       ),
     ]);
-    const tagsByEntity = tagsByEntityId(vocabulary.tags, taggings.taggings);
+    const tagsByEntity = tagsByEntityId(vocabulary?.tags ?? [], taggings?.taggings ?? []);
 
     const lines = [COLUMNS.join(",")];
     let cursor: string | null = null;
@@ -131,7 +141,7 @@ export async function POST(
         // the reader's next move is to re-run it rather than trust it.
         "x-export-summary":
           exportSummary(lines.length - 1, skipped, requirement) +
-          (taggings.truncated ? "; tags incomplete (taggings cap reached)" : ""),
+          (taggings?.truncated ? "; tags incomplete (taggings cap reached)" : ""),
         "x-export-skipped": String(skipped),
       },
     });
