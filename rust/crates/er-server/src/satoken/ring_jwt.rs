@@ -297,7 +297,7 @@ mod tests {
         let err = encode(
             &Header::new(Algorithm::HS256),
             &json!({}),
-            &EncodingKey::from_secret(b"k"),
+            &EncodingKey::from_secret(b"k").expect("non-empty secret"),
         )
         .expect_err("refused");
         assert!(
