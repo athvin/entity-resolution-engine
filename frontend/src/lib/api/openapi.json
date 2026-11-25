@@ -1125,8 +1125,59 @@
       }
     },
     "/v1/orgs/{org}/api-keys": {
+      "get": {
+        "summary": "list the org's API keys",
+        "operationId": "get_orgs_by_org_api_keys",
+        "parameters": [
+          {
+            "name": "org",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "2XX": {
+            "description": "Successful response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyList"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "detail"
+                  ],
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "admin"
+            ]
+          }
+        ]
+      },
       "post": {
-        "summary": "mint an API key for an org, returning the plaintext ONCE",
+        "summary": "mint an API key for the org, returning the plaintext ONCE",
         "operationId": "post_orgs_by_org_api_keys",
         "parameters": [
           {
@@ -1189,7 +1240,7 @@
         "security": [
           {
             "bearerAuth": [
-              "operator"
+              "admin"
             ]
           }
         ]
@@ -1250,7 +1301,7 @@
         "security": [
           {
             "bearerAuth": [
-              "operator"
+              "admin"
             ]
           }
         ]
@@ -10101,6 +10152,22 @@
             "type": "string",
             "format": "date-time",
             "description": "Wall-clock last-write time (database default; advanced by mutations once the entity migrates)."
+          }
+        }
+      },
+      "ApiKeyList": {
+        "type": "object",
+        "description": "The org's API keys, newest first, revoked ones included.",
+        "required": [
+          "keys"
+        ],
+        "properties": {
+          "keys": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ApiKey"
+            },
+            "description": "Metadata only: the wire form has no `key_hash`, and the plaintext was\nshown once at mint time and is not stored."
           }
         }
       },

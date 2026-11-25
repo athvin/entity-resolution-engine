@@ -89,6 +89,141 @@ async fn api_key_auth_role_scope_and_revocation() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
 
+    // --- Self-service (#866): an org admin manages its own org's keys. ---
+    pg::ensure_org(&client, "other", "/configs/other.yaml")
+        .await
+        .unwrap();
+    let mint = |bearer: String, org: &'static str, role: &'static str| {
+        let app = app.clone();
+        async move {
+            app.oneshot(req(
+                "POST",
+                &format!("/v1/orgs/{org}/api-keys"),
+                &bearer,
+                Body::from(format!(r#"{{"role":"{role}"}}"#)),
+            ))
+            .await
+            .unwrap()
+        }
+    };
+    // An admin mints for its own org: 201 with the plaintext.
+    let resp = mint(admin_key.clone(), "acme", "steward").await;
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let steward = json_body(resp).await;
+    let steward_key = steward["key"].as_str().unwrap().to_string();
+    let steward_key_id = steward["id"].as_str().unwrap().to_string();
+    assert_eq!(steward["role"], "steward");
+    // Another (existing) org is the cross-org 404, never a 403.
+    let resp = mint(admin_key.clone(), "other", "viewer").await;
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    // Below admin cannot mint at all.
+    for (key, who) in [(&viewer_key, "viewer"), (&steward_key, "steward")] {
+        let resp = mint(key.clone(), "acme", "viewer").await;
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN, "{who} minted a key");
+    }
+    // The ceiling's hard end: no principal mints an operator key.
+    let resp = mint(admin_key.clone(), "acme", "operator").await;
+    assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    // The minted key works on the org it belongs to (the getting-started call).
+    let resp = app
+        .clone()
+        .oneshot(req("GET", "/v1/orgs/acme", &steward_key, Body::empty()))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    // The list: admin only, metadata only.
+    let resp = app
+        .clone()
+        .oneshot(req(
+            "GET",
+            "/v1/orgs/acme/api-keys",
+            &viewer_key,
+            Body::empty(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    let resp = app
+        .clone()
+        .oneshot(req(
+            "GET",
+            "/v1/orgs/other/api-keys",
+            &admin_key,
+            Body::empty(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    let resp = app
+        .clone()
+        .oneshot(req(
+            "GET",
+            "/v1/orgs/acme/api-keys",
+            &admin_key,
+            Body::empty(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let listed = json_body(resp).await;
+    let keys = listed["keys"].as_array().unwrap();
+    assert_eq!(keys.len(), 3, "admin, viewer and steward: {listed}");
+    let roles: Vec<&str> = keys.iter().map(|k| k["role"].as_str().unwrap()).collect();
+    assert_eq!(roles.iter().filter(|r| **r == "steward").count(), 1);
+    let text = listed.to_string();
+    // The plaintext was shown exactly once, at mint, and the hash never.
+    for secret in [&admin_key, &viewer_key, &steward_key] {
+        assert!(
+            !text.contains(secret.as_str()),
+            "a plaintext key was listed"
+        );
+    }
+    assert!(
+        keys.iter()
+            .all(|k| k.get("key_hash").is_none() && k.get("key").is_none())
+    );
+
+    // An admin revokes within its org.
+    let resp = app
+        .clone()
+        .oneshot(req(
+            "DELETE",
+            &format!("/v1/orgs/acme/api-keys/{steward_key_id}"),
+            &admin_key,
+            Body::empty(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(json_body(resp).await["revoked"], true);
+    let resp = app
+        .clone()
+        .oneshot(req("GET", "/v1/orgs/acme", &steward_key, Body::empty()))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+
+    // Both halves are audited: the admin's issue and its revoke.
+    let audit = pg::audit_rows(
+        &client,
+        Some("acme"),
+        &pg::AuditFilters::default(),
+        None,
+        100,
+    )
+    .await
+    .unwrap();
+    let names = |action: &str| {
+        audit
+            .iter()
+            .filter(|e| e.action == action)
+            .filter(|e| e.detail["key_id"] == steward_key_id.as_str())
+            .count()
+    };
+    assert_eq!(names("key.issue"), 1, "{audit:?}");
+    assert_eq!(names("key.revoke"), 1, "{audit:?}");
+
     // admin key: enqueue (steward+) succeeds.
     let resp = app
         .clone()
