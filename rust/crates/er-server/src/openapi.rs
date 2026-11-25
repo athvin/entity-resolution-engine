@@ -254,6 +254,7 @@ fn add_operations(doc: &mut utoipa::openapi::OpenApi, audience: Audience) {
             .responses(operation_responses(
                 &derived.responses,
                 &derived.response_schemas,
+                arrow_rows(&derived.method, &derived.path),
             ));
         for param in derived.params {
             operation = operation.parameter(
@@ -353,9 +354,36 @@ fn json_content(value: serde_json::Value) -> utoipa::openapi::Content {
     utoipa::openapi::Content::new(Some(json_schema(value)))
 }
 
+/// The component each Arrow-streaming operation's rows conform to (#1234),
+/// keyed by method and router path.
+///
+/// An Arrow IPC stream is binary to OpenAPI, so without this a client generator
+/// learns nothing about the columns. The rows are not hand-described here: each
+/// name is the entity's JSON wire component, and
+/// `every_arrow_row_component_matches_its_entitys_arrow_schema` asserts the
+/// component's properties are exactly the Arrow schema's fields. An Arrow
+/// operation missing from this table fails `every_arrow_operation_names_its_rows`.
+const ARROW_ROWS: &[(&str, &str, &[&str])] = &[(
+    "GET",
+    "/v1/orgs/{org}/datasets/{ds}/golden-records",
+    // Person datasets stream `GoldenRecord`, account datasets `AcctGoldenRecord`;
+    // the dataset's entity type decides, so a page is one or the other.
+    &["GoldenRecord", "AcctGoldenRecord"],
+)];
+
+/// The row components of an operation's Arrow stream, empty when it streams
+/// none.
+fn arrow_rows(method: &str, path: &str) -> &'static [&'static str] {
+    ARROW_ROWS
+        .iter()
+        .find(|(m, p, _)| m.eq_ignore_ascii_case(method) && *p == path)
+        .map_or(&[], |(_, _, rows)| rows)
+}
+
 fn operation_responses(
     envelopes: &[er_api_spec::Envelope],
     typed: &[serde_json::Value],
+    arrow_rows: &[&str],
 ) -> utoipa::openapi::response::Responses {
     use er_api_spec::Envelope;
     use serde_json::json;
@@ -381,10 +409,45 @@ fn operation_responses(
                 "items":{"type":"array","items":{}},
                 "next_cursor":{"type":["string","null"]}}, "required":["items","next_cursor"]}),
             Envelope::Arrow => {
-                response = response.content(
-                    "application/vnd.apache.arrow.stream",
-                    json_content(json!({"type":"string","format":"binary"})),
-                );
+                let rows: Vec<serde_json::Value> = arrow_rows
+                    .iter()
+                    .map(|name| json!({"$ref": format!("#/components/schemas/{name}")}))
+                    .collect();
+                response = response
+                    .description(
+                        "Successful response: an Arrow IPC stream (a schema message, then \
+                         record batches). Each row is one of the components named in \
+                         `x-er-arrow-rows`, column for column, decided by the dataset's \
+                         entity type. An empty page still carries the schema.",
+                    )
+                    .content(
+                        "application/vnd.apache.arrow.stream",
+                        json_content(json!({
+                            "type": "string",
+                            "format": "binary",
+                            "x-er-arrow-rows": {"oneOf": rows},
+                        })),
+                    )
+                    .header(
+                        "x-er-snapshot",
+                        utoipa::openapi::header::HeaderBuilder::new()
+                            .schema(Some(json_schema(json!({"type": "integer"}))))
+                            .description(Some(
+                                "The lake snapshot this page was read at. Every page of one \
+                                 walk carries the same value: the cursor pins it.",
+                            ))
+                            .build(),
+                    )
+                    .header(
+                        "x-er-next-cursor",
+                        utoipa::openapi::header::HeaderBuilder::new()
+                            .schema(Some(json_schema(json!({"type": "string"}))))
+                            .description(Some(
+                                "Pass as `cursor` for the next page. Absent on the last \
+                                 page, which is how a client knows the walk is complete.",
+                            ))
+                            .build(),
+                    );
                 continue;
             }
         };
@@ -491,6 +554,84 @@ mod tests {
     use super::*;
 
     const COMMITTED: &str = include_str!("../../../../frontend/src/lib/api/openapi.json");
+
+    /// Every operation the derivation classifies as an Arrow stream names its
+    /// row components, so a new Arrow read cannot ship as an opaque binary.
+    #[test]
+    fn every_arrow_operation_names_its_rows() {
+        let source = er_api_spec::operations(
+            include_str!("lib.rs"),
+            &[
+                ("mail", include_str!("mail.rs")),
+                ("remote_attempts", include_str!("remote_attempts.rs")),
+            ],
+            &document_schemas(),
+        )
+        .unwrap();
+        let arrow: Vec<_> = source
+            .iter()
+            .filter(|o| o.responses.contains(&er_api_spec::Envelope::Arrow))
+            .collect();
+        assert!(
+            !arrow.is_empty(),
+            "no Arrow operation was derived; the filter is broken"
+        );
+        let unnamed: Vec<String> = arrow
+            .iter()
+            .filter(|o| arrow_rows(&o.method, &o.path).is_empty())
+            .map(|o| format!("{} {}", o.method, o.path))
+            .collect();
+        assert_eq!(
+            unnamed,
+            Vec::<String>::new(),
+            "these Arrow reads document no row schema; add them to ARROW_ROWS"
+        );
+        let doc: serde_json::Value = serde_json::from_str(&openapi_json(Audience::Public)).unwrap();
+        let rows = &doc["paths"]["/v1/orgs/{org}/datasets/{ds}/golden-records"]["get"]["responses"]
+            ["2XX"]["content"]["application/vnd.apache.arrow.stream"]["schema"]["x-er-arrow-rows"]
+            ["oneOf"];
+        assert_eq!(rows.as_array().map(Vec::len), Some(2), "{rows}");
+    }
+
+    /// The row components ARROW_ROWS names are, field for field, the Arrow
+    /// schema the read streams: the same set of column names. This is what
+    /// keeps the table from becoming a hand-written description.
+    #[test]
+    fn every_arrow_row_component_matches_its_entitys_arrow_schema() {
+        let doc: serde_json::Value = serde_json::from_str(&openapi_json(Audience::Public)).unwrap();
+        let schemas = component_schemas(&doc);
+        let arrow = |name: &str| -> Vec<String> {
+            let schema = match name {
+                "GoldenRecord" => er_entities::golden_record::GoldenRecord::arrow_schema(),
+                "AcctGoldenRecord" => {
+                    er_entities::acct_golden_record::AcctGoldenRecord::arrow_schema()
+                }
+                other => {
+                    panic!("ARROW_ROWS names {other}; map it to its entity's arrow_schema here")
+                }
+            };
+            let mut fields: Vec<String> =
+                schema.fields().iter().map(|f| f.name().clone()).collect();
+            fields.sort();
+            fields
+        };
+        for (_, _, rows) in ARROW_ROWS {
+            for name in *rows {
+                let mut properties: Vec<String> = schemas[*name]["properties"]
+                    .as_object()
+                    .unwrap_or_else(|| panic!("{name} is not an object component"))
+                    .keys()
+                    .cloned()
+                    .collect();
+                properties.sort();
+                assert_eq!(
+                    properties,
+                    arrow(name),
+                    "{name}'s documented properties differ from the columns its Arrow read streams"
+                );
+            }
+        }
+    }
 
     #[test]
     fn public_document_matches_the_committed_document() {

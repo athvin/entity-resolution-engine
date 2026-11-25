@@ -6057,9 +6057,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response: an Arrow IPC stream (a schema message, then record batches). Each row is one of the components named in `x-er-arrow-rows`, column for column, decided by the dataset's entity type. An empty page still carries the schema. */
             "2XX": {
                 headers: {
+                    /** @description Pass as `cursor` for the next page. Absent on the last page, which is how a client knows the walk is complete. */
+                    "x-er-next-cursor"?: string;
+                    /** @description The lake snapshot this page was read at. Every page of one walk carries the same value: the cursor pins it. */
+                    "x-er-snapshot"?: number;
                     [name: string]: unknown;
                 };
                 content: {
