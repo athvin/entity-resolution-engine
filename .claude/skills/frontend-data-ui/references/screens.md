@@ -90,6 +90,7 @@ false the moment a screen renders different markup below `lg`.
 - `/datasets-dev/datasets`
 - `/datasets-dev/datasets/new`
 - `/docs`
+- `/docs/api`
 - `/faq`
 - `/features/golden-records`
 - `/features/matching`

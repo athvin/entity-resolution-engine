@@ -20,7 +20,10 @@ const expected = new Set(
   routes.map((path) => (path === "/" ? "index.html" : `${path.slice(1)}.html`)),
 );
 for (const file of files) {
-  assert(!/(^|\/)(_worker\.js|functions|api)(\/|$)/.test(file), `Server code exported: ${file}`);
+  // Root-anchored: a static export's server code lives at its root (`api/`
+  // route handlers, Cloudflare `functions/` or `_worker.js`). Matching an `api`
+  // segment anywhere flagged the /docs/api page itself (#867).
+  assert(!/^(_worker\.js|functions|api)(\/|$)/.test(file), `Server code exported: ${file}`);
   if (file.endsWith(".html") && !["404.html", "_not-found.html"].includes(file)) {
     assert(expected.has(file), `Unexpected page exported: ${file}`);
   }
