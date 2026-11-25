@@ -222,8 +222,20 @@ list must name every section id in page order.
 `/docs` is a static workflow guide and operation reference. Its committed
 `operations.json` is generated from the MCP route manifest and response-envelope
 contract by `frontend/scripts/gen-developer-reference.mjs`; the unit test checks
-drift. It is distinct from the OpenAPI component schemas, which currently contain
-no operations. Keep examples grounded in handlers and identify contract gaps.
+drift. Keep examples grounded in handlers and identify contract gaps.
+
+`/docs/api` is the public API reference, rendered in-house from
+`openapi.public.json` by `src/lib/docs/openapi-reference.ts` (pure, unit-tested
+against the real document) and `components/marketing/docs/api-reference.tsx`.
+Two owner decisions on #867 shape it, and both are deliberate:
+- No stock viewer (Swagger UI, Redoc, Scalar), because each colour-codes HTTP
+  methods.
+- No live "try it". The first call is a copyable `curl` built from
+  `$ER_API_KEY` and `$ER_API_ORIGIN`, so the page never holds a customer
+  credential.
+
+`GET /api/openapi` serves the same document signed-out, listed in the proxy's
+`PUBLIC_PATHS` and the authz gate's `UNAUTHENTICATED_DIRS` with that reason.
 
 Conversion CTAs point at `PORTAL_ENTRY_PATH`. Story links navigate to their
 sections and Docs links to `/docs`. Small client components own demonstration

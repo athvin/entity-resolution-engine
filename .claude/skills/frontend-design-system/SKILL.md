@@ -123,7 +123,11 @@ route is invisible to it, so these need checking by eye:
   is at least one such checkbox in the config studio's comparison editor today;
   the sliders beside it get this right.
 - **Anything with its own palette**: an embedded SVG with hardcoded `fill`, an
-  inline `style`, a canvas, a third-party widget, a favicon.
+  inline `style`, a canvas, a third-party widget, a favicon. The standing case
+  is the API reference. Every stock OpenAPI viewer colour-codes HTTP methods,
+  so `/docs/api` renders in-house instead (owner decision, #867), with no
+  exception minted. A read is plain, a write is heavier, and a delete is
+  outlined.
 - **A chroma-bearing token.** A value added to `globals.css` with a non-zero
   middle number is a palette the rule will happily let through, because every
   consumer uses a legitimate semantic class name. The generated token reference
