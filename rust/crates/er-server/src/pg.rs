@@ -872,6 +872,7 @@ pub async fn set_org_state(
 /// A dataset's detail view: one resolution domain of a tenant. `env` is the
 /// raw lake settings map, handed to the engine verbatim and never echoed to
 /// tenants by the handlers.
+#[derive(Clone)]
 pub struct DatasetDetail {
     pub id: String,
     pub org_id: String,

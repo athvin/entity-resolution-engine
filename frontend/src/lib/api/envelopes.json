@@ -20,6 +20,8 @@
   "GET /v1/orgs/{org}/datasets/{ds}/data-quality": { "envelope": "scalar" },
   "GET /v1/orgs/{org}/datasets/{ds}/duplicates": { "envelope": "record", "keys": ["items", "snapshot", "next_cursor"] },
   "GET /v1/orgs/{org}/datasets/{ds}/entities/{entity_id}/links": { "envelope": "wrapped", "key": "items" },
+  "GET /v1/orgs/{org}/datasets/{ds}/exports/{export_id}": { "envelope": "record", "keys": ["export_id", "state", "kind", "format", "snapshot", "rows", "error_class", "created_at", "finished_at", "expires_at"] },
+  "GET /v1/orgs/{org}/datasets/{ds}/exports/{export_id}/download": { "envelope": "file" },
   "GET /v1/orgs/{org}/datasets/{ds}/golden-records": { "envelope": "arrow", "cursor_in": "headers" },
   "GET /v1/orgs/{org}/datasets/{ds}/golden-records/{entity_id}": { "envelope": "scalar" },
   "GET /v1/orgs/{org}/datasets/{ds}/ignore-words": { "envelope": "wrapped", "key": "rows" },

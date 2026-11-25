@@ -300,6 +300,42 @@
     "response": { "envelope": "wrapped", "key": "items" }
   },
   {
+    "id": "get_orgs_by_org_datasets_by_ds_exports_by_export_id",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}/exports/{export_id}",
+    "role": "viewer",
+    "params": ["org", "ds", "export_id"],
+    "body": null,
+    "needs_body": false,
+    "summary": "one export's state, row count and expiry",
+    "response": {
+      "envelope": "record",
+      "keys": [
+        "export_id",
+        "state",
+        "kind",
+        "format",
+        "snapshot",
+        "rows",
+        "error_class",
+        "created_at",
+        "finished_at",
+        "expires_at"
+      ]
+    }
+  },
+  {
+    "id": "get_orgs_by_org_datasets_by_ds_exports_by_export_id_download",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}/exports/{export_id}/download",
+    "role": "viewer",
+    "params": ["org", "ds", "export_id"],
+    "body": null,
+    "needs_body": false,
+    "summary": "download a finished export's artifact",
+    "response": { "envelope": "file" }
+  },
+  {
     "id": "get_orgs_by_org_datasets_by_ds_golden_records",
     "method": "GET",
     "path": "/v1/orgs/{org}/datasets/{ds}/golden-records",
@@ -940,6 +976,26 @@
     },
     "needs_body": false,
     "summary": "link two entities WITHOUT merging them",
+    "response": null
+  },
+  {
+    "id": "post_orgs_by_org_datasets_by_ds_exports",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/datasets/{ds}/exports",
+    "role": "steward",
+    "params": ["org", "ds"],
+    "body": {
+      "type": "object",
+      "properties": {
+        "kind": { "type": "string" },
+        "format": { "type": "string" },
+        "snapshot": { "type": "integer" }
+      },
+      "required": ["kind", "format"],
+      "additionalProperties": false
+    },
+    "needs_body": false,
+    "summary": "export the dataset's golden records or duplicate groups at one pinned snapshot, as one CSV or JSON Lines artifact",
     "response": null
   },
   {

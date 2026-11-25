@@ -22,8 +22,8 @@ use er_dag::{LakeRef, NodePolicy, Outcome, Plan, Task, TaskCtx, TaskError};
 
 use super::edges::{Assembled, Golden, Landed, Profiled, Resolved, Scored, Standardized};
 use super::plans::{
-    DrainedActions, ExtractReport, FinishReport, LakeInitialized, MaintenanceReport, RunPlan,
-    SchemaReconciled, TrainedModel,
+    DrainedActions, ExportReport, ExtractReport, FinishReport, LakeInitialized, MaintenanceReport,
+    RunPlan, SchemaReconciled, TrainedModel,
 };
 use super::{JobKind, Session};
 
@@ -1008,6 +1008,72 @@ impl Task<Session> for ProfileCorpus {
     }
 }
 
+/// Write one export artifact (#1230): every golden record or duplicate group
+/// of the dataset at the snapshot the API pinned at enqueue, to
+/// `<lake>/exports/<job id>.<ext>`. Read-only on the lake, so no
+/// `reconcile_schema` source: the reads go through declared, snapshot-pinned
+/// statements, and an export must not migrate a lake it only reads.
+#[derive(Default)]
+pub struct ExportResults;
+
+impl Task<Session> for ExportResults {
+    const NAME: &'static str = "export";
+    const VERSION: u32 = 1;
+    type Input = ();
+    type Output = Plan<ExportReport>;
+    const WRITES_LAKE: bool = false;
+
+    fn run(
+        &mut self,
+        ctx: &mut TaskCtx<'_, Session>,
+        (): Self::Input,
+    ) -> Result<Outcome<Self::Output>, TaskError> {
+        let precondition = |m: String| TaskError::Failed(er_errors::ErError::precondition(m));
+        let request =
+            crate::exports::ExportRequest::from_params(&ctx.order.params).map_err(precondition)?;
+        let path =
+            crate::exports::artifact_path(&ctx.order.lake_env, &ctx.order.job_id, request.format)
+                .map_err(precondition)?;
+        let entity_type = if ctx
+            .order
+            .lake_env
+            .get("ER_ENTITY_TYPE")
+            .and_then(serde_json::Value::as_str)
+            == Some("account")
+        {
+            er_config::EntityType::Account
+        } else {
+            er_config::EntityType::Person
+        };
+        let snapshot = request
+            .snapshot
+            .ok_or_else(|| precondition("the export job carries no pinned snapshot".into()))?;
+        match crate::exports::write(
+            ctx.session,
+            entity_type,
+            &request,
+            &path,
+            crate::read::MAX_LIMIT,
+            crate::exports::MAX_ROWS,
+        ) {
+            Ok(report) => Ok(Outcome::Done(
+                Plan(ExportReport {
+                    snapshot,
+                    rows: report.rows,
+                    bytes: report.bytes,
+                }),
+                er_dag::Counters(serde_json::json!({
+                    "rows": report.rows,
+                    "bytes": report.bytes,
+                    "snapshot": snapshot,
+                })),
+            )),
+            Err(message) if message.contains("row ceiling") => Err(precondition(message)),
+            Err(message) => Err(engine_error(&message)),
+        }
+    }
+}
+
 /// `flush_inlined_data` + `merge_adjacent_files` + `expire_snapshots`. REAL
 /// since Phase 2.
 #[derive(Default)]
@@ -1032,10 +1098,14 @@ impl Task<Session> for Maintain {
             .and_then(serde_json::Value::as_str)
             .unwrap_or("7 days")
             .to_string();
+        // Expired export artifacts go with expired snapshots (#1230): both
+        // are retention, and this is the dataset's retention pass.
+        let swept = crate::exports::sweep(&ctx.order.lake_env, std::time::SystemTime::now())
+            .map_err(|e| engine_error(&e))?;
         match er_cli::run_maintain(ctx.session, &expire) {
             Ok(report) => Ok(Outcome::Done(
                 Plan(MaintenanceReport { report }),
-                er_dag::Counters::default(),
+                er_dag::Counters(serde_json::json!({ "exports_swept": swept })),
             )),
             Err(e) => Err(engine_error(&format!("{e:#}"))),
         }

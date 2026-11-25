@@ -26,9 +26,9 @@ use control::{
     SettleActions, StageApproved,
 };
 use tasks::{
-    ApplyStaged, Assemble, CorrectReconcile, CorrectionsInit, CorrectionsReconcile, ExtractPull,
-    Finish, GenerateGolden, Ingest, Init, LakeInit, Maintain, Match, ProfileCorpus, Reconcile,
-    ReconcileSchema, Standardize, Train, WriteBackScan,
+    ApplyStaged, Assemble, CorrectReconcile, CorrectionsInit, CorrectionsReconcile, ExportResults,
+    ExtractPull, Finish, GenerateGolden, Ingest, Init, LakeInit, Maintain, Match, ProfileCorpus,
+    Reconcile, ReconcileSchema, Standardize, Train, WriteBackScan,
 };
 
 /// The lake session type every pod task body takes; fixed here so `er-dag`
@@ -55,10 +55,11 @@ pub enum JobKind {
     ApplyCorrections,
     ApplyApproved,
     Extract,
+    Export,
 }
 
 impl JobKind {
-    pub const ALL: [JobKind; 12] = [
+    pub const ALL: [JobKind; 13] = [
         JobKind::RunAllFull,
         JobKind::RunAllIncremental,
         JobKind::Correct,
@@ -71,6 +72,7 @@ impl JobKind {
         JobKind::ApplyCorrections,
         JobKind::ApplyApproved,
         JobKind::Extract,
+        JobKind::Export,
     ];
 
     #[must_use]
@@ -88,6 +90,7 @@ impl JobKind {
             JobKind::ApplyCorrections => "apply_corrections",
             JobKind::ApplyApproved => "apply_approved",
             JobKind::Extract => "extract",
+            JobKind::Export => "export",
         }
     }
 
@@ -127,6 +130,7 @@ pub fn dag_for(kind: JobKind) -> Dag {
         JobKind::ApplyCorrections => apply_corrections(),
         JobKind::ApplyApproved => apply_approved(),
         JobKind::Extract => extract(),
+        JobKind::Export => export(),
     }
 }
 
@@ -349,6 +353,7 @@ pub fn run_pod_task(
             completed(tasks::ProfileCorpus.run(ctx, (schema,))?)
         }
         (JobKind::Extract, "extract") => completed(tasks::ExtractPull.run(ctx, ())?),
+        (JobKind::Export, "export") => completed(tasks::ExportResults.run(ctx, ())?),
         // The pipeline stages (§11 Phase 3). Each rehydrates its upstream
         // references POSITIONALLY, in the order the DAG wired them — which is
         // what the typed `Input` tuples make checkable at compile time.
@@ -545,6 +550,14 @@ fn extract() -> Dag {
     let pulled = d.source::<ExtractPull>();
     let _ = d.control::<AdvanceSfCursor>((pulled,));
     d.build().expect("the extract DAG assembles")
+}
+
+/// Export a dataset's results at a pinned snapshot (#1230). One read-only pod
+/// task: no `reconcile_schema`, because an export reads and must not migrate.
+fn export() -> Dag {
+    let mut d = Builder::new(JobKind::Export.dag_name());
+    let _ = d.source::<ExportResults>();
+    d.build().expect("the export DAG assembles")
 }
 
 fn apply_approved() -> Dag {

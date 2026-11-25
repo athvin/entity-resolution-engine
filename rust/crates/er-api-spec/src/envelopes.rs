@@ -31,6 +31,9 @@ pub enum Envelope {
     /// travel in response **headers** rather than in an envelope. A consumer
     /// that reaches for `body.items` or `body.next_cursor` here finds neither.
     Arrow,
+    /// Not JSON either: a file streamed as an attachment (an export's artifact,
+    /// #1230). Its media type is the file's, and it has no envelope at all.
+    File,
 }
 
 impl Envelope {
@@ -50,6 +53,7 @@ impl Envelope {
             Self::Page => "{ \"envelope\": \"page\", \"key\": \"items\" }".to_string(),
             Self::Scalar => "{ \"envelope\": \"scalar\" }".to_string(),
             Self::Arrow => "{ \"envelope\": \"arrow\", \"cursor_in\": \"headers\" }".to_string(),
+            Self::File => "{ \"envelope\": \"file\" }".to_string(),
         }
     }
 }
@@ -183,6 +187,11 @@ pub fn classify_envelope(body: &str, source: &str) -> Result<Envelope, String> {
     // on its error paths, and the body is not JSON.
     if src.contains("StreamWriter") {
         return Ok(Envelope::Arrow);
+    }
+    // A streamed file: its error paths are JSON details, its success body is
+    // the file's bytes.
+    if src.contains("ReaderStream") {
+        return Ok(Envelope::File);
     }
     if src.contains("page_envelope(") {
         return Ok(Envelope::Page);
@@ -485,6 +494,10 @@ struct EmptyResponse {
         assert_eq!(
             classify_envelope("{ let mut w = StreamWriter::try_new(&mut buf, &page.schema); }"),
             Ok(Envelope::Arrow)
+        );
+        assert_eq!(
+            classify_envelope("{ let stream = tokio_util::io::ReaderStream::new(file); }"),
+            Ok(Envelope::File)
         );
         // An error arm must not be read as the success envelope — and removing it
         // must not take the success arm with it when they share a line, which is

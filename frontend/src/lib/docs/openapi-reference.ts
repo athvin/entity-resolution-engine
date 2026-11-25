@@ -127,6 +127,7 @@ const WORKFLOW: { id: string; title: string; resources: string[] }[] = [
       "merge-plans",
       "resolve",
       "entity-links",
+      "exports",
     ],
   },
   {

@@ -23,7 +23,7 @@ use serde_json::{Value, json};
 /// The golden-records list page size when the caller gives none, and the cap
 /// (`readapi.py` `limit <= 200`).
 const DEFAULT_LIMIT: i64 = 50;
-const MAX_LIMIT: i64 = 200;
+pub const MAX_LIMIT: i64 = 200;
 
 /// A decoded keyset cursor: the pinned snapshot and the last key emitted.
 pub struct Cursor {
