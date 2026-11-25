@@ -250,7 +250,7 @@ pub(crate) async fn record(
 /// longest transport wait a COMMIT delivery can still be in (statement deadline
 /// up to 600 s plus 135 s of queue and delivery allowance) and the time a dying
 /// worker's catalog transaction takes to resolve.
-pub(crate) const DEFAULT_GRACE: Duration = Duration::from_secs(900);
+pub(crate) const DEFAULT_GRACE: Duration = Duration::from_mins(15);
 
 /// Operator-owned recovery configuration: the binding registry and projected
 /// credentials the sweep reads evidence through, and the delivery grace. Unset
