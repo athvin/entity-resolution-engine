@@ -12781,18 +12781,22 @@ struct KeyIn {
     role: String,
 }
 
-/// Operator: mint an API key for an org, returning the plaintext ONCE
+/// Admin+: mint an API key for the org, returning the plaintext ONCE
 /// (`POST /v1/orgs/{org}/api-keys`). Needs the Postgres backend.
+///
+/// An org admin mints for their own org (another org's admin gets the
+/// cross-org 404); the operator mints for any org. The minted role is capped
+/// at the minter's own: no key outranks the principal that created it, and
+/// no key is ever `operator` (422).
 async fn create_key(
     principal: Principal,
     State(state): State<AppState>,
     Path(org): Path<String>,
     Json(body): Json<KeyIn>,
 ) -> impl IntoResponse {
-    if let Err(e) = operator_only(&principal) {
+    if let Err(e) = guard(&principal, &org, Role::Admin) {
         return e.into_response();
     }
-    // Operator can mint for any org; a key role of operator is rejected (422).
     let Some(role) = Role::parse_key_role(&body.role) else {
         return (
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -12800,6 +12804,22 @@ async fn create_key(
         )
             .into_response();
     };
+    // The role ceiling. Unreachable for an admin today, since Admin is both
+    // the minimum to mint and the highest mintable role, but it is stated
+    // here so a future lower minting floor cannot quietly mint upward.
+    if principal.role != Role::Operator && role > principal.role {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({
+                "detail": format!(
+                    "cannot mint a {} key as {}",
+                    role.as_str(),
+                    principal.role.as_str()
+                )
+            })),
+        )
+            .into_response();
+    }
     let Some(dsn) = &state.dsn else {
         return (
             StatusCode::NOT_IMPLEMENTED,
@@ -12842,14 +12862,59 @@ async fn create_key(
     }
 }
 
-/// Operator: revoke an API key, org-scoped and idempotent
+/// The org's API keys, newest first, revoked ones included.
+#[derive(Serialize, utoipa::ToSchema)]
+struct ApiKeyList {
+    /// Metadata only: the wire form has no `key_hash`, and the plaintext was
+    /// shown once at mint time and is not stored.
+    keys: Vec<er_entities::api_key::ApiKeyWire>,
+}
+
+/// Admin+: list the org's API keys (`GET /v1/orgs/{org}/api-keys`), newest
+/// first, revoked ones included. Never the hash, never the plaintext.
+async fn list_keys(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Admin) {
+        return e.into_response();
+    }
+    let Some(dsn) = &state.dsn else {
+        return (
+            StatusCode::NOT_IMPLEMENTED,
+            Json(json!({ "detail": "api keys require Postgres" })),
+        )
+            .into_response();
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
+    match er_entities::api_key::read::by_org(&client, &org_row.id).await {
+        Ok(rows) => Json(ApiKeyList {
+            keys: rows
+                .iter()
+                .map(er_entities::api_key::ApiKeyWire::from)
+                .collect(),
+        })
+        .into_response(),
+        Err(e) => pg_err(e),
+    }
+}
+
+/// Admin+: revoke an API key, org-scoped and idempotent
 /// (`DELETE /v1/orgs/{org}/api-keys/{key_id}`).
 async fn revoke_key(
     principal: Principal,
     State(state): State<AppState>,
     Path((org, key_id)): Path<(String, String)>,
 ) -> impl IntoResponse {
-    if let Err(e) = operator_only(&principal) {
+    if let Err(e) = guard(&principal, &org, Role::Admin) {
         return e.into_response();
     }
     let Some(dsn) = &state.dsn else {
@@ -12973,7 +13038,7 @@ fn build_routes(state: AppState) -> Router {
             "/v1/internal/attempts/{attempt_id}/remote",
             post(attempt_remote),
         )
-        .route("/v1/orgs/{org}/api-keys", post(create_key))
+        .route("/v1/orgs/{org}/api-keys", post(create_key).get(list_keys))
         .route(
             "/v1/orgs/{org}/api-keys/{key_id}",
             axum::routing::delete(revoke_key),

@@ -6,6 +6,7 @@
   "GET /v1/jobs": { "envelope": "bare" },
   "GET /v1/orgs": { "envelope": "bare" },
   "GET /v1/orgs/{org}": { "envelope": "record", "keys": ["id", "name", "state", "active_config_version", "drop_root", "resources"] },
+  "GET /v1/orgs/{org}/api-keys": { "envelope": "wrapped", "key": "keys" },
   "GET /v1/orgs/{org}/audit": { "envelope": "bare" },
   "GET /v1/orgs/{org}/connections": { "envelope": "bare" },
   "GET /v1/orgs/{org}/datasets": { "envelope": "bare" },

@@ -211,9 +211,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** list the org's API keys */
+        get: operations["get_orgs_by_org_api_keys"];
         put?: never;
-        /** mint an API key for an org, returning the plaintext ONCE */
+        /** mint an API key for the org, returning the plaintext ONCE */
         post: operations["post_orgs_by_org_api_keys"];
         delete?: never;
         options?: never;
@@ -1873,6 +1874,14 @@ export interface components {
              * @description Wall-clock last-write time (database default; advanced by mutations once the entity migrates).
              */
             updated_at: string;
+        };
+        /** @description The org's API keys, newest first, revoked ones included. */
+        ApiKeyList: {
+            /**
+             * @description Metadata only: the wire form has no `key_hash`, and the plaintext was
+             *     shown once at mint time and is not stored.
+             */
+            keys: components["schemas"]["ApiKey"][];
         };
         /**
          * @description A failed attempt's settlement: the archived try and, when the task still
@@ -4962,6 +4971,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OrgView"];
+                };
+            };
+            /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        detail: string;
+                    };
+                };
+            };
+        };
+    };
+    get_orgs_by_org_api_keys: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful response. */
+            "2XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiKeyList"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */

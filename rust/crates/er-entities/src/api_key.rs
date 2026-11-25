@@ -113,6 +113,49 @@ VALUES ($1, $2, $3, $4)
 
 pub mod read {
     //! @generated query functions for this entity + operation.
+    /// Every API key an org has ever issued, newest first, revoked ones included; the listing serializes through ApiKeyWire, which has no key_hash.
+    pub async fn by_org(
+        client: &impl ::tokio_postgres::GenericClient,
+        org_id: &str,
+    ) -> ::std::result::Result<Vec<super::ApiKey>, ::tokio_postgres::Error> {
+        const SQL: &str = "SELECT
+  id,
+  org_id,
+  role,
+  key_hash,
+  created_at,
+  revoked_at,
+  updated_at
+FROM public.api_keys
+WHERE org_id = $1
+ORDER BY created_at DESC, id
+";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "api_key",
+            "read",
+            "by_org",
+            "api_keys",
+            SQL,
+        );
+        let __result = ::er_span::instrument(&__span, client.query(SQL, &[&org_id])).await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
+        Ok(rows
+            .iter()
+            .map(|row| super::ApiKey {
+                id: row.get("id"),
+                org_id: row.get("org_id"),
+                role: row.get("role"),
+                key_hash: row.get("key_hash"),
+                created_at: row.get("created_at"),
+                revoked_at: row.get("revoked_at"),
+                updated_at: row.get("updated_at"),
+            })
+            .collect())
+    }
+
     /// Resolve a live (non-revoked) key by id for authentication; the caller constant-time-compares the presented secret's hash.
     pub async fn live_by_id(
         client: &impl ::tokio_postgres::GenericClient,

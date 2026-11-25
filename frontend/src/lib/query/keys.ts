@@ -52,6 +52,7 @@ export const queryKeys = {
   insightSources: (org: string, dataset: string) =>
     [...ds(org, dataset), "insights", "sources"] as const,
   webhooks: (org: string) => ["org", org, "webhooks"] as const,
+  apiKeys: (org: string) => ["org", org, "api-keys"] as const,
   webhookEvents: (org: string) => ["org", org, "webhook-events"] as const,
   // The filtered key nests under the unfiltered one so invalidating the
   // parent clears every filter combination at once — a deleted

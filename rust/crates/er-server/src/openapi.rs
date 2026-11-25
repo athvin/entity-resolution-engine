@@ -180,6 +180,7 @@ pub struct ApiDoc;
     crate::read::Profile,
     crate::WorkOrder,
     crate::AttemptRetried,
+    crate::ApiKeyList,
 )))]
 pub struct ResponseDoc;
 

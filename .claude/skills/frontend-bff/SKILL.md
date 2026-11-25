@@ -75,6 +75,14 @@ is `requireOrgAccess` **plus** the dataset slug check, and the authz gate accept
 `datasetPath` is only safe to interpolate because both segments were checked when
 the access value was minted.
 
+**The app's own service keys are visible to org admins, so they are guarded
+here.** The BFF calls er-server with three per-org keys it minted at
+registration (`org_credentials`). They appear in the org's API-key list, and
+revoking one would sign the app out of that org for every member. So
+`/api/orgs/[org]/api-keys` marks them (`service: true`, via `serviceKeyIds`) and
+its DELETE answers 409 for them. A new surface that can change or revoke an
+upstream credential needs the same check.
+
 The two either-guard rows are deliberate rather than lax. Ending an
 impersonation needs only that you are the person inside it: demanding super
 admin there would strand a session whose operator rights were revoked

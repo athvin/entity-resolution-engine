@@ -35,6 +35,21 @@ export async function credentialForAccess(
 }
 
 /**
+ * The ids of the org's service keys: the three keys this app minted for itself
+ * at registration and calls er-server with. An org admin can see them in the
+ * API-key list, and revoking one would sign the app out of its own org, so the
+ * API-keys routes mark and refuse them.
+ */
+export async function serviceKeyIds(org: string): Promise<Set<string>> {
+  const database = await db();
+  const rows = await database
+    .select({ keyId: schema.orgCredentials.keyId })
+    .from(schema.orgCredentials)
+    .where(eq(schema.orgCredentials.org, org));
+  return new Set(rows.map((row) => row.keyId));
+}
+
+/**
  * The org's stored VIEWER key, resolved from an org name alone (O11).
  *
  * For the one surface with no session: the embeddable widget, whose caller

@@ -780,6 +780,9 @@ export function initialState() {
     },
     // Subscriptions and the delivery log. `events` is an array of catalogued
     // names, exactly as the webhook entity's jsonb column stores it.
+    // API keys per org, as `ApiKeyWire` rows: no `key_hash`, no plaintext.
+    // The plaintext lives only in the POST response, exactly as on er-server.
+    apiKeys: {},
     webhooks: {
       "acme-dev": [
         {
@@ -1021,6 +1024,11 @@ export function initialState() {
     "webhooks-dev",
     "webhooks-ios",
     "webhooks-android",
+    // Minting and revoking both mutate the key list, so the API-keys page gets
+    // one org per device project for the same reason the webhook page does.
+    "keys-dev",
+    "keys-ios",
+    "keys-android",
     // Creating a tag changes the vocabulary every other test on that org is
     // offered, so tagging gets one org per device project too.
     "tags-dev",
@@ -1096,6 +1104,27 @@ export function initialState() {
     // The webhook page's own orgs start seeded, so the list and the log have
     // something to render before the spec creates anything; every other org
     // starts empty, which is also a state worth rendering.
+    // The API-keys page's own orgs start with one active key, so the list has
+    // a row to render before the spec mints anything.
+    // The three service keys the fixtures record in org_credentials
+    // (`mock-<org>-<role>`), as er-server would list them, plus one customer
+    // key, so the page renders both kinds before the spec mints anything.
+    const keyRow = (id, role, at) => ({
+      id,
+      org_id: `uuid-${org}`,
+      role,
+      created_at: at,
+      revoked_at: null,
+      updated_at: at,
+    });
+    state.apiKeys[org] = org.startsWith("keys-")
+      ? [
+          ...["viewer", "steward", "admin"].map((role) =>
+            keyRow(`mock-${org}-${role}`, role, "2026-10-01T09:00:00Z"),
+          ),
+          keyRow(`01jmkey${org.slice(-3)}seed0000000000`, "steward", "2026-11-01T09:00:00Z"),
+        ]
+      : [];
     const seedWebhooks = org.startsWith("webhooks-");
     state.webhooks[org] = seedWebhooks
       ? state.webhooks["acme-dev"].map((w) => ({ ...w, events: [...w.events] }))
@@ -1983,15 +2012,53 @@ const server = http.createServer((req, res) => {
       }
       return send(res, 200, org);
     }
+    if ((match = /^\/v1\/orgs\/([^/]+)\/api-keys$/.exec(path)) && req.method === "GET") {
+      if (!state.orgs[match[1]]) return send(res, 404, { detail: "not found" });
+      // `{keys}` — the real `list_keys` wraps (envelope ledger: wrapped/keys).
+      const keys = [...(state.apiKeys[match[1]] ?? [])].sort((a, b) =>
+        b.created_at.localeCompare(a.created_at),
+      );
+      return send(res, 200, { keys });
+    }
     if ((match = /^\/v1\/orgs\/([^/]+)\/api-keys$/.exec(path)) && req.method === "POST") {
       if (!state.orgs[match[1]]) return send(res, 404, { detail: "not found" });
       const body = await readBody(req);
       const role = String(body.role ?? "viewer");
-      return send(res, 201, {
-        id: `mock-${match[1]}-${role}`,
-        key: `erk_mock_${role}_secret_${match[1]}`,
+      if (!["viewer", "steward", "admin"].includes(role)) {
+        return send(res, 422, { detail: `invalid role '${role}'` });
+      }
+      const list = (state.apiKeys[match[1]] ??= []);
+      // The provisioning flow (admin.ts) mints once per role and asserts these
+      // exact ids, so the first key of a role keeps the old deterministic id.
+      const taken = list.some((k) => k.id === `mock-${match[1]}-${role}`);
+      const id = taken
+        ? `mock-${match[1]}-${role}-${String(list.length)}`
+        : `mock-${match[1]}-${role}`;
+      const now = new Date().toISOString();
+      list.push({
+        id,
+        org_id: `uuid-${match[1]}`,
         role,
+        created_at: now,
+        revoked_at: null,
+        updated_at: now,
       });
+      // The plaintext is unique per key and never equals a fixture's stored
+      // service credential (`erk_mock_<role>_secret_<org>`), so the page
+      // under test shows a key that is not the app's own.
+      return send(res, 201, { id, key: `erk_${id}_minted`, role });
+    }
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/api-keys\/([^/]+)$/.exec(path)) &&
+      req.method === "DELETE"
+    ) {
+      const key = (state.apiKeys[match[1]] ?? []).find(
+        (k) => k.id === decodeURIComponent(match[2]),
+      );
+      if (!key || key.revoked_at !== null) return send(res, 200, { revoked: false });
+      key.revoked_at = new Date().toISOString();
+      key.updated_at = key.revoked_at;
+      return send(res, 200, { revoked: true });
     }
     if (
       (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/metrics$/.exec(path)) &&

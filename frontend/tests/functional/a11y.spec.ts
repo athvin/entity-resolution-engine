@@ -331,6 +331,15 @@ const SCREENS: {
     },
   },
   {
+    // Listed in the change that adds it (#866). The sweep's steward sees the
+    // admin-only notice: the page's whole non-admin rendering.
+    name: "api-keys",
+    path: `/${ORG}/settings/api-keys`,
+    ready: async (page) => {
+      await expect(page.getByTestId("api-keys-admin-only")).toBeVisible();
+    },
+  },
+  {
     // Same rule again: listed in the change that adds it. The sweep logs in as
     // a STEWARD, and this screen is admin-write — so it is also the check that
     // the read-only rendering is complete rather than a page of disabled

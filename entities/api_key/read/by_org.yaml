@@ -1,0 +1,7 @@
+kind: statement
+operation: read
+mode: full
+description: "Every API key an org has ever issued, newest first, revoked ones included; the listing serializes through ApiKeyWire, which has no key_hash."
+params:
+  - { name: org_id, type: varchar }
+returns: entity

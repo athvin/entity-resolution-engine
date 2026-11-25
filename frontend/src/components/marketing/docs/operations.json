@@ -3,7 +3,7 @@
     "id": "delete_orgs_by_org_api_keys_by_key_id",
     "method": "DELETE",
     "path": "/v1/orgs/{org}/api-keys/{key_id}",
-    "role": "operator",
+    "role": "admin",
     "params": ["org", "key_id"],
     "body": null,
     "needs_body": false,
@@ -144,6 +144,17 @@
       "envelope": "record",
       "keys": ["id", "name", "state", "active_config_version", "drop_root", "resources"]
     }
+  },
+  {
+    "id": "get_orgs_by_org_api_keys",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/api-keys",
+    "role": "admin",
+    "params": ["org"],
+    "body": null,
+    "needs_body": false,
+    "summary": "list the org's API keys",
+    "response": { "envelope": "wrapped", "key": "keys" }
   },
   {
     "id": "get_orgs_by_org_audit",
@@ -801,7 +812,7 @@
     "id": "post_orgs_by_org_api_keys",
     "method": "POST",
     "path": "/v1/orgs/{org}/api-keys",
-    "role": "operator",
+    "role": "admin",
     "params": ["org"],
     "body": {
       "type": "object",
@@ -810,7 +821,7 @@
       "additionalProperties": false
     },
     "needs_body": false,
-    "summary": "mint an API key for an org, returning the plaintext ONCE",
+    "summary": "mint an API key for the org, returning the plaintext ONCE",
     "response": null
   },
   {
