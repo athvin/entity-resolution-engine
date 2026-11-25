@@ -136,7 +136,9 @@ The operation contract is generated and gated, with deliberate limits:
   on `ApiDoc`, so the entity-registration guards keep their meaning. Every
   other operation stays envelope-level. Bare and unresolved values stay
   unconstrained, object envelopes name observed keys, pages describe
-  items/cursor, and Arrow uses its actual media type. The envelope ledger
+  items/cursor, and Arrow uses its actual media type. A streamed file (an
+  export's download, #1230) is the `file` class, detected by `ReaderStream`
+  and documented as its media types. MCP never offers it. The envelope ledger
   (`envelopes.json`) is classified independently and must not change when a
   handler is typed. Declare a record struct's fields in the order the ledger
   records, which is the order of the `json!` literal it replaces. The
