@@ -1,7 +1,7 @@
 use super::*;
 use crate::execution::CommitState;
 
-const GRACE: Duration = Duration::from_secs(900);
+const GRACE: Duration = Duration::from_mins(15);
 
 fn evidence() -> Evidence {
     Evidence {
