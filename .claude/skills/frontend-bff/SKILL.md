@@ -91,8 +91,12 @@ mid-impersonation.
 `PUBLIC_PATHS` in the proxy are the routes reachable without a session — login,
 the invite and reset flows, the CSP report sink. Note the reasoning for the
 invite/reset entries: the token in the URL *is* the credential, so redirecting
-to `/login` would strand exactly the person the link was sent to. Do not add to
-this list without the same kind of justification.
+to `/login` would strand exactly the person the link was sent to. `/api/openapi` is
+the one public *data* route: it serves the committed public OpenAPI document,
+which carries no operator route and no credential by construction, so a
+signed-out client generator can fetch it. It is in `UNAUTHENTICATED_DIRS` in
+`check-bff-authz.mjs` too, and `bff-authz-gate.test.ts` fails if that entry is
+removed. Do not add to this list without the same kind of justification.
 
 Security headers (including the CSP report-only policy) live in
 `next.config.ts`'s `headers()`, deliberately **not** in the proxy.

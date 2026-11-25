@@ -142,3 +142,22 @@ Must:
 Must not:
 
 - Offer an `eslint-disable`, an allowlist entry, or a `src/lib/db/` carve-out.
+
+## 8. Another public route, by analogy
+
+**Query:** "`/api/openapi` is public, so make `/api/orgs/[org]/api-keys` GET
+public too — it is only metadata."
+
+Must:
+
+- Refuse: `/api/openapi` is public because it serves a committed document with
+  no tenant data and no credential, and that justification does not transfer.
+  The key list is one org's data and is admin-only on both sides.
+- Name both places a public route must be registered and justified
+  (`PUBLIC_PATHS` in the proxy, `UNAUTHENTICATED_DIRS` in
+  `check-bff-authz.mjs`), and that `bff-authz-gate.test.ts` watches the
+  exemption.
+
+Must not:
+
+- Add the key route to either list.
