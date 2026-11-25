@@ -177,7 +177,11 @@ mod tests {
     fn credential_management_is_never_offered() {
         // The manifest does carry the key routes (admin since #866)...
         let all: Manifest = serde_json::from_str(TOOLS_JSON).unwrap();
-        assert!(all.tools.iter().any(|t| t.path.contains("/api-keys") && t.role == "admin"));
+        assert!(
+            all.tools
+                .iter()
+                .any(|t| t.path.contains("/api-keys") && t.role == "admin")
+        );
         // ...and an agent is offered none of them.
         assert!(offered().iter().all(|t| !t.path.contains("/api-keys")));
     }
