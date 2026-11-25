@@ -10,7 +10,8 @@
 //! - `GET` status reads the job back, including its pinned snapshot;
 //! - download is a 409 until the export succeeds, streams the artifact with
 //!   its media type once it has, and is a 410 once seven days have passed;
-//! - another dataset's export and another org's are both 404, never a leak.
+//! - another dataset's export and another org's are both 404, never a leak;
+//! - a failed export names its error class and serves no file (#1233).
 
 use std::path::PathBuf;
 
@@ -350,6 +351,35 @@ async fn the_export_routes_pin_serve_and_expire() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::GONE);
+
+    // A failed export (#1233): the status names why, and there is nothing to
+    // download, even with an artifact from an earlier attempt still on disk.
+    client
+        .execute(
+            "UPDATE jobs SET state = 'failed', error_class = 'precondition', finished_at = now() \
+             WHERE id = $1",
+            &[&export_id],
+        )
+        .await
+        .unwrap();
+    let resp = app
+        .clone()
+        .oneshot(call("GET", &status_uri, &viewer, None))
+        .await
+        .unwrap();
+    let status = json_body(resp).await;
+    assert_eq!(status["state"], "failed");
+    assert_eq!(status["error_class"], "precondition", "{status}");
+    let resp = app
+        .clone()
+        .oneshot(call("GET", &download_uri, &viewer, None))
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::CONFLICT,
+        "a failed export serves nothing"
+    );
 
     let _ = std::fs::remove_dir_all(&tmp);
 }
