@@ -13,3 +13,4 @@ returns:
   - { name: model_version, type: varchar }
   - { name: tf_snapshot_id, type: varchar }
   - { name: rebuild_reason, type: varchar }
+  - { name: snapshot_end, type: bigint }

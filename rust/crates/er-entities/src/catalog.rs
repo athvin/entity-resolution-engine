@@ -2701,7 +2701,7 @@ columns:
     description: "First lake snapshot version the run produced."
   - name: snapshot_end
     type: bigint
-    description: "Last lake snapshot version the run produced."
+    description: "The lake snapshot holding the run's committed results, stamped by `finish` (#1229). Read the run's results at this version. NULL for a run that has not finished, and for every run finished before #1229."
   - name: created_at
     type: timestamp
     nullable: false

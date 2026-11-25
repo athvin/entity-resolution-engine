@@ -51,6 +51,30 @@ impl Config {
     }
 }
 
+/// The remote lake's `(oldest, latest)` retained snapshot versions; see
+/// `dedupe_core::Session::snapshot_bounds`.
+pub(crate) fn snapshot_bounds(session: &Session) -> Result<(i64, i64), String> {
+    use arrow::array::{Array, Int64Array};
+    // Catalog introspection; the lake alias is fixed and nothing comes from
+    // the request.
+    let batches = session
+        .query(
+            "SELECT min(snapshot_id), max(snapshot_id) FROM ducklake_snapshots('lake')",
+            &[],
+        )
+        .map_err(|error| error.to_string())?;
+    let value = |column: usize| {
+        batches
+            .first()
+            .filter(|batch| batch.num_columns() == 2 && batch.num_rows() == 1)
+            .and_then(|batch| batch.column(column).as_any().downcast_ref::<Int64Array>())
+            .filter(|array| !array.is_null(0))
+            .map(|array| array.value(0))
+            .ok_or_else(|| "invalid snapshot response".to_owned())
+    };
+    Ok((value(0)?, value(1)?))
+}
+
 pub(crate) fn page_start(
     session: &Session,
     cursor: Option<&str>,

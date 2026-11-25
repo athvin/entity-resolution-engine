@@ -3888,6 +3888,14 @@ export interface components {
             mode: string;
             model_version?: string | null;
             rebuild_reason?: string | null;
+            /**
+             * Format: int64
+             * @description The lake snapshot holding this run's results: pass it as `snapshot` to
+             *     a result read to read THIS run's output after a newer run has moved
+             *     the lake. Null while the run is unfinished, and for runs finished
+             *     before #1229, which never recorded one.
+             */
+            snapshot?: number | null;
             /** @description Naive lake text (`YYYY-MM-DD HH:MM:SS[.ffffff]`), not RFC 3339. */
             started_at: string;
             status: string;
@@ -5953,6 +5961,8 @@ export interface operations {
             query?: {
                 /** @description The opaque `next_cursor` of the previous page; omit for the first page. */
                 cursor?: string;
+                /** @description Read at this lake snapshot rather than the latest — a run's `snapshot`, to read that run's results after a newer run (#1229). An expired snapshot is a 410, never a read of a different one. */
+                snapshot?: number;
                 /** @description Exclude groups carrying this tag. */
                 exclude_tag?: string;
                 /** @description Maximum items to return; an integer, clamped to the endpoint's range when out of it. */
@@ -6169,6 +6179,8 @@ export interface operations {
                 limit?: string;
                 /** @description Free-text search over the golden record. */
                 q?: string;
+                /** @description Read at this lake snapshot rather than the latest — a run's `snapshot`, to read that run's results after a newer run (#1229). An expired snapshot is a 410, never a read of a different one. */
+                snapshot?: number;
             };
             header?: never;
             path: {

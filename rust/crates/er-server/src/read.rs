@@ -259,6 +259,58 @@ pub enum PageStartError {
     Lake(String),
 }
 
+/// Why an explicitly requested `snapshot` cannot be read (#1229).
+#[derive(Debug, PartialEq)]
+pub enum PinError {
+    /// A cursor pins its own snapshot; asking for a different one at the same
+    /// time is a contradiction, not a preference.
+    CursorDisagrees { cursor: i64, requested: i64 },
+    /// No such snapshot yet.
+    NotYet { requested: i64, latest: i64 },
+    /// Expired by snapshot retention: the data is gone, and serving a newer
+    /// snapshot under the requested number would be a silent substitution.
+    Expired { requested: i64, oldest: i64 },
+    /// The catalog could not be read.
+    Lake(String),
+}
+
+/// Apply a request's `snapshot` to a resolved page start.
+///
+/// `start` is what [`page_start`] resolved: the cursor's snapshot and key, or
+/// the latest snapshot with no key. With no `requested`, it passes through
+/// unchanged. `bounds` is consulted only for a cursor-less request, and
+/// returns `(oldest, latest)` retained.
+///
+/// # Errors
+/// A [`PinError`] naming why the requested snapshot cannot be read.
+pub fn pin_requested(
+    start: (i64, Option<String>),
+    requested: Option<i64>,
+    bounds: impl FnOnce() -> Result<(i64, i64), String>,
+) -> Result<(i64, Option<String>), PinError> {
+    let Some(requested) = requested else {
+        return Ok(start);
+    };
+    if start.1.is_some() {
+        return if start.0 == requested {
+            Ok(start)
+        } else {
+            Err(PinError::CursorDisagrees {
+                cursor: start.0,
+                requested,
+            })
+        };
+    }
+    let (oldest, latest) = bounds().map_err(PinError::Lake)?;
+    if requested > latest {
+        Err(PinError::NotYet { requested, latest })
+    } else if requested < oldest {
+        Err(PinError::Expired { requested, oldest })
+    } else {
+        Ok((requested, None))
+    }
+}
+
 /// Resolve the snapshot + after-key for a request: an explicit `cursor` pins its
 /// snapshot and key; otherwise pin the lake's latest snapshot and start at the
 /// beginning.
@@ -2094,11 +2146,23 @@ mod typed_detail_tests {
             model_version: Some("m1".into()),
             tf_snapshot_id: None,
             rebuild_reason: Some("config".into()),
+            snapshot_end: Some(7),
+        };
+        // The row's `snapshot_end` is served as `snapshot` (#1229), the name
+        // the result reads take it back under; every other key is the row's.
+        let row_as_served = |run: &er_entities::run::read::RecentRow| {
+            let mut old = rows_to_values(std::slice::from_ref(run)).remove(0);
+            let snapshot = old.as_object_mut().unwrap().remove("snapshot_end").unwrap();
+            old["snapshot"] = snapshot;
+            old
         };
         // No threshold: no `auto_merged_pairs` key at all.
-        same::<_, RunItem>(run.clone());
+        assert_eq!(
+            row_as_served(&run),
+            serde_json::to_value(RunItem::from(run.clone())).unwrap()
+        );
         // With one, the count the old map insert added.
-        let mut old = rows_to_values(std::slice::from_ref(&run)).remove(0);
+        let mut old = row_as_served(&run);
         old["auto_merged_pairs"] = json!(4_u64);
         let mut item = RunItem::from(run);
         item.auto_merged_pairs = Some(4);
@@ -2652,6 +2716,11 @@ pub struct RunItem {
     pub model_version: Option<String>,
     pub tf_snapshot_id: Option<String>,
     pub rebuild_reason: Option<String>,
+    /// The lake snapshot holding this run's results: pass it as `snapshot` to
+    /// a result read to read THIS run's output after a newer run has moved
+    /// the lake. Null while the run is unfinished, and for runs finished
+    /// before #1229, which never recorded one.
+    pub snapshot: Option<i64>,
     /// Pairs this run scored at or above the auto-merge threshold. Absent
     /// when the dataset has no readable config, so no count is reported
     /// against the wrong threshold.
@@ -2671,6 +2740,7 @@ impl From<er_entities::run::read::RecentRow> for RunItem {
             model_version,
             tf_snapshot_id,
             rebuild_reason,
+            snapshot_end,
         } = row;
         Self {
             id,
@@ -2682,6 +2752,7 @@ impl From<er_entities::run::read::RecentRow> for RunItem {
             model_version,
             tf_snapshot_id,
             rebuild_reason,
+            snapshot: snapshot_end,
             auto_merged_pairs: None,
         }
     }
@@ -3915,5 +3986,59 @@ mod scored_pair_tests {
         let mut old = rows_to_values(std::slice::from_ref(&row));
         with_confidence(&mut old);
         assert_eq!(old[0], serde_json::to_value(ScoredPair::from(row)).unwrap());
+    }
+}
+
+#[cfg(test)]
+mod pin_requested_tests {
+    //! #1229: an explicit `snapshot` is honoured exactly, or refused loudly.
+    use super::{PinError, pin_requested};
+
+    const BOUNDS: Result<(i64, i64), String> = Ok((5, 9));
+
+    #[test]
+    fn no_request_passes_the_start_through() {
+        assert_eq!(pin_requested((9, None), None, || BOUNDS), Ok((9, None)));
+    }
+
+    #[test]
+    fn a_retained_snapshot_is_read_exactly() {
+        assert_eq!(pin_requested((9, None), Some(6), || BOUNDS), Ok((6, None)));
+        assert_eq!(pin_requested((9, None), Some(5), || BOUNDS), Ok((5, None)));
+    }
+
+    #[test]
+    fn an_expired_or_future_snapshot_is_refused() {
+        assert_eq!(
+            pin_requested((9, None), Some(4), || BOUNDS),
+            Err(PinError::Expired {
+                requested: 4,
+                oldest: 5
+            })
+        );
+        assert_eq!(
+            pin_requested((9, None), Some(10), || BOUNDS),
+            Err(PinError::NotYet {
+                requested: 10,
+                latest: 9
+            })
+        );
+    }
+
+    #[test]
+    fn a_cursor_must_agree_and_needs_no_catalog_read() {
+        let start = (6, Some("k".to_string()));
+        let unread = || -> Result<(i64, i64), String> { panic!("bounds read for a cursor") };
+        assert_eq!(
+            pin_requested(start.clone(), Some(6), unread),
+            Ok(start.clone())
+        );
+        assert_eq!(
+            pin_requested(start, Some(7), unread),
+            Err(PinError::CursorDisagrees {
+                cursor: 6,
+                requested: 7
+            })
+        );
     }
 }

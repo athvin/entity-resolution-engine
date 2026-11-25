@@ -580,6 +580,24 @@ impl Session {
         Ok(Some(n))
     }
 
+    /// The oldest and newest snapshot versions the lake still retains, as
+    /// `(oldest, latest)`. Snapshot expiry removes the oldest, so a version in
+    /// this range is readable and one below it is gone.
+    ///
+    /// # Errors
+    /// Propagates the catalog query error.
+    pub fn snapshot_bounds(&self) -> Result<(i64, i64)> {
+        let lake = self.lake()?;
+        Ok(self.conn.query_row(
+            &format!(
+                "SELECT min(snapshot_id), max(snapshot_id) FROM ducklake_snapshots('{}')",
+                lake.alias
+            ),
+            [],
+            |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)),
+        )?)
+    }
+
     /// List all snapshots (version + ISO timestamp), newest last.
     pub fn list_snapshots(&self) -> Result<Vec<Snapshot>> {
         let lake = self.lake()?;

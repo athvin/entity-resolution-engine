@@ -112,6 +112,7 @@ mod pg_webhook_deliver;
 mod pg_webhooks;
 mod profile_value_gate;
 mod response_envelopes;
+mod run_snapshot_read;
 mod salesforce_mock;
 mod settle_consequences;
 mod telemetry_secrets;

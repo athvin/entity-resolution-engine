@@ -2198,12 +2198,21 @@ pub fn write_ingest_batch(
     Ok(())
 }
 
-/// Close the `runs` row on success (status `succeeded`, `ended_at` stamped).
+/// Close the `runs` row on success: status `succeeded`, `ended_at` stamped,
+/// and `snapshot_end` set to the lake snapshot holding the run's results.
+///
+/// Every stage commits on its own, so at `finish` the latest snapshot IS the
+/// one the run's results were last written in. It is read here, before this
+/// update commits a snapshot of its own; reading the results at either version
+/// gives the same rows, and the earlier one is the one the results produced.
+/// That number is what lets a customer read "run R's results" after a newer
+/// run has moved the lake (#1229).
 ///
 /// # Errors
-/// Propagates the lake update error.
+/// Propagates the lake read or update error.
 pub fn write_run_end(session: &Session, run_id: &str, ended_at: &str) -> Result<()> {
-    er_entities::run::update::finish(session.connection(), ended_at, run_id)?;
+    let snapshot = session.latest_snapshot_version()?;
+    er_entities::run::update::finish(session.connection(), ended_at, snapshot, run_id)?;
     Ok(())
 }
 

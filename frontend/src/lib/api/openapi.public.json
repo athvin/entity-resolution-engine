@@ -1722,6 +1722,15 @@
             }
           },
           {
+            "name": "snapshot",
+            "in": "query",
+            "description": "Read at this lake snapshot rather than the latest — a run's `snapshot`, to read that run's results after a newer run (#1229). An expired snapshot is a 410, never a read of a different one.",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
             "name": "exclude_tag",
             "in": "query",
             "description": "Exclude groups carrying this tag.",
@@ -2220,6 +2229,15 @@
             "required": false,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "snapshot",
+            "in": "query",
+            "description": "Read at this lake snapshot rather than the latest — a run's `snapshot`, to read that run's results after a newer run (#1229). An expired snapshot is a 410, never a read of a different one.",
+            "required": false,
+            "schema": {
+              "type": "integer"
             }
           }
         ],
@@ -13426,6 +13444,14 @@
               "string",
               "null"
             ]
+          },
+          "snapshot": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The lake snapshot holding this run's results: pass it as `snapshot` to\na result read to read THIS run's output after a newer run has moved\nthe lake. Null while the run is unfinished, and for runs finished\nbefore #1229, which never recorded one."
           },
           "started_at": {
             "type": "string",
