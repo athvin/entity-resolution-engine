@@ -1,0 +1,12 @@
+kind: statement
+operation: read
+description: "One keyset page of the source-to-entity lineage at a pinned snapshot: every source record and the entity it resolved to, keyed on record_key (#1231). What a customer joins back to their own source keys."
+params:
+  - { name: snapshot, type: bigint }
+  - { name: after, type: varchar, nullable: true }
+  - { name: limit, type: bigint }
+returns:
+  - { name: record_key, type: varchar, nullable: false }
+  - { name: source_system, type: varchar, nullable: false }
+  - { name: source_record_id, type: varchar, nullable: false }
+  - { name: entity_id, type: varchar, nullable: false }

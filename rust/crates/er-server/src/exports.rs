@@ -51,6 +51,11 @@ pub enum ExportKind {
     /// One row per duplicate group: the entity, its members, confidence and
     /// golden preview, as the duplicates read serves it.
     Duplicates,
+    /// One row per SOURCE record: `record_key`, `source_system`,
+    /// `source_record_id` and the `entity_id` it resolved to (#1231). The join
+    /// a customer makes from golden records and duplicate groups back to the
+    /// keys in their own systems.
+    Lineage,
 }
 
 /// The artifact's file format.
@@ -308,6 +313,63 @@ fn write_to(
                 })?;
             }
         },
+        ExportKind::Lineage => {
+            if request.format == ExportFormat::Csv {
+                out.write_all(b"record_key,source_system,source_record_id,entity_id\n")
+                    .map_err(|e| format!("export write: {e}"))?;
+            }
+            let mut after: Option<String> = None;
+            loop {
+                let page_rows = match er_entities::entity_membership::read::lineage_page(
+                    session.connection(),
+                    snapshot,
+                    after.as_deref(),
+                    page,
+                ) {
+                    Ok(found) => found,
+                    Err(e) if after.is_none() && not_yet_written(&e.to_string()) => break,
+                    Err(e) => return Err(e.to_string()),
+                };
+                let full = page_rows.len() as i64 == page;
+                for row in &page_rows {
+                    rows += 1;
+                    ceiling(rows)?;
+                    match request.format {
+                        ExportFormat::Csv => {
+                            let line = [
+                                row.record_key.as_str(),
+                                row.source_system.as_str(),
+                                row.source_record_id.as_str(),
+                                row.entity_id.as_str(),
+                            ]
+                            .map(csv_field)
+                            .join(",");
+                            out.write_all(line.as_bytes())
+                                .and_then(|()| out.write_all(b"\n"))
+                                .map_err(|e| format!("export write: {e}"))?;
+                        }
+                        ExportFormat::Jsonl => {
+                            serde_json::to_writer(
+                                &mut out,
+                                &serde_json::json!({
+                                    "record_key": row.record_key,
+                                    "source_system": row.source_system,
+                                    "source_record_id": row.source_record_id,
+                                    "entity_id": row.entity_id,
+                                }),
+                            )
+                            .map_err(|e| format!("export jsonl: {e}"))?;
+                            out.write_all(b"\n")
+                                .map_err(|e| format!("export write: {e}"))?;
+                        }
+                    }
+                }
+                match (full, page_rows.last()) {
+                    (true, Some(last)) => after = Some(last.record_key.clone()),
+                    _ => break,
+                }
+            }
+        }
         ExportKind::Duplicates => {
             let mut after: Option<String> = None;
             loop {
@@ -346,6 +408,16 @@ fn write_to(
     }
     out.flush().map_err(|e| format!("export flush: {e}"))?;
     Ok(rows)
+}
+
+/// One CSV field, quoted when it holds a comma, a quote or a line break
+/// (RFC 4180): a customer's source id is arbitrary text.
+fn csv_field(value: &str) -> String {
+    if value.contains([',', '"', '\n', '\r']) {
+        format!("\"{}\"", value.replace('"', "\"\""))
+    } else {
+        value.to_string()
+    }
 }
 
 /// Whether a first-page read failed because the relation it reads does not
@@ -429,6 +501,14 @@ mod tests {
             artifact_path(&env, "0193-abc", ExportFormat::Csv).unwrap(),
             PathBuf::from("/efs/acme/default/lake/exports/0193-abc.csv")
         );
+    }
+
+    #[test]
+    fn a_csv_field_is_quoted_only_when_it_must_be() {
+        assert_eq!(csv_field("crm"), "crm");
+        assert_eq!(csv_field("a,b"), "\"a,b\"");
+        assert_eq!(csv_field("say \"hi\""), "\"say \"\"hi\"\"\"");
+        assert_eq!(csv_field("two\nlines"), "\"two\nlines\"");
     }
 
     #[test]
