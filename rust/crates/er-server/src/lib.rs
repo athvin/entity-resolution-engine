@@ -6589,12 +6589,20 @@ async fn duplicates_list(
             match read::entity_of_record_key(session, snapshot, &member) {
                 Ok(Some(entity)) => filters.only_entity = Some(entity),
                 Ok(None) => {
-                    return Json(json!({
-                        "items": [],
-                        "snapshot": snapshot,
-                        "next_cursor": null,
-                    }))
-                    .into_response();
+                    return match entity_type {
+                        er_config::EntityType::Person => Json(PersonDuplicatesPage {
+                            items: Vec::new(),
+                            snapshot,
+                            next_cursor: None,
+                        })
+                        .into_response(),
+                        er_config::EntityType::Account => Json(AccountDuplicatesPage {
+                            items: Vec::new(),
+                            snapshot,
+                            next_cursor: None,
+                        })
+                        .into_response(),
+                    };
                 }
                 Err(e) => {
                     return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}"));
@@ -6609,17 +6617,45 @@ async fn duplicates_list(
             &filters,
             limit,
         ) {
-            Ok((items, next_cursor)) => Json(json!({
-                "items": items,
-                "snapshot": snapshot,
-                "next_cursor": next_cursor,
-            }))
+            Ok((read::DuplicateGroups::Person(items), next_cursor)) => Json(PersonDuplicatesPage {
+                items,
+                snapshot,
+                next_cursor,
+            })
             .into_response(),
+            Ok((read::DuplicateGroups::Account(items), next_cursor)) => {
+                Json(AccountDuplicatesPage {
+                    items,
+                    snapshot,
+                    next_cursor,
+                })
+                .into_response()
+            }
             Err(e) => detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake read: {e}")),
         }
     })
     .await
     .unwrap_or_else(|response| *response)
+}
+
+/// A page of a person dataset's duplicate groups, at a pinned snapshot.
+#[derive(Serialize, utoipa::ToSchema)]
+struct PersonDuplicatesPage {
+    items: Vec<read::PersonDuplicateGroup>,
+    /// The lake snapshot every page of this walk reads; the cursor pins it.
+    snapshot: i64,
+    /// Pass as `cursor` for the next page; null on the last page.
+    next_cursor: Option<String>,
+}
+
+/// A page of an account dataset's duplicate groups, at a pinned snapshot.
+#[derive(Serialize, utoipa::ToSchema)]
+struct AccountDuplicatesPage {
+    items: Vec<read::AccountDuplicateGroup>,
+    /// The lake snapshot every page of this walk reads; the cursor pins it.
+    snapshot: i64,
+    /// Pass as `cursor` for the next page; null on the last page.
+    next_cursor: Option<String>,
 }
 
 /// `GET …/insights`: the retained metric series, newest first.

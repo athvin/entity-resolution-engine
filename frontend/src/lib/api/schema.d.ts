@@ -1771,6 +1771,53 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * @description One duplicate group in an **account** dataset; the preview is the golden
+         *     company name and domain rather than a person's name and email (#1234).
+         */
+        AccountDuplicateGroup: {
+            /** @description The golden record's company name, when assembled. */
+            company_name?: string | null;
+            /** @description The golden record's domain, when assembled. */
+            domain?: string | null;
+            /** @description The resolved entity. */
+            entity_id: string;
+            /**
+             * Format: int64
+             * @description The group's confidence (0–100), or null when no member edge is scored.
+             */
+            group_confidence?: number | null;
+            /** @description The strongest-attached member, or null when the group is unscored. */
+            master_record_key?: string | null;
+            /** @description The comparison fields any within-group edge matched on. */
+            matched_fields: string[];
+            /** @description Each scored member's attachment confidence (0–100), by member key. */
+            member_confidences: {
+                [key: string]: number;
+            };
+            /**
+             * Format: int64
+             * @description How many source records resolved to it.
+             */
+            member_count: number;
+            /** @description The member records, as `<source_system>:<source_record_id>`, ordered. */
+            members: string[];
+            /** @description The model versions whose scores link the group, deduplicated. */
+            model_versions: string[];
+            /** @description Whether a steward asserted or verified the group. */
+            verified: boolean;
+        };
+        /** @description A page of an account dataset's duplicate groups, at a pinned snapshot. */
+        AccountDuplicatesPage: {
+            items: components["schemas"]["AccountDuplicateGroup"][];
+            /** @description Pass as `cursor` for the next page; null on the last page. */
+            next_cursor?: string | null;
+            /**
+             * Format: int64
+             * @description The lake snapshot every page of this walk reads; the cursor pins it.
+             */
+            snapshot: number;
+        };
         /** @description An account entity's golden record, as of the pinned snapshot. */
         AccountGolden: {
             addr_city?: string | null;
@@ -3353,6 +3400,55 @@ export interface components {
             updated_at: string;
             /** @description Whether these two records are the same entity. Deliberately binary: a labeller who is unsure should skip rather than guess, because a guessed label trains the model on noise and is indistinguishable afterwards from a confident one. */
             verdict: string;
+        };
+        /**
+         * @description One duplicate group in a **person** dataset: an entity with two or more
+         *     member records, its evidence metadata, and a golden preview (#1234).
+         */
+        PersonDuplicateGroup: {
+            /** @description The golden record's email, when assembled. */
+            email?: string | null;
+            /** @description The resolved entity. */
+            entity_id: string;
+            /** @description The golden record's family name, when assembled. */
+            family_name?: string | null;
+            /** @description The golden record's given name, when assembled. */
+            given_name?: string | null;
+            /**
+             * Format: int64
+             * @description The group's confidence (0–100), or null when no member edge is scored.
+             */
+            group_confidence?: number | null;
+            /** @description The strongest-attached member, or null when the group is unscored. */
+            master_record_key?: string | null;
+            /** @description The comparison fields any within-group edge matched on. */
+            matched_fields: string[];
+            /** @description Each scored member's attachment confidence (0–100), by member key. */
+            member_confidences: {
+                [key: string]: number;
+            };
+            /**
+             * Format: int64
+             * @description How many source records resolved to it.
+             */
+            member_count: number;
+            /** @description The member records, as `<source_system>:<source_record_id>`, ordered. */
+            members: string[];
+            /** @description The model versions whose scores link the group, deduplicated. */
+            model_versions: string[];
+            /** @description Whether a steward asserted or verified the group. */
+            verified: boolean;
+        };
+        /** @description A page of a person dataset's duplicate groups, at a pinned snapshot. */
+        PersonDuplicatesPage: {
+            items: components["schemas"]["PersonDuplicateGroup"][];
+            /** @description Pass as `cursor` for the next page; null on the last page. */
+            next_cursor?: string | null;
+            /**
+             * Format: int64
+             * @description The lake snapshot every page of this walk reads; the cursor pins it.
+             */
+            snapshot: number;
         };
         /** @description A person entity's golden record, as of the pinned snapshot. */
         PersonGolden: {
@@ -5859,17 +5955,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response. Payload types are described only at envelope granularity. */
+            /** @description Successful response. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        items?: unknown;
-                        next_cursor?: unknown;
-                        snapshot?: unknown;
-                    };
+                    "application/json": components["schemas"]["PersonDuplicatesPage"] | components["schemas"]["AccountDuplicatesPage"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */

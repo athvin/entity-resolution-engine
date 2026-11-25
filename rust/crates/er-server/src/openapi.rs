@@ -181,6 +181,10 @@ pub struct ApiDoc;
     crate::WorkOrder,
     crate::AttemptRetried,
     crate::ApiKeyList,
+    crate::PersonDuplicatesPage,
+    crate::AccountDuplicatesPage,
+    crate::read::PersonDuplicateGroup,
+    crate::read::AccountDuplicateGroup,
 )))]
 pub struct ResponseDoc;
 

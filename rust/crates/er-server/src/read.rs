@@ -482,42 +482,6 @@ pub struct MergePlan {
     pub member_confidences: std::collections::BTreeMap<String, i64>,
 }
 
-/// One duplicate group's confidence fields, from the page's within-group
-/// edges: `group_confidence` (the master-included average), the
-/// data-derived `master_record_key`, and per-member `member_confidences`
-/// keyed by record key. Nulls when the group carries no evidence at all.
-/// Insert the group confidence trio from a precomputed score, so a caller
-/// that filters on the score never computes it twice.
-fn insert_group_score(
-    obj: &mut serde_json::Map<String, Value>,
-    score: Option<dedupe_core::confidence::GroupScore>,
-) {
-    if let Some(score) = score {
-        obj.insert(
-            "group_confidence".to_string(),
-            Value::from(score.group.display()),
-        );
-        obj.insert("master_record_key".to_string(), Value::from(score.master));
-        obj.insert(
-            "member_confidences".to_string(),
-            Value::Object(
-                score
-                    .members
-                    .into_iter()
-                    .map(|(k, c)| (k, Value::from(c.display())))
-                    .collect(),
-            ),
-        );
-    } else {
-        obj.insert("group_confidence".to_string(), Value::Null);
-        obj.insert("master_record_key".to_string(), Value::Null);
-        obj.insert(
-            "member_confidences".to_string(),
-            Value::Object(serde_json::Map::new()),
-        );
-    }
-}
-
 /// One group's score from its members and within-group edges.
 fn group_score_of(
     members: &[String],
@@ -1021,43 +985,149 @@ struct GroupItem {
     model_versions: Vec<String>,
     matched_fields: Vec<String>,
     verified: bool,
-    preview: Vec<Value>,
+    preview: Vec<Option<String>>,
 }
 
-impl GroupItem {
-    /// The JSON shape the endpoint has always emitted, plus the evidence
-    /// metadata the filter bar and the matched-on column render.
-    fn into_json(self, entity_type: EntityType) -> Value {
-        let preview_fields: &[&str] = match entity_type {
-            EntityType::Person => &["given_name", "family_name", "email"],
-            EntityType::Account => &["company_name", "domain"],
-        };
-        let mut obj = serde_json::Map::new();
-        obj.insert("entity_id".to_string(), Value::from(self.entity_id));
-        obj.insert("member_count".to_string(), Value::from(self.member_count));
-        obj.insert(
-            "members".to_string(),
-            Value::Array(
-                self.member_keys
-                    .iter()
-                    .map(|m| Value::from(m.clone()))
+/// One duplicate group in a **person** dataset: an entity with two or more
+/// member records, its evidence metadata, and a golden preview (#1234).
+#[derive(Debug, Clone, PartialEq, serde::Serialize, utoipa::ToSchema)]
+pub struct PersonDuplicateGroup {
+    /// The resolved entity.
+    pub entity_id: String,
+    /// How many source records resolved to it.
+    pub member_count: i64,
+    /// The member records, as `<source_system>:<source_record_id>`, ordered.
+    pub members: Vec<String>,
+    /// The group's confidence (0–100), or null when no member edge is scored.
+    pub group_confidence: Option<i64>,
+    /// The strongest-attached member, or null when the group is unscored.
+    pub master_record_key: Option<String>,
+    /// Each scored member's attachment confidence (0–100), by member key.
+    pub member_confidences: std::collections::BTreeMap<String, i64>,
+    /// The model versions whose scores link the group, deduplicated.
+    pub model_versions: Vec<String>,
+    /// The comparison fields any within-group edge matched on.
+    pub matched_fields: Vec<String>,
+    /// Whether a steward asserted or verified the group.
+    pub verified: bool,
+    /// The golden record's given name, when assembled.
+    pub given_name: Option<String>,
+    /// The golden record's family name, when assembled.
+    pub family_name: Option<String>,
+    /// The golden record's email, when assembled.
+    pub email: Option<String>,
+}
+
+/// One duplicate group in an **account** dataset; the preview is the golden
+/// company name and domain rather than a person's name and email (#1234).
+#[derive(Debug, Clone, PartialEq, serde::Serialize, utoipa::ToSchema)]
+pub struct AccountDuplicateGroup {
+    /// The resolved entity.
+    pub entity_id: String,
+    /// How many source records resolved to it.
+    pub member_count: i64,
+    /// The member records, as `<source_system>:<source_record_id>`, ordered.
+    pub members: Vec<String>,
+    /// The group's confidence (0–100), or null when no member edge is scored.
+    pub group_confidence: Option<i64>,
+    /// The strongest-attached member, or null when the group is unscored.
+    pub master_record_key: Option<String>,
+    /// Each scored member's attachment confidence (0–100), by member key.
+    pub member_confidences: std::collections::BTreeMap<String, i64>,
+    /// The model versions whose scores link the group, deduplicated.
+    pub model_versions: Vec<String>,
+    /// The comparison fields any within-group edge matched on.
+    pub matched_fields: Vec<String>,
+    /// Whether a steward asserted or verified the group.
+    pub verified: bool,
+    /// The golden record's company name, when assembled.
+    pub company_name: Option<String>,
+    /// The golden record's domain, when assembled.
+    pub domain: Option<String>,
+}
+
+/// A page of duplicate groups, of the dataset's one entity type.
+#[derive(Debug, Clone, PartialEq)]
+pub enum DuplicateGroups {
+    Person(Vec<PersonDuplicateGroup>),
+    Account(Vec<AccountDuplicateGroup>),
+}
+
+impl DuplicateGroups {
+    fn new(entity_type: EntityType) -> Self {
+        match entity_type {
+            EntityType::Person => Self::Person(Vec::new()),
+            EntityType::Account => Self::Account(Vec::new()),
+        }
+    }
+
+    /// How many groups the page holds.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        match self {
+            Self::Person(v) => v.len(),
+            Self::Account(v) => v.len(),
+        }
+    }
+
+    /// Whether the page holds no group.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// The groups as the JSON the endpoint serves.
+    #[must_use]
+    pub fn to_values(&self) -> Vec<Value> {
+        match self {
+            Self::Person(v) => v.iter().map(|g| json!(g)).collect(),
+            Self::Account(v) => v.iter().map(|g| json!(g)).collect(),
+        }
+    }
+
+    fn push(&mut self, group: GroupItem) {
+        let (confidence, master, members) = match group.score {
+            Some(score) => (
+                Some(score.group.display()),
+                Some(score.master),
+                score
+                    .members
+                    .into_iter()
+                    .map(|(k, c)| (k, c.display()))
                     .collect(),
             ),
-        );
-        insert_group_score(&mut obj, self.score);
-        obj.insert(
-            "model_versions".to_string(),
-            Value::Array(self.model_versions.into_iter().map(Value::from).collect()),
-        );
-        obj.insert(
-            "matched_fields".to_string(),
-            Value::Array(self.matched_fields.into_iter().map(Value::from).collect()),
-        );
-        obj.insert("verified".to_string(), Value::from(self.verified));
-        for (field, value) in preview_fields.iter().zip(self.preview) {
-            obj.insert((*field).to_string(), value);
+            None => (None, None, std::collections::BTreeMap::new()),
+        };
+        let mut preview = group.preview.into_iter();
+        match self {
+            Self::Person(v) => v.push(PersonDuplicateGroup {
+                entity_id: group.entity_id,
+                member_count: group.member_count,
+                members: group.member_keys,
+                group_confidence: confidence,
+                master_record_key: master,
+                member_confidences: members,
+                model_versions: group.model_versions,
+                matched_fields: group.matched_fields,
+                verified: group.verified,
+                given_name: preview.next().flatten(),
+                family_name: preview.next().flatten(),
+                email: preview.next().flatten(),
+            }),
+            Self::Account(v) => v.push(AccountDuplicateGroup {
+                entity_id: group.entity_id,
+                member_count: group.member_count,
+                members: group.member_keys,
+                group_confidence: confidence,
+                master_record_key: master,
+                member_confidences: members,
+                model_versions: group.model_versions,
+                matched_fields: group.matched_fields,
+                verified: group.verified,
+                company_name: preview.next().flatten(),
+                domain: preview.next().flatten(),
+            }),
         }
-        Value::Object(obj)
     }
 }
 
@@ -1107,7 +1177,7 @@ pub fn duplicates(
     after: Option<&str>,
     filters: &DuplicateFilters,
     limit: i64,
-) -> Result<(Vec<Value>, Option<String>), String> {
+) -> Result<(DuplicateGroups, Option<String>), String> {
     let limit = limit.clamp(1, MAX_LIMIT);
     let conn = session.connection();
     // Wider than the page: the Rust-side filters drop groups after assembly,
@@ -1116,7 +1186,7 @@ pub fn duplicates(
     // caller continues the scan with the returned cursor.
     const SCAN_CHUNK: i64 = 200;
     const SCAN_CAP: i64 = 10_000;
-    let mut items: Vec<Value> = Vec::new();
+    let mut items = DuplicateGroups::new(entity_type);
     let mut after = after.map(str::to_string);
     let mut last_scanned: Option<String> = None;
     let mut scanned: i64 = 0;
@@ -1149,7 +1219,7 @@ pub fn duplicates(
                 continue;
             }
             let id = group.entity_id.clone();
-            items.push(group.into_json(entity_type));
+            items.push(group);
             last_scanned = Some(id);
             if items.len() as i64 == limit {
                 filled_at = Some(idx);
@@ -1232,21 +1302,14 @@ fn assemble_group_items(
     // The golden preview per entity in the range (person: name+email; account:
     // company+domain). A group whose golden row is absent previews as nulls,
     // like the old LEFT JOIN.
-    let mut previews: BTreeMap<String, Vec<Value>> = BTreeMap::new();
+    let mut previews: BTreeMap<String, Vec<Option<String>>> = BTreeMap::new();
     match entity_type {
         EntityType::Person => {
             let rows =
                 er_entities::golden_record::read::preview_in_range(conn, snapshot, first, last)
                     .map_err(|e| e.to_string())?;
             for r in rows {
-                previews.insert(
-                    r.id,
-                    vec![
-                        r.given_name.map_or(Value::Null, Value::from),
-                        r.family_name.map_or(Value::Null, Value::from),
-                        r.email.map_or(Value::Null, Value::from),
-                    ],
-                );
+                previews.insert(r.id, vec![r.given_name, r.family_name, r.email]);
             }
         }
         EntityType::Account => {
@@ -1255,13 +1318,7 @@ fn assemble_group_items(
             )
             .map_err(|e| e.to_string())?;
             for r in rows {
-                previews.insert(
-                    r.id,
-                    vec![
-                        r.company_name.map_or(Value::Null, Value::from),
-                        r.domain.map_or(Value::Null, Value::from),
-                    ],
-                );
+                previews.insert(r.id, vec![r.company_name, r.domain]);
             }
         }
     }
@@ -1291,12 +1348,12 @@ fn assemble_group_items(
                 .collect();
             matched_fields.sort();
             matched_fields.dedup();
-            let preview: Vec<Value> = (0..preview_field_count(entity_type))
+            let preview: Vec<Option<String>> = (0..preview_field_count(entity_type))
                 .map(|i| {
                     previews
                         .get(&g.entity_id)
                         .and_then(|vals| vals.get(i).cloned())
-                        .unwrap_or(Value::Null)
+                        .flatten()
                 })
                 .collect();
             let verified = group_edges.iter().any(|e| e.asserted)
@@ -3706,5 +3763,88 @@ mod value_gate_tests {
         assert_eq!(top[0].get("share"), Some(&json!(0.031)));
         assert_eq!(top[0].get("rank"), Some(&json!(1)));
         assert_eq!(top[0].get("value"), Some(&Value::Null));
+    }
+}
+
+#[cfg(test)]
+mod duplicate_group_tests {
+    //! #1234: the typed duplicate groups serialize to exactly the keys and
+    //! values the hand-built `into_json` map did, for both entity types and
+    //! for a scored and an unscored group (equal as parsed values).
+    use super::{DuplicateGroups, GroupItem};
+    use dedupe_core::confidence::{Confidence, GroupScore};
+    use er_config::EntityType;
+    use serde_json::json;
+
+    fn item(score: Option<GroupScore>, preview: Vec<Option<String>>) -> GroupItem {
+        GroupItem {
+            entity_id: "e1".into(),
+            member_count: 2,
+            member_keys: vec!["crm:1".into(), "erp:9".into()],
+            score,
+            model_versions: vec!["m1".into()],
+            matched_fields: vec!["email".into()],
+            verified: true,
+            preview,
+        }
+    }
+
+    #[test]
+    fn a_scored_person_group_keeps_its_wire_shape() {
+        let score = GroupScore {
+            master: "crm:1".into(),
+            members: vec![
+                ("crm:1".into(), Confidence::from_probability(0.9)),
+                ("erp:9".into(), Confidence::from_probability(0.8)),
+            ],
+            group: Confidence::from_probability(0.85),
+        };
+        let expected_group = score.group.display();
+        let expected_a = score.members[0].1.display();
+        let expected_b = score.members[1].1.display();
+        let mut page = DuplicateGroups::new(EntityType::Person);
+        page.push(item(
+            Some(score),
+            vec![Some("Ada".into()), None, Some("ada@example.com".into())],
+        ));
+        assert_eq!(
+            page.to_values(),
+            vec![json!({
+                "entity_id": "e1",
+                "member_count": 2,
+                "members": ["crm:1", "erp:9"],
+                "group_confidence": expected_group,
+                "master_record_key": "crm:1",
+                "member_confidences": {"crm:1": expected_a, "erp:9": expected_b},
+                "model_versions": ["m1"],
+                "matched_fields": ["email"],
+                "verified": true,
+                "given_name": "Ada",
+                "family_name": null,
+                "email": "ada@example.com",
+            })]
+        );
+    }
+
+    #[test]
+    fn an_unscored_account_group_keeps_its_wire_shape() {
+        let mut page = DuplicateGroups::new(EntityType::Account);
+        page.push(item(None, vec![Some("Acme".into()), None]));
+        assert_eq!(
+            page.to_values(),
+            vec![json!({
+                "entity_id": "e1",
+                "member_count": 2,
+                "members": ["crm:1", "erp:9"],
+                "group_confidence": null,
+                "master_record_key": null,
+                "member_confidences": {},
+                "model_versions": ["m1"],
+                "matched_fields": ["email"],
+                "verified": true,
+                "company_name": "Acme",
+                "domain": null,
+            })]
+        );
     }
 }

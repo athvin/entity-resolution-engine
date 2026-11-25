@@ -1823,16 +1823,18 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "description": "Successful response.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "items": {},
-                    "next_cursor": {},
-                    "snapshot": {}
-                  }
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/PersonDuplicatesPage"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountDuplicatesPage"
+                    }
+                  ]
                 }
               }
             }
@@ -8609,6 +8611,123 @@
   },
   "components": {
     "schemas": {
+      "AccountDuplicateGroup": {
+        "type": "object",
+        "description": "One duplicate group in an **account** dataset; the preview is the golden\ncompany name and domain rather than a person's name and email (#1234).",
+        "required": [
+          "entity_id",
+          "member_count",
+          "members",
+          "member_confidences",
+          "model_versions",
+          "matched_fields",
+          "verified"
+        ],
+        "properties": {
+          "company_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The golden record's company name, when assembled."
+          },
+          "domain": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The golden record's domain, when assembled."
+          },
+          "entity_id": {
+            "type": "string",
+            "description": "The resolved entity."
+          },
+          "group_confidence": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The group's confidence (0–100), or null when no member edge is scored."
+          },
+          "master_record_key": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The strongest-attached member, or null when the group is unscored."
+          },
+          "matched_fields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The comparison fields any within-group edge matched on."
+          },
+          "member_confidences": {
+            "type": "object",
+            "description": "Each scored member's attachment confidence (0–100), by member key.",
+            "additionalProperties": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "member_count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How many source records resolved to it."
+          },
+          "members": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The member records, as `<source_system>:<source_record_id>`, ordered."
+          },
+          "model_versions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The model versions whose scores link the group, deduplicated."
+          },
+          "verified": {
+            "type": "boolean",
+            "description": "Whether a steward asserted or verified the group."
+          }
+        }
+      },
+      "AccountDuplicatesPage": {
+        "type": "object",
+        "description": "A page of an account dataset's duplicate groups, at a pinned snapshot.",
+        "required": [
+          "items",
+          "snapshot"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AccountDuplicateGroup"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Pass as `cursor` for the next page; null on the last page."
+          },
+          "snapshot": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The lake snapshot every page of this walk reads; the cursor pins it."
+          }
+        }
+      },
       "AccountGolden": {
         "type": "object",
         "description": "An account entity's golden record, as of the pinned snapshot.",
@@ -12166,6 +12285,130 @@
           "verdict": {
             "type": "string",
             "description": "Whether these two records are the same entity. Deliberately binary: a labeller who is unsure should skip rather than guess, because a guessed label trains the model on noise and is indistinguishable afterwards from a confident one."
+          }
+        }
+      },
+      "PersonDuplicateGroup": {
+        "type": "object",
+        "description": "One duplicate group in a **person** dataset: an entity with two or more\nmember records, its evidence metadata, and a golden preview (#1234).",
+        "required": [
+          "entity_id",
+          "member_count",
+          "members",
+          "member_confidences",
+          "model_versions",
+          "matched_fields",
+          "verified"
+        ],
+        "properties": {
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The golden record's email, when assembled."
+          },
+          "entity_id": {
+            "type": "string",
+            "description": "The resolved entity."
+          },
+          "family_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The golden record's family name, when assembled."
+          },
+          "given_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The golden record's given name, when assembled."
+          },
+          "group_confidence": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The group's confidence (0–100), or null when no member edge is scored."
+          },
+          "master_record_key": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The strongest-attached member, or null when the group is unscored."
+          },
+          "matched_fields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The comparison fields any within-group edge matched on."
+          },
+          "member_confidences": {
+            "type": "object",
+            "description": "Each scored member's attachment confidence (0–100), by member key.",
+            "additionalProperties": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "member_count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How many source records resolved to it."
+          },
+          "members": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The member records, as `<source_system>:<source_record_id>`, ordered."
+          },
+          "model_versions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The model versions whose scores link the group, deduplicated."
+          },
+          "verified": {
+            "type": "boolean",
+            "description": "Whether a steward asserted or verified the group."
+          }
+        }
+      },
+      "PersonDuplicatesPage": {
+        "type": "object",
+        "description": "A page of a person dataset's duplicate groups, at a pinned snapshot.",
+        "required": [
+          "items",
+          "snapshot"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PersonDuplicateGroup"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Pass as `cursor` for the next page; null on the last page."
+          },
+          "snapshot": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The lake snapshot every page of this walk reads; the cursor pins it."
           }
         }
       },
