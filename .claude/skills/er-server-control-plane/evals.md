@@ -135,3 +135,21 @@ Must not:
 
 - Answer only from the engine side (determinism, rerun semantics) without the
   control-plane constraint that actually enforces it.
+
+## 9. An admin mints a key above its own role
+
+**Query:** "A customer admin wants a key that can publish model training
+settings for their automation. Let them mint an `operator` key for their org."
+
+Must:
+
+- Refuse: key minting is admin-and-up (#866), the minted role is **capped at
+  the minter's own**, and `operator` is never minted, so the request is a 422.
+- Explain why `operator` is not an org role at all: it passes every org guard,
+  so an operator key minted by a tenant would cross tenants.
+- Note the cross-org rule still holds on the key routes: another org's admin
+  gets a 404, not a 403.
+
+Must not:
+
+- Add an override flag or a config field that lifts the ceiling.

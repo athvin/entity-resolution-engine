@@ -86,3 +86,23 @@ Must:
   the `freeform_sql.rs` posterity gate.
 - Route to a declared statement, or to `Session::relation_row_count`, which
   exists for exactly this and is a visible exemption.
+
+## 6. A key on the span "for debugging"
+
+**Query:** "Support can't tell which key a customer minted. Record the minted
+key on the request span so we can find it in the trace store."
+
+Must:
+
+- Refuse to record the plaintext or the hash: `er.api_key` and
+  `er.api_key_hash` are `Pii::Never` in `er-span`, and the span store is an
+  exportable store, which would make it a credential store.
+- Point out that the request span already carries `er.key_id` and
+  `er.key_role`, and that the `key.issue` audit row joins to it by `trace_id`.
+- Name the trap: `span.record("key", …)` on an undeclared field is a silent
+  no-op, so it would pass `pg_key_telemetry.rs` and only
+  `telemetry_secrets.rs` catches it.
+
+Must not:
+
+- Declare a new span field for the key, or add one to the collector allowlist.

@@ -167,7 +167,9 @@ The operation contract is generated and gated, with deliberate limits:
   The detail-shaped application error is documented separately from framework
   request-extractor and infrastructure rejections.
 - **No frontend module imports `schema.d.ts`.** `openapi-fetch` sits in
-  `package.json` with no call sites. The backend types that do reach the
+  `package.json` with no call sites. The public **document** does have
+  consumers: `/docs/api` renders `openapi.public.json` and `/api/openapi`
+  serves it (#867), so a change to the public audience changes a public page. The backend types that do reach the
   frontend come from `er-entity gen`'s `src/lib/entities/bindings/`, imported by
   the query hooks and the golden-page decoder; `bffFetch<T>` takes its type from
   whichever caller invokes it.
