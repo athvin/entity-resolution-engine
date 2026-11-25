@@ -89,6 +89,12 @@ fn a_runs_results_read_at_its_snapshot_after_a_newer_run() {
     };
 
     run("01RUNSNAPR0000000000000000", 1, &crm);
+    // `finish` reads the latest snapshot and then commits one of its own, so
+    // the snapshot R records is exactly the one before the lake's latest now.
+    // Equal results at an earlier version would not prove that: the last
+    // writes before `finish` are reviews and metrics, which golden and
+    // duplicate reads do not see.
+    let after_r = read::latest_snapshot(&session).unwrap();
     // Run R+1 sees one more company, unlike anything already in the corpus.
     let more = format!(
         "{}c9,Hooli Systems,https://hooli.example,212-555-0999,99 Unique Way,Faraway,WA,98001,2026-01-09\n",
@@ -108,6 +114,12 @@ fn a_runs_results_read_at_its_snapshot_after_a_newer_run() {
     };
     let r = snapshot_of("01RUNSNAPR0000000000000000");
     let r1 = snapshot_of("01RUNSNAPR1000000000000000");
+    assert_eq!(
+        r,
+        after_r - 1,
+        "run R must record the snapshot its results were last written in, the one \
+         before finish's own commit"
+    );
     assert!(r < r1, "run R's snapshot {r} must precede R+1's {r1}");
 
     // 2. R's results at R's snapshot; R+1's at the latest.
