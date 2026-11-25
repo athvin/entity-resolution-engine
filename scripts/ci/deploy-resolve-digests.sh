@@ -22,9 +22,14 @@ for repo in er-api er-web; do
 		--image-ids "imageTag=$DEPLOY_SHA" \
 		--query 'imageDetails[0].imageDigest' --output text 2>/dev/null || true)"
 	if [ -z "$d" ] || [ "$d" = "None" ]; then
+		# --output json, NOT text: with text output the CLI applies --query
+		# to each PAGE, so once the repo holds more than one page of images
+		# "the newest" is one digest per page, the output line splits, and
+		# GitHub rejects the stray line (#1223). JSON output aggregates every
+		# page before the query runs, so this is the true newest.
 		d="$(aws ecr describe-images --repository-name "$repo" \
 			--query 'reverse(sort_by(imageDetails,&imagePushedAt))[0].imageDigest' \
-			--output text 2>/dev/null || true)"
+			--output json 2>/dev/null | tr -d '"' || true)"
 		# A WARNING, not just a log line. Reusing a digest is correct when
 		# that tree genuinely did not change — but it also happens when the
 		# build that should have produced one was skipped or never ran, and
@@ -88,8 +93,14 @@ for repo in er-api er-web; do
 		echo "$repo: $DEPLOY_SHA -> $d"
 		echo "reused_${repo//-/_}=0" >> "$GITHUB_OUTPUT"
 	fi
-	if [ -z "$d" ] || [ "$d" = "None" ]; then
+	if [ -z "$d" ] || [ "$d" = "None" ] || [ "$d" = "null" ]; then
 		echo "::error::no digest in ECR for $repo; refusing to deploy by tag"
+		exit 1
+	fi
+	# Exactly one digest, or nothing is deployed: a value with a second line
+	# would split the output and deploy whatever the first line happened to be.
+	if ! [[ "$d" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+		echo "::error::$repo resolved to something that is not one sha256 digest; refusing to deploy: $(printf '%q' "$d")"
 		exit 1
 	fi
 	echo "${repo//-/_}=$d" >> "$GITHUB_OUTPUT"
