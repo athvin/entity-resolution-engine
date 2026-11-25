@@ -2,7 +2,7 @@
 //!
 //! An export IS a job: `POST …/exports` enqueues kind `export` with an
 //! [`ExportRequest`] as its params, the `export` pod task writes ONE artifact
-//! with [`write`], and `GET …/exports/{id}` reads the job row back. There is no
+//! with [`write()`], and `GET …/exports/{id}` reads the job row back. There is no
 //! export table, because the job row already holds the state, the params, the
 //! error and the timestamps, and a second row would be a second truth.
 //!
@@ -208,7 +208,7 @@ pub fn sweep(lake_env: &Value, now: std::time::SystemTime) -> Result<usize, Stri
     Ok(removed)
 }
 
-/// What [`write`] produced.
+/// What [`write()`] produced.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExportReport {
     pub rows: usize,
