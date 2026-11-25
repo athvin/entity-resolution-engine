@@ -6148,6 +6148,10 @@ struct GoldenRecordsListQuery {
     limit: Option<String>,
     /// Free-text search over the golden record.
     q: Option<String>,
+    /// Read at this lake snapshot rather than the latest — a run's
+    /// `snapshot`, to read that run's results after a newer run (#1229). An
+    /// expired snapshot is a 410, never a read of a different one.
+    snapshot: Option<i64>,
 }
 
 /// Viewer+: a keyset page of the org's golden (resolved) records
@@ -6220,7 +6224,11 @@ async fn golden_records_list(
                 Ok(session) => session,
                 Err(error) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, error),
             };
-            let start = duckfleet_reads::page_start(&session, params.cursor.as_deref());
+            let start = pinned_page_start(
+                duckfleet_reads::page_start(&session, params.cursor.as_deref()),
+                params.snapshot,
+                || duckfleet_reads::snapshot_bounds(&session),
+            );
             let page = golden_records_page(&session, &dataset, &params, start);
             if let Err(error) = session.close() {
                 tracing::error!(error = %error, "remote lake read cleanup failed");
@@ -6235,7 +6243,11 @@ async fn golden_records_list(
         .unwrap_or_else(|_| detail_err(StatusCode::SERVICE_UNAVAILABLE, "lake read failed"));
     }
     with_dataset_lake(dataset, move |session, dataset| {
-        let start = read::page_start(session, params.cursor.as_deref());
+        let start = pinned_page_start(
+            read::page_start(session, params.cursor.as_deref()),
+            params.snapshot,
+            || session.snapshot_bounds().map_err(|e| e.to_string()),
+        );
         respond(golden_records_page(
             session.connection(),
             dataset,
@@ -6247,18 +6259,16 @@ async fn golden_records_list(
     .unwrap_or_else(|response| *response)
 }
 
-fn golden_records_page<E: er_entities::execution::Executor>(
-    executor: &E,
-    dataset: &pg::DatasetDetail,
-    params: &GoldenRecordsListQuery,
-    page_start: Result<(i64, Option<String>), read::PageStartError>,
-) -> Result<(i64, read::GoldenArrowPage), Box<axum::response::Response>> {
-    let entity_type = match dataset.entity_type.as_str() {
-        "account" => er_config::EntityType::Account,
-        _ => er_config::EntityType::Person,
-    };
-    let (snapshot, after) = match page_start {
-        Ok(x) => x,
+/// A list read's page start with its explicit `snapshot` applied (#1229), or
+/// the response refusing it. `bounds` is `(oldest, latest)` retained, read only
+/// for a cursor-less request that names a snapshot.
+fn pinned_page_start(
+    start: Result<(i64, Option<String>), read::PageStartError>,
+    requested: Option<i64>,
+    bounds: impl FnOnce() -> Result<(i64, i64), String>,
+) -> Result<(i64, Option<String>), Box<axum::response::Response>> {
+    let start = match start {
+        Ok(start) => start,
         Err(read::PageStartError::BadCursor) => {
             return Err(Box::new(detail_err(
                 StatusCode::UNPROCESSABLE_ENTITY,
@@ -6272,6 +6282,38 @@ fn golden_records_page<E: er_entities::execution::Executor>(
             )));
         }
     };
+    read::pin_requested(start, requested, bounds).map_err(|e| {
+        Box::new(match e {
+            read::PinError::CursorDisagrees { cursor, requested } => detail_err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                format!("the cursor reads snapshot {cursor}; snapshot={requested} contradicts it"),
+            ),
+            read::PinError::NotYet { requested, latest } => detail_err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                format!("snapshot {requested} does not exist; the latest is {latest}"),
+            ),
+            read::PinError::Expired { requested, oldest } => detail_err(
+                StatusCode::GONE,
+                format!("snapshot {requested} has expired; the oldest retained is {oldest}"),
+            ),
+            read::PinError::Lake(e) => {
+                detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}"))
+            }
+        })
+    })
+}
+
+fn golden_records_page<E: er_entities::execution::Executor>(
+    executor: &E,
+    dataset: &pg::DatasetDetail,
+    params: &GoldenRecordsListQuery,
+    page_start: Result<(i64, Option<String>), Box<axum::response::Response>>,
+) -> Result<(i64, read::GoldenArrowPage), Box<axum::response::Response>> {
+    let entity_type = match dataset.entity_type.as_str() {
+        "account" => er_config::EntityType::Account,
+        _ => er_config::EntityType::Person,
+    };
+    let (snapshot, after) = page_start?;
     let limit = read::parse_limit(params.limit.as_deref());
     let page = match read::golden_arrow_page_with_executor(
         executor,
@@ -6421,6 +6463,10 @@ async fn org_data_quality(
 struct DuplicatesListQuery {
     /// The opaque `next_cursor` of the previous page; omit for the first page.
     cursor: Option<String>,
+    /// Read at this lake snapshot rather than the latest — a run's
+    /// `snapshot`, to read that run's results after a newer run (#1229). An
+    /// expired snapshot is a 410, never a read of a different one.
+    snapshot: Option<i64>,
     /// Exclude groups carrying this tag.
     exclude_tag: Option<String>,
     /// Maximum items to return; an integer, clamped to the endpoint's range when out of it.
@@ -6573,14 +6619,13 @@ async fn duplicates_list(
             "account" => er_config::EntityType::Account,
             _ => er_config::EntityType::Person,
         };
-        let (snapshot, after) = match read::page_start(session, params.cursor.as_deref()) {
+        let (snapshot, after) = match pinned_page_start(
+            read::page_start(session, params.cursor.as_deref()),
+            params.snapshot,
+            || session.snapshot_bounds().map_err(|e| e.to_string()),
+        ) {
             Ok(x) => x,
-            Err(read::PageStartError::BadCursor) => {
-                return detail_err(StatusCode::UNPROCESSABLE_ENTITY, "invalid cursor");
-            }
-            Err(read::PageStartError::Lake(e)) => {
-                return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("lake: {e}"));
-            }
+            Err(response) => return *response,
         };
         // The member-record search: resolve the key to its entity and pin the
         // list to it, so the group payload is assembled identically on both
