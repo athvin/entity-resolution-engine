@@ -1,5 +1,6 @@
 "use client";
 
+import { simplifySamples, type FlowSample } from "./flow-keyframes";
 import { RecordGlyph, RECORD_STATES, type RecordState } from "./record-marks";
 import { useEffect, useRef, useState, type RefObject } from "react";
 
@@ -90,23 +91,37 @@ export function useFlowMotion(host: RefObject<HTMLElement | null>, paused: boole
           // Local SVG coordinates avoid mixing compositor scroll offsets with
           // layout rectangles during a phone swipe or smooth anchor navigation.
           const matrix = html ? path.getCTM() : null;
-          const transformAt = (distance: number) => {
+          const pointAt = (distance: number) => {
             const point = path.getPointAtLength(distance);
             const local = matrix ? point.matrixTransform(matrix) : point;
-            const x = local.x - originX;
-            const y = local.y - originY;
-            return `translate3d(${String(x)}px, ${String(y)}px, 0)`;
+            return { x: local.x - originX, y: local.y - originY };
           };
-          const frames: Keyframe[] = [{ offset: 0, opacity: 0, transform: transformAt(0) }];
+          const translate = (x: number, y: number) =>
+            `translate3d(${String(x)}px, ${String(y)}px, 0)`;
+          const transformAt = (distance: number) => {
+            const { x, y } = pointAt(distance);
+            return translate(x, y);
+          };
+          const points: FlowSample[] = [];
           for (let sample = 0; sample <= samples; sample++) {
             const progress = sample / samples;
-            frames.push({
+            points.push({
               offset: start + travel * progress,
-              transform: transformAt(length * progress),
+              ...pointAt(length * progress),
               opacity: Math.min(1, progress / 0.025, (1 - progress) / 0.025),
             });
           }
-          frames.push({ offset: 1, opacity: 0, transform: transformAt(length) });
+          // Keep the corners only: WebKit pays for every keyframe on every
+          // scroll frame (see flow-keyframes.ts).
+          const frames: Keyframe[] = [
+            { offset: 0, opacity: 0, transform: transformAt(0) },
+            ...simplifySamples(points).map(({ offset, x, y, opacity }) => ({
+              offset,
+              opacity,
+              transform: translate(x, y),
+            })),
+            { offset: 1, opacity: 0, transform: transformAt(length) },
+          ];
           const sprites = layer?.querySelectorAll<HTMLElement>("[data-packet]") ?? [];
           for (const [batch, sprite] of [...sprites].entries()) {
             const animation = sprite.animate(frames, {
