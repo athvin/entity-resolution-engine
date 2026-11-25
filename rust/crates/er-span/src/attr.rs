@@ -111,6 +111,13 @@ pub const STAGE: &str = "er.stage";
 /// carrying the error text.
 pub const OUTCOME: &str = "er.outcome";
 
+// --- credentials ------------------------------------------------------------
+
+/// An API key's id: `api_keys.id`, the `<key_id>` of `erk_<key_id>_<secret>`.
+pub const KEY_ID: &str = "er.key_id";
+/// The role an API key was minted with.
+pub const KEY_ROLE: &str = "er.key_role";
+
 /// Every attribute this workspace may emit.
 ///
 /// The ordering is the reference document's ordering: attribution first, then
@@ -207,6 +214,21 @@ pub const ATTRIBUTES: &[Attr] = &[
         pii: Pii::Config,
         cardinality: bounded(2, "er_span::Outcome"),
     },
+    Attr {
+        name: KEY_ID,
+        description: "An API key's id, recorded on the request span that mints or revokes it (#869). The id is the public half of `erk_<key_id>_<secret>` and is already written to `audit_log`; it authenticates nothing without the secret. Spans only, never a metric dimension.",
+        pii: Pii::Identifier,
+        cardinality: Cardinality::Unbounded,
+    },
+    Attr {
+        name: KEY_ROLE,
+        description: "The role a key was minted with. Operator is never minted (422), so the vocabulary is the three org roles.",
+        pii: Pii::Config,
+        cardinality: bounded(
+            3,
+            "er_server::Role (viewer, steward, admin; operator is never minted)",
+        ),
+    },
     // The boundary. These are declared so it is visible, and so a test can
     // assert the workspace emits none of them.
     Attr {
@@ -218,6 +240,18 @@ pub const ATTRIBUTES: &[Attr] = &[
     Attr {
         name: "url.query",
         description: "FORBIDDEN. `GET /v1/orgs/{org}/golden-records` takes `q`, a contains-search over record values, so the query string is payload. `url.path` is fine — it carries identifiers.",
+        pii: Pii::Never,
+        cardinality: Cardinality::Unbounded,
+    },
+    Attr {
+        name: "er.api_key",
+        description: "FORBIDDEN. A minted key's plaintext, or its secret half. Shown to the admin exactly once, in the mint response body, and stored nowhere: a span carrying it would make the span store a credential store. Spans carry `er.key_id`.",
+        pii: Pii::Never,
+        cardinality: Cardinality::Unbounded,
+    },
+    Attr {
+        name: "er.api_key_hash",
+        description: "FORBIDDEN. `api_keys.key_hash`, the SHA-256 of a key's secret. It never leaves Postgres: not on the wire (`ApiKeyWire` omits it), and not on a span, where it would be an offline-guessable verifier for every key it named.",
         pii: Pii::Never,
         cardinality: Cardinality::Unbounded,
     },

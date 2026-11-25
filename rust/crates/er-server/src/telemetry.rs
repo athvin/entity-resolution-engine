@@ -164,11 +164,19 @@ pub fn make_span(req: &Request<Body>) -> Span {
         // aggregate, if ever wanted, is a `spanmetrics` connector in the
         // collector's values file.
         er.action = %action,
-        // Recorded by the bearer guard, which is the first place the credential
-        // has been resolved to an org and a role.
+        // Recorded by the `Principal` extractor, the first place the credential
+        // has been resolved to an org and a role (#869). There is deliberately
+        // no `er.actor`: the actor string embeds the BFF's `x-acting-user`,
+        // which is an email, and `er.user.email` is `Pii::Never`. The actor
+        // stays in `audit_log`, joined to this span by `trace_id`.
         er.org = tracing::field::Empty,
-        er.actor = tracing::field::Empty,
         er.role = tracing::field::Empty,
+        // Recorded by the key-minting handlers (#869): which key a mint or a
+        // revoke touched. Never the plaintext, never the hash — both are
+        // `Pii::Never` in `er-span`, and `pg_key_telemetry.rs` asserts it on
+        // the exported spans.
+        er.key_id = tracing::field::Empty,
+        er.key_role = tracing::field::Empty,
         http.response.status_code = tracing::field::Empty,
     );
 

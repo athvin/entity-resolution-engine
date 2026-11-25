@@ -622,6 +622,23 @@ fn acceptable_traceparent(raw: &str) -> bool {
 
 /// Compose the recorded actor from the credential and the forwarded human.
 /// `user:<email> via <credential>` is the format `proxy.ts` documents.
+impl Principal {
+    /// Record the resolved org and role on the request span (`http.server`,
+    /// which declares both), and hand the principal back.
+    ///
+    /// Not the actor: it embeds the BFF's acting-user email, which no span may
+    /// carry (`er.user.email` is `Pii::Never`). `audit_log` holds it, joined
+    /// to the span by `trace_id`.
+    fn on_request_span(self) -> Self {
+        let span = tracing::Span::current();
+        span.record("er.role", self.role.as_str());
+        if let Some(org) = &self.org {
+            span.record(er_span::attr::ORG, org.as_str());
+        }
+        self
+    }
+}
+
 fn compose_actor(credential: &str, user: Option<String>) -> String {
     match user {
         Some(user) => format!("user:{user} via {credential}"),
@@ -655,7 +672,8 @@ impl FromRequestParts<AppState> for Principal {
                 org: None,
                 role: Role::Operator,
                 trace_context: forwarded_traceparent(parts),
-            });
+            }
+            .on_request_span());
         }
 
         // Otherwise an API key: erk_<key_id>_<secret> (secret may contain '_',
@@ -698,7 +716,8 @@ impl FromRequestParts<AppState> for Principal {
                     org: Some(org_name),
                     role: Role::parse(&role).unwrap_or(Role::Viewer),
                     trace_context: forwarded_traceparent(parts),
-                })
+                }
+                .on_request_span())
             }
             Ok(_) => Err(unauthorized("invalid credential")),
             Err(e) => Err((
@@ -12839,6 +12858,12 @@ async fn create_key(
     let _ = pg::set_actor(&client, &principal.actor).await;
     match pg::issue_key(&client, &org_row.id, role.as_str()).await {
         Ok((key_id, key)) => {
+            // The id and the role, on the span and in the log. `key` (the
+            // plaintext) goes into the response body and nowhere else.
+            let span = tracing::Span::current();
+            span.record(er_span::attr::KEY_ID, key_id.as_str());
+            span.record(er_span::attr::KEY_ROLE, role.as_str());
+            tracing::info!(org = %org, key_id = %key_id, role = role.as_str(), "api key issued");
             let _ = pg::audit(
                 &client,
                 &principal.actor,
@@ -12936,6 +12961,8 @@ async fn revoke_key(
     let _ = pg::set_actor(&client, &principal.actor).await;
     match pg::revoke_key(&client, &key_id, &org_row.id).await {
         Ok(revoked) => {
+            tracing::Span::current().record(er_span::attr::KEY_ID, key_id.as_str());
+            tracing::info!(org = %org, key_id = %key_id, revoked, "api key revoked");
             let _ = pg::audit(
                 &client,
                 &principal.actor,
