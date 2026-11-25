@@ -62,6 +62,7 @@ mod pg_e2e;
 mod pg_entity_events;
 mod pg_entity_links;
 mod pg_env_filter;
+mod pg_exports;
 mod pg_golden_read;
 mod pg_history;
 mod pg_http;
