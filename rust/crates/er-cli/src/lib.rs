@@ -2208,12 +2208,14 @@ pub fn write_ingest_batch(
 /// That number is what lets a customer read "run R's results" after a newer
 /// run has moved the lake (#1229).
 ///
+/// Returns that snapshot, so the caller can announce it (#1232).
+///
 /// # Errors
 /// Propagates the lake read or update error.
-pub fn write_run_end(session: &Session, run_id: &str, ended_at: &str) -> Result<()> {
+pub fn write_run_end(session: &Session, run_id: &str, ended_at: &str) -> Result<i64> {
     let snapshot = session.latest_snapshot_version()?;
     er_entities::run::update::finish(session.connection(), ended_at, snapshot, run_id)?;
-    Ok(())
+    Ok(snapshot)
 }
 
 /// Capture this run's resolution metrics, so the dashboard can show a TREND.
@@ -4284,7 +4286,7 @@ pub fn run_all_ensemble_observed(
         stage_assemble(session, config, inputs)
     })?;
     observed(session, observer, "finish", || {
-        stage_finish(session, inputs)
+        stage_finish(session, inputs).map(|_| ())
     })?;
     Ok(())
 }
@@ -4624,11 +4626,12 @@ pub fn stage_assemble_after_golden(
 
 /// The `finish` stage: close the run's ledger row.
 ///
+/// Returns the snapshot holding the run's results.
+///
 /// # Errors
 /// Propagates the `runs` update.
-pub fn stage_finish(session: &Session, inputs: &PipelineInputs<'_>) -> Result<()> {
-    write_run_end(session, inputs.run_id, inputs.run_at)?;
-    Ok(())
+pub fn stage_finish(session: &Session, inputs: &PipelineInputs<'_>) -> Result<i64> {
+    write_run_end(session, inputs.run_id, inputs.run_at)
 }
 
 /// `correct`'s `init` stage: pin the PRIOR run's model identity and open a

@@ -4457,7 +4457,7 @@ where
     // this helper's contract "dispatch, and deliver what that produced", which
     // is what its tests observe. Best-effort: a subscriber lookup or delivery
     // failure never fails the job, whose outcome is already persisted.
-    let _ = webhook::emit_job_event(client, &completed).await;
+    let _ = webhook::emit_job_event(client, &completed, None).await;
     if let Some(http) = webhook_http {
         let _ = webhook::drain(client, http, 16).await;
     }
@@ -4668,7 +4668,7 @@ async fn cancel_job(
                 match er_entities::job::update::cancel(&client, &job_id, &org_row.id).await {
                     Ok(rows) => match rows.into_iter().next() {
                         Some(updated) if updated.state == "canceled" => {
-                            let _ = webhook::emit_job_event(&client, &updated).await;
+                            let _ = webhook::emit_job_event(&client, &updated, None).await;
                             (
                                 StatusCode::OK,
                                 Json(er_entities::job::JobWire::from(&updated)),
@@ -4700,7 +4700,7 @@ async fn cancel_job(
                     // forever. Only RECORDED here: the dispatcher's drain does
                     // the sending, so a slow or dead subscriber cannot hold up
                     // the response to a cancel that is already persisted.
-                    let _ = webhook::emit_job_event(&client, &canceled).await;
+                    let _ = webhook::emit_job_event(&client, &canceled, None).await;
                     (
                         StatusCode::OK,
                         Json(er_entities::job::JobWire::from(&canceled)),

@@ -515,11 +515,11 @@ impl Task<Session> for Finish {
         // A run row that was never written (a failed `init`) has nothing to
         // close, and saying so must not fail the teardown — the job's own
         // outcome is already settled by then.
-        let closed = match ended {
-            Ok(()) => true,
+        let (closed, snapshot) = match ended {
+            Ok(snapshot) => (true, Some(snapshot)),
             Err(e) => {
                 tracing::warn!(error = %format!("{e:#}"), "the run row could not be closed");
-                false
+                (false, None)
             }
         };
         // The entity-event counts for the webhook aggregate (O3c-2), read here
@@ -560,6 +560,7 @@ impl Task<Session> for Finish {
             Plan(FinishReport {
                 settled: if closed { "closed" } else { "no_run_row" }.to_string(),
                 entity_counts,
+                snapshot,
             }),
             er_dag::Counters::default(),
         ))

@@ -333,6 +333,12 @@ pub struct FinishReport {
     /// failed `init`, since it is a teardown and runs on `AllTerminal`.
     #[serde(default)]
     pub entity_counts: Vec<EntityCount>,
+    /// The lake snapshot holding the run's results, crossed to the control
+    /// plane for the `job.succeeded` payload (#1232), which it cannot read
+    /// from a lake itself. Absent when no run row was closed, and on reports
+    /// written before #1232.
+    #[serde(default)]
+    pub snapshot: Option<i64>,
 }
 impl PlanDoc for FinishReport {
     const STABLE_NAME: &'static str = "finish_report";
@@ -365,9 +371,19 @@ mod finish_report_tests {
                     n: 3,
                 },
             ],
+            snapshot: Some(41),
         })
         .serialize_reference()
         .expect("finish's output serializes");
+        // The snapshot rides the same unchecked path to the `job.succeeded`
+        // payload (#1232): `output["doc"]["snapshot"]`.
+        assert_eq!(
+            published
+                .get("doc")
+                .and_then(|doc| doc.get("snapshot"))
+                .and_then(serde_json::Value::as_i64),
+            Some(41)
+        );
 
         // Byte-for-byte the chain in `Executor::readiness_for`'s settle branch.
         let recovered: Vec<EntityCount> = published
@@ -396,6 +412,7 @@ mod finish_report_tests {
         let published = er_dag::Plan(FinishReport {
             settled: "no_run_row".to_string(),
             entity_counts: vec![],
+            snapshot: None,
         })
         .serialize_reference()
         .unwrap();
