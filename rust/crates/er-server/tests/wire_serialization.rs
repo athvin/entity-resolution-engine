@@ -75,11 +75,17 @@ fn the_detector_sees_the_wholesale_shape_and_only_it() {
         ["Json(json!(self.row))"]
     );
     // Spelled-out keys and a detail body are fine.
-    assert!(wholesale(r#"Json(json!({ "items": items }))"#).is_empty());
-    assert!(wholesale(r#"Json(json!({ "detail": msg }))"#).is_empty());
+    assert_eq!(
+        wholesale(r#"Json(json!({ "items": items }))"#),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        wholesale(r#"Json(json!({ "detail": msg }))"#),
+        Vec::<String>::new()
+    );
     // A test module is not product code.
     let src = "fn h() {}\n#[cfg(test)]\nmod tests {\n    fn t() { Json(json!(job)); }\n}\n";
-    assert!(wholesale(&product_source(src)).is_empty());
+    assert_eq!(wholesale(&product_source(src)), Vec::<String>::new());
     assert_eq!(wholesale(src).len(), 1);
 }
 
