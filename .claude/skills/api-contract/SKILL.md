@@ -235,15 +235,26 @@ It is a step in the Rust `entities` job, on **pull requests only** (it diffs
 against `origin/main`, so a push to `main` has no base and it examines nothing),
 and compares both audiences. A missing baseline is explicitly reported as initial
 publication, never compared against the other audience. It is **advisory**, so it cannot
-fail the job. The
-product requirement is to have **blocking compatibility checks ready before the
-first external production org key is issued**. The deployed-baseline work is
-tracked on the live board; this requirement does not claim it has shipped.
-Pass `--strict` to enforce the detector's current coverage locally.
+fail the job. Pass `--strict` to enforce the detector's current coverage locally.
 
-So an advisory warning here is not noise to be ignored — it is a preview of what
-will block later, and the right time to decide whether the change is really
-compatible.
+**The blocking check is the API launch gate, at the production deploy (#658).**
+`deploy.yml`'s prod job runs `er-server api-check <deployed> <candidate>
+--strict`, copying the checker out of the release's own `er-api` image by
+digest. It compares against the contract production last published, at
+`s3://er-prod-api-contract-797781631727/deployed/openapi.public.json`, not
+against `origin/main`. The decisions are in `scripts/ci/api-launch-gate.sh` and
+self-tested in `make check`:
+- a break is refused unless the dispatch input `api_break_ok` names a reason
+  (a deliberate version change or a rollback);
+- an **unreadable** baseline is refused;
+- a missing one is first publication.
+
+After cutover the deploy writes `releases/<sha>/` once (undeletable by bucket
+policy) and moves the `deployed/` pointer. The coverage is the detector's,
+bounded as above: query inputs, schema compositions and payload narrowing are
+not detected.
+
+So a PR-time advisory warning is a preview of what the deploy will refuse.
 
 The detected changes, known limits, and what
 to do when a change genuinely must break:
