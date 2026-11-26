@@ -675,7 +675,11 @@ pub mod s3 {
             .await
         {
             Ok(object) => Ok(object.body),
-            Err(e) if e.as_service_error().is_some_and(|s| s.is_no_such_key()) => {
+            Err(e)
+                if e.as_service_error().is_some_and(
+                    aws_sdk_s3::operation::get_object::GetObjectError::is_no_such_key,
+                ) =>
+            {
                 Err(ReadError::Missing)
             }
             Err(e) => Err(ReadError::Other(format!(
