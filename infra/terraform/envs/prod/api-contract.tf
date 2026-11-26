@@ -135,6 +135,20 @@ data "aws_iam_policy_document" "ci_deploy_prod_api_contract" {
     ]
   }
 
+  # Pull the release's own er-api image, so the gate runs the checker that
+  # ships with it (`er-server api-check`) rather than a second implementation.
+  # ci-deploy.tf's ECR statement resolves digests only; copying a binary out of
+  # an image needs its layers too (#1248, found by the first gated deploy).
+  # Scoped to the one repository the checker comes from.
+  statement {
+    effect = "Allow"
+    actions = [
+      "ecr:GetDownloadUrlForLayer",
+      "ecr:BatchCheckLayerAvailability",
+    ]
+    resources = ["arn:aws:ecr:us-east-2:${data.aws_caller_identity.current.account_id}:repository/er-api"]
+  }
+
   statement {
     effect    = "Allow"
     actions   = ["s3:ListBucket"]
