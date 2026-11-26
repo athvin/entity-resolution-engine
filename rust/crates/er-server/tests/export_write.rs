@@ -318,7 +318,13 @@ fn an_export_writes_every_page_of_its_pinned_snapshot() {
     assert_eq!(report.unwrap().rows, 0);
     let (columns, batches) = parquet(&path);
     assert_eq!(columns, declared);
-    assert_eq!(batches.iter().map(|b| b.num_rows()).sum::<usize>(), 0);
+    assert_eq!(
+        batches
+            .iter()
+            .map(arrow::record_batch::RecordBatch::num_rows)
+            .sum::<usize>(),
+        0
+    );
     // Lineage: the CSV's columns and its seven rows.
     let (report, path) = write(
         "lineage.parquet",
