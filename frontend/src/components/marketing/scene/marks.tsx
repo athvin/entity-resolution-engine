@@ -1,7 +1,7 @@
 import type { CSSProperties, ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
-import { formatWeight } from "./score";
+import { formatProbability, formatWeight } from "./score";
 import "./scene.css";
 
 /**
@@ -135,6 +135,59 @@ export function GoldenCard({
         </dl>
       )}
       {note && <span className="scene-golden-note">{note}</span>}
+    </div>
+  );
+}
+
+/**
+ * Where a score sits between the two thresholds: three zones as lightness
+ * steps (separate, a person decides, joins), never hue, with the value printed
+ * on its marker. Drawn over 0.50–1.00, so the narrow review band stays
+ * readable.
+ */
+export function ThresholdScale({
+  probability,
+  thresholds,
+  className,
+  ...data
+}: {
+  probability: number;
+  thresholds: { review: number; autoJoin: number };
+  className?: string;
+} & Record<`data-${string}`, string | number | boolean | undefined>) {
+  const floor = 0.5;
+  const position = (value: number) => Math.min(1, Math.max(0, (value - floor) / (1 - floor)));
+  return (
+    <div
+      className={cn("scene-scale", className)}
+      style={
+        {
+          "--p": position(probability),
+          "--review": position(thresholds.review),
+          "--join": position(thresholds.autoJoin),
+        } as CSSProperties
+      }
+      {...data}
+    >
+      <div className="scene-scale-track">
+        <span className="scene-scale-zone" data-zone="separate" />
+        <span className="scene-scale-zone" data-zone="review" />
+        <span className="scene-scale-zone" data-zone="join" />
+        <span className="scene-scale-marker">
+          <span className="scene-scale-value">{formatProbability(probability)}</span>
+        </span>
+      </div>
+      {/* Below the track: above it, the 0.95 tick would collide with a value
+          just under it, which is where the close pair sits. */}
+      <div className="scene-scale-ticks">
+        <span>{thresholds.review.toFixed(2)}</span>
+        <span>{thresholds.autoJoin.toFixed(2)}</span>
+      </div>
+      <div className="scene-scale-labels">
+        <span>Separate</span>
+        <span>A person decides</span>
+        <span>Joins</span>
+      </div>
     </div>
   );
 }

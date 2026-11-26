@@ -263,6 +263,10 @@ probing rather than reading:
 - **A parked frame must read on its own.** Give each moment the frame to itself
   (the evidence leaves before the decision arrives); two half-faded layers over
   each other is the frame a reader stops on.
+- **A phone's pinned stage is short** (about 290px on the iPhone 15 profile).
+  Each stage compacts itself under `@container (max-height: 520px)`: fewer
+  fields, one-line evidence rows, a rule reduced to its verdict, and the
+  moments' offsets in custom properties so they can be respaced, not squeezed.
 - **The CSS minifier drops what it cannot parse, silently.** A `translate`
   whose `calc()` held `min(…cqw)` was simply absent from the built stylesheet;
   route such lengths through a custom property, and check the built CSS when a
