@@ -95,6 +95,7 @@ be grouped, filtered by target, or joined to a trace.
 - `er-server/src/duckfleet_tasks.rs`
 - `er-server/src/exec_task.rs`
 - `er-server/src/executor.rs`
+- `er-server/src/exports.rs`
 - `er-server/src/fixups.rs`
 - `er-server/src/lib.rs`
 - `er-server/src/mail.rs`

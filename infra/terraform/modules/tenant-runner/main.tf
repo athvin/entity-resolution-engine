@@ -16,6 +16,13 @@ variable "cluster_arn" { type = string }
 variable "bucket_arn" { type = string }
 variable "kms_key_arn" { type = string }
 variable "region" { type = string }
+# The er-api pod role, which alone may assume the per-tenant export readers
+# below (#1240). Null creates none: a stack with no API identity cannot serve
+# a download, and an export role nothing can assume is decoration.
+variable "export_reader_principal_arn" {
+  type    = string
+  default = null
+}
 variable "bindings" {
   type = map(object({
     namespace          = string
@@ -95,6 +102,15 @@ locals {
         Effect   = "Deny"
         Action   = ["s3:PutObject", "s3:DeleteObject", "s3:DeleteObjectVersion", "s3:AbortMultipartUpload"]
         Resource = [for prefix in b.read_only_prefixes : "${var.bucket_arn}/${prefix}*"]
+      }],
+      # Last, so the statement indices other modules' tests assert stay put.
+      # The export writer tags its artifact so the lake's tag-filtered
+      # lifecycle rule expires it (#1240); a tagged PutObject needs this too.
+      [{
+        Sid      = "TenantExportTagging"
+        Effect   = "Allow"
+        Action   = ["s3:PutObjectTagging"]
+        Resource = ["${var.bucket_arn}/${b.prefix}exports/*"]
     }])
   }) }
 }
@@ -133,5 +149,59 @@ resource "aws_eks_pod_identity_association" "tenant" {
   disable_session_tags = false
 }
 
+# One export READER per binding (#1240). The API pod streams a tenant's export
+# back by assuming THAT tenant's reader, chosen from the dataset's org, so a
+# download for org A cannot read org B's artifact even if the handler's guard
+# were wrong: IAM refuses it. Read-only, on `<prefix>exports/*` only, never the
+# lake data beside it.
+locals {
+  export_policies = { for key, b in var.bindings : key => jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "TenantExportRead"
+        Effect   = "Allow"
+        Action   = ["s3:GetObject"]
+        Resource = ["${var.bucket_arn}/${b.prefix}exports/*"]
+      },
+      {
+        Sid      = "LakeKeyViaS3"
+        Effect   = "Allow"
+        Action   = ["kms:Decrypt"]
+        Resource = [var.kms_key_arn]
+        Condition = { StringEquals = {
+          "kms:ViaService"                   = "s3.${var.region}.amazonaws.com"
+          "kms:EncryptionContext:aws:s3:arn" = var.bucket_arn
+        } }
+      }
+    ]
+  }) }
+  export_bindings = var.export_reader_principal_arn == null ? {} : var.bindings
+}
+
+# Named by the same recipe the chart uses to tell er-api which ARN serves
+# which org: er-<env>-export-<sha256("<namespace>/<org>")[:20]>.
+resource "aws_iam_role" "export" {
+  for_each = local.export_bindings
+  name     = "er-${var.environment}-export-${substr(sha256(each.key), 0, 20)}"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { AWS = var.export_reader_principal_arn }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "export" {
+  for_each = local.export_bindings
+  name     = "tenant-export-read"
+  role     = aws_iam_role.export[each.key].id
+  policy   = local.export_policies[each.key]
+}
+
 output "policies" { value = local.policies }
+output "export_policies" { value = local.export_policies }
+output "export_role_arns" { value = [for r in aws_iam_role.export : r.arn] }
 output "service_accounts" { value = local.accounts }

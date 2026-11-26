@@ -7123,8 +7123,17 @@ async fn create_export(
         Ok(dataset) => dataset,
         Err(response) => return *response,
     };
-    // Refuse a lake the download could never serve, before queueing work.
-    if let Err(message) = exports::artifact_path(&dataset.env, "probe", request.format) {
+    // Refuse a lake the download could never serve, before queueing work. An
+    // S3 lake needs the org's export reader (#1240); its prefix rides the job.
+    let tenant_prefix = exports::readers()
+        .get(&dataset.org_id)
+        .map(|reader| reader.prefix.clone());
+    if let Err(message) = exports::artifact_location(
+        &dataset.env,
+        "probe",
+        request.format,
+        tenant_prefix.as_deref(),
+    ) {
         return detail_err(StatusCode::NOT_IMPLEMENTED, message);
     }
     let requested = request.snapshot;
@@ -7145,11 +7154,14 @@ async fn create_export(
         Ok(c) => c,
         Err(r) => return *r,
     };
-    let params = json!({
+    let mut params = json!({
         "kind": request.kind,
         "format": request.format,
         "snapshot": snapshot,
     });
+    if let Some(prefix) = tenant_prefix {
+        params["tenant_prefix"] = json!(prefix);
+    }
     match pg::enqueue(
         &client,
         &dataset.org_id,
@@ -7304,30 +7316,56 @@ async fn export_download(
         Ok(request) => request,
         Err(message) => return detail_err(StatusCode::INTERNAL_SERVER_ERROR, message),
     };
-    let path = match exports::artifact_path(&dataset.env, &job.id, request.format) {
-        Ok(path) => path,
+    // The reader and its prefix come from THIS process's registry, never the
+    // job params, and the reader is chosen by the dataset's org: a download for
+    // one org assumes a role that IAM lets read only that org's exports.
+    let reader = exports::readers().get(&dataset.org_id);
+    let location = match exports::artifact_location(
+        &dataset.env,
+        &job.id,
+        request.format,
+        reader.map(|r| r.prefix.as_str()),
+    ) {
+        Ok(location) => location,
         Err(message) => return detail_err(StatusCode::NOT_IMPLEMENTED, message),
     };
-    // A missing file on an unexpired export is a 410 too: the retention sweep
-    // may have reached it first.
-    let file = match tokio::fs::File::open(&path).await {
-        Ok(file) => file,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return detail_err(
-                StatusCode::GONE,
-                format!("export '{export_id}' is no longer retained; create a new one"),
-            );
+    let gone = || {
+        detail_err(
+            StatusCode::GONE,
+            format!("export '{export_id}' is no longer retained; create a new one"),
+        )
+    };
+    // A missing artifact on an unexpired export is a 410 too: the retention
+    // sweep or the bucket's lifecycle rule may have reached it first.
+    let body = match (&location, reader) {
+        (exports::ArtifactLocation::File(path), _) => match tokio::fs::File::open(path).await {
+            Ok(file) => axum::body::Body::from_stream(tokio_util::io::ReaderStream::new(file)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return gone(),
+            Err(e) => {
+                return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("export read: {e}"));
+            }
+        },
+        (exports::ArtifactLocation::S3 { bucket, key }, Some(reader)) => {
+            match exports::s3::open(&reader.role, bucket, key).await {
+                Ok(object) => axum::body::Body::from_stream(tokio_util::io::ReaderStream::new(
+                    object.into_async_read(),
+                )),
+                Err(exports::s3::ReadError::Missing) => return gone(),
+                Err(exports::s3::ReadError::Other(message)) => {
+                    tracing::error!(error = %message, export_id = %export_id, "export download failed");
+                    return detail_err(StatusCode::SERVICE_UNAVAILABLE, "export read failed");
+                }
+            }
         }
-        Err(e) => {
-            return detail_err(StatusCode::SERVICE_UNAVAILABLE, format!("export read: {e}"));
+        (exports::ArtifactLocation::S3 { .. }, None) => {
+            return detail_err(StatusCode::NOT_IMPLEMENTED, "this org has no export reader");
         }
     };
-    let stream = tokio_util::io::ReaderStream::new(file);
     let disposition = format!(
         "attachment; filename=\"{export_id}.{}\"",
         request.format.extension()
     );
-    let mut response = axum::response::Response::new(axum::body::Body::from_stream(stream));
+    let mut response = axum::response::Response::new(body);
     let headers = response.headers_mut();
     headers.insert(
         axum::http::header::CONTENT_TYPE,

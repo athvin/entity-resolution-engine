@@ -87,6 +87,32 @@ resource "aws_s3_bucket_lifecycle_configuration" "lake" {
     }
   }
 
+  # Export artifacts (#1240) live under each tenant's `<prefix>exports/`, a
+  # path no single prefix filter can name, so the writer tags them and this
+  # rule matches the tag. The download refuses an export past its seven-day
+  # retention by the job row regardless; this reclaims the bytes. The bucket is
+  # versioned, so expiry only writes a delete marker and the noncurrent
+  # version must expire too, or nothing is actually freed.
+  rule {
+    id     = "export-expiry"
+    status = "Enabled"
+
+    filter {
+      tag {
+        key   = "er-export"
+        value = "1"
+      }
+    }
+
+    expiration {
+      days = 8
+    }
+
+    noncurrent_version_expiration {
+      noncurrent_days = 1
+    }
+  }
+
   depends_on = [aws_s3_bucket_versioning.lake]
 }
 
@@ -108,6 +134,27 @@ data "aws_iam_policy_document" "lake_tls_only" {
         test     = "Null"
         variable = "s3:if-none-match"
         values   = ["true"]
+      }
+    }
+  }
+  # The export-expiry lifecycle rule expires whatever carries er-export=1, so
+  # an immutable artifact must never carry it, or tagging would be a way to
+  # delete a sealed key on a timer (#1240).
+  dynamic "statement" {
+    for_each = length(var.immutable_prefixes) == 0 ? [] : [1]
+    content {
+      sid       = "ImmutableArtifactsNeverExpire"
+      effect    = "Deny"
+      actions   = ["s3:PutObject", "s3:PutObjectTagging"]
+      resources = [for prefix in var.immutable_prefixes : "${aws_s3_bucket.lake.arn}/${prefix}*"]
+      principals {
+        type        = "*"
+        identifiers = ["*"]
+      }
+      condition {
+        test     = "StringEquals"
+        variable = "s3:RequestObjectTag/er-export"
+        values   = ["1"]
       }
     }
   }

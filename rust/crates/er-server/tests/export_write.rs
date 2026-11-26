@@ -40,6 +40,7 @@ fn request(kind: ExportKind, format: ExportFormat, snapshot: i64) -> ExportReque
         kind,
         format,
         snapshot: Some(snapshot),
+        tenant_prefix: None,
     }
 }
 
