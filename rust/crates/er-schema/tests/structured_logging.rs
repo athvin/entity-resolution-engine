@@ -41,6 +41,14 @@ const ALLOWED: &[(&str, usize, &str)] = &[
          and it carries a recipient address that must stay off anything exportable",
     ),
     (
+        "api_check.rs",
+        4,
+        "the API launch gate's CI verb (#658): it prints the usage line, a \
+         read failure, the count of breaking changes and each one, for whoever is reading \
+         the deploy log that just refused a release — a report, not telemetry, \
+         exactly as er-openapi-check's is",
+    ),
+    (
         "er-openapi-check.rs",
         4,
         "a CI helper binary, not the server: it prints file-read errors and a \

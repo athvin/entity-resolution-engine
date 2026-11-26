@@ -53,7 +53,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // toolchain: the gate runs the same `breaking_changes` the PR-time advisory
     // check does, rather than a second implementation of it.
     if program_name(&args) != "er" && args.get(1).map(String::as_str) == Some("api-check") {
-        std::process::exit(er_server::openapi::api_check_cli(&args[2..]));
+        std::process::exit(er_server::api_check::run(&args[2..]));
     }
     // `er`: synchronous, so it must not run inside the runtime. Note that this
     // arm has no tokio runtime at all, which is why `init` must never need one.
