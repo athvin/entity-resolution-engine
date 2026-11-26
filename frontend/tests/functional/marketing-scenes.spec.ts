@@ -467,3 +467,197 @@ test.describe("/features/golden-records", () => {
     await expect.poll(async () => Math.min(...(await shown()))).toBeGreaterThan(0.95);
   });
 });
+
+test.describe("/product", () => {
+  const scrubTo = (page: Page, progress: number) =>
+    page.evaluate((p) => {
+      const track = document.querySelector('[data-scene="workflow"]');
+      if (!track) throw new Error("no workflow scene");
+      const box = track.getBoundingClientRect();
+      const top = box.top + window.scrollY;
+      const start = top - 64;
+      const end = top + box.height - window.innerHeight;
+      window.scrollTo({ top: Math.round(start + (end - start) * p), behavior: "instant" });
+    }, progress);
+  const opacity = (page: Page, selector: string) =>
+    page
+      .locator(`[data-scene="workflow"] ${selector}`)
+      .first()
+      .evaluate((node) => Number(getComputedStyle(node).opacity));
+  const panel = (step: number) => `.flow-panel[data-step="${String(step)}"]`;
+
+  // The seven steps are the beats, and the window shows one step at a time:
+  // the dataset first, the rules at the midpoint, the record going back out
+  // at the end.
+  test("the workflow window shows one step per beat", async ({ page }) => {
+    await page.goto("/product");
+    await expect(page.locator('[data-scene="workflow"] .scene-beat')).toHaveCount(7);
+
+    await scrubTo(page, 0);
+    await expect.poll(() => opacity(page, panel(0))).toBeGreaterThan(0.95);
+    expect(await opacity(page, panel(6))).toBeLessThan(0.05);
+
+    await scrubTo(page, 0.5);
+    await expect.poll(() => opacity(page, panel(3))).toBeGreaterThan(0.95);
+    for (const step of [0, 2, 4, 6]) expect(await opacity(page, panel(step))).toBeLessThan(0.05);
+
+    await scrubTo(page, 1);
+    await expect.poll(() => opacity(page, panel(6))).toBeGreaterThan(0.95);
+    expect(await opacity(page, panel(5))).toBeLessThan(0.05);
+  });
+
+  // On a wide stage a rail frames the current step and checks off the
+  // finished ones, so the window never reads as empty between cuts.
+  test("the step rail follows the window", async ({ page, isMobile }) => {
+    test.skip(isMobile, "a phone's stage is too narrow for the rail; each panel's title names it");
+    await page.goto("/product");
+    const marker = page.locator('[data-scene="workflow"] .flow-rail-marker');
+    await expect(marker).toBeVisible();
+    const row = () =>
+      marker.evaluate(
+        (node) =>
+          new DOMMatrixReadOnly(getComputedStyle(node).transform).m42 /
+          node.getBoundingClientRect().height,
+      );
+    const check = (step: number) =>
+      opacity(page, `.flow-rail li[data-step="${String(step)}"] .flow-rail-check`);
+
+    await scrubTo(page, 0);
+    await expect.poll(row).toBeCloseTo(0, 1);
+    expect(await check(0)).toBeLessThan(0.05);
+
+    await scrubTo(page, 0.5);
+    await expect.poll(row).toBeCloseTo(3, 1);
+    expect(await check(2)).toBeGreaterThan(0.95);
+    expect(await check(3)).toBeLessThan(0.05);
+
+    await scrubTo(page, 1);
+    await expect.poll(row).toBeCloseTo(6, 1);
+    expect(await check(5)).toBeGreaterThan(0.95);
+  });
+
+  test("with reduced motion the workflow is a static storyboard", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/product");
+    const scene = page.locator('[data-scene="workflow"]');
+    for (const moment of ["dataset", "sources", "mapping", "rules", "run", "review", "out"])
+      await expect(scene.locator(`[data-moment="${moment}"]`)).toBeVisible();
+    await expect(scene.locator(".flow-rail")).toBeHidden();
+    expect(
+      await page
+        .getByTestId("scene-workflow-stage")
+        .evaluate((stage) => stage.getAnimations({ subtree: true }).length),
+    ).toBe(0);
+  });
+
+  test("workflow scene poster visual baseline @visual", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/product");
+    await page.addStyleTag({
+      content: '[data-testid="marketing-header"] { visibility: hidden; }',
+    });
+    await expect(page.getByTestId("scene-workflow")).toHaveScreenshot(
+      "marketing-workflow-scene.png",
+    );
+  });
+
+  // The problem figure deals one company's three records out from under the
+  // middle one. Mid-deal, every record is already opaque, so no record's text
+  // shows through another's; by the time the figure is centred, all three
+  // are at rest.
+  test("the problem figure deals three records out, never translucent", async ({ page }) => {
+    await page.goto("/product");
+    const figure = page.getByTestId("split-figure");
+    const records = () =>
+      figure.evaluate((node) =>
+        [...node.querySelectorAll(".split-record")].map((record) => {
+          const style = getComputedStyle(record);
+          const matrix = new DOMMatrixReadOnly(style.transform);
+          return {
+            opacity: Number(style.opacity),
+            moved: Math.hypot(matrix.m41, matrix.m42),
+          };
+        }),
+      );
+    await figure.evaluate((node) => {
+      const top = node.getBoundingClientRect().top + window.scrollY;
+      const span = window.innerHeight + node.getBoundingClientRect().height;
+      window.scrollTo({
+        top: Math.round(top - window.innerHeight + 0.3 * span),
+        behavior: "instant",
+      });
+    });
+    await expect.poll(async () => (await records())[0]?.moved ?? 0).toBeGreaterThan(20);
+    for (const record of await records()) expect(record.opacity).toBe(1);
+
+    await figure.evaluate((node) => {
+      node.scrollIntoView({ block: "center" });
+    });
+    await expect
+      .poll(async () => Math.max(...(await records()).map((r) => r.moved)))
+      .toBeLessThan(0.5);
+  });
+});
+
+test.describe("/integrations", () => {
+  const scrubTo = (page: Page, progress: number) =>
+    page.evaluate((p) => {
+      const track = document.querySelector('[data-scene="round-trip"]');
+      if (!track) throw new Error("no round-trip scene");
+      const box = track.getBoundingClientRect();
+      const top = box.top + window.scrollY;
+      const start = top - 64;
+      const end = top + box.height - window.innerHeight;
+      window.scrollTo({ top: Math.round(start + (end - start) * p), behavior: "instant" });
+    }, progress);
+  const opacity = (page: Page, selector: string) =>
+    page
+      .locator(`[data-scene="round-trip"] ${selector}`)
+      .first()
+      .evaluate((node) => Number(getComputedStyle(node).opacity));
+
+  // The round trip builds up a beat at a time: the ways in from the first
+  // frame, the core by the second beat, the ways out by the third, the
+  // Salesforce loop last.
+  test("the round trip arrives one beat at a time", async ({ page }) => {
+    await page.goto("/integrations");
+    await expect(page.locator('[data-scene="round-trip"] .scene-beat')).toHaveCount(4);
+
+    await scrubTo(page, 0);
+    await expect.poll(() => opacity(page, ".trip-in li")).toBeGreaterThan(0.95);
+    expect(await opacity(page, ".trip-core")).toBeLessThan(0.05);
+    expect(await opacity(page, ".trip-out li")).toBeLessThan(0.05);
+
+    await scrubTo(page, 2 / 3);
+    await expect.poll(() => opacity(page, '.trip-out li[data-index="3"]')).toBeGreaterThan(0.95);
+    expect(await opacity(page, ".trip-core")).toBeGreaterThan(0.95);
+    expect(await opacity(page, ".trip-loop")).toBeLessThan(0.05);
+
+    await scrubTo(page, 1);
+    await expect.poll(() => opacity(page, ".trip-loop")).toBeGreaterThan(0.95);
+  });
+
+  test("with reduced motion the round trip is a static storyboard", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/integrations");
+    const scene = page.locator('[data-scene="round-trip"]');
+    for (const moment of ["in", "contract", "out", "round-trip"])
+      await expect(scene.locator(`[data-moment="${moment}"]`)).toBeVisible();
+    expect(
+      await page
+        .getByTestId("scene-round-trip-stage")
+        .evaluate((stage) => stage.getAnimations({ subtree: true }).length),
+    ).toBe(0);
+  });
+
+  test("round-trip scene poster visual baseline @visual", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/integrations");
+    await page.addStyleTag({
+      content: '[data-testid="marketing-header"] { visibility: hidden; }',
+    });
+    await expect(page.getByTestId("scene-round-trip")).toHaveScreenshot(
+      "marketing-round-trip-scene.png",
+    );
+  });
+});
