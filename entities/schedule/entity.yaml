@@ -63,8 +63,12 @@ columns:
     volatile: true
     description: "Wall-clock last-write time (database default; advanced by mutations once the entity migrates)."
 indexes:
-  - name: schedules_one_correction_per_org
-    columns: [org_id]
+  # One correction schedule per DATASET: each dataset publishes its own config,
+  # and its `correction_pass.cadence` is that dataset's. It was per org until
+  # #1010, so a second dataset's first publish failed on this index; fixup
+  # `0006_per_dataset_correction_schedule` drops the old one on live stores.
+  - name: schedules_one_correction_per_dataset
+    columns: [dataset_id]
     unique: true
     where: "source = 'config:correction_pass'"
   - name: schedules_one_maintenance_per_org

@@ -119,6 +119,16 @@ const FIXUPS: &[(&str, Phase, Kind)] = &[
         // the columns they know.
         Kind::Safe,
     ),
+    (
+        "0006_per_dataset_correction_schedule",
+        Phase::AfterReconcile,
+        // Drops `schedules_one_correction_per_org`, which the per-dataset
+        // unique replaces. Safe: it only loosens — no release ever relied on
+        // the org-wide uniqueness, because `ensure_config_owned` already
+        // checks by dataset — and while it stood, publishing a config to a
+        // second dataset failed with a unique violation (#1010).
+        Kind::Safe,
+    ),
 ];
 
 /// May a contract fixup run, given the catalog versions this store has recorded?
@@ -218,6 +228,11 @@ async fn run_fixup(tx: &tokio_postgres::Transaction<'_>, name: &str) -> Result<(
         "0003_per_dataset_locks" => per_dataset_locks(tx).await,
         "0004_dataset_id_required" => dataset_id_required(tx).await,
         "0005_tag_kind" => tag_kind(tx).await,
+        "0006_per_dataset_correction_schedule" => {
+            tx.batch_execute("DROP INDEX IF EXISTS public.schedules_one_correction_per_org")
+                .await?;
+            Ok(())
+        }
         // Reaching this is a FIXUPS entry without a body — a bug in this
         // module, not in any database.
         other => unreachable!("fixup {other} is listed but has no body"),
@@ -641,7 +656,8 @@ mod tests {
         // decision. This asserts the decisions that exist are the ones
         // reviewed: 0005 adds a NOT NULL column with a default — Safe because
         // older releases never read it, and its DDL fills the default for
-        // their INSERTs.
+        // their INSERTs. 0006 drops an org-wide unique the per-dataset one
+        // replaces — Safe because it only loosens, and no release relied on it.
         let kinds: Vec<&str> = super::FIXUPS
             .iter()
             .map(|(_, _, k)| match k {
@@ -650,7 +666,7 @@ mod tests {
                 Kind::ContractUngated { .. } => "ungated",
             })
             .collect();
-        assert_eq!(kinds, vec!["safe", "ungated", "contract", "safe"]);
+        assert_eq!(kinds, vec!["safe", "ungated", "contract", "safe", "safe"]);
     }
 
     #[test]

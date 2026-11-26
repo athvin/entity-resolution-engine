@@ -48,6 +48,7 @@ mod pg_clear_endpoint;
 mod pg_config;
 mod pg_connections;
 mod pg_dataset_concurrency;
+mod pg_dataset_config;
 mod pg_dataset_isolation;
 mod pg_dataset_sweep;
 mod pg_datasets;

@@ -794,8 +794,89 @@ pub fn config_reference_problems(config: &Config) -> Vec<String> {
         }
     }
 
+    problems.extend(source_mapping_problems(config));
+
     problems.sort();
     problems.dedup();
+    problems
+}
+
+/// The customer's column mappings (`sources.<name>`), checked before a run can
+/// be queued against them (#1010).
+///
+/// Each of these was otherwise discovered by the first ingest or, worse, never:
+/// a mapping keyed by a misspelled attribute (`emial: contact_email`) was
+/// carried along and silently ignored by standardization, so the tenant's
+/// emails simply never matched; a blank `record_id_column` failed every
+/// delivery; and two sources sharing a `priority_rank` made `source_priority`
+/// survivorship a coin toss decided by the source names' sort order.
+#[must_use]
+pub fn source_mapping_problems(config: &Config) -> Vec<String> {
+    let canonical: BTreeSet<&str> = canonical_attributes(config.entity_type)
+        .iter()
+        .copied()
+        .collect();
+    let mut problems = Vec::new();
+    if config.sources.is_empty() {
+        problems.push(
+            "`sources` declares no source; map at least one delivering system's columns".into(),
+        );
+    }
+    let mut ranks: BTreeMap<i64, Vec<&str>> = BTreeMap::new();
+    for (name, spec) in &config.sources {
+        ranks.entry(spec.priority_rank).or_default().push(name);
+        for (field, value) in [
+            ("record_id_column", &spec.record_id_column),
+            ("updated_at_column", &spec.updated_at_column),
+        ] {
+            if value.trim().is_empty() {
+                problems.push(format!("source `{name}`: `{field}` names no column"));
+            }
+        }
+        if spec.columns.is_empty() {
+            problems.push(format!(
+                "source `{name}` maps no columns; map at least one canonical attribute (one of: {})",
+                canonical.iter().copied().collect::<Vec<_>>().join(", ")
+            ));
+        }
+        let mut seen: BTreeMap<&str, &str> = BTreeMap::new();
+        for (attribute, column) in &spec.columns {
+            if !canonical.contains(attribute.as_str()) {
+                problems.push(format!(
+                    "source `{name}` maps `{attribute}`, which is not a canonical {} attribute \
+                     (one of: {})",
+                    match config.entity_type {
+                        EntityType::Person => "person",
+                        EntityType::Account => "account",
+                    },
+                    canonical.iter().copied().collect::<Vec<_>>().join(", ")
+                ));
+            }
+            if column.trim().is_empty() {
+                problems.push(format!(
+                    "source `{name}` maps `{attribute}` to an empty column name"
+                ));
+            } else if let Some(previous) = seen.insert(column.as_str(), attribute.as_str()) {
+                problems.push(format!(
+                    "source `{name}` maps column `{column}` to both `{previous}` and \
+                     `{attribute}`; each customer column carries one attribute"
+                ));
+            }
+        }
+    }
+    for (rank, names) in ranks {
+        if names.len() > 1 {
+            problems.push(format!(
+                "sources {} share priority_rank {rank}; ranks must be distinct, or \
+                 `source_priority` survivorship cannot choose between them",
+                names
+                    .iter()
+                    .map(|n| format!("`{n}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+    }
     problems
 }
 
@@ -812,6 +893,93 @@ mod tests {
     #[test]
     fn a_valid_config_has_no_reference_problems() {
         assert_eq!(config_reference_problems(&load(GOOD)), Vec::<String>::new());
+    }
+
+    /// #1010: a customer's column mappings are checked before any run is
+    /// queued against them, each mistake with its own actionable message.
+    #[test]
+    fn source_mappings_are_checked_before_a_run() {
+        let good = load(GOOD);
+        assert_eq!(source_mapping_problems(&good), Vec::<String>::new());
+        let first = good.sources.keys().next().unwrap().clone();
+        let second = good.sources.keys().nth(1).unwrap().clone();
+
+        let mut typo = good.clone();
+        let spec = typo.sources.get_mut(&first).unwrap();
+        let column = spec.columns.shift_remove("email").unwrap();
+        spec.columns.insert("emial".into(), column);
+        let problems = config_reference_problems(&typo);
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains(&format!("source `{first}` maps `emial`"))
+                    && p.contains("not a canonical person attribute")
+                    && p.contains("email")),
+            "{problems:?}"
+        );
+
+        let mut twice = good.clone();
+        let spec = twice.sources.get_mut(&first).unwrap();
+        let given = spec.columns["given_name"].clone();
+        spec.columns.insert("family_name".into(), given.clone());
+        let problems = source_mapping_problems(&twice);
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains(&format!("maps column `{given}` to both"))),
+            "{problems:?}"
+        );
+
+        let mut blank = good.clone();
+        blank.sources.get_mut(&first).unwrap().record_id_column = " ".into();
+        blank
+            .sources
+            .get_mut(&first)
+            .unwrap()
+            .columns
+            .insert("phone".into(), String::new());
+        let problems = source_mapping_problems(&blank);
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("`record_id_column` names no column")),
+            "{problems:?}"
+        );
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("maps `phone` to an empty column name")),
+            "{problems:?}"
+        );
+
+        let mut empty = good.clone();
+        empty.sources.get_mut(&first).unwrap().columns.clear();
+        let problems = source_mapping_problems(&empty);
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains(&format!("source `{first}` maps no columns"))),
+            "{problems:?}"
+        );
+
+        let mut tied = good.clone();
+        let rank = tied.sources[&first].priority_rank;
+        tied.sources.get_mut(&second).unwrap().priority_rank = rank;
+        let problems = source_mapping_problems(&tied);
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains(&format!("share priority_rank {rank}"))),
+            "{problems:?}"
+        );
+
+        let mut none = good;
+        none.sources.clear();
+        assert!(
+            source_mapping_problems(&none)
+                .iter()
+                .any(|p| p.contains("declares no source")),
+        );
     }
 
     /// E5b: the ensemble's structural rules. Whether a name resolves to an

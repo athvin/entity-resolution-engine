@@ -413,6 +413,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/orgs/{org}/datasets/{ds}/config/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** validate a candidate config against a dataset without storing it */
+        post: operations["post_orgs_by_org_datasets_by_ds_config_validate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/orgs/{org}/datasets/{ds}/config/versions": {
         parameters: {
             query?: never;
@@ -2359,6 +2376,28 @@ export interface components {
             tier?: string | null;
             /** Format: int64 */
             version: number;
+        };
+        /**
+         * @description `POST …/config/validate`: what publishing this document would do, decided
+         *     without storing or publishing anything.
+         */
+        ConfigValidation: {
+            /** @description The top-level blocks that differ from the active config. */
+            changed_blocks: string[];
+            /**
+             * @description The canonical document's hash, the value a run records as the config
+             *     it executed under; null when the YAML does not load.
+             */
+            config_hash?: string | null;
+            /** @description Every reason publish would refuse it, each naming what to change. */
+            problems: string[];
+            /**
+             * @description The rebuild tier publish would queue (`A`, `B` or `C`), versus the
+             *     dataset's active config; null when nothing that matters changed.
+             */
+            tier?: string | null;
+            /** @description True when publish would accept the document as written. */
+            valid: boolean;
         };
         /** @description A versioned config document for a tenant: its YAML, hash and publish state. */
         ConfigVersion: {
@@ -5811,6 +5850,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConfigVersionView"];
+                };
+            };
+            /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        detail: string;
+                    };
+                };
+            };
+        };
+    };
+    post_orgs_by_org_datasets_by_ds_config_validate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+                ds: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    yaml: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful response. */
+            "2XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigValidation"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */

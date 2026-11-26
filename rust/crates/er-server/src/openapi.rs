@@ -114,6 +114,7 @@ pub struct ApiDoc;
     crate::ConfigVersionView,
     crate::ConfigVersionItem,
     crate::ConfigDraftCreated,
+    crate::ConfigValidation,
     crate::ConfigPublished,
     crate::LexiconPair,
     crate::Lexicon,

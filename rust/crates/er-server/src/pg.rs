@@ -1090,22 +1090,6 @@ pub async fn set_dataset_display_name(
     Ok(())
 }
 
-/// The publish-time context for an org: `(config_path, state,
-/// active_config_version)`, `None` if the org is absent.
-///
-/// # Errors
-/// Propagates the query error.
-pub async fn org_publish_context(
-    client: &Client,
-    org: &str,
-) -> Result<Option<(String, String, Option<i64>)>, PgError> {
-    Ok(er_entities::org::read::by_name(client, org)
-        .await?
-        .into_iter()
-        .next()
-        .map(|o| (o.config_path, o.state, o.active_config_version)))
-}
-
 /// A config-version list row (`configsvc.py` list — no `yaml` body).
 pub struct ConfigVersionRow {
     pub version: i64,
@@ -2034,13 +2018,18 @@ pub async fn publish_config_version(
     dataset_id: &str,
     version: i64,
     tier: Option<&str>,
+    is_default_dataset: bool,
 ) -> Result<(), PgError> {
     er_entities::config_version::update::publish(client, tier, dataset_id, version).await?;
-    // Both pointers move: the dataset's is what every dataset-scoped read
-    // (`dataset_active_config`, delivery preconditions) consults; the org's is
-    // the deprecated mirror the clean-break phase retires.
+    // The dataset's pointer is what every dataset-scoped read
+    // (`dataset_active_config`, delivery preconditions) consults. The org's is
+    // the deprecated mirror the clean-break phase retires, and it mirrors the
+    // DEFAULT dataset only: moving it for any other dataset's publish pointed
+    // the org — and every org-scoped read — at another dataset's config.
     er_entities::dataset::update::set_active_config(client, version, dataset_id).await?;
-    er_entities::org::update::set_active_config(client, version, org_name).await?;
+    if is_default_dataset {
+        er_entities::org::update::set_active_config(client, version, org_name).await?;
+    }
     Ok(())
 }
 
