@@ -434,6 +434,156 @@ async fn a_tenant_configures_ingests_resolves_and_reads_back_with_its_own_key() 
         arrow::ipc::reader::StreamReader::try_new(std::io::Cursor::new(bytes), None).unwrap();
     assert_eq!(reader.map(|b| b.unwrap().num_rows()).sum::<usize>(), 10);
 
+    // --- 6b. Human review and tags through the same contract (#516) ----------
+    // The admin mints a steward key for the people who review (#866).
+    let (status, issued) = json_call(
+        &router,
+        "POST",
+        "/v1/orgs/acme/api-keys",
+        &key,
+        Some(json!({"role": "steward"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{issued}");
+    let steward = issued["key"].as_str().unwrap().to_owned();
+    let (status, reviews) =
+        json_call(&router, "GET", &format!("{base}/reviews"), &steward, None).await;
+    assert_eq!(status, StatusCode::OK, "{reviews}");
+    let open = reviews["items"].as_array().unwrap();
+    assert!(
+        !open.is_empty(),
+        "base_10 leaves gray-band pairs to review: {reviews}"
+    );
+    let review = open[0]["id"].as_str().unwrap().to_owned();
+    // Reject it, applied now: the decision is staged, drained and reconciled.
+    let (status, decided) = json_call(
+        &router,
+        "POST",
+        &format!("{base}/reviews/bulk-resolve"),
+        &steward,
+        Some(
+            json!({"items": [{"review_id": review, "resolution": "no_match"}], "apply_now": true}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{decided}");
+    let applied = settle(
+        &mut harness,
+        &client,
+        &org.id,
+        &[decided["apply_job"].as_str().unwrap().to_owned()],
+    )
+    .await;
+    assert_eq!(applied[0].1, "succeeded", "{applied:?}");
+    let (status, after) = json_call(
+        &router,
+        "GET",
+        &format!("{base}/reviews/{review}"),
+        &steward,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{after}");
+    assert!(
+        after["status"]
+            .as_str()
+            .is_some_and(|s| s.starts_with("resolved")),
+        "the decision is recorded on the review: {after}"
+    );
+
+    // Unmatch one member of a duplicate group: it leaves that group.
+    let member = groups[0]["members"][0].as_str().unwrap().to_owned();
+    let (status, unmatched) = json_call(
+        &router,
+        "POST",
+        &format!("{base}/records/unmatch"),
+        &steward,
+        Some(json!({"record_key": member, "apply_now": true})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{unmatched}");
+    assert_eq!(unmatched["entity_id"], entity, "{unmatched}");
+    let applied = settle(
+        &mut harness,
+        &client,
+        &org.id,
+        &[unmatched["apply_job"].as_str().unwrap().to_owned()],
+    )
+    .await;
+    assert_eq!(applied[0].1, "succeeded", "{applied:?}");
+    let (_, regrouped) = json_call(
+        &router,
+        "GET",
+        &format!("{base}/duplicates"),
+        &steward,
+        None,
+    )
+    .await;
+    assert!(
+        !regrouped["items"].as_array().unwrap().iter().any(|g| {
+            g["entity_id"] == entity
+                && g["members"]
+                    .as_array()
+                    .is_some_and(|m| m.iter().any(|k| k == &json!(member)))
+        }),
+        "the unmatched record left its group: {regrouped}"
+    );
+    // Lineage of what happened: the latest run's entity events.
+    let (status, runs) = json_call(&router, "GET", &format!("{base}/runs"), &steward, None).await;
+    assert_eq!(status, StatusCode::OK, "{runs}");
+    // A bare array of runs; the correction pass is the one the decisions made.
+    let runs = runs.as_array().unwrap();
+    let latest = runs
+        .iter()
+        .find(|r| r["mode"] == "correct")
+        .unwrap_or(&runs[0])["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let (status, events) = json_call(
+        &router,
+        "GET",
+        &format!("{base}/runs/{latest}/entity-events"),
+        &steward,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{events}");
+    assert!(
+        !events["items"].as_array().unwrap().is_empty(),
+        "the correction run recorded entity events: {events}"
+    );
+
+    // Tags: an admin defines the vocabulary, a steward applies it.
+    let (status, tag) = json_call(
+        &router,
+        "POST",
+        "/v1/orgs/acme/tags",
+        &key,
+        Some(json!({"name": "vip"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{tag}");
+    let (status, tagged) = json_call(
+        &router,
+        "POST",
+        &format!("{base}/tags/{}/apply", tag["id"].as_str().unwrap()),
+        &steward,
+        Some(json!({"subject_type": "entity", "subject_id": entity})),
+    )
+    .await;
+    assert!(status.is_success(), "{status} {tagged}");
+    let (status, taggings) = json_call(
+        &router,
+        "GET",
+        &format!("{base}/taggings?subject_type=entity&subject_id={entity}"),
+        &steward,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{taggings}");
+    assert!(taggings.to_string().contains(entity), "{taggings}");
+
     // --- 7. A dataset of the tenant's own, end to end (#1010-#1012) ----------
     // Created, validated, configured and fed with the admin key alone.
     let (status, provisioning) = json_call(
