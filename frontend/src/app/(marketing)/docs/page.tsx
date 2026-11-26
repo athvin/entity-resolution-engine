@@ -438,6 +438,14 @@ curl --fail-with-body -X POST "$ER_API_ORIGIN/v1/orgs/$ER_ORG/datasets/$ER_DATAS
         <section id="results">
           <h2>Retrieve results and evidence</h2>
           <p>
+            Three moments are distinct. A delivery is <strong>accepted</strong> when you hold its
+            202 receipt; resolution is <strong>complete</strong> when that receipt’s job succeeds;
+            and the results below are then the product — duplicate groups, golden records, lineage
+            and exports. Nothing is written back to your systems through this API: provider
+            writeback, such as merging records in Salesforce, is a separate, explicitly approved
+            integration.
+          </p>
+          <p>
             The golden-record list is an <strong>Apache Arrow IPC stream</strong>, not JSON. Read{" "}
             <code>application/vnd.apache.arrow.stream</code> with an Arrow-capable client. The
             response headers carry <code>x-er-snapshot</code> and, when another page exists,{" "}

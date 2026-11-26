@@ -4731,6 +4731,21 @@ async fn list_jobs(
     .into_response()
 }
 
+/// A job of this dataset, or `None`. Jobs are stored per org, so a lookup by
+/// id alone served another dataset's job under this dataset's path (#1013);
+/// a dataset-less (org-level) job stays visible from every dataset, as the
+/// provisioning job a new org hands back must be.
+async fn dataset_job(
+    client: &tokio_postgres::Client,
+    org_id: &str,
+    dataset_id: &str,
+    job_id: &str,
+) -> Result<Option<er_entities::job::Job>, tokio_postgres::Error> {
+    Ok(pg::get_job(client, org_id, job_id)
+        .await?
+        .filter(|job| job.dataset_id.as_deref().is_none_or(|id| id == dataset_id)))
+}
+
 /// Viewer+: one job by id (`GET /v1/orgs/{org}/datasets/{ds}/jobs/{job_id}`), 404 if absent
 /// or not this org's.
 async fn get_job(
@@ -4751,10 +4766,11 @@ async fn get_job(
             Err(r) => return *r,
         };
         // Scope-correct before anything is served: an unknown dataset 404s.
-        if let Err(r) = dataset_or_404(&client, &org_row, &ds).await {
-            return *r;
-        }
-        return match pg::get_job(&client, &org_row.id, &job_id).await {
+        let d = match dataset_or_404(&client, &org_row, &ds).await {
+            Ok(d) => d,
+            Err(r) => return *r,
+        };
+        return match dataset_job(&client, &org_row.id, &d.id, &job_id).await {
             Ok(Some(job)) => {
                 (StatusCode::OK, Json(er_entities::job::JobWire::from(&job))).into_response()
             }
@@ -4802,10 +4818,11 @@ async fn cancel_job(
             Err(r) => return *r,
         };
         // Scope-correct before anything is served: an unknown dataset 404s.
-        if let Err(r) = dataset_or_404(&client, &org_row, &ds).await {
-            return *r;
-        }
-        return match pg::get_job(&client, &org_row.id, &job_id).await {
+        let d = match dataset_or_404(&client, &org_row, &ds).await {
+            Ok(d) => d,
+            Err(r) => return *r,
+        };
+        return match dataset_job(&client, &org_row.id, &d.id, &job_id).await {
             // Every kind the DAG registry parses is the executor's now that the
             // `ER_EXECUTOR_DAG_KINDS` allowlist is gone (#645), so this is the
             // path essentially every cancel takes. The direct-`mark` arm below
@@ -4914,8 +4931,14 @@ async fn resume_job(
         Err(r) => return *r,
     };
     // Scope-correct before anything is served: an unknown dataset 404s.
-    if let Err(r) = dataset_or_404(&client, &org_row, &ds).await {
-        return *r;
+    let d = match dataset_or_404(&client, &org_row, &ds).await {
+        Ok(d) => d,
+        Err(r) => return *r,
+    };
+    match dataset_job(&client, &org_row.id, &d.id, &job_id).await {
+        Ok(Some(_)) => {}
+        Ok(None) => return detail_err(StatusCode::NOT_FOUND, "no such job"),
+        Err(e) => return pg_err(e),
     }
     match pg::resume_job(&client, &org_row.id, &job_id).await {
         Ok(true) => {
@@ -4972,8 +4995,14 @@ async fn list_job_tasks(
         Err(r) => return *r,
     };
     // Scope-correct before anything is served: an unknown dataset 404s.
-    if let Err(r) = dataset_or_404(&client, &org_row, &ds).await {
-        return *r;
+    let d = match dataset_or_404(&client, &org_row, &ds).await {
+        Ok(d) => d,
+        Err(r) => return *r,
+    };
+    match dataset_job(&client, &org_row.id, &d.id, &job_id).await {
+        Ok(Some(_)) => {}
+        Ok(None) => return detail_err(StatusCode::NOT_FOUND, "no such job"),
+        Err(e) => return pg_err(e),
     }
     match er_entities::task_instance::read::by_job(&client, &org_row.id, &job_id).await {
         Ok(tasks) => {
@@ -5049,10 +5078,11 @@ async fn clear_job_task(
         Ok(r) => r,
         Err(r) => return *r,
     };
-    if let Err(r) = dataset_or_404(&client, &org_row, &ds).await {
-        return *r;
-    }
-    let job = match pg::get_job(&client, &org_row.id, &job_id).await {
+    let d = match dataset_or_404(&client, &org_row, &ds).await {
+        Ok(d) => d,
+        Err(r) => return *r,
+    };
+    let job = match dataset_job(&client, &org_row.id, &d.id, &job_id).await {
         Ok(Some(j)) => j,
         Ok(None) => return detail_err(StatusCode::NOT_FOUND, "no such job"),
         Err(e) => return pg_err(e),

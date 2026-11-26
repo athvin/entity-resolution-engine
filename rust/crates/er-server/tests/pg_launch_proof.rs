@@ -434,6 +434,283 @@ async fn a_tenant_configures_ingests_resolves_and_reads_back_with_its_own_key() 
         arrow::ipc::reader::StreamReader::try_new(std::io::Cursor::new(bytes), None).unwrap();
     assert_eq!(reader.map(|b| b.unwrap().num_rows()).sum::<usize>(), 10);
 
+    // --- 7. A dataset of the tenant's own, end to end (#1010-#1012) ----------
+    // Created, validated, configured and fed with the admin key alone.
+    let (status, provisioning) = json_call(
+        &router,
+        "POST",
+        "/v1/orgs/acme/datasets",
+        &key,
+        Some(json!({"name": "contacts", "display_name": "Contacts", "entity_type": "person"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{provisioning}");
+    let provisioned = settle(
+        &mut harness,
+        &client,
+        &org.id,
+        &[provisioning["job_id"].as_str().unwrap().to_owned()],
+    )
+    .await;
+    assert_eq!(provisioned[0].1, "succeeded", "{provisioned:?}");
+    let contacts = "/v1/orgs/acme/datasets/contacts";
+    // A mapping mistake is reported before anything is stored or queued.
+    let (status, checked) = json_call(
+        &router,
+        "POST",
+        &format!("{contacts}/config/validate"),
+        &key,
+        Some(json!({"yaml": STARTER_YAML.replace("given_name:   fname", "givenname:   fname")})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{checked}");
+    assert_eq!(checked["valid"], false, "{checked}");
+    assert!(checked.to_string().contains("givenname"), "{checked}");
+    let (status, checked) = json_call(
+        &router,
+        "POST",
+        &format!("{contacts}/config/validate"),
+        &key,
+        Some(json!({"yaml": STARTER_YAML})),
+    )
+    .await;
+    assert_eq!(checked["valid"], true, "{status} {checked}");
+    let (status, draft) = json_call(
+        &router,
+        "POST",
+        &format!("{contacts}/config/versions"),
+        &key,
+        Some(json!({"yaml": STARTER_YAML})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{draft}");
+    let (status, published) = json_call(
+        &router,
+        "POST",
+        &format!("{contacts}/config/versions/{}/publish", draft["version"]),
+        &key,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{published}");
+    settle(
+        &mut harness,
+        &client,
+        &org.id,
+        &ids(&published["jobs_enqueued"]),
+    )
+    .await;
+
+    // JSON with an Idempotency-Key: the retry is the same delivery.
+    let crm = csv_records(&fixture("base_10/base/crm.csv"))
+        .into_iter()
+        .map(|mut r| {
+            r.as_object_mut().unwrap().remove("persona_id");
+            r
+        })
+        .collect::<Vec<_>>();
+    let push = |idem: &'static str| {
+        let router = router.clone();
+        let key = key.clone();
+        let crm = crm.clone();
+        async move {
+            let resp = router
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/v1/orgs/acme/datasets/contacts/records/ingest")
+                        .header(header::AUTHORIZATION, format!("Bearer {key}"))
+                        .header(header::CONTENT_TYPE, "application/json")
+                        .header("Idempotency-Key", idem)
+                        .body(Body::from(
+                            json!({"source": "crm", "records": crm}).to_string(),
+                        ))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let status = resp.status();
+            let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20)
+                .await
+                .unwrap();
+            (status, serde_json::from_slice::<Value>(&bytes).unwrap())
+        }
+    };
+    let (status, first) = push("contacts-crm-1").await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{first}");
+    let (_, retried) = push("contacts-crm-1").await;
+    assert_eq!(
+        retried["job"]["id"], first["job"]["id"],
+        "a retry is the same run"
+    );
+    let mut fed = vec![first["job"]["id"].as_str().unwrap().to_owned()];
+
+    // billing through a resumable upload, webforms as a plain import.
+    let billing = std::fs::read(fixture("base_10/base/billing.csv")).unwrap();
+    let sha = {
+        use sha2::Digest;
+        hex::encode(sha2::Sha256::digest(&billing))
+    };
+    let (status, session) = json_call(
+        &router,
+        "POST",
+        &format!("{contacts}/uploads"),
+        &key,
+        Some(json!({"source": "billing", "bytes": billing.len(), "sha256": sha})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{session}");
+    let part_size = usize::try_from(session["part_size"].as_u64().unwrap()).unwrap();
+    for (i, chunk) in billing.chunks(part_size).enumerate() {
+        let (status, _, _) = call(
+            &router,
+            "PUT",
+            &session["part_url"]
+                .as_str()
+                .unwrap()
+                .replace("{part}", &(i + 1).to_string()),
+            &key,
+            "application/octet-stream",
+            Body::from(chunk.to_vec()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+    }
+    let (status, receipt) = json_call(
+        &router,
+        "POST",
+        &format!(
+            "{contacts}/uploads/{}/complete",
+            session["upload_id"].as_str().unwrap()
+        ),
+        &key,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{receipt}");
+    fed.push(receipt["job"]["id"].as_str().unwrap().to_owned());
+    let content = std::fs::read_to_string(fixture("base_10/base/webforms.csv")).unwrap();
+    let (ct, body) = multipart("webforms.csv", &content);
+    let (status, bytes, _) = call(
+        &router,
+        "POST",
+        &format!("{contacts}/imports?source=webforms"),
+        &key,
+        &ct,
+        body,
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    let reply: Value = serde_json::from_slice(&bytes).unwrap();
+    fed.push(reply["job"]["id"].as_str().unwrap().to_owned());
+    let after = settle(&mut harness, &client, &org.id, &fed).await;
+    assert!(after.iter().all(|(_, s, _)| s == "succeeded"), "{after:?}");
+
+    // The results agree with the default dataset's, and the export agrees
+    // with the live read at the snapshot it pinned.
+    let (_, bytes, _) = call(
+        &router,
+        "GET",
+        &format!("{contacts}/golden-records"),
+        &key,
+        "application/json",
+        Body::empty(),
+    )
+    .await;
+    let reader =
+        arrow::ipc::reader::StreamReader::try_new(std::io::Cursor::new(bytes), None).unwrap();
+    assert_eq!(reader.map(|b| b.unwrap().num_rows()).sum::<usize>(), 10);
+    // One lineage row per source record delivered: every fixture row.
+    let source_records: usize = ["crm", "billing", "webforms"]
+        .iter()
+        .map(|s| csv_records(&fixture(&format!("base_10/base/{s}.csv"))).len())
+        .sum();
+    for (kind, expected) in [("golden", 10usize), ("lineage", source_records)] {
+        let (status, queued) = json_call(
+            &router,
+            "POST",
+            &format!("{contacts}/exports"),
+            &key,
+            Some(json!({"kind": kind, "format": "jsonl"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::ACCEPTED, "{kind}: {queued}");
+        let export = queued["export_id"].as_str().unwrap().to_owned();
+        let done = settle(
+            &mut harness,
+            &client,
+            &org.id,
+            std::slice::from_ref(&export),
+        )
+        .await;
+        assert_eq!(done[0].1, "succeeded", "{kind}: {done:?}");
+        let (status, bytes, _) = call(
+            &router,
+            "GET",
+            &format!("{contacts}/exports/{export}/download"),
+            &key,
+            "application/json",
+            Body::empty(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{kind}");
+        let rows = String::from_utf8(bytes)
+            .unwrap()
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .count();
+        assert_eq!(rows, expected, "{kind} export rows");
+    }
+
+    // A delivery the pipeline cannot read fails as a run, visibly: the
+    // receipt's job reports `failed` with a class and a detail.
+    let (ct, body) = multipart("webforms.csv", "not_a_declared_header\nx\n");
+    let (status, bytes, _) = call(
+        &router,
+        "POST",
+        &format!("{contacts}/imports?source=webforms"),
+        &key,
+        &ct,
+        body,
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    let broken: Value = serde_json::from_slice(&bytes).unwrap();
+    let broken_job = broken["job"]["id"].as_str().unwrap().to_owned();
+    settle(
+        &mut harness,
+        &client,
+        &org.id,
+        std::slice::from_ref(&broken_job),
+    )
+    .await;
+    let (status, job) = json_call(
+        &router,
+        "GET",
+        &format!("{contacts}/jobs/{broken_job}"),
+        &key,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{job}");
+    assert_eq!(job["state"], "failed", "{job}");
+    assert!(job["error_class"].as_str().is_some(), "{job}");
+    assert!(job["error_detail"].as_str().is_some(), "{job}");
+
+    // Datasets do not leak into each other: contacts' upload and export ids
+    // are absent from the default dataset.
+    for uri in [
+        format!("{base}/uploads/{}", session["upload_id"].as_str().unwrap()),
+        format!("{base}/jobs/{broken_job}"),
+    ] {
+        let (status, _) = json_call(&router, "GET", &uri, &key, None).await;
+        assert_eq!(
+            status,
+            StatusCode::NOT_FOUND,
+            "cross-dataset reads are 404: {uri}"
+        );
+    }
+
     // --- 6. Another tenant's key sees nothing of this one --------------------
     let (status, other) = json_call(
         &router,

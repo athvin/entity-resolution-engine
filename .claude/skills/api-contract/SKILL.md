@@ -13,6 +13,10 @@ those operations for a customer using their own systems. Salesforce is the first
 commercial adapter; SFTP and other transports must reuse the same contracts.
 For product prioritization use `project-board`.
 
+What the executable launch proof covers, the supported limits, and what is
+still owed before an external production key are in
+[references/launch-readiness.md](references/launch-readiness.md).
+
 This is the intended boundary. The generated document currently pins component
 schemas and source-derived operations between the Rust backend and TypeScript
 frontend; typed responses, query parameters and consumer coverage remain gaps. A schema snapshot passing does not
