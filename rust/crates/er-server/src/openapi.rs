@@ -573,6 +573,51 @@ pub fn breaking_changes(base_json: &str, new_json: &str) -> Vec<String> {
     breaks
 }
 
+/// `er-server api-check <base.json> <candidate.json> [--strict]` (#658): the
+/// breaking changes from a deployed contract to a candidate one, both read
+/// from files. Exit 0 when compatible (or, without `--strict`, advisory), 2
+/// when `--strict` and something breaks, 64 when an input cannot be read or
+/// the arguments are wrong. An unreadable input is never "no changes": the
+/// launch gate must refuse a release it could not check.
+#[must_use]
+pub fn api_check_cli(args: &[String]) -> i32 {
+    let strict = args.iter().any(|a| a == "--strict");
+    let files: Vec<&String> = args.iter().filter(|a| !a.starts_with("--")).collect();
+    let [base_path, candidate_path] = files.as_slice() else {
+        eprintln!("usage: er-server api-check <base.json> <candidate.json> [--strict]");
+        return 64;
+    };
+    let read = |path: &str| {
+        std::fs::read_to_string(path)
+            .map_err(|e| format!("cannot read {path}: {e}"))
+            .and_then(|text| {
+                serde_json::from_str::<serde_json::Value>(&text)
+                    .map(|_| text)
+                    .map_err(|e| format!("{path} is not JSON: {e}"))
+            })
+    };
+    let (base, candidate) = match (read(base_path), read(candidate_path)) {
+        (Ok(base), Ok(candidate)) => (base, candidate),
+        (Err(e), _) | (_, Err(e)) => {
+            eprintln!("er-server api-check: {e}");
+            return 64;
+        }
+    };
+    let breaks = breaking_changes(&base, &candidate);
+    if breaks.is_empty() {
+        println!("er-server api-check: no breaking API changes");
+        return 0;
+    }
+    eprintln!(
+        "er-server api-check: {} breaking API change(s) from the deployed contract:",
+        breaks.len()
+    );
+    for b in &breaks {
+        eprintln!("  - {b}");
+    }
+    if strict { 2 } else { 0 }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -688,6 +733,76 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The launch gate's verdicts (#658): an additive change passes, a removed
+    /// operation and a retyped property fail under `--strict`, and an
+    /// unreadable or non-JSON input is a refusal (64), never a pass.
+    #[test]
+    fn api_check_passes_additive_and_refuses_breaking_or_unreadable() {
+        let dir = std::env::temp_dir().join(format!("er_api_check_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let base: serde_json::Value =
+            serde_json::from_str(&openapi_json(Audience::Public)).unwrap();
+        let write = |name: &str, doc: &serde_json::Value| {
+            let path = dir.join(name);
+            std::fs::write(&path, doc.to_string()).unwrap();
+            path.to_string_lossy().into_owned()
+        };
+        let base_path = write("base.json", &base);
+
+        // Additive: a new operation.
+        let mut additive = base.clone();
+        additive["paths"]["/v1/new-thing"] = serde_json::json!({"get": {
+            "operationId": "get_new_thing", "responses": {"2XX": {"description": "ok"}}}});
+        let additive_path = write("additive.json", &additive);
+        let strict = |candidate: &str| {
+            api_check_cli(&[
+                base_path.clone(),
+                candidate.to_string(),
+                "--strict".to_string(),
+            ])
+        };
+        assert_eq!(strict(&additive_path), 0, "an additive change must pass");
+
+        // Breaking: an operation removed.
+        let mut removed = base.clone();
+        let path = removed["paths"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .find(|p| p.contains("/golden-records"))
+            .cloned()
+            .unwrap();
+        removed["paths"].as_object_mut().unwrap().remove(&path);
+        assert_eq!(
+            strict(&write("removed.json", &removed)),
+            2,
+            "a removed operation must fail"
+        );
+        // ...but advisory without --strict.
+        assert_eq!(
+            api_check_cli(&[base_path.clone(), write("removed2.json", &removed)]),
+            0
+        );
+
+        // Breaking: a property retyped.
+        let mut retyped = base.clone();
+        retyped["components"]["schemas"]["GoldenRecord"]["properties"]["id"] =
+            serde_json::json!({"type": "integer"});
+        assert_eq!(
+            strict(&write("retyped.json", &retyped)),
+            2,
+            "a retyped property must fail"
+        );
+
+        // Unreadable and malformed inputs refuse.
+        assert_eq!(strict("/nonexistent/candidate.json"), 64);
+        let junk = dir.join("junk.json");
+        std::fs::write(&junk, "<html>AccessDenied</html>").unwrap();
+        assert_eq!(strict(&junk.to_string_lossy()), 64);
+        assert_eq!(api_check_cli(&[base_path]), 64, "one file is a usage error");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

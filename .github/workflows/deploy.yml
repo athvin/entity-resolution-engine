@@ -84,6 +84,12 @@ on:
       sha:
         description: Commit sha to deploy (must already be built in ECR)
         required: true
+      api_break_ok:
+        description: >-
+          Prod only. A reason to release a public-contract BREAK anyway — a
+          deliberate version change or a rollback (#658). Empty refuses a break.
+        required: false
+        default: ""
 
 concurrency:
   # One group for BOTH environment jobs: a merge landing while either deploy
@@ -331,6 +337,22 @@ jobs:
       - name: Resolve image digests
         id: digests
         run: bash scripts/ci/deploy-resolve-digests.sh
+      # The API launch gate (#658): production is where external consumers
+      # are, so a release whose public contract breaks the DEPLOYED one is
+      # refused here, before the inactive colour exists. The self-test runs
+      # first because a gate that silently passes reads like a clean release.
+      - name: API launch gate self-test
+        run: bash scripts/ci/api-launch-gate-test.sh
+      - name: Fetch the release's API checker
+        env:
+          API_DIGEST: ${{ steps.digests.outputs.er_api }}
+        run: bash scripts/ci/api-launch-gate-binary.sh
+      - name: API launch gate — compare with the deployed contract
+        env:
+          API_CONTRACT_BUCKET: er-prod-api-contract-797781631727
+          CANDIDATE: frontend/src/lib/api/openapi.public.json
+          API_BREAK_OK: ${{ github.event.inputs.api_break_ok }}
+        run: bash scripts/ci/api-launch-gate.sh check
       - name: Install helm
         run: bash scripts/ci/install-helm.sh
       - name: kubeconfig
@@ -401,3 +423,11 @@ jobs:
         env:
           LIVE: ${{ steps.colour.outputs.live }}
         run: bash scripts/ci/deploy-retire-colour.sh
+
+      # Only after the release is serving: the deployed pointer must name what
+      # production runs, never what it was about to run.
+      - name: Publish the deployed API contract
+        env:
+          API_CONTRACT_BUCKET: er-prod-api-contract-797781631727
+          CANDIDATE: frontend/src/lib/api/openapi.public.json
+        run: bash scripts/ci/api-launch-gate.sh publish

@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := check
-.PHONY: check-duckfleet-task check-duckfleet-reads check-duckfleet-compat build fmt lint doc test check check-e2e entities-check skills-check agent-bridge-check scripts-home-check workflow-shell-check tf-static-credentials-check frontend frontend-audit frontend-coverage run frontend-dev frontend-e2e frontend-baselines frontend-dev-reset image-api cluster-objects nodepools kind-up kind-down check-kind measure-runner-startup dev-up dev-suspend dev-resume dev-down obs-up clean symposium
+.PHONY: check-duckfleet-task check-duckfleet-reads check-duckfleet-compat build fmt lint doc test check check-e2e entities-check skills-check agent-bridge-check scripts-home-check workflow-shell-check api-launch-gate-check tf-static-credentials-check frontend frontend-audit frontend-coverage run frontend-dev frontend-e2e frontend-baselines frontend-dev-reset image-api cluster-objects nodepools kind-up kind-down check-kind measure-runner-startup dev-up dev-suspend dev-resume dev-down obs-up clean symposium
 
 # --- Rust backend: the application (engine, CLI, control plane) lives in rust/ ---
 #
@@ -99,6 +99,13 @@ workflow-shell-check:
 pr-contract-check:
 	bash scripts/ci/pr-contract-test.sh
 
+# The API launch gate's decisions (#658): pure bash against a stub `aws` and a
+# stub checker, so it runs with no AWS, no image and no cargo. Every refusal
+# branch is asserted, because a gate that silently passes reads like a clean
+# release.
+api-launch-gate-check:
+	bash scripts/ci/api-launch-gate-test.sh
+
 # #549's acceptance check, kept as a gate instead of a closed issue: exactly one
 # `aws_iam_access_key` in the Terraform tree (`builder`), and no static
 # ER_S3_* credential assignment. Self-test first, same reasoning as its two
@@ -110,7 +117,7 @@ tf-static-credentials-check:
 # The fast PR-equivalent backend gate (mirrors rust.yml's lint + test tiers),
 # plus the skill gate — a stale generated reference is the same class of defect
 # as a stale generated entity artifact.
-check: ci-speed-check fmt lint doc entities-check skills-check agent-bridge-check scripts-home-check workflow-shell-check pr-contract-check tf-static-credentials-check test
+check: ci-speed-check fmt lint doc entities-check skills-check agent-bridge-check scripts-home-check workflow-shell-check pr-contract-check api-launch-gate-check tf-static-credentials-check test
 
 # The gated e2e tiers: the DuckLake + extension pipeline and the Postgres
 # control-plane queue/dispatch. Needs the DuckDB extensions and a local
