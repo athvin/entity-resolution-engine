@@ -52,6 +52,21 @@ describe("marketing scene scoring", () => {
     expect(formatWeight(0)).toBe("0.0");
   });
 
+  // The scene strikes through every source not named in `held`, and the
+  // explorer marks every one that is: the data has to be true for both.
+  it("names, for each golden value, exactly the sources that hold it", () => {
+    for (const value of MERIDIAN_GOLDEN) {
+      for (const source of MERIDIAN_SOURCES) {
+        const key = value.field.toLowerCase() as keyof (typeof source)["raw"];
+        const holds = source.raw[key] === value.value || source.clean[key] === value.value;
+        expect(
+          (value.held as readonly string[]).includes(source.key),
+          `${value.field} / ${source.key}`,
+        ).toBe(holds);
+      }
+    }
+  });
+
   it("draws every golden value from a source that exists", () => {
     const keys = new Set<string>(MERIDIAN_SOURCES.map((s) => s.key));
     for (const value of MERIDIAN_GOLDEN) expect(keys.has(value.from)).toBe(true);
