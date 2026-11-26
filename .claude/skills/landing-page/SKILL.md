@@ -252,6 +252,11 @@ probing rather than reading:
   `animation-timeline`. Mark the element `data-scrub` and give it only an
   `animation-name`; its normal styles are the payoff, the keyframes the states
   before it.
+- **Wire a scene's timeline with `:where()`, never `:is()`.** A stage that
+  places its parts with per-element `animation-range` (one keyframe set, many
+  ranges) needs the shared wiring rule to lose to those ranges. `:is()` takes
+  its most specific argument's weight, and it beat every `[data-step]` range:
+  each field ran over the whole scroll, and only a filmed frame showed it.
 - **A probe page needs `<meta name="viewport">`.** Without it Playwright's
   WebKit reports support and never moves the element; with it, WebKit scrubs
   like Chromium. Next adds the tag to every real page.
