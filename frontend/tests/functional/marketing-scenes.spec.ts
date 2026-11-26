@@ -374,3 +374,96 @@ test.describe("/features/review", () => {
     await expect(outcome).toContainText("stay separate, in this run and every one after it");
   });
 });
+
+test.describe("/features/golden-records", () => {
+  const scrubTo = (page: Page, progress: number) =>
+    page.evaluate((p) => {
+      const track = document.querySelector('[data-scene="survivorship"]');
+      if (!track) throw new Error("no survivorship scene");
+      const box = track.getBoundingClientRect();
+      const top = box.top + window.scrollY;
+      const start = top - 64;
+      const end = top + box.height - window.innerHeight;
+      window.scrollTo({ top: Math.round(start + (end - start) * p), behavior: "instant" });
+    }, progress);
+  const opacity = (page: Page, selector: string) =>
+    page
+      .locator(`[data-scene="survivorship"] ${selector}`)
+      .first()
+      .evaluate((node) => Number(getComputedStyle(node).opacity));
+
+  // The golden record fills one field per beat: empty at the start, the email
+  // (the first rule) a quarter of the way in, everything at the end.
+  test("fills the golden record one field per beat", async ({ page }) => {
+    await page.goto("/features/golden-records");
+    await scrubTo(page, 0);
+    await expect.poll(() => opacity(page, ".surv-sources")).toBeGreaterThan(0.95);
+    expect(await opacity(page, '.surv-slot[data-step="1"] .surv-slot-value')).toBeLessThan(0.05);
+
+    await scrubTo(page, 0.25);
+    await expect.poll(() => opacity(page, '.surv-candidates[data-step="1"]')).toBeGreaterThan(0.95);
+    await expect
+      .poll(() => opacity(page, '.surv-slot[data-step="1"] .surv-slot-value'))
+      .toBeGreaterThan(0.95);
+    expect(await opacity(page, '.surv-slot[data-step="4"] .surv-slot-value')).toBeLessThan(0.05);
+
+    await scrubTo(page, 1);
+    await expect
+      .poll(() => opacity(page, '.surv-slot[data-step="4"] .surv-slot-value'))
+      .toBeGreaterThan(0.95);
+    expect(await opacity(page, ".surv-sources")).toBeLessThan(0.05);
+  });
+
+  test("with reduced motion it is a static storyboard", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/features/golden-records");
+    const scene = page.locator('[data-scene="survivorship"]');
+    for (const moment of ["sources", "email", "phone", "name", "address"])
+      await expect(scene.locator(`[data-moment="${moment}"]`)).toBeVisible();
+    expect(
+      await page
+        .getByTestId("scene-survivorship-stage")
+        .evaluate((stage) => stage.getAnimations({ subtree: true }).length),
+    ).toBe(0);
+  });
+
+  test("survivorship scene poster visual baseline @visual", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/features/golden-records");
+    await page.addStyleTag({
+      content: '[data-testid="marketing-header"] { visibility: hidden; }',
+    });
+    await expect(page.getByTestId("scene-survivorship")).toHaveScreenshot(
+      "marketing-survivorship-scene.png",
+    );
+  });
+
+  // The trace explorer names every source holding a value: two for the phone.
+  test("the field trace names the sources behind a value", async ({ page }) => {
+    await page.goto("/features/golden-records");
+    const trace = page.getByTestId("marketing-provenance");
+    await trace.getByRole("button", { name: "Phone" }).click();
+    const result = page.getByTestId("provenance-result");
+    await expect(result).toContainText("+1 415 555 0142");
+    await expect(result).toContainText("Salesforce, CSV upload");
+    await expect(result).toContainText("the most common value");
+  });
+
+  // The way back out plays as it scrolls into view and ends with every
+  // destination and event on screen.
+  test("the way back out arrives as it scrolls into view", async ({ page }) => {
+    await page.goto("/features/golden-records");
+    const figure = page.getByTestId("way-back");
+    const shown = () =>
+      figure.evaluate((node) =>
+        [...node.querySelectorAll(".way-back-destinations li, .way-back-events span")].map((item) =>
+          Number(getComputedStyle(item).opacity),
+        ),
+      );
+    expect(Math.max(...(await shown()))).toBeLessThan(0.05);
+    await figure.evaluate((node) => {
+      node.scrollIntoView({ block: "center" });
+    });
+    await expect.poll(async () => Math.min(...(await shown()))).toBeGreaterThan(0.95);
+  });
+});
