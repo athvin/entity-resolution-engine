@@ -5,9 +5,12 @@
    storyboard reduced motion, browsers without view timelines and the axe
    sweep see. Scrubbed: seven beats (states at 0, 17, 33, 50, 67, 83, 100%);
    the panels share the window's body, and each is placed on the scroll by its
-   own `animation-range`, so the window shows one step at a time. The wiring
-   rule is `:where()` so those ranges win (an `:is()` here once outweighed
-   them). Transform and opacity only; all text is `--foreground`. */
+   own `animation-range`, so the window shows one step at a time. A panel
+   holds for most of its beat and cuts to the next in about 2% of the scroll,
+   while the step rail's frame moves down a row, so the window never reads as
+   empty between steps. The wiring rule is `:where()` so those ranges win (an
+   `:is()` here once outweighed them). Transform and opacity only; all text is
+   `--foreground`. */
 
 .flow-stage {
   display: grid;
@@ -43,9 +46,42 @@
     24px 0 0 var(--border);
 }
 .flow-window-body {
+  padding: 16px;
+}
+.flow-panels {
   display: grid;
   gap: 18px;
-  padding: 16px;
+}
+/* The step rail exists only for the scrubbed window; the storyboard already
+   lists every panel. */
+.flow-rail {
+  display: none;
+}
+.flow-rail ol {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.flow-rail li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+.flow-rail-check {
+  font-size: 11px;
+}
+.flow-rail-marker {
+  position: absolute;
+  top: 14px;
+  right: 8px;
+  left: 8px;
+  height: 30px;
+  border: 1.5px solid var(--foreground);
+  border-radius: 8px;
 }
 .flow-panel {
   display: grid;
@@ -165,12 +201,23 @@
       container-type: size;
     }
     .flow-window {
-      width: min(600px, 100%);
+      width: min(640px, 100%);
     }
     .flow-window-body {
+      display: grid;
+      grid-template-columns: 8.5rem minmax(0, 1fr);
+      height: min(380px, 62cqh);
+      padding: 0;
+    }
+    .flow-rail {
       position: relative;
       display: block;
-      height: min(360px, 62cqh);
+      padding: 14px 8px;
+      border-right: 1px solid var(--border);
+    }
+    .flow-panels {
+      position: relative;
+      display: block;
     }
     .flow-panel {
       position: absolute;
@@ -182,7 +229,15 @@
     }
 
     .flow-stage
-      :where(.flow-panel, .flow-mapping li, .flow-progress > span, .flow-stamp, .flow-out li) {
+      :where(
+        .flow-panel,
+        .flow-mapping li,
+        .flow-progress > span,
+        .flow-stamp,
+        .flow-out li,
+        .flow-rail-marker,
+        .flow-rail-check
+      ) {
       animation-duration: 1ms;
       animation-timing-function: linear;
       animation-fill-mode: both;
@@ -194,26 +249,26 @@
     }
     .flow-panel[data-step="0"] {
       animation-name: flow-first;
-      animation-range: contain 0% contain 12%;
+      animation-range: contain 0% contain 9.5%;
     }
     .flow-panel[data-step="1"] {
-      animation-range: contain 8% contain 24%;
+      animation-range: contain 10% contain 24.5%;
     }
     .flow-panel[data-step="2"] {
-      animation-range: contain 25% contain 41%;
+      animation-range: contain 25% contain 41.2%;
     }
     .flow-panel[data-step="3"] {
-      animation-range: contain 42% contain 58%;
+      animation-range: contain 41.7% contain 57.8%;
     }
     .flow-panel[data-step="4"] {
-      animation-range: contain 59% contain 75%;
+      animation-range: contain 58.3% contain 74.5%;
     }
     .flow-panel[data-step="5"] {
-      animation-range: contain 76% contain 90%;
+      animation-range: contain 75% contain 91.2%;
     }
     .flow-panel[data-step="6"] {
       animation-name: flow-last;
-      animation-range: contain 91% contain 100%;
+      animation-range: contain 91.7% contain 100%;
     }
 
     /* Inside the panels: the mapping fills row by row, the run fills its bar,
@@ -222,22 +277,22 @@
       animation-name: flow-arrive;
     }
     .flow-mapping li[data-row="0"] {
-      animation-range: contain 25.5% contain 27.5%;
+      animation-range: contain 27% contain 29%;
     }
     .flow-mapping li[data-row="1"] {
-      animation-range: contain 26.5% contain 28.5%;
+      animation-range: contain 28% contain 30%;
     }
     .flow-mapping li[data-row="2"] {
-      animation-range: contain 27.5% contain 29.5%;
+      animation-range: contain 29% contain 31%;
     }
     .flow-mapping li[data-row="3"] {
-      animation-range: contain 28.5% contain 30.5%;
+      animation-range: contain 30% contain 32%;
     }
     .flow-mapping li[data-row="4"] {
-      animation-range: contain 29.5% contain 31.5%;
+      animation-range: contain 31% contain 33%;
     }
     .flow-mapping li[data-row="5"] {
-      animation-range: contain 30.5% contain 32.5%;
+      animation-range: contain 32% contain 34%;
     }
     .flow-progress > span {
       animation-name: flow-fill;
@@ -251,16 +306,54 @@
       animation-name: flow-arrive;
     }
     .flow-out li[data-out="0"] {
-      animation-range: contain 92% contain 94%;
-    }
-    .flow-out li[data-out="1"] {
       animation-range: contain 93.5% contain 95.5%;
     }
+    .flow-out li[data-out="1"] {
+      animation-range: contain 94.5% contain 96.5%;
+    }
     .flow-out li[data-out="2"] {
-      animation-range: contain 95% contain 97%;
+      animation-range: contain 95.5% contain 97.5%;
     }
     .flow-out li[data-out="3"] {
       animation-range: contain 96.5% contain 98.5%;
+    }
+
+    /* The rail: its frame steps down a row at each cut, and a finished step
+       takes its check as the frame leaves it. */
+    .flow-rail-marker {
+      animation-name: flow-rail;
+    }
+    .flow-rail-check {
+      animation-name: flow-check;
+    }
+    .flow-rail li[data-step="0"] .flow-rail-check {
+      animation-range: contain 8% contain 10%;
+    }
+    .flow-rail li[data-step="1"] .flow-rail-check {
+      animation-range: contain 23% contain 25%;
+    }
+    .flow-rail li[data-step="2"] .flow-rail-check {
+      animation-range: contain 40% contain 42%;
+    }
+    .flow-rail li[data-step="3"] .flow-rail-check {
+      animation-range: contain 56.5% contain 58.5%;
+    }
+    .flow-rail li[data-step="4"] .flow-rail-check {
+      animation-range: contain 73% contain 75%;
+    }
+    .flow-rail li[data-step="5"] .flow-rail-check {
+      animation-range: contain 90% contain 92%;
+    }
+
+    /* A narrow stage has no room for the rail; each panel's title names its
+       step. */
+    @container (max-width: 480px) {
+      .flow-window-body {
+        grid-template-columns: minmax(0, 1fr);
+      }
+      .flow-rail {
+        display: none;
+      }
     }
 
     /* A phone's pinned stage is short: a tighter window, smaller type. */
@@ -299,7 +392,7 @@
 
 @keyframes flow-first {
   0%,
-  60% {
+  79% {
     opacity: 1;
     transform: translateY(0);
   }
@@ -314,8 +407,8 @@
     opacity: 0;
     transform: translateY(10px);
   }
-  30%,
-  70% {
+  15%,
+  85% {
     opacity: 1;
     transform: translateY(0);
   }
@@ -330,7 +423,7 @@
     opacity: 0;
     transform: translateY(10px);
   }
-  50%,
+  25%,
   100% {
     opacity: 1;
     transform: translateY(0);
@@ -361,6 +454,48 @@
   from {
     opacity: 0;
     transform: scale(1.15);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes flow-rail {
+  0%,
+  8% {
+    transform: translateY(0);
+  }
+  11%,
+  23% {
+    transform: translateY(30px);
+  }
+  26%,
+  40% {
+    transform: translateY(60px);
+  }
+  43%,
+  56.5% {
+    transform: translateY(90px);
+  }
+  59.5%,
+  73% {
+    transform: translateY(120px);
+  }
+  76%,
+  90% {
+    transform: translateY(150px);
+  }
+  93%,
+  100% {
+    transform: translateY(180px);
+  }
+}
+
+@keyframes flow-check {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
   }
   to {
     opacity: 1;

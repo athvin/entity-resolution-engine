@@ -61,40 +61,70 @@
       view-timeline-axis: block;
     }
     .split-record {
-      animation-name: split-apart;
       animation-duration: 1ms;
       animation-timing-function: linear;
       animation-fill-mode: both;
       animation-timeline: --split;
     }
-    /* All three start stacked under the one company, then part ways. */
+    /* The middle record arrives first and sits on top; the other two are
+       already opaque beneath it, and are dealt out from under it. No frame
+       stacks two translucent cards, so no record's text shows through
+       another's. */
+    .split-record[data-index="1"] {
+      position: relative;
+      z-index: 1;
+      animation-name: split-arrive;
+      animation-range: cover 12% cover 22%;
+    }
+    .split-record[data-index="0"],
+    .split-record[data-index="2"] {
+      animation-name: split-deal;
+      animation-range: cover 22% cover 40%;
+    }
     .split-record[data-index="0"] {
       --from-x: calc(100% + 10px);
-      animation-range: cover 14% cover 36%;
-    }
-    .split-record[data-index="1"] {
-      --from-x: 0px;
-      animation-range: cover 18% cover 40%;
+      --from-y: 0px;
     }
     .split-record[data-index="2"] {
       --from-x: calc(-100% - 10px);
-      animation-range: cover 22% cover 44%;
+      --from-y: 0px;
     }
+    /* One column on a phone: dealt up and down instead. */
     @media (max-width: 640px) {
-      .split-record {
+      .split-record[data-index="0"] {
         --from-x: 0px;
+        --from-y: calc(100% + 10px);
+      }
+      .split-record[data-index="2"] {
+        --from-x: 0px;
+        --from-y: calc(-100% - 10px);
       }
     }
   }
 }
 
-@keyframes split-apart {
+@keyframes split-arrive {
   from {
     opacity: 0;
-    transform: translate(var(--from-x), -40px) scale(0.9);
+    transform: translateY(-24px) scale(0.94);
   }
   to {
     opacity: 1;
     transform: translate(0, 0) scale(1);
+  }
+}
+
+@keyframes split-deal {
+  0% {
+    opacity: 0;
+    transform: translate(var(--from-x), var(--from-y));
+  }
+  1% {
+    opacity: 1;
+    transform: translate(var(--from-x), var(--from-y));
+  }
+  100% {
+    opacity: 1;
+    transform: translate(0, 0);
   }
 }
