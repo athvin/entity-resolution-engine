@@ -459,9 +459,50 @@ impl ControlTask<PgClient> for Activate {
                 "provisioned the org but its default dataset stayed provisioning"
             );
         }
+        // A `dataset_provision` job activates ITS dataset. The org is long
+        // active by then, so the branch above never fires for it, and until
+        // this arm every dataset a tenant admin created stayed `provisioning`
+        // forever — refusing publish and every delivery. The org's default
+        // dataset is the org branch's; this one is keyed by the job's own id.
+        let mut dataset_activated = false;
+        if let Some(dataset_id) = ctx.order.dataset_id.as_deref() {
+            match crate::pg::get_dataset_by_id(ctx.client, dataset_id).await {
+                Ok(Some(d)) if d.state == "provisioning" => {
+                    dataset_activated = crate::pg::set_dataset_state(
+                        ctx.client,
+                        &org.id,
+                        &d.name,
+                        "active",
+                        "provisioning",
+                    )
+                    .await
+                    .map_err(|e| {
+                        TaskError::Failed(
+                            er_errors::ErError::stage_failure(format!(
+                                "activating dataset {}: {e}",
+                                d.name
+                            ))
+                            .with_class(er_errors::ErrorClass::TransientIo),
+                        )
+                    })?;
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    return Err(TaskError::Failed(
+                        er_errors::ErError::stage_failure(format!("reading the dataset: {e}"))
+                            .with_class(er_errors::ErrorClass::TransientIo),
+                    ));
+                }
+            }
+        }
         Ok(Outcome::Done(
-            Plan(OrgActivated { activated: moved }),
-            er_dag::Counters(serde_json::json!({ "already_active": !moved })),
+            Plan(OrgActivated {
+                activated: moved || dataset_activated,
+            }),
+            er_dag::Counters(serde_json::json!({
+                "already_active": !moved && !dataset_activated,
+                "dataset_activated": dataset_activated,
+            })),
         ))
     }
 }
