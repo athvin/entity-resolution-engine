@@ -728,6 +728,148 @@
             ]
           }
         ]
+      },
+      "post": {
+        "summary": "create a dataset",
+        "operationId": "post_orgs_by_org_datasets",
+        "parameters": [
+          {
+            "name": "org",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name"
+                ],
+                "properties": {
+                  "config_path": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "display_name": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "drop_root": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "entity_type": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "env": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "s3_ingest_bucket": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "s3_ingest_prefix": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "2XX": {
+            "description": "Successful response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DatasetProvisioning"
+                    },
+                    {
+                      "$ref": "#/components/schemas/DatasetCreated"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "detail"
+                  ],
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "admin"
+            ]
+          }
+        ]
       }
     },
     "/v1/orgs/{org}/datasets/{ds}": {
@@ -1337,6 +1479,85 @@
           {
             "bearerAuth": [
               "viewer"
+            ]
+          }
+        ]
+      }
+    },
+    "/v1/orgs/{org}/datasets/{ds}/config/validate": {
+      "post": {
+        "summary": "validate a candidate config against a dataset without storing it",
+        "operationId": "post_orgs_by_org_datasets_by_ds_config_validate",
+        "parameters": [
+          {
+            "name": "org",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ds",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "yaml"
+                ],
+                "properties": {
+                  "yaml": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "2XX": {
+            "description": "Successful response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigValidation"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "detail"
+                  ],
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "admin"
             ]
           }
         ]
@@ -9957,6 +10178,49 @@
           "version": {
             "type": "integer",
             "format": "int64"
+          }
+        }
+      },
+      "ConfigValidation": {
+        "type": "object",
+        "description": "`POST …/config/validate`: what publishing this document would do, decided\nwithout storing or publishing anything.",
+        "required": [
+          "valid",
+          "problems",
+          "changed_blocks"
+        ],
+        "properties": {
+          "changed_blocks": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The top-level blocks that differ from the active config."
+          },
+          "config_hash": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The canonical document's hash, the value a run records as the config\nit executed under; null when the YAML does not load."
+          },
+          "problems": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Every reason publish would refuse it, each naming what to change."
+          },
+          "tier": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The rebuild tier publish would queue (`A`, `B` or `C`), versus the\ndataset's active config; null when nothing that matters changed."
+          },
+          "valid": {
+            "type": "boolean",
+            "description": "True when publish would accept the document as written."
           }
         }
       },

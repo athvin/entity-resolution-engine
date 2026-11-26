@@ -887,7 +887,7 @@
     "id": "post_orgs_by_org_datasets",
     "method": "POST",
     "path": "/v1/orgs/{org}/datasets",
-    "role": "operator",
+    "role": "admin",
     "params": ["org"],
     "body": {
       "type": "object",
@@ -928,6 +928,22 @@
     },
     "needs_body": false,
     "summary": "stage an always/never assertion on a pair",
+    "response": null
+  },
+  {
+    "id": "post_orgs_by_org_datasets_by_ds_config_validate",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/datasets/{ds}/config/validate",
+    "role": "admin",
+    "params": ["org", "ds"],
+    "body": {
+      "type": "object",
+      "properties": { "yaml": { "type": "string" } },
+      "required": ["yaml"],
+      "additionalProperties": false
+    },
+    "needs_body": false,
+    "summary": "validate a candidate config against a dataset without storing it",
     "response": null
   },
   {

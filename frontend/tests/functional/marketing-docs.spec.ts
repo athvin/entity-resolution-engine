@@ -57,6 +57,14 @@ test.describe("marketing developer docs", () => {
   });
   test("developer docs opening visual baseline @visual", async ({ page }) => {
     await page.goto("/docs");
+    // `#overview` is taller than the mobile viewport, so Playwright stitches it
+    // across scroll positions and a sticky element is painted in at an offset
+    // that depends on the page's TOTAL length (#1204) — any change to the
+    // generated reference below moved the header in this image. Hiding the
+    // sticky chrome pins the baseline to the overview itself.
+    await page.addStyleTag({
+      content: '[data-testid="marketing-header"] { visibility: hidden !important; }',
+    });
     await expect(page.locator("#overview")).toHaveScreenshot("developer-docs-overview.png");
   });
 });

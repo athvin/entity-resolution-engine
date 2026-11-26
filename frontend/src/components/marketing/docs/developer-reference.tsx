@@ -40,11 +40,6 @@ export function DeveloperReference() {
           payloads are described in the workflow guides for ingestion and result retrieval. Response
           descriptors identify the envelope, not a complete response schema.
         </p>
-        <p>
-          <strong>Role caveat:</strong> dataset creation is recorded as operator in the manifest.
-          The auto-provisioning path accepts an organization admin; supplying{" "}
-          <code>config_path</code> requires operator access.
-        </p>
       </section>
       {GROUPS.map((group) => (
         <section id={group.id} key={group.id}>

@@ -111,10 +111,10 @@ export ER_DATASET='contacts'
             another dataset.
           </p>
           <p>
-            Dataset creation currently supports <code>person</code> and <code>account</code> entity
-            types, fixed at creation. Organization admins can use auto-provisioning when the
-            deployment has a provisioning profile; supplying infrastructure paths and lake settings
-            requires operator access.
+            Dataset creation supports <code>person</code> and <code>account</code> entity types,
+            fixed at creation. An organization admin key creates a dataset; the service provisions
+            its storage and seeds a starter configuration as version 1. Supplying infrastructure
+            paths and lake settings requires operator access.
           </p>
           <CodeExample label="Create a person dataset">{`curl --fail-with-body -X POST \
   "$ER_API_ORIGIN/v1/orgs/$ER_ORG/datasets" \
@@ -122,9 +122,11 @@ export ER_DATASET='contacts'
   -H 'Content-Type: application/json' \
   --data '{"name":"contacts","display_name":"Contacts","entity_type":"person"}'`}</CodeExample>
           <p>
-            Creation may initiate provisioning. Fetch the dataset and check its state before
-            submitting work. If auto-provisioning is unavailable, have the operator configure the
-            environment; inventing a lake path is not a client-side workaround.
+            Creation returns 202 with a <code>job_id</code>: poll that job, or fetch the dataset
+            until its <code>state</code> is <code>active</code>, before publishing configuration or
+            submitting work. A dataset still provisioning refuses publication with 409. If
+            auto-provisioning is unavailable, have the operator configure the environment; inventing
+            a lake path is not a client-side workaround.
           </p>
         </section>
         <section id="authentication">
@@ -191,23 +193,82 @@ export ER_DATASET='contacts'
             <code>
               GET /v1/orgs/{"{org}"}/datasets/{"{ds}"}/config
             </code>
-            . Create a draft with <code>POST …/config/versions</code> and a JSON body containing a{" "}
-            <code>yaml</code> string. The service validates the YAML and hashes the configuration.
-            Use the returned version for validation and publication operations in the reference
-            below.
+            . Changing it is three steps, each with an admin key: validate a candidate, store it as
+            a draft version, then publish that version. Validation stores nothing and queues
+            nothing; it runs every check publication runs and reports all of them at once.
           </p>
-          <CodeExample label="Prepare a draft configuration request">{`# config.yaml is your deployment-reviewed dataset configuration.
+          <CodeExample label="Validate a candidate configuration">{`# config.yaml is your dataset configuration.
 python3 -c 'import json; print(json.dumps({"yaml": open("config.yaml").read()}))' > config-request.json
 curl --fail-with-body -X POST \
+  "$ER_API_ORIGIN/v1/orgs/$ER_ORG/datasets/$ER_DATASET/config/validate" \
+  -H "Authorization: Bearer $ER_API_KEY" \
+  -H 'Content-Type: application/json' \
+  --data-binary @config-request.json
+# {"valid":false,"problems":["source \`crm\` maps \`emial\`, which is not a canonical person attribute (one of: …)"],
+#  "config_hash":"…","tier":"C","changed_blocks":["sources"]}`}</CodeExample>
+          <CodeExample label="Store and publish a draft">{`curl --fail-with-body -X POST \
   "$ER_API_ORIGIN/v1/orgs/$ER_ORG/datasets/$ER_DATASET/config/versions" \
   -H "Authorization: Bearer $ER_API_KEY" \
   -H 'Content-Type: application/json' \
-  --data-binary @config-request.json`}</CodeExample>
+  --data-binary @config-request.json          # -> {"version": 2, "state": "draft", ...}
+curl --fail-with-body -X POST \
+  "$ER_API_ORIGIN/v1/orgs/$ER_ORG/datasets/$ER_DATASET/config/versions/2/publish" \
+  -H "Authorization: Bearer $ER_API_KEY"      # -> {"tier": "C", "jobs_enqueued": [...], ...}`}</CodeExample>
+          <h3>What a customer configuration may contain</h3>
+          <ul>
+            <li>
+              <strong>Sources.</strong> Each <code>sources.&lt;name&gt;</code> entry maps your own
+              column names onto canonical attributes, and names the column carrying the record key (
+              <code>record_id_column</code>) and the change timestamp (
+              <code>updated_at_column</code>). Person datasets map <code>given_name</code>,{" "}
+              <code>family_name</code>, <code>email</code>, <code>phone</code>,{" "}
+              <code>address_line</code>, <code>addr_city</code>, <code>addr_region</code>,{" "}
+              <code>addr_postal</code> and <code>birth_date</code>; account datasets map{" "}
+              <code>company_name</code>, <code>domain</code>, <code>phone</code>,{" "}
+              <code>addr_street</code>, <code>addr_city</code>, <code>addr_region</code> and{" "}
+              <code>addr_postal</code>. Any other attribute is refused, each of your columns may
+              carry one attribute, and every source needs a distinct <code>priority_rank</code>.
+            </li>
+            <li>
+              <strong>Matching.</strong> <code>blocking</code>, <code>constraints</code>,{" "}
+              <code>comparisons</code>, <code>comparison_groups</code>, <code>thresholds</code> and{" "}
+              <code>models</code> may name only standardized columns of the dataset’s entity type,
+              and an ensemble member must have an active model version.
+            </li>
+            <li>
+              <strong>Survivorship.</strong> <code>survivorship</code> and{" "}
+              <code>survivorship_groups</code> choose which value reaches the golden record.
+            </li>
+            <li>
+              <strong>Operator-only blocks.</strong> <code>tenant</code>, <code>storage</code>,{" "}
+              <code>versions</code>, <code>training</code>, <code>clustering</code>,{" "}
+              <code>coherence</code> and <code>generator</code> describe the deployment. An admin
+              key may carry them unchanged but not change them; validation reports such a change and
+              publication refuses it with 403.
+            </li>
+          </ul>
           <p>
-            A saved draft is not the active configuration. Publication checks are part of the
-            workflow; validation failures need a configuration correction, not a blind retry.
-            Matching decides which records belong together. Survivorship decides which field values
-            appear on the resulting golden record. Keep these decisions separate.
+            The entity type is fixed when the dataset is created, so a configuration declaring the
+            other type is refused. Arbitrary entity schemas are not supported: a dataset resolves
+            people or accounts through the attributes above.
+          </p>
+          <h3>What publishing does, and how to roll back</h3>
+          <p>
+            Publishing classifies what changed against the dataset’s active configuration and queues
+            the matching rebuild: a threshold or survivorship change re-clusters (tier A), a
+            blocking, constraint or ensemble change re-scores (tier B), and a source,
+            standardization or comparison change retrains and rebuilds (tier C, also every first
+            publish). Versions are immutable: an edit is a new draft. Every run records the{" "}
+            <code>config_hash</code> it executed under, the same value validation and the version
+            report, so a later publish never changes what an earlier run meant. To roll back,
+            publish an earlier version number again; it is classified and rebuilt like any other
+            publish.
+          </p>
+          <p>
+            A saved draft is not the active configuration, and a refused publication needs a
+            configuration correction, not a blind retry. Matching decides which records belong
+            together. Survivorship decides which field values appear on the resulting golden record.
+            Keep these decisions separate.
           </p>
         </section>
         <section id="ingestion">

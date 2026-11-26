@@ -256,7 +256,7 @@ async fn org_or_404(
 fn pg_err(e: tokio_postgres::Error) -> axum::response::Response {
     (
         StatusCode::INTERNAL_SERVER_ERROR,
-        Json(json!({ "detail": format!("db: {e}") })),
+        Json(json!({ "detail": format!("db: {}", errfmt::chain(&e)) })),
     )
         .into_response()
 }
@@ -1062,7 +1062,8 @@ async fn provision_org(
             "the default dataset was just converged yet cannot be read back",
         );
     };
-    if let Err(e) = pg::publish_config_version(&client, name, ds_id, version, Some("C")).await {
+    if let Err(e) = pg::publish_config_version(&client, name, ds_id, version, Some("C"), true).await
+    {
         return pg_err(e);
     }
 
@@ -1714,12 +1715,14 @@ struct DatasetIn {
     s3_ingest_prefix: Option<String>,
 }
 
-/// Operator: create a dataset (`POST /v1/orgs/{org}/datasets`), bring-your-own
-/// config only for now — the caller supplies `config_path` and the lake env.
-/// Auto-provisioning (derive the lake, seed a starter config, run the
-/// provision job) arrives with the `dataset_provision` job kind; until then an
-/// omitted `config_path` is the honest 503, exactly as org auto-provisioning
-/// was before it existed.
+/// Admin+ (operator for a bring-your-own `config_path`): create a dataset
+/// (`POST /v1/orgs/{org}/datasets`). With `name`, optional `display_name` and
+/// `entity_type` (`person` or `account`, fixed for the dataset's life) the
+/// server derives the lake, seeds the starter config as version 1 and returns
+/// 202 with the `dataset_provision` job to poll; the dataset is usable once that
+/// job succeeds. Supplying `config_path` (and the lake `env`, `drop_root` and
+/// S3 fields) points the dataset at operator-managed paths and needs the
+/// operator token; a tenant key sending them is refused.
 async fn create_dataset(
     principal: Principal,
     State(state): State<AppState>,
@@ -3211,17 +3214,6 @@ async fn active_config(
         Ok(c) => c,
         Err(r) => return *r,
     };
-    let active = match pg::org_publish_context(&client, &org).await {
-        Ok(Some((_, _, Some(v)))) => v,
-        Ok(_) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(json!({ "detail": "no published config" })),
-            )
-                .into_response();
-        }
-        Err(e) => return pg_err(e),
-    };
     let org_row = match org_or_404(&client, &org).await {
         Ok(r) => r,
         Err(r) => return *r,
@@ -3230,6 +3222,16 @@ async fn active_config(
     let d = match dataset_or_404(&client, &org_row, &ds).await {
         Ok(row) => row,
         Err(r) => return *r,
+    };
+    // The dataset's own pointer, not the org's deprecated mirror: the mirror
+    // tracks only the default dataset, so every other dataset was served the
+    // default's config here (#1010).
+    let Some(active) = d.active_config_version else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "detail": "no published config" })),
+        )
+            .into_response();
     };
     match pg::get_config_version(&client, &d.id, active).await {
         Ok(Some(d)) => Json(ConfigVersionView::from(&d)).into_response(),
@@ -3833,6 +3835,211 @@ fn write_config_file(path: &str, yaml: &str) -> std::io::Result<()> {
     std::fs::rename(&tmp, path)
 }
 
+/// What publishing a config to a dataset would do, decided without doing it:
+/// the shared half of publish and of `POST …/config/validate` (#1010), so a
+/// dry run cannot pass a document that publish then refuses.
+struct ConfigPreflight {
+    /// Problems `config_check` finds in the document itself.
+    reference_problems: Vec<String>,
+    /// An ensemble member with no ACTIVE registry version.
+    model_problem: Option<String>,
+    /// The rebuild tier versus the dataset's active config (`C` on a first
+    /// publish), `None` when nothing that matters changed.
+    tier: Option<&'static str>,
+    changed: Vec<String>,
+    /// Changed blocks only the operator may publish, empty for the operator.
+    operator_only: Vec<String>,
+    is_default: bool,
+}
+
+async fn config_preflight(
+    client: &tokio_postgres::Client,
+    d: &pg::DatasetDetail,
+    new_config: &Config,
+    role: Role,
+) -> Result<ConfigPreflight, tokio_postgres::Error> {
+    // Publish-time analysis: the config's blocking/comparison definitions must
+    // only reference columns the standardized-records table has for this entity
+    // type, and its source mappings must name canonical attributes. A mistyped
+    // or non-existent column is refused here rather than failing the tenant's
+    // first run.
+    let mut reference_problems = config_check::config_reference_problems(new_config);
+    // The dataset's entity type is fixed at creation; a document declaring the
+    // other one would standardize into relations no read of this dataset uses.
+    let declared = match new_config.entity_type {
+        er_config::EntityType::Person => "person",
+        er_config::EntityType::Account => "account",
+    };
+    if declared != d.entity_type {
+        reference_problems.push(format!(
+            "the config declares entity_type `{declared}` but dataset '{}' is `{}`; a \
+             dataset's entity type is fixed when it is created",
+            d.name, d.entity_type
+        ));
+    }
+
+    // The ensemble's members must exist as ACTIVE registry versions. Refused
+    // here, as a 422 naming the member, rather than at run time: a publish is a
+    // deliberate act with a human waiting on the response, while the same
+    // mistake discovered in the dispatcher is a failed job with the tenant's
+    // next rebuild already queued behind it.
+    let mut model_problem = None;
+    if !new_config.models.is_empty() {
+        let active = pg::active_models(client, &d.id).await?;
+        let have: std::collections::BTreeSet<&str> =
+            active.iter().map(|m| m.name.as_str()).collect();
+        let missing: Vec<&str> = new_config
+            .models
+            .iter()
+            .map(|s| s.name.as_str())
+            .filter(|n| !have.contains(n))
+            .collect();
+        if !missing.is_empty() {
+            let mut known: Vec<&str> = have.into_iter().collect();
+            known.sort_unstable();
+            model_problem = Some(format!(
+                "`models:` names {} with no ACTIVE version in the registry (active: {})",
+                missing.join(", "),
+                if known.is_empty() {
+                    "none".to_string()
+                } else {
+                    known.join(", ")
+                }
+            ));
+        }
+    }
+
+    // The DATASET's publish context, not the org's. Read from the org row
+    // until #1010, which meant a publish to any non-default dataset overwrote
+    // the default dataset's config file, classified its tier against the wrong
+    // document, and repointed the org — the second dataset's own runs never
+    // saw the edit.
+    let is_default =
+        pg::default_dataset_id(client, &d.org_id).await?.as_deref() == Some(d.id.as_str());
+
+    // Classify the change versus the current active config (first publish => C).
+    let (tier, changed): (Option<&'static str>, Vec<String>) = match d.active_config_version {
+        None => (Some("C"), Vec::new()),
+        Some(av) => {
+            let old_yaml = pg::get_config_version(client, &d.id, av)
+                .await?
+                .map(|v| v.yaml)
+                .unwrap_or_default();
+            match load_config_str(&old_yaml) {
+                Ok(old_config) => {
+                    let changed = config_changed_blocks(&old_config, new_config);
+                    (tier_for(&changed), changed)
+                }
+                // A previously-published config that no longer parses: treat the
+                // whole document as changed (fail safe to the broadest tier).
+                Err(_) => (Some("C"), Vec::new()),
+            }
+        }
+    };
+
+    // Structural (operator-only) blocks may only be changed by the operator.
+    let operator_only = if role == Role::Operator {
+        Vec::new()
+    } else {
+        changed
+            .iter()
+            .filter(|b| OPERATOR_ONLY_BLOCKS.contains(&b.as_str()))
+            .cloned()
+            .collect()
+    };
+    Ok(ConfigPreflight {
+        reference_problems,
+        model_problem,
+        tier,
+        changed,
+        operator_only,
+        is_default,
+    })
+}
+
+/// `POST …/config/validate`: what publishing this document would do, decided
+/// without storing or publishing anything.
+#[derive(Serialize, utoipa::ToSchema)]
+struct ConfigValidation {
+    /// True when publish would accept the document as written.
+    valid: bool,
+    /// Every reason publish would refuse it, each naming what to change.
+    problems: Vec<String>,
+    /// The canonical document's hash, the value a run records as the config
+    /// it executed under; null when the YAML does not load.
+    config_hash: Option<String>,
+    /// The rebuild tier publish would queue (`A`, `B` or `C`), versus the
+    /// dataset's active config; null when nothing that matters changed.
+    tier: Option<String>,
+    /// The top-level blocks that differ from the active config.
+    changed_blocks: Vec<String>,
+}
+
+/// Admin+: validate a candidate config against a dataset without storing it
+/// (`POST /v1/orgs/{org}/datasets/{ds}/config/validate`). Runs every check
+/// publish runs — the document's structure, its source mappings, its blocking
+/// and comparison columns, the dataset's entity type, the ensemble's registry
+/// versions and the operator-only blocks — and reports all of them at once, so
+/// a customer can fix a draft before any version exists or any run is queued.
+async fn validate_config(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, ds)): Path<(String, String)>,
+    Json(body): Json<ConfigIn>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Admin) {
+        return e.into_response();
+    }
+    let Some(dsn) = &state.dsn else {
+        return config_registry_unavailable();
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
+    let d = match dataset_or_404(&client, &org_row, &ds).await {
+        Ok(row) => row,
+        Err(r) => return *r,
+    };
+    let config = match load_config_str(&body.yaml) {
+        Ok(c) => c,
+        Err(e) => {
+            return Json(ConfigValidation {
+                valid: false,
+                problems: vec![format!("config error: {e}")],
+                config_hash: None,
+                tier: None,
+                changed_blocks: Vec::new(),
+            })
+            .into_response();
+        }
+    };
+    let preflight = match config_preflight(&client, &d, &config, principal.role).await {
+        Ok(p) => p,
+        Err(e) => return pg_err(e),
+    };
+    let mut problems = preflight.reference_problems;
+    problems.extend(preflight.model_problem);
+    if !preflight.operator_only.is_empty() {
+        problems.push(format!(
+            "blocks {:?} are operator-only; an admin key cannot publish a change to them",
+            preflight.operator_only
+        ));
+    }
+    Json(ConfigValidation {
+        valid: problems.is_empty(),
+        problems,
+        config_hash: Some(config_hash(&config)),
+        tier: preflight.tier.map(str::to_string),
+        changed_blocks: preflight.changed,
+    })
+    .into_response()
+}
+
 /// Admin+ (operator for structural blocks): publish a draft config version
 /// (`POST /v1/orgs/{org}/datasets/{ds}/config/versions/{version}/publish`; the Python
 /// `{version}:publish` action). Re-validates, classifies the change tier versus
@@ -3881,12 +4088,11 @@ async fn publish_config_version(
         Err(e) => return config_invalid(&e).into_response(),
     };
 
-    // Publish-time analysis: the config's blocking/comparison definitions must
-    // only reference columns the standardized-records table has for this entity
-    // type. A mistyped or non-existent column is refused here rather than failing
-    // the tenant's first run.
-    let reference_problems = config_check::config_reference_problems(&new_config);
-    if !reference_problems.is_empty() {
+    let preflight = match config_preflight(&client, &d, &new_config, principal.role).await {
+        Ok(p) => p,
+        Err(e) => return pg_err(e),
+    };
+    if !preflight.reference_problems.is_empty() {
         return detail_err(
             StatusCode::UNPROCESSABLE_ENTITY,
             // Not "references unknown columns": `config_reference_problems`
@@ -3898,103 +4104,44 @@ async fn publish_config_version(
             // there. The problems themselves each say what is wrong.
             format!(
                 "the config cannot be published as written: {}",
-                reference_problems.join("; ")
+                preflight.reference_problems.join("; ")
             ),
         )
         .into_response();
     }
-
-    // The ensemble's members must exist as ACTIVE registry versions. Refused
-    // here, as a 422 naming the member, rather than at run time: a publish is a
-    // deliberate act with a human waiting on the response, while the same
-    // mistake discovered in the dispatcher is a failed job with the tenant's
-    // next rebuild already queued behind it.
-    if !new_config.models.is_empty() {
-        match pg::active_models(&client, &d.id).await {
-            Ok(active) => {
-                let have: std::collections::BTreeSet<&str> =
-                    active.iter().map(|m| m.name.as_str()).collect();
-                let missing: Vec<&str> = new_config
-                    .models
-                    .iter()
-                    .map(|s| s.name.as_str())
-                    .filter(|n| !have.contains(n))
-                    .collect();
-                if !missing.is_empty() {
-                    let mut known: Vec<&str> = have.into_iter().collect();
-                    known.sort_unstable();
-                    return detail_err(
-                        StatusCode::UNPROCESSABLE_ENTITY,
-                        format!(
-                            "`models:` names {} with no ACTIVE version in the registry \
-                             (active: {})",
-                            missing.join(", "),
-                            if known.is_empty() {
-                                "none".to_string()
-                            } else {
-                                known.join(", ")
-                            }
-                        ),
-                    );
-                }
-            }
-            Err(e) => return pg_err(e),
-        }
+    if let Some(problem) = preflight.model_problem {
+        return detail_err(StatusCode::UNPROCESSABLE_ENTITY, problem);
     }
-
-    // Org publish context (config_path / state / current active version).
-    let (config_path, org_state, active_v) = match pg::org_publish_context(&client, &org).await {
-        Ok(Some(ctx)) => ctx,
-        Ok(None) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(json!({ "detail": format!("no org '{org}'") })),
-            )
-                .into_response();
-        }
-        Err(e) => return pg_err(e),
-    };
-
-    // Classify the change versus the current active config (first publish => C).
-    let (tier, changed): (Option<&str>, Vec<String>) = match active_v {
-        None => (Some("C"), Vec::new()),
-        Some(av) => {
-            let old_yaml = match pg::get_config_version(&client, &d.id, av).await {
-                Ok(Some(d)) => d.yaml,
-                Ok(None) => String::new(),
-                Err(e) => return pg_err(e),
-            };
-            match load_config_str(&old_yaml) {
-                Ok(old_config) => {
-                    let changed = config_changed_blocks(&old_config, &new_config);
-                    (tier_for(&changed), changed)
-                }
-                // A previously-published config that no longer parses: treat the
-                // whole document as changed (fail safe to the broadest tier).
-                Err(_) => (Some("C"), Vec::new()),
-            }
-        }
-    };
-
-    // Structural (operator-only) blocks may only be changed by the operator.
-    let operator_only: Vec<&String> = changed
-        .iter()
-        .filter(|b| OPERATOR_ONLY_BLOCKS.contains(&b.as_str()))
-        .collect();
-    if !operator_only.is_empty() && principal.role != Role::Operator {
+    let is_default = preflight.is_default;
+    let tier = preflight.tier;
+    let changed = preflight.changed;
+    if !preflight.operator_only.is_empty() {
         return detail_err(
             StatusCode::FORBIDDEN,
-            format!("blocks {operator_only:?} are operator-only; publish refused"),
+            format!(
+                "blocks {:?} are operator-only; publish refused",
+                preflight.operator_only
+            ),
         );
     }
+    let config_path = d.config_path.clone();
 
-    // Refuse publishing to a suspended/provisioning org atomically.
-    if org_state != "active" {
+    // Refuse publishing to a suspended/provisioning org or dataset atomically.
+    if org_row.state != "active" {
         return (
             StatusCode::CONFLICT,
             Json(json!({ "detail": format!("org '{org}' is not active") })),
         )
             .into_response();
+    }
+    if d.state != "active" {
+        return detail_err(
+            StatusCode::CONFLICT,
+            format!(
+                "dataset '{ds}' is {}; only an active dataset publishes",
+                d.state
+            ),
+        );
     }
 
     // Write the YAML the dispatcher reads, then record the publish + repoint the
@@ -4008,7 +4155,9 @@ async fn publish_config_version(
     }
     // History images record the acting principal (er.actor).
     let _ = pg::set_actor(&client, &principal.actor).await;
-    if let Err(e) = pg::publish_config_version(&client, &org, &d.id, version, tier).await {
+    if let Err(e) =
+        pg::publish_config_version(&client, &org, &d.id, version, tier, is_default).await
+    {
         return pg_err(e);
     }
     // The published document's `correction_pass.cadence` becomes a real
@@ -8541,8 +8690,8 @@ pub const DEFAULT_MAX_IMPORT_BYTES: usize = 256 * 1024 * 1024;
 /// only served against the config the running pipeline actually uses.
 ///
 /// Takes the already-fetched [`pg::OrgDetail`] rather than an org name, because
-/// `pg::get_config_version` keys on the org **id** while `pg::org_publish_context`
-/// keys on the **name** — a footgun that reaching through the row avoids, and
+/// `pg::get_config_version` keys on the org **id** while the org registry
+/// is keyed by **name** — a footgun that reaching through the row avoids, and
 /// that `org_source_ranks` tripped over before this existed.
 /// A DATASET's active published config, parsed — [`org_active_config`]'s
 /// dataset-scoped twin, reading the version pointer off the dataset row.
@@ -13530,6 +13679,10 @@ fn build_routes(state: AppState) -> Router {
         .route(
             "/v1/orgs/{org}/datasets/{ds}/config/versions/{version}/publish",
             post(publish_config_version),
+        )
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/config/validate",
+            post(validate_config),
         )
         .route("/v1/orgs/{org}/datasets/{ds}/config", get(active_config))
         .route(
