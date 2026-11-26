@@ -343,3 +343,34 @@ test.describe("/features/matching", () => {
     await expect(verdict).toContainText("0.93");
   });
 });
+
+test.describe("/features/review", () => {
+  // The visitor makes the close call: a match joins the pair into E-1042, an
+  // unmerge splits it back out with a never-match rule, and the history keeps
+  // both steps; "Not a match" keeps them apart from the start.
+  test("the reviewer matches, unmerges and keeps a correction", async ({ page }) => {
+    await page.goto("/features/review");
+    const reviewer = page.getByTestId("reviewer");
+    const outcome = page.getByTestId("reviewer-outcome");
+    await expect(outcome).toContainText("0.93");
+
+    await reviewer.getByRole("button", { name: "Ask AI for a recommendation" }).click();
+    await expect(reviewer.getByText("Recommends: same company.")).toBeVisible();
+
+    await reviewer.getByRole("button", { name: "Match", exact: true }).click();
+    await expect(outcome).toContainText("E-1042 now holds all three source records");
+    await expect(
+      reviewer.getByRole("list", { name: "Entities after reconciliation" }),
+    ).toContainText("Salesforce · CSV upload · API");
+
+    await reviewer.getByRole("button", { name: "Unmerge the API record" }).click();
+    await expect(outcome).toContainText("the correction stays");
+    const history = reviewer.getByRole("list", { name: "History" });
+    await expect(history.getByRole("listitem")).toHaveCount(2);
+    await expect(history).toContainText("never-match rule");
+
+    await reviewer.getByRole("button", { name: "Put the pair back in the queue" }).click();
+    await reviewer.getByRole("button", { name: "Not a match" }).click();
+    await expect(outcome).toContainText("stay separate, in this run and every one after it");
+  });
+});
