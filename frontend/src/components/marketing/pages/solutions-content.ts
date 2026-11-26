@@ -23,6 +23,29 @@ export interface Help {
   href: string;
 }
 
+/** One record as one system holds it: illustrative, a person or a company. */
+export interface SceneRecord {
+  source: string;
+  name: string;
+  label: string;
+  value: string;
+}
+
+/**
+ * The page's resolution scene (#1263): three systems' versions of one person
+ * or company, and the one record they resolve into. People and companies
+ * only, with `.example` domains and 555 numbers: never a patient, a student,
+ * an account number or anything sensitive, which solutions-pages.test.tsx
+ * scans for.
+ */
+export interface ResolutionScene {
+  records: readonly [SceneRecord, SceneRecord, SceneRecord];
+  resolved: { entity: string; name: string; label: string; value: string };
+  /** The arrow between them; "3 records → 1" unless a page says otherwise. */
+  arrow?: string;
+  sentence: string;
+}
+
 export interface Solution {
   slug: string;
   /** Menu label, and the eyebrow on the page. */
@@ -34,6 +57,7 @@ export interface Solution {
   helps: readonly Help[];
   useCases: readonly { title: string; body: string }[];
   note: { title: string; body: string };
+  scene: ResolutionScene;
 }
 
 const MATCHING = "/features/matching";
@@ -98,6 +122,31 @@ export const ROLES: readonly Solution[] = [
       },
     ],
     note: CONNECT_NOTE,
+    scene: {
+      records: [
+        {
+          source: "Lead",
+          name: "Dana Whitfield",
+          label: "Email",
+          value: "dana@harborline.example",
+        },
+        {
+          source: "Contact",
+          name: "D. Whitfield",
+          label: "Email",
+          value: "dana.whitfield@harborline.example",
+        },
+        { source: "Contact", name: "Dana Whitfield", label: "Phone", value: "(312) 555-0144" },
+      ],
+      resolved: {
+        entity: "E-2104",
+        name: "Dana Whitfield",
+        label: "Email",
+        value: "dana.whitfield@harborline.example",
+      },
+      sentence:
+        "A Lead and two Contacts for one person resolve into one record, with the evidence for every match.",
+    },
   },
   {
     slug: "revenue-operations",
@@ -144,6 +193,36 @@ export const ROLES: readonly Solution[] = [
       },
     ],
     note: CONNECT_NOTE,
+    scene: {
+      records: [
+        {
+          source: "CRM account",
+          name: "Harborline Logistics",
+          label: "Website",
+          value: "harborline.example",
+        },
+        {
+          source: "Billing",
+          name: "HARBORLINE LOGISTICS LLC",
+          label: "Email",
+          value: "billing@harborline.example",
+        },
+        {
+          source: "Marketing list",
+          name: "Harborline",
+          label: "Website",
+          value: "www.harborline.example",
+        },
+      ],
+      resolved: {
+        entity: "E-2187",
+        name: "Harborline Logistics",
+        label: "Website",
+        value: "harborline.example",
+      },
+      sentence:
+        "One account in the CRM, billing and the marketing list becomes one account, so reports count it once.",
+    },
   },
   {
     slug: "marketing",
@@ -190,6 +269,35 @@ export const ROLES: readonly Solution[] = [
       },
     ],
     note: CONNECT_NOTE,
+    scene: {
+      records: [
+        {
+          source: "Webinar list",
+          name: "Priya Raman",
+          label: "Email",
+          value: "priya.raman@northgate.example",
+        },
+        {
+          source: "Newsletter",
+          name: "P. Raman",
+          label: "Email",
+          value: "praman+news@northgate.example",
+        },
+        {
+          source: "CRM contact",
+          name: "Priya Raman",
+          label: "Company",
+          value: "Northgate Analytics",
+        },
+      ],
+      resolved: {
+        entity: "E-2230",
+        name: "Priya Raman",
+        label: "Email",
+        value: "priya.raman@northgate.example",
+      },
+      sentence: "One person on three lists becomes one contact, so a campaign reaches her once.",
+    },
   },
   {
     slug: "it-and-security",
@@ -238,6 +346,31 @@ export const ROLES: readonly Solution[] = [
       title: "What we do not offer yet",
       body: "Sign-in is by email and password. Single sign-on and multi-factor sign-in are not available, and DupeZero holds no security certification today.",
     },
+    scene: {
+      records: [
+        {
+          source: "ERP vendor",
+          name: "Brightwell Systems",
+          label: "Website",
+          value: "brightwell.example",
+        },
+        {
+          source: "Procurement",
+          name: "BRIGHTWELL SYSTEMS INC.",
+          label: "Email",
+          value: "ap@brightwell.example",
+        },
+        { source: "CRM account", name: "Brightwell", label: "Phone", value: "(415) 555-0170" },
+      ],
+      resolved: {
+        entity: "E-2312",
+        name: "Brightwell Systems",
+        label: "Website",
+        value: "brightwell.example",
+      },
+      sentence:
+        "One vendor in three systems resolves into one record, and every value says which system it came from.",
+    },
   },
 ];
 
@@ -282,6 +415,36 @@ export const INDUSTRIES: readonly Solution[] = [
       },
     ],
     note: { title: BEFORE_CONNECTING, body: NO_CERTIFICATION },
+    scene: {
+      records: [
+        {
+          source: "Product signups",
+          name: "lumencloud",
+          label: "Email",
+          value: "admin@lumencloud.example",
+        },
+        {
+          source: "CRM account",
+          name: "Lumen Cloud",
+          label: "Website",
+          value: "lumencloud.example",
+        },
+        {
+          source: "Billing",
+          name: "LUMEN CLOUD INC.",
+          label: "Email",
+          value: "finance@lumencloud.example",
+        },
+      ],
+      resolved: {
+        entity: "E-2405",
+        name: "Lumen Cloud",
+        label: "Website",
+        value: "lumencloud.example",
+      },
+      sentence:
+        "Signups, the CRM and billing each hold the same customer. Resolved, it is one account.",
+    },
   },
   {
     slug: "nonprofit",
@@ -323,6 +486,26 @@ export const INDUSTRIES: readonly Solution[] = [
       },
     ],
     note: { title: BEFORE_CONNECTING, body: NO_CERTIFICATION },
+    scene: {
+      records: [
+        {
+          source: "Donations",
+          name: "Marcus Bell",
+          label: "Email",
+          value: "marcus.bell@mail.example",
+        },
+        { source: "Event sign-ups", name: "Marc Bell", label: "Phone", value: "(617) 555-0123" },
+        { source: "Mailing list", name: "M. Bell", label: "Address", value: "12 Elm Row" },
+      ],
+      resolved: {
+        entity: "E-2461",
+        name: "Marcus Bell",
+        label: "Email",
+        value: "marcus.bell@mail.example",
+      },
+      sentence:
+        "A donor who gives online, comes to events and reads the newsletter is one supporter, not three.",
+    },
   },
   {
     slug: "financial-services",
@@ -366,6 +549,36 @@ export const INDUSTRIES: readonly Solution[] = [
     note: {
       title: BEFORE_CONNECTING,
       body: `${NO_CERTIFICATION} Tell us which client fields you plan to send before you connect, and we will confirm in writing whether we can hold them.`,
+    },
+    scene: {
+      records: [
+        {
+          source: "CRM account",
+          name: "Ostrander & Kail",
+          label: "Website",
+          value: "ostranderkail.example",
+        },
+        {
+          source: "Onboarding sheet",
+          name: "OSTRANDER AND KAIL LLP",
+          label: "Phone",
+          value: "(212) 555-0161",
+        },
+        {
+          source: "Billing",
+          name: "Ostrander Kail",
+          label: "Email",
+          value: "accounts@ostranderkail.example",
+        },
+      ],
+      resolved: {
+        entity: "E-2518",
+        name: "Ostrander & Kail",
+        label: "Website",
+        value: "ostranderkail.example",
+      },
+      sentence:
+        "One client company in three systems resolves into one record you can trace field by field.",
     },
   },
   {
@@ -411,6 +624,30 @@ export const INDUSTRIES: readonly Solution[] = [
       title: BEFORE_CONNECTING,
       body: `${NO_CERTIFICATION} Do not send patient health information to DupeZero until we have confirmed in writing that we can hold it.`,
     },
+    scene: {
+      records: [
+        {
+          source: "Supplier list",
+          name: "Calder Medical Supply",
+          label: "Website",
+          value: "calder.example",
+        },
+        {
+          source: "ERP vendor",
+          name: "CALDER MEDICAL SUPPLY CO",
+          label: "Email",
+          value: "orders@calder.example",
+        },
+        { source: "CRM account", name: "Calder Medical", label: "Phone", value: "(608) 555-0119" },
+      ],
+      resolved: {
+        entity: "E-2577",
+        name: "Calder Medical Supply",
+        label: "Website",
+        value: "calder.example",
+      },
+      sentence: "A supplier listed three ways resolves into one company record.",
+    },
   },
   {
     slug: "education",
@@ -455,6 +692,30 @@ export const INDUSTRIES: readonly Solution[] = [
       title: BEFORE_CONNECTING,
       body: `${NO_CERTIFICATION} Tell us which student fields you plan to send before you connect, and we will confirm in writing whether we can hold them.`,
     },
+    scene: {
+      records: [
+        {
+          source: "Partners list",
+          name: "Westbrook Foundation",
+          label: "Website",
+          value: "westbrook.example",
+        },
+        {
+          source: "Events",
+          name: "The Westbrook Foundation",
+          label: "Email",
+          value: "events@westbrook.example",
+        },
+        { source: "Grants sheet", name: "WESTBROOK FDN", label: "Phone", value: "(503) 555-0186" },
+      ],
+      resolved: {
+        entity: "E-2630",
+        name: "Westbrook Foundation",
+        label: "Website",
+        value: "westbrook.example",
+      },
+      sentence: "A partner organisation known to three offices resolves into one record.",
+    },
   },
   {
     slug: "real-estate",
@@ -496,6 +757,31 @@ export const INDUSTRIES: readonly Solution[] = [
       },
     ],
     note: { title: BEFORE_CONNECTING, body: NO_CERTIFICATION },
+    scene: {
+      records: [
+        {
+          source: "Listing inquiry",
+          name: "Elena Ortiz",
+          label: "Email",
+          value: "elena.ortiz@mail.example",
+        },
+        { source: "Open house", name: "E. Ortiz", label: "Phone", value: "(305) 555-0192" },
+        {
+          source: "CRM contact",
+          name: "Elena Ortiz",
+          label: "Email",
+          value: "elena.o@mail.example",
+        },
+      ],
+      resolved: {
+        entity: "E-2688",
+        name: "Elena Ortiz",
+        label: "Email",
+        value: "elena.ortiz@mail.example",
+      },
+      sentence:
+        "An inquiry, an open-house sign-in and a CRM contact for one client become one record.",
+    },
   },
   {
     slug: "manufacturing",
@@ -537,6 +823,31 @@ export const INDUSTRIES: readonly Solution[] = [
       },
     ],
     note: { title: BEFORE_CONNECTING, body: NO_CERTIFICATION },
+    scene: {
+      records: [
+        {
+          source: "ERP supplier",
+          name: "Kestrel Fasteners",
+          label: "Website",
+          value: "kestrel.example",
+        },
+        {
+          source: "Purchasing",
+          name: "KESTREL FASTENERS LTD",
+          label: "Email",
+          value: "sales@kestrel.example",
+        },
+        { source: "Quality list", name: "Kestrel", label: "Phone", value: "(414) 555-0137" },
+      ],
+      resolved: {
+        entity: "E-2742",
+        name: "Kestrel Fasteners",
+        label: "Website",
+        value: "kestrel.example",
+      },
+      sentence:
+        "One supplier in the ERP, purchasing and the quality list resolves into one record.",
+    },
   },
 ];
 
@@ -576,3 +887,43 @@ export const USE_CASES: readonly { title: string; body: string; href: string }[]
 
 export const ROLE_BASE = "/solutions/roles";
 export const INDUSTRY_BASE = "/solutions/industries";
+
+/** /solutions: one company, seen three ways by three teams, resolved once. */
+export const SOLUTIONS_SCENE: ResolutionScene = {
+  records: [
+    { source: "Sales · CRM", name: "Meridian Supply", label: "Account", value: "ACCT-042" },
+    {
+      source: "Finance · billing",
+      name: "MERIDIAN SUPPLY INC.",
+      label: "Account",
+      value: "acct-042",
+    },
+    {
+      source: "Support · helpdesk",
+      name: "Meridian Supply Co",
+      label: "Email",
+      value: "accounts@meridiansupply.example",
+    },
+  ],
+  resolved: {
+    entity: "E-1042",
+    name: "Meridian Supply",
+    label: "Seen by",
+    value: "Sales, finance and support",
+  },
+  sentence:
+    "Sales, finance and support each see Meridian Supply their own way. Resolved once, every team works from the same record.",
+};
+
+/** /about: the name, explained by the job. */
+export const ABOUT_SCENE: ResolutionScene = {
+  records: [
+    { source: "Salesforce", name: "Meridian Supply", label: "Kept", value: "the original" },
+    { source: "CSV upload", name: "MERIDIAN SUPPLY INC.", label: "Found", value: "a duplicate" },
+    { source: "API", name: "Meridian Supply Co", label: "Found", value: "a duplicate" },
+  ],
+  resolved: { entity: "E-1042", name: "Meridian Supply", label: "Duplicates", value: "0" },
+  arrow: "2 duplicates → 0",
+  sentence:
+    "The name is the job: take the duplicates down to zero, and keep one record for every company and person.",
+};
