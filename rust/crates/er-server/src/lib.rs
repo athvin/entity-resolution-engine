@@ -7237,8 +7237,9 @@ struct ExportIn {
     /// Join `lineage` to `golden` on `entity_id = id` to map every golden
     /// record back to the keys in your own systems, at the same snapshot.
     kind: String,
-    /// `csv`, `jsonl` or `parquet` (Snappy-compressed, with the CSV's
-    /// columns). Duplicates export as `jsonl` only.
+    /// `csv`, `jsonl` or `parquet` (Snappy-compressed: golden and lineage
+    /// with the CSV's columns, duplicates one row per group with its members
+    /// as a nested list). Duplicates do not export as `csv`.
     format: String,
     /// The lake snapshot to export: a run's `snapshot`, to export that run's
     /// results. Omitted, the latest is pinned and returned.
