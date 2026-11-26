@@ -59,26 +59,26 @@ Distinct `resource "aws_*"` blocks across `infra/terraform/`, by count:
 
 ```
   28  aws_iam_role
-  24  aws_iam_role_policy
+  25  aws_iam_role_policy
   14  aws_eks_pod_identity_association
+  10  aws_s3_bucket
+  10  aws_s3_bucket_public_access_block
    9  aws_cloudwatch_metric_alarm
-   9  aws_s3_bucket
-   9  aws_s3_bucket_public_access_block
    8  aws_iam_role_policy_attachment
-   7  aws_s3_bucket_server_side_encryption_configuration
+   8  aws_s3_bucket_server_side_encryption_configuration
    7  aws_secretsmanager_secret
    7  aws_secretsmanager_secret_version
-   5  aws_s3_bucket_lifecycle_configuration
-   5  aws_s3_bucket_policy
+   6  aws_s3_bucket_lifecycle_configuration
+   6  aws_s3_bucket_policy
    4  aws_cloudwatch_log_group
    4  aws_eks_addon
    4  aws_kms_alias
    4  aws_kms_key
+   4  aws_s3_bucket_versioning
    4  aws_security_group
    4  aws_ssoadmin_account_assignment
    4  aws_ssoadmin_permission_set
    3  aws_eks_access_entry
-   3  aws_s3_bucket_versioning
    3  aws_ssoadmin_managed_policy_attachment
    3  aws_vpc_security_group_ingress_rule
    2  aws_budgets_budget
