@@ -1,0 +1,344 @@
+/* /docs' walkthrough close-up (api-storyboard.tsx), inside its ScrollScene.
+
+   Unconditioned: the whole transcript, every exchange written out and
+   wrapping — the storyboard reduced motion, browsers without view timelines
+   and the baselines see. Scrubbed: six beats (0, 20, 40, 60, 80, 100%). Each
+   request types itself in (a cover the terminal's own colour steps off it one
+   character at a time), the line sent and the response follow, and the
+   transcript scrolls up one exchange at a time so the previous call, and the
+   value it hands on, stays in view. The wiring rule is `:where()` so the
+   per-exchange ranges win. Transform and opacity only; all text is
+   `--foreground`. */
+
+.sb-stage {
+  width: 100%;
+  container-type: inline-size;
+  color: var(--foreground);
+}
+.sb-terminal {
+  --sb-bg: var(--background);
+  overflow: clip;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--sb-bg);
+  font-family: var(--font-mono);
+}
+.sb-terminal .sb-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--foreground);
+  font-size: 12px;
+  line-height: 1.4;
+}
+/* Three window controls, drawn as one element's shadows. */
+.sb-dots {
+  width: 8px;
+  height: 8px;
+  margin-right: 24px;
+  border-radius: 50%;
+  background: var(--border);
+  box-shadow:
+    12px 0 0 var(--border),
+    24px 0 0 var(--border);
+}
+.sb-screen {
+  padding: 14px 16px;
+}
+.sb-terminal .sb-transcript {
+  display: grid;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.sb-terminal .sb-exchange {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  margin: 0;
+}
+.sb-terminal .sb-line {
+  margin: 0;
+  color: var(--foreground);
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.sb-terminal .sb-line[data-empty="true"] {
+  display: none;
+}
+.sb-request {
+  position: relative;
+  width: fit-content;
+  max-width: 100%;
+}
+.sb-terminal .sb-send {
+  padding-left: 2ch;
+}
+/* The value one call hands the next: outlined in the flow's one moving
+   light, in the response and again where the next call uses it. */
+.sb-carry {
+  padding: 0 2px;
+  border-radius: 3px;
+  outline: 1.5px solid var(--brand);
+  background: transparent;
+  color: inherit;
+}
+.sb-cover,
+.sb-fold-short {
+  display: none;
+}
+
+/* A narrow terminal folds each dataset path's common prefix to `…`. */
+@container (max-width: 480px) {
+  .sb-fold-long {
+    display: none;
+  }
+  .sb-fold-short {
+    display: inline;
+  }
+  .sb-terminal .sb-line {
+    font-size: 10.5px;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  @supports (animation-timeline: view()) and (animation-range: contain) {
+    .sb-stage {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      padding: 16px 16px 16px 32px;
+      container-type: size;
+    }
+    /* Fixed geometry, so the transcript can scroll by whole exchanges: every
+       exchange is three single lines, and five of them fit the screen. */
+    .sb-terminal {
+      --sb-line: 22px;
+      --sb-gap: 14px;
+      --sb-slot: calc(3 * var(--sb-line) + var(--sb-gap));
+      width: 100%;
+    }
+    .sb-screen {
+      height: calc(5 * var(--sb-slot) - var(--sb-gap) + 28px);
+    }
+    .sb-terminal .sb-transcript {
+      gap: var(--sb-gap);
+    }
+    .sb-terminal .sb-exchange {
+      gap: 0;
+      height: calc(3 * var(--sb-line));
+    }
+    .sb-terminal .sb-line {
+      height: var(--sb-line);
+      overflow: hidden;
+      line-height: var(--sb-line);
+      white-space: nowrap;
+      text-overflow: ellipsis;
+      overflow-wrap: normal;
+    }
+    .sb-terminal .sb-line[data-empty="true"] {
+      display: block;
+    }
+    .sb-cover {
+      position: absolute;
+      inset: 0;
+      display: block;
+      background: var(--sb-bg);
+    }
+
+    .sb-stage :where(.sb-transcript, .sb-cover, .sb-send, .sb-response) {
+      animation-duration: 1ms;
+      animation-timing-function: linear;
+      animation-fill-mode: both;
+      animation-timeline: --scene;
+      animation-range: contain 0% contain 100%;
+    }
+    .sb-transcript {
+      animation-name: sb-scroll-5;
+    }
+    .sb-cover {
+      animation-name: sb-type;
+      animation-timing-function: steps(var(--sb-chars));
+    }
+    .sb-send,
+    .sb-response {
+      animation-name: sb-arrive;
+    }
+    /* The first exchange is on screen from the first frame. */
+    .sb-exchange[data-ex="0"] .sb-cover {
+      display: none;
+    }
+    .sb-exchange[data-ex="0"] :where(.sb-send, .sb-response) {
+      animation-name: none;
+    }
+
+    /* Each exchange: the request types, then the line sent, then the
+       response; all done before its beat's centre. */
+    .sb-exchange[data-ex="1"] .sb-cover {
+      animation-range: contain 6% contain 12%;
+    }
+    .sb-exchange[data-ex="1"] .sb-send {
+      animation-range: contain 12% contain 13%;
+    }
+    .sb-exchange[data-ex="1"] .sb-response {
+      animation-range: contain 13% contain 15%;
+    }
+    .sb-exchange[data-ex="2"] .sb-cover {
+      animation-range: contain 26% contain 32%;
+    }
+    .sb-exchange[data-ex="2"] .sb-send {
+      animation-range: contain 32% contain 33%;
+    }
+    .sb-exchange[data-ex="2"] .sb-response {
+      animation-range: contain 33% contain 35%;
+    }
+    .sb-exchange[data-ex="3"] .sb-cover {
+      animation-range: contain 44% contain 48%;
+    }
+    .sb-exchange[data-ex="3"] .sb-response {
+      animation-range: contain 48% contain 50%;
+    }
+    .sb-exchange[data-ex="4"] .sb-cover {
+      animation-range: contain 51% contain 56%;
+    }
+    .sb-exchange[data-ex="4"] .sb-send {
+      animation-range: contain 56% contain 57%;
+    }
+    .sb-exchange[data-ex="4"] .sb-response {
+      animation-range: contain 57% contain 59%;
+    }
+    .sb-exchange[data-ex="5"] .sb-cover {
+      animation-range: contain 64% contain 68%;
+    }
+    .sb-exchange[data-ex="5"] .sb-response {
+      animation-range: contain 68% contain 70%;
+    }
+    .sb-exchange[data-ex="6"] .sb-cover {
+      animation-range: contain 71% contain 75%;
+    }
+    .sb-exchange[data-ex="6"] .sb-response {
+      animation-range: contain 75% contain 77%;
+    }
+    .sb-exchange[data-ex="7"] .sb-cover {
+      animation-range: contain 84% contain 88%;
+    }
+    .sb-exchange[data-ex="7"] .sb-response {
+      animation-range: contain 88% contain 90%;
+    }
+    .sb-exchange[data-ex="8"] .sb-cover {
+      animation-range: contain 90.5% contain 95%;
+    }
+    .sb-exchange[data-ex="8"] .sb-send {
+      animation-range: contain 95% contain 96%;
+    }
+    .sb-exchange[data-ex="8"] .sb-response {
+      animation-range: contain 96% contain 98%;
+    }
+
+    /* A narrow terminal types the folded path. */
+    @container (max-width: 480px) {
+      .sb-cover {
+        animation-timing-function: steps(var(--sb-chars-short));
+      }
+    }
+
+    /* A phone's pinned stage is short: smaller lines, four exchanges on
+       screen, and the transcript starts scrolling one exchange sooner. */
+    @container (max-height: 520px) {
+      .sb-stage {
+        padding: 8px 8px 8px 24px;
+      }
+      .sb-terminal {
+        --sb-line: 15px;
+        --sb-gap: 7px;
+      }
+      .sb-screen {
+        height: calc(4 * var(--sb-slot) - var(--sb-gap) + 20px);
+        padding: 10px 12px;
+      }
+      .sb-transcript {
+        animation-name: sb-scroll-4;
+      }
+      .sb-terminal .sb-bar {
+        padding: 6px 12px;
+        font-size: 11px;
+      }
+    }
+  }
+}
+
+@keyframes sb-type {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes sb-arrive {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Five exchanges on screen: the sixth call scrolls the first away. */
+@keyframes sb-scroll-5 {
+  0%,
+  62% {
+    transform: translateY(0);
+  }
+  64%,
+  70% {
+    transform: translateY(calc(var(--sb-slot) * -1));
+  }
+  71%,
+  82% {
+    transform: translateY(calc(var(--sb-slot) * -2));
+  }
+  84%,
+  90% {
+    transform: translateY(calc(var(--sb-slot) * -3));
+  }
+  90.5%,
+  100% {
+    transform: translateY(calc(var(--sb-slot) * -4));
+  }
+}
+
+/* Four on screen: the fifth call starts the scroll. */
+@keyframes sb-scroll-4 {
+  0%,
+  50% {
+    transform: translateY(0);
+  }
+  51%,
+  62% {
+    transform: translateY(calc(var(--sb-slot) * -1));
+  }
+  64%,
+  70% {
+    transform: translateY(calc(var(--sb-slot) * -2));
+  }
+  71%,
+  82% {
+    transform: translateY(calc(var(--sb-slot) * -3));
+  }
+  84%,
+  90% {
+    transform: translateY(calc(var(--sb-slot) * -4));
+  }
+  90.5%,
+  100% {
+    transform: translateY(calc(var(--sb-slot) * -5));
+  }
+}

@@ -88,6 +88,17 @@
   padding-left: 22px;
   margin: 24px 0;
 }
+/* A scene inside the article keeps its own lists and spacing: the article's
+   element styles would number its beats, and their margins would push each
+   beat off the centre the scene's timeline assumes. */
+.docs-article .scene ol {
+  list-style: none;
+  padding-left: 0;
+  margin: 0;
+}
+.docs-article .scene li {
+  margin: 0;
+}
 .docs-article li {
   padding-left: 8px;
   margin: 8px 0;
