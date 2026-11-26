@@ -267,7 +267,17 @@ probing rather than reading:
   element, transform and opacity only.
 - **A parked frame must read on its own.** Give each moment the frame to itself
   (the evidence leaves before the decision arrives); two half-faded layers over
-  each other is the frame a reader stops on.
+  each other is the frame a reader stops on. The same goes for things that
+  overlap while they move: /product's problem figure deals its records out
+  from under one that is already opaque, instead of fading them in as they
+  slide apart. Panels that replace each other hold for most of their beat and
+  cut in about 2% of the scroll; fades that took most of the beat parked a
+  blank window between steps.
+- **An unpinned entry figure is only halfway when it is centred.** Its view
+  timeline runs from entering at the bottom (`cover` 0%) to leaving at the top
+  (100%), so a figure in the middle of the screen sits at 50%. Finish by about
+  46%, or a reader who stops with it centred sees it unfinished: the
+  golden-records way-back figure read 0.14 opacity there.
 - **A phone's pinned stage is short** (about 290px on the iPhone 15 profile).
   Each stage compacts itself under `@container (max-height: 520px)`: fewer
   fields, one-line evidence rows, a rule reduced to its verdict, and the
