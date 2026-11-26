@@ -302,12 +302,76 @@ curl --fail-with-body -X POST \
   "delivery_id": "<delivery identifier>",
   "job": { "id": "<job identifier>", "state": "queued", "...": "additional job fields" }
 }`}</CodeExample>
+          <CodeExample label="Push JSON records">{`curl --fail-with-body -X POST \
+  "$ER_API_ORIGIN/v1/orgs/$ER_ORG/datasets/$ER_DATASET/records/ingest" \
+  -H "Authorization: Bearer $ER_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: crm-export-2026-11-26' \
+  --data '{"source":"crm","records":[{"crm_id":"C1","first_name":"Ada"}]}'`}</CodeExample>
+          <h3>Retrying safely</h3>
           <p>
-            Missing source or file fields return 422; uploads above the deployment’s configured cap
-            return 413; inactive state can return 409; unavailable delivery storage can return 503.
-            The JSON record-push surface is a separate operation in the reference and caps a request
-            at 10,000 records; larger submissions belong in file deliveries. Consult its declared
-            body before using it.
+            Send an <code>Idempotency-Key</code> header on every delivery — 1 to 255 visible ASCII
+            characters, scoped to the dataset and source. If a request times out, resend it with the
+            same key and the same bytes: you receive the original 202 receipt, the same{" "}
+            <code>delivery_id</code> and job, with <code>Idempotent-Replayed: true</code>, and no
+            second run is queued. Reusing a key for different bytes returns 409 naming the delivery
+            that owns it; new data needs a new key. Without a key every request is a new delivery.
+          </p>
+          <h3>What a delivery changes</h3>
+          <p>
+            Deliveries <strong>upsert</strong>: each row adds or replaces the record with its source
+            record key, and nothing a delivery omits is deleted, so an interrupted or partial upload
+            can never remove data. <code>mode=upsert</code> may be stated explicitly;{" "}
+            <code>mode=full_refresh</code> is refused with 422 rather than silently ignored. Remove
+            records explicitly with <code>POST …/records/delete</code>.
+          </p>
+          <h3>From receipt to result</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>State</th>
+                <th>How you see it</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>accepted</td>
+                <td>
+                  202 with <code>delivery_id</code> and <code>job</code>: the bytes are stored
+                  immutably and the run is queued. The run reads exactly these bytes, under the
+                  source mapping published when they were accepted.
+                </td>
+              </tr>
+              <tr>
+                <td>rejected</td>
+                <td>
+                  422 before anything is stored: an undeclared column, a missing source, an empty
+                  push, a bad key or mode.
+                </td>
+              </tr>
+              <tr>
+                <td>queued / running / failed / succeeded</td>
+                <td>
+                  <code>GET …/jobs/{"{job_id}"}</code>; a failed job carries{" "}
+                  <code>error_class</code> and <code>error_detail</code>, and its{" "}
+                  <code>run_id</code> once a run started.
+                </td>
+              </tr>
+              <tr>
+                <td>result available</td>
+                <td>
+                  The job succeeded; read duplicates, golden records and lineage. The delivery also
+                  appears in <code>GET …/imports</code>.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <p>
+            Limits: a JSON push carries at most 10,000 records; a file upload is capped by the
+            deployment’s configured import size and returns 413 above it. Files are CSV with a
+            header row naming the source’s mapped columns; JSON records are objects keyed by the
+            same column names. Other failures: inactive dataset 409, unavailable delivery storage
+            503 (retry with backoff and the same key).
           </p>
         </section>
         <section id="jobs">
@@ -442,7 +506,10 @@ Content-Type: application/json
                   "404",
                   "Check scope and identifiers; a cross-org request is deliberately indistinguishable from absence.",
                 ],
-                ["409", "Inspect current resource state before resubmitting."],
+                [
+                  "409",
+                  "Inspect current resource state before resubmitting; on a delivery, a key reused for different bytes.",
+                ],
                 ["413", "Reduce the delivery size to the configured cap."],
                 ["422", "Correct the request, configuration, or cursor."],
                 [
@@ -462,10 +529,11 @@ Content-Type: application/json
             </tbody>
           </table>
           <p>
-            No general idempotency-key contract is established here. Repeating an upload or job
-            submission can create another delivery or job. Persist returned identifiers; if a write
-            times out, inspect its outcome before issuing a replacement. Only rely on idempotence
-            explicitly documented for an operation.
+            Deliveries accept an <code>Idempotency-Key</code> (see{" "}
+            <a href="#ingestion">Submit a source delivery</a>), so a timed-out upload or push can be
+            resent unchanged. Other writes have no key: repeating a job submission can create
+            another job, so persist returned identifiers and inspect the outcome before issuing a
+            replacement.
           </p>
           <p>
             The generated OpenAPI schemas do not yet provide complete operation coverage or a

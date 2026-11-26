@@ -6686,6 +6686,8 @@ export interface operations {
             query?: {
                 /** @description The source system. */
                 source?: string;
+                /** @description `upsert` (the default and only mode): rows add or replace by record key; nothing the file omits is deleted. */
+                mode?: string;
             };
             header?: never;
             path: {
@@ -7995,6 +7997,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
+                    mode?: string | null;
                     records: unknown[];
                     source: string;
                 };

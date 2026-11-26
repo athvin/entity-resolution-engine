@@ -4235,6 +4235,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "mode",
+            "in": "query",
+            "description": "`upsert` (the default and only mode): rows add or replace by record key; nothing the file omits is deleted.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -6995,6 +7004,16 @@
                   "records"
                 ],
                 "properties": {
+                  "mode": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
                   "records": {
                     "type": "array",
                     "items": {}

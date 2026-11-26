@@ -1443,7 +1443,11 @@
     "params": ["org", "ds"],
     "body": {
       "type": "object",
-      "properties": { "source": { "type": "string" }, "records": { "type": "array", "items": {} } },
+      "properties": {
+        "source": { "type": "string" },
+        "mode": { "type": "string" },
+        "records": { "type": "array", "items": {} }
+      },
       "required": ["source", "records"],
       "additionalProperties": false
     },

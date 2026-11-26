@@ -8848,6 +8848,53 @@ pub(crate) struct StagedDelivery<'a> {
     /// The audit action naming how it arrived (`import.upload` / `import.push`
     /// / `import.s3`).
     pub(crate) action: &'a str,
+    /// The caller's `Idempotency-Key`, already validated. A retry carrying the
+    /// same key and the same bytes is handed the ORIGINAL receipt instead of a
+    /// second run; the same key with different bytes is a 409 (#1011).
+    pub(crate) client_key: Option<&'a str>,
+}
+
+/// The `Idempotency-Key` request header, if present: 1–255 visible ASCII
+/// characters. Its scope is one dataset and one source — the same key on
+/// another source is another delivery.
+pub(crate) fn idempotency_key(
+    headers: &axum::http::HeaderMap,
+) -> Result<Option<String>, Box<axum::response::Response>> {
+    let Some(value) = headers.get("idempotency-key") else {
+        return Ok(None);
+    };
+    match value.to_str() {
+        Ok(key)
+            if !key.is_empty() && key.len() <= 255 && key.bytes().all(|b| b.is_ascii_graphic()) =>
+        {
+            Ok(Some(key.to_owned()))
+        }
+        _ => Err(Box::new(detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Idempotency-Key must be 1-255 visible ASCII characters",
+        ))),
+    }
+}
+
+/// The delivery modes. Only `upsert` exists: rows add or replace records by
+/// their source record key, and nothing absent from a delivery is deleted.
+/// `full_refresh` — deleting what a delivery omits — is refused by name rather
+/// than accepted and ignored, because an ignored full refresh leaves records
+/// the caller believes are gone; an interrupted upload under it would delete
+/// live data. Delete explicitly with `POST …/records/delete`.
+fn delivery_mode(mode: Option<&str>) -> Result<(), Box<axum::response::Response>> {
+    match mode {
+        None | Some("upsert") => Ok(()),
+        Some("full_refresh") => Err(Box::new(detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "mode 'full_refresh' is not supported: deliveries upsert by record key and never \
+             delete what they omit; remove records with POST …/records/delete",
+        ))),
+        Some(other) => Err(Box::new(detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("unknown delivery mode '{other}'; the only mode is 'upsert'"),
+        ))),
+    }
 }
 
 /// `202` from a source delivery: the published delivery and the run queued
@@ -8874,6 +8921,7 @@ pub(crate) async fn finish_delivery(
         spec,
         bytes,
         action,
+        client_key,
     } = *d;
     let root = std::path::PathBuf::from(drop_root);
     let dataset = dataset_id.to_owned();
@@ -8896,7 +8944,12 @@ pub(crate) async fn finish_delivery(
     };
     // One stable key per accepted delivery, never per source. An enqueue retry
     // re-finds this consumer without collapsing distinct accepted deliveries.
-    let idem = format!("delivery:{delivery_id}");
+    // A caller's Idempotency-Key replaces it, scoped to the dataset and source
+    // so the jobs table's (org, key) unique cannot collide across them.
+    let idem = match client_key {
+        Some(key) => format!("client-delivery:{dataset_id}:{source}:{key}"),
+        None => format!("delivery:{delivery_id}"),
+    };
     let ds = Some(dataset_id);
     let job = match pg::enqueue(
         client,
@@ -8916,6 +8969,45 @@ pub(crate) async fn finish_delivery(
         Ok(j) => j,
         Err(e) => return pg_err(e),
     };
+    // The key already named a job: this request is a retry of it, or a misuse.
+    let original = job.params.get("delivery");
+    let original_id = original
+        .and_then(|p| p.get("delivery_id"))
+        .and_then(Value::as_str);
+    if client_key.is_some() && original_id != Some(delivery_id) {
+        // Ours is published but referenced by nothing; drop it so a replay
+        // costs no storage. Best-effort: an orphan is harmless, only wasteful.
+        let root = std::path::PathBuf::from(drop_root);
+        let id = delivery_id.to_owned();
+        let _ = er_obs::spawn_blocking_in_span(move || delivery::discard(&root, &id)).await;
+        let same_bytes = original
+            .and_then(|p| p.get("sha256"))
+            .and_then(Value::as_str)
+            == Some(pin.sha256.as_str());
+        if !same_bytes {
+            return detail_err(
+                StatusCode::CONFLICT,
+                format!(
+                    "Idempotency-Key was already used for a different {source} delivery \
+                     ({}); send a new key for new data",
+                    original_id.unwrap_or("unknown")
+                ),
+            );
+        }
+        let mut response = (
+            StatusCode::ACCEPTED,
+            Json(DeliveryAccepted {
+                delivery_id: original_id.unwrap_or_default().to_string(),
+                job: er_entities::job::JobWire::from(&job),
+            }),
+        )
+            .into_response();
+        response.headers_mut().insert(
+            "idempotent-replayed",
+            axum::http::HeaderValue::from_static("true"),
+        );
+        return response;
+    }
     let _ = pg::audit(
         client,
         actor,
@@ -8971,6 +9063,10 @@ struct PushRecordsIn {
     /// Which declared source these records belong to; their keys are that
     /// source's raw column names.
     source: String,
+    /// `upsert` (the default and only mode): records add or replace by record
+    /// key; nothing a delivery omits is deleted.
+    #[serde(default)]
+    mode: Option<String>,
     /// The records. Each is an object of that source's raw columns — the same
     /// shape a row of its CSV would have.
     records: Vec<Value>,
@@ -8992,14 +9088,28 @@ struct PushRecordsIn {
 /// records' own keys, so a record that omits a column lands as empty rather than
 /// shifting every later column — and an unexpected key is reported instead of
 /// being silently dropped.
+///
+/// Retry contract (#1011): send an `Idempotency-Key` header (1–255 visible ASCII
+/// characters, scoped to this dataset and source). A retry with the same key and
+/// the same records returns the original `202` receipt — same `delivery_id`, same
+/// job — with `Idempotent-Replayed: true`, and queues nothing; the same key with
+/// different records is a `409`. At most 10,000 records per push.
 async fn push_records(
     principal: Principal,
     State(state): State<AppState>,
     Path((org, ds)): Path<(String, String)>,
+    headers: axum::http::HeaderMap,
     Json(body): Json<PushRecordsIn>,
 ) -> impl IntoResponse {
     if let Err(e) = guard(&principal, &org, Role::Steward) {
         return e.into_response();
+    }
+    let client_key = match idempotency_key(&headers) {
+        Ok(k) => k,
+        Err(r) => return *r,
+    };
+    if let Err(r) = delivery_mode(body.mode.as_deref()) {
+        return *r;
     }
     if body.records.is_empty() {
         return detail_err(
@@ -9092,6 +9202,7 @@ async fn push_records(
             spec,
             bytes,
             action: "import.push",
+            client_key: client_key.as_deref(),
         },
     )
     .await
@@ -9122,6 +9233,9 @@ const MAX_PUSHED_RECORDS: usize = 10_000;
 struct UploadImportQuery {
     /// The source system.
     source: Option<String>,
+    /// `upsert` (the default and only mode): rows add or replace by record
+    /// key; nothing the file omits is deleted.
+    mode: Option<String>,
 }
 
 /// Steward+: upload one source's delivery
@@ -9136,14 +9250,18 @@ struct UploadImportQuery {
 /// `202 {"delivery_id": …, "job": {…}}`.
 ///
 /// Status contract (the BFF maps each one): **202** accepted · **409** org not
-/// active · **413** over the state's import cap · **422** missing `source`, no
-/// `file` part, or a source absent from the active config · **503** the org has
-/// no `drop_root` to land into.
+/// active, or an `Idempotency-Key` already used for different bytes · **413**
+/// over the state's import cap · **422** missing `source`, no `file` part, a
+/// source absent from the active config, an unsupported `mode` or a malformed
+/// key · **503** the org has no `drop_root` to land into. The same
+/// `Idempotency-Key` with the same bytes returns the original receipt, as
+/// `records/ingest` does.
 async fn upload_import(
     principal: Principal,
     State(state): State<AppState>,
     Path((org, ds)): Path<(String, String)>,
     Query(params): Query<UploadImportQuery>,
+    headers: axum::http::HeaderMap,
     mut multipart: axum::extract::Multipart,
 ) -> impl IntoResponse {
     use tokio::io::AsyncWriteExt;
@@ -9151,6 +9269,13 @@ async fn upload_import(
     let cap = state.max_import_bytes;
     if let Err(e) = guard(&principal, &org, Role::Steward) {
         return e.into_response();
+    }
+    let client_key = match idempotency_key(&headers) {
+        Ok(k) => k,
+        Err(r) => return *r,
+    };
+    if let Err(r) = delivery_mode(params.mode.as_deref()) {
+        return *r;
     }
     let Some(source) = params.source.as_deref().filter(|s| !s.is_empty()) else {
         return detail_err(StatusCode::UNPROCESSABLE_ENTITY, "source is required");
@@ -9264,6 +9389,7 @@ async fn upload_import(
             spec: &config.sources[source],
             bytes: bytes_written,
             action: "import.upload",
+            client_key: client_key.as_deref(),
         },
     )
     .await

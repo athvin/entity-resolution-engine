@@ -307,3 +307,24 @@ pub fn publish(
     File::open(root)?.sync_all()?;
     Ok(pin)
 }
+
+/// Remove a published delivery that no job references — the copy a replayed
+/// `Idempotency-Key` request published before learning the key was taken.
+/// Never call it for a delivery a job may consume.
+///
+/// # Errors
+/// Refuses an unsafe id; propagates a removal failure other than absence.
+pub fn discard(root: &Path, delivery_id: &str) -> Result<(), DeliveryError> {
+    if !safe_id(delivery_id) {
+        return Err(refused("invalid delivery identity"));
+    }
+    let dir = directory(root, false)?;
+    for name in [format!("{delivery_id}.json"), format!("{delivery_id}.csv")] {
+        match fs::remove_file(dir.join(name)) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.into()),
+        }
+    }
+    Ok(())
+}
