@@ -81,15 +81,28 @@ pub enum ExportFormat {
     Csv,
     /// JSON Lines: one JSON object per line.
     Jsonl,
+    /// Apache Parquet, Snappy-compressed: golden records and lineage, with
+    /// the same columns their CSV carries (#1241). The format a warehouse
+    /// load wants. Not duplicates: a group's nested shape has no schema
+    /// fixed before its first page, so it stays JSON Lines.
+    Parquet,
 }
 
 impl ExportFormat {
+    /// Every format, for the gates that must cover each.
+    pub const ALL: [ExportFormat; 3] = [
+        ExportFormat::Csv,
+        ExportFormat::Jsonl,
+        ExportFormat::Parquet,
+    ];
+
     /// The file extension.
     #[must_use]
     pub fn extension(self) -> &'static str {
         match self {
             ExportFormat::Csv => "csv",
             ExportFormat::Jsonl => "jsonl",
+            ExportFormat::Parquet => "parquet",
         }
     }
 
@@ -99,6 +112,7 @@ impl ExportFormat {
         match self {
             ExportFormat::Csv => "text/csv; charset=utf-8",
             ExportFormat::Jsonl => "application/x-ndjson",
+            ExportFormat::Parquet => "application/vnd.apache.parquet",
         }
     }
 }
@@ -130,9 +144,10 @@ impl ExportRequest {
     pub fn from_params(params: &Value) -> Result<Self, String> {
         let request: Self = serde_json::from_value(params.clone())
             .map_err(|e| format!("invalid export request: {e}"))?;
-        if request.kind == ExportKind::Duplicates && request.format == ExportFormat::Csv {
+        if request.kind == ExportKind::Duplicates && request.format != ExportFormat::Jsonl {
             return Err(
-                "duplicates export as jsonl only: a group's member list does not flatten into CSV"
+                "duplicates export as jsonl only: a group's member list does not flatten into CSV, \
+                 and its nested shape has no Parquet schema fixed before the first page"
                     .to_string(),
             );
         }
@@ -424,10 +439,103 @@ fn write_to(
                     writer.finish().map_err(|e| format!("export jsonl: {e}"))
                 })?;
             }
+            ExportFormat::Parquet => {
+                // The writer needs a schema before its first batch, so it is
+                // opened on the first page; an empty export takes the entity's
+                // declared schema, and is still a readable file.
+                let mut sink = Some(&mut out);
+                let mut writer = None;
+                golden_pages(session, entity_type, snapshot, page, |batch| {
+                    rows += batch.num_rows();
+                    ceiling(rows)?;
+                    if writer.is_none() {
+                        let out = sink.take().ok_or("export parquet: no output")?;
+                        writer = Some(parquet_writer(out, batch.schema())?);
+                    }
+                    writer
+                        .as_mut()
+                        .ok_or("export parquet: no writer")?
+                        .write(batch)
+                        .map_err(|e| format!("export parquet: {e}"))
+                })?;
+                let writer = match writer {
+                    Some(writer) => writer,
+                    None => parquet_writer(
+                        sink.take().ok_or("export parquet: no output")?,
+                        std::sync::Arc::new(match entity_type {
+                            EntityType::Person => {
+                                er_entities::golden_record::GoldenRecord::arrow_schema()
+                            }
+                            EntityType::Account => {
+                                er_entities::acct_golden_record::AcctGoldenRecord::arrow_schema()
+                            }
+                        }),
+                    )?,
+                };
+                writer.close().map_err(|e| format!("export parquet: {e}"))?;
+            }
         },
+        ExportKind::Lineage if request.format == ExportFormat::Parquet => {
+            let schema = std::sync::Arc::new(arrow::datatypes::Schema::new(
+                LINEAGE_COLUMNS
+                    .map(|name| {
+                        arrow::datatypes::Field::new(name, arrow::datatypes::DataType::Utf8, false)
+                    })
+                    .to_vec(),
+            ));
+            let mut writer = parquet_writer(&mut out, schema.clone())?;
+            let mut after: Option<String> = None;
+            loop {
+                let page_rows = match er_entities::entity_membership::read::lineage_page(
+                    session.connection(),
+                    snapshot,
+                    after.as_deref(),
+                    page,
+                ) {
+                    Ok(found) => found,
+                    Err(e) if after.is_none() && not_yet_written(&e.to_string()) => break,
+                    Err(e) => return Err(e.to_string()),
+                };
+                rows += page_rows.len();
+                ceiling(rows)?;
+                if !page_rows.is_empty() {
+                    let column = |get: fn(&_) -> &str| -> arrow::array::ArrayRef {
+                        std::sync::Arc::new(arrow::array::StringArray::from_iter_values(
+                            page_rows.iter().map(get),
+                        ))
+                    };
+                    let batch = arrow::record_batch::RecordBatch::try_new(
+                        schema.clone(),
+                        vec![
+                            column(|r: &er_entities::entity_membership::read::LineagePageRow| {
+                                r.record_key.as_str()
+                            }),
+                            column(|r: &er_entities::entity_membership::read::LineagePageRow| {
+                                r.source_system.as_str()
+                            }),
+                            column(|r: &er_entities::entity_membership::read::LineagePageRow| {
+                                r.source_record_id.as_str()
+                            }),
+                            column(|r: &er_entities::entity_membership::read::LineagePageRow| {
+                                r.entity_id.as_str()
+                            }),
+                        ],
+                    )
+                    .map_err(|e| format!("export parquet: {e}"))?;
+                    writer
+                        .write(&batch)
+                        .map_err(|e| format!("export parquet: {e}"))?;
+                }
+                match (page_rows.len() as i64 == page, page_rows.last()) {
+                    (true, Some(last)) => after = Some(last.record_key.clone()),
+                    _ => break,
+                }
+            }
+            writer.close().map_err(|e| format!("export parquet: {e}"))?;
+        }
         ExportKind::Lineage => {
             if request.format == ExportFormat::Csv {
-                out.write_all(b"record_key,source_system,source_record_id,entity_id\n")
+                out.write_all(format!("{}\n", LINEAGE_COLUMNS.join(",")).as_bytes())
                     .map_err(|e| format!("export write: {e}"))?;
             }
             let mut after: Option<String> = None;
@@ -460,7 +568,7 @@ fn write_to(
                                 .and_then(|()| out.write_all(b"\n"))
                                 .map_err(|e| format!("export write: {e}"))?;
                         }
-                        ExportFormat::Jsonl => {
+                        ExportFormat::Jsonl | ExportFormat::Parquet => {
                             serde_json::to_writer(
                                 &mut out,
                                 &serde_json::json!({
@@ -541,6 +649,26 @@ fn not_yet_written(error: &str) -> bool {
 }
 
 /// Walk every golden page at `snapshot`, handing each batch to `each`.
+/// The lineage export's columns, in order, for every format.
+const LINEAGE_COLUMNS: [&str; 4] = [
+    "record_key",
+    "source_system",
+    "source_record_id",
+    "entity_id",
+];
+
+/// A Snappy-compressed Parquet writer over `out` for `schema`.
+fn parquet_writer<W: std::io::Write + Send>(
+    out: W,
+    schema: arrow::datatypes::SchemaRef,
+) -> Result<parquet::arrow::ArrowWriter<W>, String> {
+    let props = parquet::file::properties::WriterProperties::builder()
+        .set_compression(parquet::basic::Compression::SNAPPY)
+        .build();
+    parquet::arrow::ArrowWriter::try_new(out, schema, Some(props))
+        .map_err(|e| format!("export parquet: {e}"))
+}
+
 fn golden_pages(
     session: &Session,
     entity_type: EntityType,
