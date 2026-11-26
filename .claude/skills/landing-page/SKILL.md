@@ -160,7 +160,11 @@ The header shows the logo, with both theme variants in the markup from
 
 ## A visual story and a detailed reference
 
-Home opens with a quiet hero, then stacked ingress, organization/dataset, dedupe
+Home opens with a hero whose opening scene (`scene/hero-scene.tsx`) plays once,
+in under five seconds, beside the headline: three versions of Meridian Supply
+clean up, line up and collapse into one golden record, then hold. It is CSS on
+a server component; Replay is its only island, and reduced motion shows the
+payoff. Then come stacked ingress, organization/dataset, dedupe
 and egress panels, followed by audit, usage, and a short FAQ and closing CTA.
 Measured paths connect actual exit and entry ports across section boundaries;
 resize and dataset/source changes must preserve their alignment. The
