@@ -11,12 +11,24 @@
 //! Beside the dataset's lake, under `<lake>/exports/`, never inside the lake's
 //! data directory: DuckLake owns that directory, and its orphan-file cleanup
 //! would delete a file its catalog does not list. The download streams through
-//! er-server behind the org guard rather than handing out a presigned URL: the
-//! API pod has no S3 grant at all, a presigning grant would have to span every
-//! tenant's prefix, and `duckfleet_artifacts.rs` already states the house
-//! policy that signed URLs never travel in a response. An S3-backed lake is
-//! therefore refused at enqueue ([`artifact_path`]) rather than accepted and
-//! then made undownloadable.
+//! er-server behind the org guard rather than handing out a presigned URL:
+//! `duckfleet_artifacts.rs` states the house policy that signed URLs never
+//! travel in a response.
+//!
+//! ## An S3-backed lake (#1240)
+//!
+//! The artifact goes to `s3://<bucket>/<tenant prefix>exports/<id>.<ext>`,
+//! under the org's prefix in `tenant-runners.json`, never the data path's
+//! parent: with a data path like `s3://b/prod/app/acme/` that parent is shared
+//! by every tenant. So the lake's data path must sit strictly BELOW the prefix
+//! (`<prefix>lake/`, say), or the artifact would land inside DuckLake's data
+//! directory; [`artifact_location`] refuses either mistake. The runner writes it
+//! with its own tenant identity and tags it `er-export=1`, which the lake
+//! bucket's lifecycle rule expires. The API streams it back by assuming that
+//! org's export READER, a role that can read only `<prefix>exports/*`, so a
+//! cross-tenant read is refused by IAM and not only by the guard. An org with
+//! no reader in [`readers`] is not enrolled, and its S3 export answers 501 at
+//! enqueue rather than being accepted and then made undownloadable.
 //!
 //! ## What "complete" means
 //!
@@ -27,8 +39,10 @@
 //! naming the ceiling. The file is written to a `.partial` name and renamed
 //! into place, so a download can never see half of one.
 
+use std::collections::BTreeMap;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use dedupe_core::session::Session;
 use er_config::EntityType;
@@ -100,6 +114,11 @@ pub struct ExportRequest {
     /// never export a different snapshot than the one the API answered with.
     #[serde(default)]
     pub snapshot: Option<i64>,
+    /// The org's S3 tenant prefix, set by the API at enqueue for an S3-backed
+    /// lake and never accepted from a client (`create_export` builds the params
+    /// from the three fields above). The runner writes under it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tenant_prefix: Option<String>,
 }
 
 impl ExportRequest {
@@ -121,13 +140,13 @@ impl ExportRequest {
     }
 }
 
-/// Where export `export_id`'s artifact lives for a dataset whose lake env is
-/// `lake_env`: `<lake>/exports/<export_id>.<ext>`, beside the lake's data
-/// directory and never inside it.
+/// Where export `export_id`'s artifact lives for a dataset whose file-system
+/// lake env is `lake_env`: `<lake>/exports/<export_id>.<ext>`, beside the
+/// lake's data directory and never inside it.
 ///
 /// # Errors
-/// The env names no data path, or the lake is on S3, which the API pod cannot
-/// read back for a download (see the module doc).
+/// The env names no data path, or the lake is on S3 ([`artifact_location`]
+/// handles that).
 pub fn artifact_path(
     lake_env: &Value,
     export_id: &str,
@@ -139,18 +158,12 @@ pub fn artifact_path(
         .ok_or("the dataset's lake env names no ER_LAKE_DATA_PATH")?;
     if data.starts_with("s3://") {
         return Err(
-            "exports are not yet available for an S3-backed lake: the API cannot read the \
-             artifact back to serve it"
-                .to_string(),
+            "an S3-backed lake has no file-system export path; see artifact_location".to_string(),
         );
     }
     // The id is a UUIDv7 job id; refuse anything else rather than build a
     // path from it.
-    if export_id.is_empty()
-        || !export_id
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-')
-    {
+    if !valid_export_id(export_id) {
         return Err(format!("invalid export id '{export_id}'"));
     }
     let lake = Path::new(data.trim_end_matches('/'))
@@ -159,6 +172,105 @@ pub fn artifact_path(
     Ok(lake
         .join("exports")
         .join(format!("{export_id}.{}", format.extension())))
+}
+
+/// Where an export's artifact lives.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ArtifactLocation {
+    /// A file beside an EFS or local lake.
+    File(PathBuf),
+    /// An object under the org's tenant prefix in the lake bucket.
+    S3 { bucket: String, key: String },
+}
+
+/// Where export `export_id` lives for a lake env: [`artifact_path`] for a
+/// file-system lake, `s3://<bucket>/<tenant_prefix>exports/<id>.<ext>` for an
+/// S3 one.
+///
+/// # Errors
+/// An S3 lake with no tenant prefix (the org is not enrolled), a data path not
+/// strictly below that prefix, or anything [`artifact_path`] refuses.
+pub fn artifact_location(
+    lake_env: &Value,
+    export_id: &str,
+    format: ExportFormat,
+    tenant_prefix: Option<&str>,
+) -> Result<ArtifactLocation, String> {
+    let data = lake_env
+        .get("ER_LAKE_DATA_PATH")
+        .and_then(Value::as_str)
+        .ok_or("the dataset's lake env names no ER_LAKE_DATA_PATH")?;
+    let Some(rest) = data.strip_prefix("s3://") else {
+        return artifact_path(lake_env, export_id, format).map(ArtifactLocation::File);
+    };
+    let prefix = tenant_prefix.ok_or(
+        "this org's lake is on S3 but it has no export reader: enroll it in tenant-runners.json",
+    )?;
+    if !valid_export_id(export_id) {
+        return Err(format!("invalid export id '{export_id}'"));
+    }
+    let (bucket, path) = rest.split_once('/').unwrap_or((rest, ""));
+    if bucket.is_empty() || prefix.is_empty() || !prefix.ends_with('/') || prefix.contains("..") {
+        return Err(format!("invalid S3 export location s3://{bucket}/{prefix}"));
+    }
+    // Strictly below the prefix: at the prefix itself, `<prefix>exports/`
+    // would sit inside DuckLake's data directory, whose orphan cleanup
+    // deletes what its catalog does not list.
+    let below = path
+        .strip_prefix(prefix)
+        .is_some_and(|tail| !tail.trim_matches('/').is_empty() && !tail.starts_with("exports/"));
+    if !below {
+        return Err(format!(
+            "the lake's data path {data} must sit strictly below its tenant prefix {prefix} \
+             (and not at {prefix}exports/) for exports to live beside it"
+        ));
+    }
+    Ok(ArtifactLocation::S3 {
+        bucket: bucket.to_string(),
+        key: format!("{prefix}exports/{export_id}.{}", format.extension()),
+    })
+}
+
+fn valid_export_id(export_id: &str) -> bool {
+    !export_id.is_empty()
+        && export_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-')
+}
+
+/// An enrolled org's export reader (#1240): the role the API assumes to read
+/// the org's artifacts, and the org's tenant prefix.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExportReader {
+    pub role: String,
+    pub prefix: String,
+}
+
+/// Parse `ER_EXPORT_READ_ROLES`, the chart's `{org: {role, prefix}}` map.
+/// Absent or empty is no readers.
+///
+/// # Errors
+/// Not that JSON shape.
+pub fn parse_readers(raw: Option<&str>) -> Result<BTreeMap<String, ExportReader>, String> {
+    match raw.map(str::trim) {
+        None | Some("") => Ok(BTreeMap::new()),
+        Some(raw) => serde_json::from_str(raw)
+            .map_err(|e| format!("ER_EXPORT_READ_ROLES must map org ids to {{role, prefix}}: {e}")),
+    }
+}
+
+/// This process's export readers, read once from `ER_EXPORT_READ_ROLES`. A
+/// malformed value is logged and treated as none, which refuses S3 exports
+/// rather than guessing at a role.
+pub fn readers() -> &'static BTreeMap<String, ExportReader> {
+    static READERS: OnceLock<BTreeMap<String, ExportReader>> = OnceLock::new();
+    READERS.get_or_init(|| {
+        parse_readers(std::env::var("ER_EXPORT_READ_ROLES").ok().as_deref()).unwrap_or_else(|e| {
+            tracing::error!(error = %e, "invalid export reader configuration; S3 exports are off");
+            BTreeMap::new()
+        })
+    })
 }
 
 /// When an export finished at `finished_at` stops being downloadable.
@@ -466,6 +578,114 @@ fn golden_pages(
     }
 }
 
+/// The S3 half of an export (#1240): the runner's tagged upload and the API's
+/// read through the org's export reader.
+pub mod s3 {
+    use aws_sdk_s3::primitives::ByteStream;
+
+    /// The tag the lake bucket's `export-expiry` lifecycle rule matches.
+    pub const EXPIRY_TAG: &str = "er-export=1";
+
+    fn https() -> aws_sdk_s3::config::SharedHttpClient {
+        // Ring-backed rustls, for the reason mail.rs gives: the SDK's default
+        // TLS needs a cmake the build image lacks.
+        aws_smithy_http_client::Builder::new()
+            .tls_provider(aws_smithy_http_client::tls::Provider::Rustls(
+                aws_smithy_http_client::tls::rustls_provider::CryptoMode::Ring,
+            ))
+            .build_https()
+    }
+
+    /// Upload the finished file at `from` to `s3://bucket/key`, tagged for
+    /// expiry, with the process's own credentials (the runner's tenant
+    /// identity). Blocking: the export task is synchronous, so this builds a
+    /// current-thread runtime of its own. A single PUT is atomic, so a
+    /// download never sees half an artifact.
+    ///
+    /// # Errors
+    /// The runtime, the file or the PUT failed.
+    pub fn put_blocking(
+        bucket: &str,
+        key: &str,
+        from: &std::path::Path,
+        content_type: &str,
+    ) -> Result<(), String> {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| format!("export upload runtime: {e}"))?;
+        runtime.block_on(async {
+            let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+                .http_client(https())
+                .load()
+                .await;
+            let body = ByteStream::from_path(from)
+                .await
+                .map_err(|e| format!("export upload body: {e}"))?;
+            aws_sdk_s3::Client::new(&config)
+                .put_object()
+                .bucket(bucket)
+                .key(key)
+                .content_type(content_type)
+                .tagging(EXPIRY_TAG)
+                .body(body)
+                .send()
+                .await
+                .map(|_| ())
+                .map_err(|e| {
+                    format!(
+                        "export upload s3://{bucket}/{key}: {}",
+                        aws_sdk_s3::error::DisplayErrorContext(&e)
+                    )
+                })
+        })
+    }
+
+    /// Why a read failed.
+    #[derive(Debug)]
+    pub enum ReadError {
+        /// No such object: the lifecycle rule reached it first.
+        Missing,
+        /// Anything else, AccessDenied included.
+        Other(String),
+    }
+
+    /// Open `s3://bucket/key` as the org's export reader `role`.
+    ///
+    /// # Errors
+    /// [`ReadError::Missing`] for an absent object, otherwise the SDK's error.
+    pub async fn open(role: &str, bucket: &str, key: &str) -> Result<ByteStream, ReadError> {
+        let base = aws_config::defaults(aws_config::BehaviorVersion::latest())
+            .http_client(https())
+            .load()
+            .await;
+        let reader = aws_config::sts::AssumeRoleProvider::builder(role)
+            .session_name("er-api-export-download")
+            .configure(&base)
+            .build()
+            .await;
+        let config = aws_sdk_s3::config::Builder::from(&base)
+            .credentials_provider(reader)
+            .build();
+        match aws_sdk_s3::Client::from_conf(config)
+            .get_object()
+            .bucket(bucket)
+            .key(key)
+            .send()
+            .await
+        {
+            Ok(object) => Ok(object.body),
+            Err(e) if e.as_service_error().is_some_and(|s| s.is_no_such_key()) => {
+                Err(ReadError::Missing)
+            }
+            Err(e) => Err(ReadError::Other(format!(
+                "export read s3://{bucket}/{key}: {}",
+                aws_sdk_s3::error::DisplayErrorContext(&e)
+            ))),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -479,6 +699,7 @@ mod tests {
                 kind: ExportKind::Golden,
                 format: ExportFormat::Csv,
                 snapshot: None,
+                tenant_prefix: None,
             })
         );
         assert!(
@@ -548,13 +769,99 @@ mod tests {
     }
 
     #[test]
-    fn an_s3_lake_and_a_path_shaped_id_are_refused() {
-        let s3 = json!({"ER_LAKE_DATA_PATH": "s3://bucket/prod/app/acme/"});
-        assert!(
-            artifact_path(&s3, "0193-abc", ExportFormat::Csv)
-                .unwrap_err()
-                .contains("S3-backed")
+    fn an_s3_export_lives_under_the_tenant_prefix_beside_the_lake() {
+        let s3 = json!({"ER_LAKE_DATA_PATH": "s3://bucket/_isolation/probe-a/lake/"});
+        assert_eq!(
+            artifact_location(
+                &s3,
+                "0193-abc",
+                ExportFormat::Csv,
+                Some("_isolation/probe-a/")
+            ),
+            Ok(ArtifactLocation::S3 {
+                bucket: "bucket".into(),
+                key: "_isolation/probe-a/exports/0193-abc.csv".into(),
+            })
         );
+        // A file-system lake ignores the prefix and keeps its path.
+        let local = json!({"ER_LAKE_DATA_PATH": "/efs/acme/lake/data"});
+        assert_eq!(
+            artifact_location(&local, "0193-abc", ExportFormat::Jsonl, None),
+            Ok(ArtifactLocation::File(PathBuf::from(
+                "/efs/acme/lake/exports/0193-abc.jsonl"
+            )))
+        );
+        // The S3 branch has no file-system path.
+        assert!(artifact_path(&s3, "0193-abc", ExportFormat::Csv).is_err());
+    }
+
+    #[test]
+    fn an_s3_export_outside_its_tenant_or_inside_the_lake_is_refused() {
+        let at = |data: &str, prefix: Option<&str>, id: &str| {
+            artifact_location(
+                &json!({"ER_LAKE_DATA_PATH": data}),
+                id,
+                ExportFormat::Csv,
+                prefix,
+            )
+        };
+        // Not enrolled: no reader, no prefix.
+        assert!(
+            at("s3://b/a/lake/", None, "x")
+                .unwrap_err()
+                .contains("enroll")
+        );
+        // The data path IS the prefix: exports/ would sit inside DuckLake's
+        // data directory and orphan cleanup would delete it.
+        assert!(at("s3://b/a/", Some("a/"), "x").is_err());
+        // A data path under ANOTHER tenant's prefix.
+        assert!(at("s3://b/other/lake/", Some("a/"), "x").is_err());
+        // A data path that is the exports dir itself.
+        assert!(at("s3://b/a/exports/", Some("a/"), "x").is_err());
+        // Malformed prefixes and ids.
+        assert!(at("s3://b/a/lake/", Some("a"), "x").is_err());
+        assert!(at("s3://b/a/../lake/", Some("a/../"), "x").is_err());
+        assert!(at("s3://b/a/lake/", Some("a/"), "../x").is_err());
+        assert!(at("s3:///a/lake/", Some("a/"), "x").is_err());
+    }
+
+    #[test]
+    fn export_readers_parse_from_the_chart_map() {
+        assert_eq!(parse_readers(None), Ok(BTreeMap::new()));
+        assert_eq!(parse_readers(Some(" ")), Ok(BTreeMap::new()));
+        let readers = parse_readers(Some(
+            r#"{"org-a":{"prefix":"a/","role":"arn:aws:iam::1:role/er-dev-export-x"}}"#,
+        ))
+        .unwrap();
+        assert_eq!(
+            readers["org-a"],
+            ExportReader {
+                role: "arn:aws:iam::1:role/er-dev-export-x".into(),
+                prefix: "a/".into(),
+            }
+        );
+        assert!(parse_readers(Some(r#"{"org-a":"arn"}"#)).is_err());
+        assert!(parse_readers(Some(r#"{"org-a":{"role":"r","prefix":"a/","x":1}}"#)).is_err());
+    }
+
+    #[test]
+    fn a_client_cannot_be_given_a_tenant_prefix_it_did_not_have() {
+        // The job carries the prefix; a request without one parses to None,
+        // and create_export never copies it from the body.
+        let request =
+            ExportRequest::from_params(&json!({"kind": "golden", "format": "csv"})).unwrap();
+        assert_eq!(request.tenant_prefix, None);
+        assert!(
+            !serde_json::to_value(&request)
+                .unwrap()
+                .as_object()
+                .unwrap()
+                .contains_key("tenant_prefix")
+        );
+    }
+
+    #[test]
+    fn a_path_shaped_id_is_refused() {
         let local = json!({"ER_LAKE_DATA_PATH": "/efs/acme/lake/data"});
         for id in ["../etc/passwd", "a/b", "", "x.y"] {
             assert!(

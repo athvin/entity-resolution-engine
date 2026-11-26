@@ -1032,9 +1032,23 @@ impl Task<Session> for ExportResults {
         let precondition = |m: String| TaskError::Failed(er_errors::ErError::precondition(m));
         let request =
             crate::exports::ExportRequest::from_params(&ctx.order.params).map_err(precondition)?;
-        let path =
-            crate::exports::artifact_path(&ctx.order.lake_env, &ctx.order.job_id, request.format)
-                .map_err(precondition)?;
+        let location = crate::exports::artifact_location(
+            &ctx.order.lake_env,
+            &ctx.order.job_id,
+            request.format,
+            request.tenant_prefix.as_deref(),
+        )
+        .map_err(precondition)?;
+        // An S3 artifact is written locally first and uploaded whole (#1240):
+        // the writer streams pages through a file, and one PUT is atomic.
+        let path = match &location {
+            crate::exports::ArtifactLocation::File(path) => path.clone(),
+            crate::exports::ArtifactLocation::S3 { .. } => std::env::temp_dir().join(format!(
+                "er-export-{}.{}",
+                ctx.order.job_id,
+                request.format.extension()
+            )),
+        };
         let entity_type = if ctx
             .order
             .lake_env
@@ -1049,14 +1063,28 @@ impl Task<Session> for ExportResults {
         let snapshot = request
             .snapshot
             .ok_or_else(|| precondition("the export job carries no pinned snapshot".into()))?;
-        match crate::exports::write(
+        let written = crate::exports::write(
             ctx.session,
             entity_type,
             &request,
             &path,
             crate::read::MAX_LIMIT,
             crate::exports::MAX_ROWS,
-        ) {
+        )
+        .and_then(|report| match &location {
+            crate::exports::ArtifactLocation::File(_) => Ok(report),
+            crate::exports::ArtifactLocation::S3 { bucket, key } => {
+                let uploaded = crate::exports::s3::put_blocking(
+                    bucket,
+                    key,
+                    &path,
+                    request.format.content_type(),
+                );
+                let _ = std::fs::remove_file(&path);
+                uploaded.map(|()| report)
+            }
+        });
+        match written {
             Ok(report) => Ok(Outcome::Done(
                 Plan(ExportReport {
                     snapshot,

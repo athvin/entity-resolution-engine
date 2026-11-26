@@ -36,7 +36,7 @@ run "tenant_boundaries" {
     error_message = "Pod Identity trust must bind the whole cluster/namespace/account triple."
   }
   assert {
-    condition     = jsondecode(output.policies["a"]).Statement[4].Condition.StringEquals["kms:ViaService"] == "s3.us-east-2.amazonaws.com"
+    condition     = jsondecode(output.policies["a"]).Statement[3].Condition.StringEquals["kms:ViaService"] == "s3.us-east-2.amazonaws.com"
     error_message = "A runner must not get direct KMS decryption."
   }
 }
@@ -119,7 +119,7 @@ run "export_readers" {
     error_message = "Only the API pod role may assume an export reader."
   }
   assert {
-    condition     = jsondecode(output.policies["a"]).Statement[2].Resource == ["arn:aws:s3:::test-lake/tenant-a/exports/*"]
+    condition     = [for st in jsondecode(output.policies["a"]).Statement : st.Resource if st.Sid == "TenantExportTagging"] == [["arn:aws:s3:::test-lake/tenant-a/exports/*"]]
     error_message = "The runner may tag only its own tenant's export artifacts."
   }
 }

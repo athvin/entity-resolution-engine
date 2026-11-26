@@ -80,14 +80,6 @@ locals {
         Condition = { StringLike = { "s3:prefix" = ["${b.prefix}*"] } }
       },
       {
-        # The export writer tags its artifact so the lake's tag-filtered
-        # lifecycle rule expires it (#1240); a tagged PutObject needs this too.
-        Sid      = "TenantExportTagging"
-        Effect   = "Allow"
-        Action   = ["s3:PutObjectTagging"]
-        Resource = ["${var.bucket_arn}/${b.prefix}exports/*"]
-      },
-      {
         Sid      = "BucketLocation"
         Effect   = "Allow"
         Action   = ["s3:GetBucketLocation"]
@@ -110,6 +102,15 @@ locals {
         Effect   = "Deny"
         Action   = ["s3:PutObject", "s3:DeleteObject", "s3:DeleteObjectVersion", "s3:AbortMultipartUpload"]
         Resource = [for prefix in b.read_only_prefixes : "${var.bucket_arn}/${prefix}*"]
+      }],
+      # Last, so the statement indices other modules' tests assert stay put.
+      # The export writer tags its artifact so the lake's tag-filtered
+      # lifecycle rule expires it (#1240); a tagged PutObject needs this too.
+      [{
+        Sid      = "TenantExportTagging"
+        Effect   = "Allow"
+        Action   = ["s3:PutObjectTagging"]
+        Resource = ["${var.bucket_arn}/${b.prefix}exports/*"]
     }])
   }) }
 }
