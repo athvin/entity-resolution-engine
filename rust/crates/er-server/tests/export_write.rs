@@ -15,9 +15,16 @@
 //!    `.partial` behind, so a failed export can never be downloaded;
 //! 6. lineage (#1231), the join a customer makes back to their own keys: every
 //!    source record of a file-ingested (non-Salesforce) dataset appears exactly
-//!    once, and the entities it names are exactly the golden export's.
+//!    once, and the entities it names are exactly the golden export's;
+//! 7. Parquet (#1241): golden at R round-trips through a reader with exactly
+//!    `AcctGoldenRecord`'s columns and R's four entities, across a page
+//!    boundary; an empty export is still a readable file with that schema;
+//!    lineage carries the same seven rows as its CSV.
 
 use std::path::{Path, PathBuf};
+
+use arrow::array::Array as _;
+use arrow::record_batch::RecordBatchReader as _;
 
 use er_config::{EntityType, load_config_str};
 use er_server::exports::{self, ExportFormat, ExportKind, ExportRequest};
@@ -42,6 +49,40 @@ fn request(kind: ExportKind, format: ExportFormat, snapshot: i64) -> ExportReque
         snapshot: Some(snapshot),
         tenant_prefix: None,
     }
+}
+
+/// Read a Parquet artifact back: its column names and every row's batch.
+fn parquet(path: &Path) -> (Vec<String>, Vec<arrow::record_batch::RecordBatch>) {
+    let file = std::fs::File::open(path).unwrap();
+    let reader = parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(file)
+        .unwrap()
+        .build()
+        .unwrap();
+    let columns = reader
+        .schema()
+        .fields()
+        .iter()
+        .map(|f| f.name().clone())
+        .collect();
+    (columns, reader.map(Result::unwrap).collect())
+}
+
+fn strings(batches: &[arrow::record_batch::RecordBatch], column: &str) -> Vec<String> {
+    batches
+        .iter()
+        .flat_map(|b| {
+            let array = b.column_by_name(column).unwrap();
+            let array = arrow::compute::cast(array, &arrow::datatypes::DataType::Utf8).unwrap();
+            let array = array
+                .as_any()
+                .downcast_ref::<arrow::array::StringArray>()
+                .unwrap()
+                .clone();
+            (0..array.len())
+                .map(|i| array.value(i).to_string())
+                .collect::<Vec<_>>()
+        })
+        .collect()
 }
 
 fn lines(path: &Path) -> Vec<String> {
@@ -251,6 +292,69 @@ fn an_export_writes_every_page_of_its_pinned_snapshot() {
     );
     assert_eq!(report.unwrap().rows, 7);
     assert_eq!(lines(&path).len(), 7);
+
+    // 7. Parquet. Golden at R: the entity's declared columns, R's four ids.
+    let declared: Vec<String> = er_entities::acct_golden_record::AcctGoldenRecord::arrow_schema()
+        .fields()
+        .iter()
+        .map(|f| f.name().clone())
+        .collect();
+    let (report, path) = write(
+        "golden-r.parquet",
+        &request(ExportKind::Golden, ExportFormat::Parquet, r),
+        exports::MAX_ROWS,
+    );
+    assert_eq!(report.unwrap().rows, 4);
+    let (columns, batches) = parquet(&path);
+    assert_eq!(columns, declared, "the GoldenRecord column set");
+    let ids: std::collections::BTreeSet<String> = strings(&batches, "id").into_iter().collect();
+    assert_eq!(ids, golden, "the same four entities as the JSONL export");
+    // An empty export is a readable, zero-row file with that schema.
+    let (report, path) = write(
+        "empty.parquet",
+        &request(ExportKind::Golden, ExportFormat::Parquet, empty),
+        exports::MAX_ROWS,
+    );
+    assert_eq!(report.unwrap().rows, 0);
+    let (columns, batches) = parquet(&path);
+    assert_eq!(columns, declared);
+    assert_eq!(
+        batches
+            .iter()
+            .map(arrow::record_batch::RecordBatch::num_rows)
+            .sum::<usize>(),
+        0
+    );
+    // Lineage: the CSV's columns and its seven rows.
+    let (report, path) = write(
+        "lineage.parquet",
+        &request(ExportKind::Lineage, ExportFormat::Parquet, r),
+        exports::MAX_ROWS,
+    );
+    assert_eq!(report.unwrap().rows, 7);
+    let (columns, batches) = parquet(&path);
+    assert_eq!(columns.join(","), lineage[0]);
+    let mut from_parquet: Vec<String> = (0..7)
+        .map(|i| {
+            [
+                "record_key",
+                "source_system",
+                "source_record_id",
+                "entity_id",
+            ]
+            .map(|c| strings(&batches, c)[i].clone())
+            .join(",")
+        })
+        .collect();
+    let mut from_csv: Vec<String> = lineage[1..].to_vec();
+    from_parquet.sort();
+    from_csv.sort();
+    assert_eq!(from_parquet, from_csv);
+    // Duplicates are JSON Lines only.
+    assert!(
+        ExportRequest::from_params(&serde_json::json!({"kind": "duplicates", "format": "parquet"}))
+            .is_err()
+    );
 
     let _ = std::fs::remove_dir_all(&tmp);
 }

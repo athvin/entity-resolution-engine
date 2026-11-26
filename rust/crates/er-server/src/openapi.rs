@@ -461,8 +461,8 @@ fn operation_responses(
                 // type is the export's format.
                 response = response
                     .description(
-                        "Successful response: the export's artifact as an attachment, CSV \
-                         or JSON Lines as the export's `format` says.",
+                        "Successful response: the export's artifact as an attachment, CSV, \
+                         JSON Lines or Parquet as the export's `format` says.",
                     )
                     .content(
                         "text/csv",
@@ -470,6 +470,10 @@ fn operation_responses(
                     )
                     .content(
                         "application/x-ndjson",
+                        json_content(json!({"type": "string", "format": "binary"})),
+                    )
+                    .content(
+                        "application/vnd.apache.parquet",
                         json_content(json!({"type": "string", "format": "binary"})),
                     );
                 continue;
@@ -969,7 +973,12 @@ mod tests {
                     }
                     "file" => {
                         assert!(content.get("application/json").is_none());
-                        assert_eq!(content["text/csv"]["schema"]["format"], "binary");
+                        // Every export format's media type is documented, so a
+                        // new format cannot ship undescribed.
+                        for format in crate::exports::ExportFormat::ALL {
+                            let media = format.content_type().split(';').next().unwrap_or_default();
+                            assert_eq!(content[media]["schema"]["format"], "binary", "{media}");
+                        }
                     }
                     other => panic!("unsupported ledger class {other}"),
                 }
