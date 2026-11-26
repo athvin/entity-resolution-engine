@@ -819,17 +819,22 @@ test.describe("/pricing", () => {
         }),
         total: Number(getComputedStyle(node.querySelector(".pool-total") as Element).opacity),
       }));
+    // The whole end state at once: the bars rest at about 1.45s but the total
+    // fades in until about 1.73s, so reading it the moment the bars stop
+    // caught it at 0.40 once the figure was held until seen (#1284).
+    const settled = async () => {
+      const now = await state();
+      return Math.max(...now.moved) < 0.5 && now.total > 0.95;
+    };
     await figure.scrollIntoViewIfNeeded();
-    await expect.poll(async () => Math.max(...(await state()).moved)).toBeLessThan(0.5);
-    expect((await state()).total).toBeGreaterThan(0.95);
+    await expect.poll(settled).toBe(true);
     await expect(figure.locator('.pool-tiers li[data-on="true"]')).toHaveText("Professional");
 
     await page.getByTestId("records-pool-stage-replay").click();
     await expect
       .poll(async () => Math.min(...(await state()).moved.slice(0, 2)))
       .toBeGreaterThan(20);
-    await expect.poll(async () => Math.max(...(await state()).moved)).toBeLessThan(0.5);
-    expect((await state()).total).toBeGreaterThan(0.95);
+    await expect.poll(settled).toBe(true);
   });
 
   test("with reduced motion the figure is its finished picture", async ({ page }) => {
