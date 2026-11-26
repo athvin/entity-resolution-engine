@@ -849,3 +849,49 @@ test.describe("/pricing", () => {
     await expect(page.getByTestId("records-pool")).toHaveScreenshot("marketing-records-pool.png");
   });
 });
+
+test.describe("solutions, role, industry and /about scenes", () => {
+  const golden = (page: Page) =>
+    page
+      .getByTestId("resolution-figure")
+      .locator(".resolve-golden")
+      .evaluate((node) => Number(getComputedStyle(node).opacity));
+
+  // Under each page intro, in the first screen: it plays itself once when
+  // seen, and Replay runs it again, from the three records alone to the one
+  // they resolve into.
+  test("three records resolve into one, and Replay runs it again", async ({ page }) => {
+    await page.goto("/solutions/industries/manufacturing");
+    const figure = page.getByTestId("resolution-figure");
+    await figure.scrollIntoViewIfNeeded();
+    await expect.poll(() => golden(page)).toBeGreaterThan(0.95);
+    await expect(figure.locator(".resolve-golden")).toContainText("Kestrel Fasteners");
+    await page.getByTestId("resolve-manufacturing-stage-replay").click();
+    await expect.poll(() => golden(page)).toBeLessThan(0.05);
+    await expect.poll(() => golden(page)).toBeGreaterThan(0.95);
+  });
+
+  test("with reduced motion every scene is its finished picture", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    for (const path of ["/solutions", "/about", "/solutions/roles/marketing"]) {
+      await page.goto(path);
+      const figure = page.getByTestId("resolution-figure");
+      await expect(figure.locator(".resolve-golden")).toBeVisible();
+      expect(
+        await figure.evaluate((node) => node.getAnimations({ subtree: true }).length),
+        path,
+      ).toBe(0);
+    }
+  });
+
+  test("resolution figure poster visual baseline @visual", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/solutions/industries/manufacturing");
+    await page.addStyleTag({
+      content: '[data-testid="marketing-header"] { visibility: hidden !important; }',
+    });
+    await expect(page.getByTestId("resolution-figure")).toHaveScreenshot(
+      "marketing-resolution-figure.png",
+    );
+  });
+});

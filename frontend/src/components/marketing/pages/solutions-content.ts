@@ -922,7 +922,7 @@ export const ABOUT_SCENE: ResolutionScene = {
     { source: "CSV upload", name: "MERIDIAN SUPPLY INC.", label: "Found", value: "a duplicate" },
     { source: "API", name: "Meridian Supply Co", label: "Found", value: "a duplicate" },
   ],
-  resolved: { entity: "E-1042", name: "Meridian Supply", label: "Duplicates", value: "0" },
+  resolved: { entity: "E-1042", name: "Meridian Supply", label: "Dupes", value: "0" },
   arrow: "2 duplicates → 0",
   sentence:
     "The name is the job: take the duplicates down to zero, and keep one record for every company and person.",
