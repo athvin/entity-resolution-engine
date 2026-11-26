@@ -183,3 +183,43 @@ cases were explicitly skipped outside mobile Chromium. All 27 existing Linux
 visual baselines passed unchanged. Build, targeted lint/format, and skills-check
 passed. A final throttled Chromium trace retained zero Paint/Layout events and
 300 sampled frames in five seconds; physical-device timing remains unmeasured.
+
+## Hero opening scene and the #dedupe set piece (epic #1253)
+
+Two scenes follow Meridian Supply, the entity the story already resolves to
+E-1042: the hero's self-playing opening (#1255) and the pinned, scroll-scrubbed
+`#dedupe` set piece (#1256). Gold references: `stacked-cards` and
+`tilted-stack` for the hero's payoff, `payout-flow` for overlapping beats that
+hold their payoff.
+
+**Hero.** It was filmed by freezing every animation at twelve times between
+100ms and 4.9s and capturing the hero on desktop Chromium (1440x900) and on
+WebKit with the iPhone 15 profile, plus the reduced-motion poster. Three rounds:
+
+- **Round one.** The cards were too small for the space. The evidence line ran
+  through the cards, because the minifier had dropped its `translate`. The
+  payoff's stack was invisible behind the golden record.
+- **Round two.** Cards grew to `min(330px, 62cqw)`, the stack moved to
+  peek-above strips, and the line went through `var()`. On phones, though, the
+  spread ran off the left edge and the golden record's email broke mid-word.
+- **Round three.** Added a container-scoped spread factor and labels above
+  values. The spec then failed for real on phones: the iPhone 15 profile shows
+  659px. The scene moved after the foot, and `scene-playback.tsx` now holds it
+  until it is first seen.
+
+**Set piece.** It was filmed by scrolling the track to twelve progress points
+from 0 to 100%, on the same two profiles. Round one showed a muddy frame at
+84%, where the golden record faded in over the fading records, and on phones
+the decision landed on top of the evidence. The beats were re-sequenced so each
+moment has the frame to itself, and round two was clean.
+
+`film.mjs --gate` samples on a clock and cannot drive a scroll timeline, so
+these sheets are the scrub's rehearsal. They were judged by eye against
+`references/framing.md` and `craft.md`, not by the automated watcher, and
+physical-device frame delivery was not measured. The functional specs assert
+what the sheets showed, and each was seen failing first:
+
+- the scene's duration (Received: 5620 when mutated to 5.4s);
+- reduced motion (19 animations without the gate);
+- scrub state (the golden record at opacity 1 with its animation removed);
+- chapter landing (338px off-centre without the scroll margin).
