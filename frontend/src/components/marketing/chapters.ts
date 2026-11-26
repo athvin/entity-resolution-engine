@@ -13,6 +13,11 @@ export const CHAPTERS = [
   { id: "flow", label: "Ingress" },
   { id: "dataset", label: "Dataset" },
   { id: "dedupe", label: "Dedupe" },
+  // The set piece's beats: the button glides through it one shot at a time.
+  { id: "dedupe-standardize", label: "Standardize" },
+  { id: "dedupe-match", label: "Match" },
+  { id: "dedupe-review", label: "Review" },
+  { id: "dedupe-reconcile", label: "Reconcile" },
   { id: "egress", label: "Egress" },
   { id: "audit", label: "Keep the last word" },
   { id: "usage", label: "A workload like yours" },

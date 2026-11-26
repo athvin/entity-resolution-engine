@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { ArrowDown, ArrowUp } from "lucide-react";
 
 import { CHAPTERS } from "./chapters";
-import { glideTo, HEADER_OFFSET } from "./glide";
+import { glideTo, HEADER_OFFSET, scrollMarginTop } from "./glide";
 
 /** A chapter whose top is this close to the header counts as already reached. */
 const REACHED_SLACK = 8;
@@ -15,7 +15,10 @@ const SHOW_AFTER_PX = 120;
 function nextChapterIndex(): number {
   const index = CHAPTERS.findIndex(({ id }) => {
     const el = document.getElementById(id);
-    return el !== null && el.getBoundingClientRect().top > HEADER_OFFSET + REACHED_SLACK;
+    return (
+      el !== null &&
+      el.getBoundingClientRect().top - scrollMarginTop(el) > HEADER_OFFSET + REACHED_SLACK
+    );
   });
   // The last chapter can be too short to reach the top; the page bottom counts.
   const atBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 2;

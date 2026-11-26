@@ -172,3 +172,96 @@ test.describe("the hero's opening scene", () => {
     }
   });
 });
+
+test.describe("the #dedupe set piece", () => {
+  /** Scroll the dedupe track to `progress` of its pinned range. */
+  const scrubTo = (page: Page, progress: number) =>
+    page.evaluate((p) => {
+      const track = document.querySelector('[data-scene="dedupe"]');
+      if (!track) throw new Error("no dedupe scene");
+      const box = track.getBoundingClientRect();
+      const top = box.top + window.scrollY;
+      const start = top - 64;
+      const end = top + box.height - window.innerHeight;
+      window.scrollTo({ top: Math.round(start + (end - start) * p), behavior: "instant" });
+    }, progress);
+  const opacity = (page: Page, selector: string) =>
+    page
+      .locator(`[data-scene="dedupe"] ${selector}`)
+      .first()
+      .evaluate((node) => Number(getComputedStyle(node).opacity));
+
+  // The reader's scroll is the playhead: at the start the three records are
+  // the picture, a third of the way in the evidence is, and at the end only
+  // the golden record is left. Read from computed styles, so the timeline,
+  // not a class flip, is what is being tested.
+  test("scrubs from three records to one golden record", async ({ page }) => {
+    await page.goto("/");
+    await scrubTo(page, 0);
+    await expect.poll(() => opacity(page, ".dedupe-records")).toBeGreaterThan(0.95);
+    expect(await opacity(page, ".dedupe-golden")).toBeLessThan(0.05);
+
+    await scrubTo(page, 0.4);
+    await expect.poll(() => opacity(page, ".dedupe-evidence")).toBeGreaterThan(0.95);
+
+    await scrubTo(page, 1);
+    await expect.poll(() => opacity(page, ".dedupe-golden")).toBeGreaterThan(0.95);
+    expect(await opacity(page, ".dedupe-records")).toBeLessThan(0.05);
+    // The stage stays pinned under the header while the track passes.
+    const stage = await page.getByTestId("scene-dedupe-stage").boundingBox();
+    expect(stage && stage.y).toBeGreaterThanOrEqual(63);
+  });
+
+  // Without motion the four moments are a storyboard: all visible, nothing
+  // animated, nothing pinned. This is also what the baseline and axe see.
+  test("with reduced motion it is a static storyboard", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/");
+    const scene = page.locator('[data-scene="dedupe"]');
+    for (const moment of ["standardize", "match", "review", "reconcile"])
+      await expect(scene.locator(`[data-moment="${moment}"]`)).toBeVisible();
+    expect(
+      await page
+        .getByTestId("scene-dedupe-stage")
+        .evaluate((stage) => [
+          stage.getAnimations({ subtree: true }).length,
+          getComputedStyle(stage).position,
+        ]),
+    ).toEqual([0, "relative"]);
+  });
+
+  // The chapter button walks the set piece one beat at a time, and each glide
+  // lands on the frame the scene draws for that beat.
+  test("the next-chapter button steps through its beats", async ({ page }) => {
+    await page.goto("/");
+    // Arrive at the dataset chapter the way the button would leave a reader:
+    // its top under the header.
+    await page.locator("#dataset").evaluate((node) => {
+      window.scrollTo({
+        top: node.getBoundingClientRect().top + window.scrollY - 64,
+        behavior: "instant",
+      });
+    });
+    const next = page.getByTestId("marketing-next-chapter");
+    for (const label of ["Dedupe", "Standardize", "Match"]) {
+      await expect(next).toHaveAccessibleName(`Next chapter: ${label}`);
+      await next.click();
+      await expect(next).not.toHaveAccessibleName(`Next chapter: ${label}`);
+    }
+    // Landed on Match: its card sits in the middle of the band the beats are
+    // read in (below the pinned stage on a phone, beside it on a wide screen),
+    // and the stage shows that beat's frame, the evidence.
+    const offset = await page.locator("#dedupe-match").evaluate((card) => {
+      const stage = document
+        .querySelector('[data-scene="dedupe"] .scene-stage-column')
+        ?.getBoundingClientRect();
+      const box = card.getBoundingClientRect();
+      const stacked = stage !== undefined && stage.bottom <= box.top + 1;
+      const bandTop = stacked ? stage.bottom : 64;
+      return Math.abs(box.top + box.height / 2 - (bandTop + window.innerHeight) / 2);
+    });
+    expect(offset).toBeLessThan(48);
+    await expect.poll(() => opacity(page, ".dedupe-evidence")).toBeGreaterThan(0.9);
+    await expect(next).toHaveAccessibleName("Next chapter: Review");
+  });
+});

@@ -1617,3 +1617,27 @@ html:has(.marketing-story) {
 .marketing-story section[tabindex="-1"]:focus {
   outline: none;
 }
+
+/* The #dedupe set piece (story-flow.tsx): the trail's step cards are the
+   scene's beats. Each card sits centred in a beat-tall block, so the scene's
+   timeline turns as each card crosses the middle of the visible band, and
+   each card's scroll margin lands a chapter glide (glide.ts) on exactly that
+   frame. Static layout untouched: these apply only while the scene scrubs. */
+@media (prefers-reduced-motion: no-preference) {
+  @supports (animation-timeline: view()) and (animation-range: contain) {
+    .trail-scene {
+      --trail-card-h: 10rem;
+    }
+    .trail-scene .trail-steps {
+      gap: 0;
+    }
+    .trail-scene .trail-steps > li {
+      grid-template-columns: minmax(0, 1fr);
+      min-height: var(--trail-card-h);
+      margin-block: calc((var(--scene-beat-h) - var(--trail-card-h)) / 2);
+      scroll-margin-top: calc(
+        var(--scene-beats-offset) + (var(--scene-beats-port) - var(--trail-card-h)) / 2
+      );
+    }
+  }
+}

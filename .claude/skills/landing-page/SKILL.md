@@ -260,6 +260,28 @@ probing rather than reading:
   dimmed.
 - **WebKit pays per keyframe on every scroll frame** (#1220): a handful per
   element, transform and opacity only.
+- **A parked frame must read on its own.** Give each moment the frame to itself
+  (the evidence leaves before the decision arrives); two half-faded layers over
+  each other is the frame a reader stops on.
+- **The CSS minifier drops what it cannot parse, silently.** A `translate`
+  whose `calc()` held `min(…cqw)` was simply absent from the built stylesheet;
+  route such lengths through a custom property, and check the built CSS when a
+  part sits where its transform says it should not.
+
+Home's `#dedupe` chapter is the set piece (`scene/dedupe-stage.tsx`). The
+trail's step cards stay in normal flow as the scene's beats, because
+`TrailDiagram` and `TrailBridges` measure them; the close-up pins beside them.
+Each card's `scroll-margin-top` centres it in the band it is read in, and
+`glideTo` and the chapter button honour that margin, so `CHAPTERS` can list the
+beats and each glide lands on the frame drawn for it. The trail now spans
+several screens and an off-screen wire is paused by design: a spec that reads a
+dedupe packet has to bring its wire into view first
+(`showFirstDedupeWire` in `marketing-interactions.spec.ts`).
+
+The hero's scene is the self-playing exception, and on phones it sits after the
+foot: the iPhone 15 profile shows 659px, and anything above the foot pushed
+"Explore the flow" below it. `scene-playback.tsx` holds a scene that is off
+screen at hydration until it is first seen.
 
 Pages cut into each other through React 19.3's `<ViewTransition>` (`cut.tsx`):
 page-kit's `Page` wraps every content page, and a page that does not use `Page`

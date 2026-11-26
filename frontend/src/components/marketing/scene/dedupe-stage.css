@@ -1,0 +1,348 @@
+/* The dedupe set piece's close-up stage (dedupe-stage.tsx), inside the home
+   page's #dedupe ScrollScene.
+
+   Unconditioned: a static storyboard — the three records (originals struck
+   through above their clean copies), the close pair's evidence, the decision
+   and the golden record, one under another. That is what reduced motion, a
+   browser without view timelines, the axe sweep and the visual baseline see.
+
+   Scrubbed (motion allowed AND view timelines supported): the four moments
+   share one frame on the pinned stage, driven by the scene's `--scene`
+   timeline, and each one has the frame to itself: the evidence leaves before
+   the decision arrives, and the records before the golden record does, because
+   a reader can park the scroll on any frame between them. Beat i of 4 is centred at progress i/3, so the keyframes turn at
+   0%, 33%, 67% and 100%. Transform and opacity only, a handful of keyframes
+   each; all stage text is `--foreground`, so a reader who parks the scroll
+   mid-fade never leaves muted text under the AA floor. */
+
+.dedupe-stage {
+  display: grid;
+  gap: 14px;
+  width: 100%;
+  color: var(--foreground);
+}
+.dedupe-records {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px;
+}
+.dedupe-record {
+  width: auto;
+}
+.dedupe-roll {
+  display: grid;
+  gap: 1px;
+}
+/* In the storyboard the original stays visible, struck through, above the
+   value it became. */
+.dedupe-roll > span:first-child {
+  font-size: 0.82em;
+  text-decoration: line-through;
+}
+.dedupe-evidence {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+}
+.dedupe-pair {
+  display: grid;
+  gap: 2px;
+  font-size: 13px;
+}
+.dedupe-pair span,
+.dedupe-clear {
+  font-size: 12px;
+}
+.dedupe-decision {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  align-items: baseline;
+  justify-self: start;
+  margin: 0;
+  padding: 8px 14px;
+  border: 1.5px solid var(--foreground);
+  border-radius: 999px;
+  font-size: 12px;
+}
+.dedupe-decision strong {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.dedupe-golden {
+  justify-self: center;
+  width: min(100%, 340px);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  @supports (animation-timeline: view()) and (animation-range: contain) {
+    .dedupe-stage {
+      position: absolute;
+      inset: 0;
+      display: block;
+      container-type: size;
+    }
+    .dedupe-stage > * {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      margin: 0;
+      translate: -50% -50%;
+    }
+    .dedupe-records {
+      width: min(680px, 92cqw);
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+    .dedupe-evidence {
+      width: min(480px, 88cqw);
+    }
+    .dedupe-decision {
+      width: max-content;
+      max-width: 88cqw;
+    }
+    .dedupe-golden {
+      width: min(340px, 82cqw);
+    }
+    .dedupe-roll {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+      height: 1.3em;
+      overflow: clip;
+      line-height: 1.3;
+    }
+    .dedupe-roll > span,
+    .dedupe-roll > span:first-child {
+      overflow: clip;
+      font-size: inherit;
+      text-decoration: none;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
+    /* The payoff, as normal styles: the golden record alone. */
+    .dedupe-records,
+    .dedupe-evidence,
+    .dedupe-decision {
+      opacity: 0;
+    }
+    .dedupe-roll > span {
+      transform: translateY(-100%);
+    }
+
+    .dedupe-stage
+      :is(
+        .dedupe-records,
+        .dedupe-record,
+        .dedupe-roll > span,
+        .dedupe-evidence,
+        .scene-evidence-bar,
+        .dedupe-decision,
+        .dedupe-golden
+      ) {
+      animation-duration: 1ms;
+      animation-timing-function: linear;
+      animation-fill-mode: both;
+      animation-timeline: --scene;
+      animation-range: contain 0% contain 100%;
+    }
+    .dedupe-records {
+      animation-name: dedupe-records;
+    }
+    .dedupe-record[data-index="0"] {
+      animation-name: dedupe-converge-left;
+    }
+    .dedupe-record[data-index="2"] {
+      animation-name: dedupe-converge-right;
+    }
+    .dedupe-record[data-index="0"] .dedupe-roll > span {
+      animation-name: dedupe-roll-0;
+    }
+    .dedupe-record[data-index="1"] .dedupe-roll > span {
+      animation-name: dedupe-roll-1;
+    }
+    .dedupe-record[data-index="2"] .dedupe-roll > span {
+      animation-name: dedupe-roll-2;
+    }
+    .dedupe-evidence {
+      animation-name: dedupe-evidence;
+    }
+    .dedupe-evidence .scene-evidence-bar {
+      animation-name: dedupe-bar;
+    }
+    .dedupe-decision {
+      animation-name: dedupe-decision;
+    }
+    .dedupe-golden {
+      animation-name: dedupe-golden;
+    }
+
+    /* A phone's pinned stage is short: the records drop their fields and the
+       evidence its detail, so each moment still fits the frame. */
+    @container (max-height: 520px) {
+      .dedupe-record .scene-record-fields,
+      .dedupe-evidence .scene-evidence-label small,
+      .dedupe-clear {
+        display: none;
+      }
+      .dedupe-record {
+        padding: 10px 12px;
+      }
+      .dedupe-record .scene-record-title {
+        font-size: 13px;
+      }
+      .dedupe-evidence {
+        gap: 6px;
+        padding: 10px 12px;
+      }
+      .dedupe-golden .scene-golden-fields small {
+        display: none;
+      }
+    }
+  }
+}
+
+/* 0%: three records, as they arrived. Values clean up by ~20%. */
+@keyframes dedupe-records {
+  0%,
+  14% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  30%,
+  70% {
+    opacity: 1;
+    transform: translateY(-34cqh) scale(0.74);
+  }
+  82% {
+    opacity: 1;
+    transform: translateY(-2cqh) scale(0.62);
+  }
+  88%,
+  100% {
+    opacity: 0;
+    transform: translateY(-2cqh) scale(0.62);
+  }
+}
+
+@keyframes dedupe-converge-left {
+  0%,
+  70% {
+    transform: translateX(0);
+  }
+  82%,
+  100% {
+    transform: translateX(calc(100% + 10px));
+  }
+}
+
+@keyframes dedupe-converge-right {
+  0%,
+  70% {
+    transform: translateX(0);
+  }
+  82%,
+  100% {
+    transform: translateX(calc(-100% - 10px));
+  }
+}
+
+@keyframes dedupe-roll-0 {
+  0%,
+  3% {
+    transform: translateY(0);
+  }
+  13%,
+  100% {
+    transform: translateY(-100%);
+  }
+}
+
+@keyframes dedupe-roll-1 {
+  0%,
+  6% {
+    transform: translateY(0);
+  }
+  16%,
+  100% {
+    transform: translateY(-100%);
+  }
+}
+
+@keyframes dedupe-roll-2 {
+  0%,
+  9% {
+    transform: translateY(0);
+  }
+  19%,
+  100% {
+    transform: translateY(-100%);
+  }
+}
+
+/* 33%: the close pair's evidence and its score. */
+@keyframes dedupe-evidence {
+  0%,
+  18% {
+    opacity: 0;
+    transform: translateY(calc(12cqh + 18px));
+  }
+  30%,
+  52% {
+    opacity: 1;
+    transform: translateY(12cqh);
+  }
+  60%,
+  100% {
+    opacity: 0;
+    transform: translateY(12cqh);
+  }
+}
+
+@keyframes dedupe-bar {
+  0%,
+  20% {
+    transform: scaleX(0);
+  }
+  31%,
+  100% {
+    transform: scaleX(var(--share));
+  }
+}
+
+/* 67%: the decision a person made inside the band. */
+@keyframes dedupe-decision {
+  0%,
+  56% {
+    opacity: 0;
+    transform: translateY(8cqh) scale(1.12);
+  }
+  64%,
+  76% {
+    opacity: 1;
+    transform: translateY(8cqh) scale(1);
+  }
+  84%,
+  100% {
+    opacity: 0;
+    transform: translateY(8cqh) scale(1);
+  }
+}
+
+/* 100%: one entity, every value with its source. */
+@keyframes dedupe-golden {
+  0%,
+  86% {
+    opacity: 0;
+    transform: translateY(16px) scale(0.96);
+  }
+  94%,
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}

@@ -76,6 +76,9 @@
       --scene-port: calc(100svh - var(--scene-header));
       --scene-beat-h: min(72svh, var(--scene-port));
       --scene-beats-port: var(--scene-port);
+      /* How far below the header the beats' visible band starts: the pinned
+         stage's height on phones, nothing beside it on wide screens. */
+      --scene-beats-offset: 0px;
       grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
       column-gap: clamp(24px, 4vw, 72px);
       row-gap: 0;
@@ -143,6 +146,7 @@
       .scene {
         --scene-stage-h: min(46svh, 420px);
         --scene-beats-port: calc(var(--scene-port) - var(--scene-stage-h));
+        --scene-beats-offset: var(--scene-stage-h);
         --scene-beat-h: min(56svh, var(--scene-beats-port));
         grid-template-columns: minmax(0, 1fr);
       }
