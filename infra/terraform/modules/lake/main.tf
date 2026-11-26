@@ -137,6 +137,27 @@ data "aws_iam_policy_document" "lake_tls_only" {
       }
     }
   }
+  # The export-expiry lifecycle rule expires whatever carries er-export=1, so
+  # an immutable artifact must never carry it, or tagging would be a way to
+  # delete a sealed key on a timer (#1240).
+  dynamic "statement" {
+    for_each = length(var.immutable_prefixes) == 0 ? [] : [1]
+    content {
+      sid       = "ImmutableArtifactsNeverExpire"
+      effect    = "Deny"
+      actions   = ["s3:PutObject", "s3:PutObjectTagging"]
+      resources = [for prefix in var.immutable_prefixes : "${aws_s3_bucket.lake.arn}/${prefix}*"]
+      principals {
+        type        = "*"
+        identifiers = ["*"]
+      }
+      condition {
+        test     = "StringEquals"
+        variable = "s3:RequestObjectTag/er-export"
+        values   = ["1"]
+      }
+    }
+  }
   dynamic "statement" {
     for_each = length(var.immutable_prefixes) == 0 ? [] : [1]
     content {

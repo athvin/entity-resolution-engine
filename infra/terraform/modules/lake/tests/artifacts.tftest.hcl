@@ -61,10 +61,28 @@ run "immutable_policy" {
     ]) == 1
     error_message = "Deletion cannot make a content-addressed key replaceable."
   }
+  # The one rule allowed to expire CURRENT objects is export-expiry, and only
+  # by the er-export=1 tag, which the bucket policy below forbids on every
+  # immutable prefix (#1240).
   assert {
     condition = alltrue([for rule in aws_s3_bucket_lifecycle_configuration.lake.rule :
-      length(rule.expiration) == 0
+      length(rule.expiration) == 0 || (
+        rule.id == "export-expiry" &&
+        try(length(rule.filter[0].tag), 0) == 1 &&
+        try(rule.filter[0].tag[0].key, "") == "er-export" &&
+        try(rule.filter[0].tag[0].value, "") == "1"
+      )
     ])
-    error_message = "Current accepted artifacts must not expire independently of delivery/result retention."
+    error_message = "Current accepted artifacts must not expire independently of delivery/result retention; only er-export-tagged objects may."
+  }
+  assert {
+    condition = length([
+      for s in jsondecode(data.aws_iam_policy_document.lake_tls_only.json).Statement : s
+      if s.Sid == "ImmutableArtifactsNeverExpire" && s.Effect == "Deny" &&
+      try(toset(s.Action), toset([])) == toset(["s3:PutObject", "s3:PutObjectTagging"]) &&
+      s.Resource == "arn:aws:s3:::test-lake/duckfleet/*/artifacts/immutable/*" &&
+      try(s.Condition.StringEquals["s3:RequestObjectTag/er-export"], "") == "1"
+    ]) == 1
+    error_message = "A sealed artifact must never be taggable into the export-expiry rule."
   }
 }
