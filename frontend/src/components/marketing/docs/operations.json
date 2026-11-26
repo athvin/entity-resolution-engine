@@ -55,6 +55,17 @@
     "response": null
   },
   {
+    "id": "delete_orgs_by_org_datasets_by_ds_uploads_by_upload_id",
+    "method": "DELETE",
+    "path": "/v1/orgs/{org}/datasets/{ds}/uploads/{upload_id}",
+    "role": "steward",
+    "params": ["org", "ds", "upload_id"],
+    "body": null,
+    "needs_body": false,
+    "summary": "abandon an upload and delete its parts",
+    "response": null
+  },
+  {
     "id": "delete_orgs_by_org_tags_by_tag_id",
     "method": "DELETE",
     "path": "/v1/orgs/{org}/tags/{tag_id}",
@@ -714,6 +725,17 @@
     "needs_body": false,
     "summary": "what carries a tag",
     "response": { "envelope": "wrapped", "key": "subjects" }
+  },
+  {
+    "id": "get_orgs_by_org_datasets_by_ds_uploads_by_upload_id",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}/uploads/{upload_id}",
+    "role": "steward",
+    "params": ["org", "ds", "upload_id"],
+    "body": null,
+    "needs_body": false,
+    "summary": "an upload's state",
+    "response": { "envelope": "scalar" }
   },
   {
     "id": "get_orgs_by_org_tags",
@@ -1589,6 +1611,37 @@
     "response": null
   },
   {
+    "id": "post_orgs_by_org_datasets_by_ds_uploads",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/datasets/{ds}/uploads",
+    "role": "steward",
+    "params": ["org", "ds"],
+    "body": {
+      "type": "object",
+      "properties": {
+        "source": { "type": "string" },
+        "bytes": { "type": "integer" },
+        "sha256": { "type": "string" }
+      },
+      "required": ["source", "bytes", "sha256"],
+      "additionalProperties": false
+    },
+    "needs_body": false,
+    "summary": "open a resumable upload",
+    "response": null
+  },
+  {
+    "id": "post_orgs_by_org_datasets_by_ds_uploads_by_upload_id_complete",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/datasets/{ds}/uploads/{upload_id}/complete",
+    "role": "steward",
+    "params": ["org", "ds", "upload_id"],
+    "body": null,
+    "needs_body": false,
+    "summary": "finish an upload",
+    "response": null
+  },
+  {
     "id": "post_orgs_by_org_resume",
     "method": "POST",
     "path": "/v1/orgs/{org}/resume",
@@ -1700,6 +1753,17 @@
     },
     "needs_body": false,
     "summary": "replace the org's nickname lexicon",
+    "response": null
+  },
+  {
+    "id": "put_orgs_by_org_datasets_by_ds_uploads_by_upload_id_parts_by_part",
+    "method": "PUT",
+    "path": "/v1/orgs/{org}/datasets/{ds}/uploads/{upload_id}/parts/{part}",
+    "role": "steward",
+    "params": ["org", "ds", "upload_id", "part"],
+    "body": null,
+    "needs_body": false,
+    "summary": "store one part",
     "response": null
   }
 ]

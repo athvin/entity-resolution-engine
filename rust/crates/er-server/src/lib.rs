@@ -64,6 +64,7 @@ pub mod schema;
 pub mod shutdown;
 pub mod taskpg;
 pub mod telemetry;
+pub mod uploads;
 pub mod urlguard;
 pub mod webhook;
 pub mod writeback;
@@ -8905,12 +8906,53 @@ struct DeliveryAccepted {
     job: er_entities::job::JobWire,
 }
 
+/// An accepted delivery: the id it is known by (the ORIGINAL one on an
+/// Idempotency-Key replay), its job, and whether this request was a replay.
+pub(crate) struct Accepted {
+    pub(crate) delivery_id: String,
+    pub(crate) job: er_entities::job::Job,
+    pub(crate) replayed: bool,
+}
+
+/// The `202` for an accepted delivery, marked when it is a replay.
+fn accepted_response(accepted: &Accepted) -> axum::response::Response {
+    let mut headers = axum::http::HeaderMap::new();
+    if accepted.replayed {
+        headers.insert(
+            "idempotent-replayed",
+            axum::http::HeaderValue::from_static("true"),
+        );
+    }
+    (
+        StatusCode::ACCEPTED,
+        headers,
+        Json(DeliveryAccepted {
+            delivery_id: accepted.delivery_id.clone(),
+            job: er_entities::job::JobWire::from(&accepted.job),
+        }),
+    )
+        .into_response()
+}
+
 pub(crate) async fn finish_delivery(
     client: &tokio_postgres::Client,
     actor: &str,
     trace_context: Option<&str>,
     d: &StagedDelivery<'_>,
 ) -> axum::response::Response {
+    match accept_delivery(client, actor, trace_context, d).await {
+        Ok(accepted) => accepted_response(&accepted),
+        Err(refusal) => *refusal,
+    }
+}
+
+/// Publish the staged bytes, queue their run, and say what was accepted.
+pub(crate) async fn accept_delivery(
+    client: &tokio_postgres::Client,
+    actor: &str,
+    trace_context: Option<&str>,
+    d: &StagedDelivery<'_>,
+) -> Result<Accepted, Box<axum::response::Response>> {
     let StagedDelivery {
         org,
         org_id,
@@ -8936,10 +8978,10 @@ pub(crate) async fn finish_delivery(
         Ok(Ok(pin)) => pin,
         result => {
             tracing::warn!(error = ?result, "delivery publication failed; retained files permit recovery");
-            return detail_err(
+            return Err(Box::new(detail_err(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "cannot publish the delivery",
-            );
+            )));
         }
     };
     // One stable key per accepted delivery, never per source. An enqueue retry
@@ -8967,7 +9009,7 @@ pub(crate) async fn finish_delivery(
     .await
     {
         Ok(j) => j,
-        Err(e) => return pg_err(e),
+        Err(e) => return Err(Box::new(pg_err(e))),
     };
     // The key already named a job: this request is a retry of it, or a misuse.
     let original = job.params.get("delivery");
@@ -8985,28 +9027,20 @@ pub(crate) async fn finish_delivery(
             .and_then(Value::as_str)
             == Some(pin.sha256.as_str());
         if !same_bytes {
-            return detail_err(
+            return Err(Box::new(detail_err(
                 StatusCode::CONFLICT,
                 format!(
                     "Idempotency-Key was already used for a different {source} delivery \
                      ({}); send a new key for new data",
                     original_id.unwrap_or("unknown")
                 ),
-            );
+            )));
         }
-        let mut response = (
-            StatusCode::ACCEPTED,
-            Json(DeliveryAccepted {
-                delivery_id: original_id.unwrap_or_default().to_string(),
-                job: er_entities::job::JobWire::from(&job),
-            }),
-        )
-            .into_response();
-        response.headers_mut().insert(
-            "idempotent-replayed",
-            axum::http::HeaderValue::from_static("true"),
-        );
-        return response;
+        return Ok(Accepted {
+            delivery_id: original_id.unwrap_or_default().to_string(),
+            job,
+            replayed: true,
+        });
     }
     let _ = pg::audit(
         client,
@@ -9047,14 +9081,11 @@ pub(crate) async fn finish_delivery(
     {
         tracing::warn!(er.org = %org, er.source = %source, error = %e, "the import.received webhook was not queued");
     }
-    (
-        StatusCode::ACCEPTED,
-        Json(DeliveryAccepted {
-            delivery_id: delivery_id.to_string(),
-            job: er_entities::job::JobWire::from(&job),
-        }),
-    )
-        .into_response()
+    Ok(Accepted {
+        delivery_id: delivery_id.to_string(),
+        job,
+        replayed: false,
+    })
 }
 
 #[derive(Deserialize)]
@@ -9393,6 +9424,415 @@ async fn upload_import(
         },
     )
     .await
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct UploadIn {
+    /// The declared source the file delivers.
+    source: String,
+    /// The file's exact size in bytes.
+    bytes: u64,
+    /// The file's SHA-256, hex. Completion refuses anything else.
+    sha256: String,
+}
+
+/// An upload session: where its parts go and which have arrived.
+#[derive(Serialize, utoipa::ToSchema)]
+struct UploadSession {
+    upload_id: String,
+    source: String,
+    bytes: u64,
+    sha256: String,
+    /// Every part but the last is exactly this many bytes.
+    part_size: u64,
+    part_count: u64,
+    /// PUT each part's bytes here, replacing `{part}` with 1..=part_count.
+    part_url: String,
+    /// The parts already stored, ascending: a resuming client sends the rest.
+    parts_received: Vec<u64>,
+    /// RFC 3339. Past it every call but abort is a 410.
+    expires_at: String,
+}
+
+/// One stored part.
+#[derive(Serialize, utoipa::ToSchema)]
+struct UploadPart {
+    part: u64,
+    bytes: u64,
+    /// The part's SHA-256 as received — compare with your copy.
+    sha256: String,
+}
+
+/// An aborted upload.
+#[derive(Serialize, utoipa::ToSchema)]
+struct UploadAborted {
+    upload_id: String,
+    state: &'static str,
+}
+
+fn upload_err(e: &uploads::UploadError) -> axum::response::Response {
+    match e {
+        uploads::UploadError::NotFound => detail_err(StatusCode::NOT_FOUND, "no such upload"),
+        uploads::UploadError::Expired => detail_err(StatusCode::GONE, e.to_string()),
+        uploads::UploadError::Invalid(msg) => {
+            detail_err(StatusCode::UNPROCESSABLE_ENTITY, msg.clone())
+        }
+        uploads::UploadError::Io(_) | uploads::UploadError::Json(_) => {
+            tracing::warn!(error = %errfmt::chain(e), "upload storage failed");
+            detail_err(StatusCode::SERVICE_UNAVAILABLE, "upload storage failed")
+        }
+    }
+}
+
+fn upload_view(
+    org: &str,
+    ds: &str,
+    session: &uploads::Session,
+    parts_received: Vec<u64>,
+) -> UploadSession {
+    UploadSession {
+        upload_id: session.upload_id.clone(),
+        source: session.source.clone(),
+        bytes: session.bytes,
+        sha256: session.sha256.clone(),
+        part_size: session.part_size,
+        part_count: session.part_count,
+        part_url: format!(
+            "/v1/orgs/{org}/datasets/{ds}/uploads/{}/parts/{{part}}",
+            session.upload_id
+        ),
+        parts_received,
+        expires_at: chrono::DateTime::from_timestamp(session.expires_at, 0)
+            .map(|t| t.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+            .unwrap_or_default(),
+    }
+}
+
+/// The dataset an upload call is scoped to, and its drop root.
+async fn upload_scope(
+    state: &AppState,
+    org: &str,
+    ds: &str,
+) -> Result<
+    (
+        tokio_postgres::Client,
+        pg::OrgDetail,
+        pg::DatasetDetail,
+        String,
+    ),
+    Box<axum::response::Response>,
+> {
+    let Some(dsn) = &state.dsn else {
+        return Err(Box::new(detail_err(
+            StatusCode::NOT_IMPLEMENTED,
+            "uploads require Postgres",
+        )));
+    };
+    let client = connect_pg(dsn).await?;
+    let org_row = org_or_404(&client, org).await?;
+    let d = dataset_or_404(&client, &org_row, ds).await?;
+    let Some(root) = d.drop_root.clone() else {
+        return Err(Box::new(detail_err(
+            StatusCode::SERVICE_UNAVAILABLE,
+            format!("dataset '{ds}' has no drop_root to stage uploads into"),
+        )));
+    };
+    Ok((client, org_row, d, root))
+}
+
+/// Steward+: open a resumable upload (`POST /v1/orgs/{org}/datasets/{ds}/uploads`)
+/// for a file larger than one import request allows (#1012). Declare the
+/// `source`, the exact `bytes` and the `sha256`; the 201 says how to split the
+/// file (`part_size`, `part_count`) and where each part goes (`part_url`). Send
+/// the parts in any order and resend any that fail, `GET` the upload to see
+/// which arrived, then `POST …/complete`. A session expires 24 hours after it
+/// opens; its parts are swept after that. At most 10,000 parts of 64 MiB.
+async fn create_upload(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, ds)): Path<(String, String)>,
+    Json(body): Json<UploadIn>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Steward) {
+        return e.into_response();
+    }
+    let Some(dsn) = &state.dsn else {
+        return detail_err(StatusCode::NOT_IMPLEMENTED, "uploads require Postgres");
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    // The same refusals an import gets: unknown source, inactive dataset, no
+    // drop root — before any session exists.
+    let (_, d, _, drop_root) = match delivery_preconditions(&client, &org, &ds, &body.source).await
+    {
+        Ok(t) => t,
+        Err(r) => return r.into_response(),
+    };
+    let root = std::path::PathBuf::from(&drop_root);
+    let part_cap = state.max_import_bytes as u64;
+    let dataset_id = d.id.clone();
+    let opened = er_obs::spawn_blocking_in_span(move || {
+        uploads::open(
+            &root,
+            &dataset_id,
+            &body.source,
+            body.bytes,
+            &body.sha256,
+            part_cap,
+        )
+    })
+    .await;
+    match opened {
+        Ok(Ok(session)) => (
+            StatusCode::CREATED,
+            Json(upload_view(&org, &ds, &session, Vec::new())),
+        )
+            .into_response(),
+        Ok(Err(e)) => upload_err(&e),
+        Err(_) => detail_err(StatusCode::SERVICE_UNAVAILABLE, "upload storage failed"),
+    }
+}
+
+/// Steward+: an upload's state (`GET /v1/orgs/{org}/datasets/{ds}/uploads/{upload_id}`),
+/// including `parts_received` — what a client resuming after an interruption
+/// does not need to send again.
+async fn get_upload(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, ds, upload_id)): Path<(String, String, String)>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Steward) {
+        return e.into_response();
+    }
+    let (_, _, d, drop_root) = match upload_scope(&state, &org, &ds).await {
+        Ok(t) => t,
+        Err(r) => return *r,
+    };
+    let root = std::path::PathBuf::from(drop_root);
+    let loaded = er_obs::spawn_blocking_in_span(move || {
+        let session = uploads::load(&root, &d.id, &upload_id)?;
+        let parts = uploads::received(&root, &session)?;
+        Ok::<_, uploads::UploadError>((session, parts))
+    })
+    .await;
+    match loaded {
+        Ok(Ok((session, parts))) => Json(upload_view(&org, &ds, &session, parts)).into_response(),
+        Ok(Err(e)) => upload_err(&e),
+        Err(_) => detail_err(StatusCode::SERVICE_UNAVAILABLE, "upload storage failed"),
+    }
+}
+
+/// Steward+: store one part
+/// (`PUT /v1/orgs/{org}/datasets/{ds}/uploads/{upload_id}/parts/{part}`), the
+/// raw bytes as `application/octet-stream`. A part must be exactly its size —
+/// `part_size`, or the remainder for the last — and re-sending a part replaces
+/// it, so retrying after a lost response is always safe.
+async fn put_upload_part(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, ds, upload_id, part)): Path<(String, String, String, String)>,
+    body: axum::body::Body,
+) -> impl IntoResponse {
+    use futures_util::StreamExt;
+    use tokio::io::AsyncWriteExt;
+
+    if let Err(e) = guard(&principal, &org, Role::Steward) {
+        return e.into_response();
+    }
+    let Ok(part) = part.parse::<u64>() else {
+        return detail_err(StatusCode::UNPROCESSABLE_ENTITY, "part must be a number");
+    };
+    let (_, _, d, drop_root) = match upload_scope(&state, &org, &ds).await {
+        Ok(t) => t,
+        Err(r) => return *r,
+    };
+    let root = std::path::PathBuf::from(drop_root);
+    let session = match uploads::load(&root, &d.id, &upload_id) {
+        Ok(s) => s,
+        Err(e) => return upload_err(&e),
+    };
+    if let Err(e) = uploads::check_part(&session, part) {
+        return upload_err(&e);
+    }
+    let staged = match uploads::part_staging(&root, &session, part) {
+        Ok(p) => p,
+        Err(e) => return upload_err(&e),
+    };
+    let expected = uploads::expected_part_bytes(&session, part);
+    let mut file = match tokio::fs::File::create(&staged).await {
+        Ok(f) => f,
+        Err(e) => return upload_err(&e.into()),
+    };
+    let mut total = 0u64;
+    let mut stream = body.into_data_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = match chunk {
+            Ok(c) => c,
+            Err(e) => {
+                let _ = tokio::fs::remove_file(&staged).await;
+                return detail_err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    format!("truncated part: {}", errfmt::chain(&e)),
+                );
+            }
+        };
+        total += chunk.len() as u64;
+        if total > expected {
+            let _ = tokio::fs::remove_file(&staged).await;
+            return detail_err(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                format!("part {part} must be {expected} bytes"),
+            );
+        }
+        if let Err(e) = file.write_all(&chunk).await {
+            let _ = tokio::fs::remove_file(&staged).await;
+            return upload_err(&e.into());
+        }
+    }
+    if let Err(e) = file.flush().await {
+        return upload_err(&e.into());
+    }
+    drop(file);
+    let committed = er_obs::spawn_blocking_in_span(move || {
+        uploads::commit_part(&root, &session, part, &staged)
+    })
+    .await;
+    match committed {
+        Ok(Ok((bytes, sha256))) => Json(UploadPart {
+            part,
+            bytes,
+            sha256,
+        })
+        .into_response(),
+        Ok(Err(e)) => upload_err(&e),
+        Err(_) => detail_err(StatusCode::SERVICE_UNAVAILABLE, "upload storage failed"),
+    }
+}
+
+/// Steward+: finish an upload
+/// (`POST /v1/orgs/{org}/datasets/{ds}/uploads/{upload_id}/complete`). Every
+/// part must be present and the assembled file must match the declared size
+/// and `sha256`, or this is a 422 naming what is missing or wrong — the parts
+/// are kept, so resend the bad one and complete again. Success is the same
+/// `202` receipt an import returns, and the same validation and run follow.
+/// Completing again returns that same receipt rather than a second delivery.
+async fn complete_upload(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, ds, upload_id)): Path<(String, String, String)>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Steward) {
+        return e.into_response();
+    }
+    let (client, _, d, drop_root) = match upload_scope(&state, &org, &ds).await {
+        Ok(t) => t,
+        Err(r) => return *r,
+    };
+    let root = std::path::PathBuf::from(&drop_root);
+    let session = match uploads::load(&root, &d.id, &upload_id) {
+        Ok(s) => s,
+        Err(e) => return upload_err(&e),
+    };
+    // Already completed: answer from the receipt, as an Idempotency-Key replay
+    // of an import would.
+    match uploads::receipt(&root, &session) {
+        Ok(Some((delivery_id, job_id))) => {
+            return match pg::get_job(&client, &d.org_id, &job_id).await {
+                Ok(Some(job)) => accepted_response(&Accepted {
+                    delivery_id,
+                    job,
+                    replayed: true,
+                }),
+                Ok(None) => detail_err(StatusCode::NOT_FOUND, "the upload's job is gone"),
+                Err(e) => pg_err(e),
+            };
+        }
+        Ok(None) => {}
+        Err(e) => return upload_err(&e),
+    }
+    let (org_row, d, config, drop_root) =
+        match delivery_preconditions(&client, &org, &ds, &session.source).await {
+            Ok(t) => t,
+            Err(r) => return r.into_response(),
+        };
+    let delivery_id = er_ids::new_v7();
+    let staged = format!("{drop_root}/.{}.{delivery_id}.csv.part", session.source);
+    let assembled = {
+        let root = std::path::PathBuf::from(&drop_root);
+        let session = session.clone();
+        let dest = std::path::PathBuf::from(&staged);
+        er_obs::spawn_blocking_in_span(move || uploads::assemble(&root, &session, &dest)).await
+    };
+    match assembled {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => return upload_err(&e),
+        Err(_) => return detail_err(StatusCode::SERVICE_UNAVAILABLE, "upload storage failed"),
+    }
+    // The upload id is the delivery's idempotency key: a second complete —
+    // a retry after a lost response — converges on the first's receipt.
+    let key = format!("upload-{upload_id}");
+    let accepted = match accept_delivery(
+        &client,
+        &principal.actor,
+        principal.trace_context.as_deref(),
+        &StagedDelivery {
+            org: &org,
+            org_id: &org_row.id,
+            source: &session.source,
+            delivery_id: &delivery_id,
+            dataset_id: &d.id,
+            drop_root: &drop_root,
+            spec: &config.sources[&session.source],
+            bytes: session.bytes,
+            action: "import.upload_session",
+            client_key: Some(&key),
+        },
+    )
+    .await
+    {
+        Ok(a) => a,
+        // Parts are kept on a refusal, for a retry; expiry sweeps them.
+        Err(refusal) => return *refusal,
+    };
+    // A delivery holds the bytes now: record the receipt, reclaim the parts.
+    if let Err(e) = uploads::finish(&root, &session, &accepted.delivery_id, &accepted.job.id) {
+        tracing::warn!(error = %errfmt::chain(&e), "an upload's parts were not reclaimed");
+    }
+    accepted_response(&accepted)
+}
+
+/// Steward+: abandon an upload and delete its parts
+/// (`DELETE /v1/orgs/{org}/datasets/{ds}/uploads/{upload_id}`). Idempotent, and
+/// allowed after expiry.
+async fn abort_upload(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, ds, upload_id)): Path<(String, String, String)>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Steward) {
+        return e.into_response();
+    }
+    let (_, _, d, drop_root) = match upload_scope(&state, &org, &ds).await {
+        Ok(t) => t,
+        Err(r) => return *r,
+    };
+    let root = std::path::PathBuf::from(drop_root);
+    // Only this dataset's session may be removed: a foreign id reads absent.
+    match uploads::load(&root, &d.id, &upload_id) {
+        Ok(_) | Err(uploads::UploadError::Expired) => {}
+        Err(e) => return upload_err(&e),
+    }
+    match uploads::remove(&root, &upload_id) {
+        Ok(()) => Json(UploadAborted {
+            upload_id,
+            state: "aborted",
+        })
+        .into_response(),
+        Err(e) => upload_err(&e),
+    }
 }
 
 /// The query parameters of `imports_list`.
@@ -13939,6 +14379,21 @@ fn build_routes(state: AppState) -> Router {
             get(imports_list)
                 .post(upload_import)
                 .layer(axum::extract::DefaultBodyLimit::max(max_import_bytes)),
+        )
+        .route("/v1/orgs/{org}/datasets/{ds}/uploads", post(create_upload))
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/uploads/{upload_id}",
+            get(get_upload).delete(abort_upload),
+        )
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/uploads/{upload_id}/parts/{part}",
+            axum::routing::put(put_upload_part).layer(axum::extract::DefaultBodyLimit::max(
+                max_import_bytes.min(uploads::MAX_PART_BYTES as usize),
+            )),
+        )
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/uploads/{upload_id}/complete",
+            post(complete_upload),
         )
         .route(
             "/v1/orgs/{org}/datasets/{ds}/imports/recent",

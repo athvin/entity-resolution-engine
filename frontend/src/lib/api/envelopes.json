@@ -56,6 +56,7 @@
   "GET /v1/orgs/{org}/datasets/{ds}/staged": { "envelope": "wrapped", "key": "pending_count" },
   "GET /v1/orgs/{org}/datasets/{ds}/taggings": { "envelope": "record", "keys": ["taggings", "truncated"] },
   "GET /v1/orgs/{org}/datasets/{ds}/tags/{tag_id}/subjects": { "envelope": "wrapped", "key": "subjects" },
+  "GET /v1/orgs/{org}/datasets/{ds}/uploads/{upload_id}": { "envelope": "scalar" },
   "GET /v1/orgs/{org}/tags": { "envelope": "wrapped", "key": "tags" },
   "GET /v1/orgs/{org}/webhooks": { "envelope": "bare" },
   "GET /v1/orgs/{org}/webhooks/deliveries": { "envelope": "wrapped", "key": "deliveries" },

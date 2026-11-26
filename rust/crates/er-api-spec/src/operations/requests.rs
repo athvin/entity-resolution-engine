@@ -121,6 +121,13 @@ pub(super) fn derive(
                 required,
                 schema: schema(source, modules, schemas, inner, &mut BTreeSet::new())?,
             })
+        } else if type_name(ty).is_some_and(|n| n == "Body") {
+            // A raw streamed body (an upload part): bytes, not a document.
+            Some(Request {
+                media_type: "application/octet-stream",
+                required,
+                schema: json!({"type": "string", "format": "binary"}),
+            })
         } else if type_name(ty).is_some_and(|n| n == "Multipart") {
             Some(Request {
                 media_type: "multipart/form-data",

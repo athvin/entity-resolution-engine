@@ -308,6 +308,39 @@ curl --fail-with-body -X POST \
   -H 'Content-Type: application/json' \
   -H 'Idempotency-Key: crm-export-2026-11-26' \
   --data '{"source":"crm","records":[{"crm_id":"C1","first_name":"Ada"}]}'`}</CodeExample>
+          <h3>Files larger than one request</h3>
+          <p>
+            A file above the import cap goes through a resumable upload. Open it with the file’s
+            exact size and SHA-256; the response gives <code>part_size</code>,{" "}
+            <code>part_count</code> and a <code>part_url</code>. PUT each part’s raw bytes (every
+            part but the last is exactly <code>part_size</code>), in any order, resending any that
+            fail. After an interruption, <code>GET</code> the upload: <code>parts_received</code>{" "}
+            lists what you need not send again. Completing checks every part is present and the
+            assembled file matches the declared size and digest, then returns the same 202 receipt
+            an import does; completing again returns that receipt rather than a second delivery.
+          </p>
+          <CodeExample label="Resumable upload">{`size=$(wc -c < big.csv); sha=$(shasum -a 256 big.csv | cut -d' ' -f1)
+curl --fail-with-body -X POST "$ER_API_ORIGIN/v1/orgs/$ER_ORG/datasets/$ER_DATASET/uploads" \
+  -H "Authorization: Bearer $ER_API_KEY" -H 'Content-Type: application/json' \
+  --data "{\"source\":\"crm\",\"bytes\":$size,\"sha256\":\"$sha\"}"
+# -> {"upload_id":"…","part_size":67108864,"part_count":3,"part_url":"/v1/…/parts/{part}",…}
+split -b 67108864 -d -a 5 big.csv part-
+n=1; for f in part-*; do
+  curl --fail-with-body -X PUT "$ER_API_ORIGIN/v1/orgs/$ER_ORG/datasets/$ER_DATASET/uploads/$UPLOAD/parts/$n" \
+    -H "Authorization: Bearer $ER_API_KEY" -H 'Content-Type: application/octet-stream' \
+    --data-binary @"$f"; n=$((n+1))
+done
+curl --fail-with-body -X POST "$ER_API_ORIGIN/v1/orgs/$ER_ORG/datasets/$ER_DATASET/uploads/$UPLOAD/complete" \
+  -H "Authorization: Bearer $ER_API_KEY"   # -> 202 {"delivery_id": …, "job": {…}}`}</CodeExample>
+          <p>
+            A part is at most 64 MiB (and never more than the import cap), an upload at most 10,000
+            parts. A wrong-size part is refused with 422; a missing part or a digest mismatch makes
+            completion a 422 that names the problem and keeps the parts, so resend the part that
+            differs and complete again — each part’s response carries its SHA-256 for comparison. An
+            upload expires 24 hours after it opens (410 from then on) and its parts are then
+            removed; <code>DELETE</code> abandons one sooner. Uploads are scoped to their dataset:
+            another dataset’s upload id is a 404.
+          </p>
           <h3>Retrying safely</h3>
           <p>
             Send an <code>Idempotency-Key</code> header on every delivery — 1 to 255 visible ASCII
@@ -367,11 +400,11 @@ curl --fail-with-body -X POST \
             </tbody>
           </table>
           <p>
-            Limits: a JSON push carries at most 10,000 records; a file upload is capped by the
-            deployment’s configured import size and returns 413 above it. Files are CSV with a
-            header row naming the source’s mapped columns; JSON records are objects keyed by the
-            same column names. Other failures: inactive dataset 409, unavailable delivery storage
-            503 (retry with backoff and the same key).
+            Limits: a JSON push carries at most 10,000 records; a file import is capped by the
+            deployment’s configured import size and returns 413 above it — use a resumable upload
+            for anything larger. Files are CSV with a header row naming the source’s mapped columns;
+            JSON records are objects keyed by the same column names. Other failures: inactive
+            dataset 409, unavailable delivery storage 503 (retry with backoff and the same key).
           </p>
         </section>
         <section id="jobs">

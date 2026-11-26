@@ -9548,6 +9548,383 @@
         ]
       }
     },
+    "/v1/orgs/{org}/datasets/{ds}/uploads": {
+      "post": {
+        "summary": "open a resumable upload",
+        "operationId": "post_orgs_by_org_datasets_by_ds_uploads",
+        "parameters": [
+          {
+            "name": "org",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ds",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "source",
+                  "bytes",
+                  "sha256"
+                ],
+                "properties": {
+                  "bytes": {
+                    "type": "integer"
+                  },
+                  "sha256": {
+                    "type": "string"
+                  },
+                  "source": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "2XX": {
+            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "default": {
+            "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "detail"
+                  ],
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "steward"
+            ]
+          }
+        ]
+      }
+    },
+    "/v1/orgs/{org}/datasets/{ds}/uploads/{upload_id}": {
+      "get": {
+        "summary": "an upload's state",
+        "operationId": "get_orgs_by_org_datasets_by_ds_uploads_by_upload_id",
+        "parameters": [
+          {
+            "name": "org",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ds",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "upload_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "2XX": {
+            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "default": {
+            "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "detail"
+                  ],
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "steward"
+            ]
+          }
+        ]
+      },
+      "delete": {
+        "summary": "abandon an upload and delete its parts",
+        "operationId": "delete_orgs_by_org_datasets_by_ds_uploads_by_upload_id",
+        "parameters": [
+          {
+            "name": "org",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ds",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "upload_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "2XX": {
+            "description": "Successful response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadAborted"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "detail"
+                  ],
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "steward"
+            ]
+          }
+        ]
+      }
+    },
+    "/v1/orgs/{org}/datasets/{ds}/uploads/{upload_id}/complete": {
+      "post": {
+        "summary": "finish an upload",
+        "operationId": "post_orgs_by_org_datasets_by_ds_uploads_by_upload_id_complete",
+        "parameters": [
+          {
+            "name": "org",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ds",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "upload_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "2XX": {
+            "description": "Successful response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryAccepted"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "detail"
+                  ],
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "steward"
+            ]
+          }
+        ]
+      }
+    },
+    "/v1/orgs/{org}/datasets/{ds}/uploads/{upload_id}/parts/{part}": {
+      "put": {
+        "summary": "store one part",
+        "operationId": "put_orgs_by_org_datasets_by_ds_uploads_by_upload_id_parts_by_part",
+        "parameters": [
+          {
+            "name": "org",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ds",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "upload_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "part",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "2XX": {
+            "description": "Successful response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadPart"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "detail"
+                  ],
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "steward"
+            ]
+          }
+        ]
+      }
+    },
     "/v1/orgs/{org}/resources": {
       "patch": {
         "summary": "set an org's DuckDB parallelism knobs",
@@ -16473,6 +16850,106 @@
           "status": {
             "type": "string",
             "description": "Always `staged`."
+          }
+        }
+      },
+      "UploadAborted": {
+        "type": "object",
+        "description": "An aborted upload.",
+        "required": [
+          "upload_id",
+          "state"
+        ],
+        "properties": {
+          "state": {
+            "type": "string"
+          },
+          "upload_id": {
+            "type": "string"
+          }
+        }
+      },
+      "UploadPart": {
+        "type": "object",
+        "description": "One stored part.",
+        "required": [
+          "part",
+          "bytes",
+          "sha256"
+        ],
+        "properties": {
+          "bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "part": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "sha256": {
+            "type": "string",
+            "description": "The part's SHA-256 as received — compare with your copy."
+          }
+        }
+      },
+      "UploadSession": {
+        "type": "object",
+        "description": "An upload session: where its parts go and which have arrived.",
+        "required": [
+          "upload_id",
+          "source",
+          "bytes",
+          "sha256",
+          "part_size",
+          "part_count",
+          "part_url",
+          "parts_received",
+          "expires_at"
+        ],
+        "properties": {
+          "bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "expires_at": {
+            "type": "string",
+            "description": "RFC 3339. Past it every call but abort is a 410."
+          },
+          "part_count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "part_size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Every part but the last is exactly this many bytes.",
+            "minimum": 0
+          },
+          "part_url": {
+            "type": "string",
+            "description": "PUT each part's bytes here, replacing `{part}` with 1..=part_count."
+          },
+          "parts_received": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            },
+            "description": "The parts already stored, ascending: a resuming client sends the rest."
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "upload_id": {
+            "type": "string"
           }
         }
       },
