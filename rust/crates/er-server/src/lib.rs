@@ -30,6 +30,7 @@
 //! backend. Unit tests are network-free (`tests/http.rs`); the Postgres +
 //! DuckLake paths are gated (`ER_TEST_PG_DSN`, `DEDUPE_E2E_DUCKLAKE`).
 
+pub mod api_check;
 pub mod config_check;
 pub mod cron;
 pub mod dags;

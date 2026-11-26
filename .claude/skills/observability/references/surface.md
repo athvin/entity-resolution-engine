@@ -125,7 +125,7 @@ Nobody reads these terminals. Each line here is consumed later by a log
 shipper or a host process, with no span ancestry to attribute it and no
 target to filter it by. **These are worth converting:**
 
-**None.** Every unattended role emits structured events.
+- `er-server/src/api_check.rs` — `Role::Api/Cli/Dispatcher/Task`
 
 #### Correct as-is — attended output
 

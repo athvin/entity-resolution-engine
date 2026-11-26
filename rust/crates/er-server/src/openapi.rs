@@ -690,6 +690,80 @@ mod tests {
         }
     }
 
+    /// The launch gate's verdicts (#658): an additive change passes, a removed
+    /// operation and a retyped property fail under `--strict`, and an
+    /// unreadable or non-JSON input is a refusal (64), never a pass.
+    #[test]
+    fn api_check_passes_additive_and_refuses_breaking_or_unreadable() {
+        let dir = std::env::temp_dir().join(format!("er_api_check_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let base: serde_json::Value =
+            serde_json::from_str(&openapi_json(Audience::Public)).unwrap();
+        let write = |name: &str, doc: &serde_json::Value| {
+            let path = dir.join(name);
+            std::fs::write(&path, doc.to_string()).unwrap();
+            path.to_string_lossy().into_owned()
+        };
+        let base_path = write("base.json", &base);
+
+        // Additive: a new operation.
+        let mut additive = base.clone();
+        additive["paths"]["/v1/new-thing"] = serde_json::json!({"get": {
+            "operationId": "get_new_thing", "responses": {"2XX": {"description": "ok"}}}});
+        let additive_path = write("additive.json", &additive);
+        let strict = |candidate: &str| {
+            crate::api_check::run(&[
+                base_path.clone(),
+                candidate.to_string(),
+                "--strict".to_string(),
+            ])
+        };
+        assert_eq!(strict(&additive_path), 0, "an additive change must pass");
+
+        // Breaking: an operation removed.
+        let mut removed = base.clone();
+        let path = removed["paths"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .find(|p| p.contains("/golden-records"))
+            .cloned()
+            .unwrap();
+        removed["paths"].as_object_mut().unwrap().remove(&path);
+        assert_eq!(
+            strict(&write("removed.json", &removed)),
+            2,
+            "a removed operation must fail"
+        );
+        // ...but advisory without --strict.
+        assert_eq!(
+            crate::api_check::run(&[base_path.clone(), write("removed2.json", &removed)]),
+            0
+        );
+
+        // Breaking: a property retyped.
+        let mut retyped = base.clone();
+        retyped["components"]["schemas"]["GoldenRecord"]["properties"]["id"] =
+            serde_json::json!({"type": "integer"});
+        assert_eq!(
+            strict(&write("retyped.json", &retyped)),
+            2,
+            "a retyped property must fail"
+        );
+
+        // Unreadable and malformed inputs refuse.
+        assert_eq!(strict("/nonexistent/candidate.json"), 64);
+        let junk = dir.join("junk.json");
+        std::fs::write(&junk, "<html>AccessDenied</html>").unwrap();
+        assert_eq!(strict(&junk.to_string_lossy()), 64);
+        assert_eq!(
+            crate::api_check::run(&[base_path]),
+            64,
+            "one file is a usage error"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn public_document_matches_the_committed_document() {
         assert_eq!(

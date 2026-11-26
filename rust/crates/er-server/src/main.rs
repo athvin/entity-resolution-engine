@@ -47,6 +47,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         telemetry.force_flush();
         std::process::exit(code);
     }
+    // `api-check <base.json> <candidate.json> [--strict]`: the API launch gate's
+    // comparison (#658), file against file. It lives in this binary because
+    // the deploy job already pulls the er-api image by digest and has no Rust
+    // toolchain: the gate runs the same `breaking_changes` the PR-time advisory
+    // check does, rather than a second implementation of it.
+    if program_name(&args) != "er" && args.get(1).map(String::as_str) == Some("api-check") {
+        std::process::exit(er_server::api_check::run(&args[2..]));
+    }
     // `er`: synchronous, so it must not run inside the runtime. Note that this
     // arm has no tokio runtime at all, which is why `init` must never need one.
     if program_name(&args) == "er" {

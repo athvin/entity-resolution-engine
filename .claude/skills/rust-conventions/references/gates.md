@@ -19,7 +19,7 @@ grown twice — `doc` and `skills-check` were both added after this reference wa
 written, and nothing failed while the prose said otherwise.
 
 <!-- BEGIN GENERATED: rust-gates -->
-**`make check` = ci-speed-check + fmt + lint + doc + entities-check + skills-check + agent-bridge-check + scripts-home-check + workflow-shell-check + pr-contract-check + tf-static-credentials-check + test** — the `check:` target's prerequisites, in order.
+**`make check` = ci-speed-check + fmt + lint + doc + entities-check + skills-check + agent-bridge-check + scripts-home-check + workflow-shell-check + pr-contract-check + api-launch-gate-check + tf-static-credentials-check + test** — the `check:` target's prerequisites, in order.
 
 | Step | Command |
 |---|---|
@@ -33,6 +33,7 @@ written, and nothing failed while the prose said otherwise.
 | `scripts-home-check` | `bash scripts/ci/scripts-home-check.sh` |
 | `workflow-shell-check` | `bash scripts/ci/workflow-shell-check-test.sh && bash scripts/ci/workflow-shell-check.sh` |
 | `pr-contract-check` | `bash scripts/ci/pr-contract-test.sh` |
+| `api-launch-gate-check` | `bash scripts/ci/api-launch-gate-test.sh` |
 | `tf-static-credentials-check` | `bash scripts/ci/tf-static-credentials-check-test.sh && bash scripts/ci/tf-static-credentials-check.sh` |
 | `test` | `cd rust && cargo test --workspace` |
 
