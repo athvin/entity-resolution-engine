@@ -1,5 +1,6 @@
 import { ArrowDownRight } from "lucide-react";
 import { HERO } from "./content";
+import { HeroScene } from "./scene/hero-scene";
 
 export function Hero() {
   return (
@@ -34,6 +35,10 @@ export function Hero() {
           </a>
         </div>
       </div>
+      {/* After the foot in the DOM: on wide screens it is positioned beside the
+          headline, and on phones it follows the way into the story, so the
+          first screen keeps the headline and the link. */}
+      <HeroScene />
     </section>
   );
 }

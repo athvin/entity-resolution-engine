@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 import { CHAPTERS } from "../../src/components/marketing/chapters";
 
@@ -71,5 +71,104 @@ test.describe("marketing scenes and cuts", () => {
           ).length,
     );
     expect(running).toBe(0);
+  });
+});
+
+test.describe("the hero's opening scene", () => {
+  const playStates = (page: Page) =>
+    page
+      .locator("#hero-scene-stage")
+      .evaluate((stage) =>
+        stage.getAnimations({ subtree: true }).map((animation) => animation.playState),
+      );
+
+  // It plays once, in under five seconds (WCAG 2.2.2 then asks for no pause
+  // control), holds its payoff, and Replay runs it again from the top.
+  test("plays once, holds the golden record, and replays", async ({ page }) => {
+    await page.goto("/");
+    const scene = page.getByTestId("hero-scene");
+    // On a short phone the scene sits below the first screen and waits to be
+    // seen (scene-playback.tsx); bring it into view the way a reader would.
+    await scene.scrollIntoViewIfNeeded();
+    await expect(scene).toBeVisible();
+    expect((await playStates(page)).length).toBeGreaterThan(0);
+    await expect
+      .poll(async () => (await playStates(page)).every((state) => state === "finished"), {
+        timeout: 7_000,
+      })
+      .toBe(true);
+    const longest = await page
+      .locator("#hero-scene-stage")
+      .evaluate((stage) =>
+        Math.max(
+          ...stage
+            .getAnimations({ subtree: true })
+            .map((animation) => Number(animation.effect?.getComputedTiming().endTime ?? 0)),
+        ),
+      );
+    expect(longest).toBeLessThanOrEqual(5_000);
+    await expect(scene.getByText(/Golden record · E-1042/)).toBeVisible();
+
+    await page.getByTestId("hero-scene-stage-replay").click();
+    expect(await playStates(page)).toContain("running");
+  });
+
+  test("with reduced motion it shows the payoff and nothing moves", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/");
+    await expect(page.getByTestId("hero-scene").getByText(/Golden record · E-1042/)).toBeVisible();
+    expect(await playStates(page)).toEqual([]);
+    await expect(page.getByTestId("hero-scene-stage-replay")).toBeHidden();
+  });
+
+  // Beside the headline on wide screens, between the intro and the foot on
+  // phones: it must never sit on a word of the copy, and the way into the
+  // story stays on the first screen of a phone.
+  test("never covers the copy, and the flow link stays on a phone's first screen", async ({
+    page,
+    isMobile,
+  }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    for (const width of isMobile ? [0] : [1440, 1280, 1024, 820]) {
+      if (width) await page.setViewportSize({ width, height: 900 });
+      await page.goto("/");
+      const overlaps = await page.evaluate(() => {
+        const stage = document.querySelector("#hero-scene-stage")?.getBoundingClientRect();
+        if (!stage) return ["no stage"];
+        const hits: string[] = [];
+        for (const selector of [".story-hero h1", ".story-intro", ".story-hero-foot"]) {
+          const node = document.querySelector(selector);
+          if (!node) continue;
+          // The glyphs themselves: a range over each TEXT node. A range over
+          // the element would also report its block-level children's boxes,
+          // which run the full width of the hero.
+          const rects: DOMRect[] = [];
+          const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+          for (let text = walker.nextNode(); text; text = walker.nextNode()) {
+            if (!text.textContent?.trim()) continue;
+            const range = document.createRange();
+            range.selectNodeContents(text);
+            rects.push(...range.getClientRects());
+          }
+          for (const rect of rects) {
+            const disjoint =
+              rect.right <= stage.left ||
+              stage.right <= rect.left ||
+              rect.bottom <= stage.top ||
+              stage.bottom <= rect.top;
+            if (!disjoint) hits.push(selector);
+          }
+        }
+        return hits;
+      });
+      expect(overlaps, `width ${String(width)}`).toEqual([]);
+    }
+    if (isMobile) {
+      const link = await page.locator("[data-explore-flow]").boundingBox();
+      const viewport = page.viewportSize();
+      expect(link && viewport ? link.y + link.height : Infinity).toBeLessThanOrEqual(
+        viewport?.height ?? 0,
+      );
+    }
   });
 });

@@ -1,0 +1,237 @@
+/* The home hero's opening scene (hero-scene.tsx).
+
+   The unconditioned rules are the payoff — the golden record in front, its
+   three sources stacked behind it with their labels showing — so reduced
+   motion, the axe sweep and the visual baseline all see the finished
+   picture. The five-second play is layered on only under
+   `prefers-reduced-motion: no-preference`. Transform and opacity only, a
+   handful of keyframes per element; card text is `--foreground`, so its short
+   entrance fade never takes muted text below the AA floor.
+
+   Lengths that mix container units into `calc()` go through custom
+   properties: the CSS minifier silently DROPS a `translate` whose calc holds
+   `min(…cqw)` (measured — the declaration was simply absent from the built
+   stylesheet), and it leaves anything built on `var()` alone. */
+
+.story-hero {
+  position: relative;
+}
+
+.hero-scene {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 10px;
+  margin: 0;
+}
+
+/* Wide screens: the empty right half of the hero, beside the headline and
+   above the foot, so the hero stays one screen and nothing in the copy
+   reflows. Measured against the headline at every width from 801px up: its
+   lines end well left of this column. */
+@media (min-width: 801px) {
+  .hero-scene {
+    position: absolute;
+    top: clamp(64px, 11vh, 130px);
+    right: max(24px, calc((100vw - 1280px) / 2));
+    bottom: 124px;
+    width: min(48%, 620px);
+  }
+}
+
+/* Phones: after the foot, so the first screen keeps the headline and the way
+   into the story (the iPhone 15 profile shows 659px; any scene above the foot
+   pushed "Explore the flow" below it). scene-playback.tsx holds the play until
+   the stage is first seen. */
+@media (max-width: 800px) {
+  .hero-scene {
+    height: 300px;
+    margin-top: 36px;
+  }
+}
+
+.hero-scene-stage {
+  position: relative;
+  min-height: 0;
+  container-type: size;
+}
+.hero-scene-stage > * {
+  --card-w: min(330px, 62cqw);
+  --golden-y: 44px;
+  --step: 28px;
+  --spread: 1;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+}
+@container (max-width: 440px) {
+  .hero-scene-stage > * {
+    --card-w: min(300px, 84cqw);
+    --golden-y: 38px;
+    --step: 24px;
+    /* The spread stays on screen: a narrow stage has no room to scatter. */
+    --spread: 0.35;
+  }
+  .hero-scene-record .scene-record-title {
+    font-size: 15px;
+  }
+}
+
+/* `translate` centres; `transform` is left free for the animation. */
+.hero-scene-record {
+  width: var(--card-w);
+  translate: -50% -50%;
+  transform: translateY(calc(var(--stack) * var(--step))) scale(var(--s2));
+}
+.hero-scene-record .scene-record-title {
+  font-size: 18px;
+}
+/* Labels above values, so a long email never breaks mid-word on a phone. */
+.hero-scene-golden .scene-golden-fields > div {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+}
+.hero-scene-golden {
+  z-index: 2;
+  width: var(--card-w);
+  translate: -50% -50%;
+  transform: translateY(var(--golden-y));
+}
+
+/* A value cleaning up in place: the original rolls away and the cleaned
+   copy rolls in, rather than one swapping for the other. */
+.hero-scene-roll {
+  display: flex;
+  flex-direction: column;
+  height: 1.3em;
+  overflow: clip;
+  line-height: 1.3;
+}
+.hero-scene-roll > span {
+  overflow: clip;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  transform: translateY(-100%);
+}
+
+/* The evidence that links the three, drawn down their left edge once they
+   line up. */
+.hero-scene-link {
+  z-index: 1;
+  width: 2px;
+  height: calc(58cqh + 48px);
+  border-radius: 1px;
+  background: var(--brand);
+  translate: calc(var(--card-w) / -2 - 16px) -50%;
+  transform-origin: top;
+  transform: scaleY(0);
+}
+
+.hero-scene-caption {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px 16px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: right;
+}
+.hero-scene-caption > span {
+  max-width: 46ch;
+}
+@media (max-width: 800px) {
+  .hero-scene-caption {
+    justify-content: space-between;
+    text-align: left;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .hero-scene-record {
+    animation: hero-record 4.6s var(--motion-ease-emphasized) both;
+  }
+  .hero-scene-record[data-index="1"] {
+    animation-delay: 110ms;
+  }
+  .hero-scene-record[data-index="2"] {
+    animation-delay: 220ms;
+  }
+  .hero-scene-roll > span {
+    animation: hero-roll 4.6s ease-in-out both;
+  }
+  .hero-scene-record[data-index="1"] .hero-scene-roll > span {
+    animation-delay: 160ms;
+  }
+  .hero-scene-record[data-index="2"] .hero-scene-roll > span {
+    animation-delay: 320ms;
+  }
+  .hero-scene-link {
+    animation: hero-link 4.6s ease-in-out both;
+  }
+  .hero-scene-golden {
+    animation: hero-golden 4.6s var(--motion-ease-emphasized) both;
+  }
+}
+
+/* Settle in, hold while the values clean up, line up, then stack. */
+@keyframes hero-record {
+  0% {
+    opacity: 0;
+    transform: translate(calc(var(--x0) * var(--spread) * 1.3), calc(var(--y0) * 1.3))
+      rotate(var(--r0));
+  }
+  14%,
+  42% {
+    opacity: 1;
+    transform: translate(calc(var(--x0) * var(--spread)), var(--y0)) rotate(var(--r0));
+  }
+  57%,
+  70% {
+    transform: translate(0, var(--y1)) rotate(0deg);
+  }
+  84%,
+  100% {
+    opacity: 1;
+    transform: translateY(calc(var(--stack) * var(--step))) scale(var(--s2));
+  }
+}
+
+@keyframes hero-roll {
+  0%,
+  22% {
+    transform: translateY(0);
+  }
+  34%,
+  100% {
+    transform: translateY(-100%);
+  }
+}
+
+@keyframes hero-link {
+  0%,
+  57% {
+    transform: scaleY(0);
+  }
+  65%,
+  72% {
+    transform: scaleY(1);
+  }
+  80%,
+  100% {
+    transform: scaleY(0);
+  }
+}
+
+@keyframes hero-golden {
+  0%,
+  76% {
+    opacity: 0;
+    transform: translateY(var(--golden-y)) scale(0.94);
+  }
+  88%,
+  100% {
+    opacity: 1;
+    transform: translateY(var(--golden-y)) scale(1);
+  }
+}
