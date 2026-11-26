@@ -27,6 +27,15 @@ function easeInOutCubic(t: number): number {
 let active: (() => void) | null = null;
 
 /**
+ * The target's `scroll-margin-top`, which native fragment navigation honours
+ * and a glide should too: a pinned scene's beat uses it to land its card in
+ * the middle of the visible band, on the frame the scene draws for it.
+ */
+export function scrollMarginTop(target: Element): number {
+  return Number.parseFloat(getComputedStyle(target).scrollMarginTop) || 0;
+}
+
+/**
  * Glide to the element with `id`, then record it in the URL (replacing, not
  * pushing, so Back still leaves the page) and give it focus without scrolling,
  * which is where native fragment navigation would leave keyboard users.
@@ -58,7 +67,13 @@ export function glideTo(id: string, onDone?: () => void): void {
 
   const from = window.scrollY;
   const max = document.documentElement.scrollHeight - window.innerHeight;
-  const to = Math.min(max, Math.max(0, target.getBoundingClientRect().top + from - HEADER_OFFSET));
+  const to = Math.min(
+    max,
+    Math.max(
+      0,
+      target.getBoundingClientRect().top + from - HEADER_OFFSET - scrollMarginTop(target),
+    ),
+  );
   const distance = Math.abs(to - from);
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 

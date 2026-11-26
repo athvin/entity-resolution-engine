@@ -10,6 +10,8 @@ import { VolumeControl } from "./volume-control";
 import { FlowPath, useFlowMotion } from "./flow-motion";
 import { DEMO_DATASETS, SOURCE_NAMES, packetCount } from "./story-model";
 import { SourceLogo, sourceBrand } from "./source-logo";
+import { DedupeStage } from "../scene/dedupe-stage";
+import { ScrollScene } from "../scene/scroll-scene";
 import "./vendor/index.css";
 import "./flow-demo.css";
 
@@ -323,64 +325,70 @@ export function StoryFlow({
               {reduced ? "Still view" : paused ? "Resume" : "Pause"}
             </Button>
           </div>
-          <TrailDiagram
-            name="dedupe"
-            paused={paused || inspect}
-            count={count}
-            edges={[
-              ["standardize", "match"],
-              ["match", "review"],
-              ["review", "reconcile"],
-            ]}
-          >
-            <ol className="trail-steps">
-              {[
-                {
-                  id: "standardize",
-                  title: "Standardize",
-                  reason: "Make formats consistent. Preserve the original.",
-                  before: "ABC-042",
-                  after: "abc-042",
-                },
-                {
-                  id: "match",
-                  title: "Match",
-                  reason: "Compare the evidence. Find a candidate group.",
-                  before: "Records A + B",
-                  after: "Candidate match",
-                },
-                {
-                  id: "review",
-                  title: "Review",
-                  reason: "Apply your policy. Inspect the close calls.",
-                  before: "Evidence + policy",
-                  after: "Decision recorded",
-                },
-                {
-                  id: "reconcile",
-                  title: "Reconcile",
-                  reason: "Build the entity. Retain the source history.",
-                  before: "Approved group",
-                  after: "Entity E-1042",
-                },
-              ].map((step, i) => (
-                <li key={step.id} data-node={step.id}>
-                  <div className="trail-step-title">
-                    <span>{String(i + 1).padStart(2, "0")}</span>
-                    <div>
-                      <Text>{step.title}</Text>
-                      <p>{step.reason}</p>
+          {/* The set piece: the trail's four steps stay in normal flow as its
+              beats (so the measured wires and bridges keep their ports), and
+              the close-up beside them pins and scrubs with the reader's scroll.
+              See scene/scroll-scene.tsx and scene/dedupe-stage.tsx. */}
+          <ScrollScene name="dedupe" beats={4} stage={<DedupeStage />} className="trail-scene">
+            <TrailDiagram
+              name="dedupe"
+              paused={paused || inspect}
+              count={count}
+              edges={[
+                ["standardize", "match"],
+                ["match", "review"],
+                ["review", "reconcile"],
+              ]}
+            >
+              <ol className="trail-steps">
+                {[
+                  {
+                    id: "standardize",
+                    title: "Standardize",
+                    reason: "Make formats consistent. Preserve the original.",
+                    before: "ABC-042",
+                    after: "abc-042",
+                  },
+                  {
+                    id: "match",
+                    title: "Match",
+                    reason: "Compare the evidence. Find a candidate group.",
+                    before: "Records A + B",
+                    after: "Candidate match",
+                  },
+                  {
+                    id: "review",
+                    title: "Review",
+                    reason: "Apply your policy. Inspect the close calls.",
+                    before: "Evidence + policy",
+                    after: "Decision recorded",
+                  },
+                  {
+                    id: "reconcile",
+                    title: "Reconcile",
+                    reason: "Build the entity. Retain the source history.",
+                    before: "Approved group",
+                    after: "Entity E-1042",
+                  },
+                ].map((step, i) => (
+                  <li key={step.id} id={`dedupe-${step.id}`} data-node={step.id}>
+                    <div className="trail-step-title">
+                      <span>{String(i + 1).padStart(2, "0")}</span>
+                      <div>
+                        <Text>{step.title}</Text>
+                        <p>{step.reason}</p>
+                      </div>
                     </div>
-                  </div>
-                  <div className="trail-step-example">
-                    <span>{step.before}</span>
-                    <ArrowDown size={12} aria-hidden="true" />
-                    <strong>{step.after}</strong>
-                  </div>
-                </li>
-              ))}
-            </ol>
-          </TrailDiagram>
+                    <div className="trail-step-example">
+                      <span>{step.before}</span>
+                      <ArrowDown size={12} aria-hidden="true" />
+                      <strong>{step.after}</strong>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            </TrailDiagram>
+          </ScrollScene>
           <TrailNext href="#egress">Next / Put the results to work</TrailNext>
         </section>
         <section id="egress" className="story-section trail-panel" data-testid="trail-egress-panel">

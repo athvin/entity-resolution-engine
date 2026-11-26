@@ -1,7 +1,24 @@
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 import { SOURCE_NAMES } from "../../src/components/marketing/demo/story-model";
+
+/**
+ * The #dedupe set piece spreads the trail over several screens (one beat
+ * each), so its first wire is no longer on screen when the section's top is,
+ * and an off-screen wire is paused by design. Put it back in view.
+ */
+async function showFirstDedupeWire(page: Page) {
+  await page
+    .getByTestId("trail-dedupe")
+    .locator('[data-node="standardize"]')
+    .evaluate((node) => {
+      window.scrollTo({
+        top: node.getBoundingClientRect().top + window.scrollY - 120,
+        behavior: "instant",
+      });
+    });
+}
 
 test.describe("interactive marketing", () => {
   test("the quiet entrance becomes the next-chapter button and leads into the audit", async ({
@@ -321,11 +338,14 @@ test.describe("interactive marketing", () => {
   test("pipeline playback pauses and resumes without resetting", async ({ page }) => {
     await page.goto("/#flow");
     const demo = page.getByTestId("pipeline-demo");
-    await page.locator("#dedupe").scrollIntoViewIfNeeded();
+    await showFirstDedupeWire(page);
     const packet = page.getByTestId("trail-dedupe").locator("[data-packet]").first();
     const clock = () => packet.evaluate((e) => Number(e.getAnimations()[0]?.currentTime ?? 0));
     await expect.poll(clock).toBeGreaterThan(100);
+    // Clicking the toolbar scrolls it into view, which can take the wire off
+    // screen again; bring it back before every reading.
     await demo.getByRole("button", { name: "Pause pipeline" }).click();
+    await showFirstDedupeWire(page);
     await packet.evaluate(async (e) => {
       await e.getAnimations()[0]?.ready;
     });
@@ -333,11 +353,13 @@ test.describe("interactive marketing", () => {
     await page.waitForTimeout(250);
     expect(Math.abs((await clock()) - stopped)).toBeLessThan(40);
     await demo.getByRole("button", { name: "Resume pipeline" }).click();
+    await showFirstDedupeWire(page);
     await expect.poll(clock).toBeGreaterThan(stopped + 100);
   });
 
   test("offscreen trails stop and transmitted light follows the same record", async ({ page }) => {
     await page.goto("/#dedupe");
+    await showFirstDedupeWire(page);
     const normal = page
       .getByTestId("trail-dedupe")
       .locator(".story-wires:not(.story-transmission) [data-packet]")
