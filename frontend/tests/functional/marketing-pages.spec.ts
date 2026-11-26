@@ -31,7 +31,15 @@ test.describe("marketing content pages", () => {
       const nav = page.getByRole("navigation", { name: "Main navigation" });
       await nav.getByRole("link", { name: label, exact: true }).click();
       await expect(page).toHaveURL(new RegExp(`${href}$`));
-      if (await menu.isVisible()) await menu.click();
+      // The URL can change before the new page commits, and the menu closes
+      // on that commit. Reopening it any earlier toggles the still-open menu
+      // shut, and the commit then leaves it closed: reproduced by delaying the
+      // route's payload, and seen once under the full tier's load. Wait for
+      // the close, which is proof the new page is in.
+      if (await menu.isVisible()) {
+        await expect(menu).toHaveAttribute("aria-expanded", "false");
+        await menu.click();
+      }
       await expect(nav.getByRole("link", { name: label, exact: true })).toHaveAttribute(
         "aria-current",
         "page",
