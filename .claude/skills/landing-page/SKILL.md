@@ -312,7 +312,13 @@ and never enters or exits. The global clamp matches `*`, which does not reach
 `/docs` is a static workflow guide and operation reference. Its committed
 `operations.json` is generated from the MCP route manifest and response-envelope
 contract by `frontend/scripts/gen-developer-reference.mjs`; the unit test checks
-drift. Keep examples grounded in handlers and identify contract gaps.
+drift. Keep examples grounded in handlers and identify contract gaps. Its walkthrough
+(`docs/api-storyboard.tsx`) is a scene that types the overview's six steps as
+HTTP exchanges; the values it shows live in `docs/storyboard.ts`, and
+`marketing-api-storyboard.test.ts` holds every method, path and field there to
+`openapi.public.json`. The article's element styles (`ol` numbering, `li`
+margins) reach into any scene placed in it, which is why `docs.css` resets them
+under `.docs-article .scene`.
 
 `/docs/api` is the public API reference, rendered in-house from
 `openapi.public.json` by `src/lib/docs/openapi-reference.ts` (pure, unit-tested
