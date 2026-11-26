@@ -97,7 +97,7 @@ const WORKFLOW: { id: string; title: string; resources: string[] }[] = [
       "s3-ingest",
     ],
   },
-  { id: "api-ingest", title: "Ingest", resources: ["records", "imports", "extract"] },
+  { id: "api-ingest", title: "Ingest", resources: ["records", "imports", "uploads", "extract"] },
   {
     id: "api-run",
     title: "Run and monitor",
