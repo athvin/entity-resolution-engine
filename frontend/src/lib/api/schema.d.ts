@@ -6286,7 +6286,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response: the export's artifact as an attachment, CSV or JSON Lines as the export's `format` says. */
+            /** @description Successful response: the export's artifact as an attachment, CSV, JSON Lines or Parquet as the export's `format` says. */
             "2XX": {
                 headers: {
                     [name: string]: unknown;
@@ -6294,6 +6294,7 @@ export interface operations {
                 content: {
                     "text/csv": string;
                     "application/x-ndjson": string;
+                    "application/vnd.apache.parquet": string;
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */

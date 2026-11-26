@@ -3444,7 +3444,7 @@
         ],
         "responses": {
           "2XX": {
-            "description": "Successful response: the export's artifact as an attachment, CSV or JSON Lines as the export's `format` says.",
+            "description": "Successful response: the export's artifact as an attachment, CSV, JSON Lines or Parquet as the export's `format` says.",
             "content": {
               "text/csv": {
                 "schema": {
@@ -3453,6 +3453,12 @@
                 }
               },
               "application/x-ndjson": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "application/vnd.apache.parquet": {
                 "schema": {
                   "type": "string",
                   "format": "binary"
