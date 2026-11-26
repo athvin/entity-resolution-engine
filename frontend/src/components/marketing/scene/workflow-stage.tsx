@@ -35,7 +35,7 @@ export function WorkflowStage() {
       <div className="flow-window">
         <p className="flow-window-bar">
           <span className="flow-window-dots" />
-          <strong>Meridian accounts</strong>
+          <strong>Accounts</strong>
         </p>
         <div className="flow-window-body">
           <div className="flow-rail">
@@ -55,7 +55,7 @@ export function WorkflowStage() {
               <dl className="flow-fields">
                 <div>
                   <dt>Name</dt>
-                  <dd>Meridian accounts</dd>
+                  <dd>Accounts</dd>
                 </div>
                 <div>
                   <dt>Holds</dt>
