@@ -895,3 +895,31 @@ test.describe("solutions, role, industry and /about scenes", () => {
     );
   });
 });
+
+test.describe("the nav", () => {
+  const scaleIns = (page: Page, testId: string) =>
+    page
+      .getByTestId(testId)
+      .evaluate(
+        (node) =>
+          node
+            .getAnimations()
+            .filter(
+              (animation) =>
+                animation instanceof CSSAnimation && animation.animationName === "scale-in",
+            ).length,
+      );
+
+  // A panel opens with the shared scale-in, the motion gate's standard case
+  // for something the reader asked for: on a wide screen the Product
+  // dropdown, on a phone the menu itself.
+  test("panels open with the scale-in", async ({ page, isMobile }) => {
+    await page.goto("/");
+    const [button, panel] = isMobile
+      ? ["marketing-menu-button", "marketing-menu-panel"]
+      : ["marketing-nav-product", "marketing-nav-product-panel"];
+    await page.getByTestId(button).click();
+    await expect(page.getByTestId(panel)).toBeVisible();
+    expect(await scaleIns(page, panel)).toBe(1);
+  });
+});
