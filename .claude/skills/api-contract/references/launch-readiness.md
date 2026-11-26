@@ -15,6 +15,7 @@ no operator call after onboarding, no SQL, no Salesforce.
 | Deliver | `records/ingest` (JSON, `Idempotency-Key`), `imports` (CSV), `uploads` (resumable) | retry is the same run; undeclared column 422; unreadable file fails as a **run** with `error_class` |
 | Follow | `GET …/imports`, `…/jobs`, `…/jobs/{id}` | — |
 | Read | `duplicates` (paged to the end), `golden-records` (Arrow), `golden-records/{id}` (lineage), `exports` golden + lineage | export rows equal the live read; lineage equals every delivered record |
+| Review | steward key minted by the admin; `reviews`, `reviews/bulk-resolve` (`no_match`, `apply_now`), `records/unmatch`, `runs/{id}/entity-events`, `tags` + `tags/{id}/apply` + `taggings` | the rejected review reads resolved; the unmatched record leaves its group |
 | Isolation | — | another org: 404; another dataset's job or upload: 404 |
 
 Other failure surfaces are pinned by their own tests rather than repeated here:

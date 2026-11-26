@@ -493,6 +493,68 @@ curl --fail-with-body -X POST "$ER_API_ORIGIN/v1/orgs/$ER_ORG/datasets/$ER_DATAS
   -H "Authorization: Bearer $ER_API_KEY" \
   -H 'Content-Type: application/json' \
   --data '{"records":["<member-record-key>"],"apply_now":true}'`}</CodeExample>
+          <h3>The core review workflow</h3>
+          <p>
+            Everything a reviewer does in the app is available to an integration with a steward key;
+            an admin defines tags. The subset most customers need:
+          </p>
+          <table>
+            <thead>
+              <tr>
+                <th>Decision</th>
+                <th>Operation</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>See what needs a person</td>
+                <td>
+                  <code>GET …/reviews</code> (filter by <code>status</code>, <code>reason</code>,
+                  probability band), <code>GET …/reviews/{"{id}"}</code>
+                </td>
+              </tr>
+              <tr>
+                <td>Approve or reject a proposed match</td>
+                <td>
+                  <code>POST …/reviews/bulk-resolve</code> with <code>match</code>,{" "}
+                  <code>no_match</code> or <code>dismiss</code> per review, and{" "}
+                  <code>apply_now</code> to reconcile at once
+                </td>
+              </tr>
+              <tr>
+                <td>Take a record out of its group for good</td>
+                <td>
+                  <code>POST …/records/unmatch</code> — it can never re-attach to those members
+                </td>
+              </tr>
+              <tr>
+                <td>Split, or force, a grouping</td>
+                <td>
+                  <code>POST …/golden-records/{"{id}"}/unmerge</code>, <code>POST …/merges</code>,{" "}
+                  <code>POST …/assertions</code>
+                </td>
+              </tr>
+              <tr>
+                <td>Label entities and reviews</td>
+                <td>
+                  <code>POST /v1/orgs/{"{org}"}/tags</code>, <code>POST …/tags/{"{id}"}/apply</code>
+                  , <code>GET …/taggings</code>
+                </td>
+              </tr>
+              <tr>
+                <td>See what changed</td>
+                <td>
+                  <code>GET …/runs</code>, <code>GET …/runs/{"{run_id}"}/entity-events</code>,{" "}
+                  <code>GET …/golden-records/{"{id}"}</code> for lineage
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <p>
+            A decision with <code>apply_now</code> returns an <code>apply_job</code>; read results
+            once that job succeeds. Approving a match here changes resolution results only — merging
+            the records in an external system is provider writeback.
+          </p>
           <p>
             Inspect the returned state and any queued job before reading the final result. A
             correction preserves the decision history and changes reconciliation; it does not
