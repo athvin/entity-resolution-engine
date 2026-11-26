@@ -587,7 +587,18 @@ test.describe("/product", () => {
         behavior: "instant",
       });
     });
-    await expect.poll(async () => (await records())[0]?.moved ?? 0).toBeGreaterThan(20);
+    // Wait for the mid-deal frame itself: the middle record arrived, record 0
+    // still displaced. Below the fold the records start in their before-state,
+    // displaced too, so displacement alone passed on a frame the timeline had
+    // not reached yet (WebKit, about one run in two in CI's shard).
+    await expect
+      .poll(async () => {
+        const [first, middle] = await records();
+        return Boolean(
+          first && middle && middle.opacity === 1 && middle.moved < 0.5 && first.moved > 20,
+        );
+      })
+      .toBe(true);
     for (const record of await records()) expect(record.opacity).toBe(1);
 
     await figure.evaluate((node) => {
@@ -751,5 +762,90 @@ test.describe("/docs walkthrough", () => {
     await expect(page.getByTestId("scene-api-storyboard")).toHaveScreenshot(
       "marketing-api-storyboard.png",
     );
+  });
+});
+
+test.describe("/pricing", () => {
+  const share = (page: Page, selector: string) =>
+    page
+      .locator(selector)
+      .first()
+      .evaluate((node) => {
+        const style = getComputedStyle(node);
+        const track = node.parentElement?.getBoundingClientRect().width ?? 0;
+        return {
+          scale: new DOMMatrixReadOnly(style.transform).a,
+          fullWidth: Math.abs(node.getBoundingClientRect().width / (track || 1)),
+          layoutWidth: Number.parseFloat(style.width) / (track || 1),
+        };
+      });
+
+  // A bar is the track's full width, scaled to its share, so an input change
+  // eases it by transform instead of resizing it.
+  test("the bars scale to their share, never resize", async ({ page }) => {
+    await page.goto("/pricing");
+    const bar = '[data-testid="pricing-option-monthly"] .pricing-bar';
+    await expect.poll(async () => (await share(page, bar)).scale).toBeCloseTo(1, 2);
+    expect((await share(page, bar)).layoutWidth).toBeCloseTo(1, 2);
+    const cheapest = '[data-testid="pricing-option-threeYear"] .pricing-bar';
+    await expect.poll(async () => (await share(page, cheapest)).scale).toBeLessThan(1);
+    expect((await share(page, cheapest)).layoutWidth).toBeCloseTo(1, 2);
+  });
+
+  // The headline price rolls through the kit's Roll and settles on the new
+  // figure; screen readers get the plain value at once.
+  test("the headline price rolls to its new value", async ({ page }) => {
+    await page.goto("/pricing");
+    const headline = page.locator(".pricing-list-price strong");
+    await expect(headline.locator(".ss-roll")).toHaveCount(1);
+    const records = page.getByTestId("pricing-records");
+    await records.fill("200,000");
+    await expect(headline.locator(".sr-only")).toHaveText("$1,875");
+    await expect(headline.locator("[aria-hidden='true']")).toHaveText("$1,875");
+  });
+
+  // The figure sits in the first screen, so it plays itself once when first
+  // seen and Replay runs it again: three systems' bars start stacked and
+  // finish end to end in one bar, with the total above and the marker on its
+  // tier.
+  test("the systems' records slide into one total on one tier", async ({ page }) => {
+    await page.goto("/pricing");
+    const figure = page.getByTestId("records-pool");
+    const state = () =>
+      figure.evaluate((node) => ({
+        moved: [...node.querySelectorAll(".pool-seg")].map((seg) => {
+          const matrix = new DOMMatrixReadOnly(getComputedStyle(seg).transform);
+          return Math.hypot(matrix.m41, matrix.m42);
+        }),
+        total: Number(getComputedStyle(node.querySelector(".pool-total") as Element).opacity),
+      }));
+    await figure.scrollIntoViewIfNeeded();
+    await expect.poll(async () => Math.max(...(await state()).moved)).toBeLessThan(0.5);
+    expect((await state()).total).toBeGreaterThan(0.95);
+    await expect(figure.locator('.pool-tiers li[data-on="true"]')).toHaveText("Professional");
+
+    await page.getByTestId("records-pool-stage-replay").click();
+    await expect
+      .poll(async () => Math.min(...(await state()).moved.slice(0, 2)))
+      .toBeGreaterThan(20);
+    await expect.poll(async () => Math.max(...(await state()).moved)).toBeLessThan(0.5);
+    expect((await state()).total).toBeGreaterThan(0.95);
+  });
+
+  test("with reduced motion the figure is its finished picture", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/pricing");
+    const figure = page.getByTestId("records-pool");
+    expect(await figure.evaluate((node) => node.getAnimations({ subtree: true }).length)).toBe(0);
+    await expect(figure.locator(".pool-total")).toBeVisible();
+  });
+
+  test("records figure poster visual baseline @visual", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/pricing");
+    await page.addStyleTag({
+      content: '[data-testid="marketing-header"] { visibility: hidden !important; }',
+    });
+    await expect(page.getByTestId("records-pool")).toHaveScreenshot("marketing-records-pool.png");
   });
 });

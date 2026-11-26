@@ -278,6 +278,14 @@ probing rather than reading:
   (100%), so a figure in the middle of the screen sits at 50%. Finish by about
   46%, or a reader who stops with it centred sees it unfinished: the
   golden-records way-back figure read 0.14 opacity there.
+- **A figure in the first screen plays itself instead.** A scroll timeline
+  there is already most of the way through at load: /pricing's
+  records-to-one-total figure starts 496px down a 900px desktop screen, so it
+  runs once on first view through `scene/scene-playback.tsx`, with Replay, as
+  the hero does.
+- **`--story-container-surface` is translucent.** A fill mixed from it is
+  still see-through; mix from an opaque base (the surface over
+  `--background`) when shapes must hide each other.
 - **A phone's pinned stage is short** (about 290px on the iPhone 15 profile).
   Each stage compacts itself under `@container (max-height: 520px)`: fewer
   fields, one-line evidence rows, a rule reduced to its verdict, and the
