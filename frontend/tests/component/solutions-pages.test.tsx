@@ -11,11 +11,14 @@ import RolePage, {
   generateStaticParams as roleParams,
 } from "@/app/(marketing)/solutions/roles/[slug]/page";
 import { MarketingNav } from "@/components/marketing/marketing-nav";
+import AboutPage from "@/app/(marketing)/about/page";
 import {
+  ABOUT_SCENE,
   INDUSTRIES,
   INDUSTRY_BASE,
   ROLE_BASE,
   ROLES,
+  SOLUTIONS_SCENE,
 } from "@/components/marketing/pages/solutions-content";
 import { MARKETING_PATHS } from "@/lib/site/routes";
 
@@ -206,5 +209,64 @@ describe("the Solutions dropdown", () => {
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.getByTestId("marketing-menu-panel")).not.toBeVisible();
     expect(screen.getByTestId("marketing-menu-button")).toHaveFocus();
+  });
+});
+
+describe("the resolution scenes", () => {
+  const scenes = [
+    ...[...ROLES, ...INDUSTRIES].map((solution) => [solution.slug, solution.scene] as const),
+    ["solutions", SOLUTIONS_SCENE] as const,
+    ["about", ABOUT_SCENE] as const,
+  ];
+
+  it("gives every role, industry and overview page three records resolving into one", () => {
+    expect(scenes).toHaveLength(ROLES.length + INDUSTRIES.length + 2);
+    for (const [slug, scene] of scenes) {
+      expect(scene.records, slug).toHaveLength(3);
+      expect(scene.resolved.name, slug).not.toBe("");
+      expect(scene.sentence, slug).toMatch(/\.$/);
+    }
+  });
+
+  // People and companies only, fictional: `.example` domains and 555-01xx
+  // numbers, and nothing a page about regulated industries must not show.
+  it("shows only fictional people and companies, never sensitive fields", () => {
+    for (const [slug, scene] of scenes) {
+      expect(JSON.stringify(scene), slug).not.toMatch(
+        /patient|student|diagnos|medical record|social security|\bssn\b|date of birth|account number|grade/i,
+      );
+      for (const value of [...scene.records.map((record) => record.value), scene.resolved.value]) {
+        if (value.includes("@")) expect(value, slug).toMatch(/@[a-z0-9.-]+\.example$/);
+        if (/^\(\d{3}\)/.test(value)) expect(value, slug).toMatch(/^\(\d{3}\) 555-01\d\d$/);
+        if (/^[a-z0-9.-]+\.[a-z]+$/.test(value)) expect(value, slug).toMatch(/\.example$/);
+      }
+    }
+  });
+
+  it("renders each page's scene, and /solutions' and /about's", async () => {
+    for (const solution of ROLES) {
+      const { unmount } = render(
+        await RolePage({ params: Promise.resolve({ slug: solution.slug }) }),
+      );
+      expect(screen.getByTestId("resolution-figure")).toHaveTextContent(
+        solution.scene.resolved.name,
+      );
+      unmount();
+    }
+    for (const solution of INDUSTRIES) {
+      const { unmount } = render(
+        await IndustryPage({ params: Promise.resolve({ slug: solution.slug }) }),
+      );
+      expect(screen.getByTestId("resolution-figure")).toHaveTextContent(solution.scene.sentence);
+      unmount();
+    }
+    for (const [Page, scene] of [
+      [SolutionsPage, SOLUTIONS_SCENE],
+      [AboutPage, ABOUT_SCENE],
+    ] as const) {
+      const { unmount } = render(<Page />);
+      expect(screen.getByTestId("resolution-figure")).toHaveTextContent(scene.sentence);
+      unmount();
+    }
   });
 });

@@ -308,7 +308,13 @@ dedupe packet has to bring its wire into view first
 The hero's scene is the self-playing exception, and on phones it sits after the
 foot: the iPhone 15 profile shows 659px, and anything above the foot pushed
 "Explore the flow" below it. `scene-playback.tsx` holds a scene that is off
-screen at hydration until it is first seen.
+screen at hydration until it is first seen, and "seen" means 40% of it on
+screen: a solutions figure that started 19px above an iPhone 15's bottom edge
+played out unwatched while any sliver counted. The same island drives
+`/pricing`'s records figure and `scene/resolution-figure.tsx`, which every
+solutions, role, industry and /about page renders from its content data's
+`scene` (people and companies only, fictional, scanned by
+`solutions-pages.test.tsx`).
 
 Pages cut into each other through React 19.3's `<ViewTransition>` (`cut.tsx`):
 page-kit's `Page` wraps every content page, and a page that does not use `Page`

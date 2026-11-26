@@ -1,3 +1,5 @@
+import { ABOUT_SCENE } from "@/components/marketing/pages/solutions-content";
+import { ResolutionFigure } from "@/components/marketing/scene/resolution-figure";
 import {
   CtaBand,
   DEMO,
@@ -24,6 +26,8 @@ export default function AboutPage() {
         title="Duplicates should be resolved with evidence."
         lead="We build DupeZero for the people who are answerable for customer data. A merge they cannot explain is a merge they cannot defend, so every match we propose comes with its reasons and every record keeps its history."
       />
+
+      <ResolutionFigure id="resolve-about" scene={ABOUT_SCENE} />
       <Section
         id="beliefs"
         title="What we hold to"
