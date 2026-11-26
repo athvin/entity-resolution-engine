@@ -370,6 +370,7 @@ pub async fn s3_poll_tick(
                     spec: &delivery_config.sources[source],
                     bytes,
                     action: "import.s3",
+                    client_key: None,
                 },
             )
             .await;
