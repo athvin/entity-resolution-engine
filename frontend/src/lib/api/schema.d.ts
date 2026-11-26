@@ -1680,6 +1680,75 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/orgs/{org}/datasets/{ds}/uploads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** open a resumable upload */
+        post: operations["post_orgs_by_org_datasets_by_ds_uploads"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/orgs/{org}/datasets/{ds}/uploads/{upload_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** an upload's state */
+        get: operations["get_orgs_by_org_datasets_by_ds_uploads_by_upload_id"];
+        put?: never;
+        post?: never;
+        /** abandon an upload and delete its parts */
+        delete: operations["delete_orgs_by_org_datasets_by_ds_uploads_by_upload_id"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/orgs/{org}/datasets/{ds}/uploads/{upload_id}/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** finish an upload */
+        post: operations["post_orgs_by_org_datasets_by_ds_uploads_by_upload_id_complete"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/orgs/{org}/datasets/{ds}/uploads/{upload_id}/parts/{part}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** store one part */
+        put: operations["put_orgs_by_org_datasets_by_ds_uploads_by_upload_id_parts_by_part"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/orgs/{org}/resources": {
         parameters: {
             query?: never;
@@ -4520,6 +4589,41 @@ export interface components {
             pending_until_next_reconcile: boolean;
             /** @description Always `staged`. */
             status: string;
+        };
+        /** @description An aborted upload. */
+        UploadAborted: {
+            state: string;
+            upload_id: string;
+        };
+        /** @description One stored part. */
+        UploadPart: {
+            /** Format: int64 */
+            bytes: number;
+            /** Format: int64 */
+            part: number;
+            /** @description The part's SHA-256 as received — compare with your copy. */
+            sha256: string;
+        };
+        /** @description An upload session: where its parts go and which have arrived. */
+        UploadSession: {
+            /** Format: int64 */
+            bytes: number;
+            /** @description RFC 3339. Past it every call but abort is a 410. */
+            expires_at: string;
+            /** Format: int64 */
+            part_count: number;
+            /**
+             * Format: int64
+             * @description Every part but the last is exactly this many bytes.
+             */
+            part_size: number;
+            /** @description PUT each part's bytes here, replacing `{part}` with 1..=part_count. */
+            part_url: string;
+            /** @description The parts already stored, ascending: a resuming client sends the rest. */
+            parts_received: number[];
+            sha256: string;
+            source: string;
+            upload_id: string;
         };
         /** @description A tenant webhook endpoint: its URL, subscribed events and signing secret. */
         Webhook: {
@@ -9163,6 +9267,193 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TagApplied"] | components["schemas"]["TagRemoved"];
+                };
+            };
+            /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        detail: string;
+                    };
+                };
+            };
+        };
+    };
+    post_orgs_by_org_datasets_by_ds_uploads: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+                ds: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    bytes: number;
+                    sha256: string;
+                    source: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful response. Payload types are described only at envelope granularity. */
+            "2XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        detail: string;
+                    };
+                };
+            };
+        };
+    };
+    get_orgs_by_org_datasets_by_ds_uploads_by_upload_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+                ds: string;
+                upload_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful response. Payload types are described only at envelope granularity. */
+            "2XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        detail: string;
+                    };
+                };
+            };
+        };
+    };
+    delete_orgs_by_org_datasets_by_ds_uploads_by_upload_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+                ds: string;
+                upload_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful response. */
+            "2XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadAborted"];
+                };
+            };
+            /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        detail: string;
+                    };
+                };
+            };
+        };
+    };
+    post_orgs_by_org_datasets_by_ds_uploads_by_upload_id_complete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+                ds: string;
+                upload_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful response. */
+            "2XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliveryAccepted"];
+                };
+            };
+            /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        detail: string;
+                    };
+                };
+            };
+        };
+    };
+    put_orgs_by_org_datasets_by_ds_uploads_by_upload_id_parts_by_part: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+                ds: string;
+                upload_id: string;
+                part: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/octet-stream": string;
+            };
+        };
+        responses: {
+            /** @description Successful response. */
+            "2XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadPart"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */

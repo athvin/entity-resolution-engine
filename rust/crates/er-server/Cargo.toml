@@ -147,6 +147,7 @@ er-duckfleet = { version = "0.1.0", path = "../er-duckfleet" }
 tempfile = "3"
 tokio-util = { version = "0.7.20", features = ["io"] }
 parquet = { version = "=60.2.0", default-features = false, features = ["arrow", "snap"] }
+futures-util = "0.3"
 
 [lints]
 workspace = true

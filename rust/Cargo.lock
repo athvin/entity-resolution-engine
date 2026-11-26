@@ -2428,6 +2428,7 @@ dependencies = [
  "er-std",
  "er-versions",
  "futures",
+ "futures-util",
  "hex",
  "hmac 0.13.0",
  "jsonwebtoken",
