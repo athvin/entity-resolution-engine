@@ -587,7 +587,18 @@ test.describe("/product", () => {
         behavior: "instant",
       });
     });
-    await expect.poll(async () => (await records())[0]?.moved ?? 0).toBeGreaterThan(20);
+    // Wait for the mid-deal frame itself: the middle record arrived, record 0
+    // still displaced. Below the fold the records start in their before-state,
+    // displaced too, so displacement alone passed on a frame the timeline had
+    // not reached yet (WebKit, about one run in two in CI's shard).
+    await expect
+      .poll(async () => {
+        const [first, middle] = await records();
+        return Boolean(
+          first && middle && middle.opacity === 1 && middle.moved < 0.5 && first.moved > 20,
+        );
+      })
+      .toBe(true);
     for (const record of await records()) expect(record.opacity).toBe(1);
 
     await figure.evaluate((node) => {
