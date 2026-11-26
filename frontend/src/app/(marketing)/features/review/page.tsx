@@ -8,7 +8,7 @@ import {
   Related,
   Section,
 } from "@/components/marketing/pages/page-kit";
-import { ProductScreenshot } from "@/components/marketing/pages/examples";
+import { Reviewer } from "@/components/marketing/scene/reviewer";
 
 export const dynamic = "force-static";
 
@@ -29,6 +29,20 @@ export default function ReviewPage() {
         primary={DEMO}
       />
 
+      <Section
+        id="decide"
+        eyebrow="Try it"
+        title="Make the call yourself."
+        intro={
+          <p>
+            One pair from the review band, with its evidence. Decide it, then change your mind and
+            watch the correction stick. The records are illustrative.
+          </p>
+        }
+      >
+        <Reviewer />
+      </Section>
+
       <Section id="queue" title="A queue for the uncertain pairs.">
         <CardGrid
           items={[
@@ -46,7 +60,6 @@ export default function ReviewPage() {
             },
           ]}
         />
-        <ProductScreenshot screen="review" />
       </Section>
 
       <Section id="fix" title="Fix a mistake without losing the history.">
