@@ -81,8 +81,14 @@ function Request({ exchange }: { exchange: Exchange }) {
 
 function Send({ exchange, previous }: { exchange: Exchange; previous: string | undefined }) {
   const send = exchange.send;
-  if (!send) return <p className="sb-line sb-send" data-empty="true" />;
-  if ("body" in send) return <p className="sb-line sb-send">{JSON.stringify(send.body)}</p>;
+  if (!send) return null;
+  if ("body" in send) {
+    // Compact JSON has no spaces to wrap at; offer a break after each comma so
+    // a long body never splits inside a value.
+    return (
+      <p className="sb-line sb-send">{JSON.stringify(send.body).replaceAll(",", ",\u200b")}</p>
+    );
+  }
   const at = exchange.uses === "authorization" && previous ? send.line.indexOf(previous) : -1;
   return (
     <p className="sb-line sb-send">
@@ -97,6 +103,17 @@ function Send({ exchange, previous }: { exchange: Exchange; previous: string | u
       )}
     </p>
   );
+}
+
+/**
+ * How many of an exchange's four lines the line sent takes: none, one, or
+ * two for a long body. The response wraps into what is left.
+ */
+function sendLines(exchange: Exchange): 0 | 1 | 2 {
+  const send = exchange.send;
+  if (!send) return 0;
+  const text = "body" in send ? JSON.stringify(send.body) : send.line;
+  return text.length > 48 ? 2 : 1;
 }
 
 /**
@@ -123,22 +140,25 @@ export function ApiStoryboard() {
           <strong>$ER_API_ORIGIN</strong>
         </p>
         <div className="sb-screen">
-          <ol className="sb-transcript">
-            {EXCHANGES.map((exchange, index) => (
-              <li
-                key={`${exchange.method} ${exchange.operation}`}
-                className="sb-exchange"
-                data-ex={index}
-                data-beat={exchange.beat}
-              >
-                <Request exchange={exchange} />
-                <Send exchange={exchange} previous={previous[index]} />
-                <p className="sb-line sb-response">
-                  ← {renderObject(exchange.response, exchange.carry, "", exchange.more ?? false)}
-                </p>
-              </li>
-            ))}
-          </ol>
+          <div className="sb-viewport">
+            <ol className="sb-transcript">
+              {EXCHANGES.map((exchange, index) => (
+                <li
+                  key={`${exchange.method} ${exchange.operation}`}
+                  className="sb-exchange"
+                  data-ex={index}
+                  data-beat={exchange.beat}
+                  data-send-lines={sendLines(exchange)}
+                >
+                  <Request exchange={exchange} />
+                  <Send exchange={exchange} previous={previous[index]} />
+                  <p className="sb-line sb-response">
+                    ← {renderObject(exchange.response, exchange.carry, "", exchange.more ?? false)}
+                  </p>
+                </li>
+              ))}
+            </ol>
+          </div>
         </div>
       </div>
     </div>

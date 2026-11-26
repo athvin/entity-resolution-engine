@@ -661,3 +661,95 @@ test.describe("/integrations", () => {
     );
   });
 });
+
+test.describe("/docs walkthrough", () => {
+  const scrubTo = (page: Page, progress: number) =>
+    page.evaluate((p) => {
+      const track = document.querySelector('[data-scene="api-storyboard"]');
+      if (!track) throw new Error("no walkthrough scene");
+      const box = track.getBoundingClientRect();
+      const top = box.top + window.scrollY;
+      const start = top - 64;
+      const end = top + box.height - window.innerHeight;
+      window.scrollTo({ top: Math.round(start + (end - start) * p), behavior: "instant" });
+    }, progress);
+  const answered = (page: Page, exchange: number) =>
+    page
+      .locator(
+        `[data-scene="api-storyboard"] .sb-exchange[data-ex="${String(exchange)}"] .sb-response`,
+      )
+      .evaluate((node) => Number(getComputedStyle(node).opacity));
+  // How much of a request is typed: its cover has moved that share of its width.
+  const typed = (page: Page, exchange: number) =>
+    page
+      .locator(
+        `[data-scene="api-storyboard"] .sb-exchange[data-ex="${String(exchange)}"] .sb-cover`,
+      )
+      .evaluate(
+        (node) =>
+          new DOMMatrixReadOnly(getComputedStyle(node).transform).m41 /
+          node.getBoundingClientRect().width,
+      );
+
+  // One call after another: each beat's calls are typed and answered by its
+  // centre, and the next beat's are not started.
+  test("types one call after another, answered by each beat's centre", async ({ page }) => {
+    await page.goto("/docs");
+    await expect(page.locator('[data-scene="api-storyboard"] .scene-beat')).toHaveCount(6);
+
+    await scrubTo(page, 0);
+    await expect.poll(() => answered(page, 0)).toBeGreaterThan(0.95);
+    expect(await answered(page, 1)).toBeLessThan(0.05);
+    expect(await typed(page, 1)).toBeLessThan(0.05);
+
+    await scrubTo(page, 0.4);
+    await expect.poll(() => answered(page, 2)).toBeGreaterThan(0.95);
+    expect(await typed(page, 2)).toBeGreaterThan(0.95);
+    expect(await typed(page, 3)).toBeLessThan(0.05);
+
+    await scrubTo(page, 1);
+    await expect.poll(() => answered(page, 8)).toBeGreaterThan(0.95);
+    const scrolled = await page
+      .locator('[data-scene="api-storyboard"] .sb-transcript')
+      .evaluate((node) => new DOMMatrixReadOnly(getComputedStyle(node).transform).m42);
+    expect(scrolled).toBeLessThan(0);
+  });
+
+  // Each value a response returns is outlined again where the next call uses
+  // it: the key in the header, then the name, version, job and entity in the
+  // path.
+  test("outlines each value where it is returned and where it is used", async ({ page }) => {
+    await page.goto("/docs");
+    const marks = await page
+      .locator('[data-scene="api-storyboard"] .sb-carry')
+      .evaluateAll((nodes) => nodes.map((node) => node.textContent.replaceAll('"', "")));
+    expect(marks).toHaveLength(10);
+    for (let index = 0; index < marks.length; index += 2) {
+      expect(marks[index + 1], `carry ${String(index / 2)}`).toBe(marks[index]);
+    }
+  });
+
+  test("with reduced motion the walkthrough is a static transcript", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/docs");
+    const exchanges = page.locator('[data-scene="api-storyboard"] .sb-exchange');
+    await expect(exchanges).toHaveCount(9);
+    for (const exchange of await exchanges.all()) await expect(exchange).toBeVisible();
+    expect(
+      await page
+        .getByTestId("scene-api-storyboard-stage")
+        .evaluate((stage) => stage.getAnimations({ subtree: true }).length),
+    ).toBe(0);
+  });
+
+  test("walkthrough poster visual baseline @visual", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/docs");
+    await page.addStyleTag({
+      content: '[data-testid="marketing-header"] { visibility: hidden !important; }',
+    });
+    await expect(page.getByTestId("scene-api-storyboard")).toHaveScreenshot(
+      "marketing-api-storyboard.png",
+    );
+  });
+});

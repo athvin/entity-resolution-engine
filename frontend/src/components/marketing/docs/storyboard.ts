@@ -102,8 +102,8 @@ export const EXCHANGES: readonly Exchange[] = [
     query: "?source=csv",
     send: { line: "file=@accounts.csv" },
     response: {
-      delivery_id: "01a219ad…5e10",
       job: { id: STORY_VALUES.job_id, state: "queued" },
+      delivery_id: "01a219ad…5e10",
     },
     carry: "job.id",
   },
