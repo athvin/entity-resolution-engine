@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import "./pages.css";
+import { MarketingCut } from "../cut";
 import { Breadcrumbs, SHARE_IMAGE } from "../seo";
 import { DEMO_PATH } from "../site-links";
 
@@ -247,10 +248,12 @@ export function Page({
   crumb?: { path: string; label: string } | undefined;
 }) {
   return (
-    <div className="page" data-testid={testId}>
-      {crumb && <Breadcrumbs path={crumb.path} label={crumb.label} />}
-      {children}
-    </div>
+    <MarketingCut>
+      <div className="page" data-testid={testId}>
+        {crumb && <Breadcrumbs path={crumb.path} label={crumb.label} />}
+        {children}
+      </div>
+    </MarketingCut>
   );
 }
 

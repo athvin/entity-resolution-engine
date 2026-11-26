@@ -8,6 +8,7 @@ import { StoryChapters } from "@/components/marketing/story-chapters";
 import { StructuredData } from "@/components/marketing/structured-data";
 import { HERO } from "@/components/marketing/content";
 import { SHARE_IMAGE } from "@/components/marketing/seo";
+import { MarketingCut } from "@/components/marketing/cut";
 
 /**
  * `force-static`, not `ensureStatic`.
@@ -43,7 +44,16 @@ export const metadata: Metadata = {
   },
 };
 
+/** The page inside its cut: see cut.tsx. */
 export default function LandingPage() {
+  return (
+    <MarketingCut>
+      <LandingPageContent />
+    </MarketingCut>
+  );
+}
+
+function LandingPageContent() {
   return (
     <div className="marketing-story">
       <StructuredData />

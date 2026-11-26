@@ -14,6 +14,7 @@ import { PRICING_CONFIG } from "@/lib/pricing/config";
 import { canonicalUrl } from "@/lib/site/routes";
 import { PricingCalculator } from "@/components/marketing/pricing/pricing-calculator";
 import "@/components/marketing/pricing/pricing.css";
+import { MarketingCut } from "@/components/marketing/cut";
 
 /** Static like every marketing page: the calculator runs entirely in the browser. */
 export const dynamic = "force-static";
@@ -42,7 +43,16 @@ export const metadata: Metadata = {
  */
 const annual = PRICING_CONFIG.tiers.map((t) => t.annualCents / 100);
 
+/** The page inside its cut: see cut.tsx. */
 export default function PricingPage() {
+  return (
+    <MarketingCut>
+      <PricingPageContent />
+    </MarketingCut>
+  );
+}
+
+function PricingPageContent() {
   return (
     <div className="pricing-page" data-testid="pricing-page">
       <Breadcrumbs path="/pricing" label="Pricing" />

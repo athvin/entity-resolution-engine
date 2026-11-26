@@ -4,6 +4,7 @@ import { Breadcrumbs, LastUpdated, PAGE_UPDATED, SHARE_IMAGE } from "@/component
 import { CodeExample } from "@/components/marketing/docs/code-example";
 import { DeveloperReference } from "@/components/marketing/docs/developer-reference";
 import "@/components/marketing/docs/docs.css";
+import { MarketingCut } from "@/components/marketing/cut";
 
 export const dynamic = "force-static";
 export const metadata: Metadata = {
@@ -46,7 +47,16 @@ const links = (
   </>
 );
 
+/** The page inside its cut: see cut.tsx. */
 export default function DocsPage() {
+  return (
+    <MarketingCut>
+      <DocsPageContent />
+    </MarketingCut>
+  );
+}
+
+function DocsPageContent() {
   return (
     <div className="developer-docs" data-testid="developer-docs">
       <aside className="docs-sidebar">
