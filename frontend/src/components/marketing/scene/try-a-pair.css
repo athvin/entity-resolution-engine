@@ -1,0 +1,117 @@
+/* "Try a pair" (try-a-pair.tsx). Grayscale: the chosen level is carried by
+   weight and a solid border, the rule's state by its words. */
+
+.try-pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 32px;
+  align-items: start;
+}
+@media (max-width: 800px) {
+  .try-pair {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 24px;
+  }
+}
+.try-pair-controls {
+  display: grid;
+  gap: 16px;
+}
+.try-pair-field {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.try-pair-field legend {
+  margin-bottom: 6px;
+  font-size: 13px;
+  font-weight: 500;
+}
+.try-pair-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.try-pair-option {
+  position: relative;
+}
+/* The native radio stays in the tab order and the accessibility tree; its
+   label is what is drawn. */
+.try-pair-option input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+.try-pair-option label {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--foreground);
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color var(--duration-fast) ease-out;
+}
+.try-pair-option input:checked + label {
+  border-color: var(--foreground);
+  background: var(--muted);
+  font-weight: 600;
+}
+.try-pair-option input:focus-visible + label {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.try-pair-reset {
+  justify-self: start;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--brand-ink);
+  font-size: 13px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.try-pair-result {
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--card);
+}
+.try-pair-bars {
+  display: grid;
+  gap: 10px;
+}
+/* The bars resize as the levels change: a change the reader caused, shown. */
+.try-pair-bars .scene-evidence-bar {
+  transition: transform var(--duration-slow) var(--motion-ease-emphasized);
+}
+.try-pair .scene-scale-marker {
+  transition: transform var(--duration-slow) var(--motion-ease-emphasized);
+}
+.try-pair-rule {
+  margin: 0;
+  font-size: 12px;
+}
+.try-pair-rule strong {
+  margin-right: 6px;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.try-pair-rule[data-fired="true"] span {
+  font-weight: 700;
+}
+.try-pair-verdict {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.5;
+}

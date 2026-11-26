@@ -265,3 +265,81 @@ test.describe("the #dedupe set piece", () => {
     await expect(next).toHaveAccessibleName("Next chapter: Review");
   });
 });
+
+test.describe("/features/matching", () => {
+  const scrubTo = (page: Page, progress: number) =>
+    page.evaluate((p) => {
+      const track = document.querySelector('[data-scene="matching"]');
+      if (!track) throw new Error("no matching scene");
+      const box = track.getBoundingClientRect();
+      const top = box.top + window.scrollY;
+      const start = top - 64;
+      const end = top + box.height - window.innerHeight;
+      window.scrollTo({ top: Math.round(start + (end - start) * p), behavior: "instant" });
+    }, progress);
+  const opacity = (page: Page, selector: string) =>
+    page
+      .locator(`[data-scene="matching"] ${selector}`)
+      .first()
+      .evaluate((node) => Number(getComputedStyle(node).opacity));
+
+  // Five beats: the rule is up halfway through, and the score is the last
+  // frame, with the rule and evidence gone so it has the frame to itself.
+  test("scrubs one pair from its values to its decision", async ({ page }) => {
+    await page.goto("/features/matching");
+    await scrubTo(page, 0);
+    expect(await opacity(page, ".match-decision")).toBeLessThan(0.05);
+    await scrubTo(page, 0.5);
+    await expect.poll(() => opacity(page, ".match-rule")).toBeGreaterThan(0.95);
+    await scrubTo(page, 1);
+    await expect.poll(() => opacity(page, ".match-decision")).toBeGreaterThan(0.95);
+    expect(await opacity(page, ".match-rule")).toBeLessThan(0.05);
+  });
+
+  // The poster: what reduced motion, the axe sweep and this baseline see.
+  test("matching scene poster visual baseline @visual", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/features/matching");
+    await page.addStyleTag({
+      content: '[data-testid="marketing-header"] { visibility: hidden; }',
+    });
+    await expect(page.getByTestId("scene-matching")).toHaveScreenshot(
+      "marketing-matching-scene.png",
+    );
+  });
+
+  test("with reduced motion the scene is a static storyboard", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/features/matching");
+    const scene = page.locator('[data-scene="matching"]');
+    for (const moment of ["clean", "rules", "compare", "decide"])
+      await expect(scene.locator(`[data-moment="${moment}"]`)).toBeVisible();
+    expect(
+      await page
+        .getByTestId("scene-matching-stage")
+        .evaluate((stage) => stage.getAnimations({ subtree: true }).length),
+    ).toBe(0);
+  });
+
+  // The explorer opens on the scene's pair and moves with the reader's choices,
+  // including the case a rule settles whatever the score says.
+  test("Try a pair moves the decision, and a rule can overrule the score", async ({ page }) => {
+    await page.goto("/features/matching");
+    const explorer = page.getByTestId("try-a-pair");
+    const verdict = page.getByTestId("try-a-pair-verdict");
+    await expect(verdict).toContainText("0.93");
+    await expect(verdict).toContainText("a person sees this pair");
+
+    await explorer
+      .getByRole("group", { name: "Phone" })
+      .getByText("exact", { exact: true })
+      .click();
+    await expect(verdict).toContainText("join without a person");
+
+    await explorer.getByRole("group", { name: "Account ID" }).getByText("different").click();
+    await expect(verdict).toContainText("a rule no score can override");
+
+    await explorer.getByRole("button", { name: "Back to the Meridian pair" }).click();
+    await expect(verdict).toContainText("0.93");
+  });
+});

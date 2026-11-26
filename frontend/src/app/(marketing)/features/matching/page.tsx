@@ -10,6 +10,9 @@ import {
   Related,
   Section,
 } from "@/components/marketing/pages/page-kit";
+import { MatchingStage } from "@/components/marketing/scene/matching-stage";
+import { SceneBeats, ScrollScene } from "@/components/marketing/scene/scroll-scene";
+import { TryAPair } from "@/components/marketing/scene/try-a-pair";
 
 export const dynamic = "force-static";
 
@@ -19,6 +22,73 @@ export const metadata = pageMetadata({
   description:
     "How DupeZero decides two records are the same person or company: value cleanup, configurable comparisons, hard rules, and a model trained on your data.",
 });
+
+/**
+ * The scene's five beats, one per section below, each linking to it: the
+ * scene is the overview, the sections keep the detail. Every claim is one
+ * this page already makes.
+ */
+const SCORED_BEATS = [
+  {
+    title: "Clean the values first.",
+    body: (
+      <>
+        Emails lose their capitals and plus tags, phone numbers take one international format, and a
+        legal suffix you chose to ignore is dropped. The originals stay.{" "}
+        <a className="story-text-link" href="#cleanup">
+          How values are cleaned
+        </a>
+      </>
+    ),
+  },
+  {
+    title: "Compare each field its own way.",
+    body: (
+      <>
+        Each field gets a level: exact, close, different, or missing on one side.{" "}
+        <a className="story-text-link" href="#compare">
+          The ways to compare
+        </a>
+      </>
+    ),
+  },
+  {
+    title: "Settle the rules before the score.",
+    body: (
+      <>
+        A rule no score can override is checked first. This one keeps records with different account
+        IDs apart; here it does not apply.{" "}
+        <a className="story-text-link" href="#rules">
+          Rules
+        </a>
+      </>
+    ),
+  },
+  {
+    title: "Weigh the evidence.",
+    body: (
+      <>
+        Each level carries a weight your data teaches the model, and a shared rare name counts for
+        more than a shared common one.{" "}
+        <a className="story-text-link" href="#learning">
+          How the weights are learned
+        </a>
+      </>
+    ),
+  },
+  {
+    title: "Decide at each score.",
+    body: (
+      <>
+        Above your auto-join threshold the records join; in the band below it a person decides. This
+        pair lands at 0.93.{" "}
+        <a className="story-text-link" href="#thresholds">
+          Thresholds
+        </a>
+      </>
+    ),
+  },
+];
 
 export default function MatchingPage() {
   return (
@@ -30,6 +100,22 @@ export default function MatchingPage() {
         primary={DEMO}
         secondary={{ href: "/features/review", label: "See how review works" }}
       />
+
+      <Section
+        id="scored"
+        eyebrow="Watch a pair being scored"
+        title="One pair, five steps, one decision."
+        intro={
+          <p>
+            Scroll through the steps every pair of records goes through. The records and weights are
+            illustrative.
+          </p>
+        }
+      >
+        <ScrollScene name="matching" beats={SCORED_BEATS.length} stage={<MatchingStage />}>
+          <SceneBeats beats={SCORED_BEATS} />
+        </ScrollScene>
+      </Section>
 
       <Section
         id="cleanup"
@@ -116,6 +202,15 @@ export default function MatchingPage() {
           Phone numbers are standardised for the United States and Canada; other numbers are left
           out of phone comparisons. Matching by how a name sounds is not supported.
         </Note>
+      </Section>
+
+      <Section
+        id="try"
+        eyebrow="Try it"
+        title="Change the evidence, watch the decision."
+        intro={<p>Flip how each field compares. The weights are illustrative.</p>}
+      >
+        <TryAPair />
       </Section>
 
       <CtaBand

@@ -1,0 +1,339 @@
+/* The /features/matching close-up (matching-stage.tsx), inside its
+   ScrollScene.
+
+   Unconditioned: a static storyboard — the pair (originals struck through
+   above their clean copies), the rule, the evidence with its weights, and the
+   score on the threshold scale. Reduced motion, browsers without view
+   timelines, the axe sweep and the poster baseline all see this.
+
+   Scrubbed: five beats, so the frames turn at 0%, 25%, 50%, 75% and 100%.
+   The pair stays in frame and shrinks to the top once it has been cleaned;
+   each later moment has the lower frame to itself, because a reader can park
+   the scroll anywhere. Transform and opacity only; all stage text is
+   `--foreground`. */
+
+.match-stage {
+  display: grid;
+  gap: 14px;
+  width: 100%;
+  color: var(--foreground);
+}
+.match-records {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
+}
+.match-record {
+  width: auto;
+}
+.match-roll {
+  display: grid;
+  gap: 1px;
+}
+.match-roll > span:first-child {
+  font-size: 0.82em;
+  text-decoration: line-through;
+}
+.match-rule {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  align-items: baseline;
+  justify-self: start;
+  margin: 0;
+  padding: 8px 14px;
+  border: 1px dashed var(--foreground);
+  border-radius: 10px;
+  font-size: 12px;
+}
+.match-rule strong {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.match-rule-result {
+  font-weight: 500;
+}
+.match-evidence {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+}
+.match-rare,
+.match-decision p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.match-decision {
+  display: grid;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  @supports (animation-timeline: view()) and (animation-range: contain) {
+    .match-stage {
+      position: absolute;
+      inset: 0;
+      display: block;
+      container-type: size;
+    }
+    .match-stage > * {
+      /* Where each moment sits in the frame; a short phone stage respaces
+         them below. */
+      --records-y: -32cqh;
+      --rule-y: -10cqh;
+      --evidence-y: 18cqh;
+      --decision-y: 10cqh;
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      margin: 0;
+      translate: -50% -50%;
+    }
+    .match-records {
+      width: min(560px, 92cqw);
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .match-rule {
+      width: max-content;
+      max-width: 88cqw;
+    }
+    .match-evidence,
+    .match-decision {
+      width: min(460px, 88cqw);
+    }
+    .match-roll {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+      height: 1.3em;
+      overflow: clip;
+      line-height: 1.3;
+    }
+    .match-roll > span,
+    .match-roll > span:first-child {
+      overflow: clip;
+      font-size: inherit;
+      text-decoration: none;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
+    /* The payoff, as normal styles: the pair above, the score below. */
+    .match-records {
+      transform: translateY(var(--records-y)) scale(0.78);
+    }
+    .match-roll > span {
+      transform: translateY(-100%);
+    }
+    .match-rule,
+    .match-evidence {
+      opacity: 0;
+    }
+    .match-decision {
+      transform: translateY(var(--decision-y));
+    }
+
+    .match-stage
+      :is(
+        .match-records,
+        .match-roll > span,
+        .match-rule,
+        .match-evidence,
+        .match-evidence .scene-evidence-bar,
+        .match-evidence .scene-evidence-weight,
+        .match-rare,
+        .match-decision,
+        .match-decision .scene-scale-marker
+      ) {
+      animation-duration: 1ms;
+      animation-timing-function: linear;
+      animation-fill-mode: both;
+      animation-timeline: --scene;
+      animation-range: contain 0% contain 100%;
+    }
+    .match-records {
+      animation-name: match-records;
+    }
+    .match-roll > span {
+      animation-name: match-roll;
+    }
+    .match-evidence {
+      animation-name: match-evidence;
+    }
+    .match-evidence .scene-evidence-bar {
+      animation-name: match-bar;
+    }
+    .match-evidence .scene-evidence-weight,
+    .match-rare {
+      animation-name: match-weigh;
+    }
+    .match-rule {
+      animation-name: match-rule;
+    }
+    .match-decision {
+      animation-name: match-decision;
+    }
+    .match-decision .scene-scale-marker {
+      animation-name: match-marker;
+    }
+
+    /* A phone's pinned stage is short: the pair keeps only its names and the
+       evidence drops its detail, so each moment still fits the frame. */
+    @container (max-height: 520px) {
+      .match-stage > * {
+        --records-y: -37cqh;
+        --rule-y: -14cqh;
+        --evidence-y: 22cqh;
+        --decision-y: 12cqh;
+      }
+      .match-record .scene-record-fields,
+      .match-evidence .scene-evidence-label small,
+      .match-rare {
+        display: none;
+      }
+      .match-record {
+        padding: 10px 12px;
+      }
+      .match-record .scene-record-title {
+        font-size: 13px;
+      }
+      .match-evidence {
+        gap: 6px;
+        padding: 10px 12px;
+      }
+      /* The beat beside the stage states the rule; the stage keeps only
+         its verdict. */
+      .match-rule > span:not(.match-rule-result) {
+        display: none;
+      }
+      .match-rule {
+        padding: 6px 10px;
+        font-size: 11px;
+      }
+      /* One line per comparison: label, bar, weight. */
+      .match-evidence .scene-evidence {
+        grid-template-areas: "label track weight";
+        grid-template-columns: 6.5em minmax(0, 1fr) auto;
+        align-items: center;
+      }
+    }
+  }
+}
+
+/* Clean (0%): the pair, full size; the values clean up by ~12%. */
+@keyframes match-records {
+  0%,
+  12% {
+    transform: translateY(0) scale(1);
+  }
+  22%,
+  100% {
+    transform: translateY(var(--records-y)) scale(0.78);
+  }
+}
+
+@keyframes match-roll {
+  0%,
+  2% {
+    transform: translateY(0);
+  }
+  12%,
+  100% {
+    transform: translateY(-100%);
+  }
+}
+
+/* Compare (25%): each field's level, before any weight. */
+@keyframes match-evidence {
+  0%,
+  12% {
+    opacity: 0;
+    transform: translateY(calc(var(--evidence-y) + 18px));
+  }
+  22%,
+  84% {
+    opacity: 1;
+    transform: translateY(var(--evidence-y));
+  }
+  92%,
+  100% {
+    opacity: 0;
+    transform: translateY(var(--evidence-y));
+  }
+}
+
+/* Rules (50%): the rule is checked before anything is added up. */
+@keyframes match-rule {
+  0%,
+  38% {
+    opacity: 0;
+    transform: translateY(var(--rule-y)) scale(1.06);
+  }
+  46%,
+  84% {
+    opacity: 1;
+    transform: translateY(var(--rule-y)) scale(1);
+  }
+  92%,
+  100% {
+    opacity: 0;
+    transform: translateY(var(--rule-y)) scale(1);
+  }
+}
+
+/* Weights (75%): the levels become signed weights. */
+@keyframes match-bar {
+  0%,
+  64% {
+    transform: scaleX(0);
+  }
+  74%,
+  100% {
+    transform: scaleX(var(--share));
+  }
+}
+
+@keyframes match-weigh {
+  0%,
+  64% {
+    opacity: 0;
+  }
+  74%,
+  100% {
+    opacity: 1;
+  }
+}
+
+/* Decide (100%): the total lands between the thresholds. */
+@keyframes match-decision {
+  0%,
+  86% {
+    opacity: 0;
+    transform: translateY(calc(var(--decision-y) + 16px));
+  }
+  94%,
+  100% {
+    opacity: 1;
+    transform: translateY(var(--decision-y));
+  }
+}
+
+@keyframes match-marker {
+  0%,
+  88% {
+    transform: translateX(0);
+  }
+  98%,
+  100% {
+    transform: translateX(calc(var(--p) * 100cqw));
+  }
+}
