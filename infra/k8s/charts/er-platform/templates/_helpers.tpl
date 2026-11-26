@@ -86,6 +86,13 @@ er.dupezero.com/color: {{ . }}
      erserver processes read (settings.py); secrets arrive via envFrom from
      the ExternalSecret-projected er-erserver-env. */}}
 {{- define "er-platform.erserverEnv" -}}
+{{/* The per-tenant export readers er-api assumes to stream an S3-backed
+     export back (#1240): org -> {role, prefix}, the role named by the recipe Terraform's
+     tenant-runner module uses, er-<env>-export-<sha256("<ns>/<org>")[:20]>.
+     Derived from the same reviewed registry, so an org without a runner
+     identity has no reader either and its S3 export answers 501. */}}
+- name: ER_EXPORT_READ_ROLES
+  value: {{ include "er-platform.exportReadRoles" . | quote }}
 {{/* Telemetry. RUST_LOG is the §10.4 "log level is environment-configured"
      knob, which no chart has carried until now — an empty value leaves the
      compiled default (er_obs::init::DEFAULT_FILTER), which already pins
@@ -199,4 +206,13 @@ capabilities:
 {{- $registry := .Files.Get "tenant-runners.json" | mustFromJson -}}
 {{- $environment := index $registry .Values.environment | default dict -}}
 {{- index $environment .Release.Namespace | default dict | toJson -}}
+{{- end -}}
+
+{{- define "er-platform.exportReadRoles" -}}
+{{- $roles := dict -}}
+{{- range $org, $prefix := include "er-platform.tenantRunners" . | fromJson -}}
+{{- $hash := printf "%s/%s" $.Release.Namespace $org | sha256sum | trunc 20 -}}
+{{- $_ := set $roles $org (dict "role" (printf "arn:aws:iam::%s:role/er-%s-export-%s" $.Values.erserver.awsAccountId $.Values.environment $hash) "prefix" $prefix) -}}
+{{- end -}}
+{{- $roles | toJson -}}
 {{- end -}}

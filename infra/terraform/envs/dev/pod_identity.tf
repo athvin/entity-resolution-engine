@@ -50,8 +50,12 @@ resource "aws_iam_role" "er_api_pod" {
   }
 }
 
+# `ci` is the shared dev deployment, created by the deploy rather than per
+# developer, so it is always bound: its er-api must assume the tenant export
+# readers (#1240) to serve an S3-backed export. A developer namespace still
+# joins only by `er_api_pod_namespaces`.
 resource "aws_eks_pod_identity_association" "er_api" {
-  for_each = toset(var.er_api_pod_namespaces)
+  for_each = toset(distinct(concat(["ci"], var.er_api_pod_namespaces)))
 
   cluster_name    = module.eks.cluster_name
   namespace       = each.value

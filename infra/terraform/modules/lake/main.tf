@@ -87,6 +87,32 @@ resource "aws_s3_bucket_lifecycle_configuration" "lake" {
     }
   }
 
+  # Export artifacts (#1240) live under each tenant's `<prefix>exports/`, a
+  # path no single prefix filter can name, so the writer tags them and this
+  # rule matches the tag. The download refuses an export past its seven-day
+  # retention by the job row regardless; this reclaims the bytes. The bucket is
+  # versioned, so expiry only writes a delete marker and the noncurrent
+  # version must expire too, or nothing is actually freed.
+  rule {
+    id     = "export-expiry"
+    status = "Enabled"
+
+    filter {
+      tag {
+        key   = "er-export"
+        value = "1"
+      }
+    }
+
+    expiration {
+      days = 8
+    }
+
+    noncurrent_version_expiration {
+      noncurrent_days = 1
+    }
+  }
+
   depends_on = [aws_s3_bucket_versioning.lake]
 }
 

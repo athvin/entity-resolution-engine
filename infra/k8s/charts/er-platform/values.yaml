@@ -57,6 +57,9 @@ efs:
   hostPath: ""
 
 erserver:
+  # The account the per-tenant export reader roles live in (#1240); the chart
+  # builds their ARNs from it and tenant-runners.json.
+  awsAccountId: "797781631727"
   # s3://{lake.bucket}/{lake.prefix}/{ns}/ — §7.3's nonprod layout. prefix
   # defaults to dev/{developer}.
   lake:

@@ -36,7 +36,7 @@ run "tenant_boundaries" {
     error_message = "Pod Identity trust must bind the whole cluster/namespace/account triple."
   }
   assert {
-    condition     = jsondecode(output.policies["a"]).Statement[3].Condition.StringEquals["kms:ViaService"] == "s3.us-east-2.amazonaws.com"
+    condition     = jsondecode(output.policies["a"]).Statement[4].Condition.StringEquals["kms:ViaService"] == "s3.us-east-2.amazonaws.com"
     error_message = "A runner must not get direct KMS decryption."
   }
 }
@@ -97,4 +97,37 @@ run "wildcard_read_only_prefix_refused" {
     }
   }
   expect_failures = [var.bindings]
+}
+
+run "export_readers" {
+  command = plan
+  variables { export_reader_principal_arn = "arn:aws:iam::123456789012:role/er-dev-api-pod" }
+  assert {
+    condition     = jsondecode(output.export_policies["a"]).Statement[0].Resource == ["arn:aws:s3:::test-lake/tenant-a/exports/*"]
+    error_message = "An export reader must read only its own tenant's exports/, never the lake data or another tenant."
+  }
+  assert {
+    condition     = jsondecode(output.export_policies["a"]).Statement[0].Action == ["s3:GetObject"]
+    error_message = "An export reader is read-only."
+  }
+  assert {
+    condition     = aws_iam_role.export["a"].name == "er-dev-export-${substr(sha256("a"), 0, 20)}"
+    error_message = "The reader's name must follow the recipe the chart derives ARNs from."
+  }
+  assert {
+    condition     = jsondecode(aws_iam_role.export["a"].assume_role_policy).Statement[0].Principal.AWS == var.export_reader_principal_arn
+    error_message = "Only the API pod role may assume an export reader."
+  }
+  assert {
+    condition     = jsondecode(output.policies["a"]).Statement[2].Resource == ["arn:aws:s3:::test-lake/tenant-a/exports/*"]
+    error_message = "The runner may tag only its own tenant's export artifacts."
+  }
+}
+
+run "no_api_identity_no_readers" {
+  command = plan
+  assert {
+    condition     = length(aws_iam_role.export) == 0
+    error_message = "Without an API principal, no export reader exists."
+  }
 }
