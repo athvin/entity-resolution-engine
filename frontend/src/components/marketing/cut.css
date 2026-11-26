@@ -1,0 +1,45 @@
+/* The cut between marketing pages (cut.tsx).
+
+   The old page leaves fast and the new one arrives gently: an exit has to get
+   out of the way, and an arrival has to be registered. The new page waits
+   until the old one has gone, so the change reads as one cut rather than two
+   pages blending. The snapshots are images, not text, so no muted copy is ever
+   taken through partial opacity in the DOM. */
+
+/* Clicks during the cut reach the live page instead of the overlay. */
+::view-transition {
+  pointer-events: none;
+}
+
+::view-transition-old(.marketing-cut) {
+  animation: marketing-cut-out var(--duration-fast) ease-in both;
+}
+
+::view-transition-new(.marketing-cut) {
+  animation: marketing-cut-in var(--duration-slow) var(--motion-ease-emphasized)
+    var(--duration-fast) both;
+}
+
+@keyframes marketing-cut-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes marketing-cut-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+}
+
+/* The global reduced-motion clamp matches `*`, which does not reach these
+   pseudo-elements on the document root, so they are zeroed here. */
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation-duration: 0s !important;
+    animation-delay: 0s !important;
+  }
+}

@@ -5,6 +5,7 @@ import { Breadcrumbs, LastUpdated, PAGE_UPDATED, SHARE_IMAGE } from "@/component
 import { API_REFERENCE_GROUPS, ApiReference } from "@/components/marketing/docs/api-reference";
 import { CodeExample } from "@/components/marketing/docs/code-example";
 import "@/components/marketing/docs/docs.css";
+import { MarketingCut } from "@/components/marketing/cut";
 
 export const dynamic = "force-static";
 export const metadata: Metadata = {
@@ -35,7 +36,16 @@ const links = (
   </>
 );
 
+/** The page inside its cut: see cut.tsx. */
 export default function ApiReferencePage() {
+  return (
+    <MarketingCut>
+      <ApiReferencePageContent />
+    </MarketingCut>
+  );
+}
+
+function ApiReferencePageContent() {
   return (
     <div className="developer-docs" data-testid="api-docs">
       <aside className="docs-sidebar">

@@ -3,22 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowDown, ArrowUp } from "lucide-react";
 
+import { CHAPTERS } from "./chapters";
 import { glideTo, HEADER_OFFSET } from "./glide";
-
-/**
- * The story's chapters, in page order. Each `id` is the section's anchor; a
- * chapter added to the page needs a line here too, or the button skips it.
- */
-const CHAPTERS = [
-  { id: "intro", label: "Start" },
-  { id: "flow", label: "Ingress" },
-  { id: "dataset", label: "Dataset" },
-  { id: "dedupe", label: "Dedupe" },
-  { id: "egress", label: "Egress" },
-  { id: "audit", label: "Keep the last word" },
-  { id: "usage", label: "A workload like yours" },
-  { id: "questions", label: "Built to be explained" },
-] as const;
 
 /** A chapter whose top is this close to the header counts as already reached. */
 const REACHED_SLACK = 8;

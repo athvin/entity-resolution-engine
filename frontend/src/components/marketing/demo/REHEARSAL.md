@@ -66,10 +66,11 @@ audit completion, every next-section link, no JavaScript and reduced motion.
 Both themes are covered by axe. Linux visual baselines cover each pipeline
 section, audit poster, hero, decision dialog, closing CTA and developer docs.
 
-Native scroll snapping must include the closing FAQ and reachable end stops for
-tall panels. The audit status reserves its space: inserting it while scrolling
-caused WebKit to jump to an earlier snap target. Both failures were reproduced
-before fixing them and are exercised by the navigation test.
+Scroll snapping has since been removed by the owner's decision: the story
+scrolls freely and nothing intercepts wheel or touch (both asserted in
+`marketing-interactions.spec.ts`). The audit status still reserves its space,
+which it first did because inserting it while scrolling made WebKit jump to an
+earlier snap target.
 
 Physical-device frame delivery and live connector traffic were not tested.
 The source icons, pipeline and audit are illustrative. Final gate and independent
@@ -96,11 +97,9 @@ are a horizontally scrollable row, the slider precedes the diagram, and the
 slider's touch handle is larger. A zero minimum inline size on the fieldset is
 necessary in Chromium; without it, its min-content width expands the viewport.
 
-Desktop chapter snapping uses one area per section and an end-aligned footer.
-On mobile, trail headings and diagrams supply separate stops without an
-overlapping parent snap area. Next links supply reachable end stops. Tall chapters remain
-scrollable; reduced motion disables snapping and packet animations. The header
-is opaque because WebKit showed sharp underlying text through its backdrop blur.
+This revision used chapter snapping, since removed (see above); reduced motion
+still disables packet animations. The header is opaque because WebKit showed
+sharp underlying text through its backdrop blur.
 The dark default respects a saved theme, and the header names the destination
 mode. Direct touchscreen taps preserve scroll position. Playwright locator.click
 can itself scroll a sticky header before clicking; the scroll regression uses

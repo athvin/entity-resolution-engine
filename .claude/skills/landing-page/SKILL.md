@@ -217,7 +217,52 @@ Both the link and the button move the page through `glide.ts`, one eased,
 interruptible scroll on every device, rather than native smooth scrolling,
 which story.css disables on touch.
 Hidden means `visibility: hidden` plus `inert`, not just transparent. Its `CHAPTERS`
-list must name every section id in page order.
+list (`chapters.ts`, React-free so a spec can import it) must name every section
+id in page order; `tests/functional/marketing-scenes.spec.ts` fails when it does
+not.
+
+## Scenes: one entity, scrubbed by scroll, no JavaScript
+
+Every page tells part of one story: **Meridian Supply** (E-1042), the company
+the home story already follows, shown at a different moment on each page.
+Its records, golden record and evidence live once in `scene/meridian.ts`, and
+every score a scene prints comes from `scene/score.ts`, so a number on one
+page cannot contradict the bars drawn on another. The owner chose the grammar
+(2026-11-26, epic #1253): below the fold, scenes are **pinned and scrubbed by
+scroll position**; the hero plays itself; new scenes stay grayscale (the
+audit's red/green stays the audit's).
+
+`scene/scroll-scene.tsx` is the primitive: a tall track with a view timeline,
+a sticky `aria-hidden` stage, and the beats as ordinary copy that scrolls past.
+It is a server component and ships no script. What breaks it, each found by
+probing rather than reading:
+
+- **The global reduced-motion clamp does not stop a scrubbed animation.** It
+  shortens `animation-duration`, and a scroll timeline ignores duration —
+  measured: the clamp left a probe at 250 of 1,000px at a quarter of the range
+  in Chromium. So scene.css puts pinning and scrubbing *inside*
+  `prefers-reduced-motion: no-preference` and a view-timeline `@supports`; the
+  unconditioned rules are the static poster layout that reduced motion, the
+  axe sweep and the baselines all see.
+- **Never the `animation` shorthand on a scrubbed element.** It resets
+  `animation-timeline`. Mark the element `data-scrub` and give it only an
+  `animation-name`; its normal styles are the payoff, the keyframes the states
+  before it.
+- **A probe page needs `<meta name="viewport">`.** Without it Playwright's
+  WebKit reports support and never moves the element; with it, WebKit scrubs
+  like Chromium. Next adds the tag to every real page.
+- **A scrub can be parked mid-animation**, so only `--foreground` text may take
+  opacity; muted text moves instead. Losing values are struck through, never
+  dimmed.
+- **WebKit pays per keyframe on every scroll frame** (#1220): a handful per
+  element, transform and opacity only.
+
+Pages cut into each other through React 19.3's `<ViewTransition>` (`cut.tsx`):
+page-kit's `Page` wraps every content page, and a page that does not use `Page`
+wraps itself in a two-line default export rather than re-indenting a large file
+other sessions edit. The layout cannot host it: a layout persists across navigations
+and never enters or exits. The global clamp matches `*`, which does not reach
+`::view-transition-*`, so `cut.css` zeroes those under reduced motion itself.
 
 `/docs` is a static workflow guide and operation reference. Its committed
 `operations.json` is generated from the MCP route manifest and response-envelope
@@ -257,10 +302,12 @@ presentation data there reports 0% and spends the budget.
   `make frontend-baselines`. The off-Linux `ignoreSnapshots` false green applies
   here like anywhere else; the frontend-testing skill is the source of truth for
   that trap and the rest of them.
-- **Keep the mobile layout a subset of desktop.** The axe sweep is desktop-only
-  on the stated grounds that the desktop DOM is a superset; a nav drawer that
-  renders different markup below `lg` breaks that premise and earns a mobile
-  pass. This is why the header is a plain row at every width.
+- **Keep the mobile layout a subset of desktop.** App screens are swept on
+  desktop only, on the grounds that their desktop DOM is a superset; marketing
+  screens (`anonymous: true`) are also swept on both phone projects, which
+  checks the phone composition. A nav drawer that renders different markup
+  below `lg` still breaks the premise, which is why the header is a plain row at
+  every width, and a scene keeps one DOM for both widths.
 
 ## Not yet reachable from the internet
 

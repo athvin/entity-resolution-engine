@@ -1,0 +1,330 @@
+/* Marketing scenes: the ScrollScene primitive (scroll-scene.tsx) and the marks
+   every scene is drawn from (marks.tsx). Grayscale throughout: brand blue
+   appears only as moving light (the progress rule), per landing-page. */
+
+/* ── ScrollScene ───────────────────────────────────────────────────────────
+   The unconditioned rules are the STATIC layout: the stage's payoff state
+   (its poster) above the beats as plain copy. Reduced motion, browsers
+   without view timelines, the axe sweep and the visual baselines (both of
+   which emulate reduced motion) all see this, and none of them depends on
+   JavaScript. Pinning and scrubbing are layered on below, only when motion is
+   allowed AND view timelines are supported. */
+.scene {
+  --scene-header: 64px;
+  display: grid;
+  gap: 32px;
+  min-width: 0;
+}
+.scene-stage-column {
+  min-width: 0;
+}
+.scene-stage {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: 320px;
+  padding: 24px;
+  overflow: clip;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--story-container-surface);
+}
+.scene-progress {
+  display: none;
+}
+.scene-beats {
+  min-width: 0;
+}
+.scene-beat-list {
+  display: grid;
+  gap: 28px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.scene-beat-copy {
+  max-width: 34rem;
+}
+.scene-beat-index {
+  color: var(--brand-ink);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+}
+.scene-beat-copy :is(h2, h3, h4) {
+  margin-top: 10px;
+  font-size: clamp(20px, 2vw, 28px);
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+}
+.scene-beat-copy p {
+  margin-top: 10px;
+  color: var(--muted-foreground);
+  line-height: 1.6;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  @supports (animation-timeline: view()) and (animation-range: contain) {
+    /* The track. Its view timeline runs from the moment its top meets the
+       header to the moment its bottom meets the viewport's: the `contain`
+       range of a subject taller than the scrollport, which is exactly the
+       stretch during which the stage is pinned. The beats column is padded
+       so beat i of n sits centred in view at progress i / (n - 1). */
+    .scene {
+      --scene-port: calc(100svh - var(--scene-header));
+      --scene-beat-h: min(72svh, var(--scene-port));
+      --scene-beats-port: var(--scene-port);
+      grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+      column-gap: clamp(24px, 4vw, 72px);
+      row-gap: 0;
+      view-timeline-name: --scene;
+      view-timeline-axis: block;
+      view-timeline-inset: var(--scene-header) 0px;
+    }
+    .scene-beats {
+      grid-row: 1;
+      grid-column: 1;
+      padding-block: calc((var(--scene-beats-port) - var(--scene-beat-h)) / 2);
+    }
+    .scene-stage-column {
+      grid-row: 1;
+      grid-column: 2;
+    }
+    .scene-stage {
+      position: sticky;
+      top: calc(var(--scene-header) + 16px);
+      height: calc(var(--scene-port) - 32px);
+      min-height: 0;
+    }
+    .scene-beat-list {
+      gap: 0;
+    }
+    .scene-beat {
+      display: flex;
+      align-items: center;
+      min-height: var(--scene-beat-h);
+    }
+
+    /* Every scrubbed element: the scene's stylesheet sets only its
+       `animation-name`. The duration is ignored by a scroll timeline, but
+       Firefox applies no animation without a non-zero one. */
+    .scene [data-scrub] {
+      animation-duration: 1ms;
+      animation-timing-function: linear;
+      animation-fill-mode: both;
+      animation-timeline: --scene;
+      animation-range: contain 0% contain 100%;
+    }
+
+    .scene-progress {
+      position: absolute;
+      top: 20px;
+      bottom: 20px;
+      left: 14px;
+      display: block;
+      width: 2px;
+      border-radius: 1px;
+      background: var(--border);
+    }
+    .scene-progress > span {
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      background: var(--brand);
+      transform-origin: top;
+      animation-name: scene-progress;
+    }
+
+    /* Phones: the stage pins at the top and the beats scroll beneath it on an
+       opaque band, so the same DOM serves both widths. */
+    @media (max-width: 800px) {
+      .scene {
+        --scene-stage-h: min(46svh, 420px);
+        --scene-beats-port: calc(var(--scene-port) - var(--scene-stage-h));
+        --scene-beat-h: min(56svh, var(--scene-beats-port));
+        grid-template-columns: minmax(0, 1fr);
+      }
+      .scene-stage-column {
+        position: sticky;
+        top: var(--scene-header);
+        z-index: 2;
+        grid-row: 1;
+        grid-column: 1;
+        height: var(--scene-stage-h);
+        padding-block: 8px;
+        background: var(--background);
+      }
+      .scene-stage {
+        position: relative;
+        top: auto;
+        height: 100%;
+      }
+      .scene-beats {
+        position: relative;
+        z-index: 1;
+        grid-row: 2;
+        grid-column: 1;
+      }
+    }
+  }
+}
+
+@keyframes scene-progress {
+  from {
+    transform: scaleY(0);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}
+
+/* ── Marks ──────────────────────────────────────────────────────────────── */
+
+.scene-record {
+  display: grid;
+  gap: 6px;
+  width: min(100%, 264px);
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+  color: var(--foreground);
+  text-align: left;
+}
+.scene-record-source,
+.scene-golden-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.scene-record-title {
+  font-size: 17px;
+  font-weight: 500;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+.scene-record-fields,
+.scene-golden-fields {
+  display: grid;
+  gap: 4px;
+  margin: 2px 0 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.scene-record-fields > div,
+.scene-golden-fields > div {
+  display: grid;
+  grid-template-columns: 4.5em minmax(0, 1fr);
+  gap: 8px;
+}
+.scene-record-fields dt,
+.scene-golden-fields dt {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  line-height: 1.6;
+}
+.scene-record-fields dd,
+.scene-golden-fields dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.scene-evidence {
+  display: grid;
+  grid-template-areas:
+    "label weight"
+    "track track";
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 5px 12px;
+  color: var(--foreground);
+  font-size: 12px;
+  line-height: 1.3;
+}
+.scene-evidence-label {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  align-items: baseline;
+  grid-area: label;
+  min-width: 0;
+}
+.scene-evidence-label small {
+  font-size: 11px;
+}
+.scene-evidence-weight {
+  grid-area: weight;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.scene-evidence-track {
+  position: relative;
+  grid-area: track;
+  height: 8px;
+}
+/* The centre axis: right of it supports the match, left argues against. */
+.scene-evidence-track::before {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  left: 50%;
+  width: 1px;
+  background: var(--border);
+  content: "";
+}
+.scene-evidence-bar {
+  position: absolute;
+  inset-block: 0;
+  width: 50%;
+  border-radius: 2px;
+  background: color-mix(in oklch, var(--foreground) 78%, transparent);
+  transform: scaleX(var(--share));
+}
+.scene-evidence[data-polarity="for"] .scene-evidence-bar {
+  left: 50%;
+  transform-origin: left;
+}
+.scene-evidence[data-polarity="against"] .scene-evidence-bar {
+  right: 50%;
+  background: color-mix(in oklch, var(--foreground) 40%, transparent);
+  transform-origin: right;
+}
+.scene-evidence[data-polarity="none"] .scene-evidence-bar {
+  display: none;
+}
+
+/* The payoff: the single inverted surface in a scene. */
+.scene-golden {
+  display: grid;
+  gap: 8px;
+  width: min(100%, 300px);
+  padding: 16px 18px;
+  border-radius: 14px;
+  background: var(--foreground);
+  color: var(--background);
+  text-align: left;
+}
+.scene-golden-title {
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.015em;
+}
+.scene-golden-fields small {
+  display: block;
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+}
+.scene-golden-note {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
