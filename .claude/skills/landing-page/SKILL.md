@@ -252,6 +252,11 @@ probing rather than reading:
   `animation-timeline`. Mark the element `data-scrub` and give it only an
   `animation-name`; its normal styles are the payoff, the keyframes the states
   before it.
+- **Wire a scene's timeline with `:where()`, never `:is()`.** A stage that
+  places its parts with per-element `animation-range` (one keyframe set, many
+  ranges) needs the shared wiring rule to lose to those ranges. `:is()` takes
+  its most specific argument's weight, and it beat every `[data-step]` range:
+  each field ran over the whole scroll, and only a filmed frame showed it.
 - **A probe page needs `<meta name="viewport">`.** Without it Playwright's
   WebKit reports support and never moves the element; with it, WebKit scrubs
   like Chromium. Next adds the tag to every real page.
@@ -262,7 +267,25 @@ probing rather than reading:
   element, transform and opacity only.
 - **A parked frame must read on its own.** Give each moment the frame to itself
   (the evidence leaves before the decision arrives); two half-faded layers over
-  each other is the frame a reader stops on.
+  each other is the frame a reader stops on. The same goes for things that
+  overlap while they move: /product's problem figure deals its records out
+  from under one that is already opaque, instead of fading them in as they
+  slide apart. Panels that replace each other hold for most of their beat and
+  cut in about 2% of the scroll; fades that took most of the beat parked a
+  blank window between steps.
+- **An unpinned entry figure is only halfway when it is centred.** Its view
+  timeline runs from entering at the bottom (`cover` 0%) to leaving at the top
+  (100%), so a figure in the middle of the screen sits at 50%. Finish by about
+  46%, or a reader who stops with it centred sees it unfinished: the
+  golden-records way-back figure read 0.14 opacity there.
+- **A figure in the first screen plays itself instead.** A scroll timeline
+  there is already most of the way through at load: /pricing's
+  records-to-one-total figure starts 496px down a 900px desktop screen, so it
+  runs once on first view through `scene/scene-playback.tsx`, with Replay, as
+  the hero does.
+- **`--story-container-surface` is translucent.** A fill mixed from it is
+  still see-through; mix from an opaque base (the surface over
+  `--background`) when shapes must hide each other.
 - **A phone's pinned stage is short** (about 290px on the iPhone 15 profile).
   Each stage compacts itself under `@container (max-height: 520px)`: fewer
   fields, one-line evidence rows, a rule reduced to its verdict, and the
@@ -285,7 +308,13 @@ dedupe packet has to bring its wire into view first
 The hero's scene is the self-playing exception, and on phones it sits after the
 foot: the iPhone 15 profile shows 659px, and anything above the foot pushed
 "Explore the flow" below it. `scene-playback.tsx` holds a scene that is off
-screen at hydration until it is first seen.
+screen at hydration until it is first seen, and "seen" means 40% of it on
+screen: a solutions figure that started 19px above an iPhone 15's bottom edge
+played out unwatched while any sliver counted. The same island drives
+`/pricing`'s records figure and `scene/resolution-figure.tsx`, which every
+solutions, role, industry and /about page renders from its content data's
+`scene` (people and companies only, fictional, scanned by
+`solutions-pages.test.tsx`).
 
 Pages cut into each other through React 19.3's `<ViewTransition>` (`cut.tsx`):
 page-kit's `Page` wraps every content page, and a page that does not use `Page`
@@ -297,7 +326,13 @@ and never enters or exits. The global clamp matches `*`, which does not reach
 `/docs` is a static workflow guide and operation reference. Its committed
 `operations.json` is generated from the MCP route manifest and response-envelope
 contract by `frontend/scripts/gen-developer-reference.mjs`; the unit test checks
-drift. Keep examples grounded in handlers and identify contract gaps.
+drift. Keep examples grounded in handlers and identify contract gaps. Its walkthrough
+(`docs/api-storyboard.tsx`) is a scene that types the overview's six steps as
+HTTP exchanges; the values it shows live in `docs/storyboard.ts`, and
+`marketing-api-storyboard.test.ts` holds every method, path and field there to
+`openapi.public.json`. The article's element styles (`ol` numbering, `li`
+margins) reach into any scene placed in it, which is why `docs.css` resets them
+under `.docs-article .scene`.
 
 `/docs/api` is the public API reference, rendered in-house from
 `openapi.public.json` by `src/lib/docs/openapi-reference.ts` (pure, unit-tested

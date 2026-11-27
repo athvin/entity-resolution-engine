@@ -1,0 +1,189 @@
+/* /pricing's records-to-one-total figure (records-pool.tsx).
+
+   Unconditioned: the finished picture — one bar, the three systems' records
+   end to end, the total above it and the tier it lands on below. It sits in
+   the first screen, so it plays itself (about 2.3s, once, when first seen;
+   scene-playback.tsx holds it until then and offers Replay): the three bars
+   start stacked, one per system, slide down and along into the one bar, then
+   the total appears and the marker travels to its tier. Transform and
+   opacity only; all text is `--foreground`. */
+
+.pool {
+  display: grid;
+  gap: 12px;
+  max-width: 720px;
+  margin: 8px auto 40px;
+}
+.pool-stage {
+  /* The stage's visible colour, opaque: the shared surface token is
+     translucent, and the bars mix from this so they hide each other. */
+  --pool-surface: color-mix(in oklch, var(--muted) 30%, var(--background));
+  display: grid;
+  gap: 18px;
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--story-container-surface);
+  color: var(--foreground);
+}
+/* Three rows of room: the total sits in the upper two, the bar on the
+   bottom one, where the stacked bars end up. */
+.pool-bars {
+  --pool-row: 34px;
+  --pool-gap: 8px;
+  position: relative;
+  height: calc(3 * var(--pool-row) + 2 * var(--pool-gap));
+  container-type: inline-size;
+}
+.pool-total {
+  position: absolute;
+  top: 0;
+  left: 0;
+  margin: 0;
+  font-size: 15px;
+}
+.pool-total strong {
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.pool-seg {
+  position: absolute;
+  bottom: 0;
+  left: calc(var(--x) * 100%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: calc(var(--w) * 100%);
+  height: var(--pool-row);
+  overflow: hidden;
+  padding: 0 10px;
+  border-right: 2px solid var(--pool-surface);
+  white-space: nowrap;
+  font-size: 12px;
+}
+/* Lightness steps, not hues, tell the three apart. The fills are mixed with
+   the opaque surface, so bars that cross on the way into line hide each
+   other instead of showing each other's text. */
+.pool-seg[data-index="0"] {
+  border-radius: 8px 0 0 8px;
+  background: color-mix(in oklch, var(--foreground) 24%, var(--pool-surface));
+}
+.pool-seg[data-index="1"] {
+  background: color-mix(in oklch, var(--foreground) 16%, var(--pool-surface));
+}
+.pool-seg[data-index="2"] {
+  border-right: 0;
+  border-radius: 0 8px 8px 0;
+  background: color-mix(in oklch, var(--foreground) 10%, var(--pool-surface));
+}
+.pool-seg-count {
+  font-variant-numeric: tabular-nums;
+}
+.pool-ruler {
+  position: relative;
+  container-type: inline-size;
+}
+.pool-tiers {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0;
+  padding: 10px 0 0;
+  border-top: 2px solid var(--border);
+  list-style: none;
+  font-size: 12px;
+}
+.pool-tiers li {
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
+}
+.pool-tiers li[data-on="true"] {
+  font-weight: 600;
+}
+.pool-marker {
+  position: absolute;
+  top: -7px;
+  left: 0;
+  width: 2px;
+  height: 14px;
+  border-radius: 1px;
+  background: var(--brand);
+  transform: translateX(calc(var(--p) * 100cqw));
+}
+.pool-caption {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--muted-foreground);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.pool-caption > span {
+  flex: 1 1 22rem;
+}
+
+/* A narrow figure keeps only the systems' names on the bar; the caption
+   carries the counts. */
+@container (max-width: 520px) {
+  .pool-seg-count {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .pool-seg {
+    animation: pool-merge 900ms var(--motion-ease-emphasized) both;
+  }
+  .pool-seg[data-index="0"] {
+    animation-delay: 250ms;
+  }
+  .pool-seg[data-index="1"] {
+    animation-delay: 400ms;
+  }
+  .pool-seg[data-index="2"] {
+    animation-delay: 550ms;
+  }
+  .pool-total {
+    animation: pool-arrive var(--duration-slow) var(--motion-ease-emphasized) 1350ms both;
+  }
+  .pool-marker {
+    animation: pool-land 800ms var(--motion-ease-emphasized) 1500ms both;
+  }
+}
+
+/* From stacked (each bar on its own row, starting at the left edge) to its
+   place in the one bar. */
+@keyframes pool-merge {
+  from {
+    transform: translate(
+      calc(var(--x) * -100cqw),
+      calc(var(--rows-up) * -1 * (var(--pool-row) + var(--pool-gap)))
+    );
+  }
+  to {
+    transform: translate(0, 0);
+  }
+}
+
+@keyframes pool-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pool-land {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(calc(var(--p) * 100cqw));
+  }
+}

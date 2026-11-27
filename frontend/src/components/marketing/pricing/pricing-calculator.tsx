@@ -24,6 +24,7 @@ import {
 } from "@/lib/pricing/calculator";
 import { PRICING_CONFIG as CONFIG } from "@/lib/pricing/config";
 
+import { RollingFigure } from "./rolling-figure";
 import { SavingsCalculator } from "./savings-calculator";
 
 /**
@@ -78,23 +79,33 @@ function OptionFacts({ option }: { option: OptionResult }) {
     <dl className="pricing-facts">
       <div>
         <dt>Due at signup</dt>
-        <dd>{formatUsd(option.dueAtSignupCents)}</dd>
+        <dd>
+          <RollingFigure value={formatUsd(option.dueAtSignupCents)} />
+        </dd>
       </div>
       <div>
         <dt>Cost per year</dt>
-        <dd>{formatUsd(option.perYearCents)}</dd>
+        <dd>
+          <RollingFigure value={formatUsd(option.perYearCents)} />
+        </dd>
       </div>
       <div>
         <dt>Cost per month</dt>
-        <dd>{formatUsd(option.perMonthCents)}</dd>
+        <dd>
+          <RollingFigure value={formatUsd(option.perMonthCents)} />
+        </dd>
       </div>
       <div>
         <dt>{option.term === "monthly" ? "Total for 12 months" : "Total for the term"}</dt>
-        <dd>{formatUsd(option.totalCents)}</dd>
+        <dd>
+          <RollingFigure value={formatUsd(option.totalCents)} />
+        </dd>
       </div>
       <div>
         <dt>Savings vs monthly</dt>
-        <dd>{savings}</dd>
+        <dd>
+          <RollingFigure value={savings} />
+        </dd>
       </div>
     </dl>
   );
@@ -294,11 +305,18 @@ export function PricingCalculator() {
               <div className="pricing-list-price">
                 {priced.estimate ? (
                   <p>
-                    Estimated from <strong>{formatUsd(priced.annualListCents)}</strong> per year
+                    Estimated from{" "}
+                    <strong>
+                      <RollingFigure value={formatUsd(priced.annualListCents)} />
+                    </strong>{" "}
+                    per year
                   </p>
                 ) : (
                   <p>
-                    <strong>{formatUsd(priced.annualListCents)}</strong> per year, list price
+                    <strong>
+                      <RollingFigure value={formatUsd(priced.annualListCents)} />
+                    </strong>{" "}
+                    per year, list price
                   </p>
                 )}
                 {priced.estimate && (
@@ -336,7 +354,7 @@ export function PricingCalculator() {
                         <span className="pricing-badge">Lowest per year</span>
                       )}
                       <span className="pricing-option-figure tabular-nums">
-                        {formatUsd(o.perYearCents)}
+                        <RollingFigure value={formatUsd(o.perYearCents)} />
                         <span className="story-muted"> /yr</span>
                       </span>
                     </div>
@@ -345,7 +363,7 @@ export function PricingCalculator() {
                         className="pricing-bar"
                         style={
                           {
-                            "--bar-w": `${String((o.perYearCents / maxPerYear) * 100)}%`,
+                            "--bar-s": String(o.perYearCents / maxPerYear),
                           } as React.CSSProperties
                         }
                       />

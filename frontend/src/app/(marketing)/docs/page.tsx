@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
 
 import { Breadcrumbs, LastUpdated, PAGE_UPDATED, SHARE_IMAGE } from "@/components/marketing/seo";
+import { ApiStoryboard } from "@/components/marketing/docs/api-storyboard";
 import { CodeExample } from "@/components/marketing/docs/code-example";
 import { DeveloperReference } from "@/components/marketing/docs/developer-reference";
 import "@/components/marketing/docs/docs.css";
 import { MarketingCut } from "@/components/marketing/cut";
+import { SceneBeats, ScrollScene } from "@/components/marketing/scene/scroll-scene";
 
 export const dynamic = "force-static";
 export const metadata: Metadata = {
@@ -21,6 +23,7 @@ export const metadata: Metadata = {
 };
 const CONTENTS: [string, string][] = [
   ["overview", "Start here"],
+  ["walkthrough", "The workflow, call by call"],
   ["organizations", "Organizations & datasets"],
   ["authentication", "Authentication & roles"],
   ["configuration", "Sources & configuration"],
@@ -46,6 +49,42 @@ const links = (
     ))}
   </>
 );
+
+/** The overview's six steps, as the walkthrough's beats. */
+const WALKTHROUGH = [
+  {
+    title: "Obtain a scoped key.",
+    body: "An administrator mints an organization-scoped key. The response shows it once, and every later call sends it as a bearer token.",
+  },
+  {
+    title: "Create the dataset.",
+    body: "Give it a name and an entity type. The name becomes the path of every call that follows, and the dataset reports active once it can take records.",
+  },
+  {
+    title: "Store a configuration.",
+    body: "Post the YAML as a draft. The version number it returns is the one you publish.",
+  },
+  {
+    title: "Publish it, then send records.",
+    body: "Publish that version, then upload a source's delivery. The upload answers with the job that processes it.",
+  },
+  {
+    title: "Follow the job, then read the results.",
+    body: "Poll the job until it succeeds, then list the duplicate groups: Meridian Supply's three records are one entity.",
+  },
+  {
+    title: "Inspect it, then correct it.",
+    body: (
+      <>
+        Read the entity with its members and lineage, then record a lasting decision: these two
+        records always match. It is staged until the next apply.{" "}
+        <a className="story-text-link" href="#corrections">
+          How corrections apply
+        </a>
+      </>
+    ),
+  },
+];
 
 /** The page inside its cut: see cut.tsx. */
 export default function DocsPage() {
@@ -102,6 +141,18 @@ export ER_DATASET='contacts'
             <li>Monitor the returned job and retrieve results after success.</li>
             <li>Inspect evidence and apply corrections through reconciliation.</li>
           </ol>
+        </section>
+        <section id="walkthrough">
+          <p className="story-eyebrow">Watch the calls</p>
+          <h2>The workflow, call by call.</h2>
+          <p>
+            The same six steps as the requests a client makes. Each response hands the next call
+            what it needs, outlined where it is returned and where it is used. Values are
+            illustrative and responses abbreviated; every field is in the reference below.
+          </p>
+          <ScrollScene name="api-storyboard" beats={WALKTHROUGH.length} stage={<ApiStoryboard />}>
+            <SceneBeats beats={WALKTHROUGH} />
+          </ScrollScene>
         </section>
         <section id="organizations">
           <h2>One organization. Multiple datasets.</h2>
