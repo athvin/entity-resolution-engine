@@ -82,8 +82,15 @@ bootstrap:
 # The third L pod is refused by the quota, which the classifier reads as a
 # capacity `FailedCreate`: it waits `executor.quotaWaitSeconds` and does not
 # spend a launch (§7.2's "the capacity wait is the backstop"). Mixed classes are
-# nowhere near it — three S pods are 6 cpu and 120Gi. Raising ephemeral to
-# 1200Gi is a real monthly cost and wants a decision, not a default.
+# nowhere near it — three S pods are 6 cpu and 120Gi.
+#
+# DECIDED (#653, 2026-11-27): both stay — at most two concurrent L pods per dev
+# namespace. A dev namespace is one developer's sandbox with no customer load,
+# the third L pod waits rather than fails, and three concurrent 400Gi spills
+# are three EBS-backed nodes billed for the whole run. Revisit only on
+# evidence: the executor's quota-wait series showing L tasks waiting in dev,
+# or a corpus whose L stages genuinely need three-way concurrency. Then raise
+# requestsEphemeralStorage to >= 1200Gi AND limitsCpu to >= 41 in one change.
 quota:
   requestsMemory: 80Gi
   limitsCpu: "40"
