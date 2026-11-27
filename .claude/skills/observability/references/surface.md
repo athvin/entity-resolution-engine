@@ -100,6 +100,7 @@ be grouped, filtered by target, or joined to a trace.
 - `er-server/src/lib.rs`
 - `er-server/src/mail.rs`
 - `er-server/src/main.rs`
+- `er-server/src/merge_apply.rs`
 - `er-server/src/ops.rs`
 - `er-server/src/pg.rs`
 - `er-server/src/remote_attempts.rs`

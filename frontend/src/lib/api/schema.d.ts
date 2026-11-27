@@ -1067,6 +1067,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/orgs/{org}/datasets/{ds}/merge-previews/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** apply the dataset's APPROVED merge previews to Salesforce */
+        post: operations["post_orgs_by_org_datasets_by_ds_merge_previews_apply"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/orgs/{org}/datasets/{ds}/merge-previews/generate": {
         parameters: {
             query?: never;
@@ -3525,6 +3542,11 @@ export interface components {
             policy_revision: string;
             /** @description `planned`, `approved`, `rejected` or `superseded`. */
             status: string;
+        };
+        /** @description `POST …/merge-previews/apply`: the job that will apply approved previews. */
+        MergesApplying: {
+            job_id: string;
+            state: string;
         };
         /** @description One run's resolution metrics, kept so the dashboard can show a TREND rather than only a current value. The dashboard has always computed its numbers live from the lake, which means it can say what is true now and nothing about whether that is better or worse than last week — which is the question an operator actually has. */
         MetricSnapshot: {
@@ -8119,6 +8141,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MergePreviewPage"];
+                };
+            };
+            /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        detail: string;
+                    };
+                };
+            };
+        };
+    };
+    post_orgs_by_org_datasets_by_ds_merge_previews_apply: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+                ds: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful response. */
+            "2XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MergesApplying"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */

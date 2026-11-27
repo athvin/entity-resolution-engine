@@ -6349,6 +6349,67 @@
         ]
       }
     },
+    "/v1/orgs/{org}/datasets/{ds}/merge-previews/apply": {
+      "post": {
+        "summary": "apply the dataset's APPROVED merge previews to Salesforce",
+        "operationId": "post_orgs_by_org_datasets_by_ds_merge_previews_apply",
+        "parameters": [
+          {
+            "name": "org",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ds",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "2XX": {
+            "description": "Successful response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MergesApplying"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "detail"
+                  ],
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "admin"
+            ]
+          }
+        ]
+      }
+    },
     "/v1/orgs/{org}/datasets/{ds}/merge-previews/generate": {
       "post": {
         "summary": "build merge previews from the dataset's latest results",
@@ -14985,6 +15046,22 @@
           "status": {
             "type": "string",
             "description": "`planned`, `approved`, `rejected` or `superseded`."
+          }
+        }
+      },
+      "MergesApplying": {
+        "type": "object",
+        "description": "`POST …/merge-previews/apply`: the job that will apply approved previews.",
+        "required": [
+          "job_id",
+          "state"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
           }
         }
       },

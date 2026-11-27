@@ -30,7 +30,7 @@ statements is read or written only through the engine's own stage SQL, not
 through a typed query function.
 
 <!-- BEGIN GENERATED: entities-index -->
-**61 entities, 310 declared statements.**
+**63 entities, 319 declared statements.**
 
 | Entity | Relation | Store | Key | Natural key | History |
 |---|---|---|---|---|---|
@@ -59,6 +59,8 @@ through a typed query function.
 | `lake_schema_migration` | `schema_migrations` | duckdb | `id` | — | — |
 | `match_score` | `match_scores` | duckdb | `id` | `rec_a_key, rec_b_key, model_version, tf_snapshot_id` | — |
 | `matching_model` | `matching_models` | postgres | `id` | `dataset_id, name, version` | yes |
+| `merge_apply` | `merge_applies` | postgres | `id` | — | — |
+| `merge_apply_operation` | `merge_apply_operations` | postgres | `id` | — | — |
 | `merge_preview` | `merge_previews` | postgres | `id` | `dataset_id, fingerprint` | — |
 | `merge_preview_journal` | `merge_preview_journal` | postgres | `id` | — | — |
 | `merge_preview_watermark` | `merge_preview_watermarks` | postgres | `id` | `dataset_id` | — |
@@ -125,7 +127,9 @@ Declared statements per entity and operation:
 | `lake_schema_migration` | 1 | 1 | 0 | 0 |
 | `match_score` | 0 | 6 | 3 | 0 |
 | `matching_model` | 1 | 4 | 1 | 0 |
-| `merge_preview` | 1 | 2 | 2 | 0 |
+| `merge_apply` | 1 | 2 | 2 | 0 |
+| `merge_apply_operation` | 1 | 1 | 1 | 0 |
+| `merge_preview` | 1 | 3 | 2 | 0 |
 | `merge_preview_journal` | 1 | 1 | 0 | 0 |
 | `merge_preview_watermark` | 1 | 1 | 1 | 0 |
 | `metric_snapshot` | 1 | 1 | 0 | 0 |

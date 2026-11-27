@@ -106,6 +106,7 @@ async fn run_all_full_runs_as_eight_pods_and_reproduces_base_10() {
     let (api, mut frames) = FakePodApi::new(format!("http://{addr}"), tmp.clone());
     let api = Arc::new(api);
     let cfg = ExecutorConfig {
+        egress: er_server::urlguard::Egress::Guarded,
         // Neither kind here provisions, so no profile is needed.
         profile: Ok(None),
         in_flight_cap: 2,

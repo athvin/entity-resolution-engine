@@ -48,6 +48,7 @@ pub mod extract_params;
 pub(crate) mod fixups;
 mod lake_reads;
 pub mod mail;
+pub mod merge_apply;
 pub mod migrate_plan;
 pub mod openapi;
 pub mod ops;
@@ -62,6 +63,7 @@ pub mod s3_ingest;
 pub mod salesforce;
 pub mod satoken;
 pub mod schema;
+pub mod sf_apply;
 pub mod sf_oauth;
 pub mod shutdown;
 pub mod taskpg;
@@ -10414,6 +10416,70 @@ async fn generate_merge_previews(
     }
 }
 
+/// `POST …/merge-previews/apply`: the job that will apply approved previews.
+#[derive(Serialize, utoipa::ToSchema)]
+struct MergesApplying {
+    job_id: String,
+    state: String,
+}
+
+/// Admin+: apply the dataset's APPROVED merge previews to Salesforce
+/// (`POST /v1/orgs/{org}/datasets/{ds}/merge-previews/apply`). Queues a
+/// `merge_apply` job that acts as the connection's delegated reviewer — 409
+/// when no previews are approved. Each group re-reads its members first: one
+/// that changed since sync is skipped as stale and re-synced, never merged.
+/// Every outcome is on the preview's history (`GET …/merge-previews/{id}`).
+/// Two jobs never run at once (control tasks are serial), and each apply
+/// begins at most once, so calling this twice is harmless.
+async fn apply_merge_previews(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, ds)): Path<(String, String)>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Admin) {
+        return e.into_response();
+    }
+    let (client, org_row, d) = match upload_scope_any(&state, &org, &ds).await {
+        Ok(t) => t,
+        Err(r) => return *r,
+    };
+    if let Err(r) = refuse_unless_active_dataset(&org_row, &d, "apply merges") {
+        return *r;
+    }
+    let ready =
+        er_entities::merge_preview::read::ready_to_apply(&client, &org_row.id, &d.id, 1).await;
+    let open = er_entities::merge_apply::read::open(&client, &org_row.id, &d.id, 1).await;
+    match (ready, open) {
+        (Ok(r), Ok(o)) if r.is_empty() && o.is_empty() => {
+            return detail_err(StatusCode::CONFLICT, "no approved merge previews to apply");
+        }
+        (Err(e), _) | (_, Err(e)) => return pg_err(e),
+        _ => {}
+    }
+    match pg::enqueue(
+        &client,
+        &org_row.id,
+        Some(d.id.as_str()),
+        "merge_apply",
+        0,
+        None,
+        None,
+        principal.provenance(),
+    )
+    .await
+    {
+        Ok(job) => (
+            StatusCode::ACCEPTED,
+            Json(MergesApplying {
+                job_id: job.id,
+                state: job.state,
+            }),
+        )
+            .into_response(),
+        Err(e) => pg_err(e),
+    }
+}
+
 /// Viewer+: a dataset's active writeback policies
 /// (`GET /v1/orgs/{org}/datasets/{ds}/writeback/policies`).
 async fn list_writeback_policies(
@@ -15618,6 +15684,10 @@ fn build_routes(state: AppState) -> Router {
         .route(
             "/v1/orgs/{org}/datasets/{ds}/merge-previews",
             get(merge_previews_list),
+        )
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/merge-previews/apply",
+            post(apply_merge_previews),
         )
         .route(
             "/v1/orgs/{org}/datasets/{ds}/merge-previews/generate",

@@ -229,6 +229,7 @@ async fn account_golden_runs_remotely_through_the_normal_job_lifecycle() {
         &dsn,
         Arc::clone(&api) as Arc<dyn er_k8s::PodApi>,
         ExecutorConfig {
+            egress: er_server::urlguard::Egress::Guarded,
             profile: Ok(None),
             in_flight_cap: 2,
             template,

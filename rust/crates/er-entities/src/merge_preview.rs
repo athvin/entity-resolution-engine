@@ -315,6 +315,64 @@ LIMIT $5
             })
             .collect())
     }
+
+    /// Approved previews no apply has begun, oldest first.
+    pub async fn ready_to_apply(
+        client: &impl ::tokio_postgres::GenericClient,
+        org_id: &str,
+        dataset_id: &str,
+        limit: i64,
+    ) -> ::std::result::Result<Vec<super::MergePreview>, ::tokio_postgres::Error> {
+        const SQL: &str = "SELECT p.id, p.org_id, p.dataset_id, p.salesforce_connection_id, p.object, p.entity_id, p.fingerprint, p.format_version, p.lake_snapshot, p.origin_run_id, p.writeback_policy_id, p.master_record_key, p.member_count, p.proposal, p.field_changes, p.related_counts, p.related_counts_state, p.status, p.decided_by, p.decided_at, p.decision_reason, p.created_at, p.updated_at
+FROM public.merge_previews p
+WHERE p.org_id = $1 AND p.dataset_id = $2 AND p.status = 'approved'
+  AND NOT EXISTS (SELECT 1 FROM public.merge_applies a WHERE a.merge_preview_id = p.id)
+ORDER BY p.id
+LIMIT $3
+";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "merge_preview",
+            "read",
+            "ready_to_apply",
+            "merge_previews",
+            SQL,
+        );
+        let __result =
+            ::er_span::instrument(&__span, client.query(SQL, &[&org_id, &dataset_id, &limit]))
+                .await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
+        Ok(rows
+            .iter()
+            .map(|row| super::MergePreview {
+                id: row.get("id"),
+                org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
+                salesforce_connection_id: row.get("salesforce_connection_id"),
+                object: row.get("object"),
+                entity_id: row.get("entity_id"),
+                fingerprint: row.get("fingerprint"),
+                format_version: row.get("format_version"),
+                lake_snapshot: row.get("lake_snapshot"),
+                origin_run_id: row.get("origin_run_id"),
+                writeback_policy_id: row.get("writeback_policy_id"),
+                master_record_key: row.get("master_record_key"),
+                member_count: row.get("member_count"),
+                proposal: row.get("proposal"),
+                field_changes: row.get("field_changes"),
+                related_counts: row.get("related_counts"),
+                related_counts_state: row.get("related_counts_state"),
+                status: row.get("status"),
+                decided_by: row.get("decided_by"),
+                decided_at: row.get("decided_at"),
+                decision_reason: row.get("decision_reason"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
+            })
+            .collect())
+    }
 }
 
 pub mod update {

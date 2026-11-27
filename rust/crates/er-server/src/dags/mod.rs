@@ -22,8 +22,8 @@ pub mod tasks;
 use er_dag::{Dag, DagBuilder, TriggerRule};
 
 use control::{
-    Activate, AdvanceSfCursor, CreateCatalog, DrainActions, EmitWriteBack, PublishPreviews,
-    RegisterModel, SettleActions, StageApproved,
+    Activate, AdvanceSfCursor, ApplyMerges, CreateCatalog, DrainActions, EmitWriteBack,
+    PublishPreviews, RegisterModel, SettleActions, StageApproved,
 };
 use tasks::{
     ApplyStaged, Assemble, CorrectReconcile, CorrectionsInit, CorrectionsReconcile, ExportResults,
@@ -58,10 +58,11 @@ pub enum JobKind {
     Extract,
     Export,
     MergePreview,
+    MergeApply,
 }
 
 impl JobKind {
-    pub const ALL: [JobKind; 14] = [
+    pub const ALL: [JobKind; 15] = [
         JobKind::RunAllFull,
         JobKind::RunAllIncremental,
         JobKind::Correct,
@@ -76,6 +77,7 @@ impl JobKind {
         JobKind::Extract,
         JobKind::Export,
         JobKind::MergePreview,
+        JobKind::MergeApply,
     ];
 
     #[must_use]
@@ -95,6 +97,7 @@ impl JobKind {
             JobKind::Extract => "extract",
             JobKind::Export => "export",
             JobKind::MergePreview => "merge_preview",
+            JobKind::MergeApply => "merge_apply",
         }
     }
 
@@ -136,6 +139,7 @@ pub fn dag_for(kind: JobKind) -> Dag {
         JobKind::Extract => extract(),
         JobKind::Export => export(),
         JobKind::MergePreview => merge_preview(),
+        JobKind::MergeApply => merge_apply(),
     }
 }
 
@@ -216,6 +220,7 @@ pub async fn run_control_task(
     task_id: &str,
     ctx: &mut er_dag::ControlCtx<'_, PgClient>,
     profile: &Result<Option<crate::provision::Profile>, crate::provision::ProfileError>,
+    egress: crate::urlguard::Egress,
 ) -> Result<PodTaskRun, er_dag::TaskError> {
     use er_dag::ControlTask as _;
     match (kind, task_id) {
@@ -261,6 +266,16 @@ pub async fn run_control_task(
         // ingest run) and advance the (dataset, source) watermark.
         // `merge_preview`'s Postgres half (#993): publish the built previews
         // and advance the checkpoint, in one transaction.
+        // `merge_apply` (#995): the whole job is one control task — it calls
+        // Salesforce and journals in Postgres; it never opens a lake.
+        (JobKind::MergeApply, "apply_merges") => completed(
+            control::ApplyMerges {
+                egress,
+                limits: crate::merge_apply::Limits::default(),
+            }
+            .run(ctx, ())
+            .await?,
+        ),
         (JobKind::MergePreview, "publish_previews") => {
             let built = control_pin::<er_dag::Plan<crate::preview_job::Materialized>>(ctx, 0)?;
             completed(control::PublishPreviews.run(ctx, (built,)).await?)
@@ -574,6 +589,13 @@ fn merge_preview() -> Dag {
     let built = d.source::<MaterializePreviews>();
     let _ = d.control::<PublishPreviews>((built,));
     d.build().expect("the merge_preview DAG assembles")
+}
+
+/// Apply approved merge previews to Salesforce (#995): one control task.
+fn merge_apply() -> Dag {
+    let mut d = Builder::new(JobKind::MergeApply.dag_name());
+    let _ = d.control::<ApplyMerges>(());
+    d.build().expect("the merge_apply DAG assembles")
 }
 
 /// Export a dataset's results at a pinned snapshot (#1230). One read-only pod

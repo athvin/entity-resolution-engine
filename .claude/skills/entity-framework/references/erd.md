@@ -152,6 +152,32 @@ erDiagram
         timestamp created_at
         timestamp updated_at
     }
+    merge_applies {
+        varchar id PK
+        varchar org_id FK
+        varchar dataset_id FK
+        varchar merge_preview_id FK, UK
+        varchar job_id
+        varchar fingerprint
+        varchar status "in {applied, applied_externally, applying, failed, skipped_stale}"
+        varchar preimage
+        varchar detail
+        timestamp created_at
+        timestamp updated_at
+    }
+    merge_apply_operations {
+        varchar id PK
+        varchar org_id FK
+        varchar dataset_id FK
+        varchar merge_apply_id FK
+        bigint seq
+        varchar kind "in {merge, update_master}"
+        varchar payload
+        varchar status "in {done, failed, in_flight}"
+        varchar outcome
+        timestamp created_at
+        timestamp updated_at
+    }
     merge_previews {
         varchar id PK
         varchar org_id FK
@@ -498,6 +524,12 @@ erDiagram
     jobs }o..|| datasets : "dataset_id → id"
     matching_models }o--|| orgs : "org_id → id"
     matching_models }o--|| datasets : "dataset_id → id"
+    merge_applies }o--|| orgs : "org_id → id"
+    merge_applies }o--|| datasets : "dataset_id → id"
+    merge_applies }o--|| merge_previews : "merge_preview_id → id"
+    merge_apply_operations }o--|| orgs : "org_id → id"
+    merge_apply_operations }o--|| datasets : "dataset_id → id"
+    merge_apply_operations }o--|| merge_applies : "merge_apply_id → id"
     merge_previews }o--|| orgs : "org_id → id"
     merge_previews }o--|| datasets : "dataset_id → id"
     merge_previews }o--|| salesforce_connections : "salesforce_connection_id → id"
@@ -559,6 +591,8 @@ erDiagram
 | `fixups` | The control-plane fixup ledger: one row per named, idempotent data/constraint fixup ensure_schema has applied. Fixups are what the declarative reconciler deliberately never does — backfills, constraint swaps, natural-key changes, NOT NULL tightening — expressed as ordered Rust steps that run semantics-once between the baseline replay and the reconcile pass. |
 | `jobs` | A unit of work on the dispatcher's queue: its kind, params, lifecycle state and retry bookkeeping. |
 | `matching_models` | An immutable version of a tenant's matching model: the settings document the engine scores against, its hash, provenance and activation state. |
+| `merge_applies` | The apply of one approved merge preview to Salesforce (#995). At most one per preview — the unique index is what makes APPROVED → APPLYING atomic — and it settles exactly once into applied, failed, skipped_stale or applied_externally. The preimage (members' live revision and the proposal's snapshot fields) is written before any mutation. |
+| `merge_apply_operations` | One provider mutation of an apply (#995) — the master field update, or one merge of up to two victims — written IN FLIGHT before the call and settled after it. An operation found in flight on resume is never replayed blind: the apply re-reads Salesforce to decide whether it landed. |
 | `merge_previews` | One immutable writeback proposal for a duplicate group in one connection's object (#993, #1305): the members' synchronized preimages, the elected master, the field changes, and the identity (snapshot, policy revision, fingerprint) an approval binds. Content columns never change; only the decision columns move, through a compare-and-set that names the fingerprint. A newer proposal for the same group supersedes a planned one rather than editing it. Contains customer data: never logged. |
 | `merge_preview_journal` | Every state change of a merge preview, append-only (#1305): planned, approved, rejected, superseded — and, from #995, the apply states. Written in the same transaction as the change it records, so the journal and the preview cannot disagree. |
 | `merge_preview_watermarks` | How far a dataset's merge-preview materialization has read (#993): the (snapshot_end, run id) of the last run whose previews are durably published. Advanced only by a compare-and-set naming the value it read, after the previews commit, so a retry or a concurrent job can never skip a run. |

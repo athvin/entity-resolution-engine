@@ -1320,6 +1320,17 @@
     "response": null
   },
   {
+    "id": "post_orgs_by_org_datasets_by_ds_merge_previews_apply",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/datasets/{ds}/merge-previews/apply",
+    "role": "admin",
+    "params": ["org", "ds"],
+    "body": null,
+    "needs_body": false,
+    "summary": "apply the dataset's APPROVED merge previews to Salesforce",
+    "response": null
+  },
+  {
     "id": "post_orgs_by_org_datasets_by_ds_merge_previews_generate",
     "method": "POST",
     "path": "/v1/orgs/{org}/datasets/{ds}/merge-previews/generate",

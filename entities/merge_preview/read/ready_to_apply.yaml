@@ -1,0 +1,10 @@
+kind: statement
+operation: read
+mode: full
+description: "Approved previews no apply has begun, oldest first."
+params:
+  - { name: org_id, type: varchar }
+  - { name: dataset_id, type: varchar }
+  - { name: limit, type: bigint }
+reads: [merge_apply]
+returns: entity

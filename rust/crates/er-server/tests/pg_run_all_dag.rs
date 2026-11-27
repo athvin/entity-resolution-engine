@@ -80,6 +80,7 @@ async fn lake_maintain_runs_end_to_end_through_the_executor() {
     let (api, mut frames) = FakePodApi::new(format!("http://{addr}"), tmp.clone());
     let api = Arc::new(api);
     let cfg = ExecutorConfig {
+        egress: er_server::urlguard::Egress::Guarded,
         // Neither kind here provisions, so no profile is needed.
         profile: Ok(None),
         in_flight_cap: 2,

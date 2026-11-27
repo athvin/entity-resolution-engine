@@ -94,6 +94,7 @@ impl Harness {
         let (api, frames) = FakePodApi::new(format!("http://{addr}"), data_root);
         let api = Arc::new(api);
         let cfg = ExecutorConfig {
+            egress: er_server::urlguard::Egress::Unguarded,
             profile,
             // No per-kind allowlist to opt into: the executor owns every kind.
             in_flight_cap: 2,

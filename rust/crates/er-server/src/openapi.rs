@@ -111,6 +111,7 @@ pub struct ApiDoc;
     crate::DeliveryAccepted,
     crate::UploadSession,
     crate::WritebackAuthorizationStarted,
+    crate::MergesApplying,
     crate::WritebackAuthorizationView,
     crate::WritebackPolicyView,
     crate::WritebackPolicyList,
