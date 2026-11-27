@@ -1,10 +1,11 @@
 mock_provider "aws" {}
 
 variables {
-  environment      = "test"
-  region           = "us-east-2"
-  metric_namespace = "ER/Test"
-  alerts_topic_arn = "arn:aws:sns:us-east-2:123456789012:alerts"
+  environment               = "test"
+  region                    = "us-east-2"
+  metric_namespace          = "ER/Test"
+  alerts_topic_arn          = "arn:aws:sns:us-east-2:123456789012:alerts"
+  containers_log_group_name = "/er/test/containers"
 }
 
 run "operational_signal_contract" {
@@ -80,3 +81,49 @@ run "operational_signal_contract" {
     error_message = "Every metric widget must query a declared instrument with awsemf's actual OTelLib dimension."
   }
 }
+
+run "standalone_alarms_877" {
+  command = plan
+
+  assert {
+    condition = (
+      length(aws_cloudwatch_metric_alarm.attempt_failure_rate.metric_query) == 9 &&
+      aws_cloudwatch_metric_alarm.attempt_failure_rate.threshold == 0.25 &&
+      aws_cloudwatch_metric_alarm.attempt_failure_rate.treat_missing_data == "notBreaching" &&
+      alltrue([for q in aws_cloudwatch_metric_alarm.attempt_failure_rate.metric_query :
+        q.metric[0].period == 3600 if length(q.metric) > 0
+      ])
+    )
+    error_message = "The failure-rate alarm must read failed and done for every class over an hour, within the ten-query ceiling, behind a volume guard."
+  }
+  assert {
+    condition = (
+      aws_cloudwatch_metric_alarm.spot_interruptions.namespace == "AWS/Events" &&
+      aws_cloudwatch_metric_alarm.spot_interruptions.metric_name == "MatchedEvents" &&
+      aws_cloudwatch_metric_alarm.spot_interruptions.dimensions["RuleName"] == "er-test-spot-interruption" &&
+      jsondecode(aws_cloudwatch_event_rule.spot_interruption.event_pattern)["detail-type"] == ["EC2 Spot Instance Interruption Warning"]
+    )
+    error_message = "Spot interruptions are counted from the interruption-warning rule's own matches."
+  }
+  assert {
+    condition = (
+      aws_cloudwatch_log_metric_filter.impersonation[0].log_group_name == "/er/test/containers" &&
+      aws_cloudwatch_log_metric_filter.impersonation[0].metric_transformation[0].name == "er.audit.impersonations" &&
+      aws_cloudwatch_metric_alarm.impersonation_volume[0].dimensions == null &&
+      aws_cloudwatch_metric_alarm.impersonation_volume[0].alarm_actions == toset([var.alerts_topic_arn])
+    )
+    error_message = "Impersonation volume is a dimensionless count from the container log group, alarmed to the existing topic."
+  }
+}
+
+run "no_log_group_no_impersonation_alarm" {
+  command = plan
+  variables {
+    containers_log_group_name = null
+  }
+  assert {
+    condition     = length(aws_cloudwatch_metric_alarm.impersonation_volume) == 0 && length(aws_cloudwatch_log_metric_filter.impersonation) == 0
+    error_message = "Without a log group there is nothing to count, so no alarm may claim coverage."
+  }
+}
+

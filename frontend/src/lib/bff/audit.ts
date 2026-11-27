@@ -48,4 +48,10 @@ export async function writeAudit(
     traceId: traceIdOf(currentRequestContext()?.traceparent),
     sessionId: identity.sessionId,
   });
+  // The impersonation-volume alarm (#877) counts this line through a log
+  // metric filter. It names the action only: who and which org stay in
+  // erweb.audit, so the count can never carry a person or a tenant.
+  if (action.startsWith("impersonat")) {
+    console.info(JSON.stringify({ event: "er.audit.impersonation", action }));
+  }
 }
