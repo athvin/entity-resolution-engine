@@ -5,7 +5,13 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 
 import { EvidenceBar, RecordCard, ThresholdScale } from "./marks";
-import { MERIDIAN_ENTITY, MERIDIAN_PAIRS, MERIDIAN_SOURCES, MERIDIAN_THRESHOLDS } from "./meridian";
+import {
+  MERIDIAN_APART_ENTITY,
+  MERIDIAN_ENTITY,
+  MERIDIAN_PAIRS,
+  MERIDIAN_SOURCES,
+  MERIDIAN_THRESHOLDS,
+} from "./meridian";
 import { formatProbability, matchProbability } from "./score";
 import "./reviewer.css";
 
@@ -14,8 +20,8 @@ const CLOSE = MERIDIAN_PAIRS.close;
 const MAX_WEIGHT = Math.max(...CLOSE.map((c) => Math.abs(c.weight)));
 const PROBABILITY = matchProbability(CLOSE.map((c) => c.weight));
 const SCORE = formatProbability(PROBABILITY);
-/** The entity the API record gets if it is kept apart: fictional, like the rest. */
-const APART = "E-2077";
+/** The entity the API record gets if it is kept apart, as on the home audit. */
+const APART = MERIDIAN_APART_ENTITY;
 
 type State = "pending" | "matched" | "kept-apart" | "split";
 

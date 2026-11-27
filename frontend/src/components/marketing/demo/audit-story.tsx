@@ -1,178 +1,235 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Pause, Play, RotateCcw } from "lucide-react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { FastForward, Pause, Play, RotateCcw } from "lucide-react";
+
 import { Button } from "@/components/ui/button";
 
-const BEATS = [
-  "A match worth a second look.",
-  "Different registration IDs. Review the evidence.",
-  "Split the mistaken match into two entities.",
-  "Return both records through reconciliation.",
-  "Two entities. Correction recorded. History preserved.",
-];
+import { AuditDesk, type AuditPress } from "../scene/audit-desk";
+import {
+  AUDIT_POSTER,
+  USUAL_DECISION,
+  reduceAudit,
+  statusAt,
+  stepOf,
+  waits,
+  type AuditAction,
+  type AuditScene,
+  type AuditState,
+} from "../scene/audit-model";
 
-/** Payout-flow's cursorless sequence: reveal evidence, act, connect, hold payoff.
- * All particles and labels read one native clock; pause never restarts a beat. */
+/** How long each playing moment runs before the film moves on, in ms. */
+const PLAY = { zone: 3200, called: 2400, unmerged: 2200, holds: 2000 } as const;
+/** How long the two waiting moments take to arrive (audit-desk.css times their entrances). */
+const ENTRANCE = { call: 1800, audit: 1500 } as const;
+/** How long "Play it for me" lets a viewer see a choice before it makes it. */
+const PRESS_AFTER = 900;
+/** How much of the stage must be on screen for the film to start: ScenePlayback's rule. */
+const SEEN = 0.4;
+
+type Segment = { duration: number; action: AuditAction | null; press: AuditPress };
+
+/**
+ * What the current moment does with time: play for a while and move on, or
+ * wait for the visitor. With "Play it for me" on, the two waits become short
+ * plays that make the usual choices; a wait it arrived at mid-film first lets
+ * the moment finish arriving.
+ */
+function segmentFor(state: AuditState, autopilotFrom: AuditScene | null): Segment | null {
+  const arrival = (scene: "call" | "audit") => (autopilotFrom === scene ? 0 : ENTRANCE[scene]);
+  switch (state.scene) {
+    case "zone":
+      return { duration: PLAY.zone, action: { type: "advance" }, press: null };
+    case "call":
+      return autopilotFrom
+        ? {
+            duration: arrival("call") + PRESS_AFTER,
+            action: { type: "decide", decision: USUAL_DECISION },
+            press: "match",
+          }
+        : null;
+    case "called":
+      return { duration: PLAY.called, action: { type: "advance" }, press: null };
+    case "audit":
+      if (!autopilotFrom) return null;
+      return state.ticked
+        ? { duration: PRESS_AFTER, action: { type: "unmerge" }, press: "unmerge" }
+        : {
+            duration: arrival("audit") + PRESS_AFTER,
+            action: { type: "tick", ticked: true },
+            press: "tick",
+          };
+    case "unmerged":
+      return { duration: PLAY.unmerged, action: { type: "advance" }, press: null };
+    case "holds":
+      return { duration: PLAY.holds, action: null, press: null };
+  }
+}
+
+/**
+ * Home section 06: how a person keeps the last word on what merges. A short
+ * film about Meridian Supply with two decisions the visitor makes: a close
+ * pair in the gray zone between the thresholds, and a record that joined by
+ * itself and does not belong. The stage is AuditDesk; this owns the time.
+ *
+ * One clock (`.story-audit-clock`, a WAAPI animation) times each moment, so
+ * pausing, scrolling away and switching tabs all hold the same thing the
+ * stage's CSS holds. It starts once 40% of the stage is on screen, waits at
+ * each decision, and holds its end as the poster. Under reduced motion it
+ * never starts on its own; the poster is the whole story, and stepping
+ * through it changes state without movement.
+ */
 export function AuditStory({ onRunning }: { onRunning: (running: boolean) => void }) {
   const host = useRef<HTMLElement>(null);
-  const animations = useRef<Animation[]>([]);
-  const sync = useRef<() => void>(() => {});
-  const pausedRef = useRef(false);
-  const [paused, setPaused] = useState(false);
-  const [inView, setInView] = useState(false);
+  const stage = useRef<HTMLDivElement>(null);
+  const clockNode = useRef<HTMLSpanElement>(null);
+  const clock = useRef<Animation | null>(null);
+  const [state, dispatch] = useReducer(reduceAudit, AUDIT_POSTER);
   const [ready, setReady] = useState(false);
   const [reduced, setReduced] = useState(false);
-  const [run, setRun] = useState(0);
-  const [phase, setPhase] = useState(0);
-  const running = run > 0 && phase < 4 && !reduced;
-  pausedRef.current = paused;
+  const [started, setStarted] = useState(false);
+  const [paused, setPaused] = useState(false);
+  const [inView, setInView] = useState(false);
+  const [hidden, setHidden] = useState(false);
+  const [autopilotFrom, setAutopilotFrom] = useState<AuditScene | null>(null);
+  const [settledAt, setSettledAt] = useState<AuditState | null>(null);
+  const [advice, setAdvice] = useState(false);
+
+  const segment = started ? segmentFor(state, autopilotFrom) : null;
+  const settled = settledAt === state;
+  const running = segment !== null && !settled;
+  const held = !started || paused || !inView || hidden;
+  // The poster: before hydration, and under reduced motion until started.
+  const still = !started && (!ready || reduced);
+
   const start = useCallback(() => {
+    dispatch({ type: "jump", step: 0 });
+    setStarted(true);
     setPaused(false);
-    setPhase(0);
-    setRun((r) => r + 1);
+    setAutopilotFrom(null);
+    setAdvice(false);
   }, []);
+  // Any choice the visitor makes takes the film back from "Play it for me".
+  const act = useCallback((action: AuditAction) => {
+    setAutopilotFrom(null);
+    setPaused(false);
+    setStarted(true);
+    dispatch(action);
+  }, []);
+
   useEffect(() => {
     setReady(true);
-    const preference = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const update = () => {
-      setReduced(preference.matches);
-      if (preference.matches) setPhase(4);
+    const preference =
+      typeof window.matchMedia === "function"
+        ? window.matchMedia("(prefers-reduced-motion: reduce)")
+        : null;
+    const sync = () => {
+      setReduced(preference?.matches ?? false);
     };
-    update();
-    preference.addEventListener("change", update);
+    sync();
+    preference?.addEventListener("change", sync);
+    // Held at its first frame until it is seen, unless reduced motion keeps the poster.
+    if (!preference?.matches) {
+      dispatch({ type: "jump", step: 0 });
+      if (window.location.hash === "#audit") start();
+    }
     const navigate = (event: MouseEvent) => {
       if (event.target instanceof Element && event.target.closest("[data-start-audit]")) start();
     };
+    const visibility = () => {
+      setHidden(document.hidden);
+    };
     document.addEventListener("click", navigate);
-    if (window.location.hash === "#audit") start();
+    document.addEventListener("visibilitychange", visibility);
     return () => {
-      preference.removeEventListener("change", update);
+      preference?.removeEventListener("change", sync);
       document.removeEventListener("click", navigate);
+      document.removeEventListener("visibilitychange", visibility);
     };
   }, [start]);
-  useEffect(() => {
-    onRunning(running && inView);
-  }, [running, inView, onRunning]);
+
+  // In view (20% of the section) pauses and resumes the film. A batch can hold
+  // both an old and a new observation of the section; the last one is current.
   useEffect(() => {
     const root = host.current;
-    if (!root || run === 0) return;
-    if (reduced) {
-      setPhase(4);
-      return;
-    }
-    let visible = false;
-    let frame = 0;
-    const clock = root.querySelector<HTMLElement>(".story-audit-clock");
-    if (!clock) return;
-    const timeline = clock.animate([{ opacity: 1 }, { opacity: 1 }], {
-      duration: 12000,
-      fill: "both",
-    });
-    const all = [timeline];
-    root.querySelectorAll<SVGCircleElement>("[data-audit-packet]").forEach((dot) => {
-      const svg = dot.ownerSVGElement;
-      const path = svg?.querySelector<SVGPathElement>(
-        `[data-track="${dot.dataset.auditPacket ?? ""}"]`,
-      );
-      if (!path) return;
-      const begin = dot.dataset.auditPacket === "flag" ? 0.04 : 0.46;
-      const end = dot.dataset.auditPacket === "flag" ? 0.25 : 0.88;
-      const length = path.getTotalLength();
-      const first = path.getPointAtLength(0),
-        last = path.getPointAtLength(length);
-      const frames: Keyframe[] = [
-        {
-          offset: 0,
-          opacity: 0,
-          transform: `translate(${String(first.x)}px, ${String(first.y)}px)`,
-        },
-        {
-          offset: begin,
-          opacity: 0,
-          transform: `translate(${String(first.x)}px, ${String(first.y)}px)`,
-        },
-      ];
-      for (let i = 1; i <= 60; i++) {
-        const p = path.getPointAtLength((length * i) / 60);
-        frames.push({
-          offset: begin + ((end - begin) * i) / 60,
-          opacity: 1,
-          transform: `translate(${String(p.x)}px, ${String(p.y)}px)`,
-        });
-      }
-      if (dot.dataset.auditPacket === "flag")
-        frames.push({
-          offset: 0.46,
-          opacity: 1,
-          transform: `translate(${String(last.x)}px, ${String(last.y)}px)`,
-        });
-      frames.push({
-        offset: dot.dataset.auditPacket === "flag" ? 0.5 : 1,
-        opacity: dot.dataset.auditPacket === "flag" ? 0 : 1,
-        transform: `translate(${String(last.x)}px, ${String(last.y)}px)`,
-      });
-      if (dot.dataset.auditPacket === "flag")
-        frames.push({
-          offset: 1,
-          opacity: 0,
-          transform: `translate(${String(last.x)}px, ${String(last.y)}px)`,
-        });
-      all.push(dot.animate(frames, { duration: 12000, fill: "both", easing: "linear" }));
-    });
-    animations.current = all;
-    const tick = () => {
-      const t = Number(timeline.currentTime ?? 0);
-      setPhase(t >= 11500 ? 4 : t >= 8000 ? 3 : t >= 5600 ? 2 : t >= 3000 ? 1 : 0);
-      if (t < 12000 && timeline.playState === "running") frame = requestAnimationFrame(tick);
-    };
-    const update = () => {
-      cancelAnimationFrame(frame);
-      const stopped = pausedRef.current || !visible || document.hidden;
-      all.forEach((a) => {
-        if (a.playState !== "finished") {
-          if (stopped) a.pause();
-          else a.play();
-        }
-      });
-      if (!stopped) frame = requestAnimationFrame(tick);
-    };
-    sync.current = update;
+    if (!root || typeof IntersectionObserver === "undefined") return;
     const observer = new IntersectionObserver(
       (entries) => {
-        // This observer watches one target. A batch can contain both its old
-        // and new visibility; the last queued entry is the current state.
-        visible = entries.at(-1)?.isIntersecting ?? false;
-        setInView(visible);
-        update();
+        setInView(entries.at(-1)?.isIntersecting ?? false);
       },
       { threshold: 0.2 },
     );
     observer.observe(root);
-    document.addEventListener("visibilitychange", update);
-    update();
     return () => {
-      cancelAnimationFrame(frame);
       observer.disconnect();
-      document.removeEventListener("visibilitychange", update);
-      all.forEach((a) => {
-        a.cancel();
-      });
-      animations.current = [];
     };
-  }, [run, reduced]);
+  }, []);
+
+  // Seen (40% of the stage) starts it, once, unless reduced motion is on.
   useEffect(() => {
-    sync.current();
-  }, [paused]);
+    const node = stage.current;
+    if (!node || started || reduced || !ready || typeof IntersectionObserver === "undefined")
+      return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const latest = entries.at(-1);
+        if (latest?.isIntersecting && latest.intersectionRatio >= SEEN - 0.01) start();
+      },
+      { threshold: SEEN },
+    );
+    observer.observe(node);
+    return () => {
+      observer.disconnect();
+    };
+  }, [started, reduced, ready, start]);
+
+  // The clock: one animation per moment, finished means the moment is over.
+  useEffect(() => {
+    const node = clockNode.current;
+    if (!segment || settled || !node || typeof node.animate !== "function") return;
+    const animation = node.animate([{ opacity: 1 }, { opacity: 1 }], {
+      duration: segment.duration,
+      fill: "forwards",
+    });
+    clock.current = animation;
+    const { action } = segment;
+    animation.onfinish = () => {
+      if (action) dispatch(action);
+      else setSettledAt(state);
+    };
+    return () => {
+      animation.onfinish = null;
+      animation.cancel();
+      clock.current = null;
+    };
+    // `segment` is derived from these on every render; keying on them keeps
+    // one clock per moment rather than one per render.
+  }, [state, autopilotFrom, started, settled]);
+
+  useEffect(() => {
+    const animation = clock.current;
+    if (!animation || animation.playState === "finished") return;
+    if (held) animation.pause();
+    else animation.play();
+  });
+
+  useEffect(() => {
+    onRunning(running && inView);
+  }, [running, inView, onRunning]);
+
+  const step = stepOf(state.scene);
+  const waiting = started && waits(state.scene) && autopilotFrom === null;
+  const done = state.scene === "holds" && (settled || !started);
   return (
     <section
       id="audit"
       ref={host}
       className="story-section story-audit"
       data-testid="marketing-audit"
-      data-phase={phase}
+      data-scene={state.scene}
+      data-step={step}
       data-running={running}
-      data-still={run === 0 || reduced}
+      data-still={still}
     >
       <div className="story-section-heading">
         <p className="story-eyebrow">06 / Keep the last word</p>
@@ -182,113 +239,58 @@ export function AuditStory({ onRunning }: { onRunning: (running: boolean) => voi
           <span className="story-muted">doesn’t have to stay one.</span>
         </h2>
         <p>
-          Follow a correction from new evidence to separate entities.
-          <br />
-          The history stays with them.
+          Decide the close calls in the gray zone, unmerge a record that joined by mistake, and see
+          the correction hold on the next run.
         </p>
       </div>
       <div
-        className="story-audit-stage ss-stage"
-        data-unframed="true"
-        data-fidelity="realistic"
-        data-palette="mono"
-        data-mark={`audit-${String(phase)}`}
+        ref={stage}
+        id="audit-stage"
+        className="story-audit-stage"
+        data-hold={held && !still}
+        data-still={still}
       >
-        <span className="story-audit-clock" aria-hidden="true" />
+        <span ref={clockNode} className="story-audit-clock" aria-hidden="true" />
         <span className="trail-audit-entry" data-audit-entry aria-hidden="true" />
         <span className="trail-audit-exit" data-audit-exit aria-hidden="true" />
-        {[false, true].map((phone) => {
-          const flag = phone ? "M179 54 V212" : "M90 120 H510";
-          const a = phone ? "M179 212 C179 260 110 255 110 368" : "M510 120 C590 120 610 72 810 72";
-          const b = phone
-            ? "M179 212 C179 260 248 255 248 368"
-            : "M510 120 C590 120 610 168 810 168";
-          return (
-            <svg
-              key={String(phone)}
-              className={phone ? "story-audit-phone" : "story-audit-wide"}
-              viewBox={phone ? "0 0 358 440" : "0 0 900 260"}
-              aria-hidden="true"
-            >
-              <path data-track="flag" d={flag} />
-              <path data-track="one" d={a} />
-              <path data-track="two" d={b} />
-              {[0, 1, 2].map((i) => (
-                <g key={i} className="story-audit-stream">
-                  <circle cx={phone ? 127 + i * 13 : 840 + i * 18} cy={phone ? 368 : 72} r="2" />
-                  <circle cx={phone ? 265 + i * 13 : 840 + i * 18} cy={phone ? 368 : 168} r="2" />
-                </g>
-              ))}
-              <circle
-                className="story-audit-flag story-audit-poster"
-                cx={phone ? 179 : 90}
-                cy={phone ? 54 : 120}
-                r="9"
-              />
-              <circle
-                className="story-audit-good story-audit-poster"
-                cx={phone ? 110 : 810}
-                cy={phone ? 368 : 72}
-                r="8"
-              />
-              <circle
-                className="story-audit-good story-audit-poster"
-                cx={phone ? 248 : 810}
-                cy={phone ? 368 : 168}
-                r="8"
-              />
-              <circle className="story-audit-flag" data-audit-packet="flag" r="9" />
-              <circle className="story-audit-good" data-audit-packet="one" r="8" />
-              <circle className="story-audit-good" data-audit-packet="two" r="8" />
-              <text x={phone ? 179 : 90} y={phone ? 24 : 80} textAnchor="middle">
-                Flagged match
-              </text>
-              <text x={phone ? 276 : 510} y={phone ? 152 : 80} textAnchor="middle">
-                Review the evidence
-              </text>
-              <text x={phone ? 110 : 810} y={phone ? 400 : 45} textAnchor="middle">
-                Meridian US
-              </text>
-              <text x={phone ? 248 : 810} y={phone ? 400 : 202} textAnchor="middle">
-                Meridian UK
-              </text>
-              <text x={phone ? 179 : 620} y={phone ? 305 : 230} textAnchor="middle">
-                {phone ? "Reconcile" : "Back through reconciliation"}
-              </text>
-              <rect
-                x={phone ? 220 : 454}
-                y={166}
-                width="112"
-                height="32"
-                rx="16"
-                className="story-audit-evidence"
-              />
-              <text
-                x={phone ? 276 : 510}
-                y={187}
-                textAnchor="middle"
-                className="story-audit-evidence-text"
-              >
-                REG-01 ≠ REG-02
-              </text>
-            </svg>
-          );
-        })}
+        <AuditDesk
+          state={state}
+          ready={ready}
+          press={segment?.press ?? null}
+          segment={segment?.duration ?? 0}
+          advice={advice}
+          onAdvice={() => {
+            setAdvice((open) => !open);
+          }}
+          onDecide={(decision) => {
+            act({ type: "decide", decision });
+          }}
+          onTick={(ticked) => {
+            act({ type: "tick", ticked });
+          }}
+          onUnmerge={() => {
+            act({ type: "unmerge" });
+          }}
+          onJump={(target) => {
+            setAdvice(false);
+            act({ type: "jump", step: target });
+          }}
+        />
       </div>
       <div className="story-audit-bottom">
         <div>
-          <p className="story-eyebrow">
-            {phase === 4 ? "Correction retained" : "An illustrative audit"}
-          </p>
+          <p className="story-eyebrow">{done ? "Correction retained" : "An illustrative audit"}</p>
           <p className="story-audit-status" role="status">
-            {BEATS[phase]}
+            {statusAt(state)}
           </p>
         </div>
         <div className="story-audit-controls">
-          <Button variant="outline" disabled={!ready || running} onClick={start}>
-            {run ? <RotateCcw aria-hidden="true" /> : <Play aria-hidden="true" />}
-            {run ? "Replay audit" : "See how audit works"}
-          </Button>
+          {ready && !started && (
+            <Button variant="outline" onClick={start}>
+              <Play aria-hidden="true" />
+              {reduced ? "Walk through the audit" : "Play the audit"}
+            </Button>
+          )}
           {running && (
             <Button
               variant="ghost"
@@ -301,11 +303,28 @@ export function AuditStory({ onRunning }: { onRunning: (running: boolean) => voi
               {paused ? "Resume" : "Pause"}
             </Button>
           )}
+          {waiting && (
+            <Button
+              variant="outline"
+              onClick={() => {
+                setAutopilotFrom(state.scene);
+              }}
+            >
+              <FastForward aria-hidden="true" />
+              Play it for me
+            </Button>
+          )}
+          {started && settled && (
+            <Button variant="outline" onClick={start}>
+              <RotateCcw aria-hidden="true" />
+              Replay audit
+            </Button>
+          )}
         </div>
       </div>
       <p className="story-caption">
-        The example records a never-match assertion, then reconciles. A correction changes the
-        grouping; it does not retrain the matching model.
+        Illustrative records. Each decision is kept as an always-match or never-match rule. A
+        correction changes the grouping; it does not retrain the matching model.
       </p>
       <a href="#usage" className="story-next">
         Next / Make it your workload <span aria-hidden="true">↓</span>
