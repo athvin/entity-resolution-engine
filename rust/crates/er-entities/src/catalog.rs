@@ -1801,6 +1801,196 @@ indexes:
 "#,
     ),
     (
+        "merge_preview",
+        r#"kind: entity
+version: 1
+name: merge_preview
+relation: merge_previews
+description: "One immutable writeback proposal for a duplicate group in one connection's object (#993, #1305): the members' synchronized preimages, the elected master, the field changes, and the identity (snapshot, policy revision, fingerprint) an approval binds. Content columns never change; only the decision columns move, through a compare-and-set that names the fingerprint. A newer proposal for the same group supersedes a planned one rather than editing it. Contains customer data: never logged."
+key: [id]
+natural_key: [dataset_id, fingerprint]
+generate:
+  stores: [postgres]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "UUIDv7, minted by the application."
+  - name: org_id
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: id }
+    description: "The tenant; denormalized beside the dataset scope per V17."
+  - name: dataset_id
+    type: varchar
+    nullable: false
+    references: { relation: datasets, column: id }
+    description: "The dataset whose resolution results this concerns."
+  - name: salesforce_connection_id
+    type: varchar
+    nullable: false
+    references: { relation: salesforce_connections, column: id }
+    description: "The connection the proposal would write through."
+  - name: object
+    type: varchar
+    nullable: false
+    accepted_values: [Lead, Contact, Account]
+    description: "The sObject of every member."
+  - name: entity_id
+    type: varchar
+    nullable: false
+    description: "The resolved entity the group belongs to."
+  - name: fingerprint
+    type: varchar
+    nullable: false
+    description: "The proposal's content fingerprint (`v1:` + SHA-256 over its canonical bytes); approval must name it."
+  - name: format_version
+    type: bigint
+    nullable: false
+    description: "The persisted proposal format; 1."
+  - name: lake_snapshot
+    type: bigint
+    nullable: false
+    description: "The lake snapshot the proposal was computed from."
+  - name: origin_run_id
+    type: varchar
+    nullable: false
+    description: "The run whose results produced the group."
+  - name: writeback_policy_id
+    type: varchar
+    nullable: false
+    references: { relation: writeback_policies, column: id }
+    description: "The writeback policy revision the proposal was built under."
+  - name: master_record_key
+    type: varchar
+    nullable: false
+    description: "The elected master's record key."
+  - name: member_count
+    type: bigint
+    nullable: false
+    description: "Members including the master."
+  - name: proposal
+    type: json
+    nullable: false
+    description: "The persisted proposal input (PersistedProposalV1). Restored only through MergeProposal::build, never trusted as validated."
+  - name: field_changes
+    type: json
+    nullable: false
+    description: "Provider field → {before, after} on the master, for display."
+  - name: related_counts
+    type: json
+    description: "Related-record counts per member, when known; NULL with related_counts_state 'unavailable' until a provider read supplies them."
+  - name: related_counts_state
+    type: varchar
+    nullable: false
+    accepted_values: [unavailable, known]
+    description: "Whether related_counts is populated."
+  - name: status
+    type: varchar
+    nullable: false
+    default: "'planned'"
+    accepted_values: [planned, approved, rejected, superseded]
+    description: "The decision state."
+  - name: decided_by
+    type: varchar
+    description: "The principal that approved or rejected it."
+  - name: decided_at
+    type: timestamp
+    description: "When it was decided."
+  - name: decision_reason
+    type: varchar
+    description: "The reason given with the decision."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the row was written."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the row last changed."
+indexes:
+  - name: merge_previews_fingerprint
+    columns: [dataset_id, fingerprint]
+    unique: true
+  - name: merge_previews_status
+    columns: [dataset_id, status, id]
+  - name: merge_previews_group
+    columns: [dataset_id, salesforce_connection_id, object, entity_id]
+  - name: merge_previews_org
+    columns: [org_id, dataset_id]
+"#,
+    ),
+    (
+        "merge_preview_journal",
+        r#"kind: entity
+version: 1
+name: merge_preview_journal
+relation: merge_preview_journal
+description: "Every state change of a merge preview, append-only (#1305): planned, approved, rejected, superseded — and, from #995, the apply states. Written in the same transaction as the change it records, so the journal and the preview cannot disagree."
+key: [id]
+generate:
+  stores: [postgres]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "UUIDv7, minted by the application."
+  - name: org_id
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: id }
+    description: "The tenant; denormalized beside the dataset scope per V17."
+  - name: dataset_id
+    type: varchar
+    nullable: false
+    references: { relation: datasets, column: id }
+    description: "The dataset whose resolution results this concerns."
+  - name: merge_preview_id
+    type: varchar
+    nullable: false
+    references: { relation: merge_previews, column: id }
+    description: "The preview that changed."
+  - name: from_status
+    type: varchar
+    description: "The state before; NULL for the first entry."
+  - name: to_status
+    type: varchar
+    nullable: false
+    description: "The state after."
+  - name: fingerprint
+    type: varchar
+    nullable: false
+    description: "The proposal fingerprint the change concerned."
+  - name: actor
+    type: varchar
+    nullable: false
+    description: "The principal or job that made the change."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the row was written."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the row last changed."
+indexes:
+  - name: merge_preview_journal_preview
+    columns: [dataset_id, merge_preview_id, id]
+  - name: merge_preview_journal_org
+    columns: [org_id, dataset_id]
+"#,
+    ),
+    (
         "metric_snapshot",
         r#"kind: entity
 version: 1
@@ -4055,6 +4245,77 @@ indexes:
   # V17: the dataset-scoped read path.
   - name: webhook_deliveries_dataset
     columns: [dataset_id, created_at]
+"#,
+    ),
+    (
+        "writeback_policy",
+        r#"kind: entity
+version: 1
+name: writeback_policy
+relation: writeback_policies
+description: "Which provider fields a dataset may write back to one connection's object, and how a master is elected there (#1305). Append-only: a change is a new row, and a row's id is the policy REVISION a merge preview binds, so an approval can be refused when the policy it was proposed under is no longer the active one. No row for a (connection, object) means nothing is proposed — the feature is opt-in and fails closed."
+key: [id]
+generate:
+  stores: [postgres]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "UUIDv7, minted by the application."
+  - name: org_id
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: id }
+    description: "The tenant; denormalized beside the dataset scope per V17."
+  - name: dataset_id
+    type: varchar
+    nullable: false
+    references: { relation: datasets, column: id }
+    description: "The dataset whose resolution results this concerns."
+  - name: salesforce_connection_id
+    type: varchar
+    nullable: false
+    references: { relation: salesforce_connections, column: id }
+    description: "The connection the policy writes through."
+  - name: object
+    type: varchar
+    nullable: false
+    accepted_values: [Lead, Contact, Account]
+    description: "The sObject the policy covers."
+  - name: election_policy
+    type: varchar
+    nullable: false
+    description: "One of er_golden's master election policies, used for this object's groups."
+  - name: writeback_allowlist
+    type: json
+    nullable: false
+    description: "The provider field names a merge may write on the master, as a JSON array. Fields outside it are never changed."
+  - name: field_mapping
+    type: json
+    nullable: false
+    description: "Canonical attribute → provider field, as a JSON object: where each golden value lands on the master."
+  - name: created_by
+    type: varchar
+    nullable: false
+    description: "The principal that set the policy."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the row was written."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the row last changed."
+indexes:
+  - name: writeback_policies_scope
+    columns: [dataset_id, salesforce_connection_id, object, id]
+  - name: writeback_policies_org
+    columns: [org_id, dataset_id]
 "#,
     ),
 ];

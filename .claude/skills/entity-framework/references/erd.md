@@ -152,6 +152,43 @@ erDiagram
         timestamp created_at
         timestamp updated_at
     }
+    merge_previews {
+        varchar id PK
+        varchar org_id FK
+        varchar dataset_id FK
+        varchar salesforce_connection_id FK
+        varchar object "in {Account, Contact, Lead}"
+        varchar entity_id
+        varchar fingerprint
+        bigint format_version
+        bigint lake_snapshot
+        varchar origin_run_id
+        varchar writeback_policy_id FK
+        varchar master_record_key
+        bigint member_count
+        json proposal
+        json field_changes
+        json related_counts
+        varchar related_counts_state "in {known, unavailable}"
+        varchar status "in {approved, planned, rejected, superseded}"
+        varchar decided_by
+        timestamp decided_at
+        varchar decision_reason
+        timestamp created_at
+        timestamp updated_at
+    }
+    merge_preview_journal {
+        varchar id PK
+        varchar org_id FK
+        varchar dataset_id FK
+        varchar merge_preview_id FK
+        varchar from_status
+        varchar to_status
+        varchar fingerprint
+        varchar actor
+        timestamp created_at
+        timestamp updated_at
+    }
     orgs {
         varchar id PK
         varchar name
@@ -396,6 +433,19 @@ erDiagram
         timestamp created_at
         timestamp updated_at
     }
+    writeback_policies {
+        varchar id PK
+        varchar org_id FK
+        varchar dataset_id FK
+        varchar salesforce_connection_id FK
+        varchar object "in {Account, Contact, Lead}"
+        varchar election_policy
+        json writeback_allowlist
+        json field_mapping
+        varchar created_by
+        timestamp created_at
+        timestamp updated_at
+    }
     api_keys }o--|| orgs : "org_id → id"
     config_versions }o--|| orgs : "org_id → id"
     config_versions }o--|| datasets : "dataset_id → id"
@@ -406,6 +456,13 @@ erDiagram
     jobs }o..|| datasets : "dataset_id → id"
     matching_models }o--|| orgs : "org_id → id"
     matching_models }o--|| datasets : "dataset_id → id"
+    merge_previews }o--|| orgs : "org_id → id"
+    merge_previews }o--|| datasets : "dataset_id → id"
+    merge_previews }o--|| salesforce_connections : "salesforce_connection_id → id"
+    merge_previews }o--|| writeback_policies : "writeback_policy_id → id"
+    merge_preview_journal }o--|| orgs : "org_id → id"
+    merge_preview_journal }o--|| datasets : "dataset_id → id"
+    merge_preview_journal }o--|| merge_previews : "merge_preview_id → id"
     pair_labels }o--|| orgs : "org_id → id"
     pair_labels }o--|| datasets : "dataset_id → id"
     remote_attempts }o--|| orgs : "org_id → id"
@@ -438,6 +495,9 @@ erDiagram
     webhook_deliveries }o--|| orgs : "org_id → id"
     webhook_deliveries }o..|| datasets : "dataset_id → id"
     webhook_deliveries }o--|| webhooks : "webhook_id → id"
+    writeback_policies }o--|| orgs : "org_id → id"
+    writeback_policies }o--|| datasets : "dataset_id → id"
+    writeback_policies }o--|| salesforce_connections : "salesforce_connection_id → id"
 ```
 
 | relation | description |
@@ -451,6 +511,8 @@ erDiagram
 | `fixups` | The control-plane fixup ledger: one row per named, idempotent data/constraint fixup ensure_schema has applied. Fixups are what the declarative reconciler deliberately never does — backfills, constraint swaps, natural-key changes, NOT NULL tightening — expressed as ordered Rust steps that run semantics-once between the baseline replay and the reconcile pass. |
 | `jobs` | A unit of work on the dispatcher's queue: its kind, params, lifecycle state and retry bookkeeping. |
 | `matching_models` | An immutable version of a tenant's matching model: the settings document the engine scores against, its hash, provenance and activation state. |
+| `merge_previews` | One immutable writeback proposal for a duplicate group in one connection's object (#993, #1305): the members' synchronized preimages, the elected master, the field changes, and the identity (snapshot, policy revision, fingerprint) an approval binds. Content columns never change; only the decision columns move, through a compare-and-set that names the fingerprint. A newer proposal for the same group supersedes a planned one rather than editing it. Contains customer data: never logged. |
+| `merge_preview_journal` | Every state change of a merge preview, append-only (#1305): planned, approved, rejected, superseded — and, from #995, the apply states. Written in the same transaction as the change it records, so the journal and the preview cannot disagree. |
 | `orgs` | A tenant: its config pointer, lake env, lifecycle state and active config version. |
 | `pair_labels` | A human (or model) verdict on one candidate pair — the training signal the engine has always been able to learn from and never had. One row per (org, pair): a re-label corrects the previous verdict rather than stacking another. |
 | `remote_attempts` | Write-ahead remote execution identity and dataset fence; unresolved attempts survive task termination and dispatcher restarts. No SQL, parameters, profiles or credentials are stored. |
@@ -467,6 +529,7 @@ erDiagram
 | `tenant_schema_states` | The control plane's cache of each tenant lake's schema position: the catalog version the lake was last reconciled or checked against and how that went. The lake's own schema_migrations ledger is authoritative; this row is what the deploy report and the drift check read without opening every lake. |
 | `webhooks` | A tenant webhook endpoint: its URL, subscribed events and signing secret. |
 | `webhook_deliveries` | One attempt-tracked delivery of one event to one subscriber. The event is recorded here BEFORE any network call, so a subscriber that is briefly unreachable gets the event late instead of never. |
+| `writeback_policies` | Which provider fields a dataset may write back to one connection's object, and how a master is elected there (#1305). Append-only: a change is a new row, and a row's id is the policy REVISION a merge preview binds, so an approval can be refused when the policy it was proposed under is no longer the active one. No row for a (connection, object) means nothing is proposed — the feature is opt-in and fails closed. |
 
 ## Frontend BFF — Postgres `erweb`
 

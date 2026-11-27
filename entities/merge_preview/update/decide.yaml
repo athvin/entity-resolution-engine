@@ -1,0 +1,13 @@
+kind: statement
+operation: update
+mode: partial
+description: "The approval compare-and-set: move a PLANNED preview with exactly this fingerprint to approved or rejected. Zero rows means it was not planned, not this fingerprint, or not in scope; the caller re-reads to say which."
+params:
+  - { name: to_status, type: varchar }
+  - { name: decided_by, type: varchar }
+  - { name: decision_reason, type: varchar, nullable: true }
+  - { name: id, type: varchar }
+  - { name: org_id, type: varchar }
+  - { name: dataset_id, type: varchar }
+  - { name: fingerprint, type: varchar }
+returns: entity

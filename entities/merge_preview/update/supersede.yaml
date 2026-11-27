@@ -1,0 +1,12 @@
+kind: statement
+operation: update
+mode: partial
+description: "Supersede every PLANNED preview of a group whose content has moved on (a different fingerprint). Decided previews are history and never change."
+params:
+  - { name: org_id, type: varchar }
+  - { name: dataset_id, type: varchar }
+  - { name: salesforce_connection_id, type: varchar }
+  - { name: object, type: varchar }
+  - { name: entity_id, type: varchar }
+  - { name: fingerprint, type: varchar }
+returns: entity

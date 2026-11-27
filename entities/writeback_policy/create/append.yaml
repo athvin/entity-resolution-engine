@@ -1,0 +1,15 @@
+kind: statement
+operation: create
+mode: partial
+description: "Append a new revision of a (connection, object) writeback policy. Never an update: the previous revision stays, so a preview bound to it can be recognised as stale."
+params:
+  - { name: id, type: varchar }
+  - { name: org_id, type: varchar }
+  - { name: dataset_id, type: varchar }
+  - { name: salesforce_connection_id, type: varchar }
+  - { name: object, type: varchar }
+  - { name: election_policy, type: varchar }
+  - { name: writeback_allowlist, type: json }
+  - { name: field_mapping, type: json }
+  - { name: created_by, type: varchar }
+returns: entity

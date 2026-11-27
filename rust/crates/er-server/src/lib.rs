@@ -10059,6 +10059,509 @@ async fn abort_upload(
     }
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WritebackPolicyIn {
+    /// The Salesforce connection, which must belong to this org.
+    connection_id: String,
+    /// `Lead`, `Contact` or `Account`.
+    object: String,
+    /// One of the master election policies; defaults to the platform default.
+    #[serde(default)]
+    election_policy: Option<String>,
+    /// Provider fields a merge may write on the master.
+    writeback_allowlist: Vec<String>,
+    /// Canonical attribute → provider field.
+    field_mapping: std::collections::BTreeMap<String, String>,
+}
+
+/// A writeback policy revision.
+#[derive(Serialize, utoipa::ToSchema)]
+struct WritebackPolicyView {
+    /// The revision id a merge preview binds.
+    id: String,
+    connection_id: String,
+    object: String,
+    election_policy: String,
+    writeback_allowlist: Value,
+    field_mapping: Value,
+    created_by: String,
+    /// RFC 3339.
+    created_at: String,
+}
+
+impl From<&er_entities::writeback_policy::WritebackPolicy> for WritebackPolicyView {
+    fn from(p: &er_entities::writeback_policy::WritebackPolicy) -> Self {
+        Self {
+            id: p.id.clone(),
+            connection_id: p.salesforce_connection_id.clone(),
+            object: p.object.clone(),
+            election_policy: p.election_policy.clone(),
+            writeback_allowlist: p.writeback_allowlist.clone(),
+            field_mapping: p.field_mapping.clone(),
+            created_by: p.created_by.clone(),
+            created_at: pg::ts(&p.created_at),
+        }
+    }
+}
+
+/// The active writeback policies of a dataset.
+#[derive(Serialize, utoipa::ToSchema)]
+struct WritebackPolicyList {
+    items: Vec<WritebackPolicyView>,
+}
+
+/// One merge preview, without its member snapshots.
+#[derive(Serialize, utoipa::ToSchema)]
+struct MergePreviewSummary {
+    id: String,
+    connection_id: String,
+    object: String,
+    entity_id: String,
+    /// Name it to approve or reject.
+    fingerprint: String,
+    /// `planned`, `approved`, `rejected` or `superseded`.
+    status: String,
+    master_record_key: String,
+    member_count: i64,
+    lake_snapshot: i64,
+    /// The writeback policy revision it was built under.
+    policy_revision: String,
+    /// RFC 3339.
+    created_at: String,
+}
+
+impl From<&er_entities::merge_preview::MergePreview> for MergePreviewSummary {
+    fn from(p: &er_entities::merge_preview::MergePreview) -> Self {
+        Self {
+            id: p.id.clone(),
+            connection_id: p.salesforce_connection_id.clone(),
+            object: p.object.clone(),
+            entity_id: p.entity_id.clone(),
+            fingerprint: p.fingerprint.clone(),
+            status: p.status.clone(),
+            master_record_key: p.master_record_key.clone(),
+            member_count: p.member_count,
+            lake_snapshot: p.lake_snapshot,
+            policy_revision: p.writeback_policy_id.clone(),
+            created_at: pg::ts(&p.created_at),
+        }
+    }
+}
+
+/// A page of merge previews.
+#[derive(Serialize, utoipa::ToSchema)]
+struct MergePreviewPage {
+    items: Vec<MergePreviewSummary>,
+    /// Pass as `cursor` for the next page; null on the last.
+    next_cursor: Option<String>,
+}
+
+/// One state change in a preview's history.
+#[derive(Serialize, utoipa::ToSchema)]
+struct MergePreviewEvent {
+    from_status: Option<String>,
+    to_status: String,
+    fingerprint: String,
+    actor: String,
+    /// RFC 3339.
+    at: String,
+}
+
+/// A merge preview in full: what approving it would do.
+#[derive(Serialize, utoipa::ToSchema)]
+struct MergePreviewDetail {
+    summary: MergePreviewSummary,
+    /// The members' synchronized preimages, the master and the policy inputs
+    /// (the persisted proposal).
+    proposal: Value,
+    /// Provider field → `{before, after}` on the master.
+    field_changes: Value,
+    /// Related-record counts per member; null while `related_counts_state` is
+    /// `unavailable`.
+    related_counts: Option<Value>,
+    related_counts_state: String,
+    decided_by: Option<String>,
+    decision_reason: Option<String>,
+    history: Vec<MergePreviewEvent>,
+}
+
+/// The query parameters of `merge_previews_list`.
+#[derive(Debug, Clone, Default, Deserialize)]
+struct MergePreviewsQuery {
+    /// Only previews in this state.
+    status: Option<String>,
+    /// The `next_cursor` of the previous page.
+    cursor: Option<String>,
+    /// Maximum items, 1–200; default 50.
+    limit: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PreviewDecisionIn {
+    /// The fingerprint of the preview being decided — what the caller saw.
+    fingerprint: String,
+    #[serde(default)]
+    reason: Option<String>,
+}
+
+/// Admin+: set the writeback policy for one connection's object
+/// (`PUT /v1/orgs/{org}/datasets/{ds}/writeback/policies`). Appends a new
+/// revision; previews built under the previous one can no longer be approved.
+/// Without a policy nothing is proposed for that object.
+async fn put_writeback_policy(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, ds)): Path<(String, String)>,
+    Json(body): Json<WritebackPolicyIn>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Admin) {
+        return e.into_response();
+    }
+    if !matches!(body.object.as_str(), "Lead" | "Contact" | "Account") {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "object must be Lead, Contact or Account",
+        );
+    }
+    let election = body
+        .election_policy
+        .clone()
+        .unwrap_or_else(|| er_golden::DEFAULT_MASTER_ELECTION_POLICY.to_string());
+    if !er_golden::MASTER_ELECTION_POLICIES.contains(&election.as_str()) {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!(
+                "election_policy must be one of {}",
+                er_golden::MASTER_ELECTION_POLICIES.join(", ")
+            ),
+        );
+    }
+    let valid_field = |f: &str| {
+        let mut b = f.bytes();
+        b.next().is_some_and(|c| c.is_ascii_alphabetic())
+            && b.all(|c| c.is_ascii_alphanumeric() || c == b'_')
+            && !f.eq_ignore_ascii_case("Id")
+            && !f.eq_ignore_ascii_case("SystemModstamp")
+    };
+    if let Some(bad) = body
+        .writeback_allowlist
+        .iter()
+        .chain(body.field_mapping.values())
+        .find(|f| !valid_field(f))
+    {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!(
+                "{bad:?} is not a writable provider field name (Id and SystemModstamp never are)"
+            ),
+        );
+    }
+    let Some(dsn) = &state.dsn else {
+        return detail_err(StatusCode::NOT_IMPLEMENTED, "writeback requires Postgres");
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
+    let d = match dataset_or_404(&client, &org_row, &ds).await {
+        Ok(d) => d,
+        Err(r) => return *r,
+    };
+    match pg::list_salesforce_connections(&client, &org_row.id).await {
+        Ok(conns) if conns.iter().any(|c| c.id == body.connection_id && c.active) => {}
+        Ok(_) => {
+            return detail_err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "connection_id names no active connection of this org",
+            );
+        }
+        Err(e) => return pg_err(e),
+    }
+    let _ = pg::set_actor(&client, &principal.actor).await;
+    match pg::append_writeback_policy(
+        &client,
+        &org_row.id,
+        &d.id,
+        &body.connection_id,
+        &body.object,
+        &election,
+        &json!(body.writeback_allowlist),
+        &json!(body.field_mapping),
+        &principal.actor,
+    )
+    .await
+    {
+        Ok(p) => Json(WritebackPolicyView::from(&p)).into_response(),
+        Err(e) => pg_err(e),
+    }
+}
+
+/// Viewer+: a dataset's active writeback policies
+/// (`GET /v1/orgs/{org}/datasets/{ds}/writeback/policies`).
+async fn list_writeback_policies(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, ds)): Path<(String, String)>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let (client, _, d) = match upload_scope_any(&state, &org, &ds).await {
+        Ok(t) => t,
+        Err(r) => return *r,
+    };
+    match pg::active_writeback_policies(&client, &d.org_id, &d.id).await {
+        Ok(rows) => Json(WritebackPolicyList {
+            items: rows.iter().map(WritebackPolicyView::from).collect(),
+        })
+        .into_response(),
+        Err(e) => pg_err(e),
+    }
+}
+
+/// Viewer+: a page of merge previews
+/// (`GET /v1/orgs/{org}/datasets/{ds}/merge-previews`), optionally one `status`.
+async fn merge_previews_list(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, ds)): Path<(String, String)>,
+    Query(params): Query<MergePreviewsQuery>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let (client, _, d) = match upload_scope_any(&state, &org, &ds).await {
+        Ok(t) => t,
+        Err(r) => return *r,
+    };
+    let limit = params
+        .limit
+        .as_deref()
+        .and_then(|l| l.parse::<i64>().ok())
+        .unwrap_or(50)
+        .clamp(1, 200);
+    let status = params.status.unwrap_or_default();
+    let after = params.cursor.unwrap_or_default();
+    match er_entities::merge_preview::read::page(
+        &client,
+        &d.org_id,
+        &d.id,
+        &status,
+        &after,
+        limit + 1,
+    )
+    .await
+    {
+        Ok(mut rows) => {
+            let more = rows.len() > usize::try_from(limit).unwrap_or(usize::MAX);
+            rows.truncate(usize::try_from(limit).unwrap_or(usize::MAX));
+            Json(MergePreviewPage {
+                next_cursor: if more {
+                    rows.last().map(|r| r.id.clone())
+                } else {
+                    None
+                },
+                items: rows.iter().map(MergePreviewSummary::from).collect(),
+            })
+            .into_response()
+        }
+        Err(e) => pg_err(e),
+    }
+}
+
+/// Viewer+: one merge preview in full, with its history
+/// (`GET /v1/orgs/{org}/datasets/{ds}/merge-previews/{preview_id}`).
+async fn merge_preview_detail(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, ds, preview_id)): Path<(String, String, String)>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let (client, _, d) = match upload_scope_any(&state, &org, &ds).await {
+        Ok(t) => t,
+        Err(r) => return *r,
+    };
+    let row = match er_entities::merge_preview::read::by_id(&client, &preview_id, &d.org_id, &d.id)
+        .await
+    {
+        Ok(rows) => match rows.into_iter().next() {
+            Some(r) => r,
+            None => return detail_err(StatusCode::NOT_FOUND, "no such merge preview"),
+        },
+        Err(e) => return pg_err(e),
+    };
+    let history = match er_entities::merge_preview_journal::read::by_preview(
+        &client, &d.org_id, &d.id, &row.id,
+    )
+    .await
+    {
+        Ok(rows) => rows
+            .iter()
+            .map(|j| MergePreviewEvent {
+                from_status: j.from_status.clone(),
+                to_status: j.to_status.clone(),
+                fingerprint: j.fingerprint.clone(),
+                actor: j.actor.clone(),
+                at: pg::ts(&j.created_at),
+            })
+            .collect(),
+        Err(e) => return pg_err(e),
+    };
+    Json(MergePreviewDetail {
+        summary: MergePreviewSummary::from(&row),
+        proposal: row.proposal.clone(),
+        field_changes: row.field_changes.clone(),
+        related_counts: row.related_counts.clone(),
+        related_counts_state: row.related_counts_state.clone(),
+        decided_by: row.decided_by.clone(),
+        decision_reason: row.decision_reason.clone(),
+        history,
+    })
+    .into_response()
+}
+
+/// Steward+: approve a merge preview
+/// (`POST /v1/orgs/{org}/datasets/{ds}/merge-previews/{preview_id}/approve`).
+/// Binds exactly the proposal whose `fingerprint` is named: a stale
+/// fingerprint, a decided preview, a policy revision no longer active, or a
+/// connection no longer active is a 409. Approving twice is idempotent.
+/// Approval writes nothing to Salesforce; applying approved merges is #995.
+async fn approve_merge_preview(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, ds, preview_id)): Path<(String, String, String)>,
+    Json(body): Json<PreviewDecisionIn>,
+) -> impl IntoResponse {
+    decide_merge_preview(&principal, &state, &org, &ds, &preview_id, body, "approved").await
+}
+
+/// Steward+: reject a merge preview
+/// (`POST /v1/orgs/{org}/datasets/{ds}/merge-previews/{preview_id}/reject`).
+/// The same contract as approve; a rejected preview can never be approved.
+async fn reject_merge_preview(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, ds, preview_id)): Path<(String, String, String)>,
+    Json(body): Json<PreviewDecisionIn>,
+) -> impl IntoResponse {
+    decide_merge_preview(&principal, &state, &org, &ds, &preview_id, body, "rejected").await
+}
+
+async fn decide_merge_preview(
+    principal: &Principal,
+    state: &AppState,
+    org: &str,
+    ds: &str,
+    preview_id: &str,
+    body: PreviewDecisionIn,
+    to_status: &str,
+) -> axum::response::Response {
+    if let Err(e) = guard(principal, org, Role::Steward) {
+        return e.into_response();
+    }
+    let (mut client, _, d) = match upload_scope_any(state, org, ds).await {
+        Ok(t) => t,
+        Err(r) => return *r,
+    };
+    let row = match er_entities::merge_preview::read::by_id(&client, preview_id, &d.org_id, &d.id)
+        .await
+    {
+        Ok(rows) => match rows.into_iter().next() {
+            Some(r) => r,
+            None => return detail_err(StatusCode::NOT_FOUND, "no such merge preview"),
+        },
+        Err(e) => return pg_err(e),
+    };
+    if to_status == "approved" && row.status == "planned" {
+        // The stored bytes must still rebuild to the fingerprint the caller
+        // saw, under a policy revision and connection that are still live.
+        match writeback::PersistedProposalV1::restore(&row.proposal) {
+            Ok(p) if p.fingerprint() == row.fingerprint => {}
+            _ => {
+                return detail_err(
+                    StatusCode::CONFLICT,
+                    "the stored proposal no longer validates; regenerate previews",
+                );
+            }
+        }
+        match pg::active_writeback_policies(&client, &d.org_id, &d.id).await {
+            Ok(active) if active.iter().any(|p| p.id == row.writeback_policy_id) => {}
+            Ok(_) => {
+                return detail_err(
+                    StatusCode::CONFLICT,
+                    "the writeback policy this preview was built under has been replaced; regenerate previews",
+                );
+            }
+            Err(e) => return pg_err(e),
+        }
+        match pg::list_salesforce_connections(&client, &d.org_id).await {
+            Ok(conns)
+                if conns
+                    .iter()
+                    .any(|c| c.id == row.salesforce_connection_id && c.active) => {}
+            Ok(_) => {
+                return detail_err(
+                    StatusCode::CONFLICT,
+                    "the preview's connection is no longer active",
+                );
+            }
+            Err(e) => return pg_err(e),
+        }
+    }
+    match pg::decide_preview(
+        &mut client,
+        &d.org_id,
+        &d.id,
+        preview_id,
+        &body.fingerprint,
+        to_status,
+        &principal.actor,
+        body.reason.as_deref(),
+    )
+    .await
+    {
+        Ok(pg::Decision::Decided(r) | pg::Decision::AlreadyDecided(r)) => {
+            Json(MergePreviewSummary::from(&r)).into_response()
+        }
+        Ok(pg::Decision::StaleFingerprint) => detail_err(
+            StatusCode::CONFLICT,
+            "fingerprint does not match the preview; re-read it before deciding",
+        ),
+        Ok(pg::Decision::NotPlanned(status)) => {
+            detail_err(StatusCode::CONFLICT, format!("the preview is {status}"))
+        }
+        Ok(pg::Decision::NotFound) => detail_err(StatusCode::NOT_FOUND, "no such merge preview"),
+        Err(e) => pg_err(e),
+    }
+}
+
+/// The org and dataset a dataset-scoped Postgres read is for.
+async fn upload_scope_any(
+    state: &AppState,
+    org: &str,
+    ds: &str,
+) -> Result<(tokio_postgres::Client, pg::OrgDetail, pg::DatasetDetail), Box<axum::response::Response>>
+{
+    let Some(dsn) = &state.dsn else {
+        return Err(Box::new(detail_err(
+            StatusCode::NOT_IMPLEMENTED,
+            "requires Postgres",
+        )));
+    };
+    let client = connect_pg(dsn).await?;
+    let org_row = org_or_404(&client, org).await?;
+    let d = dataset_or_404(&client, &org_row, ds).await?;
+    Ok((client, org_row, d))
+}
+
 /// The query parameters of `imports_list`.
 #[derive(Debug, Clone, Default, Deserialize)]
 struct ImportsListQuery {
@@ -14608,6 +15111,26 @@ fn build_routes(state: AppState) -> Router {
             get(imports_list)
                 .post(upload_import)
                 .layer(axum::extract::DefaultBodyLimit::max(max_import_bytes)),
+        )
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/writeback/policies",
+            get(list_writeback_policies).put(put_writeback_policy),
+        )
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/merge-previews",
+            get(merge_previews_list),
+        )
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/merge-previews/{preview_id}",
+            get(merge_preview_detail),
+        )
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/merge-previews/{preview_id}/approve",
+            post(approve_merge_preview),
+        )
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/merge-previews/{preview_id}/reject",
+            post(reject_merge_preview),
         )
         .route("/v1/orgs/{org}/datasets/{ds}/uploads", post(create_upload))
         .route(

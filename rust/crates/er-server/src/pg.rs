@@ -2490,3 +2490,222 @@ pub async fn ambiguous_provenance_sources(
         .collect(),
     )
 }
+
+// ---- merge previews and writeback policy (#1305) ----------------------------
+
+/// Append a writeback policy revision.
+///
+/// # Errors
+/// Propagates the insert error.
+#[allow(clippy::too_many_arguments)]
+pub async fn append_writeback_policy(
+    client: &Client,
+    org_id: &str,
+    dataset_id: &str,
+    connection_id: &str,
+    object: &str,
+    election_policy: &str,
+    allowlist: &serde_json::Value,
+    field_mapping: &serde_json::Value,
+    actor: &str,
+) -> Result<er_entities::writeback_policy::WritebackPolicy, PgError> {
+    Ok(er_entities::writeback_policy::create::append(
+        client,
+        &er_ids::new_v7(),
+        org_id,
+        dataset_id,
+        connection_id,
+        object,
+        election_policy,
+        allowlist,
+        field_mapping,
+        actor,
+    )
+    .await?
+    .into_iter()
+    .next()
+    .expect("append RETURNING yields one row"))
+}
+
+/// The active policy revision per (connection, object) of a dataset.
+///
+/// # Errors
+/// Propagates the query error.
+pub async fn active_writeback_policies(
+    client: &Client,
+    org_id: &str,
+    dataset_id: &str,
+) -> Result<Vec<er_entities::writeback_policy::WritebackPolicy>, PgError> {
+    er_entities::writeback_policy::read::active(client, org_id, dataset_id).await
+}
+
+/// A validated proposal and the context the store needs beside it.
+pub struct PreviewToPublish<'a> {
+    pub org_id: &'a str,
+    pub dataset_id: &'a str,
+    pub origin_run_id: &'a str,
+    pub policy_id: &'a str,
+    pub proposal: &'a crate::writeback::MergeProposal,
+    pub persisted: &'a serde_json::Value,
+    pub actor: &'a str,
+}
+
+/// Publish a proposal and supersede the group's older PLANNED previews, with
+/// their journal rows, in one transaction. `None` when an identical proposal
+/// is already stored — regeneration is idempotent.
+///
+/// # Errors
+/// Propagates the transaction error.
+pub async fn publish_preview(
+    client: &mut Client,
+    p: &PreviewToPublish<'_>,
+) -> Result<Option<er_entities::merge_preview::MergePreview>, PgError> {
+    let content = p.proposal.content();
+    let scope = &content.scope;
+    let object = match scope.provider.object {
+        crate::writeback::MergeObject::Lead => "Lead",
+        crate::writeback::MergeObject::Contact => "Contact",
+        crate::writeback::MergeObject::Account => "Account",
+    };
+    let field_changes = serde_json::to_value(&content.field_changes).unwrap_or_default();
+    let tx = client.transaction().await?;
+    let published = er_entities::merge_preview::create::publish(
+        &tx,
+        &er_ids::new_v7(),
+        p.org_id,
+        p.dataset_id,
+        &scope.provider.connection_id,
+        object,
+        &scope.entity_id,
+        p.proposal.fingerprint(),
+        i64::from(crate::writeback::PersistedProposalV1::FORMAT_VERSION),
+        scope.lake_snapshot,
+        p.origin_run_id,
+        p.policy_id,
+        &content.master.record_key,
+        i64::try_from(content.victims.len() + 1).unwrap_or(i64::MAX),
+        p.persisted,
+        &field_changes,
+        None,
+        "unavailable",
+    )
+    .await?
+    .into_iter()
+    .next();
+    if let Some(row) = &published {
+        let superseded = er_entities::merge_preview::update::supersede(
+            &tx,
+            p.org_id,
+            p.dataset_id,
+            &scope.provider.connection_id,
+            object,
+            &scope.entity_id,
+            &row.fingerprint,
+        )
+        .await?;
+        for old in &superseded {
+            er_entities::merge_preview_journal::create::append(
+                &tx,
+                &er_ids::new_v7(),
+                p.org_id,
+                p.dataset_id,
+                &old.id,
+                Some("planned"),
+                "superseded",
+                &old.fingerprint,
+                p.actor,
+            )
+            .await?;
+        }
+        er_entities::merge_preview_journal::create::append(
+            &tx,
+            &er_ids::new_v7(),
+            p.org_id,
+            p.dataset_id,
+            &row.id,
+            None,
+            "planned",
+            &row.fingerprint,
+            p.actor,
+        )
+        .await?;
+    }
+    tx.commit().await?;
+    Ok(published)
+}
+
+/// What a decision on a preview came to.
+pub enum Decision {
+    /// This request moved it.
+    Decided(er_entities::merge_preview::MergePreview),
+    /// It was already in the requested state for this fingerprint.
+    AlreadyDecided(er_entities::merge_preview::MergePreview),
+    /// It names a different fingerprint than the request.
+    StaleFingerprint,
+    /// It is in another state; the decision cannot apply.
+    NotPlanned(String),
+    NotFound,
+}
+
+/// Approve or reject a preview: the compare-and-set and its journal row in one
+/// transaction.
+///
+/// # Errors
+/// Propagates the transaction error.
+#[allow(clippy::too_many_arguments)]
+pub async fn decide_preview(
+    client: &mut Client,
+    org_id: &str,
+    dataset_id: &str,
+    id: &str,
+    fingerprint: &str,
+    to_status: &str,
+    actor: &str,
+    reason: Option<&str>,
+) -> Result<Decision, PgError> {
+    let tx = client.transaction().await?;
+    let moved = er_entities::merge_preview::update::decide(
+        &tx,
+        to_status,
+        actor,
+        reason,
+        id,
+        org_id,
+        dataset_id,
+        fingerprint,
+    )
+    .await?
+    .into_iter()
+    .next();
+    if let Some(row) = moved {
+        er_entities::merge_preview_journal::create::append(
+            &tx,
+            &er_ids::new_v7(),
+            org_id,
+            dataset_id,
+            &row.id,
+            Some("planned"),
+            to_status,
+            &row.fingerprint,
+            actor,
+        )
+        .await?;
+        tx.commit().await?;
+        return Ok(Decision::Decided(row));
+    }
+    tx.rollback().await?;
+    let Some(row) = er_entities::merge_preview::read::by_id(client, id, org_id, dataset_id)
+        .await?
+        .into_iter()
+        .next()
+    else {
+        return Ok(Decision::NotFound);
+    };
+    Ok(if row.fingerprint != fingerprint {
+        Decision::StaleFingerprint
+    } else if row.status == to_status {
+        Decision::AlreadyDecided(row)
+    } else {
+        Decision::NotPlanned(row.status)
+    })
+}

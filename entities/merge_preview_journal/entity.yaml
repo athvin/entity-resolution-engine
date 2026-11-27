@@ -1,0 +1,61 @@
+kind: entity
+version: 1
+name: merge_preview_journal
+relation: merge_preview_journal
+description: "Every state change of a merge preview, append-only (#1305): planned, approved, rejected, superseded — and, from #995, the apply states. Written in the same transaction as the change it records, so the journal and the preview cannot disagree."
+key: [id]
+generate:
+  stores: [postgres]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "UUIDv7, minted by the application."
+  - name: org_id
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: id }
+    description: "The tenant; denormalized beside the dataset scope per V17."
+  - name: dataset_id
+    type: varchar
+    nullable: false
+    references: { relation: datasets, column: id }
+    description: "The dataset whose resolution results this concerns."
+  - name: merge_preview_id
+    type: varchar
+    nullable: false
+    references: { relation: merge_previews, column: id }
+    description: "The preview that changed."
+  - name: from_status
+    type: varchar
+    description: "The state before; NULL for the first entry."
+  - name: to_status
+    type: varchar
+    nullable: false
+    description: "The state after."
+  - name: fingerprint
+    type: varchar
+    nullable: false
+    description: "The proposal fingerprint the change concerned."
+  - name: actor
+    type: varchar
+    nullable: false
+    description: "The principal or job that made the change."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the row was written."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the row last changed."
+indexes:
+  - name: merge_preview_journal_preview
+    columns: [dataset_id, merge_preview_id, id]
+  - name: merge_preview_journal_org
+    columns: [org_id, dataset_id]

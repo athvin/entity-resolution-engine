@@ -1,0 +1,23 @@
+kind: statement
+operation: create
+mode: partial
+description: "Publish a proposal. Idempotent on (dataset, fingerprint): regenerating identical content returns no row and changes nothing."
+params:
+  - { name: id, type: varchar }
+  - { name: org_id, type: varchar }
+  - { name: dataset_id, type: varchar }
+  - { name: salesforce_connection_id, type: varchar }
+  - { name: object, type: varchar }
+  - { name: entity_id, type: varchar }
+  - { name: fingerprint, type: varchar }
+  - { name: format_version, type: bigint }
+  - { name: lake_snapshot, type: bigint }
+  - { name: origin_run_id, type: varchar }
+  - { name: writeback_policy_id, type: varchar }
+  - { name: master_record_key, type: varchar }
+  - { name: member_count, type: bigint }
+  - { name: proposal, type: json }
+  - { name: field_changes, type: json }
+  - { name: related_counts, type: json, nullable: true }
+  - { name: related_counts_state, type: varchar }
+returns: entity

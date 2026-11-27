@@ -1,0 +1,9 @@
+kind: statement
+operation: read
+mode: full
+description: "One preview, scoped to its org and dataset (another scope's id reads as absent)."
+params:
+  - { name: id, type: varchar }
+  - { name: org_id, type: varchar }
+  - { name: dataset_id, type: varchar }
+returns: entity
