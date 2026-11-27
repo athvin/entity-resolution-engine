@@ -154,6 +154,7 @@ fn variant(kind: JobKind) -> &'static str {
         JobKind::Extract => "Extract",
         JobKind::Export => "Export",
         JobKind::MergePreview => "MergePreview",
+        JobKind::MergeApply => "MergeApply",
     }
 }
 

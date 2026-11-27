@@ -62,6 +62,10 @@ pub struct ExecutorConfig {
     /// Orgs enrolled in the chart/Terraform tenant-runner registry. All other
     /// orgs use the unprivileged runner account, never another org's identity.
     pub runner_orgs: BTreeSet<String>,
+    /// The outbound URL guard for control tasks that call a provider (#995's
+    /// merge apply). Always `Guarded` in product code; the executor harness
+    /// passes `Unguarded` so a Postgres-tier test can reach a local mock.
+    pub egress: crate::urlguard::Egress,
 }
 
 impl ExecutorConfig {
@@ -104,6 +108,7 @@ impl ExecutorConfig {
             .map(|dir| load_class_templates(std::path::Path::new(&dir)))
             .unwrap_or_default();
         Some(ExecutorConfig {
+            egress: crate::urlguard::Egress::Guarded,
             runner_orgs,
             profile: crate::provision::Profile::from_env(),
             in_flight_cap,
@@ -660,7 +665,15 @@ impl Executor {
             order: &order,
             client: &self.client,
         };
-        match dags::run_control_task(kind, &row.task_id, &mut ctx, &self.cfg.profile).await {
+        match dags::run_control_task(
+            kind,
+            &row.task_id,
+            &mut ctx,
+            &self.cfg.profile,
+            self.cfg.egress,
+        )
+        .await
+        {
             Ok(run) => {
                 let _ = er_entities::task_instance::update::finish_control(
                     &self.client,
@@ -1733,6 +1746,7 @@ mod class_template_tests {
         let templates = load_class_templates(&dir);
         assert_eq!(templates.keys().collect::<Vec<_>>(), ["L", "S"]);
         let cfg = ExecutorConfig {
+            egress: crate::urlguard::Egress::Guarded,
             profile: Ok(None),
             in_flight_cap: 1,
             template: "default".into(),

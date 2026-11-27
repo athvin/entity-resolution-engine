@@ -271,6 +271,8 @@ const DATASET_SCOPED: &[(&str, bool)] = &[
     ("merge_previews", true),
     ("merge_preview_journal", true),
     ("merge_preview_watermarks", true),
+    ("merge_applies", true),
+    ("merge_apply_operations", true),
     ("jobs", false),
     ("task_instances", false),
 ];

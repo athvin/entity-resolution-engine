@@ -315,6 +315,33 @@ start route refuses any other `redirect_uri` with 422, and answers 503 while the
 list is empty. The page at the redirect reads `code` and `state` from its query
 and posts them to `…/complete` with the same credential that started the flow.
 
+### 4.3.2 Journaled apply (as built, #995)
+
+`POST /v1/orgs/{org}/datasets/{ds}/merge-previews/apply` (Admin; 409 when
+nothing is approved) queues a `merge_apply` job: ONE control task,
+`apply_merges` (`src/merge_apply.rs`), acting through the connection's delegated
+grant (§4.3.1). Control tasks run one at a time, so two apply jobs never
+overlap. Per job: at most 25 groups and 100 provider mutations.
+
+| Step | Mechanism |
+|---|---|
+| `APPROVED → APPLYING` | `merge_apply/create/begin`: a conditional insert under a unique index on the preview — at most once, journaled in the same transaction |
+| exact proposal | restored through `MergeProposal::build`; its fingerprint must equal the approved one |
+| re-read | `queryAll` of every member's `SystemModstamp`, `IsDeleted`, `MasterRecordId` before any write |
+| stale | a moved modstamp → `SKIPPED_STALE`, and an incremental `extract` of the object is queued so the next generation re-scores it |
+| external merge | a victim deleted with `MasterRecordId` = master is evidence; all victims so → `APPLIED_EXTERNALLY`. Missing, or merged elsewhere → `FAILED` |
+| preimage | written once (`merge_apply.preimage`) before the first mutation |
+| operations | `merge_apply_operations`: written IN FLIGHT before each call (master PATCH, then SOAP `merge()` in batches of 2) and settled after |
+| crash / lost response | an in-flight operation is resolved by the next run's re-read — proven landed (`verified`), proven not landed (re-attempted), or `FAILED` as unresolvable; never replayed blind |
+| rate limits | 429/503 retried 3× with backoff, honouring `Retry-After` up to 30s; otherwise the group stays `APPLYING` and the job stops |
+| budget | `REQUEST_LIMIT_EXCEEDED` stops the job; the begun group resumes next run |
+| isolation | a refused operation fails its group only; the batch continues |
+| cancellation | checked between groups |
+
+A mutation that may have reached Salesforce (timeout, reset, 5xx other than 503)
+is never retried in-call. Every transition is on the preview's history
+(`GET …/merge-previews/{id}`).
+
 ### 4.4 Explicit v1 boundaries
 
 - Writeback via `merge()` (Lead/Contact/Account) and `upsert`.

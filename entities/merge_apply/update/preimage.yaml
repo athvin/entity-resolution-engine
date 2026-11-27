@@ -1,0 +1,9 @@
+kind: statement
+operation: update
+mode: partial
+description: "Record the preimage, once, before any mutation."
+params:
+  - { name: preimage, type: varchar }
+  - { name: id, type: varchar }
+  - { name: org_id, type: varchar }
+returns: entity

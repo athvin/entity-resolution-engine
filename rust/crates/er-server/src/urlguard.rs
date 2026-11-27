@@ -39,7 +39,9 @@ use std::net::IpAddr;
 /// off in production. The only unguarded path is
 /// [`crate::webhook::drain_once_with_egress`], which exists so the delivery
 /// integration test can POST to a local listener, and which
-/// `tests/egress_guard.rs` forbids product code from naming.
+/// `tests/egress_guard.rs` forbids product code from naming. The executor
+/// carries an `Egress` in its config for the same reason (the merge-apply
+/// test's mock Salesforce); product code constructs it `Guarded`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Egress {
     /// Enforce the guard. Every production caller.

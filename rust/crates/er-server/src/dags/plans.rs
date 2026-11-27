@@ -469,3 +469,7 @@ pub struct PreviewsPublished {
 impl PlanDoc for PreviewsPublished {
     const STABLE_NAME: &'static str = "previews_published";
 }
+
+impl PlanDoc for crate::merge_apply::Report {
+    const STABLE_NAME: &'static str = "merges_applied";
+}

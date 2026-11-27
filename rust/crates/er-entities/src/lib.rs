@@ -31,6 +31,8 @@ pub mod job;
 pub mod lake_schema_migration;
 pub mod match_score;
 pub mod matching_model;
+pub mod merge_apply;
+pub mod merge_apply_operation;
 pub mod merge_preview;
 pub mod merge_preview_journal;
 pub mod merge_preview_watermark;

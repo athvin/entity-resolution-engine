@@ -1,0 +1,9 @@
+kind: statement
+operation: read
+mode: full
+description: "Applies a crash or a budget stop left in APPLYING, oldest first — resumed before anything new begins."
+params:
+  - { name: org_id, type: varchar }
+  - { name: dataset_id, type: varchar }
+  - { name: limit, type: bigint }
+returns: entity

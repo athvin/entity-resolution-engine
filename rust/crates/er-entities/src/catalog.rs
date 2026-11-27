@@ -1801,6 +1801,152 @@ indexes:
 "#,
     ),
     (
+        "merge_apply",
+        r#"kind: entity
+version: 1
+name: merge_apply
+relation: merge_applies
+description: "The apply of one approved merge preview to Salesforce (#995). At most one per preview — the unique index is what makes APPROVED → APPLYING atomic — and it settles exactly once into applied, failed, skipped_stale or applied_externally. The preimage (members' live revision and the proposal's snapshot fields) is written before any mutation."
+key: [id]
+generate:
+  stores: [postgres]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "UUIDv7, minted by the application."
+  - name: org_id
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: id }
+    description: "The tenant; denormalized beside the dataset scope per V17."
+  - name: dataset_id
+    type: varchar
+    nullable: false
+    references: { relation: datasets, column: id }
+    description: "The dataset whose preview this applies."
+  - name: merge_preview_id
+    type: varchar
+    nullable: false
+    references: { relation: merge_previews, column: id }
+    description: "The approved preview being applied."
+  - name: job_id
+    type: varchar
+    nullable: false
+    description: "The merge_apply job that began it."
+  - name: fingerprint
+    type: varchar
+    nullable: false
+    description: "The approved proposal fingerprint; the apply executes exactly that proposal."
+  - name: status
+    type: varchar
+    nullable: false
+    default: "'applying'"
+    accepted_values: [applying, applied, failed, skipped_stale, applied_externally]
+    description: "The apply state."
+  - name: preimage
+    type: varchar
+    nullable: false
+    default: "''"
+    description: "JSON: each member's SystemModstamp as read before mutation, plus the proposal's member field snapshots (what restore needs). Written before the first operation."
+  - name: detail
+    type: varchar
+    description: "Why it settled as it did: the stale member, the provider error code, or the external-merge evidence. Never a record value or token."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the row was written."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the row last changed."
+indexes:
+  - name: merge_applies_preview
+    columns: [merge_preview_id]
+    unique: true
+  - name: merge_applies_dataset
+    columns: [org_id, dataset_id, status]
+"#,
+    ),
+    (
+        "merge_apply_operation",
+        r#"kind: entity
+version: 1
+name: merge_apply_operation
+relation: merge_apply_operations
+description: "One provider mutation of an apply (#995) — the master field update, or one merge of up to two victims — written IN FLIGHT before the call and settled after it. An operation found in flight on resume is never replayed blind: the apply re-reads Salesforce to decide whether it landed."
+key: [id]
+generate:
+  stores: [postgres]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "UUIDv7, minted by the application."
+  - name: org_id
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: id }
+    description: "The tenant; denormalized beside the dataset scope per V17."
+  - name: dataset_id
+    type: varchar
+    nullable: false
+    references: { relation: datasets, column: id }
+    description: "The dataset whose preview this applies."
+  - name: merge_apply_id
+    type: varchar
+    nullable: false
+    references: { relation: merge_applies, column: id }
+    description: "The apply it belongs to."
+  - name: seq
+    type: bigint
+    nullable: false
+    description: "Order within the apply: 0 is the master update, then one per merge batch."
+  - name: kind
+    type: varchar
+    nullable: false
+    accepted_values: [update_master, merge]
+    description: "What the operation does."
+  - name: payload
+    type: varchar
+    nullable: false
+    description: "JSON: the field values written, or the victim ids merged. Provider ids and approved values only."
+  - name: status
+    type: varchar
+    nullable: false
+    default: "'in_flight'"
+    accepted_values: [in_flight, done, failed]
+    description: "Whether the call is known to have landed."
+  - name: outcome
+    type: varchar
+    description: "How it settled: ok, verified (an in-flight call proven landed by a re-read), or the provider error code."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the row was written."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the row last changed."
+indexes:
+  - name: merge_apply_operations_seq
+    columns: [merge_apply_id, seq]
+    unique: true
+  - name: merge_apply_operations_org
+    columns: [org_id, dataset_id]
+"#,
+    ),
+    (
         "merge_preview",
         r#"kind: entity
 version: 1

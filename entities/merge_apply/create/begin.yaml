@@ -1,0 +1,14 @@
+kind: statement
+operation: create
+mode: partial
+description: "APPROVED → APPLYING, atomically: inserts only when the preview is approved with this fingerprint and no apply exists. The caller always binds approved_status = 'approved' (a parameter only because the analyser attributes an INSERT…SELECT literal to the target table's accepted values). Zero rows: someone else began it, or the preview is no longer approved."
+params:
+  - { name: id, type: varchar }
+  - { name: job_id, type: varchar }
+  - { name: merge_preview_id, type: varchar }
+  - { name: org_id, type: varchar }
+  - { name: dataset_id, type: varchar }
+  - { name: fingerprint, type: varchar }
+  - { name: approved_status, type: varchar }
+reads: [merge_preview]
+returns: none

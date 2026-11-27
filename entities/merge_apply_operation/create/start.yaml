@@ -1,0 +1,13 @@
+kind: statement
+operation: create
+mode: partial
+description: "Record an operation in flight, before the provider call."
+params:
+  - { name: id, type: varchar }
+  - { name: org_id, type: varchar }
+  - { name: dataset_id, type: varchar }
+  - { name: merge_apply_id, type: varchar }
+  - { name: seq, type: bigint }
+  - { name: kind, type: varchar }
+  - { name: payload, type: varchar }
+returns: none

@@ -223,6 +223,62 @@ impl ControlTask<PgClient> for AdvanceSfCursor {
 #[derive(Default)]
 pub struct PublishPreviews;
 
+/// Apply a dataset's approved merge previews to Salesforce (#995), journaled
+/// per group and per operation — see [`crate::merge_apply`]. Provider
+/// failures are group outcomes; only a database failure fails the task.
+pub struct ApplyMerges {
+    pub egress: crate::urlguard::Egress,
+    pub limits: crate::merge_apply::Limits,
+}
+
+impl Default for ApplyMerges {
+    fn default() -> Self {
+        Self {
+            egress: crate::urlguard::Egress::Guarded,
+            limits: crate::merge_apply::Limits::default(),
+        }
+    }
+}
+
+impl ControlTask<PgClient> for ApplyMerges {
+    const NAME: &'static str = "apply_merges";
+    const VERSION: u32 = 1;
+    type Input = ();
+    type Output = Plan<crate::merge_apply::Report>;
+
+    async fn run(
+        &mut self,
+        ctx: &mut ControlCtx<'_, PgClient>,
+        (): Self::Input,
+    ) -> Result<Outcome<Self::Output>, TaskError> {
+        let Some(dataset_id) = ctx.order.dataset_id.clone() else {
+            return Err(TaskError::Failed(er_errors::ErError::precondition(
+                "a merge_apply job must name a dataset".to_string(),
+            )));
+        };
+        let report = crate::merge_apply::run(
+            ctx.client,
+            &ctx.order.org_id,
+            &dataset_id,
+            &ctx.order.job_id,
+            self.egress,
+            self.limits,
+        )
+        .await
+        .map_err(|e| {
+            TaskError::Failed(
+                er_errors::ErError::stage_failure(format!(
+                    "merge apply: {}",
+                    crate::errfmt::chain(&e)
+                ))
+                .with_class(er_errors::ErrorClass::TransientIo),
+            )
+        })?;
+        let counters = serde_json::to_value(&report).unwrap_or_default();
+        Ok(Outcome::Done(Plan(report), er_dag::Counters(counters)))
+    }
+}
+
 impl ControlTask<PgClient> for PublishPreviews {
     const NAME: &'static str = "publish_previews";
     const VERSION: u32 = 1;

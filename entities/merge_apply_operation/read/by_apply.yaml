@@ -1,0 +1,8 @@
+kind: statement
+operation: read
+mode: full
+description: "An apply's operations in order."
+params:
+  - { name: org_id, type: varchar }
+  - { name: merge_apply_id, type: varchar }
+returns: entity
