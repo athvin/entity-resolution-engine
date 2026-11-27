@@ -243,36 +243,3 @@ resource "aws_cloudwatch_metric_alarm" "spot_interruptions" {
   alarm_actions       = [var.alerts_topic_arn]
   ok_actions          = [var.alerts_topic_arn]
 }
-
-# Impersonation volume: the BFF's audit writer prints one structured line per
-# impersonation event, carrying no user or tenant identity (that stays in
-# erweb.audit). The metric is a bare count, so a tenant never becomes a
-# dimension.
-resource "aws_cloudwatch_log_metric_filter" "impersonation" {
-  count          = var.containers_log_group_name == null ? 0 : 1
-  name           = "er-${var.environment}-impersonation"
-  log_group_name = var.containers_log_group_name
-  pattern        = "\"er.audit.impersonation\""
-  metric_transformation {
-    name          = "er.audit.impersonations"
-    namespace     = var.metric_namespace
-    value         = "1"
-    default_value = "0"
-  }
-}
-
-resource "aws_cloudwatch_metric_alarm" "impersonation_volume" {
-  count               = var.containers_log_group_name == null ? 0 : 1
-  alarm_name          = "er-${var.environment}-impersonation-volume"
-  alarm_description   = "More than ${var.impersonation_threshold} impersonation events (start, stop or impersonated mutation) in an hour. Read erweb.audit for who and which org; operators impersonate to support a tenant, so a burst is either an incident being worked or a compromised operator session."
-  namespace           = var.metric_namespace
-  metric_name         = "er.audit.impersonations"
-  statistic           = "Sum"
-  period              = 3600
-  comparison_operator = "GreaterThanThreshold"
-  threshold           = var.impersonation_threshold
-  evaluation_periods  = 1
-  treat_missing_data  = "notBreaching"
-  alarm_actions       = [var.alerts_topic_arn]
-  ok_actions          = [var.alerts_topic_arn]
-}

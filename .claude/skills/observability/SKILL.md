@@ -79,9 +79,10 @@ The Terraform `operational-observability` module provides the dashboard and
 SNS-backed backlog, snapshot-silence, OOM and eviction alarms, plus the
 standalone set (#877): queue-oldest > 900 s, pod-pending > 600 s, attempt failure
 rate > 25 %/h (failed ÷ (failed + done), ≥ 4 attempts), spot interruptions
-> 5/h (the `aws.ec2` interruption-warning rule's `MatchedEvents`), and
-impersonation volume > 20/h (a log metric filter on the BFF's identity-free
-`er.audit.impersonation` line). Dev is wired to
+> 5/h (the `aws.ec2` interruption-warning rule's `MatchedEvents`). Impersonation
+volume is NOT alarmed yet: the containers log group is Infrequent-Access class,
+which refuses metric filters (#1301). The BFF already prints the identity-free
+`er.audit.impersonation` line it will count. Dev is wired to
 `ER/Dev` for the shared `ci` deployment. The chart sets
 `ER_OPERATIONAL_METRICS=true` only in dev/ci and prod/app; local and developer
 databases cannot overwrite those gauges. Production uses its own collector/store and the `ER/Prod` namespace (#944). Per-tenant
