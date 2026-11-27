@@ -356,6 +356,24 @@ other sessions edit. The layout cannot host it: a layout persists across navigat
 and never enters or exits. The global clamp matches `*`, which does not reach
 `::view-transition-*`, so `cut.css` zeroes those under reduced motion itself.
 
+**The card a reader clicks opens into the page it leads to.** `PageMorph` in
+`cut.tsx` is a shared-element `<ViewTransition>` with one name per destination
+(`morphName(path)`). Today it runs from `/product`'s "What DupeZero does" grid
+(`CardGrid morph`) and from home's egress golden record into the heading of
+each feature page (`PageIntro morph="<path>"`).
+
+- **Unpaired, it is the page's own cut.** Any other way in or out plays the
+  `marketing-cut` enter and exit, so naming an element changes nothing there.
+- **It is opt-in.** A page that carries one name twice drops the whole
+  transition, cut and all. `marketing-cut.test.ts` holds the grid to distinct
+  names, and each card to a destination heading with its name.
+- **The motion is a container transform.** It runs on an opaque surface, so
+  neither page shows through, and each picture is pinned at its own size so
+  text is never magnified. It was filmed at a tenth of its speed with the
+  Chromium DevTools protocol's `Animation.setPlaybackRate`.
+- **Test by animation name, never by pseudo-element.** `page-morph-surface`
+  runs only when React paired the two elements.
+
 `/docs` is a static workflow guide and operation reference. Its committed
 `operations.json` is generated from the MCP route manifest and response-envelope
 contract by `frontend/scripts/gen-developer-reference.mjs`; the unit test checks

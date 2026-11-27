@@ -96,6 +96,7 @@
    pseudo-elements on the document root, so they are zeroed here. */
 @media (prefers-reduced-motion: reduce) {
   ::view-transition-group(*),
+  ::view-transition-image-pair(*),
   ::view-transition-old(*),
   ::view-transition-new(*) {
     animation-duration: 0s !important;
