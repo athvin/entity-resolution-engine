@@ -399,7 +399,7 @@ code="$(curl -s -o /dev/null -w '%{http_code}' \
 [ "${code}" = "401" ] || fail "a forged JWT answered ${code}, wanted 401"
 log "phase 4 ok: 401"
 
-# ---- phase 5: a seven-stage pipeline, each stage its own pod ---------------
+# ---- phase 5: an eight-stage pipeline, each stage its own pod ---------------
 #
 # The four phases above all drive single-task kinds, so none of them can show
 # the thing most likely to break once a DAG is split across pods: a stage
@@ -417,9 +417,9 @@ log "phase 4 ok: 401"
 # they share would quietly change the window phases 2 and 3 are trying to
 # catch. `pg_run_all_pipeline.rs` already holds the golden-partition
 # comparison against a child-process double; what this adds is real pods, real
-# scheduling and real per-pod token verification for all seven.
+# scheduling and real per-pod token verification for all eight.
 PORG="kindpipe"
-log "phase 5: run_all_full as seven pods (org ${PORG})"
+log "phase 5: run_all_full as eight pods (org ${PORG})"
 
 PDROP="${DATA_DIR}/drop/${PORG}"
 mkdir -p "${PDROP}" "${DATA_DIR}/data/${PORG}"
@@ -466,9 +466,9 @@ ORG="${PORG}"
 
 # Wait for ANY terminal state, then dump the ledger, THEN require success.
 # `wait_state … succeeded` would abort the moment the job settled `failed`,
-# before anything printed the per-task rows — and in a seven-stage pipeline the
+# before anything printed the per-task rows — and in an eight-stage pipeline the
 # only thing worth knowing is WHICH stage failed and with what `error_detail`.
-# Generous on time: seven sequential pods, each paying a cold image start and a
+# Generous on time: eight sequential pods, each paying a cold image start and a
 # cold DuckDB open, on one kind node inside a laptop's docker VM.
 pdeadline=$(( $(date +%s) + 1800 ))
 pfinal=""
@@ -496,7 +496,7 @@ import json, sys
 
 tasks = json.load(open(sys.argv[1]))["tasks"]
 live = [t for t in tasks if t["live"]]
-want = ["init", "ingest", "standardize", "match", "reconcile", "assemble", "finish"]
+want = ["init", "ingest", "standardize", "match", "reconcile", "golden", "assemble", "finish"]
 assert sorted(t["task_id"] for t in live) == sorted(want), sorted(t["task_id"] for t in live)
 
 jobs = set()
@@ -510,7 +510,7 @@ for t in live:
     assert t["pod_uid"], f"{t['task_id']}: no verified pod uid"
     assert t["output"] is not None, f"{t['task_id']}: no durable output"
     jobs.add(name)
-assert len(jobs) == 7, f"each stage needs its own Job object, got {len(jobs)}: {sorted(jobs)}"
+assert len(jobs) == len(want), f"each stage needs its own Job object, got {len(jobs)}: {sorted(jobs)}"
 
 # The handoff actually crossed the pod boundary. `init` published the run plan,
 # and `standardize` pinned two references — the plan plus the corpus `ingest`
@@ -521,7 +521,7 @@ assert init["output"]["doc"]["mode"] == "full", init["output"]["doc"]
 std = next(t for t in live if t["task_id"] == "standardize")
 pins = std["input"]["pins"]
 assert len(pins) == 2, f"standardize pinned {len(pins)} refs, wanted the plan + the landed corpus"
-print(f"phase 5 ok: seven stages, seven Jobs, one launch each — {sorted(jobs)[0]} …")
+print(f"phase 5 ok: {len(want)} stages, {len(jobs)} Jobs, one launch each — {sorted(jobs)[0]} …")
 EOF
 
 # And the lake really holds the result: the run is ledgered under the model the
