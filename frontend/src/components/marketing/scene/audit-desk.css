@@ -1110,6 +1110,12 @@
     grid-template-columns: minmax(0, 1fr);
     gap: 14px;
   }
+  /* On a phone the score, its sentence and the decision come before the
+     evidence, so the call is on the first screen (iPhone 15: 659px) and clear
+     of the floating next-chapter button; the bars follow as the reasons. */
+  .audit-verdict {
+    order: -1;
+  }
   .audit-evidence {
     gap: 6px;
   }
