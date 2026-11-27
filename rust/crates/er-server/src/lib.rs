@@ -49,6 +49,7 @@ pub(crate) mod fixups;
 mod lake_reads;
 pub mod mail;
 pub mod merge_apply;
+pub mod merge_restore;
 pub mod migrate_plan;
 pub mod openapi;
 pub mod ops;
@@ -10416,6 +10417,214 @@ async fn generate_merge_previews(
     }
 }
 
+/// One compensation step of an undo.
+#[derive(Serialize, utoipa::ToSchema)]
+struct MergeRestoreStepView {
+    /// `never_assert`, `undelete`, `recreate` or `revert_master`.
+    kind: String,
+    /// The Salesforce id acted on (the record key for `never_assert`).
+    target_id: String,
+    /// `in_flight`, `done` or `failed`.
+    status: String,
+    outcome: Option<String>,
+    /// For `recreate`: the new Salesforce id of the recreated record.
+    new_id: Option<String>,
+}
+
+/// The undo of an applied merge.
+#[derive(Serialize, utoipa::ToSchema)]
+struct MergeRestoreView {
+    /// `restoring`, `restored`, `partial` or `failed`.
+    status: String,
+    /// What was refused rather than overwritten.
+    #[schema(value_type = Vec<Object>)]
+    conflicts: Value,
+    detail: Option<String>,
+    steps: Vec<MergeRestoreStepView>,
+    /// Always false: records the merge reparented to the master stay there.
+    related_records_reverted: bool,
+    /// The job working on it, when this request queued one.
+    job_id: Option<String>,
+}
+
+async fn restore_view(
+    client: &tokio_postgres::Client,
+    org_id: &str,
+    dataset_id: &str,
+    apply_id: &str,
+    job_id: Option<String>,
+) -> Result<Option<MergeRestoreView>, tokio_postgres::Error> {
+    let Some(r) = er_entities::merge_restore::read::by_apply(client, org_id, dataset_id, apply_id)
+        .await?
+        .into_iter()
+        .next()
+    else {
+        return Ok(None);
+    };
+    let steps = er_entities::merge_restore_step::read::by_restore(client, org_id, &r.id).await?;
+    Ok(Some(MergeRestoreView {
+        status: r.status,
+        conflicts: serde_json::from_str(&r.conflicts).unwrap_or_else(|_| json!([])),
+        detail: r.detail,
+        steps: steps
+            .into_iter()
+            .map(|s| MergeRestoreStepView {
+                kind: s.kind,
+                target_id: s.target_id,
+                status: s.status,
+                outcome: s.outcome,
+                new_id: s.new_id,
+            })
+            .collect(),
+        related_records_reverted: false,
+        job_id,
+    }))
+}
+
+/// Admin+: undo an applied merge
+/// (`POST /v1/orgs/{org}/datasets/{ds}/merge-previews/{preview_id}/restore`).
+/// Stages never-match assertions so resolution does not re-propose it,
+/// undeletes the victims from the Salesforce Recycle Bin (recreating them
+/// from the apply's preimage when the bin no longer has them), and reverts
+/// the master's fields only where Salesforce still holds what the apply
+/// wrote — anything changed since is reported as a conflict, not
+/// overwritten. Records the merge reparented are NOT moved back. 409 unless
+/// the preview's apply merged something; a repeat request returns the same
+/// undo.
+async fn restore_merge_preview(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, ds, preview_id)): Path<(String, String, String)>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Admin) {
+        return e.into_response();
+    }
+    let (client, org_row, d) = match upload_scope_any(&state, &org, &ds).await {
+        Ok(t) => t,
+        Err(r) => return *r,
+    };
+    let apply =
+        match er_entities::merge_apply::read::by_preview(&client, &org_row.id, &d.id, &preview_id)
+            .await
+        {
+            Ok(rows) => rows.into_iter().next(),
+            Err(e) => return pg_err(e),
+        };
+    let Some(apply) = apply else {
+        return detail_err(StatusCode::NOT_FOUND, "no applied merge for this preview");
+    };
+    let merged_any =
+        match er_entities::merge_apply_operation::read::by_apply(&client, &org_row.id, &apply.id)
+            .await
+        {
+            Ok(ops) => ops.iter().any(|o| o.kind == "merge" && o.status == "done"),
+            Err(e) => return pg_err(e),
+        };
+    if apply.status == "applying" || !merged_any {
+        return detail_err(
+            StatusCode::CONFLICT,
+            format!(
+                "nothing to undo: the apply is {} and merged no records",
+                apply.status
+            ),
+        );
+    }
+    let fingerprint =
+        match er_entities::merge_preview::read::by_id(&client, &preview_id, &org_row.id, &d.id)
+            .await
+        {
+            Ok(rows) => rows
+                .into_iter()
+                .next()
+                .map(|p| p.fingerprint)
+                .unwrap_or_default(),
+            Err(e) => return pg_err(e),
+        };
+    let inserted = match er_entities::merge_restore::create::request(
+        &client,
+        &er_ids::new_v7(),
+        &org_row.id,
+        &d.id,
+        &apply.id,
+        &preview_id,
+        &principal.actor,
+    )
+    .await
+    {
+        Ok(n) => n,
+        Err(e) => return pg_err(e),
+    };
+    let mut job_id = None;
+    if inserted == 1 {
+        let _ = er_entities::merge_preview_journal::create::append(
+            &client,
+            &er_ids::new_v7(),
+            &org_row.id,
+            &d.id,
+            &preview_id,
+            Some(&apply.status),
+            "restoring",
+            &fingerprint,
+            &principal.actor,
+        )
+        .await;
+        match pg::enqueue(
+            &client,
+            &org_row.id,
+            Some(d.id.as_str()),
+            "merge_restore",
+            0,
+            None,
+            None,
+            principal.provenance(),
+        )
+        .await
+        {
+            Ok(job) => job_id = Some(job.id),
+            Err(e) => return pg_err(e),
+        }
+    }
+    match restore_view(&client, &org_row.id, &d.id, &apply.id, job_id).await {
+        Ok(Some(v)) => (StatusCode::ACCEPTED, Json(v)).into_response(),
+        Ok(None) => detail_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "the undo was not recorded",
+        ),
+        Err(e) => pg_err(e),
+    }
+}
+
+/// Viewer+: an applied merge's undo, its steps and conflicts
+/// (`GET /v1/orgs/{org}/datasets/{ds}/merge-previews/{preview_id}/restore`).
+async fn get_merge_restore(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, ds, preview_id)): Path<(String, String, String)>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let (client, org_row, d) = match upload_scope_any(&state, &org, &ds).await {
+        Ok(t) => t,
+        Err(r) => return *r,
+    };
+    let apply =
+        match er_entities::merge_apply::read::by_preview(&client, &org_row.id, &d.id, &preview_id)
+            .await
+        {
+            Ok(rows) => rows.into_iter().next(),
+            Err(e) => return pg_err(e),
+        };
+    let Some(apply) = apply else {
+        return detail_err(StatusCode::NOT_FOUND, "this preview has no undo");
+    };
+    match restore_view(&client, &org_row.id, &d.id, &apply.id, None).await {
+        Ok(Some(v)) => Json(v).into_response(),
+        Ok(None) => detail_err(StatusCode::NOT_FOUND, "this preview has no undo"),
+        Err(e) => pg_err(e),
+    }
+}
+
 /// `POST …/merge-previews/apply`: the job that will apply approved previews.
 #[derive(Serialize, utoipa::ToSchema)]
 struct MergesApplying {
@@ -15696,6 +15905,10 @@ fn build_routes(state: AppState) -> Router {
         .route(
             "/v1/orgs/{org}/datasets/{ds}/merge-previews/{preview_id}",
             get(merge_preview_detail),
+        )
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/merge-previews/{preview_id}/restore",
+            get(get_merge_restore).post(restore_merge_preview),
         )
         .route(
             "/v1/orgs/{org}/datasets/{ds}/merge-previews/{preview_id}/approve",

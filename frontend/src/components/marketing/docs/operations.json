@@ -582,6 +582,17 @@
     }
   },
   {
+    "id": "get_orgs_by_org_datasets_by_ds_merge_previews_by_preview_id_restore",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}/merge-previews/{preview_id}/restore",
+    "role": "viewer",
+    "params": ["org", "ds", "preview_id"],
+    "body": null,
+    "needs_body": false,
+    "summary": "an applied merge's undo, its steps and conflicts",
+    "response": { "envelope": "scalar" }
+  },
+  {
     "id": "get_orgs_by_org_datasets_by_ds_metrics",
     "method": "GET",
     "path": "/v1/orgs/{org}/datasets/{ds}/metrics",
@@ -1371,6 +1382,17 @@
     },
     "needs_body": false,
     "summary": "reject a merge preview",
+    "response": null
+  },
+  {
+    "id": "post_orgs_by_org_datasets_by_ds_merge_previews_by_preview_id_restore",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/datasets/{ds}/merge-previews/{preview_id}/restore",
+    "role": "admin",
+    "params": ["org", "ds", "preview_id"],
+    "body": null,
+    "needs_body": false,
+    "summary": "undo an applied merge",
     "response": null
   },
   {

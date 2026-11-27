@@ -23,7 +23,7 @@ use er_dag::{Dag, DagBuilder, TriggerRule};
 
 use control::{
     Activate, AdvanceSfCursor, ApplyMerges, CreateCatalog, DrainActions, EmitWriteBack,
-    PublishPreviews, RegisterModel, SettleActions, StageApproved,
+    PublishPreviews, RegisterModel, RestoreMerges, SettleActions, StageApproved,
 };
 use tasks::{
     ApplyStaged, Assemble, CorrectReconcile, CorrectionsInit, CorrectionsReconcile, ExportResults,
@@ -59,10 +59,11 @@ pub enum JobKind {
     Export,
     MergePreview,
     MergeApply,
+    MergeRestore,
 }
 
 impl JobKind {
-    pub const ALL: [JobKind; 15] = [
+    pub const ALL: [JobKind; 16] = [
         JobKind::RunAllFull,
         JobKind::RunAllIncremental,
         JobKind::Correct,
@@ -78,6 +79,7 @@ impl JobKind {
         JobKind::Export,
         JobKind::MergePreview,
         JobKind::MergeApply,
+        JobKind::MergeRestore,
     ];
 
     #[must_use]
@@ -98,6 +100,7 @@ impl JobKind {
             JobKind::Export => "export",
             JobKind::MergePreview => "merge_preview",
             JobKind::MergeApply => "merge_apply",
+            JobKind::MergeRestore => "merge_restore",
         }
     }
 
@@ -140,6 +143,7 @@ pub fn dag_for(kind: JobKind) -> Dag {
         JobKind::Export => export(),
         JobKind::MergePreview => merge_preview(),
         JobKind::MergeApply => merge_apply(),
+        JobKind::MergeRestore => merge_restore(),
     }
 }
 
@@ -276,6 +280,10 @@ pub async fn run_control_task(
             .run(ctx, ())
             .await?,
         ),
+        // `merge_restore` (#996): one control task, like merge_apply.
+        (JobKind::MergeRestore, "restore_merges") => {
+            completed(control::RestoreMerges { egress }.run(ctx, ()).await?)
+        }
         (JobKind::MergePreview, "publish_previews") => {
             let built = control_pin::<er_dag::Plan<crate::preview_job::Materialized>>(ctx, 0)?;
             completed(control::PublishPreviews.run(ctx, (built,)).await?)
@@ -596,6 +604,13 @@ fn merge_apply() -> Dag {
     let mut d = Builder::new(JobKind::MergeApply.dag_name());
     let _ = d.control::<ApplyMerges>(());
     d.build().expect("the merge_apply DAG assembles")
+}
+
+/// Undo applied merges (#996): one control task.
+fn merge_restore() -> Dag {
+    let mut d = Builder::new(JobKind::MergeRestore.dag_name());
+    let _ = d.control::<RestoreMerges>(());
+    d.build().expect("the merge_restore DAG assembles")
 }
 
 /// Export a dataset's results at a pinned snapshot (#1230). One read-only pod

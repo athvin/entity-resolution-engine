@@ -1,0 +1,12 @@
+kind: statement
+operation: update
+mode: partial
+description: "Settle an in-flight step."
+params:
+  - { name: to_status, type: varchar }
+  - { name: outcome, type: varchar }
+  - { name: new_id, type: varchar, nullable: true }
+  - { name: merge_restore_id, type: varchar }
+  - { name: seq, type: bigint }
+  - { name: org_id, type: varchar }
+returns: entity

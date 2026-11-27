@@ -1,0 +1,12 @@
+kind: statement
+operation: create
+mode: partial
+description: "Request the undo of an apply; a repeat request changes nothing (the unique index)."
+params:
+  - { name: id, type: varchar }
+  - { name: org_id, type: varchar }
+  - { name: dataset_id, type: varchar }
+  - { name: merge_apply_id, type: varchar }
+  - { name: merge_preview_id, type: varchar }
+  - { name: requested_by, type: varchar }
+returns: none

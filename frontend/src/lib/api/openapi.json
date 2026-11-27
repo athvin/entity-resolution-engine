@@ -6736,6 +6736,138 @@
         ]
       }
     },
+    "/v1/orgs/{org}/datasets/{ds}/merge-previews/{preview_id}/restore": {
+      "get": {
+        "summary": "an applied merge's undo, its steps and conflicts",
+        "operationId": "get_orgs_by_org_datasets_by_ds_merge_previews_by_preview_id_restore",
+        "parameters": [
+          {
+            "name": "org",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ds",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "preview_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "2XX": {
+            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "default": {
+            "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "detail"
+                  ],
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "viewer"
+            ]
+          }
+        ]
+      },
+      "post": {
+        "summary": "undo an applied merge",
+        "operationId": "post_orgs_by_org_datasets_by_ds_merge_previews_by_preview_id_restore",
+        "parameters": [
+          {
+            "name": "org",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ds",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "preview_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "2XX": {
+            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "default": {
+            "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "detail"
+                  ],
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "admin"
+            ]
+          }
+        ]
+      }
+    },
     "/v1/orgs/{org}/datasets/{ds}/merges": {
       "post": {
         "summary": "merge a GROUP of records from the review dialog",
@@ -15046,6 +15178,88 @@
           "status": {
             "type": "string",
             "description": "`planned`, `approved`, `rejected` or `superseded`."
+          }
+        }
+      },
+      "MergeRestoreStepView": {
+        "type": "object",
+        "description": "One compensation step of an undo.",
+        "required": [
+          "kind",
+          "target_id",
+          "status"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "description": "`never_assert`, `undelete`, `recreate` or `revert_master`."
+          },
+          "new_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "For `recreate`: the new Salesforce id of the recreated record."
+          },
+          "outcome": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "description": "`in_flight`, `done` or `failed`."
+          },
+          "target_id": {
+            "type": "string",
+            "description": "The Salesforce id acted on (the record key for `never_assert`)."
+          }
+        }
+      },
+      "MergeRestoreView": {
+        "type": "object",
+        "description": "The undo of an applied merge.",
+        "required": [
+          "status",
+          "conflicts",
+          "steps",
+          "related_records_reverted"
+        ],
+        "properties": {
+          "conflicts": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            },
+            "description": "What was refused rather than overwritten."
+          },
+          "detail": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "job_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The job working on it, when this request queued one."
+          },
+          "related_records_reverted": {
+            "type": "boolean",
+            "description": "Always false: records the merge reparented to the master stay there."
+          },
+          "status": {
+            "type": "string",
+            "description": "`restoring`, `restored`, `partial` or `failed`."
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MergeRestoreStepView"
+            }
           }
         }
       },

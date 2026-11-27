@@ -30,7 +30,7 @@ statements is read or written only through the engine's own stage SQL, not
 through a typed query function.
 
 <!-- BEGIN GENERATED: entities-index -->
-**63 entities, 319 declared statements.**
+**65 entities, 326 declared statements.**
 
 | Entity | Relation | Store | Key | Natural key | History |
 |---|---|---|---|---|---|
@@ -64,6 +64,8 @@ through a typed query function.
 | `merge_preview` | `merge_previews` | postgres | `id` | `dataset_id, fingerprint` | — |
 | `merge_preview_journal` | `merge_preview_journal` | postgres | `id` | — | — |
 | `merge_preview_watermark` | `merge_preview_watermarks` | postgres | `id` | `dataset_id` | — |
+| `merge_restore` | `merge_restores` | postgres | `id` | — | — |
+| `merge_restore_step` | `merge_restore_steps` | postgres | `id` | — | — |
 | `metric_snapshot` | `metric_snapshots` | duckdb | `id` | `run_id` | — |
 | `metric_snapshot_source` | `metric_snapshot_sources` | duckdb | `id` | `run_id, source_system` | — |
 | `org` | `orgs` | postgres | `id` | `name` | yes |
@@ -132,6 +134,8 @@ Declared statements per entity and operation:
 | `merge_preview` | 1 | 3 | 2 | 0 |
 | `merge_preview_journal` | 1 | 1 | 0 | 0 |
 | `merge_preview_watermark` | 1 | 1 | 1 | 0 |
+| `merge_restore` | 1 | 2 | 1 | 0 |
+| `merge_restore_step` | 1 | 1 | 1 | 0 |
 | `metric_snapshot` | 1 | 1 | 0 | 0 |
 | `metric_snapshot_source` | 1 | 1 | 0 | 0 |
 | `org` | 2 | 4 | 4 | 0 |
