@@ -402,7 +402,9 @@ test.describe("interactive marketing", () => {
     expect(separation.y).toBeLessThan(1);
   });
 
-  test("audit holds its clock while paused and retains the corrected result", async ({ page }) => {
+  test("audit holds its clock while paused, waits for the call, and plays through", async ({
+    page,
+  }) => {
     // Browsers can queue multiple entries for the same target in one callback.
     // Reproduce the shard-only failure: an old offscreen observation arrives
     // in the same batch as the current visible observation (and vice versa).
@@ -461,11 +463,18 @@ test.describe("interactive marketing", () => {
     });
     await expect(page.locator("#flow-dataset")).toBeDisabled();
     await audit.getByRole("button", { name: "Resume audit" }).click();
-    await expect(audit).toHaveAttribute("data-phase", "4", { timeout: 20000 });
-    await expect(audit.getByRole("status")).toContainText("Two entities. Correction recorded.");
+    // The film plays to the first decision and waits there: a wait is not
+    // playing, so the configuration is free again while the visitor thinks.
+    await expect(audit).toHaveAttribute("data-scene", "call", { timeout: 10000 });
+    await expect(audit).toHaveAttribute("data-running", "false");
+    await expect(page.locator("#flow-dataset")).toBeEnabled();
+    await audit.getByRole("button", { name: "Play it for me" }).click();
+    await expect(audit).toHaveAttribute("data-scene", "holds", { timeout: 20000 });
+    await expect(audit).toHaveAttribute("data-running", "false", { timeout: 10000 });
+    await expect(audit.getByRole("status")).toContainText("your rules hold");
     await expect(page.locator("#flow-dataset")).toBeEnabled();
     await audit.getByRole("button", { name: "Replay audit" }).click();
-    await expect(audit).toHaveAttribute("data-phase", "0");
+    await expect(audit).toHaveAttribute("data-scene", "zone");
   });
 
   test("record evidence is keyboard accessible @visual", async ({ page }) => {
@@ -482,18 +491,26 @@ test.describe("interactive marketing", () => {
     await expect(dialog).toHaveCount(0);
   });
 
-  test("reduced motion preserves the explanation and has no packet animations", async ({
+  test("reduced motion shows the poster, moves nothing, and can still be walked through", async ({
     page,
   }) => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.goto("/#audit");
-    await expect(page.getByTestId("marketing-audit")).toHaveAttribute("data-phase", "4");
+    const audit = page.getByTestId("marketing-audit");
+    await expect(audit).toHaveAttribute("data-scene", "holds");
+    await expect(audit).toHaveAttribute("data-still", "true");
+    await expect(audit).toHaveAttribute("data-running", "false");
+    await expect(audit).toContainText("Kept apart by your never-match rule");
+    // Nothing in the stage animates, and nothing starts on its own.
     expect(
       await page
-        .locator("[data-packet]")
-        .evaluateAll((nodes) => nodes.flatMap((n) => n.getAnimations()).length),
+        .locator("#audit-stage")
+        .evaluate((node) => node.getAnimations({ subtree: true }).length),
     ).toBe(0);
-    await expect(page.getByTestId("marketing-audit")).toContainText("Two entities.");
+    await page.waitForTimeout(600);
+    await expect(audit).toHaveAttribute("data-scene", "holds");
+    await audit.getByRole("button", { name: "Walk through the audit" }).click();
+    await expect(audit).toHaveAttribute("data-scene", "zone");
   });
 
   test("the story and docs remain meaningful without JavaScript", async ({ browser }) => {
@@ -536,7 +553,7 @@ test.describe("interactive marketing", () => {
   test("audit poster visual baseline @visual", async ({ page }) => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.goto("/#audit");
-    await expect(page.getByTestId("marketing-audit")).toHaveAttribute("data-phase", "4");
+    await expect(page.getByTestId("marketing-audit")).toHaveAttribute("data-scene", "holds");
     await page.addStyleTag({ content: '[data-testid="marketing-header"] { visibility: hidden; }' });
     await expect(page.getByTestId("marketing-audit")).toHaveScreenshot("marketing-audit.png");
   });

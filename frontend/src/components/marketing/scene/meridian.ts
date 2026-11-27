@@ -1,10 +1,10 @@
 /**
  * Meridian Supply: the one fictional company every marketing scene follows.
  *
- * The home story already names it (entity E-1042, split into Meridian US and
- * Meridian UK by the audit), so each page shows the same entity at a different
- * moment of its life in DupeZero, and moving between pages reads as cuts in
- * one film rather than separate brochures.
+ * The home story already names it (entity E-1042, and the home audit unmerges
+ * Meridian Supply Ltd from it), so each page shows the same entity at a
+ * different moment of its life in DupeZero, and moving between pages reads as
+ * cuts in one film rather than separate brochures.
  *
  * Fictional presentation data only: never customer data, and never a capacity
  * or accuracy claim. Every transformation it shows is one that
@@ -178,7 +178,43 @@ export const MERIDIAN_PAIRS = {
     { field: "Phone", level: "different", weight: -2.6 },
     { field: "Address", level: "number and street agree", weight: 4.8 },
   ],
+  /**
+   * Salesforce and Meridian Supply Ltd: confident, and wrong. The shared
+   * account number and ordering mailbox outweigh a different phone and
+   * address, so the pair joins without a person; the home audit unmerges it.
+   */
+  wrong: [
+    { field: "Account ID", level: "exact", weight: 7.1 },
+    { field: "Name", level: "exact once cleaned", weight: 6.4 },
+    { field: "Email", level: "exact", weight: 4.3 },
+    { field: "Phone", level: "different", weight: -2.6 },
+    { field: "Address", level: "different", weight: -2.4 },
+  ],
 } as const satisfies Record<string, readonly Comparison[]>;
+
+/**
+ * The record the home audit unmerges: Meridian's company in London, arriving
+ * in a CSV import a week after the run every other scene shows. It carries
+ * the parent's account number and the shared orders@ mailbox, so it joins
+ * E-1042 on its own, above the auto-join line, and is a different company.
+ * Fictional like the rest; the phone number is in a range reserved for drama.
+ */
+export const MERIDIAN_LTD = {
+  label: "CSV upload",
+  raw: {
+    name: "Meridian Supply Ltd",
+    account: "ACCT-042",
+    email: "orders@meridiansupply.example",
+    phone: "+44 20 7946 0142",
+    address: "2 Wharf Lane, London",
+  },
+} as const satisfies Pick<MeridianSource, "label" | "raw">;
+
+/** The entity Meridian Supply Ltd becomes once it is unmerged. */
+export const MERIDIAN_LTD_ENTITY = "E-1043";
+
+/** The entity the API record becomes when a reviewer keeps the close pair apart. */
+export const MERIDIAN_APART_ENTITY = "E-2077";
 
 /** The two thresholds the scenes show, as /features/matching describes them. */
 export const MERIDIAN_THRESHOLDS = {

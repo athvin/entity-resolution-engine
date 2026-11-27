@@ -1,0 +1,1201 @@
+/* The home audit film (audit-desk.tsx, timed by demo/audit-story.tsx).
+
+   Four shots share one grid cell inside a miniature window, so the window
+   holds the height of its tallest shot and the page never shifts as the film
+   cuts. Each shot's entrances run only while it is the active shot, so going
+   back to a step replays them, and every entrance fits inside the moment's
+   playing time in audit-story.tsx (PLAY and ENTRANCE).
+
+   Motion is transform and opacity only, with a handful of keyframes per
+   element, because WebKit pays for every keyframe on every scroll frame
+   (#1220). Text is `--foreground` throughout, so nothing muted is ever taken
+   through partial opacity. Three states turn the motion off:
+   - `data-still` on the stage is the poster (before hydration, and reduced
+     motion until the visitor starts it): no animations at all;
+   - `data-hold` pauses every animation where it stands (paused, off screen,
+     or not yet seen);
+   - reduced motion clamps everything else to an instant (globals.css).
+
+   Colour is the audit's scoped exception and nothing else: the member that
+   does not belong is ringed in `--story-flag`, the corrected entities carry a
+   `--story-corrected` check, and brand blue is the rail's moving light. */
+
+.story-audit-stage {
+  container: audit / inline-size;
+}
+.story-audit-stage[data-hold="true"] .audit-desk *,
+.story-audit-stage[data-hold="true"] .audit-desk *::before,
+.story-audit-stage[data-hold="true"] .audit-desk *::after {
+  animation-play-state: paused !important;
+}
+.story-audit-stage[data-still="true"] .audit-desk *,
+.story-audit-stage[data-still="true"] .audit-desk *::before,
+.story-audit-stage[data-still="true"] .audit-desk *::after {
+  animation: none !important;
+}
+
+.audit-desk {
+  --audit-ease: var(--motion-ease-emphasized);
+  display: grid;
+  gap: 16px;
+  color: var(--foreground);
+  text-align: left;
+}
+
+/* ── The step rail ─────────────────────────────────────────────────────── */
+
+.audit-rail {
+  position: relative;
+  border-bottom: 1px solid var(--border);
+}
+.audit-rail ol {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.audit-rail li {
+  position: relative;
+  min-width: 0;
+}
+/* The step's button, laid over its words once hydrated. */
+.audit-rail-hit {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  cursor: pointer;
+}
+.audit-rail-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 48px;
+  padding: 0 6px;
+  border: 0;
+  background: none;
+  color: var(--foreground);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+}
+.audit-rail-index {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  transition:
+    background-color var(--duration-base) var(--audit-ease),
+    color var(--duration-base) var(--audit-ease);
+}
+.audit-rail-index svg {
+  width: 13px;
+  height: 13px;
+}
+.audit-rail-item[aria-current="step"] .audit-rail-index {
+  border-color: var(--foreground);
+  background: var(--foreground);
+  color: var(--background);
+}
+.audit-rail-item[aria-current="step"] .audit-rail-label {
+  font-weight: 500;
+}
+.audit-rail-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.audit-rail-label[data-length="short"] {
+  display: none;
+}
+/* The one moving light: it travels to the current step. */
+.audit-rail-light {
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  width: 25%;
+  height: 2px;
+  background: var(--brand);
+  transform: translateX(calc(var(--step) * 100%));
+  transition: transform var(--duration-slow) var(--audit-ease);
+}
+@media (hover: hover) and (pointer: fine) {
+  .audit-rail li:has(.audit-rail-hit:hover) .audit-rail-index {
+    border-color: var(--foreground);
+  }
+}
+
+/* ── The window and the history beside it ──────────────────────────────── */
+
+.audit-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 260px);
+  gap: 16px;
+  align-items: stretch;
+}
+.audit-window {
+  min-width: 0;
+  overflow: clip;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--card);
+}
+.audit-window-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.audit-window-bar strong {
+  font-weight: 500;
+}
+/* Three window controls, drawn as one element's shadows. */
+.audit-window-dots {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-right: 24px;
+  border-radius: 50%;
+  background: var(--border);
+  box-shadow:
+    12px 0 0 var(--border),
+    24px 0 0 var(--border);
+}
+.audit-shots {
+  display: grid;
+  padding: 18px;
+}
+.audit-shot {
+  display: grid;
+  grid-area: 1 / 1;
+  gap: 14px;
+  align-content: start;
+  min-width: 0;
+  visibility: hidden;
+}
+.audit-shot[data-active="true"] {
+  visibility: visible;
+}
+.audit-zone,
+.audit-holds {
+  align-content: center;
+}
+.audit-kicker,
+.audit-queue strong,
+.audit-later span,
+.audit-golden-eyebrow,
+.audit-history h3,
+.audit-history-who,
+.audit-entity-id {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+/* ── 1. The gray zone ──────────────────────────────────────────────────── */
+
+.audit-zone-strip {
+  position: relative;
+  display: grid;
+  gap: 6px;
+  padding-top: 8px;
+}
+.audit-zone-field {
+  position: relative;
+  height: 112px;
+}
+.audit-zone-dot {
+  position: absolute;
+  bottom: calc(12px + var(--lane) * 22px);
+  left: calc(var(--x) * 100%);
+  width: 10px;
+  height: 10px;
+  margin-left: -5px;
+  border-radius: 50%;
+  background: color-mix(in oklch, var(--foreground) 72%, var(--card));
+}
+/* A pair that waits for a person is hollow: nothing has decided it yet. */
+.audit-zone-dot[data-zone="review"] {
+  border: 2px solid var(--foreground);
+  background: var(--card);
+}
+.audit-zone-dot[data-meridian] {
+  width: 16px;
+  height: 16px;
+  margin-left: -8px;
+  border-width: 3px;
+}
+/* The review band, outlined once the pairs have landed. */
+.audit-zone-band {
+  position: absolute;
+  inset: 28px auto -16px calc(var(--separate) * 100%);
+  width: calc(var(--review) * 100%);
+  border: 1.5px solid var(--foreground);
+  border-radius: 10px;
+}
+.audit-zone-callout {
+  position: absolute;
+  top: 0;
+  left: calc(var(--meridian) * 100%);
+  margin: 0;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--foreground);
+  color: var(--background);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  white-space: nowrap;
+  translate: -50% 0;
+}
+.audit-zone-track {
+  display: flex;
+  height: 10px;
+  overflow: hidden;
+  border-radius: 5px;
+}
+.audit-zone-track [data-zone="separate"] {
+  width: calc(var(--separate) * 100%);
+  background: color-mix(in oklch, var(--foreground) 12%, transparent);
+}
+.audit-zone-track [data-zone="review"] {
+  width: calc(var(--review) * 100%);
+  background: color-mix(in oklch, var(--foreground) 28%, transparent);
+}
+.audit-zone-track [data-zone="join"] {
+  flex: 1;
+  background: color-mix(in oklch, var(--foreground) 55%, transparent);
+}
+.audit-zone-ticks {
+  position: relative;
+  height: 16px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.audit-zone-ticks span {
+  position: absolute;
+  translate: -50% 0;
+}
+.audit-zone-ticks span:first-child {
+  left: calc(var(--separate) * 100%);
+}
+.audit-zone-ticks span:last-child {
+  left: calc((var(--separate) + var(--review)) * 100%);
+}
+/* What each zone does, under the zone it names. */
+.audit-zone-legend {
+  display: grid;
+  grid-template-columns: calc(var(--separate) * 100%) calc(var(--review) * 100%) minmax(0, 1fr);
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.audit-zone-legend > div {
+  display: grid;
+  gap: 3px;
+  align-content: start;
+  padding-right: 14px;
+}
+.audit-zone-legend > div:nth-child(2) {
+  padding-left: 10px;
+}
+.audit-zone-legend > div:last-child {
+  padding-right: 0;
+  padding-left: 10px;
+}
+.audit-zone-legend dt {
+  font-weight: 500;
+}
+.audit-zone-legend dd {
+  margin: 0;
+}
+.audit-zone-note {
+  margin: 6px 0 0;
+  font-size: 15px;
+  font-weight: 500;
+}
+
+[data-active="true"] .audit-zone-dot {
+  animation: audit-drop var(--duration-slow) var(--audit-ease) calc(var(--i) * 45ms) both;
+}
+[data-active="true"] .audit-zone-band {
+  animation: scale-in var(--duration-slow) var(--audit-ease) 1400ms both;
+}
+[data-active="true"] .audit-zone-callout {
+  animation: audit-rise var(--duration-slow) var(--audit-ease) 1700ms both;
+}
+[data-active="true"] .audit-zone-note {
+  animation: audit-rise var(--duration-slow) var(--audit-ease) 1950ms both;
+}
+
+/* ── 2. Your call ──────────────────────────────────────────────────────── */
+
+.audit-queue {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  align-items: baseline;
+  margin: 0;
+  font-size: 12px;
+}
+.audit-queue-score {
+  margin-left: auto;
+  font-family: var(--font-mono);
+}
+.audit-pair {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.audit-slot {
+  position: relative;
+  display: grid;
+  min-width: 0;
+}
+.audit-pair .scene-record {
+  position: relative;
+  width: auto;
+}
+/* Stacking, top to bottom: the Salesforce card, the API card, then the plate
+   a match uncovers, so a matched API record slides under Salesforce and the
+   entity it joined is what is left. Every layer is opaque. */
+.audit-pair [data-card="salesforce"] {
+  z-index: 2;
+}
+.audit-pair [data-card="api"] {
+  z-index: 1;
+}
+.audit-result {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  display: grid;
+  gap: 6px;
+  align-content: center;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: var(--foreground);
+  color: var(--background);
+  font-size: 12px;
+  line-height: 1.4;
+  visibility: hidden;
+}
+.audit-result strong {
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+.audit-result-rule {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.audit-tag {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 3;
+  padding: 2px 8px;
+  border: 1px solid var(--foreground);
+  border-radius: 999px;
+  background: var(--card);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  visibility: hidden;
+}
+.audit-pair-rule {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1.5px solid var(--foreground);
+  border-radius: 50%;
+  background: var(--card);
+  font-size: 15px;
+  line-height: 1;
+  translate: -50% -50%;
+  visibility: hidden;
+}
+.audit-call-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+.audit-evidence {
+  display: grid;
+  gap: 9px;
+}
+.audit-verdict {
+  display: grid;
+  gap: 12px;
+}
+.audit-call-scale {
+  padding-top: 26px;
+}
+.audit-ask [data-length="short"] {
+  display: none;
+}
+.audit-explain {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.audit-decide {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  min-height: 44px;
+}
+.audit-decide .audit-ask {
+  padding-inline: 8px;
+  font-size: 12px;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.audit-written {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+}
+.audit-written svg {
+  width: 16px;
+  height: 16px;
+}
+.audit-advice {
+  margin: 0;
+  padding: 10px 12px;
+  border-left: 2px solid var(--foreground);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.audit-advice small {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+}
+
+[data-active="true"] .audit-card[data-card="salesforce"] {
+  animation: audit-from-left var(--duration-slow) var(--audit-ease) both;
+}
+[data-active="true"] .audit-card[data-card="api"] {
+  animation: audit-from-right var(--duration-slow) var(--audit-ease) 80ms both;
+}
+[data-active="true"] .audit-evidence .scene-evidence-bar {
+  animation: bar-grow var(--duration-deliberate) var(--audit-ease) 400ms both;
+}
+[data-active="true"] .audit-evidence .scene-evidence:nth-child(2) .scene-evidence-bar {
+  animation-delay: 490ms;
+}
+[data-active="true"] .audit-evidence .scene-evidence:nth-child(3) .scene-evidence-bar {
+  animation-delay: 580ms;
+}
+[data-active="true"] .audit-evidence .scene-evidence:nth-child(4) .scene-evidence-bar {
+  animation-delay: 670ms;
+}
+[data-active="true"] .audit-evidence .scene-evidence:nth-child(5) .scene-evidence-bar {
+  animation-delay: 760ms;
+}
+[data-active="true"] .audit-call-scale .scene-scale-marker {
+  animation: audit-marker 900ms var(--audit-ease) 700ms both;
+}
+[data-active="true"] .audit-explain {
+  animation: audit-rise var(--duration-slow) var(--audit-ease) 1300ms both;
+}
+[data-active="true"] .audit-decide > * {
+  animation: audit-rise var(--duration-base) var(--audit-ease) 1500ms both;
+}
+
+[data-scene="called"] .audit-written {
+  animation: audit-rise var(--duration-base) var(--audit-ease) 200ms both;
+}
+/* Matched: the API record folds under the Salesforce card and uncovers the
+   entity it joined. */
+[data-scene="called"][data-decision="match"] .audit-result {
+  visibility: visible;
+}
+[data-scene="called"][data-decision="match"] .audit-card[data-card="api"] {
+  animation: audit-fold var(--duration-deliberate) var(--audit-ease) 250ms both;
+}
+/* Kept apart: a never-match rule lands between them, and each keeps its own entity. */
+[data-scene="called"][data-decision="apart"] :is(.audit-pair-rule, .audit-tag) {
+  visibility: visible;
+}
+[data-scene="called"][data-decision="apart"] .audit-pair-rule {
+  animation: scale-in var(--duration-slow) var(--audit-ease) 250ms both;
+}
+[data-scene="called"][data-decision="apart"] .audit-tag {
+  animation: scale-in var(--duration-slow) var(--audit-ease) 650ms both;
+}
+[data-scene="called"][data-decision="apart"] .audit-card[data-card="salesforce"] {
+  animation: audit-part-left var(--duration-slow) var(--audit-ease) 150ms both;
+}
+[data-scene="called"][data-decision="apart"] .audit-card[data-card="api"] {
+  animation: audit-part-right var(--duration-slow) var(--audit-ease) 150ms both;
+}
+
+/* ── 3. Unmerge ────────────────────────────────────────────────────────── */
+
+.audit-later {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.audit-later span {
+  display: block;
+  margin-bottom: 4px;
+}
+.audit-record-grid {
+  display: grid;
+  grid-template-columns: minmax(170px, 212px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+.audit-record-side {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+.audit-golden-eyebrow {
+  white-space: nowrap;
+}
+/* The record itself: the scene's one inverted surface. */
+.audit-golden {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: var(--foreground);
+  color: var(--background);
+  font-size: 12px;
+}
+.audit-golden strong {
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.015em;
+}
+.audit-rules {
+  display: grid;
+  gap: 8px;
+}
+.audit-rules ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.audit-rules li {
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.audit-rule-kind {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+}
+.audit-rules small {
+  font-size: 11px;
+}
+/* A rule not yet written keeps its place, unseen. */
+.audit-rules li[data-pending] {
+  visibility: hidden;
+}
+/* The rule the unmerge writes: it arrives as the row leaves. */
+[data-scene="unmerged"] .audit-rules li[data-new] {
+  border-color: var(--foreground);
+  animation: lift-in var(--duration-slow) var(--audit-ease) 450ms both;
+}
+.audit-members {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+/* Holds the unmerge button's height before hydration renders it, so the
+   page does not move when it appears. */
+.audit-members-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 44px;
+  font-size: 12px;
+}
+.audit-members-head strong {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.audit-unmerge svg {
+  width: 15px;
+  height: 15px;
+}
+.audit-members ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.audit-members li {
+  position: relative;
+  display: grid;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card);
+  font-size: 12.5px;
+}
+.audit-member-row {
+  display: grid;
+  grid-template-columns: 20px minmax(64px, 84px) minmax(0, 1fr) minmax(0, 1.1fr);
+  gap: 10px;
+  align-items: center;
+  min-height: 44px;
+  padding: 6px 10px;
+}
+/* The flagged row is ringed instead of bordered, and says why under itself. */
+.audit-members li[data-flag] {
+  padding-bottom: 8px;
+  border-color: transparent;
+}
+.audit-member-pick:has(input) {
+  cursor: pointer;
+}
+.audit-member-pick input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--foreground);
+}
+.audit-member-box {
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.audit-member-source {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.audit-member-name {
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.audit-member-address {
+  overflow-wrap: anywhere;
+}
+/* The ring around the member that does not belong. */
+.audit-members li[data-flag]::after {
+  position: absolute;
+  inset: -1px;
+  border: 2px solid var(--story-flag);
+  border-radius: 10px;
+  content: "";
+  pointer-events: none;
+}
+.audit-flag {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 0 12px 0 40px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.audit-flag-mark {
+  color: var(--story-flag);
+}
+.audit-applied {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  gap: 8px;
+  align-content: center;
+  padding: 8px 14px;
+  border: 1px solid var(--foreground);
+  border-radius: 10px;
+  background: var(--card);
+  font-size: 12.5px;
+  line-height: 1.45;
+  visibility: hidden;
+}
+.audit-reconcile {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.audit-reconcile-bar {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: color-mix(in oklch, var(--foreground) 12%, transparent);
+}
+.audit-reconcile-bar span {
+  display: block;
+  height: 100%;
+  background: var(--foreground);
+  transform-origin: left;
+}
+
+[data-active="true"] .audit-later {
+  animation: audit-rise var(--duration-slow) var(--audit-ease) both;
+}
+[data-active="true"] .audit-golden {
+  animation: lift-in var(--duration-slow) var(--audit-ease) 100ms both;
+}
+[data-active="true"] .audit-members li:not([data-flag]) {
+  animation: audit-rise var(--duration-base) var(--audit-ease) 200ms both;
+}
+/* The record the import brought: it arrives last, then the ring draws. */
+[data-scene="audit"] .audit-members li[data-flag] {
+  animation: lift-in var(--duration-slow) var(--audit-ease) 600ms both;
+}
+[data-scene="audit"] .audit-members li[data-flag]::after {
+  animation: scale-in var(--duration-slow) var(--audit-ease) 1050ms both;
+}
+[data-scene="audit"] .audit-flag {
+  animation: audit-rise var(--duration-base) var(--audit-ease) 1200ms both;
+}
+/* Unmerge: the row lifts out of the entity, its ring lets go, and the
+   message that replaces it says what was written. */
+[data-scene="unmerged"] li[data-leaving] > :is(.audit-member-row, .audit-flag) {
+  animation: audit-peel 520ms var(--audit-ease) both;
+}
+[data-scene="unmerged"] li[data-leaving]::after {
+  animation: audit-let-go 420ms var(--audit-ease) both;
+}
+[data-scene="unmerged"] .audit-applied {
+  visibility: visible;
+  animation: audit-rise var(--duration-slow) var(--audit-ease) 300ms both;
+}
+[data-scene="unmerged"] .audit-reconcile-bar span {
+  animation: bar-grow 1100ms var(--audit-ease) 600ms both;
+}
+
+/* ── 4. It holds ───────────────────────────────────────────────────────── */
+
+.audit-entities {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+}
+.audit-entity {
+  position: relative;
+  display: grid;
+  gap: 4px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+  font-size: 12px;
+}
+.audit-entity strong {
+  font-size: 17px;
+  font-weight: 500;
+  line-height: 1.25;
+}
+.audit-entity::after {
+  position: absolute;
+  inset: -1px;
+  border: 1.5px solid var(--story-corrected);
+  border-radius: 12px;
+  content: "";
+  pointer-events: none;
+}
+.audit-corrected {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 4px;
+  font-weight: 500;
+}
+.audit-corrected svg {
+  width: 15px;
+  height: 15px;
+  color: var(--story-corrected);
+}
+.audit-never {
+  padding: 4px 10px;
+  border: 1px solid var(--foreground);
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.audit-next {
+  display: grid;
+  gap: 8px;
+}
+.audit-next ul {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.audit-next li {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) 44px minmax(0, 1.4fr);
+  gap: 12px;
+  align-items: baseline;
+  padding: 9px 0;
+  border-top: 1px solid var(--border);
+  font-size: 12.5px;
+}
+.audit-next-score {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.audit-next-outcome {
+  font-weight: 500;
+}
+.audit-next-note {
+  margin: 0;
+  font-size: 13px;
+}
+
+[data-active="true"] .audit-entity {
+  animation: lift-in var(--duration-slow) var(--audit-ease) both;
+}
+[data-active="true"] .audit-entity:last-child {
+  animation-delay: 140ms;
+}
+[data-active="true"] .audit-never {
+  animation: scale-in var(--duration-slow) var(--audit-ease) 380ms both;
+}
+[data-active="true"] .audit-corrected svg,
+[data-active="true"] .audit-entity::after {
+  animation: mark-in var(--duration-slow) var(--audit-ease) 650ms both;
+}
+[data-active="true"] .audit-next li {
+  animation: audit-rise var(--duration-base) var(--audit-ease) 950ms both;
+}
+[data-active="true"] .audit-next li:last-child {
+  animation-delay: 1100ms;
+}
+[data-active="true"] .audit-next-note {
+  animation: audit-rise var(--duration-base) var(--audit-ease) 1350ms both;
+}
+
+/* ── The history ───────────────────────────────────────────────────────── */
+
+.audit-history {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--card);
+}
+.audit-history-frame {
+  display: grid;
+}
+/* Every list sits at the top of the reserved space, at its own height: a
+   stretched grid list would spread its entries down the card. */
+.audit-history-frame > * {
+  grid-area: 1 / 1;
+  align-self: start;
+}
+.audit-history-ghost {
+  visibility: hidden;
+}
+.audit-history-ghost li {
+  animation: none;
+}
+/* A member row that is not a member yet keeps its place, unseen. */
+.audit-members li[data-ghost] {
+  visibility: hidden;
+}
+.audit-history-empty {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.audit-history ol {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.audit-history li {
+  display: grid;
+  gap: 3px;
+  padding-left: 12px;
+  border-left: 2px solid var(--border);
+  font-size: 12.5px;
+  line-height: 1.45;
+  animation: audit-rise var(--duration-base) var(--audit-ease) both;
+}
+.audit-history li:last-child {
+  border-left-color: var(--foreground);
+}
+
+/* "Play it for me" presses the control it is about to use, at the end of its moment. */
+.audit-desk[data-press="match"] [data-press-target="match"],
+.audit-desk[data-press="tick"] [data-press-target="tick"],
+.audit-desk[data-press="unmerge"] [data-press-target="unmerge"] {
+  animation: audit-press 320ms var(--audit-ease) calc(var(--audit-segment) - 340ms) both;
+}
+
+@keyframes audit-drop {
+  from {
+    opacity: 0;
+    transform: translateY(-40px);
+  }
+}
+@keyframes audit-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+@keyframes audit-from-left {
+  from {
+    opacity: 0;
+    transform: translateX(-24px);
+  }
+}
+@keyframes audit-from-right {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+}
+@keyframes audit-marker {
+  from {
+    transform: translateX(0);
+  }
+}
+@keyframes audit-fold {
+  to {
+    transform: translateX(calc(-100% - 14px)) scale(0.96);
+  }
+}
+@keyframes audit-part-left {
+  to {
+    transform: translateX(-6px);
+  }
+}
+@keyframes audit-part-right {
+  to {
+    transform: translateX(6px);
+  }
+}
+@keyframes audit-peel {
+  to {
+    opacity: 0;
+    transform: translateX(48px);
+  }
+}
+@keyframes audit-let-go {
+  to {
+    opacity: 0;
+    transform: scale(1.02);
+  }
+}
+@keyframes audit-press {
+  45% {
+    transform: scale(0.94);
+  }
+}
+
+/* ── Narrow stages: a redesign for a phone's column, not a squeeze ─────── */
+
+@container audit (max-width: 720px) {
+  .trail-audit-entry {
+    left: 50%;
+  }
+  .trail-audit-exit {
+    left: 70%;
+  }
+  .audit-desk {
+    gap: 12px;
+  }
+  .audit-rail-item {
+    flex-direction: column;
+    gap: 4px;
+    justify-content: center;
+    min-height: 56px;
+    padding: 4px 2px;
+    font-size: 11.5px;
+    text-align: center;
+  }
+  .audit-rail-label[data-length="long"] {
+    display: none;
+  }
+  .audit-rail-label[data-length="short"] {
+    display: inline;
+  }
+  .audit-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .audit-shots {
+    padding: 14px;
+  }
+  .audit-zone-legend {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    margin-top: 6px;
+  }
+  .audit-zone-legend > div,
+  .audit-zone-legend > div:nth-child(2),
+  .audit-zone-legend > div:last-child {
+    grid-template-columns: minmax(96px, auto) minmax(0, 1fr);
+    gap: 10px;
+    padding: 0;
+  }
+  .audit-ask [data-length="long"] {
+    display: none;
+  }
+  .audit-ask [data-length="short"] {
+    display: inline;
+  }
+  .audit-zone-callout {
+    font-size: 10.5px;
+  }
+  .audit-pair {
+    gap: 10px;
+  }
+  .audit-pair .scene-record {
+    padding: 12px;
+  }
+  .audit-pair .scene-record-title {
+    font-size: 14px;
+  }
+  .audit-pair :is([data-field="Account"], [data-field="Email"]) {
+    display: none;
+  }
+  .audit-pair .scene-record-fields > div {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+  .audit-call-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+  }
+  /* On a phone the score, its sentence and the decision come before the
+     evidence, so the call is on the first screen (iPhone 15: 659px) and clear
+     of the floating next-chapter button; the bars follow as the reasons. */
+  .audit-verdict {
+    order: -1;
+  }
+  .audit-evidence {
+    gap: 6px;
+  }
+  .audit-evidence .scene-evidence {
+    grid-template-areas: "label track weight";
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr) 34px;
+    align-items: center;
+  }
+  .audit-evidence .scene-evidence-weight {
+    text-align: right;
+  }
+  .audit-evidence .scene-evidence-label small {
+    display: none;
+  }
+  .audit-record-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+  .audit-record-side {
+    display: contents;
+  }
+  .audit-rules {
+    order: 3;
+  }
+  .audit-golden {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: baseline;
+  }
+  .audit-golden-eyebrow {
+    grid-column: 1 / -1;
+  }
+  .audit-golden strong {
+    font-size: 16px;
+  }
+  .audit-member-row {
+    grid-template-columns: 20px minmax(0, 1fr);
+    grid-template-areas:
+      "box name"
+      "box address";
+    gap: 0 10px;
+  }
+  .audit-member-row > :is(input, .audit-member-box) {
+    grid-area: box;
+  }
+  .audit-member-source {
+    display: none;
+  }
+  .audit-member-name {
+    grid-area: name;
+  }
+  .audit-member-address {
+    grid-area: address;
+    font-size: 11.5px;
+  }
+  .audit-flag {
+    padding-left: 40px;
+  }
+  .audit-entities {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+  .audit-never {
+    justify-self: center;
+  }
+  .audit-entity strong {
+    font-size: 15px;
+  }
+  .audit-next li {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 2px 10px;
+  }
+  .audit-next-outcome {
+    grid-column: 1 / -1;
+  }
+}
+
+/* Wide stages put the scale in a narrow column, where its three zone names
+   would run together; the sentence under it says the same thing. */
+@container audit (min-width: 721px) {
+  .audit-call-scale .scene-scale-labels {
+    display: none;
+  }
+}

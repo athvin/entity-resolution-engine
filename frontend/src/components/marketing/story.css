@@ -433,61 +433,37 @@ html:has(.marketing-story) {
   height: 1px;
   pointer-events: none;
 }
-.story-audit-stage svg {
-  width: 100%;
-  overflow: visible;
-}
-.story-audit-stage path {
-  fill: none;
-  stroke: var(--border);
-  stroke-width: 2;
-}
-.story-audit-stage text {
-  fill: var(--muted-foreground);
-  font-size: 13px;
-  font-family: inherit;
-}
-.story-audit-stage .story-audit-evidence-text {
-  fill: var(--foreground);
-  font-size: 11px;
-}
-.story-audit-evidence {
-  fill: var(--story-surface);
-  stroke: var(--border);
-}
-.story-audit-flag {
-  fill: var(--story-flag);
-}
-.story-audit-good {
-  fill: var(--story-corrected);
-}
-.story-audit-phone {
-  display: none;
-}
-.story-audit [data-audit-packet] {
-  opacity: 0;
-}
-.story-audit[data-still="false"] .story-audit-poster {
-  opacity: 0;
-}
+/* Status over controls, both on the left: the page's floating next-chapter
+   button sits in the bottom-right corner, where a control would hide under it. */
 .story-audit-bottom {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 24px;
+  display: grid;
+  justify-items: start;
+  gap: 14px;
   border-top: 1px solid var(--border);
   padding-top: 24px;
 }
-.story-audit-status {
-  margin-top: 10px;
-  font-size: 17px;
-  min-height: 54px;
+.story-audit-status-frame {
+  display: grid;
   max-width: 610px;
+  margin-top: 10px;
 }
+.story-audit-status-frame > * {
+  grid-area: 1 / 1;
+}
+.story-audit-status-ghost {
+  visibility: hidden;
+}
+.story-audit-status,
+.story-audit-status-ghost {
+  margin: 0;
+  font-size: 17px;
+}
+/* One control at a time; the row keeps its height while it has none. */
 .story-audit-controls {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  min-height: 44px;
 }
 .story-audit-controls button {
   min-height: 44px;
@@ -695,20 +671,11 @@ html:has(.marketing-story) {
   .story-volume-control {
     grid-column: auto;
   }
-  .story-audit-wide {
-    display: none;
-  }
-  .story-audit-phone {
-    display: block;
-    max-width: 440px;
-    margin: 0 auto;
-  }
   .story-audit-bottom {
-    flex-direction: column;
-    align-items: start;
     gap: 12px;
   }
-  .story-audit-status {
+  .story-audit-status,
+  .story-audit-status-ghost {
     font-size: 16px;
   }
   .story-usage-summary {
@@ -811,10 +778,6 @@ html:has(.marketing-story) {
   .story-usage-paths {
     height: 72px;
   }
-}
-
-.story-audit-stream {
-  fill: var(--muted-foreground);
 }
 
 /* Free native scrolling: no snapping. The padding keeps a jumped-to chapter
@@ -1266,23 +1229,16 @@ html:has(.marketing-story) {
   height: 1px;
   pointer-events: none;
 }
+/* The trail enters the audit at its first step, and leaves from under the
+   window toward the usage section. Narrow stages move both into the column
+   (audit-desk.css), where there is no side gutter to run along. */
 .trail-audit-entry {
-  left: 10%;
-  top: 46.15%;
+  left: 8%;
+  top: 0;
 }
 .trail-audit-exit {
-  left: 90%;
-  top: 27.69%;
-}
-@media (max-width: 800px) {
-  .trail-audit-entry {
-    left: 50%;
-    top: 12.27%;
-  }
-  .trail-audit-exit {
-    left: 69.27%;
-    top: 83.64%;
-  }
+  left: 92%;
+  top: 100%;
 }
 
 .story-audit > .story-section-heading,

@@ -137,9 +137,9 @@ All were requested by the owner, and all live in `story.css` under
 `.marketing-site`, never in `globals.css`; the application palette and the
 palette-utility lint rule remain unchanged.
 
-- **The audit demonstration.** `--story-flag` and `--story-corrected` show a red
-  flagged match becoming two green corrected entities. Labels and shapes carry
-  the same meaning.
+- **The audit demonstration.** Home's audit film rings the member that does
+  not belong in `--story-flag` and marks the two corrected entities with
+  `--story-corrected`. Labels and shapes carry the same meaning.
 - **The brand blue from the logo** (`frontend/assets/dupezero-logo-*.svg`).
   `--brand` is the logo's exact `#2F6BFF`, for marks and the flow's moving
   light only: it sits at the AA edge (4.4-4.5:1), so text and filled controls
@@ -304,6 +304,39 @@ beats and each glide lands on the frame drawn for it. The trail now spans
 several screens and an off-screen wire is paused by design: a spec that reads a
 dedupe packet has to bring its wire into view first
 (`showFirstDedupeWire` in `marketing-interactions.spec.ts`).
+
+Home's `#audit` chapter (06) is a film the visitor takes part in, not a scrub.
+`scene/audit-desk.tsx` draws it, `demo/audit-story.tsx` times it, and
+`scene/audit-model.ts` holds every fact on it. It is click-driven because a
+scroll position cannot wait for a decision.
+
+- **How it plays.** It starts at 40% seen and plays each moment on one WAAPI
+  clock (`.story-audit-clock`); pausing, an off-screen section and a hidden tab
+  all hold that clock.
+- **Its two decisions:**
+  - A pair in the review band: Match leaves an always-match rule and Not a
+    match a never-match rule, as `resolve_review` does.
+  - A member that joined above auto-join and does not belong: select it and
+    unmerge, which writes one never-match rule against a kept member, as
+    `unmerge_entity` does.
+- **Controls.** "Play it for me" makes the usual choices, and the step rail
+  jumps, filling in any decision it skips.
+- **Layout.** Its four shots share one grid cell, so the window never changes
+  height as it cuts; TrailBridges measures the stage. Inactive shots are
+  `inert` and `aria-hidden`.
+- **The poster** is the end of the usual path. Reduced motion, no JavaScript
+  and the baseline all show it. The film swaps the poster for its first frame
+  only once the stage is within a screen of the viewport, never at hydration.
+- **Its height never changes.** Every shot draws one structure in every state,
+  and the status line and the history reserve their longest content.
+- **Nothing in its flow is swapped at hydration.** When React replaces an
+  in-flow element (a `<span>` becoming a `<button>`), WebKit moves a reader
+  parked at the foot of the page, even though the page height is unchanged.
+  So the rail lays a button over its words, and the selectable row is a
+  `<label>` from the server render on.
+- **Honesty.** Never claim the product flagged the record by itself: the person
+  auditing finds it, and `marketing-audit-model.test.ts` holds the status copy
+  to that.
 
 The hero's scene is the self-playing exception, and on phones it sits after the
 foot: the iPhone 15 profile shows 659px, and anything above the foot pushed
