@@ -7,11 +7,14 @@
 //! it, and the per-tenant bookkeeping around the lake half:
 //!
 //! - **Boot and `er-server migrate`** reconcile `public.*` ([`crate::pg::ensure_schema`]).
-//! - **Every lake job reconciles its lake first** ([`reconcile_lake_env`], from
-//!   the dispatcher before any stage runs), under the queue's one-active-job-
-//!   per-org rule, which is the writer lock. A breaking difference fails the
-//!   job with `ERR_SCHEMA_BREAKING` rather than running the new engine against
-//!   an old table.
+//! - **Every lake job reconciles its lake first**, inside its first
+//!   lake-touching task and through that task's own session: the
+//!   `reconcile_schema` source of `train`, `lake_maintain`, `profile` and
+//!   `lake_migrate`, and the `init` task of `run_all_*`, `correct` and
+//!   `apply_corrections` (#1288). This runs under the queue's
+//!   one-active-job-per-org rule, which is the writer lock. A breaking
+//!   difference fails the job with `ERR_SCHEMA_BREAKING` rather than running
+//!   the new engine against an old table.
 //! - **Provisioning** reconciles the new lake before the org is promoted to
 //!   `active`, so a tenant never starts with a lake whose tables the first run
 //!   would have to create.

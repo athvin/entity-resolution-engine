@@ -120,7 +120,8 @@ pub struct Init;
 
 impl Task<Session> for Init {
     const NAME: &'static str = "init";
-    const VERSION: u32 = 1;
+    // 2: reconciles the lake schema before reading `runs` (#1288).
+    const VERSION: u32 = 2;
     type Input = ();
     type Output = Plan<RunPlan>;
     const WRITES_LAKE: bool = true;
@@ -130,6 +131,12 @@ impl Task<Session> for Init {
         ctx: &mut TaskCtx<'_, Session>,
         (): Self::Input,
     ) -> Result<Outcome<Self::Output>, TaskError> {
+        // Reconcile first: the drift guard and the correction init below read
+        // `runs`, and a lake that missed the deploy sweep would otherwise fail
+        // its first run after an additive column ships with a binder error
+        // (#1288). Pipeline DAGs open with this task, so this is the "start of
+        // every lake job" for run_all_full, run_all_incremental and correct.
+        reconcile_through(ctx)?;
         let run = context(ctx, false)?;
         let model = run.model();
         let members = run.ensemble();
@@ -618,7 +625,8 @@ pub struct CorrectionsInit;
 
 impl Task<Session> for CorrectionsInit {
     const NAME: &'static str = "init";
-    const VERSION: u32 = 1;
+    // 2: reconciles the lake schema before reading `runs` (#1288).
+    const VERSION: u32 = 2;
     type Input = (Plan<DrainedActions>,);
     type Output = Plan<RunPlan>;
     const WRITES_LAKE: bool = true;
@@ -628,6 +636,8 @@ impl Task<Session> for CorrectionsInit {
         ctx: &mut TaskCtx<'_, Session>,
         (drained,): Self::Input,
     ) -> Result<Outcome<Self::Output>, TaskError> {
+        // apply_corrections' first lake-touching task; see `Init` (#1288).
+        reconcile_through(ctx)?;
         let run = context(ctx, false)?;
         let run_at = crate::dispatcher::fmt_epoch(crate::dispatcher::unix_now());
         let snapshot_start = ctx.session.latest_snapshot_version().ok();
@@ -906,6 +916,31 @@ impl Task<Session> for WriteBackScan {
     }
 }
 
+/// Reconciles the lake schema through the session the task already holds (see
+/// `ReconcileSchema` for why it must be this session and not a second one).
+/// A breaking difference fails the task with the full list of differences.
+fn reconcile_through(ctx: &mut TaskCtx<'_, Session>) -> Result<SchemaReconciled, TaskError> {
+    let outcome = er_entity_diff::reconcile_lake(
+        ctx.session.connection(),
+        &er_entities::catalog::catalog(),
+        &crate::schema::applied_by(),
+    )
+    .map_err(|e| match e {
+        // The breaking message already lists every difference.
+        e @ er_entity_diff::ReconcileError::Breaking(_) => e.to_string(),
+        other => format!("lake schema: {}", crate::errfmt::chain(&other)),
+    });
+    let (status, hash, detail) = crate::schema::tenant_state(&outcome);
+    match outcome {
+        Ok(_) => Ok(SchemaReconciled {
+            status: status.to_string(),
+            catalog_hash: hash,
+            detail,
+        }),
+        Err(message) => Err(engine_error(&message)),
+    }
+}
+
 #[derive(Default)]
 pub struct ReconcileSchema;
 
@@ -938,28 +973,10 @@ impl Task<Session> for ReconcileSchema {
         // but only once it ran through the executor instead of the legacy arm —
         // the arm did its reconcile in the dispatcher's own process, one
         // session, so the defect was invisible there.
-        let outcome = er_entity_diff::reconcile_lake(
-            ctx.session.connection(),
-            &er_entities::catalog::catalog(),
-            &crate::schema::applied_by(),
-        )
-        .map_err(|e| match e {
-            // The breaking message already lists every difference.
-            e @ er_entity_diff::ReconcileError::Breaking(_) => e.to_string(),
-            other => format!("lake schema: {}", crate::errfmt::chain(&other)),
-        });
-        let (status, hash, detail) = crate::schema::tenant_state(&outcome);
-        match outcome {
-            Ok(_) => Ok(Outcome::Done(
-                Plan(SchemaReconciled {
-                    status: status.to_string(),
-                    catalog_hash: hash,
-                    detail,
-                }),
-                er_dag::Counters::default(),
-            )),
-            Err(message) => Err(engine_error(&message)),
-        }
+        Ok(Outcome::Done(
+            Plan(reconcile_through(ctx)?),
+            er_dag::Counters::default(),
+        ))
     }
 }
 
