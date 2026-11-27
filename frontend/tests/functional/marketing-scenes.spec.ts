@@ -943,8 +943,9 @@ test.describe("the home audit", () => {
   }) => {
     await page.goto("/");
     const audit = page.getByTestId("marketing-audit");
-    // Held at its first frame until it is seen.
-    await expect(audit).toHaveAttribute("data-scene", "zone");
+    // Far from the reader it is the poster, still: the whole story in one frame.
+    await expect(audit).toHaveAttribute("data-scene", "holds");
+    await expect(audit).toHaveAttribute("data-still", "true");
     await expect(audit).toHaveAttribute("data-running", "false");
     await bringIntoView(page);
     await expect(audit).toHaveAttribute("data-running", "true");

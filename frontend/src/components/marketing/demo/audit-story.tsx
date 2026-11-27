@@ -89,6 +89,7 @@ export function AuditStory({ onRunning }: { onRunning: (running: boolean) => voi
   const [state, dispatch] = useReducer(reduceAudit, AUDIT_POSTER);
   const [ready, setReady] = useState(false);
   const [reduced, setReduced] = useState(false);
+  const [prepared, setPrepared] = useState(false);
   const [started, setStarted] = useState(false);
   const [paused, setPaused] = useState(false);
   const [inView, setInView] = useState(false);
@@ -101,20 +102,26 @@ export function AuditStory({ onRunning }: { onRunning: (running: boolean) => voi
   const settled = settledAt === state;
   const running = segment !== null && !settled;
   const held = !started || paused || !inView || hidden;
-  // The poster: before hydration, and under reduced motion until started.
-  const still = !started && (!ready || reduced);
+  // The poster: until the film is prepared, and under reduced motion until started.
+  const still = !started && (!prepared || reduced);
 
-  const start = useCallback(() => {
+  // Swap the poster for the film's first frame, held until it is seen.
+  const prepare = useCallback(() => {
+    setPrepared(true);
     dispatch({ type: "jump", step: 0 });
+  }, []);
+  const start = useCallback(() => {
+    prepare();
     setStarted(true);
     setPaused(false);
     setAutopilotFrom(null);
     setAdvice(false);
-  }, []);
+  }, [prepare]);
   // Any choice the visitor makes takes the film back from "Play it for me".
   const act = useCallback((action: AuditAction) => {
     setAutopilotFrom(null);
     setPaused(false);
+    setPrepared(true);
     setStarted(true);
     dispatch(action);
   }, []);
@@ -130,10 +137,11 @@ export function AuditStory({ onRunning }: { onRunning: (running: boolean) => voi
     };
     sync();
     preference?.addEventListener("change", sync);
-    // Held at its first frame until it is seen, unless reduced motion keeps the poster.
+    // Reduced motion keeps the poster. Otherwise a link to the audit starts
+    // it at once; without an observer to say when it is near, it is prepared now.
     if (!preference?.matches) {
-      dispatch({ type: "jump", step: 0 });
       if (window.location.hash === "#audit") start();
+      else if (typeof IntersectionObserver === "undefined") prepare();
     }
     const navigate = (event: MouseEvent) => {
       if (event.target instanceof Element && event.target.closest("[data-start-audit]")) start();
@@ -148,7 +156,26 @@ export function AuditStory({ onRunning }: { onRunning: (running: boolean) => voi
       document.removeEventListener("click", navigate);
       document.removeEventListener("visibilitychange", visibility);
     };
-  }, [start]);
+  }, [start, prepare]);
+
+  // Near (within a screen of the viewport) swaps the poster for the film's
+  // first frame, held. Not at hydration: WebKit moves a reader parked at the
+  // very bottom of the page when the stage changes state far above them.
+  useEffect(() => {
+    const node = stage.current;
+    if (!node || prepared || reduced || !ready || typeof IntersectionObserver === "undefined")
+      return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.at(-1)?.isIntersecting) prepare();
+      },
+      { rootMargin: "100% 0px 100% 0px" },
+    );
+    observer.observe(node);
+    return () => {
+      observer.disconnect();
+    };
+  }, [prepared, reduced, ready, prepare]);
 
   // In view (20% of the section) pauses and resumes the film. A batch can hold
   // both an old and a new observation of the section; the last one is current.

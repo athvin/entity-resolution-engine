@@ -26,6 +26,7 @@ import {
   type AuditScene,
   type AuditState,
   type Entity,
+  type RecordKey,
   type Rule,
 } from "./audit-model";
 import { EvidenceBar, RecordCard, ThresholdScale } from "./marks";
@@ -43,6 +44,10 @@ import "./audit-desk.css";
 
 /** The entity the unmerged record becomes: drawn in every state, so the shot keeps its height. */
 const SPLIT: Entity = { id: MERIDIAN_LTD_ENTITY, name: RECORD.ltd.name, members: ["ltd"] };
+/** The longest the history gets: the end of each branch. */
+const FULL_HISTORIES = (["match", "apart"] as const).map((decision) =>
+  historyAt({ scene: "holds", decision, ticked: true }),
+);
 /** The rule an unmerge writes, held in place before it is written. */
 const UNMERGE_RULE: Rule = { kind: "never", a: "ltd", b: "salesforce", why: "your unmerge" };
 
@@ -315,10 +320,15 @@ function AuditShot({
 }) {
   const [entity] = entitiesAt(state);
   const leaving = state.scene === "unmerged";
-  // The London row is always drawn, so the shot keeps one height in every
-  // state (the window is as tall as its tallest shot); while it leaves, it can
-  // be seen going.
-  const rows = [...entity.members.filter((key) => key !== "ltd"), "ltd" as const];
+  // Four rows in every state, so the shot keeps one height (the window is as
+  // tall as its tallest shot, and the page must not move under a reader).
+  // The London row is always drawn, and stays while it leaves so it can be
+  // seen going. The API row holds its place, unseen at the end of the list,
+  // whenever it is not a member: before the call, or after "Not a match".
+  const apiJoined = entity.members.includes("api");
+  const rows: RecordKey[] = apiJoined
+    ? ["salesforce", "csv", "api", "ltd"]
+    : ["salesforce", "csv", "ltd", "api"];
   const count = entity.members.length;
   // Both rules are always drawn for the same reason: the review decision (the
   // usual one until it is made) and the unmerge's, shown once it is written.
@@ -390,7 +400,12 @@ function AuditShot({
               );
               if (key !== "ltd")
                 return (
-                  <li key={key} data-member={key}>
+                  <li
+                    key={key}
+                    data-member={key}
+                    data-ghost={(key === "api" && !apiJoined) || undefined}
+                    aria-hidden={(key === "api" && !apiJoined) || undefined}
+                  >
                     <span className="audit-member-row">
                       <span className="audit-member-box" aria-hidden="true" />
                       {body}
@@ -399,8 +414,10 @@ function AuditShot({
                 );
               return (
                 <li key={key} data-member={key} data-flag data-leaving={leaving || undefined}>
-                  {ready ? (
-                    <label className="audit-member-row audit-member-pick">
+                  {/* A label from the server render on, so hydration swaps only
+                      the small box for the checkbox, never the row. */}
+                  <label className="audit-member-row audit-member-pick">
+                    {ready ? (
                       <input
                         type="checkbox"
                         data-press-target="tick"
@@ -410,14 +427,11 @@ function AuditShot({
                           onTick(event.target.checked);
                         }}
                       />
-                      {body}
-                    </label>
-                  ) : (
-                    <span className="audit-member-row">
+                    ) : (
                       <span className="audit-member-box" aria-hidden="true" />
-                      {body}
-                    </span>
-                  )}
+                    )}
+                    {body}
+                  </label>
                   <span className="audit-flag">
                     <span className="audit-flag-mark" aria-hidden="true">
                       ⚑
@@ -555,24 +569,29 @@ export function AuditDesk({
               </>
             );
             const current = index === step ? "step" : undefined;
+            // The step's words stay in place from the server render on, and the
+            // button is laid over them once it can do something. Swapping one
+            // element for another here moved WebKit readers parked at the foot
+            // of the page (the swap briefly removes a line of the layout).
             return (
               <li key={item.label}>
-                {ready ? (
+                <span
+                  className="audit-rail-item"
+                  aria-current={current}
+                  aria-hidden={ready || undefined}
+                >
+                  {content}
+                </span>
+                {ready && (
                   <button
                     type="button"
-                    className="audit-rail-item"
+                    className="audit-rail-hit"
                     aria-current={current}
                     aria-label={`Step ${String(index + 1)}: ${item.label}`}
                     onClick={() => {
                       onJump(index);
                     }}
-                  >
-                    {content}
-                  </button>
-                ) : (
-                  <span className="audit-rail-item" aria-current={current}>
-                    {content}
-                  </span>
+                  />
                 )}
               </li>
             );
@@ -608,18 +627,32 @@ export function AuditDesk({
         </div>
         <aside className="audit-history" aria-labelledby="audit-history-title">
           <h3 id="audit-history-title">History</h3>
-          {history.length === 0 ? (
-            <p className="audit-history-empty">No decisions yet — make the first call.</p>
-          ) : (
-            <ol>
-              {history.map((entry) => (
-                <li key={entry.who + entry.what}>
-                  <span className="audit-history-who">{entry.who}</span>
-                  {entry.what}
-                </li>
-              ))}
-            </ol>
-          )}
+          {/* Both branches' full records sit invisibly in the same cell, so the
+              card is as tall as it will ever be and nothing below it moves. */}
+          <div className="audit-history-frame">
+            {FULL_HISTORIES.map((entries, index) => (
+              <ol key={index} className="audit-history-ghost" aria-hidden="true">
+                {entries.map((entry) => (
+                  <li key={entry.who + entry.what}>
+                    <span className="audit-history-who">{entry.who}</span>
+                    {entry.what}
+                  </li>
+                ))}
+              </ol>
+            ))}
+            {history.length === 0 ? (
+              <p className="audit-history-empty">No decisions yet — make the first call.</p>
+            ) : (
+              <ol>
+                {history.map((entry) => (
+                  <li key={entry.who + entry.what}>
+                    <span className="audit-history-who">{entry.who}</span>
+                    {entry.what}
+                  </li>
+                ))}
+              </ol>
+            )}
+          </div>
         </aside>
       </div>
     </div>

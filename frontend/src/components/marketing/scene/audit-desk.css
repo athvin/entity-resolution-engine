@@ -56,7 +56,17 @@
   list-style: none;
 }
 .audit-rail li {
+  position: relative;
   min-width: 0;
+}
+/* The step's button, laid over its words once hydrated. */
+.audit-rail-hit {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  cursor: pointer;
 }
 .audit-rail-item {
   display: flex;
@@ -71,9 +81,6 @@
   font: inherit;
   font-size: 13px;
   text-align: left;
-}
-button.audit-rail-item {
-  cursor: pointer;
 }
 .audit-rail-index {
   display: inline-grid;
@@ -120,7 +127,7 @@ button.audit-rail-item {
   transition: transform var(--duration-slow) var(--audit-ease);
 }
 @media (hover: hover) and (pointer: fine) {
-  button.audit-rail-item:hover .audit-rail-index {
+  .audit-rail li:has(.audit-rail-hit:hover) .audit-rail-index {
     border-color: var(--foreground);
   }
 }
@@ -630,12 +637,15 @@ button.audit-rail-item {
   gap: 10px;
   min-width: 0;
 }
+/* Holds the unmerge button's height before hydration renders it, so the
+   page does not move when it appears. */
 .audit-members-head {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
   justify-content: space-between;
+  min-height: 44px;
   font-size: 12px;
 }
 .audit-members-head strong {
@@ -677,7 +687,7 @@ button.audit-rail-item {
   padding-bottom: 8px;
   border-color: transparent;
 }
-.audit-member-pick {
+.audit-member-pick:has(input) {
   cursor: pointer;
 }
 .audit-member-pick input {
@@ -911,6 +921,22 @@ button.audit-rail-item {
   border: 1px solid var(--border);
   border-radius: 14px;
   background: var(--card);
+}
+.audit-history-frame {
+  display: grid;
+}
+.audit-history-frame > * {
+  grid-area: 1 / 1;
+}
+.audit-history-ghost {
+  visibility: hidden;
+}
+.audit-history-ghost li {
+  animation: none;
+}
+/* A member row that is not a member yet keeps its place, unseen. */
+.audit-members li[data-ghost] {
+  visibility: hidden;
 }
 .audit-history-empty {
   margin: 0;

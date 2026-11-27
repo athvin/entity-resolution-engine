@@ -235,7 +235,7 @@ draws it and `demo/audit-story.tsx` times it. Gold references:
 **How it was filmed.** A probe drove the real page: it brought the stage into
 view, took frames at fixed times through each moment, and clicked the decisions
 itself. Both branches were filmed on desktop Chromium (1280x800) and the Pixel
-7 profile. Three rounds:
+7 profile. Four rounds:
 
 - **Round one.**
   - The four shots share one grid cell, so the shorter ones (the zone, the
@@ -260,6 +260,24 @@ itself. Both branches were filmed on desktop Chromium (1280x800) and the Pixel
   on WebKit, because the status bar also grew at hydration. Now every shot
   draws one structure in every state. The status line reserves its longest
   sentence, and the controls row reserves one button.
+
+- **Round four, WebKit only, also first seen as the footer spec failing.**
+  With the reader already parked at the very bottom of the page, hydration
+  moved the scroll by 104px. The page height did not change, no script
+  scrolled, and `overflow-anchor: none` made no difference. Bisecting with
+  injected styles found two element swaps: 56px from the step rail (a `<span>`
+  became a `<button>`) and 48px from the London row (a `<span>` became a
+  `<label>`). When an in-flow element is replaced, WebKit clamps a reader at
+  the maximum scroll position; pure insertions into reserved space did nothing.
+  - The rail keeps its words, and a button is laid over them after hydration.
+  - The row is a `<label>` from the server render on, and only its 18px box
+    is swapped.
+  - The film stays the still poster until it comes within a screen of the
+    viewport, so it no longer changes state at hydration either.
+
+  A step change with the reader parked at the bottom still moves WebKit (forced
+  from a script in a probe). No reader can do that: the clock pauses with the
+  section off screen, and the rail is only reachable in view.
 
 **What was not done.** `film.mjs --gate` was not run: it needs
 `playwright-core` beside the skill, and its clock sampling cannot make the

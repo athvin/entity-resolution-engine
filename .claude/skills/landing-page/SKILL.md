@@ -325,7 +325,15 @@ scroll position cannot wait for a decision.
   height as it cuts; TrailBridges measures the stage. Inactive shots are
   `inert` and `aria-hidden`.
 - **The poster** is the end of the usual path. Reduced motion, no JavaScript
-  and the baseline all show it.
+  and the baseline all show it. The film swaps the poster for its first frame
+  only once the stage is within a screen of the viewport, never at hydration.
+- **Its height never changes.** Every shot draws one structure in every state,
+  and the status line and the history reserve their longest content.
+- **Nothing in its flow is swapped at hydration.** When React replaces an
+  in-flow element (a `<span>` becoming a `<button>`), WebKit moves a reader
+  parked at the foot of the page, even though the page height is unchanged.
+  So the rail lays a button over its words, and the selectable row is a
+  `<label>` from the server render on.
 - **Honesty.** Never claim the product flagged the record by itself: the person
   auditing finds it, and `marketing-audit-model.test.ts` holds the status copy
   to that.
