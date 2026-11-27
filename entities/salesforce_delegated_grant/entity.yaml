@@ -1,0 +1,78 @@
+kind: entity
+version: 1
+name: salesforce_delegated_grant
+relation: salesforce_delegated_grants
+description: "A Salesforce user's delegated consent for writeback through one connection (#994): the refresh token, and the provider org and user it is bound to. Writeback acts as this user, never as the extraction's client credentials. Revoked when Salesforce refuses the refresh (consent withdrawn) or on request; a revoked grant authorizes nothing."
+key: [id]
+generate:
+  stores: [postgres]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "UUIDv7, minted by the application."
+  - name: org_id
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: id }
+    description: "The tenant."
+  - name: salesforce_connection_id
+    type: varchar
+    nullable: false
+    references: { relation: salesforce_connections, column: id }
+    description: "The connection the authorization is for."
+  - name: sf_org_id
+    type: varchar
+    nullable: false
+    description: "The Salesforce organization id the identity service returned."
+  - name: sf_user_id
+    type: varchar
+    nullable: false
+    description: "The Salesforce user id writeback acts as."
+  - name: sf_username
+    type: varchar
+    description: "The user's Salesforce username, for display."
+  - name: refresh_token
+    type: varchar
+    nullable: false
+    description: "The OAuth refresh token. A secret: returned only by for_use, never listed, audited, returned or put on a span."
+  - name: scopes
+    type: varchar
+    nullable: false
+    description: "The granted scopes, space-separated, as Salesforce reported them."
+  - name: allow_automatic
+    type: boolean
+    nullable: false
+    description: "Whether queued or policy-driven writeback may use this grant without a human present."
+  - name: status
+    type: varchar
+    nullable: false
+    default: "'active'"
+    accepted_values: [active, revoked]
+    description: "Whether the grant may be used."
+  - name: authorized_by
+    type: varchar
+    nullable: false
+    description: "The tenant principal that completed the authorization."
+  - name: revoked_reason
+    type: varchar
+    description: "Why it was revoked: consent_withdrawn, replaced or requested."
+  - name: revoked_at
+    type: timestamp
+    description: "When it was revoked."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the row was written."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the row last changed."
+indexes:
+  - name: salesforce_delegated_grants_connection
+    columns: [org_id, salesforce_connection_id, status]

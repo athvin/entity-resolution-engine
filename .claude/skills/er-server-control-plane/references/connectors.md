@@ -276,6 +276,45 @@ snapshot) then `publish_previews` (control, one transaction).
 - **v1 limits:** person datasets only; related-record counts are
   `unavailable` (they need a provider read); a golden NULL proposes no change.
 
+### 4.3.1 Delegated authorization (as built, #994)
+
+Writeback acts as a **reviewing Salesforce user who consented**, never as the
+extraction's client-credentials identity. `src/sf_oauth.rs` is the OAuth 2.0
+web-server flow with PKCE; the routes are under
+`/v1/orgs/{org}/connections/{connection_id}/writeback-authorization`:
+
+| Route | Role | Does |
+|---|---|---|
+| `POST` | Admin | Starts a flow: a single-use `state` (stored only as SHA-256) and a PKCE verifier, valid 10 minutes, returning the Salesforce consent URL. `allow_automatic` (default false) records whether queued or policy-driven writeback may use the grant unattended. |
+| `POST …/complete` | Admin | Consumes the state — it must be this org's, this connection's, unexpired, unused and **started by the same principal**; every mismatch is one 409 that does not say which. Exchanges the code with the verifier, then binds the identity service's org and user (both must match the `id` URL, and the instance must be the connection's). Any previous grant is revoked `replaced`. |
+| `GET` | Viewer | The latest grant, without tokens. |
+| `DELETE` | Admin | Revokes here at once (`requested`) and asks Salesforce to revoke the token, best effort. |
+
+The worker side is `sf_oauth::access_token(client, org, connection, unattended,
+egress)`: it refuses unattended use unless the grant allows it, refreshes, and on
+Salesforce's `invalid_grant` marks the grant revoked `consent_withdrawn` before
+returning, so nothing retries a dead grant. A revoked or absent grant is
+`NotAuthorized` — the client credentials are never a fallback.
+
+Secrets: the refresh token and the PKCE verifier are each returned by exactly one
+statement (`salesforce_delegated_grant/read/for_use`,
+`salesforce_oauth_state/update/consume`), and no response, audit detail or log
+line carries one. Errors carry Salesforce's `error` code, never a body. Every
+call re-checks the instance URL with the outbound URL guard and never follows a
+redirect.
+
+**Provider requirements.** The tenant's connected app must enable OAuth with the
+`api` and `refresh_token` scopes, require PKCE, and list each allowed redirect as
+a Callback URL. The consenting user needs the object permissions writeback uses
+(edit and merge on the object). The same connected app's consumer key and secret
+serve both extraction (client credentials) and this flow.
+
+**Deploy configuration.** `ER_SF_OAUTH_REDIRECT_URIS` (chart value
+`erserver.salesforceOAuthRedirectUris`) is the comma-separated allowlist; the
+start route refuses any other `redirect_uri` with 422, and answers 503 while the
+list is empty. The page at the redirect reads `code` and `state` from its query
+and posts them to `…/complete` with the same credential that started the flow.
+
 ### 4.4 Explicit v1 boundaries
 
 - Writeback via `merge()` (Lead/Contact/Account) and `upsert`.

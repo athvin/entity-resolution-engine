@@ -51,6 +51,8 @@ pub mod run;
 pub mod run_stage;
 pub mod s3_ingest_cursor;
 pub mod salesforce_connection;
+pub mod salesforce_delegated_grant;
+pub mod salesforce_oauth_state;
 pub mod schedule;
 pub mod schema;
 pub mod schema_migration;

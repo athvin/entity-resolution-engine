@@ -160,6 +160,10 @@ er.dupezero.com/color: {{ . }}
 - name: ER_MAIL_CONFIGURATION_SET
   value: {{ . | quote }}
 {{- end }}
+{{- with .Values.erserver.salesforceOAuthRedirectUris }}
+- name: ER_SF_OAUTH_REDIRECT_URIS
+  value: {{ . | quote }}
+{{- end }}
 {{- end }}
 
 {{/* The pod-level security context all er pods share. The namespace enforces

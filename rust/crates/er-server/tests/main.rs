@@ -109,6 +109,7 @@ mod pg_schema_race;
 mod pg_schema_replay;
 mod pg_segments;
 mod pg_serial;
+mod pg_sf_delegated_auth;
 mod pg_source_ranks;
 mod pg_steward;
 mod pg_tags;

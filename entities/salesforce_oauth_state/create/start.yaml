@@ -1,0 +1,15 @@
+kind: statement
+operation: create
+mode: partial
+description: "Record a started delegated authorization."
+params:
+  - { name: id, type: varchar }
+  - { name: org_id, type: varchar }
+  - { name: salesforce_connection_id, type: varchar }
+  - { name: state_sha256, type: varchar }
+  - { name: code_verifier, type: varchar }
+  - { name: redirect_uri, type: varchar }
+  - { name: allow_automatic, type: boolean }
+  - { name: requested_by, type: varchar }
+  - { name: expires_at, type: timestamp }
+returns: none

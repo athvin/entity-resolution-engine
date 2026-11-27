@@ -62,6 +62,7 @@ pub mod s3_ingest;
 pub mod salesforce;
 pub mod satoken;
 pub mod schema;
+pub mod sf_oauth;
 pub mod shutdown;
 pub mod taskpg;
 pub mod telemetry;
@@ -126,6 +127,10 @@ pub struct AppState {
     /// [`DEFAULT_MAX_IMPORT_BYTES`]; configurable so an operator can tighten it
     /// and so the oversize path is testable without a 256 MiB request.
     max_import_bytes: usize,
+    /// Redirect URIs a delegated Salesforce authorization may return to
+    /// (#994), from `ER_SF_OAUTH_REDIRECT_URIS` (comma-separated). Empty means
+    /// delegated authorization is not configured: starting one is a 503.
+    sf_redirect_uris: Vec<String>,
     /// The tenant auto-provisioning target (D8), or `None` when provisioning is
     /// off — in which case `POST /v1/orgs` without a `config_path` keeps
     /// answering 503, exactly as it did before provisioning existed.
@@ -156,6 +161,7 @@ impl AppState {
             dsn: None,
             mail: Arc::new(mail::Mailer::off()),
             max_import_bytes: DEFAULT_MAX_IMPORT_BYTES,
+            sf_redirect_uris: Vec::new(),
             provision: None,
             provision_error: None,
             sa_verifier: None,
@@ -174,6 +180,7 @@ impl AppState {
             dsn: Some(dsn),
             mail: Arc::new(mail::Mailer::off()),
             max_import_bytes: DEFAULT_MAX_IMPORT_BYTES,
+            sf_redirect_uris: Vec::new(),
             provision: None,
             provision_error: None,
             sa_verifier: None,
@@ -216,6 +223,13 @@ impl AppState {
     #[must_use]
     pub fn with_max_import_bytes(mut self, bytes: usize) -> Self {
         self.max_import_bytes = bytes;
+        self
+    }
+
+    /// Allow these redirect URIs for delegated Salesforce authorization.
+    #[must_use]
+    pub fn with_salesforce_redirects(mut self, uris: Vec<String>) -> Self {
+        self.sf_redirect_uris = uris;
         self
     }
 }
@@ -10660,6 +10674,393 @@ async fn upload_scope_any(
     Ok((client, org_row, d))
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WritebackAuthorizeIn {
+    /// Where Salesforce returns the reviewer; must be one the deployment allows.
+    redirect_uri: String,
+    /// Whether queued or policy-driven writeback may use the grant without a
+    /// human present. Off unless asked for.
+    #[serde(default)]
+    allow_automatic: bool,
+}
+
+/// A started delegated authorization.
+#[derive(Serialize, utoipa::ToSchema)]
+struct WritebackAuthorizationStarted {
+    /// Send the reviewer here; Salesforce returns them to `redirect_uri` with
+    /// `code` and `state`.
+    authorize_url: String,
+    /// RFC 3339; complete before this.
+    expires_at: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WritebackAuthorizeComplete {
+    state: String,
+    code: String,
+}
+
+/// A connection's delegated authorization, without its tokens.
+#[derive(Serialize, utoipa::ToSchema)]
+struct WritebackAuthorizationView {
+    /// `active` or `revoked`.
+    status: String,
+    sf_org_id: String,
+    /// The Salesforce user writeback acts as.
+    sf_user_id: String,
+    sf_username: Option<String>,
+    scopes: String,
+    allow_automatic: bool,
+    authorized_by: String,
+    /// `consent_withdrawn`, `replaced` or `requested`.
+    revoked_reason: Option<String>,
+    /// RFC 3339.
+    revoked_at: Option<String>,
+    /// RFC 3339.
+    created_at: String,
+}
+
+async fn authorization_view(
+    client: &tokio_postgres::Client,
+    org_id: &str,
+    connection_id: &str,
+) -> Result<Option<WritebackAuthorizationView>, tokio_postgres::Error> {
+    Ok(
+        er_entities::salesforce_delegated_grant::read::latest(client, org_id, connection_id)
+            .await?
+            .into_iter()
+            .next()
+            .map(|g| WritebackAuthorizationView {
+                status: g.status,
+                sf_org_id: g.sf_org_id,
+                sf_user_id: g.sf_user_id,
+                sf_username: g.sf_username,
+                scopes: g.scopes,
+                allow_automatic: g.allow_automatic,
+                authorized_by: g.authorized_by,
+                revoked_reason: g.revoked_reason,
+                revoked_at: g.revoked_at.as_ref().map(pg::ts),
+                created_at: pg::ts(&g.created_at),
+            }),
+    )
+}
+
+/// The org row and the org's active connection, or the 404 for either.
+async fn org_connection(
+    state: &AppState,
+    org: &str,
+    connection_id: &str,
+) -> Result<
+    (
+        tokio_postgres::Client,
+        pg::OrgDetail,
+        er_entities::salesforce_connection::SalesforceConnection,
+    ),
+    Box<axum::response::Response>,
+> {
+    let Some(dsn) = &state.dsn else {
+        return Err(Box::new(detail_err(
+            StatusCode::NOT_IMPLEMENTED,
+            "requires Postgres",
+        )));
+    };
+    let client = connect_pg(dsn).await?;
+    let org_row = org_or_404(&client, org).await?;
+    match pg::salesforce_connection_credential(&client, &org_row.id, connection_id).await {
+        Ok(Some(c)) if c.active => Ok((client, org_row, c)),
+        Ok(_) => Err(Box::new(detail_err(
+            StatusCode::NOT_FOUND,
+            "no such connection",
+        ))),
+        Err(e) => Err(Box::new(pg_err(e))),
+    }
+}
+
+/// Admin+: start delegating Salesforce writeback to a reviewing user
+/// (`POST /v1/orgs/{org}/connections/{connection_id}/writeback-authorization`).
+/// Returns the Salesforce consent URL (OAuth web-server flow with PKCE and a
+/// single-use `state`, valid ten minutes). The SAME principal completes it.
+/// 503 when the deployment allows no redirect URI.
+async fn start_writeback_authorization(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, connection_id)): Path<(String, String)>,
+    Json(body): Json<WritebackAuthorizeIn>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Admin) {
+        return e.into_response();
+    }
+    if state.sf_redirect_uris.is_empty() {
+        return detail_err(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "delegated Salesforce authorization is not configured (ER_SF_OAUTH_REDIRECT_URIS)",
+        );
+    }
+    if !state.sf_redirect_uris.contains(&body.redirect_uri) {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "redirect_uri is not one this deployment allows",
+        );
+    }
+    let (client, org_row, conn) = match org_connection(&state, &org, &connection_id).await {
+        Ok(t) => t,
+        Err(r) => return *r,
+    };
+    if let Err(rejection) = urlguard::check(&conn.instance_url, urlguard::Egress::Guarded).await {
+        return detail_err(
+            StatusCode::CONFLICT,
+            format!("the connection's instance URL is refused: {rejection}"),
+        );
+    }
+    let (state_value, state_sha) = sf_oauth::new_state();
+    let (verifier, challenge) = sf_oauth::pkce();
+    let expires = chrono::Utc::now() + chrono::Duration::seconds(sf_oauth::STATE_TTL_SECS);
+    let url = match sf_oauth::authorize_url(
+        &conn.instance_url,
+        &conn.client_id,
+        &body.redirect_uri,
+        &state_value,
+        &challenge,
+    ) {
+        Ok(u) => u,
+        Err(e) => return detail_err(StatusCode::CONFLICT, e.to_string()),
+    };
+    if let Err(e) = er_entities::salesforce_oauth_state::create::start(
+        &client,
+        &er_ids::new_v7(),
+        &org_row.id,
+        &connection_id,
+        &state_sha,
+        &verifier,
+        &body.redirect_uri,
+        body.allow_automatic,
+        &principal.actor,
+        expires,
+    )
+    .await
+    {
+        return pg_err(e);
+    }
+    let _ = pg::audit(
+        &client,
+        &principal.actor,
+        Some(&org),
+        None,
+        "salesforce.authorize.start",
+        &json!({ "connection_id": connection_id, "allow_automatic": body.allow_automatic }),
+    )
+    .await;
+    (
+        StatusCode::CREATED,
+        Json(WritebackAuthorizationStarted {
+            authorize_url: url,
+            expires_at: pg::ts(&expires),
+        }),
+    )
+        .into_response()
+}
+
+/// Admin+: finish a delegated authorization
+/// (`POST /v1/orgs/{org}/connections/{connection_id}/writeback-authorization/complete`)
+/// with the `state` and `code` Salesforce returned. The state must be this
+/// org's, this connection's, unexpired, unused and started by the same
+/// principal; any mismatch is one 409 that does not say which. The code is
+/// exchanged with the PKCE verifier, the identity is bound (org and user), and
+/// any previous grant for the connection is revoked as `replaced`. Tokens are
+/// never returned.
+async fn complete_writeback_authorization(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, connection_id)): Path<(String, String)>,
+    Json(body): Json<WritebackAuthorizeComplete>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Admin) {
+        return e.into_response();
+    }
+    let (client, org_row, conn) = match org_connection(&state, &org, &connection_id).await {
+        Ok(t) => t,
+        Err(r) => return *r,
+    };
+    let started = match er_entities::salesforce_oauth_state::update::consume(
+        &client,
+        &sf_oauth::state_hash(&body.state),
+        &org_row.id,
+        &connection_id,
+        &principal.actor,
+    )
+    .await
+    {
+        Ok(rows) => match rows.into_iter().next() {
+            Some(s) => s,
+            None => {
+                return detail_err(
+                    StatusCode::CONFLICT,
+                    "this authorization is unknown, expired, already used or not yours; start again",
+                );
+            }
+        },
+        Err(e) => return pg_err(e),
+    };
+    let tokens = match sf_oauth::exchange_code(
+        &conn.instance_url,
+        &conn.client_id,
+        &conn.client_secret,
+        &body.code,
+        &started.code_verifier,
+        &started.redirect_uri,
+        urlguard::Egress::Guarded,
+    )
+    .await
+    {
+        Ok(t) => t,
+        Err(sf_oauth::OAuthError::Transient(m)) => {
+            return detail_err(
+                StatusCode::BAD_GATEWAY,
+                format!("Salesforce is unreachable ({m}); start again"),
+            );
+        }
+        Err(e) => return detail_err(StatusCode::CONFLICT, e.to_string()),
+    };
+    let Some(refresh_token) = tokens.refresh_token.clone() else {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Salesforce returned no refresh token; the connected app must grant the refresh_token scope",
+        );
+    };
+    let who = match sf_oauth::identity(&tokens, urlguard::Egress::Guarded).await {
+        Ok(w) => w,
+        Err(e) => return detail_err(StatusCode::CONFLICT, e.to_string()),
+    };
+    let _ = pg::set_actor(&client, &principal.actor).await;
+    if let Err(e) = er_entities::salesforce_delegated_grant::update::revoke(
+        &client,
+        "replaced",
+        &org_row.id,
+        &connection_id,
+    )
+    .await
+    {
+        return pg_err(e);
+    }
+    if let Err(e) = er_entities::salesforce_delegated_grant::create::grant(
+        &client,
+        &er_ids::new_v7(),
+        &org_row.id,
+        &connection_id,
+        &who.org_id,
+        &who.user_id,
+        who.username.as_deref(),
+        &refresh_token,
+        &tokens.scope,
+        started.allow_automatic,
+        &principal.actor,
+    )
+    .await
+    {
+        return pg_err(e);
+    }
+    let _ = pg::audit(
+        &client,
+        &principal.actor,
+        Some(&org),
+        None,
+        "salesforce.authorize.complete",
+        &json!({ "connection_id": connection_id, "sf_user_id": who.user_id, "allow_automatic": started.allow_automatic }),
+    )
+    .await;
+    match authorization_view(&client, &org_row.id, &connection_id).await {
+        Ok(Some(v)) => Json(v).into_response(),
+        Ok(None) => detail_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "the grant was not stored",
+        ),
+        Err(e) => pg_err(e),
+    }
+}
+
+/// Viewer+: a connection's delegated writeback authorization, without tokens
+/// (`GET /v1/orgs/{org}/connections/{connection_id}/writeback-authorization`).
+async fn get_writeback_authorization(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, connection_id)): Path<(String, String)>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let (client, org_row, _) = match org_connection(&state, &org, &connection_id).await {
+        Ok(t) => t,
+        Err(r) => return *r,
+    };
+    match authorization_view(&client, &org_row.id, &connection_id).await {
+        Ok(Some(v)) => Json(v).into_response(),
+        Ok(None) => detail_err(
+            StatusCode::NOT_FOUND,
+            "this connection has no writeback authorization",
+        ),
+        Err(e) => pg_err(e),
+    }
+}
+
+/// Admin+: revoke a connection's delegated writeback authorization
+/// (`DELETE /v1/orgs/{org}/connections/{connection_id}/writeback-authorization`).
+/// Revoked here at once; Salesforce is asked to revoke the token too, best
+/// effort. Idempotent.
+async fn revoke_writeback_authorization(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, connection_id)): Path<(String, String)>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Admin) {
+        return e.into_response();
+    }
+    let (client, org_row, conn) = match org_connection(&state, &org, &connection_id).await {
+        Ok(t) => t,
+        Err(r) => return *r,
+    };
+    let revoked = match er_entities::salesforce_delegated_grant::update::revoke(
+        &client,
+        "requested",
+        &org_row.id,
+        &connection_id,
+    )
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => return pg_err(e),
+    };
+    for grant in &revoked {
+        if let Err(e) = sf_oauth::revoke(
+            &conn.instance_url,
+            &grant.refresh_token,
+            urlguard::Egress::Guarded,
+        )
+        .await
+        {
+            tracing::warn!(error = %e, "Salesforce did not confirm the token revocation; it is revoked here");
+        }
+    }
+    let _ = pg::audit(
+        &client,
+        &principal.actor,
+        Some(&org),
+        None,
+        "salesforce.authorize.revoke",
+        &json!({ "connection_id": connection_id }),
+    )
+    .await;
+    match authorization_view(&client, &org_row.id, &connection_id).await {
+        Ok(Some(v)) => Json(v).into_response(),
+        Ok(None) => detail_err(
+            StatusCode::NOT_FOUND,
+            "this connection has no writeback authorization",
+        ),
+        Err(e) => pg_err(e),
+    }
+}
+
 /// The query parameters of `imports_list`.
 #[derive(Debug, Clone, Default, Deserialize)]
 struct ImportsListQuery {
@@ -15349,6 +15750,16 @@ fn build_routes(state: AppState) -> Router {
             get(salesforce_connections_index).post(create_salesforce_connection),
         )
         .route(
+            "/v1/orgs/{org}/connections/{connection_id}/writeback-authorization",
+            get(get_writeback_authorization)
+                .post(start_writeback_authorization)
+                .delete(revoke_writeback_authorization),
+        )
+        .route(
+            "/v1/orgs/{org}/connections/{connection_id}/writeback-authorization/complete",
+            post(complete_writeback_authorization),
+        )
+        .route(
             "/v1/orgs/{org}/connections/{connection_id}",
             axum::routing::delete(delete_salesforce_connection),
         )
@@ -15468,6 +15879,15 @@ pub async fn state_from_env() -> AppState {
     state
         .with_mail(mail::Mailer::from_env().await)
         .with_provision(provision::Profile::from_env())
+        .with_salesforce_redirects(
+            std::env::var("ER_SF_OAUTH_REDIRECT_URIS")
+                .unwrap_or_default()
+                .split(',')
+                .map(str::trim)
+                .filter(|u| !u.is_empty())
+                .map(str::to_string)
+                .collect(),
+        )
 }
 
 #[cfg(test)]

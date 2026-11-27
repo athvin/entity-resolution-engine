@@ -515,6 +515,42 @@ CREATE INDEX IF NOT EXISTS remote_attempts_dataset_history ON public.remote_atte
 );
 CREATE UNIQUE INDEX IF NOT EXISTS s3_ingest_cursors_org_source ON public.s3_ingest_cursors (org_id, source);
 CREATE INDEX IF NOT EXISTS s3_ingest_cursors_dataset ON public.s3_ingest_cursors (dataset_id, source);"#,
+    r#"CREATE TABLE IF NOT EXISTS public.salesforce_delegated_grants (
+  id text NOT NULL,
+  org_id text NOT NULL REFERENCES orgs(id),
+  salesforce_connection_id text NOT NULL REFERENCES salesforce_connections(id),
+  sf_org_id text NOT NULL,
+  sf_user_id text NOT NULL,
+  sf_username text,
+  refresh_token text NOT NULL,
+  scopes text NOT NULL,
+  allow_automatic boolean NOT NULL,
+  status text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'revoked')),
+  authorized_by text NOT NULL,
+  revoked_reason text,
+  revoked_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (id)
+);
+CREATE INDEX IF NOT EXISTS salesforce_delegated_grants_connection ON public.salesforce_delegated_grants (org_id, salesforce_connection_id, status);"#,
+    r#"CREATE TABLE IF NOT EXISTS public.salesforce_oauth_states (
+  id text NOT NULL,
+  org_id text NOT NULL REFERENCES orgs(id),
+  salesforce_connection_id text NOT NULL REFERENCES salesforce_connections(id),
+  state_sha256 text NOT NULL,
+  code_verifier text NOT NULL,
+  redirect_uri text NOT NULL,
+  allow_automatic boolean NOT NULL,
+  requested_by text NOT NULL,
+  expires_at timestamptz NOT NULL,
+  consumed_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS salesforce_oauth_states_state ON public.salesforce_oauth_states (state_sha256);
+CREATE INDEX IF NOT EXISTS salesforce_oauth_states_org ON public.salesforce_oauth_states (org_id, salesforce_connection_id);"#,
     r#"CREATE TABLE IF NOT EXISTS public.schedules (
   id text NOT NULL,
   org_id text NOT NULL REFERENCES orgs(id),

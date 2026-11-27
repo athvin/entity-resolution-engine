@@ -22,6 +22,17 @@
     "response": null
   },
   {
+    "id": "delete_orgs_by_org_connections_by_connection_id_writeback_authorization",
+    "method": "DELETE",
+    "path": "/v1/orgs/{org}/connections/{connection_id}/writeback-authorization",
+    "role": "admin",
+    "params": ["org", "connection_id"],
+    "body": null,
+    "needs_body": false,
+    "summary": "revoke a connection's delegated writeback authorization",
+    "response": null
+  },
+  {
     "id": "delete_orgs_by_org_datasets_by_ds_assertions_by_assertion_id",
     "method": "DELETE",
     "path": "/v1/orgs/{org}/datasets/{ds}/assertions/{assertion_id}",
@@ -188,6 +199,17 @@
     "needs_body": false,
     "summary": "list an org's active Salesforce connections",
     "response": { "envelope": "bare" }
+  },
+  {
+    "id": "get_orgs_by_org_connections_by_connection_id_writeback_authorization",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/connections/{connection_id}/writeback-authorization",
+    "role": "viewer",
+    "params": ["org", "connection_id"],
+    "body": null,
+    "needs_body": false,
+    "summary": "a connection's delegated writeback authorization, without tokens",
+    "response": { "envelope": "scalar" }
   },
   {
     "id": "get_orgs_by_org_datasets",
@@ -975,6 +997,41 @@
     },
     "needs_body": false,
     "summary": "register a Salesforce connection",
+    "response": null
+  },
+  {
+    "id": "post_orgs_by_org_connections_by_connection_id_writeback_authorization",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/connections/{connection_id}/writeback-authorization",
+    "role": "admin",
+    "params": ["org", "connection_id"],
+    "body": {
+      "type": "object",
+      "properties": {
+        "redirect_uri": { "type": "string" },
+        "allow_automatic": { "type": "boolean" }
+      },
+      "required": ["redirect_uri"],
+      "additionalProperties": false
+    },
+    "needs_body": false,
+    "summary": "start delegating Salesforce writeback to a reviewing user",
+    "response": null
+  },
+  {
+    "id": "post_orgs_by_org_connections_by_connection_id_writeback_authorization_complete",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/connections/{connection_id}/writeback-authorization/complete",
+    "role": "admin",
+    "params": ["org", "connection_id"],
+    "body": {
+      "type": "object",
+      "properties": { "state": { "type": "string" }, "code": { "type": "string" } },
+      "required": ["state", "code"],
+      "additionalProperties": false
+    },
+    "needs_body": false,
+    "summary": "finish a delegated authorization",
     "response": null
   },
   {

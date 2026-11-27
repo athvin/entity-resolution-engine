@@ -110,6 +110,8 @@ pub struct ApiDoc;
     crate::UnmatchApplied,
     crate::DeliveryAccepted,
     crate::UploadSession,
+    crate::WritebackAuthorizationStarted,
+    crate::WritebackAuthorizationView,
     crate::WritebackPolicyView,
     crate::WritebackPolicyList,
     crate::MergePreviewSummary,

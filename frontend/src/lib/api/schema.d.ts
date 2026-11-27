@@ -308,6 +308,42 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/orgs/{org}/connections/{connection_id}/writeback-authorization": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** a connection's delegated writeback authorization, without tokens */
+        get: operations["get_orgs_by_org_connections_by_connection_id_writeback_authorization"];
+        put?: never;
+        /** start delegating Salesforce writeback to a reviewing user */
+        post: operations["post_orgs_by_org_connections_by_connection_id_writeback_authorization"];
+        /** revoke a connection's delegated writeback authorization */
+        delete: operations["delete_orgs_by_org_connections_by_connection_id_writeback_authorization"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/orgs/{org}/connections/{connection_id}/writeback-authorization/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** finish a delegated authorization */
+        post: operations["post_orgs_by_org_connections_by_connection_id_writeback_authorization_complete"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/orgs/{org}/datasets": {
         parameters: {
             query?: never;
@@ -5029,6 +5065,34 @@ export interface components {
             /** Format: double */
             validity?: number | null;
         };
+        /** @description A started delegated authorization. */
+        WritebackAuthorizationStarted: {
+            /**
+             * @description Send the reviewer here; Salesforce returns them to `redirect_uri` with
+             *     `code` and `state`.
+             */
+            authorize_url: string;
+            /** @description RFC 3339; complete before this. */
+            expires_at: string;
+        };
+        /** @description A connection's delegated authorization, without its tokens. */
+        WritebackAuthorizationView: {
+            allow_automatic: boolean;
+            authorized_by: string;
+            /** @description RFC 3339. */
+            created_at: string;
+            /** @description RFC 3339. */
+            revoked_at?: string | null;
+            /** @description `consent_withdrawn`, `replaced` or `requested`. */
+            revoked_reason?: string | null;
+            scopes: string;
+            sf_org_id: string;
+            /** @description The Salesforce user writeback acts as. */
+            sf_user_id: string;
+            sf_username?: string | null;
+            /** @description `active` or `revoked`. */
+            status: string;
+        };
         /** @description The active writeback policies of a dataset. */
         WritebackPolicyList: {
             items: components["schemas"]["WritebackPolicyView"][];
@@ -5869,6 +5933,156 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Deleted"];
+                };
+            };
+            /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        detail: string;
+                    };
+                };
+            };
+        };
+    };
+    get_orgs_by_org_connections_by_connection_id_writeback_authorization: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+                connection_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful response. Payload types are described only at envelope granularity. */
+            "2XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        detail: string;
+                    };
+                };
+            };
+        };
+    };
+    post_orgs_by_org_connections_by_connection_id_writeback_authorization: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+                connection_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    allow_automatic?: boolean;
+                    redirect_uri: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful response. */
+            "2XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WritebackAuthorizationStarted"];
+                };
+            };
+            /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        detail: string;
+                    };
+                };
+            };
+        };
+    };
+    delete_orgs_by_org_connections_by_connection_id_writeback_authorization: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+                connection_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful response. Payload types are described only at envelope granularity. */
+            "2XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        detail: string;
+                    };
+                };
+            };
+        };
+    };
+    post_orgs_by_org_connections_by_connection_id_writeback_authorization_complete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+                connection_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    code: string;
+                    state: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful response. Payload types are described only at envelope granularity. */
+            "2XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */

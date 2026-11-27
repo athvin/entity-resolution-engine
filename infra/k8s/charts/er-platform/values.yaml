@@ -77,6 +77,11 @@ erserver:
     backend: "" # ER_MAIL_BACKEND: ses | log | off
     from: "" # ER_MAIL_FROM; required by `ses`, which disables itself without it
     configurationSet: "" # ER_MAIL_CONFIGURATION_SET; terraform output ses_configuration_set_name
+  # #994: redirect URIs a delegated Salesforce writeback authorization may
+  # return to, comma-separated (ER_SF_OAUTH_REDIRECT_URIS). Each must also be
+  # a Callback URL on the tenant's connected app. Empty leaves
+  # POST …/connections/{id}/writeback-authorization answering 503.
+  salesforceOAuthRedirectUris: ""
 
 # Blue/green for the web-api pod. TWO Deployments, one per colour, and the
 # `er-api`/`er-web` Services select `color.active` — so a cutover is one field

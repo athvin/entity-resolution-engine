@@ -1,0 +1,9 @@
+kind: statement
+operation: update
+mode: partial
+description: "Revoke a connection's active grant, with a reason. Idempotent: an already-revoked grant changes nothing."
+params:
+  - { name: reason, type: varchar }
+  - { name: org_id, type: varchar }
+  - { name: salesforce_connection_id, type: varchar }
+returns: entity
