@@ -65,9 +65,27 @@ fn rank_case(source_ranks: &BTreeMap<String, i64>) -> String {
     format!("COALESCE(CASE m.source_system {arms} END, {UNRANKED_SENTINEL})")
 }
 
+/// The Account survivable columns: `acct_golden_records`' surviving values,
+/// in that relation's column order. `most_complete` counts these for an
+/// Account member, as [`GOLDEN_SURVIVABLE_COLUMNS`] for a person.
+pub const ACCT_SURVIVABLE_COLUMNS: [&str; 7] = [
+    "company_name",
+    "domain",
+    "phone_e164",
+    "addr_street",
+    "addr_city",
+    "addr_region",
+    "addr_postal",
+];
+
 /// How many survivable attributes a member carries, over the S5 column set.
 fn completeness_expr() -> String {
-    let terms = GOLDEN_SURVIVABLE_COLUMNS
+    completeness_over(&GOLDEN_SURVIVABLE_COLUMNS)
+}
+
+/// [`completeness_expr`] over an explicit column set.
+fn completeness_over(columns: &[&str]) -> String {
+    let terms = columns
         .iter()
         .map(|c| format!("(CASE WHEN s.{c} IS NOT NULL THEN 1 ELSE 0 END)"))
         .collect::<Vec<_>>()
@@ -247,6 +265,65 @@ pub fn scoped_masters_sql(
     source_ranks: Option<&BTreeMap<String, i64>>,
     protect: bool,
 ) -> Result<String, MasterElectionError> {
+    scoped_masters_over(
+        policy,
+        schema_qualifier,
+        source_ranks,
+        protect,
+        Relations {
+            std: "int_std_records",
+            lineage: "golden_lineage",
+            survivable: &GOLDEN_SURVIVABLE_COLUMNS,
+        },
+    )
+}
+
+/// The Account twin of [`scoped_masters_sql`] (#1309): the same election,
+/// parameters and output, over `acct_int_std_records` and
+/// `acct_golden_lineage`, with `most_complete` counting
+/// [`ACCT_SURVIVABLE_COLUMNS`]. Membership and overlays are shared relations.
+/// One lake holds one entity type, so a caller picks by the config's.
+///
+/// # Errors
+/// [`MasterElectionError`] as [`masters_cte_sql`].
+pub fn acct_scoped_masters_sql(
+    policy: &str,
+    schema_qualifier: &str,
+    source_ranks: Option<&BTreeMap<String, i64>>,
+    protect: bool,
+) -> Result<String, MasterElectionError> {
+    scoped_masters_over(
+        policy,
+        schema_qualifier,
+        source_ranks,
+        protect,
+        Relations {
+            std: "acct_int_std_records",
+            lineage: "acct_golden_lineage",
+            survivable: &ACCT_SURVIVABLE_COLUMNS,
+        },
+    )
+}
+
+/// The entity-type-specific relations the scoped election reads.
+struct Relations<'a> {
+    std: &'a str,
+    lineage: &'a str,
+    survivable: &'a [&'a str],
+}
+
+fn scoped_masters_over(
+    policy: &str,
+    schema_qualifier: &str,
+    source_ranks: Option<&BTreeMap<String, i64>>,
+    protect: bool,
+    rel: Relations<'_>,
+) -> Result<String, MasterElectionError> {
+    let Relations {
+        std,
+        lineage,
+        survivable,
+    } = rel;
     if !MASTER_ELECTION_POLICIES.contains(&policy) {
         return Err(MasterElectionError(format!(
             "{policy:?} is not a master-election policy; the vocabulary is {MASTER_ELECTION_POLICIES:?}"
@@ -266,7 +343,7 @@ pub fn scoped_masters_sql(
              FROM ( \
                SELECT e.entity_id, e.group_key, e.record_key, count(l.record_key) AS won_attributes \
                FROM eligible e \
-               LEFT JOIN {schema_qualifier}.golden_lineage l \
+               LEFT JOIN {schema_qualifier}.{lineage} l \
                  ON l.entity_id = e.entity_id AND l.record_key = e.record_key \
                GROUP BY e.entity_id, e.group_key, e.record_key \
              )"
@@ -285,7 +362,7 @@ pub fn scoped_masters_sql(
             }
             "most_recent" => "COALESCE(s.updated_at_source, s.ingested_at) DESC".to_string(),
             "oldest" => "COALESCE(s.updated_at_source, s.ingested_at) ASC".to_string(),
-            _ => format!("{} DESC", completeness_expr()),
+            _ => format!("{} DESC", completeness_over(survivable)),
         };
         format!(
             "SELECT e.entity_id, e.group_key, e.record_key, \
@@ -295,7 +372,7 @@ pub fn scoped_masters_sql(
              FROM eligible e \
              JOIN {schema_qualifier}.entity_membership m \
                ON m.entity_id = e.entity_id AND m.record_key = e.record_key \
-             JOIN {schema_qualifier}.int_std_records s ON s.record_key = e.record_key"
+             JOIN {schema_qualifier}.{std} s ON s.record_key = e.record_key"
         )
     };
     let elected = format!(

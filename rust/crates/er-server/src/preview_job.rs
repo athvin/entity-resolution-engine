@@ -212,6 +212,70 @@ pub const GOLDEN_COLUMNS: [&str; 11] = [
     "birth_date",
 ];
 
+/// The Account golden record's survivable values (#1309), by column name.
+pub const ACCT_GOLDEN_COLUMNS: [&str; 7] = er_golden::ACCT_SURVIVABLE_COLUMNS;
+
+/// The golden columns a policy for `object` may map from. An Account policy
+/// writes an account dataset's golden values; a Lead or Contact policy, a
+/// person dataset's.
+#[must_use]
+pub fn golden_columns_for_object(object: &str) -> &'static [&'static str] {
+    if object == "Account" {
+        &ACCT_GOLDEN_COLUMNS
+    } else {
+        &GOLDEN_COLUMNS
+    }
+}
+
+/// The golden columns of the lake's own entity type.
+fn golden_columns(account: bool) -> &'static [&'static str] {
+    if account {
+        &ACCT_GOLDEN_COLUMNS
+    } else {
+        &GOLDEN_COLUMNS
+    }
+}
+
+/// The golden records' survivable values for `ids` (joined by `SEP`), from the
+/// person or the account mart, whichever this lake holds.
+fn goldens_by_ids(
+    conn: &duckdb::Connection,
+    snapshot: i64,
+    ids: &str,
+    account: bool,
+) -> Result<BTreeMap<String, BTreeMap<String, Value>>, String> {
+    let s = |v: &Option<String>| v.clone().map_or(Value::Null, Value::String);
+    if account {
+        return Ok(
+            er_entities::acct_golden_record::read::by_ids(conn, snapshot, ids)
+                .map_err(|e| e.to_string())?
+                .iter()
+                .map(|g| {
+                    (
+                        g.id.clone(),
+                        BTreeMap::from([
+                            ("company_name".into(), s(&g.company_name)),
+                            ("domain".into(), s(&g.domain)),
+                            ("phone_e164".into(), s(&g.phone_e164)),
+                            ("addr_street".into(), s(&g.addr_street)),
+                            ("addr_city".into(), s(&g.addr_city)),
+                            ("addr_region".into(), s(&g.addr_region)),
+                            ("addr_postal".into(), s(&g.addr_postal)),
+                        ]),
+                    )
+                })
+                .collect(),
+        );
+    }
+    Ok(
+        er_entities::golden_record::read::by_ids(conn, snapshot, ids)
+            .map_err(|e| e.to_string())?
+            .iter()
+            .map(|g| (g.id.clone(), golden_values(g)))
+            .collect(),
+    )
+}
+
 fn golden_values(row: &er_entities::golden_record::read::ByIdsRow) -> BTreeMap<String, Value> {
     let s = |v: &Option<String>| v.clone().map_or(Value::Null, Value::String);
     BTreeMap::from([
@@ -246,6 +310,7 @@ pub fn materialize(
     ctx: &PreviewContext,
 ) -> Result<Materialized, String> {
     let conn = session.connection();
+    let account = !config.entity_type.is_person();
     let snapshot = crate::read::latest_snapshot(session)?;
     let mut out = Materialized {
         snapshot,
@@ -287,7 +352,7 @@ pub fn materialize(
                 .map(|r| r.entity_id)
                 .collect();
         if !affected.is_empty() && !ctx.upsert_policies.is_empty() {
-            upsert_candidates(session, snapshot, run, &affected, ctx, &mut out)?;
+            upsert_candidates(session, snapshot, run, &affected, ctx, account, &mut out)?;
         }
         if !affected.is_empty() && !policies.is_empty() {
             let members = er_entities::entity_membership::read::members_of(
@@ -453,7 +518,12 @@ pub fn materialize(
                     .collect();
                 let mut masters: BTreeMap<(String, String), String> = BTreeMap::new();
                 for (election, rows) in &by_election {
-                    let sql = er_golden::scoped_masters_sql(
+                    let elect = if account {
+                        er_golden::acct_scoped_masters_sql
+                    } else {
+                        er_golden::scoped_masters_sql
+                    };
+                    let sql = elect(
                         election,
                         "lake.main",
                         Some(&ranks),
@@ -482,22 +552,18 @@ pub fn materialize(
                         masters.insert((entity, group), master);
                     }
                 }
-                let goldens: BTreeMap<String, BTreeMap<String, Value>> =
-                    er_entities::golden_record::read::by_ids(
-                        conn,
-                        snapshot,
-                        &groups
-                            .keys()
-                            .map(|k| k.0.clone())
-                            .collect::<BTreeSet<_>>()
-                            .into_iter()
-                            .collect::<Vec<_>>()
-                            .join(SEP),
-                    )
-                    .map_err(|e| e.to_string())?
-                    .iter()
-                    .map(|g| (g.id.clone(), golden_values(g)))
-                    .collect();
+                let goldens = goldens_by_ids(
+                    conn,
+                    snapshot,
+                    &groups
+                        .keys()
+                        .map(|k| k.0.clone())
+                        .collect::<BTreeSet<_>>()
+                        .into_iter()
+                        .collect::<Vec<_>>()
+                        .join(SEP),
+                    account,
+                )?;
                 // Score evidence: active edges among the groups' members. A
                 // lake without a match run has no `match_scores` table, and
                 // then no group has evidence.
@@ -558,7 +624,7 @@ pub fn materialize(
                         field_mapping: policy
                             .field_mapping
                             .iter()
-                            .filter(|(attr, _)| GOLDEN_COLUMNS.contains(&attr.as_str()))
+                            .filter(|(attr, _)| golden_columns(account).contains(&attr.as_str()))
                             .map(|(a, f)| (a.clone(), f.clone()))
                             .collect(),
                         writeback_allowlist: policy.writeback_allowlist.iter().cloned().collect(),
@@ -603,6 +669,7 @@ fn upsert_candidates(
     run: &er_entities::run::read::SucceededAfterRow,
     affected: &[String],
     ctx: &PreviewContext,
+    account: bool,
     out: &mut Materialized,
 ) -> Result<(), String> {
     let conn = session.connection();
@@ -655,16 +722,12 @@ fn upsert_candidates(
         return Ok(());
     }
     let ids: BTreeSet<&str> = wanted.iter().map(|(_, e, _)| *e).collect();
-    let goldens: BTreeMap<String, BTreeMap<String, Value>> =
-        er_entities::golden_record::read::by_ids(
-            conn,
-            snapshot,
-            &ids.into_iter().collect::<Vec<_>>().join(SEP),
-        )
-        .map_err(|e| e.to_string())?
-        .iter()
-        .map(|g| (g.id.clone(), golden_values(g)))
-        .collect();
+    let goldens = goldens_by_ids(
+        conn,
+        snapshot,
+        &ids.into_iter().collect::<Vec<_>>().join(SEP),
+        account,
+    )?;
     for (policy, entity, anchor) in wanted {
         let Some(golden) = goldens.get(entity) else {
             *out.excluded.entry("upsert_no_golden".into()).or_default() += 1;
@@ -674,7 +737,7 @@ fn upsert_candidates(
             .field_mapping
             .iter()
             .filter(|(attr, field)| {
-                GOLDEN_COLUMNS.contains(&attr.as_str())
+                golden_columns(account).contains(&attr.as_str())
                     && policy.writeback_allowlist.contains(field)
             })
             .filter_map(|(attr, field)| {

@@ -386,6 +386,34 @@ mod tests {
         }
     }
 
+    /// The Account twin of the scoped election (#1309): the same vectors over
+    /// `acct_int_std_records` and `acct_golden_lineage`, and the SQL names
+    /// neither person relation.
+    #[test]
+    fn the_account_scoped_master_generator_plans_for_every_policy_and_topology() {
+        let catalog = build_lake_stage_catalog(&entities_catalog(), true);
+        let ranks: std::collections::BTreeMap<String, i64> =
+            [("crm".to_string(), 1)].into_iter().collect();
+        for policy in er_golden::MASTER_ELECTION_POLICIES {
+            for protect in [false, true] {
+                let sql =
+                    er_golden::acct_scoped_masters_sql(policy, "lake.main", Some(&ranks), protect)
+                        .expect("a vocabulary policy renders");
+                assert!(
+                    !sql.contains("lake.main.int_std_records")
+                        && !sql.contains("lake.main.golden_lineage"),
+                    "the account election reads no person relation ({policy})"
+                );
+                let cols = plan_stage(&catalog, &sql);
+                assert_eq!(
+                    cols,
+                    ["entity_id", "group_key", "master_key"],
+                    "account scoped masters ({policy}, protect={protect})"
+                );
+            }
+        }
+    }
+
     /// The merge-plan generator (er-golden) is a governed generator like the
     /// mart assembly: every shape it can emit — the full policy vocabulary ×
     /// the protect-override topology × the since filter — plans against the
