@@ -157,6 +157,7 @@ fn variant(kind: JobKind) -> &'static str {
         JobKind::MergeApply => "MergeApply",
         JobKind::MergeRestore => "MergeRestore",
         JobKind::UpsertApply => "UpsertApply",
+        JobKind::LeadConvert => "LeadConvert",
     }
 }
 

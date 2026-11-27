@@ -279,6 +279,8 @@ const DATASET_SCOPED: &[(&str, bool)] = &[
     ("upsert_policies", true),
     ("upsert_previews", true),
     ("upsert_applies", true),
+    ("lead_conversions", true),
+    ("lead_conversion_applies", true),
     ("jobs", false),
     ("task_instances", false),
 ];

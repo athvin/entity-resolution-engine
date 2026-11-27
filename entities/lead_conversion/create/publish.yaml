@@ -1,0 +1,22 @@
+kind: statement
+operation: create
+mode: partial
+description: "Publish a conversion proposal; identical content publishes nothing."
+params:
+  - { name: id, type: varchar }
+  - { name: org_id, type: varchar }
+  - { name: dataset_id, type: varchar }
+  - { name: salesforce_connection_id, type: varchar }
+  - { name: entity_id, type: varchar }
+  - { name: lead_external_id, type: varchar }
+  - { name: lead_record_key, type: varchar }
+  - { name: lead_modstamp, type: varchar }
+  - { name: contact_external_id, type: varchar }
+  - { name: contact_record_key, type: varchar }
+  - { name: contact_modstamp, type: varchar }
+  - { name: fingerprint, type: varchar }
+  - { name: lake_snapshot, type: bigint }
+  - { name: origin_run_id, type: varchar }
+  - { name: lead_writeback_policy_id, type: varchar }
+  - { name: contact_writeback_policy_id, type: varchar }
+returns: entity

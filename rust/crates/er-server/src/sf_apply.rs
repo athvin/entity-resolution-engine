@@ -643,6 +643,123 @@ fn urlencode(s: &str) -> String {
         .collect()
 }
 
+/// One record by id through `queryAll` (deleted and converted rows
+/// included), with `fields`; `None` when no record has the id.
+///
+/// # Errors
+/// See [`CallError`].
+pub async fn record(
+    org: &Org,
+    object: &str,
+    id: &str,
+    fields: &[&str],
+) -> Result<Option<serde_json::Map<String, serde_json::Value>>, CallError> {
+    if !valid_id(id) || fields.iter().any(|f| !valid_field(f)) {
+        return Err(CallError::Rejected("INVALID_ID".into()));
+    }
+    let soql = format!(
+        "SELECT {} FROM {object} WHERE Id = '{id}'",
+        fields.join(", ")
+    );
+    let url = format!("{}/services/data/{}/queryAll", base(org), org.api_version);
+    let body = call(
+        org,
+        |h| {
+            h.get(&url)
+                .bearer_auth(&org.access_token)
+                .query(&[("q", soql.as_str())])
+        },
+        &url,
+        false,
+    )
+    .await?;
+    let v: serde_json::Value = serde_json::from_str(&body)
+        .map_err(|_| CallError::Transient("query response is not JSON".into()))?;
+    Ok(v.get("records")
+        .and_then(|r| r.get(0))
+        .and_then(|r| r.as_object())
+        .cloned())
+}
+
+/// The org's converted Lead status label (`LeadStatus` with `IsConverted`).
+///
+/// # Errors
+/// See [`CallError`]; an org with none is `Rejected("NO_CONVERTED_STATUS")`.
+pub async fn converted_status(org: &Org) -> Result<String, CallError> {
+    let soql = "SELECT MasterLabel FROM LeadStatus WHERE IsConverted = true LIMIT 1";
+    let url = format!("{}/services/data/{}/query", base(org), org.api_version);
+    let body = call(
+        org,
+        |h| {
+            h.get(&url)
+                .bearer_auth(&org.access_token)
+                .query(&[("q", soql)])
+        },
+        &url,
+        false,
+    )
+    .await?;
+    serde_json::from_str::<serde_json::Value>(&body)
+        .ok()
+        .and_then(|v| v["records"][0]["MasterLabel"].as_str().map(str::to_string))
+        .ok_or_else(|| CallError::Rejected("NO_CONVERTED_STATUS".into()))
+}
+
+/// Convert a Lead into an existing Contact and its Account (SOAP
+/// `convertLead()`), creating no Opportunity and sending no email.
+///
+/// # Errors
+/// See [`CallError`]; `Ambiguous` means re-read the Lead before deciding.
+pub async fn convert_lead(
+    org: &Org,
+    lead: &str,
+    contact: &str,
+    account: &str,
+    status: &str,
+) -> Result<(), CallError> {
+    if !valid_id(lead) || !valid_id(contact) || !valid_id(account) {
+        return Err(CallError::Rejected("INVALID_ID".into()));
+    }
+    let version = org.api_version.trim_start_matches('v');
+    let url = format!("{}/services/Soap/u/{version}", base(org));
+    let envelope = format!(
+        concat!(
+            r#"<?xml version="1.0" encoding="utf-8"?>"#,
+            r#"<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:urn="urn:partner.soap.sforce.com">"#,
+            "<soapenv:Header><urn:SessionHeader><urn:sessionId>{token}</urn:sessionId></urn:SessionHeader></soapenv:Header>",
+            "<soapenv:Body><urn:convertLead><urn:leadConverts>",
+            "<urn:accountId>{account}</urn:accountId><urn:contactId>{contact}</urn:contactId>",
+            "<urn:convertedStatus>{status}</urn:convertedStatus>",
+            "<urn:doNotCreateOpportunity>true</urn:doNotCreateOpportunity>",
+            "<urn:leadId>{lead}</urn:leadId><urn:overwriteLeadSource>false</urn:overwriteLeadSource>",
+            "<urn:sendNotificationEmail>false</urn:sendNotificationEmail>",
+            "</urn:leadConverts></urn:convertLead></soapenv:Body></soapenv:Envelope>"
+        ),
+        token = xml_escape(&org.access_token),
+        account = account,
+        contact = contact,
+        status = xml_escape(status),
+        lead = lead,
+    );
+    let body = call(
+        org,
+        |h| {
+            h.post(&url)
+                .header(reqwest::header::CONTENT_TYPE, "text/xml; charset=utf-8")
+                .header("SOAPAction", "convertLead")
+                .body(envelope.clone())
+        },
+        &url,
+        true,
+    )
+    .await?;
+    if between(&body, "<success>", "</success>") == Some("true") {
+        Ok(())
+    } else {
+        Err(CallError::Rejected(error_code(&body)))
+    }
+}
+
 fn xml_escape(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")

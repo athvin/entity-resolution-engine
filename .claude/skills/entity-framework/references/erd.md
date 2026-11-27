@@ -134,6 +134,44 @@ erDiagram
         timestamp started_at
         timestamp finished_at
     }
+    lead_conversions {
+        varchar id PK
+        varchar org_id FK
+        varchar dataset_id FK
+        varchar salesforce_connection_id FK
+        varchar entity_id
+        varchar lead_external_id
+        varchar lead_record_key
+        varchar lead_modstamp
+        varchar contact_external_id
+        varchar contact_record_key
+        varchar contact_modstamp
+        varchar fingerprint
+        bigint lake_snapshot
+        varchar origin_run_id
+        varchar lead_writeback_policy_id FK
+        varchar contact_writeback_policy_id FK
+        varchar status "in {approved, planned, rejected, superseded}"
+        varchar decided_by
+        timestamp decided_at
+        varchar decision_reason
+        timestamp created_at
+        timestamp updated_at
+    }
+    lead_conversion_applies {
+        varchar id PK
+        varchar org_id FK
+        varchar dataset_id FK
+        varchar lead_conversion_id FK, UK
+        varchar job_id
+        varchar fingerprint
+        varchar status "in {applying, converted, converted_externally, failed, skipped_stale}"
+        varchar call_state "in {in_flight, none}"
+        varchar account_id
+        varchar detail
+        timestamp created_at
+        timestamp updated_at
+    }
     matching_models {
         varchar id PK
         varchar org_id FK
@@ -614,6 +652,14 @@ erDiagram
     entity_links }o--|| datasets : "dataset_id → id"
     jobs }o--|| orgs : "org_id → id"
     jobs }o..|| datasets : "dataset_id → id"
+    lead_conversions }o--|| orgs : "org_id → id"
+    lead_conversions }o--|| datasets : "dataset_id → id"
+    lead_conversions }o--|| salesforce_connections : "salesforce_connection_id → id"
+    lead_conversions }o--|| writeback_policies : "lead_writeback_policy_id → id"
+    lead_conversions }o--|| writeback_policies : "contact_writeback_policy_id → id"
+    lead_conversion_applies }o--|| orgs : "org_id → id"
+    lead_conversion_applies }o--|| datasets : "dataset_id → id"
+    lead_conversion_applies }o--|| lead_conversions : "lead_conversion_id → id"
     matching_models }o--|| orgs : "org_id → id"
     matching_models }o--|| datasets : "dataset_id → id"
     merge_applies }o--|| orgs : "org_id → id"
@@ -702,6 +748,8 @@ erDiagram
 | `entity_links` | A relationship between two resolved entities that is NOT a merge: a household, a corporate hierarchy, a 'these are related but distinct' note. The product has one answer to 'these two records belong together' — merge them — and that answer is wrong for a husband and wife at one address, or a subsidiary and its parent. Merging them loses the distinction and no later run can recover it; refusing to record anything loses the relationship. A link records it without collapsing either side. |
 | `fixups` | The control-plane fixup ledger: one row per named, idempotent data/constraint fixup ensure_schema has applied. Fixups are what the declarative reconciler deliberately never does — backfills, constraint swaps, natural-key changes, NOT NULL tightening — expressed as ordered Rust steps that run semantics-once between the baseline replay and the reconcile pass. |
 | `jobs` | A unit of work on the dispatcher's queue: its kind, params, lifecycle state and retry bookkeeping. |
+| `lead_conversions` | A proposed conversion of a duplicate Lead into the existing Contact it resolved with (#520): the Lead, the target Contact, both records' revision tokens at the pinned snapshot, and the writeback policy revisions for both objects. Reviewed and approved by fingerprint like a merge preview; applied through the same journal discipline. Conversion is not reversible in Salesforce. |
+| `lead_conversion_applies` | The apply of one approved Lead conversion (#520): at most one per proposal, the convertLead call journaled IN FLIGHT before it is made, the outcome after. An in-flight call is reconciled by re-reading the Lead (IsConverted, ConvertedContactId); a Lead already converted into the same Contact outside DupeZero is recorded, not retried. Not reversible in Salesforce. |
 | `matching_models` | An immutable version of a tenant's matching model: the settings document the engine scores against, its hash, provenance and activation state. |
 | `merge_applies` | The apply of one approved merge preview to Salesforce (#995). At most one per preview — the unique index is what makes APPROVED → APPLYING atomic — and it settles exactly once into applied, failed, skipped_stale or applied_externally. The preimage (members' live revision and the proposal's snapshot fields) is written before any mutation. |
 | `merge_apply_operations` | One provider mutation of an apply (#995) — the master field update, or one merge of up to two victims — written IN FLIGHT before the call and settled after it. An operation found in flight on resume is never replayed blind: the apply re-reads Salesforce to decide whether it landed. |

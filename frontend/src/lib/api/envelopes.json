@@ -35,6 +35,7 @@
   "GET /v1/orgs/{org}/datasets/{ds}/jobs/{job_id}/tasks": { "envelope": "wrapped", "key": "tasks" },
   "GET /v1/orgs/{org}/datasets/{ds}/labeling/next": { "envelope": "record", "keys": ["items", "snapshot", "threshold", "band", "coverage"] },
   "GET /v1/orgs/{org}/datasets/{ds}/labels": { "envelope": "wrapped", "key": "labels" },
+  "GET /v1/orgs/{org}/datasets/{ds}/lead-conversions": { "envelope": "record", "keys": ["items", "next_cursor"] },
   "GET /v1/orgs/{org}/datasets/{ds}/lexicon": { "envelope": "wrapped", "key": "pairs" },
   "GET /v1/orgs/{org}/datasets/{ds}/match-preview": { "envelope": "scalar" },
   "GET /v1/orgs/{org}/datasets/{ds}/match-scores": { "envelope": "record", "keys": ["items", "snapshot", "next_cursor"] },

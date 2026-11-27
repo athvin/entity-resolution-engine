@@ -73,6 +73,14 @@ const EXPLAINED: Record<string, string> = {
   "merge_preview.apply":
     "MergePreviewDetail composes the merge_apply row's status/detail (er-server/src/lib.rs)",
   "merge_preview_journal.at": "MergePreviewEvent renames created_at (er-server/src/lib.rs)",
+  "lead_conversion.connection_id":
+    "LeadConversionView renames salesforce_connection_id (er-server/src/lib.rs)",
+  "lead_conversion.apply_status":
+    "LeadConversionView composes the lead_conversion_apply row's status (er-server/src/lib.rs)",
+  "lead_conversion.account_id":
+    "LeadConversionView composes the lead_conversion_apply row's account_id (er-server/src/lib.rs)",
+  "lead_conversion.apply_detail":
+    "LeadConversionView composes the lead_conversion_apply row's detail (er-server/src/lib.rs)",
   "upsert_preview.connection_id":
     "UpsertPreviewView renames salesforce_connection_id (er-server/src/lib.rs)",
   "upsert_preview.policy_revision":

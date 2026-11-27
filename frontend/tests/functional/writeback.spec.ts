@@ -65,4 +65,21 @@ test.describe("writeback review (#997)", () => {
     await page.getByTestId("writeback-upserts-apply").click();
     await expect(upserts).toContainText("Applying approved upserts to Salesforce.");
   });
+
+  test("a steward approves a Lead conversion; an admin converts", async ({ page }, testInfo) => {
+    const org = triageOrg(testInfo.project.name);
+    await login(page, USERS.admin);
+    await page.goto(`/${org}/${DS}/writeback`);
+    const panel = page.getByTestId("writeback-conversions");
+    await expect(panel).toContainText("Salesforce cannot undo a conversion");
+    await page
+      .getByRole("checkbox", { name: "Select conversion of sf_leads:00Q000000000001" })
+      .check();
+    await panel.getByRole("button", { name: "Approve 1" }).click();
+    await expect(panel.getByTestId("writeback-batch-outcome")).toContainText(
+      "1 decided, 0 refused",
+    );
+    await page.getByTestId("writeback-conversions-apply").click();
+    await expect(panel).toContainText("Converting approved Leads in Salesforce.");
+  });
 });

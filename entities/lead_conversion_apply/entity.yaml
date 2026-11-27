@@ -1,0 +1,73 @@
+kind: entity
+version: 1
+name: lead_conversion_apply
+relation: lead_conversion_applies
+description: "The apply of one approved Lead conversion (#520): at most one per proposal, the convertLead call journaled IN FLIGHT before it is made, the outcome after. An in-flight call is reconciled by re-reading the Lead (IsConverted, ConvertedContactId); a Lead already converted into the same Contact outside DupeZero is recorded, not retried. Not reversible in Salesforce."
+key: [id]
+generate:
+  stores: [postgres]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "UUIDv7, minted by the application."
+  - name: org_id
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: id }
+    description: "The tenant; denormalized beside the dataset scope per V17."
+  - name: dataset_id
+    type: varchar
+    nullable: false
+    references: { relation: datasets, column: id }
+    description: "The dataset whose resolution found the duplicate."
+  - name: lead_conversion_id
+    type: varchar
+    nullable: false
+    references: { relation: lead_conversions, column: id }
+    description: "The approved proposal."
+  - name: job_id
+    type: varchar
+    nullable: false
+    description: "The job that began it."
+  - name: fingerprint
+    type: varchar
+    nullable: false
+    description: "The approved fingerprint."
+  - name: status
+    type: varchar
+    nullable: false
+    default: "'applying'"
+    accepted_values: [applying, converted, converted_externally, failed, skipped_stale]
+    description: "The apply state."
+  - name: call_state
+    type: varchar
+    nullable: false
+    default: "'none'"
+    accepted_values: [none, in_flight]
+    description: "in_flight from just before the convertLead call until its outcome is recorded."
+  - name: account_id
+    type: varchar
+    description: "The Contact's Account the Lead converted into."
+  - name: detail
+    type: varchar
+    description: "Why it settled as it did."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the row was written."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the row last changed."
+indexes:
+  - name: lead_conversion_applies_proposal
+    columns: [lead_conversion_id]
+    unique: true
+  - name: lead_conversion_applies_dataset
+    columns: [org_id, dataset_id, status]

@@ -47,6 +47,7 @@ pub mod exports;
 pub mod extract_params;
 pub(crate) mod fixups;
 mod lake_reads;
+pub mod lead_convert;
 pub mod mail;
 pub mod merge_apply;
 pub mod merge_restore;
@@ -11563,6 +11564,274 @@ async fn apply_upsert_previews(
     }
 }
 
+/// A proposed Lead conversion.
+#[derive(Serialize, utoipa::ToSchema)]
+struct LeadConversionView {
+    id: String,
+    connection_id: String,
+    entity_id: String,
+    /// The Lead's Salesforce id and record key.
+    lead_external_id: String,
+    lead_record_key: String,
+    /// The Contact it converts into.
+    contact_external_id: String,
+    contact_record_key: String,
+    /// Name it to approve or reject.
+    fingerprint: String,
+    /// `planned`, `approved`, `rejected` or `superseded`.
+    status: String,
+    decided_by: Option<String>,
+    /// The apply, once begun: `applying`, `converted`, `converted_externally`,
+    /// `failed` or `skipped_stale`.
+    apply_status: Option<String>,
+    /// The Account the Lead converted into.
+    account_id: Option<String>,
+    apply_detail: Option<String>,
+    /// RFC 3339.
+    created_at: String,
+}
+
+/// A page of Lead conversion proposals.
+#[derive(Serialize, utoipa::ToSchema)]
+struct LeadConversionPage {
+    items: Vec<LeadConversionView>,
+    /// Pass as `cursor` for the next page; null on the last.
+    next_cursor: Option<String>,
+}
+
+/// Viewer+: a dataset's Lead conversion proposals
+/// (`GET /v1/orgs/{org}/datasets/{ds}/lead-conversions`): a duplicate Lead
+/// and the existing Contact it resolved with. Conversion is not reversible
+/// in Salesforce.
+async fn list_lead_conversions(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, ds)): Path<(String, String)>,
+    Query(params): Query<MergePreviewsQuery>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let (client, org_row, d) = match upload_scope_any(&state, &org, &ds).await {
+        Ok(t) => t,
+        Err(r) => return *r,
+    };
+    let limit = params
+        .limit
+        .as_deref()
+        .and_then(|l| l.parse::<i64>().ok())
+        .unwrap_or(50)
+        .clamp(1, 200);
+    let rows = match er_entities::lead_conversion::read::page(
+        &client,
+        &org_row.id,
+        &d.id,
+        params.status.as_deref().unwrap_or(""),
+        params.cursor.as_deref().unwrap_or(""),
+        limit + 1,
+    )
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => return pg_err(e),
+    };
+    let cap = usize::try_from(limit).unwrap_or(usize::MAX);
+    let more = rows.len() > cap;
+    let rows: Vec<_> = rows.into_iter().take(cap).collect();
+    let mut items = Vec::with_capacity(rows.len());
+    for p in &rows {
+        let a = match er_entities::lead_conversion_apply::read::by_conversion(
+            &client,
+            &org_row.id,
+            &d.id,
+            &p.id,
+        )
+        .await
+        {
+            Ok(a) => a.into_iter().next(),
+            Err(e) => return pg_err(e),
+        };
+        items.push(LeadConversionView {
+            id: p.id.clone(),
+            connection_id: p.salesforce_connection_id.clone(),
+            entity_id: p.entity_id.clone(),
+            lead_external_id: p.lead_external_id.clone(),
+            lead_record_key: p.lead_record_key.clone(),
+            contact_external_id: p.contact_external_id.clone(),
+            contact_record_key: p.contact_record_key.clone(),
+            fingerprint: p.fingerprint.clone(),
+            status: p.status.clone(),
+            decided_by: p.decided_by.clone(),
+            apply_status: a.as_ref().map(|a| a.status.clone()),
+            account_id: a.as_ref().and_then(|a| a.account_id.clone()),
+            apply_detail: a.as_ref().and_then(|a| a.detail.clone()),
+            created_at: pg::ts(&p.created_at),
+        });
+    }
+    Json(LeadConversionPage {
+        next_cursor: if more {
+            rows.last().map(|p| p.id.clone())
+        } else {
+            None
+        },
+        items,
+    })
+    .into_response()
+}
+
+/// Steward+: approve or reject Lead conversions
+/// (`POST /v1/orgs/{org}/datasets/{ds}/lead-conversions/decide`), up to 100,
+/// each naming the fingerprint the reviewer saw; an approval is refused when
+/// either object's writeback policy revision is no longer in force.
+async fn decide_lead_conversions(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, ds)): Path<(String, String)>,
+    Json(body): Json<BatchDecisionIn>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Steward) {
+        return e.into_response();
+    }
+    let to_status = match body.decision.as_str() {
+        "approve" => "approved",
+        "reject" => "rejected",
+        _ => {
+            return detail_err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "decision must be approve or reject",
+            );
+        }
+    };
+    if body.items.is_empty() || body.items.len() > 100 {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "items must hold 1 to 100 proposals",
+        );
+    }
+    let (client, org_row, d) = match upload_scope_any(&state, &org, &ds).await {
+        Ok(t) => t,
+        Err(r) => return *r,
+    };
+    let live: Vec<String> = match pg::active_writeback_policies(&client, &org_row.id, &d.id).await {
+        Ok(p) => p.into_iter().map(|p| p.id).collect(),
+        Err(e) => return pg_err(e),
+    };
+    let mut results = Vec::with_capacity(body.items.len());
+    for item in body.items {
+        let refuse = |status: u16, detail: &str| BatchDecisionResult {
+            id: item.id.clone(),
+            status,
+            preview_status: None,
+            detail: Some(detail.to_string()),
+        };
+        let row =
+            match er_entities::lead_conversion::read::by_id(&client, &item.id, &org_row.id, &d.id)
+                .await
+            {
+                Ok(r) => r.into_iter().next(),
+                Err(e) => return pg_err(e),
+            };
+        let Some(row) = row else {
+            results.push(refuse(404, "no such lead conversion"));
+            continue;
+        };
+        if row.fingerprint != item.fingerprint {
+            results.push(refuse(409, "the proposal changed since you saw it"));
+            continue;
+        }
+        if to_status == "approved"
+            && !(live.contains(&row.lead_writeback_policy_id)
+                && live.contains(&row.contact_writeback_policy_id))
+        {
+            results.push(refuse(
+                409,
+                "a writeback policy this proposal was built under has been replaced; regenerate",
+            ));
+            continue;
+        }
+        match er_entities::lead_conversion::update::decide(
+            &client,
+            to_status,
+            &principal.actor,
+            body.reason.as_deref(),
+            &row.id,
+            &org_row.id,
+            &d.id,
+            &row.fingerprint,
+        )
+        .await
+        {
+            Ok(moved) if !moved.is_empty() => results.push(BatchDecisionResult {
+                id: row.id.clone(),
+                status: 200,
+                preview_status: Some(to_status.to_string()),
+                detail: None,
+            }),
+            Ok(_) => results.push(refuse(409, &format!("the proposal is {}", row.status))),
+            Err(e) => return pg_err(e),
+        }
+    }
+    Json(BatchDecisionOut { results }).into_response()
+}
+
+/// Admin+: convert the dataset's approved Leads in Salesforce
+/// (`POST /v1/orgs/{org}/datasets/{ds}/lead-conversions/apply`). Queues a
+/// `lead_convert` job acting as the connection's delegated reviewer; 409
+/// when nothing is approved. Both records are re-read first; a stale one is
+/// skipped, a Lead already converted into the same Contact is recorded, and
+/// conversion — which Salesforce cannot undo — is never retried blind.
+async fn apply_lead_conversions(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, ds)): Path<(String, String)>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Admin) {
+        return e.into_response();
+    }
+    let (client, org_row, d) = match upload_scope_any(&state, &org, &ds).await {
+        Ok(t) => t,
+        Err(r) => return *r,
+    };
+    if let Err(r) = refuse_unless_active_dataset(&org_row, &d, "convert leads") {
+        return *r;
+    }
+    let ready =
+        er_entities::lead_conversion::read::ready_to_apply(&client, &org_row.id, &d.id, 1).await;
+    let open = er_entities::lead_conversion_apply::read::open(&client, &org_row.id, &d.id, 1).await;
+    match (ready, open) {
+        (Ok(r), Ok(o)) if r.is_empty() && o.is_empty() => {
+            return detail_err(
+                StatusCode::CONFLICT,
+                "no approved lead conversions to apply",
+            );
+        }
+        (Err(e), _) | (_, Err(e)) => return pg_err(e),
+        _ => {}
+    }
+    match pg::enqueue(
+        &client,
+        &org_row.id,
+        Some(d.id.as_str()),
+        "lead_convert",
+        0,
+        None,
+        None,
+        principal.provenance(),
+    )
+    .await
+    {
+        Ok(job) => (
+            StatusCode::ACCEPTED,
+            Json(MergesApplying {
+                job_id: job.id,
+                state: job.state,
+            }),
+        )
+            .into_response(),
+        Err(e) => pg_err(e),
+    }
+}
+
 async fn decide_merge_preview(
     principal: &Principal,
     state: &AppState,
@@ -16614,6 +16883,18 @@ fn build_routes(state: AppState) -> Router {
         .route(
             "/v1/orgs/{org}/datasets/{ds}/merge-previews",
             get(merge_previews_list),
+        )
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/lead-conversions",
+            get(list_lead_conversions),
+        )
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/lead-conversions/decide",
+            post(decide_lead_conversions),
+        )
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/lead-conversions/apply",
+            post(apply_lead_conversions),
         )
         .route(
             "/v1/orgs/{org}/datasets/{ds}/writeback/upsert-policies",

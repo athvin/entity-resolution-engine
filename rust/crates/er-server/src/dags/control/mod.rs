@@ -240,6 +240,58 @@ impl Default for ApplyMerges {
     }
 }
 
+/// Convert approved Leads (#520) — see [`crate::lead_convert`].
+pub struct ConvertLeads {
+    pub egress: crate::urlguard::Egress,
+}
+
+impl Default for ConvertLeads {
+    fn default() -> Self {
+        Self {
+            egress: crate::urlguard::Egress::Guarded,
+        }
+    }
+}
+
+impl ControlTask<PgClient> for ConvertLeads {
+    const NAME: &'static str = "convert_leads";
+    const VERSION: u32 = 1;
+    type Input = ();
+    type Output = Plan<crate::lead_convert::Report>;
+
+    async fn run(
+        &mut self,
+        ctx: &mut ControlCtx<'_, PgClient>,
+        (): Self::Input,
+    ) -> Result<Outcome<Self::Output>, TaskError> {
+        let Some(dataset_id) = ctx.order.dataset_id.clone() else {
+            return Err(TaskError::Failed(er_errors::ErError::precondition(
+                "a lead_convert job must name a dataset".to_string(),
+            )));
+        };
+        let report = crate::lead_convert::run(
+            ctx.client,
+            &ctx.order.org_id,
+            &dataset_id,
+            &ctx.order.job_id,
+            self.egress,
+            crate::merge_apply::Limits::default(),
+        )
+        .await
+        .map_err(|e| {
+            TaskError::Failed(
+                er_errors::ErError::stage_failure(format!(
+                    "lead conversion: {}",
+                    crate::errfmt::chain(&e)
+                ))
+                .with_class(er_errors::ErrorClass::TransientIo),
+            )
+        })?;
+        let counters = serde_json::to_value(&report).unwrap_or_default();
+        Ok(Outcome::Done(Plan(report), er_dag::Counters(counters)))
+    }
+}
+
 /// Apply approved upserts (#998) — see [`crate::upsert_apply`].
 pub struct ApplyUpserts {
     pub egress: crate::urlguard::Egress,
@@ -573,6 +625,52 @@ async fn publish_batch(
                 auto_approve(ctx, &rules, &row).await.map_err(|e| {
                     failed(
                         format!("auto-approving a preview: {e}"),
+                        er_errors::ErrorClass::TransientIo,
+                    )
+                })?;
+            }
+        }
+        // Lead conversions (#520): idempotent on the fingerprint; a newer one
+        // supersedes the Lead's planned conversions.
+        for c in &built.conversions {
+            let stored = er_entities::lead_conversion::create::publish(
+                ctx.client,
+                &er_ids::new_v7(),
+                &org_id,
+                &dataset_id,
+                &c.connection_id,
+                &c.entity_id,
+                &c.lead_external_id,
+                &c.lead_record_key,
+                &c.lead_modstamp,
+                &c.contact_external_id,
+                &c.contact_record_key,
+                &c.contact_modstamp,
+                &c.fingerprint,
+                built.snapshot,
+                &c.origin_run_id,
+                &c.lead_policy_id,
+                &c.contact_policy_id,
+            )
+            .await
+            .map_err(|e| {
+                failed(
+                    format!("publishing a conversion: {e}"),
+                    er_errors::ErrorClass::TransientIo,
+                )
+            })?;
+            if !stored.is_empty() {
+                er_entities::lead_conversion::update::supersede(
+                    ctx.client,
+                    &org_id,
+                    &dataset_id,
+                    &c.lead_external_id,
+                    &c.fingerprint,
+                )
+                .await
+                .map_err(|e| {
+                    failed(
+                        format!("superseding conversions: {e}"),
                         er_errors::ErrorClass::TransientIo,
                     )
                 })?;
