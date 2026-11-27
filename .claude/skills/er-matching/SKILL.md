@@ -177,6 +177,8 @@ question, both measured in `er-compile/tests/score_scale_calibration.rs`:
 So the scale is a calibrated constant for person configs and an open question
 for account ones. The numbers, the grid search and the weight→probability
 mapping behind them: [references/config-to-model.md](references/config-to-model.md).
+What a customer can express as rules — every block, how it is validated,
+executed and versioned, and what is missing: [references/customer-rules.md](references/customer-rules.md).
 
 ## The goldens are the contract
 
