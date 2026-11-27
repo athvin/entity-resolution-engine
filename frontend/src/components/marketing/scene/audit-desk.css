@@ -925,8 +925,11 @@
 .audit-history-frame {
   display: grid;
 }
+/* Every list sits at the top of the reserved space, at its own height: a
+   stretched grid list would spread its entries down the card. */
 .audit-history-frame > * {
   grid-area: 1 / 1;
+  align-self: start;
 }
 .audit-history-ghost {
   visibility: hidden;
@@ -946,6 +949,7 @@
 .audit-history ol {
   display: grid;
   gap: 10px;
+  align-content: start;
   margin: 0;
   padding: 0;
   list-style: none;
