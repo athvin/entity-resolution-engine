@@ -228,6 +228,7 @@ what the sheets showed, and each was seen failing first:
 
 Section 06 is now a film the visitor takes part in. `scene/audit-desk.tsx`
 draws it and `demo/audit-story.tsx` times it. Gold references:
+
 - `payout-flow`, for arrivals that overlap and a payoff that holds;
 - `table-edit`, for an edit made in place and then the total it feeds;
 - `form-error`, for a fault on the thing that caused it, cleared by fixing it.
