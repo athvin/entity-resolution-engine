@@ -1,0 +1,69 @@
+kind: entity
+version: 1
+name: upsert_policy
+relation: upsert_policies
+description: "Which golden records a dataset may upsert into one connection's object, keyed by which external-ID field (#998). Append-only: the newest per (connection, object) is in force and its id is the revision an upsert preview binds. Only entities with a member from one of `sources` (deliveries such as imports) and with NO member already synced from that object are proposed — upsert never stands in for a merge."
+key: [id]
+generate:
+  stores: [postgres]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "UUIDv7, minted by the application."
+  - name: org_id
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: id }
+    description: "The tenant; denormalized beside the dataset scope per V17."
+  - name: dataset_id
+    type: varchar
+    nullable: false
+    references: { relation: datasets, column: id }
+    description: "The dataset whose golden records this writes."
+  - name: salesforce_connection_id
+    type: varchar
+    nullable: false
+    references: { relation: salesforce_connections, column: id }
+    description: "The connection written through."
+  - name: object
+    type: varchar
+    nullable: false
+    accepted_values: [Lead, Contact, Account]
+    description: "The sObject upserted."
+  - name: external_id_field
+    type: varchar
+    nullable: false
+    description: "The Salesforce External ID field the upsert is keyed by (e.g. DupeZero_Id__c); it carries the entity id, so a retry can only ever address the same record."
+  - name: field_mapping
+    type: json
+    nullable: false
+    description: "Golden attribute → provider field."
+  - name: writeback_allowlist
+    type: json
+    nullable: false
+    description: "The provider fields an upsert may write."
+  - name: sources
+    type: json
+    nullable: false
+    description: "Delivery sources (e.g. an import's source) whose records may be upserted. Empty means nothing is proposed."
+  - name: created_by
+    type: varchar
+    nullable: false
+    description: "The principal that wrote this revision."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the row was written."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the row last changed."
+indexes:
+  - name: upsert_policies_scope
+    columns: [org_id, dataset_id, salesforce_connection_id, object]

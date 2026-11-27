@@ -119,6 +119,7 @@ mod pg_task_instances;
 mod pg_train;
 mod pg_unmatch;
 mod pg_unmerge;
+mod pg_upsert_apply;
 mod pg_webhook_catalog;
 mod pg_webhook_deliver;
 mod pg_webhooks;

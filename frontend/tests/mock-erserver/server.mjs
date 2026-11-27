@@ -257,6 +257,28 @@ export function initialState() {
       ]),
     ),
     mergeRestores: {},
+    upsertPreviews: Object.fromEntries(
+      ["acme-dev", "mutable-dev", "mutable-ios", "mutable-android"].map((org) => [
+        org,
+        [1, 2].map((n) => ({
+          id: `01jmups${String(n).padStart(5, "0")}`,
+          connection_id: "conn-prod",
+          object: "Contact",
+          entity_id: `ent-up-${String(n)}`,
+          external_id_field: "DupeZero_Id__c",
+          external_id_value: `ent-up-${String(n)}`,
+          fields: { Email: `new${String(n)}@acme.test`, LastName: `Upload${String(n)}` },
+          fingerprint: `v1:up${String(n)}`,
+          status: "planned",
+          decided_by: null,
+          policy_revision: "upol-1",
+          apply_status: null,
+          sf_record_id: null,
+          apply_detail: null,
+          created_at: "2026-11-27T08:00:00Z",
+        })),
+      ]),
+    ),
     autoApprovals: {
       "acme-dev": [
         {
@@ -2653,6 +2675,45 @@ const server = http.createServer((req, res) => {
       job.state = "queued";
       job.error_class = null;
       return send(res, 200, { id: job.id, state: "queued" });
+    }
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/upsert-previews$/.exec(path)) &&
+      req.method === "GET"
+    ) {
+      return send(res, 200, { items: state.upsertPreviews[match[1]] ?? [], next_cursor: null });
+    }
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/upsert-previews\/decide$/.exec(path)) &&
+      req.method === "POST"
+    ) {
+      const body = await readBody(req);
+      const to = body.decision === "approve" ? "approved" : "rejected";
+      const results = (body.items ?? []).map((item) => {
+        const row = (state.upsertPreviews[match[1]] ?? []).find((u) => u.id === item.id);
+        if (!row)
+          return {
+            id: item.id,
+            status: 404,
+            preview_status: null,
+            detail: "no such upsert preview",
+          };
+        if (row.fingerprint !== item.fingerprint || row.status !== "planned")
+          return {
+            id: item.id,
+            status: 409,
+            preview_status: null,
+            detail: "the preview changed since you saw it",
+          };
+        row.status = to;
+        return { id: item.id, status: 200, preview_status: to, detail: null };
+      });
+      return send(res, 200, { results });
+    }
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/upsert-previews\/apply$/.exec(path)) &&
+      req.method === "POST"
+    ) {
+      return send(res, 202, { job_id: "job-upsert", state: "queued" });
     }
     if (
       (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/merge-previews$/.exec(path)) &&

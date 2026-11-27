@@ -1,0 +1,10 @@
+kind: statement
+operation: read
+mode: full
+description: "Approved upserts no apply has begun, oldest first."
+reads: [upsert_apply]
+params:
+  - { name: org_id, type: varchar }
+  - { name: dataset_id, type: varchar }
+  - { name: limit, type: bigint }
+returns: entity

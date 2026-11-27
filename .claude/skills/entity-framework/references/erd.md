@@ -514,6 +514,57 @@ erDiagram
         timestamp created_at
         timestamp updated_at
     }
+    upsert_applies {
+        varchar id PK
+        varchar org_id FK
+        varchar dataset_id FK
+        varchar upsert_preview_id FK, UK
+        varchar job_id
+        varchar fingerprint
+        varchar status "in {applying, created, failed, skipped_stale, updated}"
+        varchar call_state "in {in_flight, none}"
+        varchar sf_record_id
+        varchar preimage
+        varchar detail
+        timestamp created_at
+        timestamp updated_at
+    }
+    upsert_policies {
+        varchar id PK
+        varchar org_id FK
+        varchar dataset_id FK
+        varchar salesforce_connection_id FK
+        varchar object "in {Account, Contact, Lead}"
+        varchar external_id_field
+        json field_mapping
+        json writeback_allowlist
+        json sources
+        varchar created_by
+        timestamp created_at
+        timestamp updated_at
+    }
+    upsert_previews {
+        varchar id PK
+        varchar org_id FK
+        varchar dataset_id FK
+        varchar salesforce_connection_id FK
+        varchar object "in {Account, Contact, Lead}"
+        varchar entity_id
+        varchar external_id_field
+        varchar external_id_value
+        varchar anchor_record_key
+        json fields
+        varchar fingerprint
+        bigint lake_snapshot
+        varchar origin_run_id
+        varchar upsert_policy_id FK
+        varchar status "in {approved, planned, rejected, superseded}"
+        varchar decided_by
+        timestamp decided_at
+        varchar decision_reason
+        timestamp created_at
+        timestamp updated_at
+    }
     webhooks {
         varchar id PK
         varchar org_id FK
@@ -621,6 +672,16 @@ erDiagram
     task_instances }o--|| jobs : "job_id → id"
     tenant_schema_states }o--|| orgs : "org_id → id"
     tenant_schema_states }o..|| datasets : "dataset_id → id"
+    upsert_applies }o--|| orgs : "org_id → id"
+    upsert_applies }o--|| datasets : "dataset_id → id"
+    upsert_applies }o--|| upsert_previews : "upsert_preview_id → id"
+    upsert_policies }o--|| orgs : "org_id → id"
+    upsert_policies }o--|| datasets : "dataset_id → id"
+    upsert_policies }o--|| salesforce_connections : "salesforce_connection_id → id"
+    upsert_previews }o--|| orgs : "org_id → id"
+    upsert_previews }o--|| datasets : "dataset_id → id"
+    upsert_previews }o--|| salesforce_connections : "salesforce_connection_id → id"
+    upsert_previews }o--|| upsert_policies : "upsert_policy_id → id"
     webhooks }o--|| orgs : "org_id → id"
     webhooks }o..|| datasets : "dataset_id → id"
     webhook_deliveries }o--|| orgs : "org_id → id"
@@ -666,6 +727,9 @@ erDiagram
 | `taggings` | One tag applied to one subject: the attachment, kept apart from the tag so retiring a tag does not rewrite what it was applied to. |
 | `task_instances` | One try of one task of one job (Airflow's task_instance shape): the live try has live = TRUE, archived tries have live NULL and stay in the table as history (batch-orchestration-design §4.2). |
 | `tenant_schema_states` | The control plane's cache of each tenant lake's schema position: the catalog version the lake was last reconciled or checked against and how that went. The lake's own schema_migrations ledger is authoritative; this row is what the deploy report and the drift check read without opening every lake. |
+| `upsert_applies` | The apply of one approved upsert (#998): at most one per preview (the unique index), the call journaled IN FLIGHT before it is made, and the outcome — created or updated, with the Salesforce id — recorded after. An in-flight call is reconciled by reading the record by its external ID; because the upsert is keyed by that ID, a retry addresses the same record and cannot duplicate it. |
+| `upsert_policies` | Which golden records a dataset may upsert into one connection's object, keyed by which external-ID field (#998). Append-only: the newest per (connection, object) is in force and its id is the revision an upsert preview binds. Only entities with a member from one of `sources` (deliveries such as imports) and with NO member already synced from that object are proposed — upsert never stands in for a merge. |
+| `upsert_previews` | A proposed Salesforce upsert of one golden record (#998): the external-ID key and the allowlisted field values, reviewed and approved by fingerprint exactly like a merge preview. Idempotent on (dataset, fingerprint); a newer proposal for the same entity supersedes a planned one. |
 | `webhooks` | A tenant webhook endpoint: its URL, subscribed events and signing secret. |
 | `webhook_deliveries` | One attempt-tracked delivery of one event to one subscriber. The event is recorded here BEFORE any network call, so a subscriber that is briefly unreachable gets the event late instead of never. |
 | `writeback_policies` | Which provider fields a dataset may write back to one connection's object, and how a master is elected there (#1305). Append-only: a change is a new row, and a row's id is the policy REVISION a merge preview binds, so an approval can be refused when the policy it was proposed under is no longer the active one. No row for a (connection, object) means nothing is proposed — the feature is opt-in and fails closed. |

@@ -1,0 +1,78 @@
+kind: entity
+version: 1
+name: upsert_apply
+relation: upsert_applies
+description: "The apply of one approved upsert (#998): at most one per preview (the unique index), the call journaled IN FLIGHT before it is made, and the outcome — created or updated, with the Salesforce id — recorded after. An in-flight call is reconciled by reading the record by its external ID; because the upsert is keyed by that ID, a retry addresses the same record and cannot duplicate it."
+key: [id]
+generate:
+  stores: [postgres]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "UUIDv7, minted by the application."
+  - name: org_id
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: id }
+    description: "The tenant; denormalized beside the dataset scope per V17."
+  - name: dataset_id
+    type: varchar
+    nullable: false
+    references: { relation: datasets, column: id }
+    description: "The dataset whose golden records this writes."
+  - name: upsert_preview_id
+    type: varchar
+    nullable: false
+    references: { relation: upsert_previews, column: id }
+    description: "The approved preview."
+  - name: job_id
+    type: varchar
+    nullable: false
+    description: "The job that began it."
+  - name: fingerprint
+    type: varchar
+    nullable: false
+    description: "The approved fingerprint."
+  - name: status
+    type: varchar
+    nullable: false
+    default: "'applying'"
+    accepted_values: [applying, created, updated, failed, skipped_stale]
+    description: "The apply state."
+  - name: call_state
+    type: varchar
+    nullable: false
+    default: "'none'"
+    accepted_values: [none, in_flight]
+    description: "in_flight from just before the upsert call until its outcome is recorded."
+  - name: sf_record_id
+    type: varchar
+    description: "The Salesforce id of the record created or updated."
+  - name: preimage
+    type: varchar
+    nullable: false
+    default: "''"
+    description: "JSON: the record's field values before an update ('null' for a create), read before the call."
+  - name: detail
+    type: varchar
+    description: "Why it settled as it did."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the row was written."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the row last changed."
+indexes:
+  - name: upsert_applies_preview
+    columns: [upsert_preview_id]
+    unique: true
+  - name: upsert_applies_dataset
+    columns: [org_id, dataset_id, status]

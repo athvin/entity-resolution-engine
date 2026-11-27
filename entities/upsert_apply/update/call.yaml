@@ -1,0 +1,9 @@
+kind: statement
+operation: update
+mode: partial
+description: "Record the preimage and mark the call in flight, before it is made."
+params:
+  - { name: preimage, type: varchar }
+  - { name: id, type: varchar }
+  - { name: org_id, type: varchar }
+returns: entity

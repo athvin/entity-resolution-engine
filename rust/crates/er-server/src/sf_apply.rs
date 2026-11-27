@@ -506,6 +506,143 @@ pub async fn create(
         .ok_or_else(|| CallError::Ambiguous("create returned no id".into()))
 }
 
+/// A record found by its External ID.
+#[derive(Debug, Clone)]
+pub struct Found {
+    pub id: String,
+    pub system_modstamp: String,
+    pub fields: BTreeMap<String, serde_json::Value>,
+}
+
+/// The record whose `key_field` equals `key`, with `fields`, or `None`.
+///
+/// # Errors
+/// See [`CallError`].
+pub async fn find_by_external_id(
+    org: &Org,
+    object: &str,
+    key_field: &str,
+    key: &str,
+    fields: &[String],
+) -> Result<Option<Found>, CallError> {
+    if !valid_field(key_field) || fields.iter().any(|f| !valid_field(f)) {
+        return Err(CallError::Rejected("INVALID_FIELD".into()));
+    }
+    let mut select: Vec<&str> = vec!["Id", "SystemModstamp"];
+    select.extend(fields.iter().map(String::as_str));
+    let url = format!(
+        "{}/services/data/{}/sobjects/{object}/{key_field}/{}",
+        base(org),
+        org.api_version,
+        urlencode(key)
+    );
+    let joined = select.join(",");
+    match call(
+        org,
+        |h| {
+            h.get(&url)
+                .bearer_auth(&org.access_token)
+                .query(&[("fields", joined.as_str())])
+        },
+        &url,
+        false,
+    )
+    .await
+    {
+        Ok(body) => {
+            let v: serde_json::Value = serde_json::from_str(&body)
+                .map_err(|_| CallError::Transient("record response is not JSON".into()))?;
+            let s = |k: &str| {
+                v.get(k)
+                    .and_then(|x| x.as_str())
+                    .unwrap_or_default()
+                    .to_string()
+            };
+            Ok(Some(Found {
+                id: s("Id"),
+                system_modstamp: s("SystemModstamp"),
+                fields: fields
+                    .iter()
+                    .map(|f| {
+                        (
+                            f.clone(),
+                            v.get(f).cloned().unwrap_or(serde_json::Value::Null),
+                        )
+                    })
+                    .collect(),
+            }))
+        }
+        Err(CallError::Rejected(code)) if code == "NOT_FOUND" => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+/// What an upsert did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Upserted {
+    Created(String),
+    Updated(String),
+}
+
+/// Upsert by External ID (REST `PATCH …/{object}/{key_field}/{key}`):
+/// creates the record or updates the one already carrying that key. Keyed,
+/// so a retry addresses the same record — it can update twice, never create
+/// twice.
+///
+/// # Errors
+/// See [`CallError`]; `Ambiguous` means read it back by the key.
+pub async fn upsert(
+    org: &Org,
+    object: &str,
+    key_field: &str,
+    key: &str,
+    fields: &BTreeMap<String, serde_json::Value>,
+) -> Result<Upserted, CallError> {
+    if !valid_field(key_field)
+        || fields
+            .keys()
+            .any(|f| !valid_field(f) || SYSTEM_FIELDS.contains(&f.as_str()))
+    {
+        return Err(CallError::Rejected("INVALID_FIELD".into()));
+    }
+    let url = format!(
+        "{}/services/data/{}/sobjects/{object}/{key_field}/{}",
+        base(org),
+        org.api_version,
+        urlencode(key)
+    );
+    let body = call(
+        org,
+        |h| h.patch(&url).bearer_auth(&org.access_token).json(fields),
+        &url,
+        true,
+    )
+    .await?;
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap_or(serde_json::Value::Null);
+    let id = v
+        .get("id")
+        .and_then(|i| i.as_str())
+        .unwrap_or_default()
+        .to_string();
+    if v.get("created").and_then(serde_json::Value::as_bool) == Some(true) {
+        Ok(Upserted::Created(id))
+    } else {
+        Ok(Upserted::Updated(id))
+    }
+}
+
+fn urlencode(s: &str) -> String {
+    s.bytes()
+        .map(|b| {
+            if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {
+                (b as char).to_string()
+            } else {
+                format!("%{b:02X}")
+            }
+        })
+        .collect()
+}
+
 fn xml_escape(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")

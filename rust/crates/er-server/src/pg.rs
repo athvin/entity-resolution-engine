@@ -2825,5 +2825,19 @@ pub async fn preview_context(
         policies,
         provenance,
         ambiguous: ambiguous_provenance_sources(client, org_id, dataset_id).await?,
+        upsert_policies: er_entities::upsert_policy::read::active(client, org_id, dataset_id)
+            .await?
+            .into_iter()
+            .map(|p| crate::preview_job::UpsertPolicyCtx {
+                id: p.id,
+                connection_id: p.salesforce_connection_id,
+                object: p.object,
+                external_id_field: p.external_id_field,
+                field_mapping: serde_json::from_value(p.field_mapping).unwrap_or_default(),
+                writeback_allowlist: serde_json::from_value(p.writeback_allowlist)
+                    .unwrap_or_default(),
+                sources: serde_json::from_value(p.sources).unwrap_or_default(),
+            })
+            .collect(),
     })
 }

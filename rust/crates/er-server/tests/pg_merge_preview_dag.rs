@@ -275,6 +275,18 @@ C002,Priya,Raghavan,priya.raghavan@example.com,(415) 555-0132,88 Harbor Street #
     .await;
     assert_eq!(status, StatusCode::OK, "{rule}");
     let rule_id = rule["id"].as_str().unwrap().to_owned();
+    // An upsert policy for records that arrived by upload (#998).
+    let (status, upsert_policy) = json_call(
+        &router,
+        "PUT",
+        &format!("{base}/writeback/upsert-policies"),
+        &key,
+        Some(json!({"connection_id": conn, "object": "Contact", "external_id_field": "DupeZero_Id__c",
+            "field_mapping": {"email": "Email", "family_name": "LastName"},
+            "writeback_allowlist": ["Email", "LastName"], "sources": ["webforms"]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{upsert_policy}");
 
     // --- Generate: only the provenanced crm pair forms a group -------------
     let (status, queued) = generate(key.clone()).await;
@@ -309,6 +321,43 @@ C002,Priya,Raghavan,priya.raghavan@example.com,(415) 555-0132,88 Harbor Street #
         items[0]["decided_by"],
         format!("policy:{rule_id}"),
         "{page}"
+    );
+    // Upserts: the webforms-only entities are proposed; the entity already
+    // synced from the Contact object is a merge, never an upsert.
+    let merged_entity = items[0]["entity_id"].as_str().unwrap().to_owned();
+    let (status, upserts) = json_call(
+        &router,
+        "GET",
+        &format!("{base}/upsert-previews"),
+        &key,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{upserts}");
+    let proposed = upserts["items"].as_array().unwrap();
+    assert!(
+        !proposed.is_empty(),
+        "webforms-only entities are proposed: {upserts}"
+    );
+    assert!(
+        proposed
+            .iter()
+            .all(|u| u["entity_id"] != merged_entity.as_str()),
+        "{upserts}"
+    );
+    // Keyed by the entity id; only allowlisted fields, and only golden values
+    // that exist (a record with no golden email writes no Email).
+    assert!(
+        proposed
+            .iter()
+            .all(|u| u["external_id_value"] == u["entity_id"]
+                && !u["fields"].as_object().unwrap().is_empty()
+                && u["fields"]
+                    .as_object()
+                    .unwrap()
+                    .keys()
+                    .all(|k| k == "Email" || k == "LastName")),
+        "{upserts}"
     );
     let id = items[0]["id"].as_str().unwrap().to_owned();
     let (_, detail) = json_call(

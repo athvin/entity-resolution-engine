@@ -11004,6 +11004,265 @@
         ]
       }
     },
+    "/v1/orgs/{org}/datasets/{ds}/upsert-previews": {
+      "get": {
+        "summary": "a dataset's upsert previews",
+        "operationId": "get_orgs_by_org_datasets_by_ds_upsert_previews",
+        "parameters": [
+          {
+            "name": "org",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ds",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "description": "Only previews in this state.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "The `next_cursor` of the previous page.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum items, 1–200; default 50.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "2XX": {
+            "description": "Successful response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpsertPreviewPage"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "detail"
+                  ],
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "viewer"
+            ]
+          }
+        ]
+      }
+    },
+    "/v1/orgs/{org}/datasets/{ds}/upsert-previews/apply": {
+      "post": {
+        "summary": "apply the dataset's approved upserts to Salesforce",
+        "operationId": "post_orgs_by_org_datasets_by_ds_upsert_previews_apply",
+        "parameters": [
+          {
+            "name": "org",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ds",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "2XX": {
+            "description": "Successful response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MergesApplying"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "detail"
+                  ],
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "admin"
+            ]
+          }
+        ]
+      }
+    },
+    "/v1/orgs/{org}/datasets/{ds}/upsert-previews/decide": {
+      "post": {
+        "summary": "approve or reject upserts",
+        "operationId": "post_orgs_by_org_datasets_by_ds_upsert_previews_decide",
+        "parameters": [
+          {
+            "name": "org",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ds",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "decision",
+                  "items"
+                ],
+                "properties": {
+                  "decision": {
+                    "type": "string"
+                  },
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "fingerprint"
+                      ],
+                      "properties": {
+                        "fingerprint": {
+                          "type": "string"
+                        },
+                        "id": {
+                          "type": "string"
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "reason": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "2XX": {
+            "description": "Successful response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchDecisionOut"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "detail"
+                  ],
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "steward"
+            ]
+          }
+        ]
+      }
+    },
     "/v1/orgs/{org}/datasets/{ds}/writeback/auto-approval": {
       "get": {
         "summary": "the auto-approval rules in force",
@@ -11294,6 +11553,174 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/WritebackPolicyView"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "detail"
+                  ],
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "admin"
+            ]
+          }
+        ]
+      }
+    },
+    "/v1/orgs/{org}/datasets/{ds}/writeback/upsert-policies": {
+      "get": {
+        "summary": "the upsert policies in force",
+        "operationId": "get_orgs_by_org_datasets_by_ds_writeback_upsert_policies",
+        "parameters": [
+          {
+            "name": "org",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ds",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "2XX": {
+            "description": "Successful response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpsertPolicyList"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "detail"
+                  ],
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "viewer"
+            ]
+          }
+        ]
+      },
+      "put": {
+        "summary": "set the upsert policy for one connection's object",
+        "operationId": "put_orgs_by_org_datasets_by_ds_writeback_upsert_policies",
+        "parameters": [
+          {
+            "name": "org",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ds",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "connection_id",
+                  "object",
+                  "external_id_field",
+                  "field_mapping",
+                  "writeback_allowlist",
+                  "sources"
+                ],
+                "properties": {
+                  "connection_id": {
+                    "type": "string"
+                  },
+                  "external_id_field": {
+                    "type": "string"
+                  },
+                  "field_mapping": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  },
+                  "object": {
+                    "type": "string"
+                  },
+                  "sources": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "writeback_allowlist": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "2XX": {
+            "description": "Successful response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpsertPolicyView"
                 }
               }
             }
@@ -18925,6 +19352,178 @@
           },
           "upload_id": {
             "type": "string"
+          }
+        }
+      },
+      "UpsertPolicyList": {
+        "type": "object",
+        "description": "The upsert policies in force.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UpsertPolicyView"
+            }
+          }
+        }
+      },
+      "UpsertPolicyView": {
+        "type": "object",
+        "description": "An upsert policy revision.",
+        "required": [
+          "id",
+          "connection_id",
+          "object",
+          "external_id_field",
+          "field_mapping",
+          "writeback_allowlist",
+          "sources",
+          "created_by",
+          "created_at"
+        ],
+        "properties": {
+          "connection_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "description": "RFC 3339."
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "external_id_field": {
+            "type": "string"
+          },
+          "field_mapping": {
+            "type": "object"
+          },
+          "id": {
+            "type": "string",
+            "description": "The revision an upsert preview binds."
+          },
+          "object": {
+            "type": "string"
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "writeback_allowlist": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "UpsertPreviewPage": {
+        "type": "object",
+        "description": "A page of upsert previews.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UpsertPreviewView"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Pass as `cursor` for the next page; null on the last."
+          }
+        }
+      },
+      "UpsertPreviewView": {
+        "type": "object",
+        "description": "A proposed upsert.",
+        "required": [
+          "id",
+          "connection_id",
+          "object",
+          "entity_id",
+          "external_id_field",
+          "external_id_value",
+          "fields",
+          "fingerprint",
+          "status",
+          "policy_revision",
+          "created_at"
+        ],
+        "properties": {
+          "apply_detail": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "apply_status": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The apply, once begun: `applying`, `created`, `updated`, `failed` or `skipped_stale`."
+          },
+          "connection_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "description": "RFC 3339."
+          },
+          "decided_by": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "entity_id": {
+            "type": "string"
+          },
+          "external_id_field": {
+            "type": "string"
+          },
+          "external_id_value": {
+            "type": "string"
+          },
+          "fields": {
+            "type": "object",
+            "description": "Provider field → value to write."
+          },
+          "fingerprint": {
+            "type": "string",
+            "description": "Name it to approve or reject."
+          },
+          "id": {
+            "type": "string"
+          },
+          "object": {
+            "type": "string"
+          },
+          "policy_revision": {
+            "type": "string",
+            "description": "The upsert policy revision it was built under."
+          },
+          "sf_record_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The Salesforce id written, once applied."
+          },
+          "status": {
+            "type": "string",
+            "description": "`planned`, `approved`, `rejected` or `superseded`."
           }
         }
       },

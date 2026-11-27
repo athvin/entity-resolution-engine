@@ -22,8 +22,8 @@ pub mod tasks;
 use er_dag::{Dag, DagBuilder, TriggerRule};
 
 use control::{
-    Activate, AdvanceSfCursor, ApplyMerges, CreateCatalog, DrainActions, EmitWriteBack,
-    PublishPreviews, RegisterModel, RestoreMerges, SettleActions, StageApproved,
+    Activate, AdvanceSfCursor, ApplyMerges, ApplyUpserts, CreateCatalog, DrainActions,
+    EmitWriteBack, PublishPreviews, RegisterModel, RestoreMerges, SettleActions, StageApproved,
 };
 use tasks::{
     ApplyStaged, Assemble, CorrectReconcile, CorrectionsInit, CorrectionsReconcile, ExportResults,
@@ -60,10 +60,11 @@ pub enum JobKind {
     MergePreview,
     MergeApply,
     MergeRestore,
+    UpsertApply,
 }
 
 impl JobKind {
-    pub const ALL: [JobKind; 16] = [
+    pub const ALL: [JobKind; 17] = [
         JobKind::RunAllFull,
         JobKind::RunAllIncremental,
         JobKind::Correct,
@@ -80,6 +81,7 @@ impl JobKind {
         JobKind::MergePreview,
         JobKind::MergeApply,
         JobKind::MergeRestore,
+        JobKind::UpsertApply,
     ];
 
     #[must_use]
@@ -101,6 +103,7 @@ impl JobKind {
             JobKind::MergePreview => "merge_preview",
             JobKind::MergeApply => "merge_apply",
             JobKind::MergeRestore => "merge_restore",
+            JobKind::UpsertApply => "upsert_apply",
         }
     }
 
@@ -144,6 +147,7 @@ pub fn dag_for(kind: JobKind) -> Dag {
         JobKind::MergePreview => merge_preview(),
         JobKind::MergeApply => merge_apply(),
         JobKind::MergeRestore => merge_restore(),
+        JobKind::UpsertApply => upsert_apply(),
     }
 }
 
@@ -281,6 +285,10 @@ pub async fn run_control_task(
             .await?,
         ),
         // `merge_restore` (#996): one control task, like merge_apply.
+        // `upsert_apply` (#998): one control task.
+        (JobKind::UpsertApply, "apply_upserts") => {
+            completed(control::ApplyUpserts { egress }.run(ctx, ()).await?)
+        }
         (JobKind::MergeRestore, "restore_merges") => {
             completed(control::RestoreMerges { egress }.run(ctx, ()).await?)
         }
@@ -604,6 +612,13 @@ fn merge_apply() -> Dag {
     let mut d = Builder::new(JobKind::MergeApply.dag_name());
     let _ = d.control::<ApplyMerges>(());
     d.build().expect("the merge_apply DAG assembles")
+}
+
+/// Apply approved upserts (#998): one control task.
+fn upsert_apply() -> Dag {
+    let mut d = Builder::new(JobKind::UpsertApply.dag_name());
+    let _ = d.control::<ApplyUpserts>(());
+    d.build().expect("the upsert_apply DAG assembles")
 }
 
 /// Undo applied merges (#996): one control task.

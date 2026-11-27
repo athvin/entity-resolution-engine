@@ -73,6 +73,16 @@ const EXPLAINED: Record<string, string> = {
   "merge_preview.apply":
     "MergePreviewDetail composes the merge_apply row's status/detail (er-server/src/lib.rs)",
   "merge_preview_journal.at": "MergePreviewEvent renames created_at (er-server/src/lib.rs)",
+  "upsert_preview.connection_id":
+    "UpsertPreviewView renames salesforce_connection_id (er-server/src/lib.rs)",
+  "upsert_preview.policy_revision":
+    "UpsertPreviewView renames upsert_policy_id — the revision it binds (er-server/src/lib.rs)",
+  "upsert_preview.apply_status":
+    "UpsertPreviewView composes the upsert_apply row's status (er-server/src/lib.rs)",
+  "upsert_preview.sf_record_id":
+    "UpsertPreviewView composes the upsert_apply row's sf_record_id (er-server/src/lib.rs)",
+  "upsert_preview.apply_detail":
+    "UpsertPreviewView composes the upsert_apply row's detail (er-server/src/lib.rs)",
   "merge_auto_approval.connection_id":
     "AutoApprovalView renames salesforce_connection_id (er-server/src/lib.rs)",
   // These are the mock's ORG detail rows. The dataset entity mirrors the org's

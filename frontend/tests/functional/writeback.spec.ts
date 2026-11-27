@@ -48,4 +48,21 @@ test.describe("writeback review (#997)", () => {
       "Records the merge reparented to the master are not moved back.",
     );
   });
+
+  test("a steward approves proposed upserts; an admin can apply them", async ({
+    page,
+  }, testInfo) => {
+    const org = triageOrg(testInfo.project.name);
+    await login(page, USERS.admin);
+    await page.goto(`/${org}/${DS}/writeback`);
+    const upserts = page.getByTestId("writeback-upserts");
+    await expect(upserts).toContainText("Email: new1@acme.test");
+    await page.getByRole("checkbox", { name: "Select upsert for ent-up-1" }).check();
+    await upserts.getByRole("button", { name: "Approve 1" }).click();
+    await expect(upserts.getByTestId("writeback-batch-outcome")).toContainText(
+      "1 decided, 0 refused",
+    );
+    await page.getByTestId("writeback-upserts-apply").click();
+    await expect(upserts).toContainText("Applying approved upserts to Salesforce.");
+  });
 });

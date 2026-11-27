@@ -384,6 +384,23 @@ the same transaction; changing or disabling it never rewrites a decision
 already made. Every mode ends in the same apply (§4.3.2), with the same
 authorization, staleness and journal.
 
+### 4.3.5 Upserts (as built, #998)
+
+`PUT/GET …/writeback/upsert-policies` (Admin / Viewer) sets, per (connection,
+object), the External ID field the upsert is keyed by, a golden-attribute →
+field mapping, an allowlist, and the delivery `sources` (an import's, say) whose
+records may be upserted. Append-only; the revision is what a preview binds.
+
+| Step | Mechanism |
+|---|---|
+| materialize | the same `merge_preview` job, runs and checkpoint as merges: an entity is a candidate when a member came from a policy source and NONE is already provenanced from the policy's object (that entity is a merge's, never an upsert's); fields are the golden values, mapped and allowlisted, nulls omitted; keyed by the entity id |
+| review | `GET …/upsert-previews`, `POST …/upsert-previews/decide` (Steward, ≤100; fingerprint and live policy revision per item); the writeback page's Upserts section |
+| apply | `POST …/upsert-previews/apply` (Admin) → `upsert_apply` job (`src/upsert_apply.rs`): `APPROVED → APPLYING` at most once; the record read by its External ID; a record modified after the proposal is `SKIPPED_STALE`; the preimage (current values, or `null` for a create) written and the call marked in flight before `PATCH …/{object}/{field}/{key}` |
+| ambiguity | an in-flight call is reconciled by reading the record back by its key; keyed by External ID, a retry updates the same record and can never create a second |
+| convergence | a CREATED record is asserted always-match (`{sfdc source}:{new id}` ↔ the entity's upload member), so the next extraction joins it to the entity rather than resolving a new one |
+
+Lead conversion is #520 and export/DRS is #521, not upsert deliverables.
+
 ### 4.4 Explicit v1 boundaries
 
 - Writeback via `merge()` (Lead/Contact/Account) and `upsert`.

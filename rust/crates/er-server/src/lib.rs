@@ -70,6 +70,7 @@ pub mod shutdown;
 pub mod taskpg;
 pub mod telemetry;
 pub mod uploads;
+pub mod upsert_apply;
 pub mod urlguard;
 pub mod webhook;
 pub mod writeback;
@@ -10411,7 +10412,17 @@ async fn generate_merge_previews(
         Ok(p) => p.into_iter().map(|p| p.id).collect::<Vec<_>>().join(","),
         Err(e) => return pg_err(e),
     };
-    let idem = format!("merge-preview:{}:{checkpoint}:{revisions}", d.id);
+    // Upsert policies ride the same job (#998), so their revisions are part
+    // of what the result depends on.
+    let upsert_revisions =
+        match er_entities::upsert_policy::read::active(&client, &org_row.id, &d.id).await {
+            Ok(p) => p.into_iter().map(|p| p.id).collect::<Vec<_>>().join(","),
+            Err(e) => return pg_err(e),
+        };
+    let idem = format!(
+        "merge-preview:{}:{checkpoint}:{revisions}:{upsert_revisions}",
+        d.id
+    );
     match pg::enqueue(
         &client,
         &org_row.id,
@@ -11112,6 +11123,442 @@ async fn list_auto_approval(
             items: rows.iter().map(AutoApprovalView::from).collect(),
         })
         .into_response(),
+        Err(e) => pg_err(e),
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct UpsertPolicyIn {
+    connection_id: String,
+    /// `Lead`, `Contact` or `Account`.
+    object: String,
+    /// The Salesforce External ID field the upsert is keyed by; it carries
+    /// the entity id.
+    external_id_field: String,
+    /// Golden attribute → provider field.
+    field_mapping: std::collections::BTreeMap<String, String>,
+    /// Provider fields an upsert may write.
+    writeback_allowlist: Vec<String>,
+    /// Delivery sources (e.g. an import's) whose records may be upserted.
+    sources: Vec<String>,
+}
+
+/// An upsert policy revision.
+#[derive(Serialize, utoipa::ToSchema)]
+struct UpsertPolicyView {
+    /// The revision an upsert preview binds.
+    id: String,
+    connection_id: String,
+    object: String,
+    external_id_field: String,
+    #[schema(value_type = Object)]
+    field_mapping: Value,
+    #[schema(value_type = Vec<String>)]
+    writeback_allowlist: Value,
+    #[schema(value_type = Vec<String>)]
+    sources: Value,
+    created_by: String,
+    /// RFC 3339.
+    created_at: String,
+}
+
+impl From<&er_entities::upsert_policy::UpsertPolicy> for UpsertPolicyView {
+    fn from(p: &er_entities::upsert_policy::UpsertPolicy) -> Self {
+        Self {
+            id: p.id.clone(),
+            connection_id: p.salesforce_connection_id.clone(),
+            object: p.object.clone(),
+            external_id_field: p.external_id_field.clone(),
+            field_mapping: p.field_mapping.clone(),
+            writeback_allowlist: p.writeback_allowlist.clone(),
+            sources: p.sources.clone(),
+            created_by: p.created_by.clone(),
+            created_at: pg::ts(&p.created_at),
+        }
+    }
+}
+
+/// The upsert policies in force.
+#[derive(Serialize, utoipa::ToSchema)]
+struct UpsertPolicyList {
+    items: Vec<UpsertPolicyView>,
+}
+
+fn sf_field_name(f: &str) -> bool {
+    !f.is_empty() && f.len() <= 80 && f.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+}
+
+/// Admin+: set the upsert policy for one connection's object
+/// (`PUT /v1/orgs/{org}/datasets/{ds}/writeback/upsert-policies`). Entities
+/// with a member from one of `sources` and none already in that object are
+/// proposed as upserts keyed by `external_id_field` (which carries the entity
+/// id) at the next preview generation. Append-only.
+async fn put_upsert_policy(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, ds)): Path<(String, String)>,
+    Json(body): Json<UpsertPolicyIn>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Admin) {
+        return e.into_response();
+    }
+    if !["Lead", "Contact", "Account"].contains(&body.object.as_str()) {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "object must be Lead, Contact or Account",
+        );
+    }
+    if !sf_field_name(&body.external_id_field)
+        || body
+            .writeback_allowlist
+            .iter()
+            .any(|f| !sf_field_name(f) || f == "Id")
+        || body.field_mapping.values().any(|f| !sf_field_name(f))
+    {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "field names must be Salesforce API names, and Id is never written",
+        );
+    }
+    if let Some(attr) = body
+        .field_mapping
+        .keys()
+        .find(|a| !crate::preview_job::GOLDEN_COLUMNS.contains(&a.as_str()))
+    {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("{attr:?} is not a golden record attribute"),
+        );
+    }
+    let (client, org_row, d) = match upload_scope_any(&state, &org, &ds).await {
+        Ok(t) => t,
+        Err(r) => return *r,
+    };
+    match pg::list_salesforce_connections(&client, &org_row.id).await {
+        Ok(conns) if conns.iter().any(|c| c.id == body.connection_id && c.active) => {}
+        Ok(_) => {
+            return detail_err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "no active connection with that id in this org",
+            );
+        }
+        Err(e) => return pg_err(e),
+    }
+    match er_entities::upsert_policy::create::append(
+        &client,
+        &er_ids::new_v7(),
+        &org_row.id,
+        &d.id,
+        &body.connection_id,
+        &body.object,
+        &body.external_id_field,
+        &json!(body.field_mapping),
+        &json!(body.writeback_allowlist),
+        &json!(body.sources),
+        &principal.actor,
+    )
+    .await
+    {
+        Ok(rows) => match rows.first() {
+            Some(p) => Json(UpsertPolicyView::from(p)).into_response(),
+            None => detail_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "the policy was not stored",
+            ),
+        },
+        Err(e) => pg_err(e),
+    }
+}
+
+/// Viewer+: the upsert policies in force
+/// (`GET /v1/orgs/{org}/datasets/{ds}/writeback/upsert-policies`).
+async fn list_upsert_policies(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, ds)): Path<(String, String)>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let (client, org_row, d) = match upload_scope_any(&state, &org, &ds).await {
+        Ok(t) => t,
+        Err(r) => return *r,
+    };
+    match er_entities::upsert_policy::read::active(&client, &org_row.id, &d.id).await {
+        Ok(rows) => Json(UpsertPolicyList {
+            items: rows.iter().map(UpsertPolicyView::from).collect(),
+        })
+        .into_response(),
+        Err(e) => pg_err(e),
+    }
+}
+
+/// A proposed upsert.
+#[derive(Serialize, utoipa::ToSchema)]
+struct UpsertPreviewView {
+    id: String,
+    connection_id: String,
+    object: String,
+    entity_id: String,
+    external_id_field: String,
+    external_id_value: String,
+    /// Provider field → value to write.
+    #[schema(value_type = Object)]
+    fields: Value,
+    /// Name it to approve or reject.
+    fingerprint: String,
+    /// `planned`, `approved`, `rejected` or `superseded`.
+    status: String,
+    decided_by: Option<String>,
+    /// The upsert policy revision it was built under.
+    policy_revision: String,
+    /// The apply, once begun: `applying`, `created`, `updated`, `failed` or `skipped_stale`.
+    apply_status: Option<String>,
+    /// The Salesforce id written, once applied.
+    sf_record_id: Option<String>,
+    apply_detail: Option<String>,
+    /// RFC 3339.
+    created_at: String,
+}
+
+fn upsert_view(
+    p: &er_entities::upsert_preview::UpsertPreview,
+    a: Option<&er_entities::upsert_apply::UpsertApply>,
+) -> UpsertPreviewView {
+    UpsertPreviewView {
+        id: p.id.clone(),
+        connection_id: p.salesforce_connection_id.clone(),
+        object: p.object.clone(),
+        entity_id: p.entity_id.clone(),
+        external_id_field: p.external_id_field.clone(),
+        external_id_value: p.external_id_value.clone(),
+        fields: p.fields.clone(),
+        fingerprint: p.fingerprint.clone(),
+        status: p.status.clone(),
+        decided_by: p.decided_by.clone(),
+        policy_revision: p.upsert_policy_id.clone(),
+        apply_status: a.map(|a| a.status.clone()),
+        sf_record_id: a.and_then(|a| a.sf_record_id.clone()),
+        apply_detail: a.and_then(|a| a.detail.clone()),
+        created_at: pg::ts(&p.created_at),
+    }
+}
+
+/// A page of upsert previews.
+#[derive(Serialize, utoipa::ToSchema)]
+struct UpsertPreviewPage {
+    items: Vec<UpsertPreviewView>,
+    /// Pass as `cursor` for the next page; null on the last.
+    next_cursor: Option<String>,
+}
+
+/// Viewer+: a dataset's upsert previews
+/// (`GET /v1/orgs/{org}/datasets/{ds}/upsert-previews`), optionally one
+/// `status`, keyset-paged by `cursor`.
+async fn list_upsert_previews(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, ds)): Path<(String, String)>,
+    Query(params): Query<MergePreviewsQuery>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let (client, org_row, d) = match upload_scope_any(&state, &org, &ds).await {
+        Ok(t) => t,
+        Err(r) => return *r,
+    };
+    let limit = params
+        .limit
+        .as_deref()
+        .and_then(|l| l.parse::<i64>().ok())
+        .unwrap_or(50)
+        .clamp(1, 200);
+    let rows = match er_entities::upsert_preview::read::page(
+        &client,
+        &org_row.id,
+        &d.id,
+        params.status.as_deref().unwrap_or(""),
+        params.cursor.as_deref().unwrap_or(""),
+        limit + 1,
+    )
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => return pg_err(e),
+    };
+    let more = rows.len() > usize::try_from(limit).unwrap_or(usize::MAX);
+    let rows: Vec<_> = rows
+        .into_iter()
+        .take(usize::try_from(limit).unwrap_or(usize::MAX))
+        .collect();
+    let mut items = Vec::with_capacity(rows.len());
+    for p in &rows {
+        let a =
+            match er_entities::upsert_apply::read::by_preview(&client, &org_row.id, &d.id, &p.id)
+                .await
+            {
+                Ok(a) => a.into_iter().next(),
+                Err(e) => return pg_err(e),
+            };
+        items.push(upsert_view(p, a.as_ref()));
+    }
+    Json(UpsertPreviewPage {
+        next_cursor: if more {
+            rows.last().map(|p| p.id.clone())
+        } else {
+            None
+        },
+        items,
+    })
+    .into_response()
+}
+
+/// Steward+: approve or reject upserts
+/// (`POST /v1/orgs/{org}/datasets/{ds}/upsert-previews/decide`), up to 100,
+/// each naming the fingerprint the reviewer saw and refused on its own if the
+/// preview changed or its policy revision is no longer in force.
+async fn decide_upsert_previews(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, ds)): Path<(String, String)>,
+    Json(body): Json<BatchDecisionIn>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Steward) {
+        return e.into_response();
+    }
+    let to_status = match body.decision.as_str() {
+        "approve" => "approved",
+        "reject" => "rejected",
+        _ => {
+            return detail_err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "decision must be approve or reject",
+            );
+        }
+    };
+    if body.items.is_empty() || body.items.len() > 100 {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "items must hold 1 to 100 previews",
+        );
+    }
+    let (client, org_row, d) = match upload_scope_any(&state, &org, &ds).await {
+        Ok(t) => t,
+        Err(r) => return *r,
+    };
+    let live: Vec<String> =
+        match er_entities::upsert_policy::read::active(&client, &org_row.id, &d.id).await {
+            Ok(p) => p.into_iter().map(|p| p.id).collect(),
+            Err(e) => return pg_err(e),
+        };
+    let mut results = Vec::with_capacity(body.items.len());
+    for item in body.items {
+        let row =
+            match er_entities::upsert_preview::read::by_id(&client, &item.id, &org_row.id, &d.id)
+                .await
+            {
+                Ok(r) => r.into_iter().next(),
+                Err(e) => return pg_err(e),
+            };
+        let refuse = |status: u16, detail: &str| BatchDecisionResult {
+            id: item.id.clone(),
+            status,
+            preview_status: None,
+            detail: Some(detail.to_string()),
+        };
+        let Some(row) = row else {
+            results.push(refuse(404, "no such upsert preview"));
+            continue;
+        };
+        if row.fingerprint != item.fingerprint {
+            results.push(refuse(409, "the preview changed since you saw it"));
+            continue;
+        }
+        if to_status == "approved" && !live.contains(&row.upsert_policy_id) {
+            results.push(refuse(
+                409,
+                "the upsert policy this preview was built under has been replaced; regenerate",
+            ));
+            continue;
+        }
+        match er_entities::upsert_preview::update::decide(
+            &client,
+            to_status,
+            &principal.actor,
+            body.reason.as_deref(),
+            &row.id,
+            &org_row.id,
+            &d.id,
+            &row.fingerprint,
+        )
+        .await
+        {
+            Ok(moved) if !moved.is_empty() => results.push(BatchDecisionResult {
+                id: row.id.clone(),
+                status: 200,
+                preview_status: Some(to_status.to_string()),
+                detail: None,
+            }),
+            Ok(_) => results.push(refuse(409, &format!("the preview is {}", row.status))),
+            Err(e) => return pg_err(e),
+        }
+    }
+    Json(BatchDecisionOut { results }).into_response()
+}
+
+/// Admin+: apply the dataset's approved upserts to Salesforce
+/// (`POST /v1/orgs/{org}/datasets/{ds}/upsert-previews/apply`). Queues an
+/// `upsert_apply` job acting as the connection's delegated reviewer; 409 when
+/// nothing is approved. A record modified after its proposal is skipped as
+/// stale; a created record is asserted to its entity so the next extraction
+/// converges on it.
+async fn apply_upsert_previews(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, ds)): Path<(String, String)>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Admin) {
+        return e.into_response();
+    }
+    let (client, org_row, d) = match upload_scope_any(&state, &org, &ds).await {
+        Ok(t) => t,
+        Err(r) => return *r,
+    };
+    if let Err(r) = refuse_unless_active_dataset(&org_row, &d, "apply upserts") {
+        return *r;
+    }
+    let ready =
+        er_entities::upsert_preview::read::ready_to_apply(&client, &org_row.id, &d.id, 1).await;
+    let open = er_entities::upsert_apply::read::open(&client, &org_row.id, &d.id, 1).await;
+    match (ready, open) {
+        (Ok(r), Ok(o)) if r.is_empty() && o.is_empty() => {
+            return detail_err(StatusCode::CONFLICT, "no approved upserts to apply");
+        }
+        (Err(e), _) | (_, Err(e)) => return pg_err(e),
+        _ => {}
+    }
+    match pg::enqueue(
+        &client,
+        &org_row.id,
+        Some(d.id.as_str()),
+        "upsert_apply",
+        0,
+        None,
+        None,
+        principal.provenance(),
+    )
+    .await
+    {
+        Ok(job) => (
+            StatusCode::ACCEPTED,
+            Json(MergesApplying {
+                job_id: job.id,
+                state: job.state,
+            }),
+        )
+            .into_response(),
         Err(e) => pg_err(e),
     }
 }
@@ -16167,6 +16614,22 @@ fn build_routes(state: AppState) -> Router {
         .route(
             "/v1/orgs/{org}/datasets/{ds}/merge-previews",
             get(merge_previews_list),
+        )
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/writeback/upsert-policies",
+            get(list_upsert_policies).put(put_upsert_policy),
+        )
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/upsert-previews",
+            get(list_upsert_previews),
+        )
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/upsert-previews/decide",
+            post(decide_upsert_previews),
+        )
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/upsert-previews/apply",
+            post(apply_upsert_previews),
         )
         .route(
             "/v1/orgs/{org}/datasets/{ds}/merge-previews/decide",

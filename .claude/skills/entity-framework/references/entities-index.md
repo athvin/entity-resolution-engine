@@ -30,7 +30,7 @@ statements is read or written only through the engine's own stage SQL, not
 through a typed query function.
 
 <!-- BEGIN GENERATED: entities-index -->
-**66 entities, 329 declared statements.**
+**69 entities, 342 declared statements.**
 
 | Entity | Relation | Store | Key | Natural key | History |
 |---|---|---|---|---|---|
@@ -97,6 +97,9 @@ through a typed query function.
 | `tagging` | `taggings` | postgres | `id` | — | yes |
 | `task_instance` | `task_instances` | postgres | `id` | `job_id, task_id, try_number` | — |
 | `tenant_schema_state` | `tenant_schema_states` | postgres | `id` | — | — |
+| `upsert_apply` | `upsert_applies` | postgres | `id` | — | — |
+| `upsert_policy` | `upsert_policies` | postgres | `id` | — | — |
+| `upsert_preview` | `upsert_previews` | postgres | `id` | — | — |
 | `webhook` | `webhooks` | postgres | `id` | — | yes |
 | `webhook_delivery` | `webhook_deliveries` | postgres | `id` | — | — |
 | `writeback_policy` | `writeback_policies` | postgres | `id` | — | — |
@@ -167,6 +170,9 @@ Declared statements per entity and operation:
 | `tagging` | 1 | 2 | 0 | 1 |
 | `task_instance` | 3 | 5 | 22 | 0 |
 | `tenant_schema_state` | 2 | 1 | 0 | 0 |
+| `upsert_apply` | 1 | 2 | 2 | 0 |
+| `upsert_policy` | 1 | 1 | 0 | 0 |
+| `upsert_preview` | 1 | 3 | 2 | 0 |
 | `webhook` | 1 | 3 | 1 | 0 |
 | `webhook_delivery` | 1 | 1 | 2 | 1 |
 | `writeback_policy` | 1 | 1 | 0 | 0 |
