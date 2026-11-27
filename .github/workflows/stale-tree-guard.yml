@@ -1,0 +1,55 @@
+# The stale-tree guard (#1307): a pull request whose files return to an older
+# version of themselves on main.
+#
+# WHY. #1286 put a tree from an old worktree on a fresh main and undid seven
+# merged pull requests with every gate green. #1310 nearly did the same, the
+# same day. The diff of such a commit looks like a feature that also deletes
+# things. What gives it away is that its files now hold versions main already
+# had and moved past. scripts/ci/stale-tree-guard.sh explains the check and
+# the thresholds.
+#
+# NOT A REQUIRED CHECK YET, by the order the ci-and-supply-chain skill gives:
+# report on real pull requests, be seen failing, then promote. Until then a red
+# `stale tree guard` is a finding to read rather than a block. A deliberate
+# revert is exempt by a title starting "Revert", or by the `revert-ok` label.
+#
+# NO `paths:` FILTER, for the reason CLAUDE.md gives: any file can be the one
+# that goes back, and a required check (which this is meant to become) must
+# report on every pull request.
+on:
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+      - labeled
+      - unlabeled
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    name: stale tree guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # The head SHA, as pr-contract.yml checks out, and the whole history:
+      # every file's past versions are what the check compares against, and
+      # the script refuses a shallow clone rather than pass everything.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      # THE SELF-TEST RUNS FIRST: a guard that has stopped noticing anything
+      # passes every pull request, which reads exactly like a clean one.
+      - name: self-test the guard
+        run: bash scripts/ci/stale-tree-guard-test.sh
+      - name: check this pull request
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: bash scripts/ci/stale-tree-guard.sh
