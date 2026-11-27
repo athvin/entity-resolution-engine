@@ -30,7 +30,7 @@ statements is read or written only through the engine's own stage SQL, not
 through a typed query function.
 
 <!-- BEGIN GENERATED: entities-index -->
-**69 entities, 342 declared statements.**
+**71 entities, 353 declared statements.**
 
 | Entity | Relation | Store | Key | Natural key | History |
 |---|---|---|---|---|---|
@@ -57,6 +57,8 @@ through a typed query function.
 | `int_std_record` | `int_std_records` | duckdb | `id` | `record_key` | — |
 | `job` | `jobs` | postgres | `id` | — | — |
 | `lake_schema_migration` | `schema_migrations` | duckdb | `id` | — | — |
+| `lead_conversion` | `lead_conversions` | postgres | `id` | — | — |
+| `lead_conversion_apply` | `lead_conversion_applies` | postgres | `id` | — | — |
 | `match_score` | `match_scores` | duckdb | `id` | `rec_a_key, rec_b_key, model_version, tf_snapshot_id` | — |
 | `matching_model` | `matching_models` | postgres | `id` | `dataset_id, name, version` | yes |
 | `merge_apply` | `merge_applies` | postgres | `id` | — | — |
@@ -131,6 +133,8 @@ Declared statements per entity and operation:
 | `int_std_record` | 0 | 5 | 0 | 0 |
 | `job` | 2 | 5 | 10 | 0 |
 | `lake_schema_migration` | 1 | 1 | 0 | 0 |
+| `lead_conversion` | 1 | 3 | 2 | 0 |
+| `lead_conversion_apply` | 1 | 2 | 2 | 0 |
 | `match_score` | 0 | 7 | 3 | 0 |
 | `matching_model` | 1 | 4 | 1 | 0 |
 | `merge_apply` | 1 | 2 | 2 | 0 |

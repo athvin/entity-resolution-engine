@@ -964,6 +964,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/orgs/{org}/datasets/{ds}/lead-conversions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** a dataset's Lead conversion proposals */
+        get: operations["get_orgs_by_org_datasets_by_ds_lead_conversions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/orgs/{org}/datasets/{ds}/lead-conversions/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** convert the dataset's approved Leads in Salesforce */
+        post: operations["post_orgs_by_org_datasets_by_ds_lead_conversions_apply"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/orgs/{org}/datasets/{ds}/lead-conversions/decide": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** approve or reject Lead conversions */
+        post: operations["post_orgs_by_org_datasets_by_ds_lead_conversions_decide"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/orgs/{org}/datasets/{ds}/lexicon": {
         parameters: {
             query?: never;
@@ -3525,6 +3576,39 @@ export interface components {
              *     value can dominate a run.
              */
             rows: number;
+        };
+        /** @description A page of Lead conversion proposals. */
+        LeadConversionPage: {
+            items: components["schemas"]["LeadConversionView"][];
+            /** @description Pass as `cursor` for the next page; null on the last. */
+            next_cursor?: string | null;
+        };
+        /** @description A proposed Lead conversion. */
+        LeadConversionView: {
+            /** @description The Account the Lead converted into. */
+            account_id?: string | null;
+            apply_detail?: string | null;
+            /**
+             * @description The apply, once begun: `applying`, `converted`, `converted_externally`,
+             *     `failed` or `skipped_stale`.
+             */
+            apply_status?: string | null;
+            connection_id: string;
+            /** @description The Contact it converts into. */
+            contact_external_id: string;
+            contact_record_key: string;
+            /** @description RFC 3339. */
+            created_at: string;
+            decided_by?: string | null;
+            entity_id: string;
+            /** @description Name it to approve or reject. */
+            fingerprint: string;
+            id: string;
+            /** @description The Lead's Salesforce id and record key. */
+            lead_external_id: string;
+            lead_record_key: string;
+            /** @description `planned`, `approved`, `rejected` or `superseded`. */
+            status: string;
         };
         /** @description `GET …/lexicon`: the dataset's nickname pairs. */
         Lexicon: {
@@ -8105,6 +8189,126 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PairLabel"];
+                };
+            };
+            /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        detail: string;
+                    };
+                };
+            };
+        };
+    };
+    get_orgs_by_org_datasets_by_ds_lead_conversions: {
+        parameters: {
+            query?: {
+                /** @description Only previews in this state. */
+                status?: string;
+                /** @description The `next_cursor` of the previous page. */
+                cursor?: string;
+                /** @description Maximum items, 1–200; default 50. */
+                limit?: string;
+            };
+            header?: never;
+            path: {
+                org: string;
+                ds: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful response. */
+            "2XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LeadConversionPage"];
+                };
+            };
+            /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        detail: string;
+                    };
+                };
+            };
+        };
+    };
+    post_orgs_by_org_datasets_by_ds_lead_conversions_apply: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+                ds: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful response. */
+            "2XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MergesApplying"];
+                };
+            };
+            /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        detail: string;
+                    };
+                };
+            };
+        };
+    };
+    post_orgs_by_org_datasets_by_ds_lead_conversions_decide: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+                ds: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    decision: string;
+                    items: {
+                        fingerprint: string;
+                        id: string;
+                    }[];
+                    reason?: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful response. */
+            "2XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatchDecisionOut"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */

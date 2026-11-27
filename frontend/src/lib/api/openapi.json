@@ -5727,6 +5727,265 @@
         ]
       }
     },
+    "/v1/orgs/{org}/datasets/{ds}/lead-conversions": {
+      "get": {
+        "summary": "a dataset's Lead conversion proposals",
+        "operationId": "get_orgs_by_org_datasets_by_ds_lead_conversions",
+        "parameters": [
+          {
+            "name": "org",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ds",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "description": "Only previews in this state.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "The `next_cursor` of the previous page.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum items, 1–200; default 50.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "2XX": {
+            "description": "Successful response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeadConversionPage"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "detail"
+                  ],
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "viewer"
+            ]
+          }
+        ]
+      }
+    },
+    "/v1/orgs/{org}/datasets/{ds}/lead-conversions/apply": {
+      "post": {
+        "summary": "convert the dataset's approved Leads in Salesforce",
+        "operationId": "post_orgs_by_org_datasets_by_ds_lead_conversions_apply",
+        "parameters": [
+          {
+            "name": "org",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ds",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "2XX": {
+            "description": "Successful response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MergesApplying"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "detail"
+                  ],
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "admin"
+            ]
+          }
+        ]
+      }
+    },
+    "/v1/orgs/{org}/datasets/{ds}/lead-conversions/decide": {
+      "post": {
+        "summary": "approve or reject Lead conversions",
+        "operationId": "post_orgs_by_org_datasets_by_ds_lead_conversions_decide",
+        "parameters": [
+          {
+            "name": "org",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ds",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "decision",
+                  "items"
+                ],
+                "properties": {
+                  "decision": {
+                    "type": "string"
+                  },
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "fingerprint"
+                      ],
+                      "properties": {
+                        "fingerprint": {
+                          "type": "string"
+                        },
+                        "id": {
+                          "type": "string"
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "reason": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "2XX": {
+            "description": "Successful response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchDecisionOut"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "detail"
+                  ],
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "steward"
+            ]
+          }
+        ]
+      }
+    },
     "/v1/orgs/{org}/datasets/{ds}/lexicon": {
       "get": {
         "summary": "the org's nickname lexicon",
@@ -15499,6 +15758,107 @@
             "type": "integer",
             "format": "int64",
             "description": "Rows carrying this key value. Reported beside the pairs because the two\nanswer different questions — how much work, and how lopsided the data —\nand because `pairs` is quadratic in `rows`, which is the whole reason one\nvalue can dominate a run."
+          }
+        }
+      },
+      "LeadConversionPage": {
+        "type": "object",
+        "description": "A page of Lead conversion proposals.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LeadConversionView"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Pass as `cursor` for the next page; null on the last."
+          }
+        }
+      },
+      "LeadConversionView": {
+        "type": "object",
+        "description": "A proposed Lead conversion.",
+        "required": [
+          "id",
+          "connection_id",
+          "entity_id",
+          "lead_external_id",
+          "lead_record_key",
+          "contact_external_id",
+          "contact_record_key",
+          "fingerprint",
+          "status",
+          "created_at"
+        ],
+        "properties": {
+          "account_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The Account the Lead converted into."
+          },
+          "apply_detail": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "apply_status": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The apply, once begun: `applying`, `converted`, `converted_externally`,\n`failed` or `skipped_stale`."
+          },
+          "connection_id": {
+            "type": "string"
+          },
+          "contact_external_id": {
+            "type": "string",
+            "description": "The Contact it converts into."
+          },
+          "contact_record_key": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "description": "RFC 3339."
+          },
+          "decided_by": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "entity_id": {
+            "type": "string"
+          },
+          "fingerprint": {
+            "type": "string",
+            "description": "Name it to approve or reject."
+          },
+          "id": {
+            "type": "string"
+          },
+          "lead_external_id": {
+            "type": "string",
+            "description": "The Lead's Salesforce id and record key."
+          },
+          "lead_record_key": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "description": "`planned`, `approved`, `rejected` or `superseded`."
           }
         }
       },

@@ -473,6 +473,10 @@ impl PlanDoc for PreviewsPublished {
     const STABLE_NAME: &'static str = "previews_published";
 }
 
+impl PlanDoc for crate::lead_convert::Report {
+    const STABLE_NAME: &'static str = "leads_converted";
+}
+
 impl PlanDoc for crate::upsert_apply::Report {
     const STABLE_NAME: &'static str = "upserts_applied";
 }

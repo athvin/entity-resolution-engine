@@ -1,0 +1,10 @@
+kind: statement
+operation: update
+mode: partial
+description: "Supersede a Lead's other planned conversions."
+params:
+  - { name: org_id, type: varchar }
+  - { name: dataset_id, type: varchar }
+  - { name: lead_external_id, type: varchar }
+  - { name: fingerprint, type: varchar }
+returns: entity

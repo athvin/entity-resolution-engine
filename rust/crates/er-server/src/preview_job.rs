@@ -100,6 +100,39 @@ pub struct BuiltUpsert {
     pub fingerprint: String,
 }
 
+/// A proposed Lead → Contact conversion the pod built (#520).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BuiltConversion {
+    pub origin_run_id: String,
+    pub connection_id: String,
+    pub entity_id: String,
+    pub lead_external_id: String,
+    pub lead_record_key: String,
+    pub lead_modstamp: String,
+    pub contact_external_id: String,
+    pub contact_record_key: String,
+    pub contact_modstamp: String,
+    pub lead_policy_id: String,
+    pub contact_policy_id: String,
+    pub fingerprint: String,
+}
+
+/// `v1:` + SHA-256 over the canonical conversion (everything but the run).
+#[must_use]
+pub fn conversion_fingerprint(c: &BuiltConversion) -> String {
+    use sha2::{Digest, Sha256};
+    let canonical = serde_json::json!({
+        "connection": c.connection_id, "entity": c.entity_id,
+        "lead": [c.lead_external_id, c.lead_record_key, c.lead_modstamp],
+        "contact": [c.contact_external_id, c.contact_record_key, c.contact_modstamp],
+        "policies": [c.lead_policy_id, c.contact_policy_id],
+    });
+    format!(
+        "v1:{}",
+        hex::encode(Sha256::digest(canonical.to_string().as_bytes()))
+    )
+}
+
 /// `v1:` + SHA-256 over the canonical upsert content (everything but the
 /// run that produced it): the identity an approval names.
 #[must_use]
@@ -134,6 +167,9 @@ pub struct Materialized {
     /// Upsert proposals (#998), from the same runs as the merge previews.
     #[serde(default)]
     pub upserts: Vec<BuiltUpsert>,
+    /// Lead conversion proposals (#520).
+    #[serde(default)]
+    pub conversions: Vec<BuiltConversion>,
     pub snapshot: i64,
     /// Where the checkpoint moves to once these are published; `None` when no
     /// run was read.
@@ -342,6 +378,55 @@ pub fn materialize(
                         fields,
                     });
             }
+            // Lead conversions (#520): an entity holding Leads and exactly one
+            // Contact through the same connection converts each Lead into that
+            // Contact, instead of merging the Leads among themselves. With
+            // several Contacts the target is not yet one record — their merge
+            // lands first, and a later generation proposes the conversion.
+            let mut converting: BTreeSet<(String, String)> = BTreeSet::new();
+            for ((entity, connection, object), leads) in &groups {
+                if object != "Lead" {
+                    continue;
+                }
+                let Some(contacts) =
+                    groups.get(&(entity.clone(), connection.clone(), "Contact".to_string()))
+                else {
+                    continue;
+                };
+                let [contact] = contacts.as_slice() else {
+                    bump(
+                        "conversion_awaits_contact_merge",
+                        &mut out,
+                        leads.len() as u64,
+                    );
+                    converting.insert((entity.clone(), connection.clone()));
+                    continue;
+                };
+                let lead_policy = policies[&(connection.clone(), "Lead".to_string())];
+                let contact_policy = policies[&(connection.clone(), "Contact".to_string())];
+                for lead in leads {
+                    let mut built = BuiltConversion {
+                        origin_run_id: run.id.clone(),
+                        connection_id: connection.clone(),
+                        entity_id: entity.clone(),
+                        lead_external_id: lead.external_id.clone(),
+                        lead_record_key: lead.record_key.clone(),
+                        lead_modstamp: lead.system_modstamp.clone(),
+                        contact_external_id: contact.external_id.clone(),
+                        contact_record_key: contact.record_key.clone(),
+                        contact_modstamp: contact.system_modstamp.clone(),
+                        lead_policy_id: lead_policy.id.clone(),
+                        contact_policy_id: contact_policy.id.clone(),
+                        fingerprint: String::new(),
+                    };
+                    built.fingerprint = conversion_fingerprint(&built);
+                    out.conversions.push(built);
+                }
+                converting.insert((entity.clone(), connection.clone()));
+            }
+            groups.retain(|(entity, connection, object), _| {
+                object != "Lead" || !converting.contains(&(entity.clone(), connection.clone()))
+            });
             let singletons = groups.values().filter(|g| g.len() < 2).count() as u64;
             bump("singleton_group", &mut out, singletons);
             groups.retain(|_, g| g.len() >= 2);

@@ -267,6 +267,83 @@ CREATE UNIQUE INDEX IF NOT EXISTS jobs_one_active_per_dataset ON public.jobs (da
 CREATE UNIQUE INDEX IF NOT EXISTS jobs_one_active_org_level ON public.jobs (org_id) WHERE state IN ('dispatching','running','canceling') AND dataset_id IS NULL;
 CREATE INDEX IF NOT EXISTS jobs_claimable ON public.jobs (state, not_before, priority, id);
 CREATE INDEX IF NOT EXISTS jobs_dataset ON public.jobs (dataset_id, state);"#,
+    r#"CREATE TABLE IF NOT EXISTS public.salesforce_connections (
+  id text NOT NULL,
+  org_id text NOT NULL REFERENCES orgs(id),
+  name text NOT NULL,
+  instance_url text NOT NULL,
+  auth_kind text NOT NULL,
+  client_id text NOT NULL,
+  client_secret text NOT NULL,
+  api_version text NOT NULL,
+  active boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (id),
+  UNIQUE (org_id, name)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS salesforce_connections_org_name ON public.salesforce_connections (org_id, name);"#,
+    r#"CREATE TABLE IF NOT EXISTS public.writeback_policies (
+  id text NOT NULL,
+  org_id text NOT NULL REFERENCES orgs(id),
+  dataset_id text NOT NULL REFERENCES datasets(id),
+  salesforce_connection_id text NOT NULL REFERENCES salesforce_connections(id),
+  object text NOT NULL CHECK (object IN ('Lead', 'Contact', 'Account')),
+  election_policy text NOT NULL,
+  writeback_allowlist jsonb NOT NULL,
+  field_mapping jsonb NOT NULL,
+  created_by text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (id)
+);
+CREATE INDEX IF NOT EXISTS writeback_policies_scope ON public.writeback_policies (dataset_id, salesforce_connection_id, object, id);
+CREATE INDEX IF NOT EXISTS writeback_policies_org ON public.writeback_policies (org_id, dataset_id);"#,
+    r#"CREATE TABLE IF NOT EXISTS public.lead_conversions (
+  id text NOT NULL,
+  org_id text NOT NULL REFERENCES orgs(id),
+  dataset_id text NOT NULL REFERENCES datasets(id),
+  salesforce_connection_id text NOT NULL REFERENCES salesforce_connections(id),
+  entity_id text NOT NULL,
+  lead_external_id text NOT NULL,
+  lead_record_key text NOT NULL,
+  lead_modstamp text NOT NULL,
+  contact_external_id text NOT NULL,
+  contact_record_key text NOT NULL,
+  contact_modstamp text NOT NULL,
+  fingerprint text NOT NULL,
+  lake_snapshot bigint NOT NULL,
+  origin_run_id text NOT NULL,
+  lead_writeback_policy_id text NOT NULL REFERENCES writeback_policies(id),
+  contact_writeback_policy_id text NOT NULL REFERENCES writeback_policies(id),
+  status text NOT NULL DEFAULT 'planned' CHECK (status IN ('planned', 'approved', 'rejected', 'superseded')),
+  decided_by text,
+  decided_at timestamptz,
+  decision_reason text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS lead_conversions_fingerprint ON public.lead_conversions (dataset_id, fingerprint);
+CREATE INDEX IF NOT EXISTS lead_conversions_dataset ON public.lead_conversions (org_id, dataset_id, status, id);
+CREATE INDEX IF NOT EXISTS lead_conversions_lead ON public.lead_conversions (dataset_id, lead_external_id);"#,
+    r#"CREATE TABLE IF NOT EXISTS public.lead_conversion_applies (
+  id text NOT NULL,
+  org_id text NOT NULL REFERENCES orgs(id),
+  dataset_id text NOT NULL REFERENCES datasets(id),
+  lead_conversion_id text NOT NULL REFERENCES lead_conversions(id),
+  job_id text NOT NULL,
+  fingerprint text NOT NULL,
+  status text NOT NULL DEFAULT 'applying' CHECK (status IN ('applying', 'converted', 'converted_externally', 'failed', 'skipped_stale')),
+  call_state text NOT NULL DEFAULT 'none' CHECK (call_state IN ('none', 'in_flight')),
+  account_id text,
+  detail text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS lead_conversion_applies_proposal ON public.lead_conversion_applies (lead_conversion_id);
+CREATE INDEX IF NOT EXISTS lead_conversion_applies_dataset ON public.lead_conversion_applies (org_id, dataset_id, status);"#,
     r#"CREATE TABLE IF NOT EXISTS public.matching_models (
   id text NOT NULL,
   org_id text NOT NULL REFERENCES orgs(id),
@@ -306,38 +383,6 @@ CREATE INDEX IF NOT EXISTS matching_models_history_changed_at ON public.matching
 CREATE OR REPLACE TRIGGER er_history_matching_models
   AFTER INSERT OR UPDATE OR DELETE ON public.matching_models
   FOR EACH ROW EXECUTE FUNCTION public.er_history('matching_models_history');"#,
-    r#"CREATE TABLE IF NOT EXISTS public.salesforce_connections (
-  id text NOT NULL,
-  org_id text NOT NULL REFERENCES orgs(id),
-  name text NOT NULL,
-  instance_url text NOT NULL,
-  auth_kind text NOT NULL,
-  client_id text NOT NULL,
-  client_secret text NOT NULL,
-  api_version text NOT NULL,
-  active boolean NOT NULL DEFAULT true,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now(),
-  PRIMARY KEY (id),
-  UNIQUE (org_id, name)
-);
-CREATE UNIQUE INDEX IF NOT EXISTS salesforce_connections_org_name ON public.salesforce_connections (org_id, name);"#,
-    r#"CREATE TABLE IF NOT EXISTS public.writeback_policies (
-  id text NOT NULL,
-  org_id text NOT NULL REFERENCES orgs(id),
-  dataset_id text NOT NULL REFERENCES datasets(id),
-  salesforce_connection_id text NOT NULL REFERENCES salesforce_connections(id),
-  object text NOT NULL CHECK (object IN ('Lead', 'Contact', 'Account')),
-  election_policy text NOT NULL,
-  writeback_allowlist jsonb NOT NULL,
-  field_mapping jsonb NOT NULL,
-  created_by text NOT NULL,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now(),
-  PRIMARY KEY (id)
-);
-CREATE INDEX IF NOT EXISTS writeback_policies_scope ON public.writeback_policies (dataset_id, salesforce_connection_id, object, id);
-CREATE INDEX IF NOT EXISTS writeback_policies_org ON public.writeback_policies (org_id, dataset_id);"#,
     r#"CREATE TABLE IF NOT EXISTS public.merge_previews (
   id text NOT NULL,
   org_id text NOT NULL REFERENCES orgs(id),

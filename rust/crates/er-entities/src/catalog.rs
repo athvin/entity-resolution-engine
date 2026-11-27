@@ -1614,6 +1614,201 @@ columns:
 "#,
     ),
     (
+        "lead_conversion",
+        r#"kind: entity
+version: 1
+name: lead_conversion
+relation: lead_conversions
+description: "A proposed conversion of a duplicate Lead into the existing Contact it resolved with (#520): the Lead, the target Contact, both records' revision tokens at the pinned snapshot, and the writeback policy revisions for both objects. Reviewed and approved by fingerprint like a merge preview; applied through the same journal discipline. Conversion is not reversible in Salesforce."
+key: [id]
+generate:
+  stores: [postgres]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "UUIDv7, minted by the application."
+  - name: org_id
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: id }
+    description: "The tenant; denormalized beside the dataset scope per V17."
+  - name: dataset_id
+    type: varchar
+    nullable: false
+    references: { relation: datasets, column: id }
+    description: "The dataset whose resolution found the duplicate."
+  - name: salesforce_connection_id
+    type: varchar
+    nullable: false
+    references: { relation: salesforce_connections, column: id }
+    description: "The connection both records were synced from."
+  - name: entity_id
+    type: varchar
+    nullable: false
+    description: "The entity the Lead and the Contact resolved into."
+  - name: lead_external_id
+    type: varchar
+    nullable: false
+    description: "The Lead's Salesforce id."
+  - name: lead_record_key
+    type: varchar
+    nullable: false
+    description: "The Lead's record key."
+  - name: lead_modstamp
+    type: varchar
+    nullable: false
+    description: "The Lead's SystemModstamp at the snapshot, for the staleness check."
+  - name: contact_external_id
+    type: varchar
+    nullable: false
+    description: "The target Contact's Salesforce id."
+  - name: contact_record_key
+    type: varchar
+    nullable: false
+    description: "The Contact's record key."
+  - name: contact_modstamp
+    type: varchar
+    nullable: false
+    description: "The Contact's SystemModstamp at the snapshot."
+  - name: fingerprint
+    type: varchar
+    nullable: false
+    description: "v1: + SHA-256 over the canonical proposal; approval must name it."
+  - name: lake_snapshot
+    type: bigint
+    nullable: false
+    description: "The snapshot it was computed from."
+  - name: origin_run_id
+    type: varchar
+    nullable: false
+    description: "The run whose results produced it."
+  - name: lead_writeback_policy_id
+    type: varchar
+    nullable: false
+    references: { relation: writeback_policies, column: id }
+    description: "The Lead writeback policy revision in force."
+  - name: contact_writeback_policy_id
+    type: varchar
+    nullable: false
+    references: { relation: writeback_policies, column: id }
+    description: "The Contact writeback policy revision in force."
+  - name: status
+    type: varchar
+    nullable: false
+    default: "'planned'"
+    accepted_values: [planned, approved, rejected, superseded]
+    description: "The decision state."
+  - name: decided_by
+    type: varchar
+    description: "Who decided it."
+  - name: decided_at
+    type: timestamp
+    description: "When."
+  - name: decision_reason
+    type: varchar
+    description: "Why, when given."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the row was written."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the row last changed."
+indexes:
+  - name: lead_conversions_fingerprint
+    columns: [dataset_id, fingerprint]
+    unique: true
+  - name: lead_conversions_dataset
+    columns: [org_id, dataset_id, status, id]
+  - name: lead_conversions_lead
+    columns: [dataset_id, lead_external_id]
+"#,
+    ),
+    (
+        "lead_conversion_apply",
+        r#"kind: entity
+version: 1
+name: lead_conversion_apply
+relation: lead_conversion_applies
+description: "The apply of one approved Lead conversion (#520): at most one per proposal, the convertLead call journaled IN FLIGHT before it is made, the outcome after. An in-flight call is reconciled by re-reading the Lead (IsConverted, ConvertedContactId); a Lead already converted into the same Contact outside DupeZero is recorded, not retried. Not reversible in Salesforce."
+key: [id]
+generate:
+  stores: [postgres]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "UUIDv7, minted by the application."
+  - name: org_id
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: id }
+    description: "The tenant; denormalized beside the dataset scope per V17."
+  - name: dataset_id
+    type: varchar
+    nullable: false
+    references: { relation: datasets, column: id }
+    description: "The dataset whose resolution found the duplicate."
+  - name: lead_conversion_id
+    type: varchar
+    nullable: false
+    references: { relation: lead_conversions, column: id }
+    description: "The approved proposal."
+  - name: job_id
+    type: varchar
+    nullable: false
+    description: "The job that began it."
+  - name: fingerprint
+    type: varchar
+    nullable: false
+    description: "The approved fingerprint."
+  - name: status
+    type: varchar
+    nullable: false
+    default: "'applying'"
+    accepted_values: [applying, converted, converted_externally, failed, skipped_stale]
+    description: "The apply state."
+  - name: call_state
+    type: varchar
+    nullable: false
+    default: "'none'"
+    accepted_values: [none, in_flight]
+    description: "in_flight from just before the convertLead call until its outcome is recorded."
+  - name: account_id
+    type: varchar
+    description: "The Contact's Account the Lead converted into."
+  - name: detail
+    type: varchar
+    description: "Why it settled as it did."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the row was written."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the row last changed."
+indexes:
+  - name: lead_conversion_applies_proposal
+    columns: [lead_conversion_id]
+    unique: true
+  - name: lead_conversion_applies_dataset
+    columns: [org_id, dataset_id, status]
+"#,
+    ),
+    (
         "match_score",
         r#"kind: entity
 version: 1

@@ -504,6 +504,17 @@
     "response": { "envelope": "wrapped", "key": "labels" }
   },
   {
+    "id": "get_orgs_by_org_datasets_by_ds_lead_conversions",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}/lead-conversions",
+    "role": "viewer",
+    "params": ["org", "ds"],
+    "body": null,
+    "needs_body": false,
+    "summary": "a dataset's Lead conversion proposals",
+    "response": { "envelope": "record", "keys": ["items", "next_cursor"] }
+  },
+  {
     "id": "get_orgs_by_org_datasets_by_ds_lexicon",
     "method": "GET",
     "path": "/v1/orgs/{org}/datasets/{ds}/lexicon",
@@ -1330,6 +1341,45 @@
     },
     "needs_body": false,
     "summary": "record a verdict on a pair",
+    "response": null
+  },
+  {
+    "id": "post_orgs_by_org_datasets_by_ds_lead_conversions_apply",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/datasets/{ds}/lead-conversions/apply",
+    "role": "admin",
+    "params": ["org", "ds"],
+    "body": null,
+    "needs_body": false,
+    "summary": "convert the dataset's approved Leads in Salesforce",
+    "response": null
+  },
+  {
+    "id": "post_orgs_by_org_datasets_by_ds_lead_conversions_decide",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/datasets/{ds}/lead-conversions/decide",
+    "role": "steward",
+    "params": ["org", "ds"],
+    "body": {
+      "type": "object",
+      "properties": {
+        "decision": { "type": "string" },
+        "reason": { "type": "string" },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": { "id": { "type": "string" }, "fingerprint": { "type": "string" } },
+            "required": ["id", "fingerprint"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["decision", "items"],
+      "additionalProperties": false
+    },
+    "needs_body": false,
+    "summary": "approve or reject Lead conversions",
     "response": null
   },
   {

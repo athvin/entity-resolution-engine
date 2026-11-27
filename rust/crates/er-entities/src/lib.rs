@@ -29,6 +29,8 @@ pub mod ingest_batch;
 pub mod int_std_record;
 pub mod job;
 pub mod lake_schema_migration;
+pub mod lead_conversion;
+pub mod lead_conversion_apply;
 pub mod match_score;
 pub mod matching_model;
 pub mod merge_apply;

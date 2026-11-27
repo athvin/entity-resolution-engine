@@ -1,0 +1,10 @@
+kind: statement
+operation: read
+mode: full
+description: "Approved conversions no apply has begun."
+reads: [lead_conversion_apply]
+params:
+  - { name: org_id, type: varchar }
+  - { name: dataset_id, type: varchar }
+  - { name: limit, type: bigint }
+returns: entity

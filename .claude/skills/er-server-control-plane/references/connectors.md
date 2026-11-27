@@ -401,6 +401,27 @@ records may be upserted. Append-only; the revision is what a preview binds.
 
 Lead conversion is #520 and export/DRS is #521, not upsert deliverables.
 
+### 4.3.6 Lead conversion (as built, #520)
+
+Opt-in by writeback policies for BOTH Lead and Contact on the connection. The
+same `merge_preview` job proposes it: an entity holding Leads and exactly one
+Contact converts each Lead into that Contact (and its Lead merge group is not
+proposed). With several Contacts the target is not yet one record, so the
+Contact merge lands first and a later generation proposes the conversion
+(`conversion_awaits_contact_merge` in the job's exclusions).
+
+| Step | Mechanism |
+|---|---|
+| review | `GET …/lead-conversions`, `POST …/lead-conversions/decide` (Steward; fingerprint and both policy revisions live per item); the writeback page's Lead conversions section |
+| apply | `POST …/lead-conversions/apply` (Admin) → `lead_convert` job (`src/lead_convert.rs`): `APPROVED → APPLYING` at most once; both records re-read through `queryAll` |
+| external | a Lead already converted into the proposed Contact is `CONVERTED_EXTERNALLY`; converted elsewhere or deleted is `FAILED` — reported, never retried, because Salesforce cannot reverse a conversion |
+| stale | either record's `SystemModstamp` moved since the snapshot → `SKIPPED_STALE` |
+| call | the Contact's `AccountId` recorded and the call marked in flight, then SOAP `convertLead()` (no Opportunity, no email, the org's converted `LeadStatus`); a lost response is resolved by re-reading `IsConverted` / `ConvertedContactId` |
+| corpus | after a conversion, a FULL Lead extract (extraction excludes converted Leads, so ingest tombstones it and the next run drops it from the entity) and an incremental Contact extract (its post-conversion values reach the golden record) are queued |
+
+**Recovery:** there is no undo. A wrong conversion is corrected in Salesforce by
+hand; the next extracts bring the corpus to whatever Salesforce then holds.
+
 ### 4.4 Explicit v1 boundaries
 
 - Writeback via `merge()` (Lead/Contact/Account) and `upsert`.

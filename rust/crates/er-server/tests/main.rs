@@ -78,6 +78,7 @@ mod pg_key_telemetry;
 mod pg_labels;
 mod pg_lake_catalog_schema;
 mod pg_launch_proof;
+mod pg_lead_convert;
 mod pg_lexicon;
 mod pg_mass_update;
 mod pg_merge_apply;

@@ -114,6 +114,8 @@ pub struct ApiDoc;
     crate::MergesApplying,
     crate::BatchDecisionOut,
     crate::UpsertPolicyView,
+    crate::LeadConversionView,
+    crate::LeadConversionPage,
     crate::UpsertPolicyList,
     crate::UpsertPreviewView,
     crate::UpsertPreviewPage,

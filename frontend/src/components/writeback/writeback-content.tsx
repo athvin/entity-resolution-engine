@@ -9,11 +9,14 @@ import { Label } from "@/components/ui/label";
 import { effectiveRole, useSession } from "@/lib/query/hooks";
 import {
   useApplyApproved,
+  useApplyConversions,
   useApplyUpserts,
   useAutoApproval,
   useDecideBatch,
+  useDecideConversions,
   useDecideUpserts,
   useGeneratePreviews,
+  useLeadConversions,
   useMergePreview,
   useMergePreviews,
   useRequestRestore,
@@ -218,6 +221,7 @@ export function WritebackContent({ org }: { org: string }) {
         )}
       </div>
 
+      <ConversionPanel org={org} ds={ds} isSteward={isSteward} isAdmin={isAdmin} />
       <UpsertPanel org={org} ds={ds} isSteward={isSteward} isAdmin={isAdmin} />
       <AutoApprovalPanel org={org} ds={ds} isAdmin={isAdmin} previews={items} />
     </div>
@@ -835,6 +839,172 @@ function AutoApprovalPanel({
             </div>
           </form>
         ) : null}
+        {message ? (
+          <p role="status" className="font-medium">
+            {message}
+          </p>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+/** Proposed Lead conversions (#520): a duplicate Lead and the existing
+ * Contact it resolved with. Salesforce cannot undo a conversion, so the copy
+ * says so where the decision is made. */
+function ConversionPanel({
+  org,
+  ds,
+  isSteward,
+  isAdmin,
+}: {
+  org: string;
+  ds: string;
+  isSteward: boolean;
+  isAdmin: boolean;
+}) {
+  const conversions = useLeadConversions(org, ds);
+  const decide = useDecideConversions(org, ds);
+  const apply = useApplyConversions(org, ds);
+  const [checked, setChecked] = useState<ReadonlySet<string>>(new Set());
+  const [outcome, setOutcome] = useState<BatchResult | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const items = conversions.data?.items ?? [];
+  const chosen = items.filter((c) => c.status === "planned" && checked.has(c.id));
+
+  function run(decision: "approve" | "reject") {
+    decide.mutate(
+      { decision, items: chosen.map((c) => ({ id: c.id, fingerprint: c.fingerprint })) },
+      {
+        onSuccess: (result) => {
+          setOutcome(result);
+          setChecked(new Set());
+        },
+      },
+    );
+  }
+
+  return (
+    <Card data-testid="writeback-conversions">
+      <CardHeader>
+        <CardTitle className="text-base">Lead conversions</CardTitle>
+        <p className="text-muted-foreground text-sm">
+          A Lead that resolved with an existing Contact is converted into that Contact and its
+          Account. Salesforce cannot undo a conversion; a Lead or Contact changed since the sync is
+          skipped, and a Lead already converted elsewhere is reported rather than retried.
+        </p>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3 text-sm">
+        {items.length === 0 ? (
+          <p className="text-muted-foreground" data-testid="writeback-conversions-empty">
+            No conversions proposed.
+          </p>
+        ) : (
+          <div className="overflow-x-auto rounded-md border">
+            <table className="w-full" data-testid="writeback-conversions-table">
+              <caption className="sr-only">Proposed Lead conversions</caption>
+              <thead className="bg-muted/50 text-left">
+                <tr>
+                  {isSteward ? (
+                    <th scope="col" className="w-10 px-2 py-2">
+                      <span className="sr-only">Select</span>
+                    </th>
+                  ) : null}
+                  <th scope="col" className="px-2 py-2 font-medium">
+                    Lead
+                  </th>
+                  <th scope="col" className="px-2 py-2 font-medium">
+                    Into Contact
+                  </th>
+                  <th scope="col" className="px-2 py-2 font-medium">
+                    State
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((c) => (
+                  <tr key={c.id} className="border-t">
+                    {isSteward ? (
+                      <td className="px-2 py-1">
+                        {c.status === "planned" ? (
+                          <input
+                            type="checkbox"
+                            className="size-5"
+                            checked={checked.has(c.id)}
+                            onChange={() => {
+                              setChecked((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(c.id)) next.delete(c.id);
+                                else next.add(c.id);
+                                return next;
+                              });
+                            }}
+                            aria-label={`Select conversion of ${c.lead_record_key}`}
+                          />
+                        ) : null}
+                      </td>
+                    ) : null}
+                    <td className="px-2 py-1 font-mono">{c.lead_record_key}</td>
+                    <td className="px-2 py-1 font-mono">{c.contact_record_key}</td>
+                    <td className="px-2 py-1">
+                      {(c.apply_status ?? c.status).replace("_", " ")}
+                      {c.apply_detail && c.apply_status !== "converted" ? (
+                        <span className="text-muted-foreground"> — {c.apply_detail}</span>
+                      ) : null}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {isSteward && chosen.length > 0 ? (
+            <>
+              <Button
+                size="sm"
+                disabled={decide.isPending}
+                onClick={() => {
+                  run("approve");
+                }}
+              >
+                Approve {chosen.length}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={decide.isPending}
+                onClick={() => {
+                  run("reject");
+                }}
+              >
+                Reject {chosen.length}
+              </Button>
+            </>
+          ) : null}
+          {isAdmin ? (
+            <Button
+              size="sm"
+              variant="outline"
+              className="ml-auto"
+              disabled={apply.isPending}
+              onClick={() => {
+                apply.mutate(undefined, {
+                  onSuccess: () => {
+                    setMessage("Converting approved Leads in Salesforce.");
+                  },
+                  onError: (error) => {
+                    setMessage(error.message);
+                  },
+                });
+              }}
+              data-testid="writeback-conversions-apply"
+            >
+              Convert approved Leads
+            </Button>
+          ) : null}
+        </div>
+        {outcome ? <BatchOutcome result={outcome} /> : null}
         {message ? (
           <p role="status" className="font-medium">
             {message}

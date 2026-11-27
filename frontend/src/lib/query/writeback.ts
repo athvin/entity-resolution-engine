@@ -226,3 +226,48 @@ export function useApplyUpserts(org: string, ds: string) {
     post<{ job_id: string; state: string }>(`${base(org, ds)}/upsert-previews/apply`),
   );
 }
+
+/** A proposed Lead → Contact conversion (#520). Not reversible in Salesforce. */
+export interface LeadConversion {
+  id: string;
+  connection_id: string;
+  entity_id: string;
+  lead_external_id: string;
+  lead_record_key: string;
+  contact_external_id: string;
+  contact_record_key: string;
+  fingerprint: string;
+  /** `planned`, `approved`, `rejected` or `superseded`. */
+  status: string;
+  decided_by: string | null;
+  /** `applying`, `converted`, `converted_externally`, `failed` or `skipped_stale`, once begun. */
+  apply_status: string | null;
+  account_id: string | null;
+  apply_detail: string | null;
+  created_at: string;
+}
+
+export function useLeadConversions(org: string, ds: string) {
+  return useQuery({
+    queryKey: [...root(org, ds), "conversions"],
+    queryFn: () =>
+      bffFetch<{ items: LeadConversion[]; next_cursor: string | null }>(
+        `${base(org, ds)}/lead-conversions?limit=100`,
+      ),
+  });
+}
+
+export function useDecideConversions(org: string, ds: string) {
+  return useWritebackMutation(
+    org,
+    ds,
+    (vars: { decision: "approve" | "reject"; items: { id: string; fingerprint: string }[] }) =>
+      post<BatchResult>(`${base(org, ds)}/lead-conversions/decide`, vars),
+  );
+}
+
+export function useApplyConversions(org: string, ds: string) {
+  return useWritebackMutation(org, ds, () =>
+    post<{ job_id: string; state: string }>(`${base(org, ds)}/lead-conversions/apply`),
+  );
+}

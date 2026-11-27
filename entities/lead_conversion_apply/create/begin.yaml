@@ -1,0 +1,14 @@
+kind: statement
+operation: create
+mode: partial
+description: "APPROVED → APPLYING, at most once. approved_status is always 'approved' (a parameter for the analyser's INSERT…SELECT limit, as merge_apply/create/begin)."
+reads: [lead_conversion]
+params:
+  - { name: id, type: varchar }
+  - { name: job_id, type: varchar }
+  - { name: lead_conversion_id, type: varchar }
+  - { name: org_id, type: varchar }
+  - { name: dataset_id, type: varchar }
+  - { name: fingerprint, type: varchar }
+  - { name: approved_status, type: varchar }
+returns: none

@@ -257,6 +257,29 @@ export function initialState() {
       ]),
     ),
     mergeRestores: {},
+    leadConversions: Object.fromEntries(
+      ["acme-dev", "mutable-dev", "mutable-ios", "mutable-android"].map((org) => [
+        org,
+        [
+          {
+            id: "01jmconv00001",
+            connection_id: "conn-prod",
+            entity_id: "ent-cv-1",
+            lead_external_id: "00Q000000000001",
+            lead_record_key: "sf_leads:00Q000000000001",
+            contact_external_id: "003000000000009",
+            contact_record_key: "sf_contacts:003000000000009",
+            fingerprint: "v1:cv1",
+            status: "planned",
+            decided_by: null,
+            apply_status: null,
+            account_id: null,
+            apply_detail: null,
+            created_at: "2026-11-27T08:00:00Z",
+          },
+        ],
+      ]),
+    ),
     upsertPreviews: Object.fromEntries(
       ["acme-dev", "mutable-dev", "mutable-ios", "mutable-android"].map((org) => [
         org,
@@ -2675,6 +2698,45 @@ const server = http.createServer((req, res) => {
       job.state = "queued";
       job.error_class = null;
       return send(res, 200, { id: job.id, state: "queued" });
+    }
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/lead-conversions$/.exec(path)) &&
+      req.method === "GET"
+    ) {
+      return send(res, 200, { items: state.leadConversions[match[1]] ?? [], next_cursor: null });
+    }
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/lead-conversions\/decide$/.exec(path)) &&
+      req.method === "POST"
+    ) {
+      const body = await readBody(req);
+      const to = body.decision === "approve" ? "approved" : "rejected";
+      const results = (body.items ?? []).map((item) => {
+        const row = (state.leadConversions[match[1]] ?? []).find((c) => c.id === item.id);
+        if (!row)
+          return {
+            id: item.id,
+            status: 404,
+            preview_status: null,
+            detail: "no such lead conversion",
+          };
+        if (row.fingerprint !== item.fingerprint || row.status !== "planned")
+          return {
+            id: item.id,
+            status: 409,
+            preview_status: null,
+            detail: "the proposal changed since you saw it",
+          };
+        row.status = to;
+        return { id: item.id, status: 200, preview_status: to, detail: null };
+      });
+      return send(res, 200, { results });
+    }
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/lead-conversions\/apply$/.exec(path)) &&
+      req.method === "POST"
+    ) {
+      return send(res, 202, { job_id: "job-convert", state: "queued" });
     }
     if (
       (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/upsert-previews$/.exec(path)) &&

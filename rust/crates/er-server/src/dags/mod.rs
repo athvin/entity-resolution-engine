@@ -22,8 +22,9 @@ pub mod tasks;
 use er_dag::{Dag, DagBuilder, TriggerRule};
 
 use control::{
-    Activate, AdvanceSfCursor, ApplyMerges, ApplyUpserts, CreateCatalog, DrainActions,
-    EmitWriteBack, PublishPreviews, RegisterModel, RestoreMerges, SettleActions, StageApproved,
+    Activate, AdvanceSfCursor, ApplyMerges, ApplyUpserts, ConvertLeads, CreateCatalog,
+    DrainActions, EmitWriteBack, PublishPreviews, RegisterModel, RestoreMerges, SettleActions,
+    StageApproved,
 };
 use tasks::{
     ApplyStaged, Assemble, CorrectReconcile, CorrectionsInit, CorrectionsReconcile, ExportResults,
@@ -61,10 +62,11 @@ pub enum JobKind {
     MergeApply,
     MergeRestore,
     UpsertApply,
+    LeadConvert,
 }
 
 impl JobKind {
-    pub const ALL: [JobKind; 17] = [
+    pub const ALL: [JobKind; 18] = [
         JobKind::RunAllFull,
         JobKind::RunAllIncremental,
         JobKind::Correct,
@@ -82,6 +84,7 @@ impl JobKind {
         JobKind::MergeApply,
         JobKind::MergeRestore,
         JobKind::UpsertApply,
+        JobKind::LeadConvert,
     ];
 
     #[must_use]
@@ -104,6 +107,7 @@ impl JobKind {
             JobKind::MergeApply => "merge_apply",
             JobKind::MergeRestore => "merge_restore",
             JobKind::UpsertApply => "upsert_apply",
+            JobKind::LeadConvert => "lead_convert",
         }
     }
 
@@ -148,6 +152,7 @@ pub fn dag_for(kind: JobKind) -> Dag {
         JobKind::MergeApply => merge_apply(),
         JobKind::MergeRestore => merge_restore(),
         JobKind::UpsertApply => upsert_apply(),
+        JobKind::LeadConvert => lead_convert(),
     }
 }
 
@@ -285,6 +290,10 @@ pub async fn run_control_task(
             .await?,
         ),
         // `merge_restore` (#996): one control task, like merge_apply.
+        // `lead_convert` (#520): one control task.
+        (JobKind::LeadConvert, "convert_leads") => {
+            completed(control::ConvertLeads { egress }.run(ctx, ()).await?)
+        }
         // `upsert_apply` (#998): one control task.
         (JobKind::UpsertApply, "apply_upserts") => {
             completed(control::ApplyUpserts { egress }.run(ctx, ()).await?)
@@ -612,6 +621,13 @@ fn merge_apply() -> Dag {
     let mut d = Builder::new(JobKind::MergeApply.dag_name());
     let _ = d.control::<ApplyMerges>(());
     d.build().expect("the merge_apply DAG assembles")
+}
+
+/// Convert approved Leads (#520): one control task.
+fn lead_convert() -> Dag {
+    let mut d = Builder::new(JobKind::LeadConvert.dag_name());
+    let _ = d.control::<ConvertLeads>(());
+    d.build().expect("the lead_convert DAG assembles")
 }
 
 /// Apply approved upserts (#998): one control task.
