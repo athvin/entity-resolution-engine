@@ -52,6 +52,7 @@ pub mod migrate_plan;
 pub mod openapi;
 pub mod ops;
 pub mod pg;
+pub mod preview_job;
 pub mod profile_params;
 pub mod provision;
 pub mod read;
@@ -5457,6 +5458,20 @@ async fn attempt_work_order(
             "api_version": row.api_version,
             "watermark": watermark,
         })
+    } else if job.kind == "merge_preview" {
+        // The preview pod's Postgres context (#993): it cannot reach Postgres,
+        // so policies, provenance and the checkpoint ride in the order —
+        // resolved per attempt, so a policy replaced between tries applies.
+        let Some(dataset_id) = job.dataset_id.as_deref() else {
+            return detail_err(
+                StatusCode::CONFLICT,
+                "a merge_preview job must name a dataset",
+            );
+        };
+        match pg::preview_context(&client, &current.org_id, dataset_id).await {
+            Ok(context) => serde_json::to_value(context).unwrap_or(Value::Null),
+            Err(e) => return pg_err(e),
+        }
     } else {
         Value::Null
     };
@@ -10258,6 +10273,19 @@ async fn put_writeback_policy(
             ),
         );
     }
+    if let Some(bad) = body
+        .field_mapping
+        .keys()
+        .find(|k| !preview_job::GOLDEN_COLUMNS.contains(&k.as_str()))
+    {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!(
+                "field_mapping key {bad:?} is not a golden record column (one of: {})",
+                preview_job::GOLDEN_COLUMNS.join(", ")
+            ),
+        );
+    }
     let Some(dsn) = &state.dsn else {
         return detail_err(StatusCode::NOT_IMPLEMENTED, "writeback requires Postgres");
     };
@@ -10298,6 +10326,76 @@ async fn put_writeback_policy(
     .await
     {
         Ok(p) => Json(WritebackPolicyView::from(&p)).into_response(),
+        Err(e) => pg_err(e),
+    }
+}
+
+/// `POST …/merge-previews/generate`: the job that will build previews.
+#[derive(Serialize, utoipa::ToSchema)]
+struct PreviewsGenerating {
+    job_id: String,
+    state: String,
+}
+
+/// Steward+: build merge previews from the dataset's latest results
+/// (`POST /v1/orgs/{org}/datasets/{ds}/merge-previews/generate`). Queues a
+/// `merge_preview` job that reads every run since the last checkpoint and
+/// proposes one merge per (entity, connection, object) group; poll the job,
+/// then list previews. Calling again with nothing new — the same checkpoint
+/// and policy revisions — returns the same job.
+/// Nothing is written to Salesforce.
+async fn generate_merge_previews(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, ds)): Path<(String, String)>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Steward) {
+        return e.into_response();
+    }
+    let (client, org_row, d) = match upload_scope_any(&state, &org, &ds).await {
+        Ok(t) => t,
+        Err(r) => return *r,
+    };
+    if let Err(r) = refuse_unless_active_dataset(&org_row, &d, "generate merge previews") {
+        return *r;
+    }
+    // One pending generation per dataset and checkpoint: a repeat call while
+    // it is queued converges on the same job.
+    let checkpoint = match pg::preview_watermark(&client, &org_row.id, &d.id).await {
+        Ok(w) => w.map_or_else(
+            || "start".to_string(),
+            |w| format!("{}:{}", w.snapshot_end, w.run_id),
+        ),
+        Err(e) => return pg_err(e),
+    };
+    // The key covers everything the result depends on: the checkpoint and
+    // the active policy revisions. Same inputs → the same job; a new run or a
+    // new policy → a new generation.
+    let revisions = match pg::active_writeback_policies(&client, &org_row.id, &d.id).await {
+        Ok(p) => p.into_iter().map(|p| p.id).collect::<Vec<_>>().join(","),
+        Err(e) => return pg_err(e),
+    };
+    let idem = format!("merge-preview:{}:{checkpoint}:{revisions}", d.id);
+    match pg::enqueue(
+        &client,
+        &org_row.id,
+        Some(d.id.as_str()),
+        "merge_preview",
+        0,
+        Some(&idem),
+        None,
+        principal.provenance(),
+    )
+    .await
+    {
+        Ok(job) => (
+            StatusCode::ACCEPTED,
+            Json(PreviewsGenerating {
+                job_id: job.id,
+                state: job.state,
+            }),
+        )
+            .into_response(),
         Err(e) => pg_err(e),
     }
 }
@@ -15119,6 +15217,10 @@ fn build_routes(state: AppState) -> Router {
         .route(
             "/v1/orgs/{org}/datasets/{ds}/merge-previews",
             get(merge_previews_list),
+        )
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/merge-previews/generate",
+            post(generate_merge_previews),
         )
         .route(
             "/v1/orgs/{org}/datasets/{ds}/merge-previews/{preview_id}",

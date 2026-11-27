@@ -30,7 +30,7 @@ statements is read or written only through the engine's own stage SQL, not
 through a typed query function.
 
 <!-- BEGIN GENERATED: entities-index -->
-**58 entities, 295 declared statements.**
+**59 entities, 304 declared statements.**
 
 | Entity | Relation | Store | Key | Natural key | History |
 |---|---|---|---|---|---|
@@ -61,6 +61,7 @@ through a typed query function.
 | `matching_model` | `matching_models` | postgres | `id` | `dataset_id, name, version` | yes |
 | `merge_preview` | `merge_previews` | postgres | `id` | `dataset_id, fingerprint` | — |
 | `merge_preview_journal` | `merge_preview_journal` | postgres | `id` | — | — |
+| `merge_preview_watermark` | `merge_preview_watermarks` | postgres | `id` | `dataset_id` | — |
 | `metric_snapshot` | `metric_snapshots` | duckdb | `id` | `run_id` | — |
 | `metric_snapshot_source` | `metric_snapshot_sources` | duckdb | `id` | `run_id, source_system` | — |
 | `org` | `orgs` | postgres | `id` | `name` | yes |
@@ -108,13 +109,13 @@ Declared statements per entity and operation:
 | `config_version` | 1 | 2 | 1 | 0 |
 | `dataset` | 1 | 3 | 4 | 0 |
 | `ddl_log` | 0 | 1 | 0 | 0 |
-| `entity_event` | 1 | 3 | 0 | 1 |
+| `entity_event` | 1 | 4 | 0 | 1 |
 | `entity_link` | 1 | 1 | 0 | 1 |
-| `entity_membership` | 0 | 8 | 1 | 1 |
+| `entity_membership` | 0 | 9 | 1 | 1 |
 | `fixup` | 1 | 1 | 0 | 0 |
 | `golden_lineage` | 0 | 1 | 0 | 0 |
 | `golden_override` | 1 | 0 | 0 | 1 |
-| `golden_record` | 0 | 5 | 22 | 0 |
+| `golden_record` | 0 | 6 | 22 | 0 |
 | `golden_record_override` | 1 | 0 | 0 | 1 |
 | `ingest_batch` | 1 | 2 | 1 | 1 |
 | `int_std_record` | 0 | 5 | 0 | 0 |
@@ -124,20 +125,21 @@ Declared statements per entity and operation:
 | `matching_model` | 1 | 4 | 1 | 0 |
 | `merge_preview` | 1 | 2 | 2 | 0 |
 | `merge_preview_journal` | 1 | 1 | 0 | 0 |
+| `merge_preview_watermark` | 1 | 1 | 1 | 0 |
 | `metric_snapshot` | 1 | 1 | 0 | 0 |
 | `metric_snapshot_source` | 1 | 1 | 0 | 0 |
 | `org` | 2 | 4 | 4 | 0 |
 | `pair_label` | 1 | 2 | 0 | 0 |
 | `profile_finding` | 1 | 1 | 0 | 0 |
 | `profile_run` | 1 | 2 | 0 | 0 |
-| `raw_record` | 0 | 2 | 0 | 1 |
+| `raw_record` | 0 | 3 | 0 | 1 |
 | `record_overlay` | 1 | 3 | 1 | 1 |
 | `record_quality` | 1 | 2 | 0 | 1 |
 | `record_verification` | 1 | 1 | 1 | 1 |
 | `remote_attempt` | 1 | 3 | 4 | 0 |
 | `resolved_entity` | 0 | 2 | 1 | 0 |
 | `review` | 0 | 5 | 3 | 0 |
-| `run` | 1 | 4 | 2 | 1 |
+| `run` | 1 | 5 | 2 | 1 |
 | `run_stage` | 1 | 1 | 1 | 0 |
 | `s3_ingest_cursor` | 1 | 1 | 0 | 0 |
 | `salesforce_connection` | 1 | 2 | 1 | 0 |
@@ -145,7 +147,7 @@ Declared statements per entity and operation:
 | `schema_migration` | 1 | 2 | 0 | 0 |
 | `scored_record` | 0 | 2 | 1 | 2 |
 | `sf_extract_cursor` | 1 | 1 | 0 | 0 |
-| `source_delivery_provenance` | 1 | 2 | 0 | 0 |
+| `source_delivery_provenance` | 1 | 3 | 0 | 0 |
 | `staged_steward_action` | 1 | 1 | 1 | 0 |
 | `tag` | 1 | 3 | 1 | 0 |
 | `tagging` | 1 | 2 | 0 | 1 |

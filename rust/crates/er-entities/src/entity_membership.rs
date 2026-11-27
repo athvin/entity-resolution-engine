@@ -720,6 +720,96 @@ ORDER BY entity_id, record_key
         drop(__entered);
         MembersInRangeRow::from_batches(&batches)
     }
+
+    /// One row of `members_of`: Every member of the given entities (ids joined by chr(31)) at a pinned snapshot.
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct MembersOfRow {
+        pub entity_id: String,
+        pub record_key: String,
+        pub source_system: String,
+        pub source_record_id: String,
+    }
+
+    impl MembersOfRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![
+                ("entity_id", ::arrow::datatypes::DataType::Utf8),
+                ("record_key", ::arrow::datatypes::DataType::Utf8),
+                ("source_system", ::arrow::datatypes::DataType::Utf8),
+                ("source_record_id", ::arrow::datatypes::DataType::Utf8),
+            ]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "entity_id")?;
+                let c1: &::arrow::array::StringArray = crate::batch::col(batch, 1, "record_key")?;
+                let c2: &::arrow::array::StringArray =
+                    crate::batch::col(batch, 2, "source_system")?;
+                let c3: &::arrow::array::StringArray =
+                    crate::batch::col(batch, 3, "source_record_id")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        entity_id: crate::batch::req(crate::batch::opt_str(c0, i), "entity_id", i)?,
+                        record_key: crate::batch::req(
+                            crate::batch::opt_str(c1, i),
+                            "record_key",
+                            i,
+                        )?,
+                        source_system: crate::batch::req(
+                            crate::batch::opt_str(c2, i),
+                            "source_system",
+                            i,
+                        )?,
+                        source_record_id: crate::batch::req(
+                            crate::batch::opt_str(c3, i),
+                            "source_record_id",
+                            i,
+                        )?,
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// Every member of the given entities (ids joined by chr(31)) at a pinned snapshot.
+    pub fn members_of(
+        conn: &::duckdb::Connection,
+        snapshot: i64,
+        entity_ids: &str,
+    ) -> ::duckdb::Result<Vec<MembersOfRow>> {
+        const SQL: &str = "SELECT entity_id, record_key, source_system, source_record_id
+FROM lake.main.entity_membership AT (VERSION => {snapshot})
+WHERE entity_id IN (SELECT unnest(string_split($1, chr(31))))
+ORDER BY entity_id, record_key
+";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "entity_membership",
+            "read",
+            "members_of",
+            "entity_membership",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let sql = SQL.replace("{snapshot}", &snapshot.to_string());
+        let mut stmt = ::er_span::check(&__span, conn.prepare(&sql))?;
+        let batches = ::er_span::check(&__span, stmt.query_arrow(::duckdb::params![entity_ids]))?
+            .collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
+        MembersOfRow::from_batches(&batches)
+    }
 }
 
 pub mod update {

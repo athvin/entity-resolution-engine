@@ -450,3 +450,22 @@ pub struct ExportReport {
 impl PlanDoc for ExportReport {
     const STABLE_NAME: &'static str = "export_report";
 }
+
+/// The merge-preview pod's output (#993): proposals built from one pinned
+/// snapshot, and the checkpoint they advance to once published.
+pub type MaterializedPreviews = crate::preview_job::Materialized;
+
+impl PlanDoc for crate::preview_job::Materialized {
+    const STABLE_NAME: &'static str = "materialized_previews";
+}
+
+/// What the publish step stored.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PreviewsPublished {
+    pub published: usize,
+    pub superseded: usize,
+}
+
+impl PlanDoc for PreviewsPublished {
+    const STABLE_NAME: &'static str = "previews_published";
+}

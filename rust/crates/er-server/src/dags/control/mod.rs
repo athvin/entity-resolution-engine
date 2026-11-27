@@ -213,6 +213,218 @@ impl ControlTask<PgClient> for AdvanceSfCursor {
     }
 }
 
+/// Publish what `materialize_previews` built, then advance the checkpoint
+/// (#993). Each proposal is re-validated through the builder and must rebuild
+/// to the fingerprint the pod computed; a mismatch fails the task rather than
+/// storing something the builder would refuse. Planned previews of an
+/// affected entity that no longer forms a group are superseded. The
+/// checkpoint moves LAST, by compare-and-set: a failure anywhere before it
+/// re-runs the same runs, and publishing is idempotent on the fingerprint.
+#[derive(Default)]
+pub struct PublishPreviews;
+
+impl ControlTask<PgClient> for PublishPreviews {
+    const NAME: &'static str = "publish_previews";
+    const VERSION: u32 = 1;
+    type Input = (Plan<crate::preview_job::Materialized>,);
+    type Output = Plan<crate::dags::plans::PreviewsPublished>;
+
+    async fn run(
+        &mut self,
+        ctx: &mut ControlCtx<'_, PgClient>,
+        (built,): Self::Input,
+    ) -> Result<Outcome<Self::Output>, TaskError> {
+        let built = built.0;
+        let failed = |m: String, class: er_errors::ErrorClass| {
+            TaskError::Failed(er_errors::ErError::stage_failure(m).with_class(class))
+        };
+        let Some(dataset_id) = ctx.order.dataset_id.clone() else {
+            return Err(TaskError::Failed(er_errors::ErError::precondition(
+                "a merge_preview job must name a dataset".to_string(),
+            )));
+        };
+        let Some(next) = built.next.clone() else {
+            return Ok(Outcome::NoOp(Plan(crate::dags::plans::PreviewsPublished {
+                published: 0,
+                superseded: 0,
+            })));
+        };
+        let org_id = ctx.order.org_id.clone();
+        // One transaction for the batch and the checkpoint. The executor runs
+        // control tasks one at a time on its own client, so nothing else's
+        // statements can land inside it.
+        ctx.client.batch_execute("BEGIN").await.map_err(|e| {
+            failed(
+                format!("opening the publish transaction: {e}"),
+                er_errors::ErrorClass::TransientIo,
+            )
+        })?;
+        let result = publish_batch(ctx, &org_id, &dataset_id, &built, &next).await;
+        let end = if result.is_ok() { "COMMIT" } else { "ROLLBACK" };
+        let closed = ctx.client.batch_execute(end).await;
+        let published = result?;
+        closed.map_err(|e| {
+            failed(
+                format!("closing the publish transaction: {e}"),
+                er_errors::ErrorClass::TransientIo,
+            )
+        })?;
+        Ok(Outcome::Done(
+            Plan(published.clone()),
+            er_dag::Counters(serde_json::json!({
+                "published": published.published,
+                "superseded": published.superseded,
+            })),
+        ))
+    }
+}
+
+async fn publish_batch(
+    ctx: &mut ControlCtx<'_, PgClient>,
+    org_id: &str,
+    dataset_id: &str,
+    built: &crate::preview_job::Materialized,
+    next: &crate::preview_job::Checkpoint,
+) -> Result<crate::dags::plans::PreviewsPublished, TaskError> {
+    let failed = |m: String, class: er_errors::ErrorClass| {
+        TaskError::Failed(er_errors::ErError::stage_failure(m).with_class(class))
+    };
+    let (org_id, dataset_id) = (org_id.to_string(), dataset_id.to_string());
+    {
+        let expected = crate::pg::preview_watermark(ctx.client, &org_id, &dataset_id)
+            .await
+            .map_err(|e| {
+                failed(
+                    format!("reading the checkpoint: {e}"),
+                    er_errors::ErrorClass::TransientIo,
+                )
+            })?;
+        let mut published = 0usize;
+        let mut kept: std::collections::BTreeSet<(String, String, String)> =
+            std::collections::BTreeSet::new();
+        for preview in &built.previews {
+            let proposal = crate::writeback::PersistedProposalV1::restore(&preview.persisted)
+                .map_err(|e| {
+                    failed(
+                        format!("a built proposal no longer validates: {e}"),
+                        er_errors::ErrorClass::Data,
+                    )
+                })?;
+            if proposal.fingerprint() != preview.fingerprint {
+                return Err(failed(
+                    "a built proposal rebuilt to a different fingerprint".to_string(),
+                    er_errors::ErrorClass::Data,
+                ));
+            }
+            let scope = &proposal.content().scope;
+            kept.insert((
+                scope.entity_id.clone(),
+                scope.provider.connection_id.clone(),
+                format!("{:?}", scope.provider.object),
+            ));
+            let publish = crate::pg::PreviewToPublish {
+                org_id: &org_id,
+                dataset_id: &dataset_id,
+                origin_run_id: &preview.origin_run_id,
+                policy_id: &preview.policy_id,
+                proposal: &proposal,
+                persisted: &preview.persisted,
+                actor: &format!("job:{}", ctx.order.job_id),
+            };
+            let stored = crate::pg::publish_preview(ctx.client, &publish)
+                .await
+                .map_err(|e| {
+                    failed(
+                        format!("publishing a preview: {e}"),
+                        er_errors::ErrorClass::TransientIo,
+                    )
+                })?;
+            if stored.is_some() {
+                published += 1;
+            }
+        }
+        // An affected entity with no group under a policy any more: its
+        // planned previews are stale.
+        let policies = crate::pg::active_writeback_policies(ctx.client, &org_id, &dataset_id)
+            .await
+            .map_err(|e| {
+                failed(
+                    format!("reading policies: {e}"),
+                    er_errors::ErrorClass::TransientIo,
+                )
+            })?;
+        let mut superseded = 0usize;
+        for entity in &built.affected {
+            for policy in &policies {
+                if kept.contains(&(
+                    entity.clone(),
+                    policy.salesforce_connection_id.clone(),
+                    policy.object.clone(),
+                )) {
+                    continue;
+                }
+                let rows = er_entities::merge_preview::update::supersede(
+                    ctx.client,
+                    &org_id,
+                    &dataset_id,
+                    &policy.salesforce_connection_id,
+                    &policy.object,
+                    entity,
+                    "",
+                )
+                .await
+                .map_err(|e| {
+                    failed(
+                        format!("superseding stale previews: {e}"),
+                        er_errors::ErrorClass::TransientIo,
+                    )
+                })?;
+                for old in &rows {
+                    let _ = er_entities::merge_preview_journal::create::append(
+                        ctx.client,
+                        &er_ids::new_v7(),
+                        &org_id,
+                        &dataset_id,
+                        &old.id,
+                        Some("planned"),
+                        "superseded",
+                        &old.fingerprint,
+                        &format!("job:{}", ctx.order.job_id),
+                    )
+                    .await;
+                }
+                superseded += rows.len();
+            }
+        }
+        let moved = crate::pg::advance_preview_watermark(
+            ctx.client,
+            &org_id,
+            &dataset_id,
+            expected.as_ref(),
+            next,
+            built.snapshot,
+            &ctx.order.job_id,
+        )
+        .await
+        .map_err(|e| {
+            failed(
+                format!("advancing the checkpoint: {e}"),
+                er_errors::ErrorClass::TransientIo,
+            )
+        })?;
+        if !moved {
+            return Err(failed(
+                "the merge-preview checkpoint moved underneath this job".to_string(),
+                er_errors::ErrorClass::LockConflict,
+            ));
+        }
+        Ok(crate::dags::plans::PreviewsPublished {
+            published,
+            superseded,
+        })
+    }
+}
+
 /// Queue one `entity.write_back` per entity the pass changed (O4).
 ///
 /// The Postgres half of the write-back: `write_back_scan` read the corrected

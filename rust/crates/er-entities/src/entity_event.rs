@@ -131,6 +131,75 @@ pub mod delete {
 
 pub mod read {
     //! @generated query functions for this entity + operation.
+    /// One row of `affected_in_runs`: The entities whose membership the given runs changed (ids joined by chr(31)), at a pinned snapshot. `created` counts: two new records forming a group emit created, not merged. Splits and removals count so a stale planned preview can be superseded.
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct AffectedInRunsRow {
+        pub run_id: String,
+        pub entity_id: String,
+    }
+
+    impl AffectedInRunsRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![
+                ("run_id", ::arrow::datatypes::DataType::Utf8),
+                ("entity_id", ::arrow::datatypes::DataType::Utf8),
+            ]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "run_id")?;
+                let c1: &::arrow::array::StringArray = crate::batch::col(batch, 1, "entity_id")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        run_id: crate::batch::req(crate::batch::opt_str(c0, i), "run_id", i)?,
+                        entity_id: crate::batch::req(crate::batch::opt_str(c1, i), "entity_id", i)?,
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// The entities whose membership the given runs changed (ids joined by chr(31)), at a pinned snapshot. `created` counts: two new records forming a group emit created, not merged. Splits and removals count so a stale planned preview can be superseded.
+    pub fn affected_in_runs(
+        conn: &::duckdb::Connection,
+        snapshot: i64,
+        run_ids: &str,
+    ) -> ::duckdb::Result<Vec<AffectedInRunsRow>> {
+        const SQL: &str = "SELECT DISTINCT run_id, entity_id
+FROM lake.main.entity_events AT (VERSION => {snapshot})
+WHERE run_id IN (SELECT unnest(string_split($1, chr(31))))
+  AND event_type IN ('created', 'merged', 'member_added', 'split', 'member_removed', 'retired')
+ORDER BY run_id, entity_id
+";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "entity_event",
+            "read",
+            "affected_in_runs",
+            "entity_events",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let sql = SQL.replace("{snapshot}", &snapshot.to_string());
+        let mut stmt = ::er_span::check(&__span, conn.prepare(&sql))?;
+        let batches = ::er_span::check(&__span, stmt.query_arrow(::duckdb::params![run_ids]))?
+            .collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
+        AffectedInRunsRow::from_batches(&batches)
+    }
+
     /// One row of `by_entity`: One entity's lifecycle events at a pinned snapshot, in occurrence order (the detail event feed).
     #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
     pub struct ByEntityRow {

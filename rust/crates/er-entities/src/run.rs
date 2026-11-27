@@ -543,6 +543,81 @@ LIMIT 20
         drop(__entered);
         RecentRow::from_batches(&batches)
     }
+
+    /// One row of `succeeded_after`: Succeeded runs after a (snapshot_end, run id) checkpoint, in checkpoint order — the merge-preview job's keyset (#993). snapshot_end is stamped at finish and rises strictly under the dataset's one writer, so the order is total and a re-executed run, which gets a new snapshot_end, is seen again rather than skipped.
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct SucceededAfterRow {
+        pub id: String,
+        pub snapshot_end: Option<i64>,
+    }
+
+    impl SucceededAfterRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![
+                ("id", ::arrow::datatypes::DataType::Utf8),
+                ("snapshot_end", ::arrow::datatypes::DataType::Int64),
+            ]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "id")?;
+                let c1: &::arrow::array::Int64Array = crate::batch::col(batch, 1, "snapshot_end")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        id: crate::batch::req(crate::batch::opt_str(c0, i), "id", i)?,
+                        snapshot_end: crate::batch::opt_i64(c1, i),
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// Succeeded runs after a (snapshot_end, run id) checkpoint, in checkpoint order — the merge-preview job's keyset (#993). snapshot_end is stamped at finish and rises strictly under the dataset's one writer, so the order is total and a re-executed run, which gets a new snapshot_end, is seen again rather than skipped.
+    pub fn succeeded_after(
+        conn: &::duckdb::Connection,
+        snapshot: i64,
+        after_snapshot: i64,
+        after_run: &str,
+        limit: i64,
+    ) -> ::duckdb::Result<Vec<SucceededAfterRow>> {
+        const SQL: &str = "SELECT id, snapshot_end
+FROM lake.main.runs AT (VERSION => {snapshot})
+WHERE status = 'succeeded' AND snapshot_end IS NOT NULL
+  AND (snapshot_end > $1 OR (snapshot_end = $1 AND id > $2))
+ORDER BY snapshot_end, id
+LIMIT $3
+";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "run",
+            "read",
+            "succeeded_after",
+            "runs",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let sql = SQL.replace("{snapshot}", &snapshot.to_string());
+        let mut stmt = ::er_span::check(&__span, conn.prepare(&sql))?;
+        let batches = ::er_span::check(
+            &__span,
+            stmt.query_arrow(::duckdb::params![after_snapshot, after_run, limit]),
+        )?
+        .collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
+        SucceededAfterRow::from_batches(&batches)
+    }
 }
 
 pub mod update {

@@ -201,7 +201,7 @@ async fn previews_publish_idempotently_and_approval_binds_the_exact_proposal() {
     };
     let (p, bytes, pol) = to_publish(&first, &first_bytes, &policy_id);
     let row = pg::publish_preview(
-        &mut client,
+        &client,
         &pg::PreviewToPublish {
             org_id: &org.id,
             dataset_id: &ds,
@@ -216,7 +216,7 @@ async fn previews_publish_idempotently_and_approval_binds_the_exact_proposal() {
     .unwrap()
     .expect("first publish stores a row");
     let again = pg::publish_preview(
-        &mut client,
+        &client,
         &pg::PreviewToPublish {
             org_id: &org.id,
             dataset_id: &ds,
@@ -361,7 +361,7 @@ async fn previews_publish_idempotently_and_approval_binds_the_exact_proposal() {
     let (second, second_bytes) = publish("old@x.test");
     let (p2, b2, pol2) = to_publish(&second, &second_bytes, &policy_id);
     let newer = pg::publish_preview(
-        &mut client,
+        &client,
         &pg::PreviewToPublish {
             org_id: &org.id,
             dataset_id: &ds,
@@ -378,7 +378,7 @@ async fn previews_publish_idempotently_and_approval_binds_the_exact_proposal() {
     let (third, third_bytes) = publish("older@x.test");
     let (p3, b3, pol3) = to_publish(&third, &third_bytes, &policy_id);
     pg::publish_preview(
-        &mut client,
+        &client,
         &pg::PreviewToPublish {
             org_id: &org.id,
             dataset_id: &ds,

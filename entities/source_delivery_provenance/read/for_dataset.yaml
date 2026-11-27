@@ -1,0 +1,8 @@
+kind: statement
+operation: read
+mode: full
+description: "Every provenance row of a dataset (capped), for the merge-preview job's work order: the pod cannot reach Postgres, so it receives the run → connection map with its order."
+params:
+  - { name: org_id, type: varchar }
+  - { name: dataset_id, type: varchar }
+returns: entity

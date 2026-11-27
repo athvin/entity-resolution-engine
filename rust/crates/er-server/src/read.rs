@@ -2096,7 +2096,7 @@ fn is_missing_table(err: &str, relation: &str) -> bool {
     ))
 }
 
-fn active_protect_overlay(session: &Session) -> Result<bool, String> {
+pub(crate) fn active_protect_overlay(session: &Session) -> Result<bool, String> {
     match er_entities::record_overlay::read::any_active_protect(session.connection()) {
         Ok(rows) => Ok(!rows.is_empty()),
         Err(e) => {

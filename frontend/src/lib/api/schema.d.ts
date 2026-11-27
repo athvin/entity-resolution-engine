@@ -1031,6 +1031,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/orgs/{org}/datasets/{ds}/merge-previews/generate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** build merge previews from the dataset's latest results */
+        post: operations["post_orgs_by_org_datasets_by_ds_merge_previews_generate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/orgs/{org}/datasets/{ds}/merge-previews/{preview_id}": {
         parameters: {
             query?: never;
@@ -3871,6 +3888,11 @@ export interface components {
             match_probability: number;
             rec_a_key: string;
             rec_b_key: string;
+        };
+        /** @description `POST …/merge-previews/generate`: the job that will build previews. */
+        PreviewsGenerating: {
+            job_id: string;
+            state: string;
         };
         /** @description `GET …/profile`: the latest profile, or that there is none yet. */
         Profile: components["schemas"]["ProfileReport"] | components["schemas"]["ProfileNotYet"];
@@ -7883,6 +7905,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MergePreviewPage"];
+                };
+            };
+            /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        detail: string;
+                    };
+                };
+            };
+        };
+    };
+    post_orgs_by_org_datasets_by_ds_merge_previews_generate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+                ds: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful response. */
+            "2XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PreviewsGenerating"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */

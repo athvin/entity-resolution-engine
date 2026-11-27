@@ -212,4 +212,49 @@ ORDER BY source
             .collect();
         ::er_span::check(&__span, decoded)
     }
+
+    /// Every provenance row of a dataset (capped), for the merge-preview job's work order: the pod cannot reach Postgres, so it receives the run → connection map with its order.
+    pub async fn for_dataset(
+        client: &impl ::tokio_postgres::GenericClient,
+        org_id: &str,
+        dataset_id: &str,
+    ) -> ::std::result::Result<Vec<super::SourceDeliveryProvenance>, ::tokio_postgres::Error> {
+        const SQL: &str = "SELECT id, org_id, dataset_id, run_id, delivery_id, source, salesforce_connection_id, object,
+       delivery_sha256, source_sha256, created_at, updated_at
+FROM public.source_delivery_provenance
+WHERE org_id = $1 AND dataset_id = $2
+ORDER BY run_id
+LIMIT 100000
+";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "source_delivery_provenance",
+            "read",
+            "for_dataset",
+            "source_delivery_provenance",
+            SQL,
+        );
+        let __result =
+            ::er_span::instrument(&__span, client.query(SQL, &[&org_id, &dataset_id])).await;
+        let __entered = __span.enter();
+        let rows = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, rows.len() as u64);
+        Ok(rows
+            .iter()
+            .map(|row| super::SourceDeliveryProvenance {
+                id: row.get("id"),
+                org_id: row.get("org_id"),
+                dataset_id: row.get("dataset_id"),
+                run_id: row.get("run_id"),
+                delivery_id: row.get("delivery_id"),
+                source: row.get("source"),
+                salesforce_connection_id: row.get("salesforce_connection_id"),
+                object: row.get("object"),
+                delivery_sha256: row.get("delivery_sha256"),
+                source_sha256: row.get("source_sha256"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
+            })
+            .collect())
+    }
 }

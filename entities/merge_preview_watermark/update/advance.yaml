@@ -1,0 +1,14 @@
+kind: statement
+operation: update
+mode: partial
+description: "Advance an existing checkpoint, compare-and-set on the value the job read. Zero rows means it moved underneath the job, which then fails rather than skipping runs."
+params:
+  - { name: run_snapshot_end, type: bigint }
+  - { name: run_id, type: varchar }
+  - { name: lake_snapshot, type: bigint }
+  - { name: job_id, type: varchar }
+  - { name: org_id, type: varchar }
+  - { name: dataset_id, type: varchar }
+  - { name: expected_snapshot_end, type: bigint }
+  - { name: expected_run_id, type: varchar }
+returns: entity

@@ -224,3 +224,103 @@ pub fn merge_plans_sql(
          ORDER BY gr.entity_id, m.record_key"
     ))
 }
+
+/// Master election restricted to an ELIGIBLE subset of each entity's members,
+/// per `(entity_id, group_key)` (#993). The writeback preview elects a master
+/// among the members that may be written to one provider connection and
+/// object — electing over the whole entity and discarding a foreign master
+/// would leave groups masterless, or worse, quietly pick a different policy.
+/// Same policy vocabulary and orderings as [`masters_cte_sql`]; this is that
+/// election with a narrower input, not a second one.
+///
+/// A governed generator: plan-vector-tested in er-sql-check for every policy
+/// × protect. Bound parameters, in order: `$1` entity ids, `$2` group keys,
+/// `$3` record keys — three equally long lists joined by `chr(31)`, one triple
+/// per eligible member. Output: `(entity_id, group_key, master_key)`, one row
+/// per group, ordered by `(entity_id, group_key)`.
+///
+/// # Errors
+/// [`MasterElectionError`] as [`masters_cte_sql`].
+pub fn scoped_masters_sql(
+    policy: &str,
+    schema_qualifier: &str,
+    source_ranks: Option<&BTreeMap<String, i64>>,
+    protect: bool,
+) -> Result<String, MasterElectionError> {
+    if !MASTER_ELECTION_POLICIES.contains(&policy) {
+        return Err(MasterElectionError(format!(
+            "{policy:?} is not a master-election policy; the vocabulary is {MASTER_ELECTION_POLICIES:?}"
+        )));
+    }
+    let eligible = "eligible AS ( \
+           SELECT unnest(string_split($1, chr(31))) AS entity_id, \
+                  unnest(string_split($2, chr(31))) AS group_key, \
+                  unnest(string_split($3, chr(31))) AS record_key \
+         )";
+    let ranked = if policy == "most_attributes" {
+        format!(
+            "SELECT entity_id, group_key, record_key, \
+                    row_number() OVER ( \
+                      PARTITION BY entity_id, group_key ORDER BY won_attributes DESC, record_key \
+                    ) AS rank \
+             FROM ( \
+               SELECT e.entity_id, e.group_key, e.record_key, count(l.record_key) AS won_attributes \
+               FROM eligible e \
+               LEFT JOIN {schema_qualifier}.golden_lineage l \
+                 ON l.entity_id = e.entity_id AND l.record_key = e.record_key \
+               GROUP BY e.entity_id, e.group_key, e.record_key \
+             )"
+        )
+    } else {
+        let order = match policy {
+            "source_priority" => {
+                let ranks = source_ranks.ok_or_else(|| {
+                    MasterElectionError(
+                        "the source_priority policy needs the tenant's sources.<name>.priority_rank \
+                         mapping"
+                            .to_string(),
+                    )
+                })?;
+                format!("{} ASC", rank_case(ranks))
+            }
+            "most_recent" => "COALESCE(s.updated_at_source, s.ingested_at) DESC".to_string(),
+            "oldest" => "COALESCE(s.updated_at_source, s.ingested_at) ASC".to_string(),
+            _ => format!("{} DESC", completeness_expr()),
+        };
+        format!(
+            "SELECT e.entity_id, e.group_key, e.record_key, \
+                    row_number() OVER ( \
+                      PARTITION BY e.entity_id, e.group_key ORDER BY {order}, e.record_key \
+                    ) AS rank \
+             FROM eligible e \
+             JOIN {schema_qualifier}.entity_membership m \
+               ON m.entity_id = e.entity_id AND m.record_key = e.record_key \
+             JOIN {schema_qualifier}.int_std_records s ON s.record_key = e.record_key"
+        )
+    };
+    let elected = format!(
+        "elected AS ( SELECT entity_id, group_key, record_key AS master_key FROM ( {ranked} ) WHERE rank = 1 )"
+    );
+    if protect {
+        Ok(format!(
+            "WITH {eligible}, {elected}, \
+             protected AS ( \
+               SELECT e.entity_id, e.group_key, min(e.record_key) AS master_key \
+               FROM eligible e \
+               JOIN {schema_qualifier}.record_overlays o \
+                 ON o.record_key = e.record_key AND o.kind = 'protect' AND o.active \
+               GROUP BY e.entity_id, e.group_key \
+             ) \
+             SELECT el.entity_id, el.group_key, COALESCE(p.master_key, el.master_key) AS master_key \
+             FROM elected el \
+             LEFT JOIN protected p ON p.entity_id = el.entity_id AND p.group_key = el.group_key \
+             ORDER BY el.entity_id, el.group_key"
+        ))
+    } else {
+        Ok(format!(
+            "WITH {eligible}, {elected} \
+             SELECT entity_id, group_key, master_key FROM elected \
+             ORDER BY entity_id, group_key"
+        ))
+    }
+}

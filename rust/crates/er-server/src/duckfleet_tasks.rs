@@ -69,8 +69,17 @@ pub(crate) fn route(kind: JobKind, task: &str) -> Option<Route> {
         }
         "reconcile_schema" | "lake_init" | "maintain" => Route::Embedded(ADMINISTRATION),
         "init" | "assemble" | "finish" => Route::Embedded(ORCHESTRATION),
-        "ingest" | "standardize" | "match" | "reconcile" | "train" | "profile" | "extract"
-        | "export" | "write_back_scan" | "apply_staged" => Route::Embedded(NOT_QUALIFIED),
+        "ingest"
+        | "standardize"
+        | "match"
+        | "reconcile"
+        | "train"
+        | "profile"
+        | "extract"
+        | "export"
+        | "write_back_scan"
+        | "apply_staged"
+        | "materialize_previews" => Route::Embedded(NOT_QUALIFIED),
         _ => return None,
     };
     Some(route)

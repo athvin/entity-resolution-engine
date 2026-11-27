@@ -270,6 +270,7 @@ const DATASET_SCOPED: &[(&str, bool)] = &[
     ("writeback_policies", true),
     ("merge_previews", true),
     ("merge_preview_journal", true),
+    ("merge_preview_watermarks", true),
     ("jobs", false),
     ("task_instances", false),
 ];

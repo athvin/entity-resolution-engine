@@ -153,6 +153,7 @@ fn variant(kind: JobKind) -> &'static str {
         JobKind::ApplyApproved => "ApplyApproved",
         JobKind::Extract => "Extract",
         JobKind::Export => "Export",
+        JobKind::MergePreview => "MergePreview",
     }
 }
 

@@ -1,0 +1,9 @@
+kind: statement
+operation: read
+description: "The entities whose membership the given runs changed (ids joined by chr(31)), at a pinned snapshot. `created` counts: two new records forming a group emit created, not merged. Splits and removals count so a stale planned preview can be superseded."
+params:
+  - { name: snapshot, type: bigint }
+  - { name: run_ids, type: varchar }
+returns:
+  - { name: run_id, type: varchar, nullable: false }
+  - { name: entity_id, type: varchar, nullable: false }

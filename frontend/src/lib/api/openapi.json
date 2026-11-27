@@ -6070,6 +6070,67 @@
         ]
       }
     },
+    "/v1/orgs/{org}/datasets/{ds}/merge-previews/generate": {
+      "post": {
+        "summary": "build merge previews from the dataset's latest results",
+        "operationId": "post_orgs_by_org_datasets_by_ds_merge_previews_generate",
+        "parameters": [
+          {
+            "name": "org",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ds",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "2XX": {
+            "description": "Successful response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreviewsGenerating"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "detail"
+                  ],
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "steward"
+            ]
+          }
+        ]
+      }
+    },
     "/v1/orgs/{org}/datasets/{ds}/merge-previews/{preview_id}": {
       "get": {
         "summary": "one merge preview in full, with its history",
@@ -15567,6 +15628,22 @@
             "type": "string"
           },
           "rec_b_key": {
+            "type": "string"
+          }
+        }
+      },
+      "PreviewsGenerating": {
+        "type": "object",
+        "description": "`POST …/merge-previews/generate`: the job that will build previews.",
+        "required": [
+          "job_id",
+          "state"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "string"
+          },
+          "state": {
             "type": "string"
           }
         }

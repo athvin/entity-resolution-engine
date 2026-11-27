@@ -313,6 +313,116 @@ WHERE id = $1
         ByIdRow::from_batches(&batches)
     }
 
+    /// One row of `by_ids`: The survivable values of the given golden records (ids joined by chr(31)) at a pinned snapshot — what a merge would write to the master.
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct ByIdsRow {
+        pub id: String,
+        pub given_name: Option<String>,
+        pub family_name: Option<String>,
+        pub email: Option<String>,
+        pub phone_e164: Option<String>,
+        pub addr_number: Option<String>,
+        pub addr_street: Option<String>,
+        pub addr_unit: Option<String>,
+        pub addr_city: Option<String>,
+        pub addr_region: Option<String>,
+        pub addr_postal: Option<String>,
+        pub birth_date: Option<::chrono::NaiveDate>,
+    }
+
+    impl ByIdsRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![
+                ("id", ::arrow::datatypes::DataType::Utf8),
+                ("given_name", ::arrow::datatypes::DataType::Utf8),
+                ("family_name", ::arrow::datatypes::DataType::Utf8),
+                ("email", ::arrow::datatypes::DataType::Utf8),
+                ("phone_e164", ::arrow::datatypes::DataType::Utf8),
+                ("addr_number", ::arrow::datatypes::DataType::Utf8),
+                ("addr_street", ::arrow::datatypes::DataType::Utf8),
+                ("addr_unit", ::arrow::datatypes::DataType::Utf8),
+                ("addr_city", ::arrow::datatypes::DataType::Utf8),
+                ("addr_region", ::arrow::datatypes::DataType::Utf8),
+                ("addr_postal", ::arrow::datatypes::DataType::Utf8),
+                ("birth_date", ::arrow::datatypes::DataType::Date32),
+            ]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "id")?;
+                let c1: &::arrow::array::StringArray = crate::batch::col(batch, 1, "given_name")?;
+                let c2: &::arrow::array::StringArray = crate::batch::col(batch, 2, "family_name")?;
+                let c3: &::arrow::array::StringArray = crate::batch::col(batch, 3, "email")?;
+                let c4: &::arrow::array::StringArray = crate::batch::col(batch, 4, "phone_e164")?;
+                let c5: &::arrow::array::StringArray = crate::batch::col(batch, 5, "addr_number")?;
+                let c6: &::arrow::array::StringArray = crate::batch::col(batch, 6, "addr_street")?;
+                let c7: &::arrow::array::StringArray = crate::batch::col(batch, 7, "addr_unit")?;
+                let c8: &::arrow::array::StringArray = crate::batch::col(batch, 8, "addr_city")?;
+                let c9: &::arrow::array::StringArray = crate::batch::col(batch, 9, "addr_region")?;
+                let c10: &::arrow::array::StringArray =
+                    crate::batch::col(batch, 10, "addr_postal")?;
+                let c11: &::arrow::array::Date32Array = crate::batch::col(batch, 11, "birth_date")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        id: crate::batch::req(crate::batch::opt_str(c0, i), "id", i)?,
+                        given_name: crate::batch::opt_str(c1, i),
+                        family_name: crate::batch::opt_str(c2, i),
+                        email: crate::batch::opt_str(c3, i),
+                        phone_e164: crate::batch::opt_str(c4, i),
+                        addr_number: crate::batch::opt_str(c5, i),
+                        addr_street: crate::batch::opt_str(c6, i),
+                        addr_unit: crate::batch::opt_str(c7, i),
+                        addr_city: crate::batch::opt_str(c8, i),
+                        addr_region: crate::batch::opt_str(c9, i),
+                        addr_postal: crate::batch::opt_str(c10, i),
+                        birth_date: crate::batch::opt_date(c11, i),
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// The survivable values of the given golden records (ids joined by chr(31)) at a pinned snapshot — what a merge would write to the master.
+    pub fn by_ids(
+        conn: &::duckdb::Connection,
+        snapshot: i64,
+        ids: &str,
+    ) -> ::duckdb::Result<Vec<ByIdsRow>> {
+        const SQL: &str = "SELECT id, given_name, family_name, email, phone_e164, addr_number, addr_street, addr_unit,
+       addr_city, addr_region, addr_postal, birth_date
+FROM lake.main.golden_records AT (VERSION => {snapshot})
+WHERE id IN (SELECT unnest(string_split($1, chr(31))))
+ORDER BY id
+";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "golden_record",
+            "read",
+            "by_ids",
+            "golden_records",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let sql = SQL.replace("{snapshot}", &snapshot.to_string());
+        let mut stmt = ::er_span::check(&__span, conn.prepare(&sql))?;
+        let batches = ::er_span::check(&__span, stmt.query_arrow(::duckdb::params![ids]))?
+            .collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
+        ByIdsRow::from_batches(&batches)
+    }
+
     /// One row of `completeness_counts`: Per-attribute non-null counts over the 11 survivable golden columns at a pinned snapshot (the data-quality completeness score).
     #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
     pub struct CompletenessCountsRow {
