@@ -61,9 +61,9 @@ Distinct `resource "aws_*"` blocks across `infra/terraform/`, by count:
   29  aws_iam_role
   28  aws_iam_role_policy
   14  aws_eks_pod_identity_association
+  12  aws_cloudwatch_metric_alarm
   10  aws_s3_bucket
   10  aws_s3_bucket_public_access_block
-   9  aws_cloudwatch_metric_alarm
    8  aws_iam_role_policy_attachment
    8  aws_s3_bucket_server_side_encryption_configuration
    7  aws_secretsmanager_secret
@@ -104,6 +104,8 @@ Distinct `resource "aws_*"` blocks across `infra/terraform/`, by count:
    1  aws_bedrock_use_case_for_model_access
    1  aws_cloudtrail
    1  aws_cloudwatch_dashboard
+   1  aws_cloudwatch_event_rule
+   1  aws_cloudwatch_log_metric_filter
    1  aws_config_configuration_recorder
    1  aws_config_configuration_recorder_status
    1  aws_config_delivery_channel
@@ -151,11 +153,9 @@ drops off this list on the next regeneration, so an absence here cannot rot.
 - API Gateway
 - AWS Backup
 - CloudFront
-- CloudWatch metric filters
 - Cost Explorer (aws_ce_*)
 - DynamoDB
 - ElastiCache
-- EventBridge
 - GuardDuty
 - Lambda
 - Route 53
@@ -167,11 +167,11 @@ drops off this list on the next regeneration, so an absence here cannot rot.
 
 | Resource type | Declared |
 |---|---|
-| `aws_cloudwatch_metric_alarm` | 9 |
+| `aws_cloudwatch_metric_alarm` | 12 |
 | `aws_sns_topic` | 1 |
 | `aws_sns_topic_subscription` | 1 |
 | `aws_cloudwatch_dashboard` | 1 |
-| `aws_cloudwatch_log_metric_filter` | 0 |
+| `aws_cloudwatch_log_metric_filter` | 1 |
 | `aws_budgets_budget` | 2 |
 | `aws_cloudwatch_log_group` | 4 |
 

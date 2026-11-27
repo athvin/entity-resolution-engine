@@ -176,3 +176,103 @@ resource "aws_cloudwatch_metric_alarm" "pod_snapshot_missing" {
   alarm_actions       = [var.alerts_topic_arn]
   ok_actions          = [var.alerts_topic_arn]
 }
+
+# --- #877: the three standalone alarms that need no cost model -------------
+
+# Attempt failure rate: failed / (failed + done) over an hour, summed across
+# classes. Ten is the alarm's metric-query ceiling, which is why no_op and
+# skipped (neither ran a failing body) are left out of the denominator. The
+# minimum-volume guard stops a single failed attempt in a quiet hour paging.
+resource "aws_cloudwatch_metric_alarm" "attempt_failure_rate" {
+  alarm_name          = "er-${var.environment}-attempt-failure-rate"
+  alarm_description   = "More than ${var.failure_rate_threshold * 100}% of finished task attempts failed in the last hour (with at least ${var.failure_rate_min_attempts} attempts). Read the failing tasks' error_class: a config or precondition burst is a tenant's input, an internal or infrastructure burst is ours."
+  comparison_operator = "GreaterThanThreshold"
+  threshold           = var.failure_rate_threshold
+  evaluation_periods  = 1
+  treat_missing_data  = "notBreaching"
+  dynamic "metric_query" {
+    for_each = merge(
+      { for n, class in local.classes : "f${n}" => { class = class, outcome = "failed" } },
+      { for n, class in local.classes : "d${n}" => { class = class, outcome = "done" } },
+    )
+    content {
+      id = metric_query.key
+      metric {
+        namespace   = var.metric_namespace
+        metric_name = "er.tasks.completed"
+        dimensions  = { resource_class = metric_query.value.class, outcome = metric_query.value.outcome, OTelLib = "er-obs" }
+        period      = 3600
+        stat        = "Sum"
+      }
+    }
+  }
+  metric_query {
+    id          = "rate"
+    expression  = "IF((FILL(f0,0)+FILL(f1,0)+FILL(f2,0)+FILL(f3,0)+FILL(d0,0)+FILL(d1,0)+FILL(d2,0)+FILL(d3,0)) >= ${var.failure_rate_min_attempts}, (FILL(f0,0)+FILL(f1,0)+FILL(f2,0)+FILL(f3,0)) / (FILL(f0,0)+FILL(f1,0)+FILL(f2,0)+FILL(f3,0)+FILL(d0,0)+FILL(d1,0)+FILL(d2,0)+FILL(d3,0)), 0)"
+    return_data = true
+  }
+  alarm_actions = [var.alerts_topic_arn]
+  ok_actions    = [var.alerts_topic_arn]
+}
+
+# Spot interruptions: the account's EC2 Spot interruption warnings, counted by
+# the rule's own MatchedEvents. Every spot instance here is a Karpenter runner
+# node, so this is how "spot is cheap enough to tolerate" gets checked rather
+# than trusted. The rule needs no target; matching is what is measured.
+resource "aws_cloudwatch_event_rule" "spot_interruption" {
+  name        = "er-${var.environment}-spot-interruption"
+  description = "EC2 Spot interruption warnings, counted for the spot-interruption alarm."
+  event_pattern = jsonencode({
+    source        = ["aws.ec2"]
+    "detail-type" = ["EC2 Spot Instance Interruption Warning"]
+  })
+}
+
+resource "aws_cloudwatch_metric_alarm" "spot_interruptions" {
+  alarm_name          = "er-${var.environment}-spot-interruptions"
+  alarm_description   = "More than ${var.spot_interruptions_threshold} EC2 Spot interruption warnings in an hour. Runner tasks survive one (do-not-disrupt pods are reclaimed under, then relaunched), but a sustained rate means the spot pools are a poor fit: widen the NodePools' instance families or move a class to on-demand."
+  namespace           = "AWS/Events"
+  metric_name         = "MatchedEvents"
+  dimensions          = { RuleName = aws_cloudwatch_event_rule.spot_interruption.name }
+  statistic           = "Sum"
+  period              = 3600
+  comparison_operator = "GreaterThanThreshold"
+  threshold           = var.spot_interruptions_threshold
+  evaluation_periods  = 1
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = [var.alerts_topic_arn]
+  ok_actions          = [var.alerts_topic_arn]
+}
+
+# Impersonation volume: the BFF's audit writer prints one structured line per
+# impersonation event, carrying no user or tenant identity (that stays in
+# erweb.audit). The metric is a bare count, so a tenant never becomes a
+# dimension.
+resource "aws_cloudwatch_log_metric_filter" "impersonation" {
+  count          = var.containers_log_group_name == null ? 0 : 1
+  name           = "er-${var.environment}-impersonation"
+  log_group_name = var.containers_log_group_name
+  pattern        = "\"er.audit.impersonation\""
+  metric_transformation {
+    name          = "er.audit.impersonations"
+    namespace     = var.metric_namespace
+    value         = "1"
+    default_value = "0"
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "impersonation_volume" {
+  count               = var.containers_log_group_name == null ? 0 : 1
+  alarm_name          = "er-${var.environment}-impersonation-volume"
+  alarm_description   = "More than ${var.impersonation_threshold} impersonation events (start, stop or impersonated mutation) in an hour. Read erweb.audit for who and which org; operators impersonate to support a tenant, so a burst is either an incident being worked or a compromised operator session."
+  namespace           = var.metric_namespace
+  metric_name         = "er.audit.impersonations"
+  statistic           = "Sum"
+  period              = 3600
+  comparison_operator = "GreaterThanThreshold"
+  threshold           = var.impersonation_threshold
+  evaluation_periods  = 1
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = [var.alerts_topic_arn]
+  ok_actions          = [var.alerts_topic_arn]
+}
