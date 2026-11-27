@@ -1,10 +1,10 @@
 mock_provider "aws" {}
 
 variables {
-  environment      = "test"
-  region           = "us-east-2"
-  metric_namespace = "ER/Test"
-  alerts_topic_arn = "arn:aws:sns:us-east-2:123456789012:alerts"
+  environment               = "test"
+  region                    = "us-east-2"
+  metric_namespace          = "ER/Test"
+  alerts_topic_arn          = "arn:aws:sns:us-east-2:123456789012:alerts"
   containers_log_group_name = "/er/test/containers"
 }
 
