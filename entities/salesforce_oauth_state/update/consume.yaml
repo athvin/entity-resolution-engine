@@ -1,0 +1,10 @@
+kind: statement
+operation: update
+mode: partial
+description: "Consume a state exactly once, only for its own org, connection and starting principal, and only before it expires. Zero rows: unknown, foreign, someone else's, expired or already used — the caller refuses without saying which."
+params:
+  - { name: state_sha256, type: varchar }
+  - { name: org_id, type: varchar }
+  - { name: salesforce_connection_id, type: varchar }
+  - { name: requested_by, type: varchar }
+returns: entity

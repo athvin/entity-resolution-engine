@@ -1,0 +1,8 @@
+kind: statement
+operation: read
+mode: full
+description: "A connection's active grant, with its refresh token — the one statement that returns it, for the writeback worker. Never feed this row to a response or an audit."
+params:
+  - { name: org_id, type: varchar }
+  - { name: salesforce_connection_id, type: varchar }
+returns: entity

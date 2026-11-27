@@ -1,0 +1,16 @@
+kind: statement
+operation: create
+mode: partial
+description: "Store a completed delegated authorization."
+params:
+  - { name: id, type: varchar }
+  - { name: org_id, type: varchar }
+  - { name: salesforce_connection_id, type: varchar }
+  - { name: sf_org_id, type: varchar }
+  - { name: sf_user_id, type: varchar }
+  - { name: sf_username, type: varchar, nullable: true }
+  - { name: refresh_token, type: varchar }
+  - { name: scopes, type: varchar }
+  - { name: allow_automatic, type: boolean }
+  - { name: authorized_by, type: varchar }
+returns: none

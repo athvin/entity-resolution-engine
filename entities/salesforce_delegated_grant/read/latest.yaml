@@ -1,0 +1,18 @@
+kind: statement
+operation: read
+description: "A connection's most recent grant WITHOUT its token — the status a tenant may see."
+params:
+  - { name: org_id, type: varchar }
+  - { name: salesforce_connection_id, type: varchar }
+returns:
+  - { name: id, type: varchar, nullable: false }
+  - { name: sf_org_id, type: varchar, nullable: false }
+  - { name: sf_user_id, type: varchar, nullable: false }
+  - { name: sf_username, type: varchar }
+  - { name: scopes, type: varchar, nullable: false }
+  - { name: allow_automatic, type: boolean, nullable: false }
+  - { name: status, type: varchar, nullable: false }
+  - { name: authorized_by, type: varchar, nullable: false }
+  - { name: revoked_reason, type: varchar }
+  - { name: revoked_at, type: timestamp }
+  - { name: created_at, type: timestamp, nullable: false }

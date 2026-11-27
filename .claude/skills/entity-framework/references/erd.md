@@ -272,6 +272,37 @@ erDiagram
         timestamp created_at
         timestamp updated_at
     }
+    salesforce_delegated_grants {
+        varchar id PK
+        varchar org_id FK
+        varchar salesforce_connection_id FK
+        varchar sf_org_id
+        varchar sf_user_id
+        varchar sf_username
+        varchar refresh_token
+        varchar scopes
+        boolean allow_automatic
+        varchar status "in {active, revoked}"
+        varchar authorized_by
+        varchar revoked_reason
+        timestamp revoked_at
+        timestamp created_at
+        timestamp updated_at
+    }
+    salesforce_oauth_states {
+        varchar id PK
+        varchar org_id FK
+        varchar salesforce_connection_id FK
+        varchar state_sha256 UK
+        varchar code_verifier
+        varchar redirect_uri
+        boolean allow_automatic
+        varchar requested_by
+        timestamp expires_at
+        timestamp consumed_at
+        timestamp created_at
+        timestamp updated_at
+    }
     schedules {
         varchar id PK
         varchar org_id FK
@@ -485,6 +516,10 @@ erDiagram
     s3_ingest_cursors }o--|| orgs : "org_id → id"
     s3_ingest_cursors }o--|| datasets : "dataset_id → id"
     salesforce_connections }o--|| orgs : "org_id → id"
+    salesforce_delegated_grants }o--|| orgs : "org_id → id"
+    salesforce_delegated_grants }o--|| salesforce_connections : "salesforce_connection_id → id"
+    salesforce_oauth_states }o--|| orgs : "org_id → id"
+    salesforce_oauth_states }o--|| salesforce_connections : "salesforce_connection_id → id"
     schedules }o--|| orgs : "org_id → id"
     schedules }o--|| datasets : "dataset_id → id"
     sf_extract_cursors }o--|| orgs : "org_id → id"
@@ -532,6 +567,8 @@ erDiagram
 | `remote_attempts` | Write-ahead remote execution identity and dataset fence; unresolved attempts survive task termination and dispatcher restarts. No SQL, parameters, profiles or credentials are stored. |
 | `s3_ingest_cursors` | What the auto-ingest poller has already read, one row per (org, source). The poller runs on every dispatcher tick and the newest object under a prefix stays the newest until a new one arrives, so without this row the same CSV would be re-ingested every few seconds forever — an unbounded run loop over the tenant's own lake. An upsert rather than a log: the question it answers is 'what is already in', not 'what has ever been in', and the audit log already answers the second. |
 | `salesforce_connections` | A tenant's Salesforce org credential: the instance URL and the OAuth client-credentials pair the extract job authenticates with. Org-scoped — one connection is one Salesforce org (connectors.md §4.1), and a credential is a tenant-level fact that several datasets may extract through. Deliberately NOT history: true — the history trigger copies whole rows as jsonb into an append-only companion, which would duplicate the client secret into a table nothing ever deletes from. |
+| `salesforce_delegated_grants` | A Salesforce user's delegated consent for writeback through one connection (#994): the refresh token, and the provider org and user it is bound to. Writeback acts as this user, never as the extraction's client credentials. Revoked when Salesforce refuses the refresh (consent withdrawn) or on request; a revoked grant authorizes nothing. |
+| `salesforce_oauth_states` | One in-flight delegated authorization (#994): the OAuth `state` (stored only as its SHA-256), the PKCE verifier, and who started it for which connection. Single-use and short-lived: completing consumes it, and the completing principal must be the one who started it, so a code from one tenant's flow cannot bind another tenant's connection. |
 | `schedules` | A recurring job schedule for a tenant: its kind, cron and source. |
 | `schema_migrations` | The control-plane schema ledger: one row per DDL statement the reconciler applied to public.*, plus one `verified` row each time a new catalog version found the live schema already current. The latest row's catalog_hash is the version the database is at. |
 | `sf_extract_cursors` | The extract job's high-water mark, one row per (dataset, source): the newest SystemModstamp already pulled from Salesforce, so an incremental extract asks only for what changed since. The s3_ingest_cursor shape for an API-polled provider — an upsert rather than a log, because the question is 'what is already in', and advanced only AFTER the delivery is published, so a failure re-extracts once rather than skipping rows forever. |

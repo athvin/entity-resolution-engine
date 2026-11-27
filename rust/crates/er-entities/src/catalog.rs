@@ -3214,6 +3214,161 @@ indexes:
 "#,
     ),
     (
+        "salesforce_delegated_grant",
+        r#"kind: entity
+version: 1
+name: salesforce_delegated_grant
+relation: salesforce_delegated_grants
+description: "A Salesforce user's delegated consent for writeback through one connection (#994): the refresh token, and the provider org and user it is bound to. Writeback acts as this user, never as the extraction's client credentials. Revoked when Salesforce refuses the refresh (consent withdrawn) or on request; a revoked grant authorizes nothing."
+key: [id]
+generate:
+  stores: [postgres]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "UUIDv7, minted by the application."
+  - name: org_id
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: id }
+    description: "The tenant."
+  - name: salesforce_connection_id
+    type: varchar
+    nullable: false
+    references: { relation: salesforce_connections, column: id }
+    description: "The connection the authorization is for."
+  - name: sf_org_id
+    type: varchar
+    nullable: false
+    description: "The Salesforce organization id the identity service returned."
+  - name: sf_user_id
+    type: varchar
+    nullable: false
+    description: "The Salesforce user id writeback acts as."
+  - name: sf_username
+    type: varchar
+    description: "The user's Salesforce username, for display."
+  - name: refresh_token
+    type: varchar
+    nullable: false
+    description: "The OAuth refresh token. A secret: returned only by for_use, never listed, audited, returned or put on a span."
+  - name: scopes
+    type: varchar
+    nullable: false
+    description: "The granted scopes, space-separated, as Salesforce reported them."
+  - name: allow_automatic
+    type: boolean
+    nullable: false
+    description: "Whether queued or policy-driven writeback may use this grant without a human present."
+  - name: status
+    type: varchar
+    nullable: false
+    default: "'active'"
+    accepted_values: [active, revoked]
+    description: "Whether the grant may be used."
+  - name: authorized_by
+    type: varchar
+    nullable: false
+    description: "The tenant principal that completed the authorization."
+  - name: revoked_reason
+    type: varchar
+    description: "Why it was revoked: consent_withdrawn, replaced or requested."
+  - name: revoked_at
+    type: timestamp
+    description: "When it was revoked."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the row was written."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the row last changed."
+indexes:
+  - name: salesforce_delegated_grants_connection
+    columns: [org_id, salesforce_connection_id, status]
+"#,
+    ),
+    (
+        "salesforce_oauth_state",
+        r#"kind: entity
+version: 1
+name: salesforce_oauth_state
+relation: salesforce_oauth_states
+description: "One in-flight delegated authorization (#994): the OAuth `state` (stored only as its SHA-256), the PKCE verifier, and who started it for which connection. Single-use and short-lived: completing consumes it, and the completing principal must be the one who started it, so a code from one tenant's flow cannot bind another tenant's connection."
+key: [id]
+generate:
+  stores: [postgres]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "UUIDv7, minted by the application."
+  - name: org_id
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: id }
+    description: "The tenant."
+  - name: salesforce_connection_id
+    type: varchar
+    nullable: false
+    references: { relation: salesforce_connections, column: id }
+    description: "The connection the authorization is for."
+  - name: state_sha256
+    type: varchar
+    nullable: false
+    description: "SHA-256 of the state value sent to Salesforce; the value itself is never stored."
+  - name: code_verifier
+    type: varchar
+    nullable: false
+    description: "The PKCE verifier. A secret: returned by exactly one statement (consume), never listed, audited or put on a span."
+  - name: redirect_uri
+    type: varchar
+    nullable: false
+    description: "The redirect the authorization was started with; the code exchange must name the same one."
+  - name: allow_automatic
+    type: boolean
+    nullable: false
+    description: "Whether the resulting grant may run queued or policy-driven writeback without a human present."
+  - name: requested_by
+    type: varchar
+    nullable: false
+    description: "The principal that started the flow; only it may complete it."
+  - name: expires_at
+    type: timestamp
+    nullable: false
+    description: "When the state stops being accepted."
+  - name: consumed_at
+    type: timestamp
+    description: "When a completion used it; never reusable after."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the row was written."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the row last changed."
+indexes:
+  - name: salesforce_oauth_states_state
+    columns: [state_sha256]
+    unique: true
+  - name: salesforce_oauth_states_org
+    columns: [org_id, salesforce_connection_id]
+"#,
+    ),
+    (
         "schedule",
         r#"kind: entity
 version: 1

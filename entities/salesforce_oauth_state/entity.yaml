@@ -1,0 +1,69 @@
+kind: entity
+version: 1
+name: salesforce_oauth_state
+relation: salesforce_oauth_states
+description: "One in-flight delegated authorization (#994): the OAuth `state` (stored only as its SHA-256), the PKCE verifier, and who started it for which connection. Single-use and short-lived: completing consumes it, and the completing principal must be the one who started it, so a code from one tenant's flow cannot bind another tenant's connection."
+key: [id]
+generate:
+  stores: [postgres]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "UUIDv7, minted by the application."
+  - name: org_id
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: id }
+    description: "The tenant."
+  - name: salesforce_connection_id
+    type: varchar
+    nullable: false
+    references: { relation: salesforce_connections, column: id }
+    description: "The connection the authorization is for."
+  - name: state_sha256
+    type: varchar
+    nullable: false
+    description: "SHA-256 of the state value sent to Salesforce; the value itself is never stored."
+  - name: code_verifier
+    type: varchar
+    nullable: false
+    description: "The PKCE verifier. A secret: returned by exactly one statement (consume), never listed, audited or put on a span."
+  - name: redirect_uri
+    type: varchar
+    nullable: false
+    description: "The redirect the authorization was started with; the code exchange must name the same one."
+  - name: allow_automatic
+    type: boolean
+    nullable: false
+    description: "Whether the resulting grant may run queued or policy-driven writeback without a human present."
+  - name: requested_by
+    type: varchar
+    nullable: false
+    description: "The principal that started the flow; only it may complete it."
+  - name: expires_at
+    type: timestamp
+    nullable: false
+    description: "When the state stops being accepted."
+  - name: consumed_at
+    type: timestamp
+    description: "When a completion used it; never reusable after."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the row was written."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the row last changed."
+indexes:
+  - name: salesforce_oauth_states_state
+    columns: [state_sha256]
+    unique: true
+  - name: salesforce_oauth_states_org
+    columns: [org_id, salesforce_connection_id]

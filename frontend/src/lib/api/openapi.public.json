@@ -674,6 +674,285 @@
         ]
       }
     },
+    "/v1/orgs/{org}/connections/{connection_id}/writeback-authorization": {
+      "get": {
+        "summary": "a connection's delegated writeback authorization, without tokens",
+        "operationId": "get_orgs_by_org_connections_by_connection_id_writeback_authorization",
+        "parameters": [
+          {
+            "name": "org",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "2XX": {
+            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "default": {
+            "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "detail"
+                  ],
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "viewer"
+            ]
+          }
+        ]
+      },
+      "post": {
+        "summary": "start delegating Salesforce writeback to a reviewing user",
+        "operationId": "post_orgs_by_org_connections_by_connection_id_writeback_authorization",
+        "parameters": [
+          {
+            "name": "org",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "redirect_uri"
+                ],
+                "properties": {
+                  "allow_automatic": {
+                    "type": "boolean"
+                  },
+                  "redirect_uri": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "2XX": {
+            "description": "Successful response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WritebackAuthorizationStarted"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "detail"
+                  ],
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "admin"
+            ]
+          }
+        ]
+      },
+      "delete": {
+        "summary": "revoke a connection's delegated writeback authorization",
+        "operationId": "delete_orgs_by_org_connections_by_connection_id_writeback_authorization",
+        "parameters": [
+          {
+            "name": "org",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "2XX": {
+            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "default": {
+            "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "detail"
+                  ],
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "admin"
+            ]
+          }
+        ]
+      }
+    },
+    "/v1/orgs/{org}/connections/{connection_id}/writeback-authorization/complete": {
+      "post": {
+        "summary": "finish a delegated authorization",
+        "operationId": "post_orgs_by_org_connections_by_connection_id_writeback_authorization_complete",
+        "parameters": [
+          {
+            "name": "org",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "state",
+                  "code"
+                ],
+                "properties": {
+                  "code": {
+                    "type": "string"
+                  },
+                  "state": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "2XX": {
+            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "default": {
+            "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "detail"
+                  ],
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "admin"
+            ]
+          }
+        ]
+      }
+    },
     "/v1/orgs/{org}/datasets": {
       "get": {
         "summary": "an org's datasets",
@@ -17079,6 +17358,83 @@
               "null"
             ],
             "format": "double"
+          }
+        }
+      },
+      "WritebackAuthorizationStarted": {
+        "type": "object",
+        "description": "A started delegated authorization.",
+        "required": [
+          "authorize_url",
+          "expires_at"
+        ],
+        "properties": {
+          "authorize_url": {
+            "type": "string",
+            "description": "Send the reviewer here; Salesforce returns them to `redirect_uri` with\n`code` and `state`."
+          },
+          "expires_at": {
+            "type": "string",
+            "description": "RFC 3339; complete before this."
+          }
+        }
+      },
+      "WritebackAuthorizationView": {
+        "type": "object",
+        "description": "A connection's delegated authorization, without its tokens.",
+        "required": [
+          "status",
+          "sf_org_id",
+          "sf_user_id",
+          "scopes",
+          "allow_automatic",
+          "authorized_by",
+          "created_at"
+        ],
+        "properties": {
+          "allow_automatic": {
+            "type": "boolean"
+          },
+          "authorized_by": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "description": "RFC 3339."
+          },
+          "revoked_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "RFC 3339."
+          },
+          "revoked_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`consent_withdrawn`, `replaced` or `requested`."
+          },
+          "scopes": {
+            "type": "string"
+          },
+          "sf_org_id": {
+            "type": "string"
+          },
+          "sf_user_id": {
+            "type": "string",
+            "description": "The Salesforce user writeback acts as."
+          },
+          "sf_username": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "description": "`active` or `revoked`."
           }
         }
       },
