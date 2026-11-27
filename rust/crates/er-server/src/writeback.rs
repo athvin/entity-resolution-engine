@@ -12,12 +12,12 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 /// The Salesforce objects covered by the v1 merge design.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MergeObject {
     Lead,
     Contact,
@@ -25,7 +25,7 @@ pub enum MergeObject {
 }
 
 /// Scope resolved by the caller, never inferred from an external record ID.
-#[derive(Clone, PartialEq, Eq, Serialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProviderScope {
     pub org_id: String,
     pub dataset_id: String,
@@ -34,7 +34,7 @@ pub struct ProviderScope {
 }
 
 /// The exact source and policy revision a future approval will bind.
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct ProposalScope {
     pub provider: ProviderScope,
     pub entity_id: String,
@@ -45,7 +45,7 @@ pub struct ProposalScope {
 }
 
 /// A member's synchronized preimage, including fields needed for restore.
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct MemberSnapshot {
     pub provider: ProviderScope,
     pub record_key: String,
@@ -58,7 +58,7 @@ pub struct MemberSnapshot {
 
 /// Unvalidated inputs. There is intentionally no deserializer for a validated
 /// proposal: restoring persisted data must pass the builder again.
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct ProposalInput {
     pub scope: ProposalScope,
     pub master_record_key: String,
@@ -289,4 +289,138 @@ fn validate(input: &ProposalInput) -> Result<(), ProposalError> {
         validate_target(field)?;
     }
     Ok(())
+}
+
+/// The persisted form of a proposal (#1305): its UNVALIDATED input and a
+/// format version. A validated [`MergeProposal`] is never deserialized —
+/// restoring one always runs [`MergeProposal::build`] again, so stored bytes
+/// cannot smuggle in a proposal the builder would refuse, and the rebuilt
+/// fingerprint must equal the one an approval names.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct PersistedProposalV1 {
+    pub format_version: u32,
+    pub input: ProposalInput,
+}
+
+impl PersistedProposalV1 {
+    pub const FORMAT_VERSION: u32 = 1;
+
+    #[must_use]
+    pub fn new(input: ProposalInput) -> Self {
+        Self {
+            format_version: Self::FORMAT_VERSION,
+            input,
+        }
+    }
+
+    /// Rebuild the validated proposal.
+    ///
+    /// # Errors
+    /// An unknown format version, or anything the builder refuses.
+    pub fn restore(value: &Value) -> Result<MergeProposal, RestoreError> {
+        let persisted: Self = serde_json::from_value(value.clone())?;
+        if persisted.format_version != Self::FORMAT_VERSION {
+            return Err(RestoreError::UnknownFormat(persisted.format_version));
+        }
+        Ok(MergeProposal::build(persisted.input)?)
+    }
+}
+
+/// Why a persisted proposal could not be restored.
+#[derive(Debug, thiserror::Error)]
+pub enum RestoreError {
+    #[error("persisted proposal is malformed")]
+    Malformed(#[from] serde_json::Error),
+    #[error("unknown persisted proposal format {0}")]
+    UnknownFormat(u32),
+    #[error("persisted proposal no longer validates")]
+    Invalid(#[from] ProposalError),
+}
+
+#[cfg(test)]
+mod persisted_tests {
+    use super::*;
+
+    fn input() -> ProposalInput {
+        let provider = ProviderScope {
+            org_id: "org".into(),
+            dataset_id: "ds".into(),
+            connection_id: "conn".into(),
+            object: MergeObject::Contact,
+        };
+        let member = |key: &str, id: &str, email: Value| MemberSnapshot {
+            provider: provider.clone(),
+            record_key: key.into(),
+            external_id: id.into(),
+            system_modstamp: "2026-11-27T00:00:00.000+0000".into(),
+            fields: BTreeMap::from([
+                ("Email".to_string(), email),
+                ("Phone".to_string(), Value::Null),
+            ]),
+        };
+        ProposalInput {
+            scope: ProposalScope {
+                provider: provider.clone(),
+                entity_id: "e1".into(),
+                lake_snapshot: 7,
+                policy_revision: "rev1".into(),
+                election_policy: er_golden::DEFAULT_MASTER_ELECTION_POLICY.into(),
+            },
+            master_record_key: "crm:a".into(),
+            members: vec![
+                member("crm:b", "003B", Value::String("b@x.test".into())),
+                member("crm:a", "003A", Value::String("a@x.test".into())),
+            ],
+            golden_fields: BTreeMap::from([
+                ("email".to_string(), Value::String("b@x.test".into())),
+                ("phone".to_string(), Value::Null),
+            ]),
+            field_mapping: BTreeMap::from([
+                ("email".to_string(), "Email".to_string()),
+                ("phone".to_string(), "Phone".to_string()),
+            ]),
+            writeback_allowlist: BTreeSet::from(["Email".to_string(), "Phone".to_string()]),
+        }
+    }
+
+    #[test]
+    fn a_persisted_proposal_restores_to_the_same_fingerprint() {
+        let built = MergeProposal::build(input()).unwrap();
+        let stored = serde_json::to_value(PersistedProposalV1::new(input())).unwrap();
+        let restored = PersistedProposalV1::restore(&stored).unwrap();
+        assert_eq!(restored.fingerprint(), built.fingerprint());
+        // Pinned: a change to the canonical bytes is a format change and must
+        // bump the version rather than silently re-fingerprint stored rows.
+        assert_eq!(
+            built.fingerprint(),
+            PINNED_FINGERPRINT,
+            "the v1 proposal bytes changed"
+        );
+        // An explicit null on the golden side equals the master's null: no change.
+        assert!(!built.content().field_changes.contains_key("Phone"));
+        assert_eq!(
+            built.content().field_changes["Email"].after,
+            Value::String("b@x.test".into())
+        );
+    }
+
+    #[test]
+    fn restoring_refuses_an_unknown_format_and_an_invalid_input() {
+        let mut stored = serde_json::to_value(PersistedProposalV1::new(input())).unwrap();
+        stored["format_version"] = Value::from(2);
+        assert!(matches!(
+            PersistedProposalV1::restore(&stored),
+            Err(RestoreError::UnknownFormat(2))
+        ));
+        let mut bad = input();
+        bad.master_record_key = "crm:missing".into();
+        let stored = serde_json::to_value(PersistedProposalV1::new(bad)).unwrap();
+        assert!(matches!(
+            PersistedProposalV1::restore(&stored),
+            Err(RestoreError::Invalid(_))
+        ));
+    }
+
+    const PINNED_FINGERPRINT: &str =
+        "v1:8d4057cacf51f12f5c215dabedc7e5880ba7b7171cf5576abf1189daca77ca8b";
 }

@@ -144,6 +144,11 @@ const WORKFLOW: { id: string; title: string; resources: string[] }[] = [
       "taggings",
     ],
   },
+  {
+    id: "api-writeback",
+    title: "Salesforce writeback",
+    resources: ["writeback", "merge-previews"],
+  },
   { id: "api-webhooks", title: "Webhooks", resources: ["webhooks"] },
 ];
 

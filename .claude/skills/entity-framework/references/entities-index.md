@@ -30,7 +30,7 @@ statements is read or written only through the engine's own stage SQL, not
 through a typed query function.
 
 <!-- BEGIN GENERATED: entities-index -->
-**55 entities, 286 declared statements.**
+**58 entities, 295 declared statements.**
 
 | Entity | Relation | Store | Key | Natural key | History |
 |---|---|---|---|---|---|
@@ -59,6 +59,8 @@ through a typed query function.
 | `lake_schema_migration` | `schema_migrations` | duckdb | `id` | — | — |
 | `match_score` | `match_scores` | duckdb | `id` | `rec_a_key, rec_b_key, model_version, tf_snapshot_id` | — |
 | `matching_model` | `matching_models` | postgres | `id` | `dataset_id, name, version` | yes |
+| `merge_preview` | `merge_previews` | postgres | `id` | `dataset_id, fingerprint` | — |
+| `merge_preview_journal` | `merge_preview_journal` | postgres | `id` | — | — |
 | `metric_snapshot` | `metric_snapshots` | duckdb | `id` | `run_id` | — |
 | `metric_snapshot_source` | `metric_snapshot_sources` | duckdb | `id` | `run_id, source_system` | — |
 | `org` | `orgs` | postgres | `id` | `name` | yes |
@@ -89,6 +91,7 @@ through a typed query function.
 | `tenant_schema_state` | `tenant_schema_states` | postgres | `id` | — | — |
 | `webhook` | `webhooks` | postgres | `id` | — | yes |
 | `webhook_delivery` | `webhook_deliveries` | postgres | `id` | — | — |
+| `writeback_policy` | `writeback_policies` | postgres | `id` | — | — |
 
 Declared statements per entity and operation:
 
@@ -119,6 +122,8 @@ Declared statements per entity and operation:
 | `lake_schema_migration` | 1 | 1 | 0 | 0 |
 | `match_score` | 0 | 6 | 3 | 0 |
 | `matching_model` | 1 | 4 | 1 | 0 |
+| `merge_preview` | 1 | 2 | 2 | 0 |
+| `merge_preview_journal` | 1 | 1 | 0 | 0 |
 | `metric_snapshot` | 1 | 1 | 0 | 0 |
 | `metric_snapshot_source` | 1 | 1 | 0 | 0 |
 | `org` | 2 | 4 | 4 | 0 |
@@ -148,4 +153,5 @@ Declared statements per entity and operation:
 | `tenant_schema_state` | 2 | 1 | 0 | 0 |
 | `webhook` | 1 | 3 | 1 | 0 |
 | `webhook_delivery` | 1 | 1 | 2 | 1 |
+| `writeback_policy` | 1 | 1 | 0 | 0 |
 <!-- END GENERATED: entities-index -->

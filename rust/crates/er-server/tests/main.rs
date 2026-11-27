@@ -81,6 +81,7 @@ mod pg_launch_proof;
 mod pg_lexicon;
 mod pg_mass_update;
 mod pg_merge_group;
+mod pg_merge_preview_api;
 mod pg_migrate_plan;
 mod pg_migrate_tenants;
 mod pg_model_registry;

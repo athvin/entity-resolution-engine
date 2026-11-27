@@ -526,6 +526,40 @@
     "response": { "envelope": "wrapped", "key": "items" }
   },
   {
+    "id": "get_orgs_by_org_datasets_by_ds_merge_previews",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}/merge-previews",
+    "role": "viewer",
+    "params": ["org", "ds"],
+    "body": null,
+    "needs_body": false,
+    "summary": "a page of merge previews",
+    "response": { "envelope": "record", "keys": ["items", "next_cursor"] }
+  },
+  {
+    "id": "get_orgs_by_org_datasets_by_ds_merge_previews_by_preview_id",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}/merge-previews/{preview_id}",
+    "role": "viewer",
+    "params": ["org", "ds", "preview_id"],
+    "body": null,
+    "needs_body": false,
+    "summary": "one merge preview in full, with its history",
+    "response": {
+      "envelope": "record",
+      "keys": [
+        "summary",
+        "proposal",
+        "field_changes",
+        "related_counts",
+        "related_counts_state",
+        "decided_by",
+        "decision_reason",
+        "history"
+      ]
+    }
+  },
+  {
     "id": "get_orgs_by_org_datasets_by_ds_metrics",
     "method": "GET",
     "path": "/v1/orgs/{org}/datasets/{ds}/metrics",
@@ -736,6 +770,17 @@
     "needs_body": false,
     "summary": "an upload's state",
     "response": { "envelope": "scalar" }
+  },
+  {
+    "id": "get_orgs_by_org_datasets_by_ds_writeback_policies",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}/writeback/policies",
+    "role": "viewer",
+    "params": ["org", "ds"],
+    "body": null,
+    "needs_body": false,
+    "summary": "a dataset's active writeback policies",
+    "response": { "envelope": "wrapped", "key": "items" }
   },
   {
     "id": "get_orgs_by_org_tags",
@@ -1215,6 +1260,38 @@
     },
     "needs_body": false,
     "summary": "stage golden field overrides across many entities in one window",
+    "response": null
+  },
+  {
+    "id": "post_orgs_by_org_datasets_by_ds_merge_previews_by_preview_id_approve",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/datasets/{ds}/merge-previews/{preview_id}/approve",
+    "role": "steward",
+    "params": ["org", "ds", "preview_id"],
+    "body": {
+      "type": "object",
+      "properties": { "fingerprint": { "type": "string" }, "reason": { "type": "string" } },
+      "required": ["fingerprint"],
+      "additionalProperties": false
+    },
+    "needs_body": false,
+    "summary": "approve a merge preview",
+    "response": null
+  },
+  {
+    "id": "post_orgs_by_org_datasets_by_ds_merge_previews_by_preview_id_reject",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/datasets/{ds}/merge-previews/{preview_id}/reject",
+    "role": "steward",
+    "params": ["org", "ds", "preview_id"],
+    "body": {
+      "type": "object",
+      "properties": { "fingerprint": { "type": "string" }, "reason": { "type": "string" } },
+      "required": ["fingerprint"],
+      "additionalProperties": false
+    },
+    "needs_body": false,
+    "summary": "reject a merge preview",
     "response": null
   },
   {
@@ -1791,6 +1868,28 @@
     "body": null,
     "needs_body": false,
     "summary": "store one part",
+    "response": null
+  },
+  {
+    "id": "put_orgs_by_org_datasets_by_ds_writeback_policies",
+    "method": "PUT",
+    "path": "/v1/orgs/{org}/datasets/{ds}/writeback/policies",
+    "role": "admin",
+    "params": ["org", "ds"],
+    "body": {
+      "type": "object",
+      "properties": {
+        "connection_id": { "type": "string" },
+        "object": { "type": "string" },
+        "election_policy": { "type": "string" },
+        "writeback_allowlist": { "type": "array", "items": { "type": "string" } },
+        "field_mapping": { "type": "object", "additionalProperties": { "type": "string" } }
+      },
+      "required": ["connection_id", "object", "writeback_allowlist", "field_mapping"],
+      "additionalProperties": false
+    },
+    "needs_body": false,
+    "summary": "set the writeback policy for one connection's object",
     "response": null
   }
 ]

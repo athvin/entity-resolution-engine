@@ -306,6 +306,84 @@ CREATE INDEX IF NOT EXISTS matching_models_history_changed_at ON public.matching
 CREATE OR REPLACE TRIGGER er_history_matching_models
   AFTER INSERT OR UPDATE OR DELETE ON public.matching_models
   FOR EACH ROW EXECUTE FUNCTION public.er_history('matching_models_history');"#,
+    r#"CREATE TABLE IF NOT EXISTS public.salesforce_connections (
+  id text NOT NULL,
+  org_id text NOT NULL REFERENCES orgs(id),
+  name text NOT NULL,
+  instance_url text NOT NULL,
+  auth_kind text NOT NULL,
+  client_id text NOT NULL,
+  client_secret text NOT NULL,
+  api_version text NOT NULL,
+  active boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (id),
+  UNIQUE (org_id, name)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS salesforce_connections_org_name ON public.salesforce_connections (org_id, name);"#,
+    r#"CREATE TABLE IF NOT EXISTS public.writeback_policies (
+  id text NOT NULL,
+  org_id text NOT NULL REFERENCES orgs(id),
+  dataset_id text NOT NULL REFERENCES datasets(id),
+  salesforce_connection_id text NOT NULL REFERENCES salesforce_connections(id),
+  object text NOT NULL CHECK (object IN ('Lead', 'Contact', 'Account')),
+  election_policy text NOT NULL,
+  writeback_allowlist jsonb NOT NULL,
+  field_mapping jsonb NOT NULL,
+  created_by text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (id)
+);
+CREATE INDEX IF NOT EXISTS writeback_policies_scope ON public.writeback_policies (dataset_id, salesforce_connection_id, object, id);
+CREATE INDEX IF NOT EXISTS writeback_policies_org ON public.writeback_policies (org_id, dataset_id);"#,
+    r#"CREATE TABLE IF NOT EXISTS public.merge_previews (
+  id text NOT NULL,
+  org_id text NOT NULL REFERENCES orgs(id),
+  dataset_id text NOT NULL REFERENCES datasets(id),
+  salesforce_connection_id text NOT NULL REFERENCES salesforce_connections(id),
+  object text NOT NULL CHECK (object IN ('Lead', 'Contact', 'Account')),
+  entity_id text NOT NULL,
+  fingerprint text NOT NULL,
+  format_version bigint NOT NULL,
+  lake_snapshot bigint NOT NULL,
+  origin_run_id text NOT NULL,
+  writeback_policy_id text NOT NULL REFERENCES writeback_policies(id),
+  master_record_key text NOT NULL,
+  member_count bigint NOT NULL,
+  proposal jsonb NOT NULL,
+  field_changes jsonb NOT NULL,
+  related_counts jsonb,
+  related_counts_state text NOT NULL CHECK (related_counts_state IN ('unavailable', 'known')),
+  status text NOT NULL DEFAULT 'planned' CHECK (status IN ('planned', 'approved', 'rejected', 'superseded')),
+  decided_by text,
+  decided_at timestamptz,
+  decision_reason text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (id),
+  UNIQUE (dataset_id, fingerprint)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS merge_previews_fingerprint ON public.merge_previews (dataset_id, fingerprint);
+CREATE INDEX IF NOT EXISTS merge_previews_status ON public.merge_previews (dataset_id, status, id);
+CREATE INDEX IF NOT EXISTS merge_previews_group ON public.merge_previews (dataset_id, salesforce_connection_id, object, entity_id);
+CREATE INDEX IF NOT EXISTS merge_previews_org ON public.merge_previews (org_id, dataset_id);"#,
+    r#"CREATE TABLE IF NOT EXISTS public.merge_preview_journal (
+  id text NOT NULL,
+  org_id text NOT NULL REFERENCES orgs(id),
+  dataset_id text NOT NULL REFERENCES datasets(id),
+  merge_preview_id text NOT NULL REFERENCES merge_previews(id),
+  from_status text,
+  to_status text NOT NULL,
+  fingerprint text NOT NULL,
+  actor text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (id)
+);
+CREATE INDEX IF NOT EXISTS merge_preview_journal_preview ON public.merge_preview_journal (dataset_id, merge_preview_id, id);
+CREATE INDEX IF NOT EXISTS merge_preview_journal_org ON public.merge_preview_journal (org_id, dataset_id);"#,
     r#"CREATE TABLE IF NOT EXISTS public.pair_labels (
   id text NOT NULL,
   org_id text NOT NULL REFERENCES orgs(id),
@@ -422,22 +500,6 @@ CREATE INDEX IF NOT EXISTS remote_attempts_dataset_history ON public.remote_atte
 );
 CREATE UNIQUE INDEX IF NOT EXISTS s3_ingest_cursors_org_source ON public.s3_ingest_cursors (org_id, source);
 CREATE INDEX IF NOT EXISTS s3_ingest_cursors_dataset ON public.s3_ingest_cursors (dataset_id, source);"#,
-    r#"CREATE TABLE IF NOT EXISTS public.salesforce_connections (
-  id text NOT NULL,
-  org_id text NOT NULL REFERENCES orgs(id),
-  name text NOT NULL,
-  instance_url text NOT NULL,
-  auth_kind text NOT NULL,
-  client_id text NOT NULL,
-  client_secret text NOT NULL,
-  api_version text NOT NULL,
-  active boolean NOT NULL DEFAULT true,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now(),
-  PRIMARY KEY (id),
-  UNIQUE (org_id, name)
-);
-CREATE UNIQUE INDEX IF NOT EXISTS salesforce_connections_org_name ON public.salesforce_connections (org_id, name);"#,
     r#"CREATE TABLE IF NOT EXISTS public.schedules (
   id text NOT NULL,
   org_id text NOT NULL REFERENCES orgs(id),

@@ -1,0 +1,67 @@
+kind: entity
+version: 1
+name: writeback_policy
+relation: writeback_policies
+description: "Which provider fields a dataset may write back to one connection's object, and how a master is elected there (#1305). Append-only: a change is a new row, and a row's id is the policy REVISION a merge preview binds, so an approval can be refused when the policy it was proposed under is no longer the active one. No row for a (connection, object) means nothing is proposed — the feature is opt-in and fails closed."
+key: [id]
+generate:
+  stores: [postgres]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "UUIDv7, minted by the application."
+  - name: org_id
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: id }
+    description: "The tenant; denormalized beside the dataset scope per V17."
+  - name: dataset_id
+    type: varchar
+    nullable: false
+    references: { relation: datasets, column: id }
+    description: "The dataset whose resolution results this concerns."
+  - name: salesforce_connection_id
+    type: varchar
+    nullable: false
+    references: { relation: salesforce_connections, column: id }
+    description: "The connection the policy writes through."
+  - name: object
+    type: varchar
+    nullable: false
+    accepted_values: [Lead, Contact, Account]
+    description: "The sObject the policy covers."
+  - name: election_policy
+    type: varchar
+    nullable: false
+    description: "One of er_golden's master election policies, used for this object's groups."
+  - name: writeback_allowlist
+    type: json
+    nullable: false
+    description: "The provider field names a merge may write on the master, as a JSON array. Fields outside it are never changed."
+  - name: field_mapping
+    type: json
+    nullable: false
+    description: "Canonical attribute → provider field, as a JSON object: where each golden value lands on the master."
+  - name: created_by
+    type: varchar
+    nullable: false
+    description: "The principal that set the policy."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the row was written."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the row last changed."
+indexes:
+  - name: writeback_policies_scope
+    columns: [dataset_id, salesforce_connection_id, object, id]
+  - name: writeback_policies_org
+    columns: [org_id, dataset_id]

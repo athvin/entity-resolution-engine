@@ -266,6 +266,10 @@ const DATASET_SCOPED: &[(&str, bool)] = &[
     ("remote_attempts", true),
     // Shipped after the re-key (#1296), listed for the same aged-store reason.
     ("source_delivery_provenance", true),
+    // Shipped after the re-key (#1305), listed for the same aged-store reason.
+    ("writeback_policies", true),
+    ("merge_previews", true),
+    ("merge_preview_journal", true),
     ("jobs", false),
     ("task_instances", false),
 ];

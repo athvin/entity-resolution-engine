@@ -1,0 +1,14 @@
+kind: statement
+operation: create
+mode: partial
+description: "Record one preview state change."
+params:
+  - { name: id, type: varchar }
+  - { name: org_id, type: varchar }
+  - { name: dataset_id, type: varchar }
+  - { name: merge_preview_id, type: varchar }
+  - { name: from_status, type: varchar, nullable: true }
+  - { name: to_status, type: varchar }
+  - { name: fingerprint, type: varchar }
+  - { name: actor, type: varchar }
+returns: none

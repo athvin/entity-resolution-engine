@@ -1014,6 +1014,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/orgs/{org}/datasets/{ds}/merge-previews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** a page of merge previews */
+        get: operations["get_orgs_by_org_datasets_by_ds_merge_previews"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/orgs/{org}/datasets/{ds}/merge-previews/{preview_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** one merge preview in full, with its history */
+        get: operations["get_orgs_by_org_datasets_by_ds_merge_previews_by_preview_id"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/orgs/{org}/datasets/{ds}/merge-previews/{preview_id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** approve a merge preview */
+        post: operations["post_orgs_by_org_datasets_by_ds_merge_previews_by_preview_id_approve"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/orgs/{org}/datasets/{ds}/merge-previews/{preview_id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** reject a merge preview */
+        post: operations["post_orgs_by_org_datasets_by_ds_merge_previews_by_preview_id_reject"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/orgs/{org}/datasets/{ds}/merges": {
         parameters: {
             query?: never;
@@ -1759,6 +1827,24 @@ export interface paths {
         get?: never;
         /** store one part */
         put: operations["put_orgs_by_org_datasets_by_ds_uploads_by_upload_id_parts_by_part"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/orgs/{org}/datasets/{ds}/writeback/policies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** a dataset's active writeback policies */
+        get: operations["get_orgs_by_org_datasets_by_ds_writeback_policies"];
+        /** set the writeback policy for one connection's object */
+        put: operations["put_orgs_by_org_datasets_by_ds_writeback_policies"];
         post?: never;
         delete?: never;
         options?: never;
@@ -3332,6 +3418,61 @@ export interface components {
         MergePlanList: {
             items: components["schemas"]["MergePlan"][];
         };
+        /** @description A merge preview in full: what approving it would do. */
+        MergePreviewDetail: {
+            decided_by?: string | null;
+            decision_reason?: string | null;
+            /** @description Provider field → `{before, after}` on the master. */
+            field_changes: unknown;
+            history: components["schemas"]["MergePreviewEvent"][];
+            /**
+             * @description The members' synchronized preimages, the master and the policy inputs
+             *     (the persisted proposal).
+             */
+            proposal: unknown;
+            /**
+             * @description Related-record counts per member; null while `related_counts_state` is
+             *     `unavailable`.
+             */
+            related_counts?: unknown;
+            related_counts_state: string;
+            summary: components["schemas"]["MergePreviewSummary"];
+        };
+        /** @description One state change in a preview's history. */
+        MergePreviewEvent: {
+            actor: string;
+            /** @description RFC 3339. */
+            at: string;
+            fingerprint: string;
+            from_status?: string | null;
+            to_status: string;
+        };
+        /** @description A page of merge previews. */
+        MergePreviewPage: {
+            items: components["schemas"]["MergePreviewSummary"][];
+            /** @description Pass as `cursor` for the next page; null on the last. */
+            next_cursor?: string | null;
+        };
+        /** @description One merge preview, without its member snapshots. */
+        MergePreviewSummary: {
+            connection_id: string;
+            /** @description RFC 3339. */
+            created_at: string;
+            entity_id: string;
+            /** @description Name it to approve or reject. */
+            fingerprint: string;
+            id: string;
+            /** Format: int64 */
+            lake_snapshot: number;
+            master_record_key: string;
+            /** Format: int64 */
+            member_count: number;
+            object: string;
+            /** @description The writeback policy revision it was built under. */
+            policy_revision: string;
+            /** @description `planned`, `approved`, `rejected` or `superseded`. */
+            status: string;
+        };
         /** @description One run's resolution metrics, kept so the dashboard can show a TREND rather than only a current value. The dashboard has always computed its numbers live from the lake, which means it can say what is true now and nothing about whether that is better or worse than last week — which is the question an operator actually has. */
         MetricSnapshot: {
             /**
@@ -4865,6 +5006,23 @@ export interface components {
             score: number;
             /** Format: double */
             validity?: number | null;
+        };
+        /** @description The active writeback policies of a dataset. */
+        WritebackPolicyList: {
+            items: components["schemas"]["WritebackPolicyView"][];
+        };
+        /** @description A writeback policy revision. */
+        WritebackPolicyView: {
+            connection_id: string;
+            /** @description RFC 3339. */
+            created_at: string;
+            created_by: string;
+            election_policy: string;
+            field_mapping: unknown;
+            /** @description The revision id a merge preview binds. */
+            id: string;
+            object: string;
+            writeback_allowlist: unknown;
         };
     };
     responses: never;
@@ -7699,6 +7857,166 @@ export interface operations {
             };
         };
     };
+    get_orgs_by_org_datasets_by_ds_merge_previews: {
+        parameters: {
+            query?: {
+                /** @description Only previews in this state. */
+                status?: string;
+                /** @description The `next_cursor` of the previous page. */
+                cursor?: string;
+                /** @description Maximum items, 1–200; default 50. */
+                limit?: string;
+            };
+            header?: never;
+            path: {
+                org: string;
+                ds: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful response. */
+            "2XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MergePreviewPage"];
+                };
+            };
+            /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        detail: string;
+                    };
+                };
+            };
+        };
+    };
+    get_orgs_by_org_datasets_by_ds_merge_previews_by_preview_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+                ds: string;
+                preview_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful response. */
+            "2XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MergePreviewDetail"];
+                };
+            };
+            /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        detail: string;
+                    };
+                };
+            };
+        };
+    };
+    post_orgs_by_org_datasets_by_ds_merge_previews_by_preview_id_approve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+                ds: string;
+                preview_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    fingerprint: string;
+                    reason?: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful response. */
+            "2XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MergePreviewSummary"];
+                };
+            };
+            /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        detail: string;
+                    };
+                };
+            };
+        };
+    };
+    post_orgs_by_org_datasets_by_ds_merge_previews_by_preview_id_reject: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+                ds: string;
+                preview_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    fingerprint: string;
+                    reason?: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful response. */
+            "2XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MergePreviewSummary"];
+                };
+            };
+            /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        detail: string;
+                    };
+                };
+            };
+        };
+    };
     post_orgs_by_org_datasets_by_ds_merges: {
         parameters: {
             query?: never;
@@ -9572,6 +9890,86 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UploadPart"];
+                };
+            };
+            /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        detail: string;
+                    };
+                };
+            };
+        };
+    };
+    get_orgs_by_org_datasets_by_ds_writeback_policies: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+                ds: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful response. */
+            "2XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WritebackPolicyList"];
+                };
+            };
+            /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        detail: string;
+                    };
+                };
+            };
+        };
+    };
+    put_orgs_by_org_datasets_by_ds_writeback_policies: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+                ds: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    connection_id: string;
+                    election_policy?: string | null;
+                    field_mapping: {
+                        [key: string]: string;
+                    };
+                    object: string;
+                    writeback_allowlist: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description Successful response. */
+            "2XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WritebackPolicyView"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */

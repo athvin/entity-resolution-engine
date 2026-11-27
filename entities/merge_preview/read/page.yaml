@@ -1,0 +1,11 @@
+kind: statement
+operation: read
+mode: full
+description: "A keyset page of a dataset's previews, optionally one status; `after` is the last id of the previous page ('' for the first)."
+params:
+  - { name: org_id, type: varchar }
+  - { name: dataset_id, type: varchar }
+  - { name: status, type: varchar }
+  - { name: after, type: varchar }
+  - { name: limit, type: bigint }
+returns: entity
