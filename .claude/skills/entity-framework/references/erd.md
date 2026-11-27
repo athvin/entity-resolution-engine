@@ -226,6 +226,33 @@ erDiagram
         timestamp created_at
         timestamp updated_at
     }
+    merge_restores {
+        varchar id PK
+        varchar org_id FK
+        varchar dataset_id FK
+        varchar merge_apply_id FK, UK
+        varchar merge_preview_id FK
+        varchar requested_by
+        varchar status "in {failed, partial, restored, restoring}"
+        varchar conflicts
+        varchar detail
+        timestamp created_at
+        timestamp updated_at
+    }
+    merge_restore_steps {
+        varchar id PK
+        varchar org_id FK
+        varchar dataset_id FK
+        varchar merge_restore_id FK
+        bigint seq
+        varchar kind "in {never_assert, recreate, revert_master, undelete}"
+        varchar target_id
+        varchar status "in {done, failed, in_flight}"
+        varchar outcome
+        varchar new_id
+        timestamp created_at
+        timestamp updated_at
+    }
     orgs {
         varchar id PK
         varchar name
@@ -539,6 +566,13 @@ erDiagram
     merge_preview_journal }o--|| merge_previews : "merge_preview_id → id"
     merge_preview_watermarks }o--|| orgs : "org_id → id"
     merge_preview_watermarks }o--|| datasets : "dataset_id → id"
+    merge_restores }o--|| orgs : "org_id → id"
+    merge_restores }o--|| datasets : "dataset_id → id"
+    merge_restores }o--|| merge_applies : "merge_apply_id → id"
+    merge_restores }o--|| merge_previews : "merge_preview_id → id"
+    merge_restore_steps }o--|| orgs : "org_id → id"
+    merge_restore_steps }o--|| datasets : "dataset_id → id"
+    merge_restore_steps }o--|| merge_restores : "merge_restore_id → id"
     pair_labels }o--|| orgs : "org_id → id"
     pair_labels }o--|| datasets : "dataset_id → id"
     remote_attempts }o--|| orgs : "org_id → id"
@@ -596,6 +630,8 @@ erDiagram
 | `merge_previews` | One immutable writeback proposal for a duplicate group in one connection's object (#993, #1305): the members' synchronized preimages, the elected master, the field changes, and the identity (snapshot, policy revision, fingerprint) an approval binds. Content columns never change; only the decision columns move, through a compare-and-set that names the fingerprint. A newer proposal for the same group supersedes a planned one rather than editing it. Contains customer data: never logged. |
 | `merge_preview_journal` | Every state change of a merge preview, append-only (#1305): planned, approved, rejected, superseded — and, from #995, the apply states. Written in the same transaction as the change it records, so the journal and the preview cannot disagree. |
 | `merge_preview_watermarks` | How far a dataset's merge-preview materialization has read (#993): the (snapshot_end, run id) of the last run whose previews are durably published. Advanced only by a compare-and-set naming the value it read, after the previews commit, so a retry or a concurrent job can never skip a run. |
+| `merge_restores` | The undo of one applied merge (#996): never-match assertions so resolution does not re-propose it, victims undeleted from the Salesforce Recycle Bin (recreated from the apply's preimage when the bin no longer has them), and the master's fields reverted where Salesforce still holds the values the apply wrote. At most one per apply; a repeated undo returns it. Records reparented by the merge are NOT moved back. |
+| `merge_restore_steps` | One compensation of an undo (#996), written IN FLIGHT before its provider call and settled after, so a retry after a partial restore resumes rather than repeats. A recreated victim's step carries the old→new identity mapping. |
 | `orgs` | A tenant: its config pointer, lake env, lifecycle state and active config version. |
 | `pair_labels` | A human (or model) verdict on one candidate pair — the training signal the engine has always been able to learn from and never had. One row per (org, pair): a re-label corrects the previous verdict rather than stacking another. |
 | `remote_attempts` | Write-ahead remote execution identity and dataset fence; unresolved attempts survive task termination and dispatcher restarts. No SQL, parameters, profiles or credentials are stored. |

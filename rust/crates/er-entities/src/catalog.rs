@@ -2200,6 +2200,156 @@ indexes:
 "#,
     ),
     (
+        "merge_restore",
+        r#"kind: entity
+version: 1
+name: merge_restore
+relation: merge_restores
+description: "The undo of one applied merge (#996): never-match assertions so resolution does not re-propose it, victims undeleted from the Salesforce Recycle Bin (recreated from the apply's preimage when the bin no longer has them), and the master's fields reverted where Salesforce still holds the values the apply wrote. At most one per apply; a repeated undo returns it. Records reparented by the merge are NOT moved back."
+key: [id]
+generate:
+  stores: [postgres]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "UUIDv7, minted by the application."
+  - name: org_id
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: id }
+    description: "The tenant; denormalized beside the dataset scope per V17."
+  - name: dataset_id
+    type: varchar
+    nullable: false
+    references: { relation: datasets, column: id }
+    description: "The dataset whose applied merge this restores."
+  - name: merge_apply_id
+    type: varchar
+    nullable: false
+    references: { relation: merge_applies, column: id }
+    description: "The apply being undone."
+  - name: merge_preview_id
+    type: varchar
+    nullable: false
+    references: { relation: merge_previews, column: id }
+    description: "The preview whose history records the undo."
+  - name: requested_by
+    type: varchar
+    nullable: false
+    description: "The principal that asked for the undo."
+  - name: status
+    type: varchar
+    nullable: false
+    default: "'restoring'"
+    accepted_values: [restoring, restored, partial, failed]
+    description: "restored: everything undone; partial: undone except the listed conflicts; failed: nothing could be done safely."
+  - name: conflicts
+    type: varchar
+    nullable: false
+    default: "'[]'"
+    description: "JSON list of what was refused rather than overwritten — a master field someone changed after the apply, a recreate whose outcome is unknown."
+  - name: detail
+    type: varchar
+    description: "Why it settled as it did. Never a record value or token."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the row was written."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the row last changed."
+indexes:
+  - name: merge_restores_apply
+    columns: [merge_apply_id]
+    unique: true
+  - name: merge_restores_dataset
+    columns: [org_id, dataset_id, status]
+"#,
+    ),
+    (
+        "merge_restore_step",
+        r#"kind: entity
+version: 1
+name: merge_restore_step
+relation: merge_restore_steps
+description: "One compensation of an undo (#996), written IN FLIGHT before its provider call and settled after, so a retry after a partial restore resumes rather than repeats. A recreated victim's step carries the old→new identity mapping."
+key: [id]
+generate:
+  stores: [postgres]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "UUIDv7, minted by the application."
+  - name: org_id
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: id }
+    description: "The tenant; denormalized beside the dataset scope per V17."
+  - name: dataset_id
+    type: varchar
+    nullable: false
+    references: { relation: datasets, column: id }
+    description: "The dataset whose applied merge this restores."
+  - name: merge_restore_id
+    type: varchar
+    nullable: false
+    references: { relation: merge_restores, column: id }
+    description: "The undo it belongs to."
+  - name: seq
+    type: bigint
+    nullable: false
+    description: "Order within the undo."
+  - name: kind
+    type: varchar
+    nullable: false
+    accepted_values: [never_assert, undelete, recreate, revert_master]
+    description: "What the step does."
+  - name: target_id
+    type: varchar
+    nullable: false
+    description: "The Salesforce id acted on (the victim, or the master); the record key for never_assert."
+  - name: status
+    type: varchar
+    nullable: false
+    default: "'in_flight'"
+    accepted_values: [in_flight, done, failed]
+    description: "Whether the step is known to have landed."
+  - name: outcome
+    type: varchar
+    description: "ok, already_present, verified, the provider error code, or why it was refused."
+  - name: new_id
+    type: varchar
+    description: "For recreate: the id Salesforce gave the recreated record (old id = target_id)."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the row was written."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the row last changed."
+indexes:
+  - name: merge_restore_steps_seq
+    columns: [merge_restore_id, seq]
+    unique: true
+  - name: merge_restore_steps_org
+    columns: [org_id, dataset_id]
+"#,
+    ),
+    (
         "metric_snapshot",
         r#"kind: entity
 version: 1

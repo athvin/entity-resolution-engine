@@ -1152,6 +1152,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/orgs/{org}/datasets/{ds}/merge-previews/{preview_id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** an applied merge's undo, its steps and conflicts */
+        get: operations["get_orgs_by_org_datasets_by_ds_merge_previews_by_preview_id_restore"];
+        put?: never;
+        /** undo an applied merge */
+        post: operations["post_orgs_by_org_datasets_by_ds_merge_previews_by_preview_id_restore"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/orgs/{org}/datasets/{ds}/merges": {
         parameters: {
             query?: never;
@@ -3542,6 +3560,31 @@ export interface components {
             policy_revision: string;
             /** @description `planned`, `approved`, `rejected` or `superseded`. */
             status: string;
+        };
+        /** @description One compensation step of an undo. */
+        MergeRestoreStepView: {
+            /** @description `never_assert`, `undelete`, `recreate` or `revert_master`. */
+            kind: string;
+            /** @description For `recreate`: the new Salesforce id of the recreated record. */
+            new_id?: string | null;
+            outcome?: string | null;
+            /** @description `in_flight`, `done` or `failed`. */
+            status: string;
+            /** @description The Salesforce id acted on (the record key for `never_assert`). */
+            target_id: string;
+        };
+        /** @description The undo of an applied merge. */
+        MergeRestoreView: {
+            /** @description What was refused rather than overwritten. */
+            conflicts: Record<string, never>[];
+            detail?: string | null;
+            /** @description The job working on it, when this request queued one. */
+            job_id?: string | null;
+            /** @description Always false: records the merge reparented to the master stay there. */
+            related_records_reverted: boolean;
+            /** @description `restoring`, `restored`, `partial` or `failed`. */
+            status: string;
+            steps: components["schemas"]["MergeRestoreStepView"][];
         };
         /** @description `POST …/merge-previews/apply`: the job that will apply approved previews. */
         MergesApplying: {
@@ -8328,6 +8371,76 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MergePreviewSummary"];
+                };
+            };
+            /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        detail: string;
+                    };
+                };
+            };
+        };
+    };
+    get_orgs_by_org_datasets_by_ds_merge_previews_by_preview_id_restore: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+                ds: string;
+                preview_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful response. Payload types are described only at envelope granularity. */
+            "2XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        detail: string;
+                    };
+                };
+            };
+        };
+    };
+    post_orgs_by_org_datasets_by_ds_merge_previews_by_preview_id_restore: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+                ds: string;
+                preview_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful response. Payload types are described only at envelope granularity. */
+            "2XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */

@@ -1,0 +1,72 @@
+kind: entity
+version: 1
+name: merge_restore_step
+relation: merge_restore_steps
+description: "One compensation of an undo (#996), written IN FLIGHT before its provider call and settled after, so a retry after a partial restore resumes rather than repeats. A recreated victim's step carries the old→new identity mapping."
+key: [id]
+generate:
+  stores: [postgres]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "UUIDv7, minted by the application."
+  - name: org_id
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: id }
+    description: "The tenant; denormalized beside the dataset scope per V17."
+  - name: dataset_id
+    type: varchar
+    nullable: false
+    references: { relation: datasets, column: id }
+    description: "The dataset whose applied merge this restores."
+  - name: merge_restore_id
+    type: varchar
+    nullable: false
+    references: { relation: merge_restores, column: id }
+    description: "The undo it belongs to."
+  - name: seq
+    type: bigint
+    nullable: false
+    description: "Order within the undo."
+  - name: kind
+    type: varchar
+    nullable: false
+    accepted_values: [never_assert, undelete, recreate, revert_master]
+    description: "What the step does."
+  - name: target_id
+    type: varchar
+    nullable: false
+    description: "The Salesforce id acted on (the victim, or the master); the record key for never_assert."
+  - name: status
+    type: varchar
+    nullable: false
+    default: "'in_flight'"
+    accepted_values: [in_flight, done, failed]
+    description: "Whether the step is known to have landed."
+  - name: outcome
+    type: varchar
+    description: "ok, already_present, verified, the provider error code, or why it was refused."
+  - name: new_id
+    type: varchar
+    description: "For recreate: the id Salesforce gave the recreated record (old id = target_id)."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the row was written."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the row last changed."
+indexes:
+  - name: merge_restore_steps_seq
+    columns: [merge_restore_id, seq]
+    unique: true
+  - name: merge_restore_steps_org
+    columns: [org_id, dataset_id]

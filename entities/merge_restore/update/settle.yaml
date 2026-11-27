@@ -1,0 +1,11 @@
+kind: statement
+operation: update
+mode: partial
+description: "RESTORING → a terminal state, exactly once."
+params:
+  - { name: to_status, type: varchar }
+  - { name: conflicts, type: varchar }
+  - { name: detail, type: varchar, nullable: true }
+  - { name: id, type: varchar }
+  - { name: org_id, type: varchar }
+returns: entity

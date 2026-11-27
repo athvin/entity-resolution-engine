@@ -1,0 +1,8 @@
+kind: statement
+operation: read
+mode: full
+description: "An undo's steps in order."
+params:
+  - { name: org_id, type: varchar }
+  - { name: merge_restore_id, type: varchar }
+returns: entity

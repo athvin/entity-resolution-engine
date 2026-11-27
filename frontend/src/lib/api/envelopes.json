@@ -41,6 +41,7 @@
   "GET /v1/orgs/{org}/datasets/{ds}/merge-plans": { "envelope": "wrapped", "key": "items" },
   "GET /v1/orgs/{org}/datasets/{ds}/merge-previews": { "envelope": "record", "keys": ["items", "next_cursor"] },
   "GET /v1/orgs/{org}/datasets/{ds}/merge-previews/{preview_id}": { "envelope": "record", "keys": ["summary", "proposal", "field_changes", "related_counts", "related_counts_state", "decided_by", "decision_reason", "history"] },
+  "GET /v1/orgs/{org}/datasets/{ds}/merge-previews/{preview_id}/restore": { "envelope": "scalar" },
   "GET /v1/orgs/{org}/datasets/{ds}/metrics": { "envelope": "scalar" },
   "GET /v1/orgs/{org}/datasets/{ds}/models": { "envelope": "record", "keys": ["items", "active"] },
   "GET /v1/orgs/{org}/datasets/{ds}/models/{name}/versions/{version}": { "envelope": "scalar" },

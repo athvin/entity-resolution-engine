@@ -240,6 +240,58 @@ impl Default for ApplyMerges {
     }
 }
 
+/// Undo applied merges (#996) — see [`crate::merge_restore`].
+pub struct RestoreMerges {
+    pub egress: crate::urlguard::Egress,
+}
+
+impl Default for RestoreMerges {
+    fn default() -> Self {
+        Self {
+            egress: crate::urlguard::Egress::Guarded,
+        }
+    }
+}
+
+impl ControlTask<PgClient> for RestoreMerges {
+    const NAME: &'static str = "restore_merges";
+    const VERSION: u32 = 1;
+    type Input = ();
+    type Output = Plan<crate::merge_restore::Report>;
+
+    async fn run(
+        &mut self,
+        ctx: &mut ControlCtx<'_, PgClient>,
+        (): Self::Input,
+    ) -> Result<Outcome<Self::Output>, TaskError> {
+        let Some(dataset_id) = ctx.order.dataset_id.clone() else {
+            return Err(TaskError::Failed(er_errors::ErError::precondition(
+                "a merge_restore job must name a dataset".to_string(),
+            )));
+        };
+        let report = crate::merge_restore::run(
+            ctx.client,
+            &ctx.order.org_id,
+            &dataset_id,
+            &ctx.order.job_id,
+            self.egress,
+            crate::merge_apply::Limits::default(),
+        )
+        .await
+        .map_err(|e| {
+            TaskError::Failed(
+                er_errors::ErError::stage_failure(format!(
+                    "merge restore: {}",
+                    crate::errfmt::chain(&e)
+                ))
+                .with_class(er_errors::ErrorClass::TransientIo),
+            )
+        })?;
+        let counters = serde_json::to_value(&report).unwrap_or_default();
+        Ok(Outcome::Done(Plan(report), er_dag::Counters(counters)))
+    }
+}
+
 impl ControlTask<PgClient> for ApplyMerges {
     const NAME: &'static str = "apply_merges";
     const VERSION: u32 = 1;

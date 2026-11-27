@@ -1,0 +1,13 @@
+kind: statement
+operation: create
+mode: partial
+description: "Record a step in flight, before its call."
+params:
+  - { name: id, type: varchar }
+  - { name: org_id, type: varchar }
+  - { name: dataset_id, type: varchar }
+  - { name: merge_restore_id, type: varchar }
+  - { name: seq, type: bigint }
+  - { name: kind, type: varchar }
+  - { name: target_id, type: varchar }
+returns: none

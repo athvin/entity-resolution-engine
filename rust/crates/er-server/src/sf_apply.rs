@@ -352,6 +352,160 @@ pub async fn merge(
     }
 }
 
+/// Fields Salesforce sets itself; never sent on a recreate.
+const SYSTEM_FIELDS: [&str; 10] = [
+    "Id",
+    "IsDeleted",
+    "MasterRecordId",
+    "SystemModstamp",
+    "CreatedDate",
+    "CreatedById",
+    "LastModifiedDate",
+    "LastModifiedById",
+    "LastActivityDate",
+    "LastViewedDate",
+];
+
+/// Current values of `fields` on one record (REST query).
+///
+/// # Errors
+/// See [`CallError`]; a missing record is `Rejected("NOT_FOUND")`.
+pub async fn read_fields(
+    org: &Org,
+    object: &str,
+    id: &str,
+    fields: &[String],
+) -> Result<BTreeMap<String, serde_json::Value>, CallError> {
+    if !valid_id(id) || fields.is_empty() || fields.iter().any(|f| !valid_field(f)) {
+        return Err(CallError::Rejected("INVALID_FIELD".into()));
+    }
+    let soql = format!(
+        "SELECT {} FROM {object} WHERE Id = '{id}'",
+        fields.join(", ")
+    );
+    let url = format!("{}/services/data/{}/query", base(org), org.api_version);
+    let body = call(
+        org,
+        |h| {
+            h.get(&url)
+                .bearer_auth(&org.access_token)
+                .query(&[("q", soql.as_str())])
+        },
+        &url,
+        false,
+    )
+    .await?;
+    let v: serde_json::Value = serde_json::from_str(&body)
+        .map_err(|_| CallError::Transient("query response is not JSON".into()))?;
+    let Some(record) = v.get("records").and_then(|r| r.get(0)) else {
+        return Err(CallError::Rejected("NOT_FOUND".into()));
+    };
+    Ok(fields
+        .iter()
+        .map(|f| {
+            (
+                f.clone(),
+                record.get(f).cloned().unwrap_or(serde_json::Value::Null),
+            )
+        })
+        .collect())
+}
+
+fn valid_field(f: &str) -> bool {
+    !f.is_empty() && f.len() <= 80 && f.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+}
+
+/// Undelete records from the Recycle Bin (SOAP `undelete()`). Per id: `Ok`
+/// when restored, or the error code — `UNDELETE_FAILED` /
+/// `ENTITY_IS_DELETED` when the bin no longer has it.
+///
+/// # Errors
+/// See [`CallError`]; `Ambiguous` means re-read before deciding.
+pub async fn undelete(org: &Org, ids: &[String]) -> Result<Vec<Result<(), String>>, CallError> {
+    if ids.is_empty() || ids.iter().any(|v| !valid_id(v)) {
+        return Err(CallError::Rejected("INVALID_ID".into()));
+    }
+    let version = org.api_version.trim_start_matches('v');
+    let url = format!("{}/services/Soap/u/{version}", base(org));
+    let id_xml: String = ids.iter().fold(String::new(), |mut out, v| {
+        use std::fmt::Write as _;
+        let _ = write!(out, "<urn:ids>{v}</urn:ids>");
+        out
+    });
+    let envelope = format!(
+        concat!(
+            r#"<?xml version="1.0" encoding="utf-8"?>"#,
+            r#"<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:urn="urn:partner.soap.sforce.com">"#,
+            "<soapenv:Header><urn:SessionHeader><urn:sessionId>{token}</urn:sessionId></urn:SessionHeader></soapenv:Header>",
+            "<soapenv:Body><urn:undelete>{ids}</urn:undelete></soapenv:Body></soapenv:Envelope>"
+        ),
+        token = xml_escape(&org.access_token),
+        ids = id_xml,
+    );
+    let body = call(
+        org,
+        |h| {
+            h.post(&url)
+                .header(reqwest::header::CONTENT_TYPE, "text/xml; charset=utf-8")
+                .header("SOAPAction", "undelete")
+                .body(envelope.clone())
+        },
+        &url,
+        true,
+    )
+    .await?;
+    let results: Vec<Result<(), String>> = body
+        .split("<result>")
+        .skip(1)
+        .map(|r| {
+            if between(r, "<success>", "</success>") == Some("true") {
+                Ok(())
+            } else {
+                Err(error_code(r))
+            }
+        })
+        .collect();
+    if results.len() == ids.len() {
+        Ok(results)
+    } else {
+        Err(CallError::Ambiguous(
+            "undelete returned an unexpected result count".into(),
+        ))
+    }
+}
+
+/// Recreate a record from its snapshot fields (REST create); system fields
+/// are dropped. Returns the new id.
+///
+/// # Errors
+/// See [`CallError`]; `Ambiguous` means the record may exist.
+pub async fn create(
+    org: &Org,
+    object: &str,
+    fields: &BTreeMap<String, serde_json::Value>,
+) -> Result<String, CallError> {
+    let body: BTreeMap<&String, &serde_json::Value> = fields
+        .iter()
+        .filter(|(k, _)| valid_field(k) && !SYSTEM_FIELDS.contains(&k.as_str()))
+        .collect();
+    let url = format!(
+        "{}/services/data/{}/sobjects/{object}",
+        base(org),
+        org.api_version
+    );
+    let reply = call(
+        org,
+        |h| h.post(&url).bearer_auth(&org.access_token).json(&body),
+        &url,
+        true,
+    )
+    .await?;
+    serde_json::from_str::<serde_json::Value>(&reply)
+        .ok()
+        .and_then(|v| v.get("id").and_then(|i| i.as_str()).map(str::to_string))
+        .ok_or_else(|| CallError::Ambiguous("create returned no id".into()))
+}
+
 fn xml_escape(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")

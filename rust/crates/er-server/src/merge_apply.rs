@@ -192,7 +192,11 @@ pub async fn run(
     Ok(report)
 }
 
-async fn job_canceling(client: &Client, org_id: &str, job_id: &str) -> Result<bool, ApplyFatal> {
+pub(crate) async fn job_canceling(
+    client: &Client,
+    org_id: &str,
+    job_id: &str,
+) -> Result<bool, ApplyFatal> {
     Ok(crate::pg::get_job(client, org_id, job_id)
         .await?
         .is_some_and(|j| j.state == "canceling" || j.state == "canceled"))
@@ -200,7 +204,7 @@ async fn job_canceling(client: &Client, org_id: &str, job_id: &str) -> Result<bo
 
 /// A delegated session for the connection, or why there is none. Attended:
 /// the job was requested by a principal through the API.
-async fn delegated(
+pub(crate) async fn delegated(
     client: &Client,
     org_id: &str,
     connection_id: &str,

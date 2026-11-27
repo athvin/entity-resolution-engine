@@ -84,6 +84,7 @@ mod pg_merge_apply;
 mod pg_merge_group;
 mod pg_merge_preview_api;
 mod pg_merge_preview_dag;
+mod pg_merge_restore;
 mod pg_migrate_plan;
 mod pg_migrate_tenants;
 mod pg_model_registry;

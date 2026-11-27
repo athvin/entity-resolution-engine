@@ -36,6 +36,8 @@ pub mod merge_apply_operation;
 pub mod merge_preview;
 pub mod merge_preview_journal;
 pub mod merge_preview_watermark;
+pub mod merge_restore;
+pub mod merge_restore_step;
 pub mod metric_snapshot;
 pub mod metric_snapshot_source;
 pub mod org;

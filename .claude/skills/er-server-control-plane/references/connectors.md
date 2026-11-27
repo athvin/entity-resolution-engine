@@ -342,6 +342,26 @@ A mutation that may have reached Salesforce (timeout, reset, 5xx other than 503)
 is never retried in-call. Every transition is on the preview's history
 (`GET …/merge-previews/{id}`).
 
+### 4.3.3 Restore (as built, #996)
+
+`POST /v1/orgs/{org}/datasets/{ds}/merge-previews/{preview_id}/restore` (Admin)
+records one undo per apply (a repeat request returns it and queues nothing) and
+queues a `merge_restore` job (`restore_merges`, `src/merge_restore.rs`); `GET`
+on the same path (Viewer) shows its steps and conflicts. 409 unless the apply
+merged something. Composition:
+
+| Step | Mechanism |
+|---|---|
+| resolution | a never-match assertion per (master, victim), staged exactly as the engine's unmerge does, so resolution does not re-propose it |
+| victims | SOAP `undelete()` from the Recycle Bin; when the bin no longer has the record, it is recreated from the apply's preimage (system fields dropped) and the step records old id → new id; a victim already live is left alone |
+| master | each field the apply wrote is reverted to its preimage value only where Salesforce still holds what the apply wrote; a value already back is left; anything else is a conflict, never overwritten |
+| progress | `merge_restore_steps`, in flight before each call; a lost undelete is resolved by the next run's re-read; a recreate with an unknown outcome is a conflict, never retried (it could duplicate the record) |
+| outcome | `restored`, `partial` (with conflicts) or `failed`, journaled on the preview |
+
+**Records the merge reparented to the master — opportunities, cases, activities,
+attachments — are not moved back.** The view says so (`related_records_reverted:
+false`). Salesforce Files archival and audit-driven retry remain #530.
+
 ### 4.4 Explicit v1 boundaries
 
 - Writeback via `merge()` (Lead/Contact/Account) and `upsert`.
