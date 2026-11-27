@@ -1,0 +1,15 @@
+kind: statement
+operation: create
+mode: partial
+description: "Write a new rule revision; the newest per (connection, object) is in force."
+params:
+  - { name: id, type: varchar }
+  - { name: org_id, type: varchar }
+  - { name: dataset_id, type: varchar }
+  - { name: salesforce_connection_id, type: varchar }
+  - { name: object, type: varchar }
+  - { name: enabled, type: boolean }
+  - { name: min_score, type: double }
+  - { name: max_members, type: bigint }
+  - { name: created_by, type: varchar }
+returns: entity

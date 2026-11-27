@@ -16,6 +16,7 @@ params:
   - { name: writeback_policy_id, type: varchar }
   - { name: master_record_key, type: varchar }
   - { name: member_count, type: bigint }
+  - { name: score, type: double, nullable: true }
   - { name: proposal, type: json }
   - { name: field_changes, type: json }
   - { name: related_counts, type: json, nullable: true }

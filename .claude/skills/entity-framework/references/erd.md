@@ -178,6 +178,19 @@ erDiagram
         timestamp created_at
         timestamp updated_at
     }
+    merge_auto_approvals {
+        varchar id PK
+        varchar org_id FK
+        varchar dataset_id FK
+        varchar salesforce_connection_id FK
+        varchar object "in {Account, Contact, Lead}"
+        boolean enabled
+        double min_score
+        bigint max_members
+        varchar created_by
+        timestamp created_at
+        timestamp updated_at
+    }
     merge_previews {
         varchar id PK
         varchar org_id FK
@@ -192,6 +205,7 @@ erDiagram
         varchar writeback_policy_id FK
         varchar master_record_key
         bigint member_count
+        double score
         json proposal
         json field_changes
         json related_counts
@@ -557,6 +571,9 @@ erDiagram
     merge_apply_operations }o--|| orgs : "org_id → id"
     merge_apply_operations }o--|| datasets : "dataset_id → id"
     merge_apply_operations }o--|| merge_applies : "merge_apply_id → id"
+    merge_auto_approvals }o--|| orgs : "org_id → id"
+    merge_auto_approvals }o--|| datasets : "dataset_id → id"
+    merge_auto_approvals }o--|| salesforce_connections : "salesforce_connection_id → id"
     merge_previews }o--|| orgs : "org_id → id"
     merge_previews }o--|| datasets : "dataset_id → id"
     merge_previews }o--|| salesforce_connections : "salesforce_connection_id → id"
@@ -627,6 +644,7 @@ erDiagram
 | `matching_models` | An immutable version of a tenant's matching model: the settings document the engine scores against, its hash, provenance and activation state. |
 | `merge_applies` | The apply of one approved merge preview to Salesforce (#995). At most one per preview — the unique index is what makes APPROVED → APPLYING atomic — and it settles exactly once into applied, failed, skipped_stale or applied_externally. The preimage (members' live revision and the proposal's snapshot fields) is written before any mutation. |
 | `merge_apply_operations` | One provider mutation of an apply (#995) — the master field update, or one merge of up to two victims — written IN FLIGHT before the call and settled after it. An operation found in flight on resume is never replayed blind: the apply re-reads Salesforce to decide whether it landed. |
+| `merge_auto_approvals` | A dataset's auto-approval rule for one connection's object (#997): a merge preview whose score is at least min_score and whose group has at most max_members is approved as it is published, attributed to this revision. Append-only — a change (including disabling) is a new row, and the newest per (connection, object) is in force. Evaluated ONLY when a preview is published: changing a rule never rewrites a decision already made, and a preview with no score evidence is never auto-approved. |
 | `merge_previews` | One immutable writeback proposal for a duplicate group in one connection's object (#993, #1305): the members' synchronized preimages, the elected master, the field changes, and the identity (snapshot, policy revision, fingerprint) an approval binds. Content columns never change; only the decision columns move, through a compare-and-set that names the fingerprint. A newer proposal for the same group supersedes a planned one rather than editing it. Contains customer data: never logged. |
 | `merge_preview_journal` | Every state change of a merge preview, append-only (#1305): planned, approved, rejected, superseded — and, from #995, the apply states. Written in the same transaction as the change it records, so the journal and the preview cannot disagree. |
 | `merge_preview_watermarks` | How far a dataset's merge-preview materialization has read (#993): the (snapshot_end, run id) of the last run whose previews are durably published. Advanced only by a compare-and-set naming the value it read, after the previews commit, so a retry or a concurrent job can never skip a run. |

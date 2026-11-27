@@ -10156,6 +10156,12 @@ struct MergePreviewSummary {
     status: String,
     master_record_key: String,
     member_count: i64,
+    /// Match evidence: for each victim, its strongest scored edge to another
+    /// member, then the weakest of those. Null when absent.
+    score: Option<f64>,
+    /// Who decided it — a principal, or `policy:<rule id>` for an
+    /// auto-approval.
+    decided_by: Option<String>,
     lake_snapshot: i64,
     /// The writeback policy revision it was built under.
     policy_revision: String,
@@ -10174,6 +10180,8 @@ impl From<&er_entities::merge_preview::MergePreview> for MergePreviewSummary {
             status: p.status.clone(),
             master_record_key: p.master_record_key.clone(),
             member_count: p.member_count,
+            score: p.score,
+            decided_by: p.decided_by.clone(),
             lake_snapshot: p.lake_snapshot,
             policy_revision: p.writeback_policy_id.clone(),
             created_at: pg::ts(&p.created_at),
@@ -10216,6 +10224,17 @@ struct MergePreviewDetail {
     decided_by: Option<String>,
     decision_reason: Option<String>,
     history: Vec<MergePreviewEvent>,
+    /// The apply to Salesforce, once one has begun (#995).
+    apply: Option<MergeApplyView>,
+}
+
+/// An apply's outcome.
+#[derive(Serialize, utoipa::ToSchema)]
+struct MergeApplyView {
+    /// `applying`, `applied`, `failed`, `skipped_stale` or `applied_externally`.
+    status: String,
+    /// Why it settled as it did.
+    detail: Option<String>,
 }
 
 /// The query parameters of `merge_previews_list`.
@@ -10785,6 +10804,15 @@ async fn merge_preview_detail(
         },
         Err(e) => return pg_err(e),
     };
+    let apply = match er_entities::merge_apply::read::by_preview(&client, &d.org_id, &d.id, &row.id)
+        .await
+    {
+        Ok(rows) => rows.into_iter().next().map(|a| MergeApplyView {
+            status: a.status,
+            detail: a.detail,
+        }),
+        Err(e) => return pg_err(e),
+    };
     let history = match er_entities::merge_preview_journal::read::by_preview(
         &client, &d.org_id, &d.id, &row.id,
     )
@@ -10811,6 +10839,7 @@ async fn merge_preview_detail(
         decided_by: row.decided_by.clone(),
         decision_reason: row.decision_reason.clone(),
         history,
+        apply,
     })
     .into_response()
 }
@@ -10840,6 +10869,251 @@ async fn reject_merge_preview(
     Json(body): Json<PreviewDecisionIn>,
 ) -> impl IntoResponse {
     decide_merge_preview(&principal, &state, &org, &ds, &preview_id, body, "rejected").await
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BatchDecisionItem {
+    id: String,
+    /// The fingerprint the reviewer saw.
+    fingerprint: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BatchDecisionIn {
+    /// `approve` or `reject`.
+    decision: String,
+    #[serde(default)]
+    reason: Option<String>,
+    /// At most 100.
+    items: Vec<BatchDecisionItem>,
+}
+
+/// One item of a batch decision.
+#[derive(Serialize, utoipa::ToSchema)]
+struct BatchDecisionResult {
+    id: String,
+    /// The HTTP status the single-item route would have answered.
+    status: u16,
+    /// The preview's state after, when decided.
+    preview_status: Option<String>,
+    /// Why it was refused, when it was.
+    detail: Option<String>,
+}
+
+/// The outcome of a batch decision, item by item.
+#[derive(Serialize, utoipa::ToSchema)]
+struct BatchDecisionOut {
+    results: Vec<BatchDecisionResult>,
+}
+
+/// Steward+: approve or reject several merge previews at once
+/// (`POST /v1/orgs/{org}/datasets/{ds}/merge-previews/decide`). Each item
+/// goes through exactly the single-item route's checks — the fingerprint
+/// the reviewer saw, the proposal still validating, its policy revision and
+/// connection still live — and fails or succeeds on its own.
+async fn decide_merge_previews(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, ds)): Path<(String, String)>,
+    Json(body): Json<BatchDecisionIn>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Steward) {
+        return e.into_response();
+    }
+    let to_status = match body.decision.as_str() {
+        "approve" => "approved",
+        "reject" => "rejected",
+        _ => {
+            return detail_err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "decision must be approve or reject",
+            );
+        }
+    };
+    if body.items.is_empty() || body.items.len() > 100 {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "items must hold 1 to 100 previews",
+        );
+    }
+    let mut results = Vec::with_capacity(body.items.len());
+    for item in body.items {
+        let resp = decide_merge_preview(
+            &principal,
+            &state,
+            &org,
+            &ds,
+            &item.id,
+            PreviewDecisionIn {
+                fingerprint: item.fingerprint,
+                reason: body.reason.clone(),
+            },
+            to_status,
+        )
+        .await;
+        let status = resp.status().as_u16();
+        let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20)
+            .await
+            .unwrap_or_default();
+        let v: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+        results.push(BatchDecisionResult {
+            id: item.id,
+            status,
+            preview_status: v.get("status").and_then(Value::as_str).map(str::to_string),
+            detail: v.get("detail").and_then(Value::as_str).map(str::to_string),
+        });
+    }
+    Json(BatchDecisionOut { results }).into_response()
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AutoApprovalIn {
+    connection_id: String,
+    /// `Lead`, `Contact` or `Account`.
+    object: String,
+    /// false turns the rule off (a new revision that approves nothing).
+    enabled: bool,
+    /// The lowest group score approved, 0–1.
+    min_score: f64,
+    /// The largest group approved, master included; at least 2.
+    max_members: i64,
+}
+
+/// An auto-approval rule revision.
+#[derive(Serialize, utoipa::ToSchema)]
+struct AutoApprovalView {
+    /// The revision; auto-approved previews name it as `policy:<id>`.
+    id: String,
+    connection_id: String,
+    object: String,
+    enabled: bool,
+    min_score: f64,
+    max_members: i64,
+    created_by: String,
+    /// RFC 3339.
+    created_at: String,
+}
+
+impl From<&er_entities::merge_auto_approval::MergeAutoApproval> for AutoApprovalView {
+    fn from(r: &er_entities::merge_auto_approval::MergeAutoApproval) -> Self {
+        Self {
+            id: r.id.clone(),
+            connection_id: r.salesforce_connection_id.clone(),
+            object: r.object.clone(),
+            enabled: r.enabled,
+            min_score: r.min_score,
+            max_members: r.max_members,
+            created_by: r.created_by.clone(),
+            created_at: pg::ts(&r.created_at),
+        }
+    }
+}
+
+/// The rules in force.
+#[derive(Serialize, utoipa::ToSchema)]
+struct AutoApprovalList {
+    items: Vec<AutoApprovalView>,
+}
+
+/// Admin+: set the auto-approval rule for one connection's object
+/// (`PUT /v1/orgs/{org}/datasets/{ds}/writeback/auto-approval`). A preview
+/// whose score is at least `min_score` and whose group is at most
+/// `max_members` is approved as it is published, attributed to this
+/// revision. The rule only decides previews published after it: previews
+/// already stored keep their state, and a preview with no score evidence is
+/// never auto-approved. Append-only; `enabled: false` turns it off.
+async fn put_auto_approval(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, ds)): Path<(String, String)>,
+    Json(body): Json<AutoApprovalIn>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Admin) {
+        return e.into_response();
+    }
+    if !["Lead", "Contact", "Account"].contains(&body.object.as_str()) {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "object must be Lead, Contact or Account",
+        );
+    }
+    if !(0.0..=1.0).contains(&body.min_score) || body.max_members < 2 {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "min_score must be within 0–1 and max_members at least 2",
+        );
+    }
+    let (client, org_row, d) = match upload_scope_any(&state, &org, &ds).await {
+        Ok(t) => t,
+        Err(r) => return *r,
+    };
+    match pg::list_salesforce_connections(&client, &org_row.id).await {
+        Ok(conns) if conns.iter().any(|c| c.id == body.connection_id && c.active) => {}
+        Ok(_) => {
+            return detail_err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "no active connection with that id in this org",
+            );
+        }
+        Err(e) => return pg_err(e),
+    }
+    match er_entities::merge_auto_approval::create::append(
+        &client,
+        &er_ids::new_v7(),
+        &org_row.id,
+        &d.id,
+        &body.connection_id,
+        &body.object,
+        body.enabled,
+        body.min_score,
+        body.max_members,
+        &principal.actor,
+    )
+    .await
+    {
+        Ok(rows) => match rows.first() {
+            Some(r) => {
+                let _ = pg::audit(
+                    &client,
+                    &principal.actor,
+                    Some(&org),
+                    None,
+                    "writeback.auto_approval.set",
+                    &json!({ "rule": r.id, "connection_id": r.salesforce_connection_id, "object": r.object, "enabled": r.enabled, "min_score": r.min_score, "max_members": r.max_members }),
+                )
+                .await;
+                Json(AutoApprovalView::from(r)).into_response()
+            }
+            None => detail_err(StatusCode::INTERNAL_SERVER_ERROR, "the rule was not stored"),
+        },
+        Err(e) => pg_err(e),
+    }
+}
+
+/// Viewer+: the auto-approval rules in force
+/// (`GET /v1/orgs/{org}/datasets/{ds}/writeback/auto-approval`).
+async fn list_auto_approval(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path((org, ds)): Path<(String, String)>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let (client, org_row, d) = match upload_scope_any(&state, &org, &ds).await {
+        Ok(t) => t,
+        Err(r) => return *r,
+    };
+    match er_entities::merge_auto_approval::read::active(&client, &org_row.id, &d.id).await {
+        Ok(rows) => Json(AutoApprovalList {
+            items: rows.iter().map(AutoApprovalView::from).collect(),
+        })
+        .into_response(),
+        Err(e) => pg_err(e),
+    }
 }
 
 async fn decide_merge_preview(
@@ -15893,6 +16167,14 @@ fn build_routes(state: AppState) -> Router {
         .route(
             "/v1/orgs/{org}/datasets/{ds}/merge-previews",
             get(merge_previews_list),
+        )
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/merge-previews/decide",
+            post(decide_merge_previews),
+        )
+        .route(
+            "/v1/orgs/{org}/datasets/{ds}/writeback/auto-approval",
+            get(list_auto_approval).put(put_auto_approval),
         )
         .route(
             "/v1/orgs/{org}/datasets/{ds}/merge-previews/apply",

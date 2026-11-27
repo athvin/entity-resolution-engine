@@ -1,0 +1,51 @@
+import { expect, test } from "@playwright/test";
+
+import { DS, login, ORG, triageOrg, USERS } from "./helpers";
+
+// acme-dev is render-only (it is pixel-compared); decisions run in the
+// per-project triage org so parallel device projects never race.
+test.describe("writeback review (#997)", () => {
+  test("shows previews, scores and absent evidence to a viewer, with no actions", async ({
+    page,
+  }) => {
+    await login(page, USERS.viewer);
+    await page.goto(`/${ORG}/${DS}/writeback`);
+    const table = page.getByTestId("writeback-table");
+    await expect(table).toContainText("crm:C-101");
+    await expect(table).toContainText("98.2%");
+    await expect(table).toContainText("no evidence");
+    await expect(page.getByTestId("writeback-apply")).toHaveCount(0);
+    await expect(page.getByRole("checkbox", { name: /Select preview/ })).toHaveCount(0);
+    await expect(page.getByTestId("writeback-auto-approval")).toContainText("score ≥ 99.0%");
+  });
+
+  test("a steward approves a batch; every item reports its own outcome", async ({
+    page,
+  }, testInfo) => {
+    const org = triageOrg(testInfo.project.name);
+    await login(page, USERS.steward);
+    await page.goto(`/${org}/${DS}/writeback`);
+    await page.getByRole("checkbox", { name: "Select preview for crm:C-101" }).check();
+    await page.getByRole("checkbox", { name: "Select preview for crm:C-102" }).check();
+    await page.getByRole("button", { name: "Approve 2" }).click();
+    await expect(page.getByTestId("writeback-batch-outcome")).toContainText("2 decided, 0 refused");
+    await expect(page.getByTestId("writeback-empty")).toBeVisible();
+  });
+
+  test("an admin sees an auto-approved apply and can undo it", async ({ page }, testInfo) => {
+    const org = triageOrg(testInfo.project.name);
+    await login(page, USERS.admin);
+    await page.goto(`/${org}/${DS}/writeback`);
+    await page.getByTestId("writeback-tab-approved").click();
+    await page.getByRole("button", { name: "crm:C-103" }).click();
+    const detail = page.getByTestId("writeback-detail");
+    await expect(detail).toContainText("auto-approval rule");
+    await expect(detail).toContainText("new@acme.test");
+    await expect(page.getByTestId("writeback-apply-state")).toContainText("applied");
+    await page.getByTestId("writeback-undo").click();
+    await expect(page.getByTestId("writeback-restore")).toContainText("restoring");
+    await expect(page.getByTestId("writeback-restore")).toContainText(
+      "Records the merge reparented to the master are not moved back.",
+    );
+  });
+});

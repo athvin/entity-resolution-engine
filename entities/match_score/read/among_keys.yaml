@@ -1,0 +1,10 @@
+kind: statement
+operation: read
+description: "Active scored edges whose two endpoints are both in a chr(31)-joined record-key list, at a pinned snapshot — the evidence a merge preview's score is computed from (#997). The caller groups edges by its own groups and only calls this when the lake has a match_scores table."
+params:
+  - { name: snapshot, type: bigint }
+  - { name: record_keys, type: varchar }
+returns:
+  - { name: rec_a_key, type: varchar, nullable: false }
+  - { name: rec_b_key, type: varchar, nullable: false }
+  - { name: match_probability, type: double, nullable: false }

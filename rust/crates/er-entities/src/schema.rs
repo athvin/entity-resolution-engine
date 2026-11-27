@@ -352,6 +352,7 @@ CREATE INDEX IF NOT EXISTS writeback_policies_org ON public.writeback_policies (
   writeback_policy_id text NOT NULL REFERENCES writeback_policies(id),
   master_record_key text NOT NULL,
   member_count bigint NOT NULL,
+  score double precision,
   proposal jsonb NOT NULL,
   field_changes jsonb NOT NULL,
   related_counts jsonb,
@@ -401,6 +402,21 @@ CREATE INDEX IF NOT EXISTS merge_applies_dataset ON public.merge_applies (org_id
 );
 CREATE UNIQUE INDEX IF NOT EXISTS merge_apply_operations_seq ON public.merge_apply_operations (merge_apply_id, seq);
 CREATE INDEX IF NOT EXISTS merge_apply_operations_org ON public.merge_apply_operations (org_id, dataset_id);"#,
+    r#"CREATE TABLE IF NOT EXISTS public.merge_auto_approvals (
+  id text NOT NULL,
+  org_id text NOT NULL REFERENCES orgs(id),
+  dataset_id text NOT NULL REFERENCES datasets(id),
+  salesforce_connection_id text NOT NULL REFERENCES salesforce_connections(id),
+  object text NOT NULL CHECK (object IN ('Lead', 'Contact', 'Account')),
+  enabled boolean NOT NULL,
+  min_score double precision NOT NULL,
+  max_members bigint NOT NULL,
+  created_by text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (id)
+);
+CREATE INDEX IF NOT EXISTS merge_auto_approvals_scope ON public.merge_auto_approvals (org_id, dataset_id, salesforce_connection_id, object);"#,
     r#"CREATE TABLE IF NOT EXISTS public.merge_preview_journal (
   id text NOT NULL,
   org_id text NOT NULL REFERENCES orgs(id),

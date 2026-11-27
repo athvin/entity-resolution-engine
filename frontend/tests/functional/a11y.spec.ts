@@ -221,6 +221,13 @@ const SCREENS: {
     },
   },
   {
+    name: "writeback",
+    path: `/${ORG}/${DS}/writeback`,
+    ready: async (page) => {
+      await expect(page.getByTestId("writeback-table")).toBeVisible();
+    },
+  },
+  {
     name: "duplicates",
     path: `/${ORG}/${DS}/duplicates`,
     ready: async (page) => {

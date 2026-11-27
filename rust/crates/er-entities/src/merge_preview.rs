@@ -32,6 +32,8 @@ pub struct MergePreview {
     pub master_record_key: String,
     /// Members including the master.
     pub member_count: i64,
+    /// The group's match evidence (#997): for each victim, its strongest active scored edge to another member, then the weakest of those. NULL when any victim has no scored edge — absent evidence, which an auto-approval policy never approves on.
+    pub score: Option<f64>,
     /// The persisted proposal input (PersistedProposalV1). Restored only through MergeProposal::build, never trusted as validated.
     pub proposal: ::serde_json::Value,
     /// Provider field → {before, after} on the master, for display.
@@ -81,6 +83,7 @@ impl MergePreview {
             "writeback_policy_id",
             "master_record_key",
             "member_count",
+            "score",
             "proposal",
             "field_changes",
             "related_counts",
@@ -113,6 +116,7 @@ pub mod create {
         writeback_policy_id: &str,
         master_record_key: &str,
         member_count: i64,
+        score: Option<f64>,
         proposal: &::serde_json::Value,
         field_changes: &::serde_json::Value,
         related_counts: Option<&::serde_json::Value>,
@@ -121,13 +125,13 @@ pub mod create {
         const SQL: &str = "INSERT INTO public.merge_previews
   (id, org_id, dataset_id, salesforce_connection_id, object, entity_id, fingerprint,
    format_version, lake_snapshot, origin_run_id, writeback_policy_id, master_record_key,
-   member_count, proposal, field_changes, related_counts, related_counts_state)
+   member_count, score, proposal, field_changes, related_counts, related_counts_state)
 VALUES
   ($1, $2, $3, $4, $5, $6, $7,
    $8, $9, $10, $11, $12,
-   $13, $14, $15, $16, $17)
+   $13, $14, $15, $16, $17, $18)
 ON CONFLICT (dataset_id, fingerprint) DO NOTHING
-RETURNING id, org_id, dataset_id, salesforce_connection_id, object, entity_id, fingerprint, format_version, lake_snapshot, origin_run_id, writeback_policy_id, master_record_key, member_count, proposal, field_changes, related_counts, related_counts_state, status, decided_by, decided_at, decision_reason, created_at, updated_at
+RETURNING id, org_id, dataset_id, salesforce_connection_id, object, entity_id, fingerprint, format_version, lake_snapshot, origin_run_id, writeback_policy_id, master_record_key, member_count, score, proposal, field_changes, related_counts, related_counts_state, status, decided_by, decided_at, decision_reason, created_at, updated_at
 ";
         let __span = ::er_span::sql_span(
             ::er_span::Store::Control,
@@ -155,6 +159,7 @@ RETURNING id, org_id, dataset_id, salesforce_connection_id, object, entity_id, f
                     &writeback_policy_id,
                     &master_record_key,
                     &member_count,
+                    &score,
                     &proposal,
                     &field_changes,
                     &related_counts,
@@ -182,6 +187,7 @@ RETURNING id, org_id, dataset_id, salesforce_connection_id, object, entity_id, f
                 writeback_policy_id: row.get("writeback_policy_id"),
                 master_record_key: row.get("master_record_key"),
                 member_count: row.get("member_count"),
+                score: row.get("score"),
                 proposal: row.get("proposal"),
                 field_changes: row.get("field_changes"),
                 related_counts: row.get("related_counts"),
@@ -206,7 +212,7 @@ pub mod read {
         org_id: &str,
         dataset_id: &str,
     ) -> ::std::result::Result<Vec<super::MergePreview>, ::tokio_postgres::Error> {
-        const SQL: &str = "SELECT id, org_id, dataset_id, salesforce_connection_id, object, entity_id, fingerprint, format_version, lake_snapshot, origin_run_id, writeback_policy_id, master_record_key, member_count, proposal, field_changes, related_counts, related_counts_state, status, decided_by, decided_at, decision_reason, created_at, updated_at
+        const SQL: &str = "SELECT id, org_id, dataset_id, salesforce_connection_id, object, entity_id, fingerprint, format_version, lake_snapshot, origin_run_id, writeback_policy_id, master_record_key, member_count, score, proposal, field_changes, related_counts, related_counts_state, status, decided_by, decided_at, decision_reason, created_at, updated_at
 FROM public.merge_previews
 WHERE id = $1 AND org_id = $2 AND dataset_id = $3
 ";
@@ -239,6 +245,7 @@ WHERE id = $1 AND org_id = $2 AND dataset_id = $3
                 writeback_policy_id: row.get("writeback_policy_id"),
                 master_record_key: row.get("master_record_key"),
                 member_count: row.get("member_count"),
+                score: row.get("score"),
                 proposal: row.get("proposal"),
                 field_changes: row.get("field_changes"),
                 related_counts: row.get("related_counts"),
@@ -262,7 +269,7 @@ WHERE id = $1 AND org_id = $2 AND dataset_id = $3
         after: &str,
         limit: i64,
     ) -> ::std::result::Result<Vec<super::MergePreview>, ::tokio_postgres::Error> {
-        const SQL: &str = "SELECT id, org_id, dataset_id, salesforce_connection_id, object, entity_id, fingerprint, format_version, lake_snapshot, origin_run_id, writeback_policy_id, master_record_key, member_count, proposal, field_changes, related_counts, related_counts_state, status, decided_by, decided_at, decision_reason, created_at, updated_at
+        const SQL: &str = "SELECT id, org_id, dataset_id, salesforce_connection_id, object, entity_id, fingerprint, format_version, lake_snapshot, origin_run_id, writeback_policy_id, master_record_key, member_count, score, proposal, field_changes, related_counts, related_counts_state, status, decided_by, decided_at, decision_reason, created_at, updated_at
 FROM public.merge_previews
 WHERE org_id = $1 AND dataset_id = $2
   AND ($3 = '' OR status = $3)
@@ -302,6 +309,7 @@ LIMIT $5
                 writeback_policy_id: row.get("writeback_policy_id"),
                 master_record_key: row.get("master_record_key"),
                 member_count: row.get("member_count"),
+                score: row.get("score"),
                 proposal: row.get("proposal"),
                 field_changes: row.get("field_changes"),
                 related_counts: row.get("related_counts"),
@@ -323,7 +331,7 @@ LIMIT $5
         dataset_id: &str,
         limit: i64,
     ) -> ::std::result::Result<Vec<super::MergePreview>, ::tokio_postgres::Error> {
-        const SQL: &str = "SELECT p.id, p.org_id, p.dataset_id, p.salesforce_connection_id, p.object, p.entity_id, p.fingerprint, p.format_version, p.lake_snapshot, p.origin_run_id, p.writeback_policy_id, p.master_record_key, p.member_count, p.proposal, p.field_changes, p.related_counts, p.related_counts_state, p.status, p.decided_by, p.decided_at, p.decision_reason, p.created_at, p.updated_at
+        const SQL: &str = "SELECT p.id, p.org_id, p.dataset_id, p.salesforce_connection_id, p.object, p.entity_id, p.fingerprint, p.format_version, p.lake_snapshot, p.origin_run_id, p.writeback_policy_id, p.master_record_key, p.member_count, p.score, p.proposal, p.field_changes, p.related_counts, p.related_counts_state, p.status, p.decided_by, p.decided_at, p.decision_reason, p.created_at, p.updated_at
 FROM public.merge_previews p
 WHERE p.org_id = $1 AND p.dataset_id = $2 AND p.status = 'approved'
   AND NOT EXISTS (SELECT 1 FROM public.merge_applies a WHERE a.merge_preview_id = p.id)
@@ -360,6 +368,7 @@ LIMIT $3
                 writeback_policy_id: row.get("writeback_policy_id"),
                 master_record_key: row.get("master_record_key"),
                 member_count: row.get("member_count"),
+                score: row.get("score"),
                 proposal: row.get("proposal"),
                 field_changes: row.get("field_changes"),
                 related_counts: row.get("related_counts"),
@@ -393,7 +402,7 @@ SET status = $1, decided_by = $2, decided_at = now(),
     decision_reason = $3, updated_at = now()
 WHERE id = $4 AND org_id = $5 AND dataset_id = $6
   AND fingerprint = $7 AND status = 'planned'
-RETURNING id, org_id, dataset_id, salesforce_connection_id, object, entity_id, fingerprint, format_version, lake_snapshot, origin_run_id, writeback_policy_id, master_record_key, member_count, proposal, field_changes, related_counts, related_counts_state, status, decided_by, decided_at, decision_reason, created_at, updated_at
+RETURNING id, org_id, dataset_id, salesforce_connection_id, object, entity_id, fingerprint, format_version, lake_snapshot, origin_run_id, writeback_policy_id, master_record_key, member_count, score, proposal, field_changes, related_counts, related_counts_state, status, decided_by, decided_at, decision_reason, created_at, updated_at
 ";
         let __span = ::er_span::sql_span(
             ::er_span::Store::Control,
@@ -438,6 +447,7 @@ RETURNING id, org_id, dataset_id, salesforce_connection_id, object, entity_id, f
                 writeback_policy_id: row.get("writeback_policy_id"),
                 master_record_key: row.get("master_record_key"),
                 member_count: row.get("member_count"),
+                score: row.get("score"),
                 proposal: row.get("proposal"),
                 field_changes: row.get("field_changes"),
                 related_counts: row.get("related_counts"),
@@ -467,7 +477,7 @@ SET status = 'superseded', updated_at = now()
 WHERE org_id = $1 AND dataset_id = $2
   AND salesforce_connection_id = $3 AND object = $4
   AND entity_id = $5 AND status = 'planned' AND fingerprint <> $6
-RETURNING id, org_id, dataset_id, salesforce_connection_id, object, entity_id, fingerprint, format_version, lake_snapshot, origin_run_id, writeback_policy_id, master_record_key, member_count, proposal, field_changes, related_counts, related_counts_state, status, decided_by, decided_at, decision_reason, created_at, updated_at
+RETURNING id, org_id, dataset_id, salesforce_connection_id, object, entity_id, fingerprint, format_version, lake_snapshot, origin_run_id, writeback_policy_id, master_record_key, member_count, score, proposal, field_changes, related_counts, related_counts_state, status, decided_by, decided_at, decision_reason, created_at, updated_at
 ";
         let __span = ::er_span::sql_span(
             ::er_span::Store::Control,
@@ -511,6 +521,7 @@ RETURNING id, org_id, dataset_id, salesforce_connection_id, object, entity_id, f
                 writeback_policy_id: row.get("writeback_policy_id"),
                 master_record_key: row.get("master_record_key"),
                 member_count: row.get("member_count"),
+                score: row.get("score"),
                 proposal: row.get("proposal"),
                 field_changes: row.get("field_changes"),
                 related_counts: row.get("related_counts"),

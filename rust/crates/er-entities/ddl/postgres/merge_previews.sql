@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS public.merge_previews (
   writeback_policy_id text NOT NULL REFERENCES writeback_policies(id),
   master_record_key text NOT NULL,
   member_count bigint NOT NULL,
+  score double precision,
   proposal jsonb NOT NULL,
   field_changes jsonb NOT NULL,
   related_counts jsonb,

@@ -210,6 +210,7 @@ async fn previews_publish_idempotently_and_approval_binds_the_exact_proposal() {
             proposal: &p,
             persisted: &bytes,
             actor: "job:test",
+            score: None,
         },
     )
     .await
@@ -225,6 +226,7 @@ async fn previews_publish_idempotently_and_approval_binds_the_exact_proposal() {
             proposal: &p,
             persisted: &bytes,
             actor: "job:test",
+            score: None,
         },
     )
     .await
@@ -370,6 +372,7 @@ async fn previews_publish_idempotently_and_approval_binds_the_exact_proposal() {
             proposal: &p2,
             persisted: &b2,
             actor: "job:test",
+            score: None,
         },
     )
     .await
@@ -387,6 +390,7 @@ async fn previews_publish_idempotently_and_approval_binds_the_exact_proposal() {
             proposal: &p3,
             persisted: &b3,
             actor: "job:test",
+            score: None,
         },
     )
     .await
@@ -443,4 +447,69 @@ async fn previews_publish_idempotently_and_approval_binds_the_exact_proposal() {
         blocked["detail"].as_str().unwrap().contains("policy"),
         "{blocked}"
     );
+
+    // --- Batch decisions run each item through the same checks (#997) -------
+    let (status, _) = call(
+        &router,
+        "POST",
+        &format!("{base}/merge-previews/decide"),
+        &keys["acme:viewer"],
+        Some(json!({"decision": "approve", "items": [{"id": current["id"], "fingerprint": current["fingerprint"]}]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, batch) = call(
+        &router,
+        "POST",
+        &format!("{base}/merge-previews/decide"),
+        &keys["acme:steward"],
+        Some(json!({"decision": "reject", "reason": "batch", "items": [
+            {"id": current["id"], "fingerprint": current["fingerprint"]},
+            {"id": current["id"], "fingerprint": "v1:wrong"},
+            {"id": "nope", "fingerprint": "v1:x"},
+        ]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{batch}");
+    let results = batch["results"].as_array().unwrap();
+    assert_eq!(
+        (
+            results[0]["status"].as_u64(),
+            results[0]["preview_status"].as_str()
+        ),
+        (Some(200), Some("rejected")),
+        "{batch}"
+    );
+    assert_ne!(
+        results[1]["status"], 200,
+        "a stale fingerprint is refused: {batch}"
+    );
+    assert_eq!(results[2]["status"], 404, "{batch}");
+    let (status, _) = call(
+        &router,
+        "POST",
+        &format!("{base}/merge-previews/decide"),
+        &keys["acme:steward"],
+        Some(json!({"decision": "maybe", "items": [{"id": "x", "fingerprint": "y"}]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (status, _) = call(
+        &router,
+        "PUT",
+        &format!("{base}/writeback/auto-approval"),
+        &keys["acme:steward"],
+        Some(json!({"connection_id": conn, "object": "Contact", "enabled": true, "min_score": 0.9, "max_members": 2})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "rules are admin-only");
+    let (status, _) = call(
+        &router,
+        "PUT",
+        &format!("{base}/writeback/auto-approval"),
+        &keys["acme:admin"],
+        Some(json!({"connection_id": conn, "object": "Contact", "enabled": true, "min_score": 1.5, "max_members": 2})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
 }
