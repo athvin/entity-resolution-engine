@@ -232,6 +232,7 @@ async fn account_golden_runs_remotely_through_the_normal_job_lifecycle() {
             profile: Ok(None),
             in_flight_cap: 2,
             template,
+            class_templates: std::collections::BTreeMap::default(),
             runner_orgs: [org.clone()].into_iter().collect(),
             image_digest: None,
         },
