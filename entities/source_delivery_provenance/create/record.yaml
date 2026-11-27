@@ -1,0 +1,16 @@
+kind: statement
+operation: create
+mode: partial
+description: "Record a delivery's provider provenance. Idempotent: a retried extract task re-records the same run and delivery and changes nothing; the caller reads the row back and refuses a conflicting identity rather than trusting the first writer silently."
+params:
+  - { name: id, type: varchar }
+  - { name: org_id, type: varchar }
+  - { name: dataset_id, type: varchar }
+  - { name: run_id, type: varchar }
+  - { name: delivery_id, type: varchar }
+  - { name: source, type: varchar }
+  - { name: salesforce_connection_id, type: varchar }
+  - { name: object, type: varchar }
+  - { name: delivery_sha256, type: varchar }
+  - { name: source_sha256, type: varchar }
+returns: none

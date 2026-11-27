@@ -104,6 +104,41 @@ impl ControlTask<PgClient> for AdvanceSfCursor {
             )
         })?;
 
+        // Provenance (#1296) is NOT best-effort: it is what may later let a
+        // landed record acquire a Salesforce identity for writeback. Written
+        // after the idempotent enqueue (the run id is the job id) and before
+        // the cursor advances, so a failure retries this task, which re-finds
+        // the same job and converges; a run whose provenance never lands is
+        // simply ineligible — the closed failure.
+        crate::pg::record_provenance(
+            ctx.client,
+            &crate::pg::DeliveryProvenance {
+                org_id: &ctx.order.org_id,
+                dataset_id: &dataset_id,
+                run_id: &job.id,
+                delivery_id: &report.delivery_id,
+                source: &report.source,
+                connection_id: &report.connection_id,
+                object: &report.object,
+                delivery_sha256: &pin.sha256,
+                source_sha256: &pin.source_sha256,
+            },
+        )
+        .await
+        .map_err(|e| {
+            let class = match e {
+                crate::pg::ProvenanceError::Conflict(_) => er_errors::ErrorClass::Precondition,
+                crate::pg::ProvenanceError::Db(_) => er_errors::ErrorClass::TransientIo,
+            };
+            TaskError::Failed(
+                er_errors::ErError::stage_failure(format!(
+                    "recording the delivery's provenance: {}",
+                    crate::errfmt::chain(&e)
+                ))
+                .with_class(class),
+            )
+        })?;
+
         // Best-effort reporting, the finish_delivery discipline: the delivery
         // is committed and its run queued, so neither row may undo that.
         let _ = crate::pg::audit(

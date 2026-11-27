@@ -1,0 +1,9 @@
+kind: statement
+operation: read
+mode: full
+description: "The provider provenance of the given runs (ids joined by chr(31)) in one dataset: which connection and object each run's delivery came from. A run with no row (an upload, a push) is not provider-provenanced."
+params:
+  - { name: org_id, type: varchar }
+  - { name: dataset_id, type: varchar }
+  - { name: run_ids, type: varchar }
+returns: entity

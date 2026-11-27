@@ -53,6 +53,7 @@ pub mod schema;
 pub mod schema_migration;
 pub mod scored_record;
 pub mod sf_extract_cursor;
+pub mod source_delivery_provenance;
 pub mod staged_steward_action;
 pub mod statement_execution;
 pub mod tag;

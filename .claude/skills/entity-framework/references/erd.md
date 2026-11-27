@@ -259,6 +259,20 @@ erDiagram
         timestamp created_at
         timestamp updated_at
     }
+    source_delivery_provenance {
+        varchar id PK
+        varchar org_id FK
+        varchar dataset_id FK
+        varchar run_id
+        varchar delivery_id
+        varchar source
+        varchar salesforce_connection_id FK
+        varchar object
+        varchar delivery_sha256
+        varchar source_sha256
+        timestamp created_at
+        timestamp updated_at
+    }
     staged_steward_actions {
         varchar id PK
         varchar org_id FK
@@ -405,6 +419,9 @@ erDiagram
     schedules }o--|| datasets : "dataset_id → id"
     sf_extract_cursors }o--|| orgs : "org_id → id"
     sf_extract_cursors }o--|| datasets : "dataset_id → id"
+    source_delivery_provenance }o--|| orgs : "org_id → id"
+    source_delivery_provenance }o--|| datasets : "dataset_id → id"
+    source_delivery_provenance }o--|| salesforce_connections : "salesforce_connection_id → id"
     staged_steward_actions }o--|| orgs : "org_id → id"
     staged_steward_actions }o--|| datasets : "dataset_id → id"
     tags }o--|| orgs : "org_id → id"
@@ -442,6 +459,7 @@ erDiagram
 | `schedules` | A recurring job schedule for a tenant: its kind, cron and source. |
 | `schema_migrations` | The control-plane schema ledger: one row per DDL statement the reconciler applied to public.*, plus one `verified` row each time a new catalog version found the live schema already current. The latest row's catalog_hash is the version the database is at. |
 | `sf_extract_cursors` | The extract job's high-water mark, one row per (dataset, source): the newest SystemModstamp already pulled from Salesforce, so an incremental extract asks only for what changed since. The s3_ingest_cursor shape for an API-polled provider — an upsert rather than a log, because the question is 'what is already in', and advanced only AFTER the delivery is published, so a failure re-extracts once rather than skipping rows forever. |
+| `source_delivery_provenance` | Which provider connection and object a delivery came from, keyed by the run that ingests it (#1296). The lake's raw_records carry only the source label and the ingest batch (= the run id), and the import.extract audit is best-effort, so neither can authorize a writeback; this row is the durable link from a landed record to the Salesforce connection that produced it. Written by the extract's AdvanceSfCursor after the run is enqueued and before the cursor advances; an uploaded or pushed delivery has no row, so its records are never writeback-eligible. |
 | `staged_steward_actions` | A steward action staged for review/apply: its payload, state and outcome. |
 | `tags` | A tenant's own label for entities and review groups: the vocabulary a steward sorts work by. |
 | `taggings` | One tag applied to one subject: the attachment, kept apart from the tag so retiring a tag does not rewrite what it was applied to. |
