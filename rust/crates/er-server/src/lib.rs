@@ -10314,13 +10314,14 @@ async fn put_writeback_policy(
     if let Some(bad) = body
         .field_mapping
         .keys()
-        .find(|k| !preview_job::GOLDEN_COLUMNS.contains(&k.as_str()))
+        .find(|k| !preview_job::golden_columns_for_object(&body.object).contains(&k.as_str()))
     {
         return detail_err(
             StatusCode::UNPROCESSABLE_ENTITY,
             format!(
-                "field_mapping key {bad:?} is not a golden record column (one of: {})",
-                preview_job::GOLDEN_COLUMNS.join(", ")
+                "field_mapping key {bad:?} is not a {} golden record column (one of: {})",
+                body.object,
+                preview_job::golden_columns_for_object(&body.object).join(", ")
             ),
         );
     }
@@ -11222,11 +11223,9 @@ async fn put_upsert_policy(
             "field names must be Salesforce API names, and Id is never written",
         );
     }
-    if let Some(attr) = body
-        .field_mapping
-        .keys()
-        .find(|a| !crate::preview_job::GOLDEN_COLUMNS.contains(&a.as_str()))
-    {
+    if let Some(attr) = body.field_mapping.keys().find(|a| {
+        !crate::preview_job::golden_columns_for_object(&body.object).contains(&a.as_str())
+    }) {
         return detail_err(
             StatusCode::UNPROCESSABLE_ENTITY,
             format!("{attr:?} is not a golden record attribute"),

@@ -1034,7 +1034,8 @@ pub struct MaterializePreviews;
 
 impl Task<Session> for MaterializePreviews {
     const NAME: &'static str = "materialize_previews";
-    const VERSION: u32 = 1;
+    // 2: account datasets materialize too (#1309).
+    const VERSION: u32 = 2;
     type Input = ();
     type Output = Plan<crate::preview_job::Materialized>;
     const WRITES_LAKE: bool = false;
@@ -1051,14 +1052,9 @@ impl Task<Session> for MaterializePreviews {
                 "a merge_preview job must name a dataset".to_string(),
             ))
         })?;
+        // Person and account datasets both materialize; `materialize` reads
+        // the relations of the config's entity type (#1309).
         let config = published_config(&ctx.order.lake_env)?;
-        if config.entity_type != er_config::EntityType::Person {
-            // Account datasets elect over acct_* relations the scoped
-            // election does not read yet; refuse quietly rather than guess.
-            return Ok(Outcome::NoOp(Plan(
-                crate::preview_job::Materialized::default(),
-            )));
-        }
         if context.policies.is_empty() && context.upsert_policies.is_empty() {
             return Ok(Outcome::NoOp(Plan(
                 crate::preview_job::Materialized::default(),
