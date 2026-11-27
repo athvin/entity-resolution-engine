@@ -236,4 +236,35 @@ async fn a_live_older_store_boots_through_the_deferred_replay() {
         .unwrap()
         .get(0);
     assert_eq!(recorded, 1, "the heal is ledgered, not repeated per boot");
+
+    // ---- phase 6: a store that predates the newest `orgs` column boots -----
+    // The default-dataset sweep reads `orgs` BEFORE the reconciler adds
+    // columns. Reading through the generated full-row statement failed every
+    // deploy of #518 on `column "record_allowance" does not exist`; the sweep
+    // must name only what it reads. Age the store by the newest org column,
+    // with an org present so the sweep has a row to read.
+    client
+        .batch_execute("ALTER TABLE public.orgs DROP COLUMN record_allowance")
+        .await
+        .unwrap();
+    let orgs: i64 = client
+        .query_one("SELECT count(*) FROM public.orgs", &[])
+        .await
+        .unwrap()
+        .get(0);
+    assert!(orgs > 0, "the sweep must have an org to read");
+    pg::ensure_schema(&mut client)
+        .await
+        .expect("a store behind the newest orgs column must boot");
+    let restored: i64 = client
+        .query_one(
+            "SELECT count(*) FROM information_schema.columns
+             WHERE table_schema = 'public' AND table_name = 'orgs'
+               AND column_name = 'record_allowance'",
+            &[],
+        )
+        .await
+        .unwrap()
+        .get(0);
+    assert_eq!(restored, 1, "the reconciler adds the column back");
 }

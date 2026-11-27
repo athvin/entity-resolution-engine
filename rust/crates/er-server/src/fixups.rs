@@ -353,12 +353,65 @@ pub(crate) async fn ensure_default_datasets(client: &mut Client) -> Result<(), S
         &[],
     )
     .await?;
-    let orgs = er_entities::org::read::list(&tx).await?;
-    for org in orgs {
-        ensure_default_dataset_for(&tx, &org).await?;
+    // Raw and narrow, not the generated `org::read::list`: this runs BEFORE
+    // the reconciler, so the generated reader — which names every catalog
+    // column — fails on any store that predates the newest `orgs` column.
+    // That took down both deploys of #518 (`column "record_allowance" does
+    // not exist`); naming only the columns this sweep reads means a new org
+    // column can never stop a boot here again.
+    let orgs: Vec<OrgSeed> = tx
+        .query(
+            "SELECT id, config_path, env, drop_root, s3_ingest_bucket, s3_ingest_prefix,
+                    active_config_version, state
+             FROM public.orgs",
+            &[],
+        )
+        .await?
+        .iter()
+        .map(|row| OrgSeed {
+            id: row.get("id"),
+            config_path: row.get("config_path"),
+            env: row.get("env"),
+            drop_root: row.get("drop_root"),
+            s3_ingest_bucket: row.get("s3_ingest_bucket"),
+            s3_ingest_prefix: row.get("s3_ingest_prefix"),
+            active_config_version: row.get("active_config_version"),
+            state: row.get("state"),
+        })
+        .collect();
+    for org in &orgs {
+        ensure_default_dataset_for(&tx, org).await?;
     }
     tx.commit().await?;
     Ok(())
+}
+
+/// The org fields the default-dataset sweep copies — and nothing else, so the
+/// pre-reconcile read never names a column the store may not have yet.
+pub(crate) struct OrgSeed {
+    pub(crate) id: String,
+    pub(crate) config_path: String,
+    pub(crate) env: serde_json::Value,
+    pub(crate) drop_root: Option<String>,
+    pub(crate) s3_ingest_bucket: Option<String>,
+    pub(crate) s3_ingest_prefix: Option<String>,
+    pub(crate) active_config_version: Option<i64>,
+    pub(crate) state: String,
+}
+
+impl From<er_entities::org::Org> for OrgSeed {
+    fn from(o: er_entities::org::Org) -> Self {
+        Self {
+            id: o.id,
+            config_path: o.config_path,
+            env: o.env,
+            drop_root: o.drop_root,
+            s3_ingest_bucket: o.s3_ingest_bucket,
+            s3_ingest_prefix: o.s3_ingest_prefix,
+            active_config_version: o.active_config_version,
+            state: o.state,
+        }
+    }
 }
 
 /// The per-org body of [`ensure_default_datasets`], also run inline where an
@@ -366,7 +419,7 @@ pub(crate) async fn ensure_default_datasets(client: &mut Client) -> Result<(), S
 /// the next boot.
 pub(crate) async fn ensure_default_dataset_for(
     client: &impl tokio_postgres::GenericClient,
-    org: &er_entities::org::Org,
+    org: &OrgSeed,
 ) -> Result<(), SchemaError> {
     let entity_type = match org.active_config_version {
         Some(version) => {
@@ -422,7 +475,7 @@ pub(crate) async fn ensure_default_dataset_by_name(
         .into_iter()
         .next()
     {
-        ensure_default_dataset_for(client, &org).await?;
+        ensure_default_dataset_for(client, &OrgSeed::from(org)).await?;
     }
     Ok(())
 }
