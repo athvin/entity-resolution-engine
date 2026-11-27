@@ -580,14 +580,13 @@ mod tests {
     use super::*;
 
     fn with_dictionary(text: &str, check_rows: impl FnOnce(&PathBuf)) {
-        let nonce = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let path = std::env::temp_dir().join(format!(
-            "er-cli-dictionary-{}-{nonce}.csv",
-            std::process::id()
-        ));
+        // Tests run in parallel in one process, and macOS's clock is only
+        // microsecond-resolution, so a timestamp alone can repeat. A
+        // process-wide counter makes every call's path unique.
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let path =
+            std::env::temp_dir().join(format!("er-cli-dictionary-{}-{n}.csv", std::process::id()));
         std::fs::write(&path, text).unwrap();
         check_rows(&path);
         std::fs::remove_file(path).unwrap();
