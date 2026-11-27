@@ -393,8 +393,21 @@ names the commits a return would undo. Its verdict:
 
 Its self-test runs first in the job.
 
-It is **not required yet**. Promote it in the order above once it has reported
-on real pull requests.
+It is **required** (branch protection, since 2026-11-27, #1318). It was
+promoted in the order above, on this evidence from its first 14 pull-request
+runs:
+
+- 11 passes, and no false positive on a genuine change.
+- 1 true finding: #1327 re-landed the revert #1124, and all four files returned
+  to `fd8c72a3`'s versions. The finding was correct, and it was deliberate, so
+  the PR took `revert-ok`.
+- 2 failures on branches cut before the guard merged, which have no
+  `scripts/ci/stale-tree-guard-test.sh`. The fix is to rebase onto `main`. Any
+  branch cut since then carries the script.
+
+A red `stale tree guard` now blocks the merge. Read the files and commits it
+names. If the return is deliberate, label the PR `revert-ok` (the label exists)
+or title it `Revert …`. Otherwise rebuild the commit on today's `main`.
 
 To run it locally, set `BASE_SHA` and `HEAD_SHA`, and add
 `STALE_TREE_ALLOW_SHALLOW=1` on a clone that was deepened after a shallow

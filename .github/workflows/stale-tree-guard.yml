@@ -8,10 +8,11 @@
 # had and moved past. scripts/ci/stale-tree-guard.sh explains the check and
 # the thresholds.
 #
-# NOT A REQUIRED CHECK YET, by the order the ci-and-supply-chain skill gives:
-# report on real pull requests, be seen failing, then promote. Until then a red
-# `stale tree guard` is a finding to read rather than a block. A deliberate
-# revert is exempt by a title starting "Revert", or by the `revert-ok` label.
+# A REQUIRED CHECK since 2026-11-27 (#1318), promoted by the order the
+# ci-and-supply-chain skill gives: it reported on real pull requests, was seen
+# failing on a real return (#1327), and then became required. A red
+# `stale tree guard` blocks the merge. A deliberate revert is exempt by a title
+# starting "Revert", or by the `revert-ok` label.
 #
 # NO `paths:` FILTER, for the reason CLAUDE.md gives: any file can be the one
 # that goes back, and a required check (which this is meant to become) must
