@@ -303,7 +303,15 @@
     *::after {
       animation-duration: 0.01ms !important;
       animation-iteration-count: 1 !important;
-      transition-duration: 0.01ms !important;
+      /* 0s, not 0.01ms. With the default `transition-property: all`, any
+       * non-zero duration turns EVERY style change into a running transition,
+       * even on elements that declare none, including the theme flip on
+       * html, body and .marketing-site at load. WebKit holds each one's start
+       * value until its next animation tick, so reduced-motion pages briefly
+       * showed light ink on dark and reported running animations (#1281). A
+       * zero duration means no transition at all: the end state is simply
+       * there. Animations keep 0.01ms because code waits on `animationend`. */
+      transition-duration: 0s !important;
       /* Clamping duration alone is not enough once anything is staggered: a
        * delayed entrance would still sit invisible for its full delay and
        * then pop, which is the jarring thing the preference asks us to

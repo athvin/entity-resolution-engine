@@ -173,3 +173,32 @@ export function apiKeyOrg(projectName: string): string {
   if (!org) throw new Error(`no api-keys org for project ${projectName}`);
   return org;
 }
+
+/**
+ * Wait until the page renders frames on time again: `count` consecutive
+ * animation frames each under `budgetMs`.
+ *
+ * Use this before an element screenshot on a large page. `goto` resolves at
+ * `load`, but hydrating a big client tree (the ~6k-element /docs reference)
+ * can then block WebKit's main thread for well over a second. Playwright's
+ * screenshot waits for fonts and for two stable frames, so it would spend
+ * its whole timeout queued behind that block (#1281). This waits only for
+ * the page to be ready; it changes nothing the screenshot asserts.
+ */
+export async function framesSettled(page: Page, count = 10, budgetMs = 50): Promise<void> {
+  await page.evaluate(
+    ([needed, budget]) =>
+      new Promise<void>((resolve) => {
+        let last = performance.now();
+        let streak = 0;
+        const tick = (now: number) => {
+          streak = now - last < budget ? streak + 1 : 0;
+          last = now;
+          if (streak >= needed) resolve();
+          else requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      }),
+    [count, budgetMs] as const,
+  );
+}
