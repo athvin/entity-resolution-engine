@@ -72,6 +72,7 @@ false the moment a screen renders different markup below `lg`.
 - `/[org]/[ds]/settings/models`
 - `/[org]/[ds]/sources`
 - `/[org]/[ds]/sources/new`
+- `/[org]/[ds]/writeback`
 - `/[org]/settings/ai`
 - `/[org]/settings/api-keys`
 - `/[org]/settings/audit`

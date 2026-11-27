@@ -577,7 +577,8 @@
         "related_counts_state",
         "decided_by",
         "decision_reason",
-        "history"
+        "history",
+        "apply"
       ]
     }
   },
@@ -803,6 +804,17 @@
     "needs_body": false,
     "summary": "an upload's state",
     "response": { "envelope": "scalar" }
+  },
+  {
+    "id": "get_orgs_by_org_datasets_by_ds_writeback_auto_approval",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}/writeback/auto-approval",
+    "role": "viewer",
+    "params": ["org", "ds"],
+    "body": null,
+    "needs_body": false,
+    "summary": "the auto-approval rules in force",
+    "response": { "envelope": "wrapped", "key": "items" }
   },
   {
     "id": "get_orgs_by_org_datasets_by_ds_writeback_policies",
@@ -1339,6 +1351,34 @@
     "body": null,
     "needs_body": false,
     "summary": "apply the dataset's APPROVED merge previews to Salesforce",
+    "response": null
+  },
+  {
+    "id": "post_orgs_by_org_datasets_by_ds_merge_previews_decide",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/datasets/{ds}/merge-previews/decide",
+    "role": "steward",
+    "params": ["org", "ds"],
+    "body": {
+      "type": "object",
+      "properties": {
+        "decision": { "type": "string" },
+        "reason": { "type": "string" },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": { "id": { "type": "string" }, "fingerprint": { "type": "string" } },
+            "required": ["id", "fingerprint"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["decision", "items"],
+      "additionalProperties": false
+    },
+    "needs_body": false,
+    "summary": "approve or reject several merge previews at once",
     "response": null
   },
   {
@@ -1969,6 +2009,28 @@
     "body": null,
     "needs_body": false,
     "summary": "store one part",
+    "response": null
+  },
+  {
+    "id": "put_orgs_by_org_datasets_by_ds_writeback_auto_approval",
+    "method": "PUT",
+    "path": "/v1/orgs/{org}/datasets/{ds}/writeback/auto-approval",
+    "role": "admin",
+    "params": ["org", "ds"],
+    "body": {
+      "type": "object",
+      "properties": {
+        "connection_id": { "type": "string" },
+        "object": { "type": "string" },
+        "enabled": { "type": "boolean" },
+        "min_score": { "type": "number" },
+        "max_members": { "type": "integer" }
+      },
+      "required": ["connection_id", "object", "enabled", "min_score", "max_members"],
+      "additionalProperties": false
+    },
+    "needs_body": false,
+    "summary": "set the auto-approval rule for one connection's object",
     "response": null
   },
   {

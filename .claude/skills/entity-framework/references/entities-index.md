@@ -30,7 +30,7 @@ statements is read or written only through the engine's own stage SQL, not
 through a typed query function.
 
 <!-- BEGIN GENERATED: entities-index -->
-**65 entities, 326 declared statements.**
+**66 entities, 329 declared statements.**
 
 | Entity | Relation | Store | Key | Natural key | History |
 |---|---|---|---|---|---|
@@ -61,6 +61,7 @@ through a typed query function.
 | `matching_model` | `matching_models` | postgres | `id` | `dataset_id, name, version` | yes |
 | `merge_apply` | `merge_applies` | postgres | `id` | — | — |
 | `merge_apply_operation` | `merge_apply_operations` | postgres | `id` | — | — |
+| `merge_auto_approval` | `merge_auto_approvals` | postgres | `id` | — | — |
 | `merge_preview` | `merge_previews` | postgres | `id` | `dataset_id, fingerprint` | — |
 | `merge_preview_journal` | `merge_preview_journal` | postgres | `id` | — | — |
 | `merge_preview_watermark` | `merge_preview_watermarks` | postgres | `id` | `dataset_id` | — |
@@ -127,10 +128,11 @@ Declared statements per entity and operation:
 | `int_std_record` | 0 | 5 | 0 | 0 |
 | `job` | 2 | 5 | 10 | 0 |
 | `lake_schema_migration` | 1 | 1 | 0 | 0 |
-| `match_score` | 0 | 6 | 3 | 0 |
+| `match_score` | 0 | 7 | 3 | 0 |
 | `matching_model` | 1 | 4 | 1 | 0 |
 | `merge_apply` | 1 | 2 | 2 | 0 |
 | `merge_apply_operation` | 1 | 1 | 1 | 0 |
+| `merge_auto_approval` | 1 | 1 | 0 | 0 |
 | `merge_preview` | 1 | 3 | 2 | 0 |
 | `merge_preview_journal` | 1 | 1 | 0 | 0 |
 | `merge_preview_watermark` | 1 | 1 | 1 | 0 |

@@ -1084,6 +1084,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/orgs/{org}/datasets/{ds}/merge-previews/decide": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** approve or reject several merge previews at once */
+        post: operations["post_orgs_by_org_datasets_by_ds_merge_previews_decide"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/orgs/{org}/datasets/{ds}/merge-previews/generate": {
         parameters: {
             query?: never;
@@ -1922,6 +1939,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/orgs/{org}/datasets/{ds}/writeback/auto-approval": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** the auto-approval rules in force */
+        get: operations["get_orgs_by_org_datasets_by_ds_writeback_auto_approval"];
+        /** set the auto-approval rule for one connection's object */
+        put: operations["put_orgs_by_org_datasets_by_ds_writeback_auto_approval"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/orgs/{org}/datasets/{ds}/writeback/policies": {
         parameters: {
             query?: never;
@@ -2353,6 +2388,42 @@ export interface components {
              * @description Wall-clock last-write time (equals created_at; audit rows are append-only).
              */
             updated_at: string;
+        };
+        /** @description The rules in force. */
+        AutoApprovalList: {
+            items: components["schemas"]["AutoApprovalView"][];
+        };
+        /** @description An auto-approval rule revision. */
+        AutoApprovalView: {
+            connection_id: string;
+            /** @description RFC 3339. */
+            created_at: string;
+            created_by: string;
+            enabled: boolean;
+            /** @description The revision; auto-approved previews name it as `policy:<id>`. */
+            id: string;
+            /** Format: int64 */
+            max_members: number;
+            /** Format: double */
+            min_score: number;
+            object: string;
+        };
+        /** @description The outcome of a batch decision, item by item. */
+        BatchDecisionOut: {
+            results: components["schemas"]["BatchDecisionResult"][];
+        };
+        /** @description One item of a batch decision. */
+        BatchDecisionResult: {
+            /** @description Why it was refused, when it was. */
+            detail?: string | null;
+            id: string;
+            /** @description The preview's state after, when decided. */
+            preview_status?: string | null;
+            /**
+             * Format: int32
+             * @description The HTTP status the single-item route would have answered.
+             */
+            status: number;
         };
         /** @description What a run would cost, before running it. */
         BlockingEstimate: {
@@ -3477,6 +3548,13 @@ export interface components {
              */
             version: number;
         };
+        /** @description An apply's outcome. */
+        MergeApplyView: {
+            /** @description Why it settled as it did. */
+            detail?: string | null;
+            /** @description `applying`, `applied`, `failed`, `skipped_stale` or `applied_externally`. */
+            status: string;
+        };
         /**
          * @description One entity's merge plan (`GET …/merge-plans`): its elected master, the
          *     golden preview, every member as `source_system:source_record_id`, and the
@@ -3508,6 +3586,7 @@ export interface components {
         };
         /** @description A merge preview in full: what approving it would do. */
         MergePreviewDetail: {
+            apply?: components["schemas"]["MergeApplyView"] | null;
             decided_by?: string | null;
             decision_reason?: string | null;
             /** @description Provider field → `{before, after}` on the master. */
@@ -3546,6 +3625,11 @@ export interface components {
             connection_id: string;
             /** @description RFC 3339. */
             created_at: string;
+            /**
+             * @description Who decided it — a principal, or `policy:<rule id>` for an
+             *     auto-approval.
+             */
+            decided_by?: string | null;
             entity_id: string;
             /** @description Name it to approve or reject. */
             fingerprint: string;
@@ -3558,6 +3642,12 @@ export interface components {
             object: string;
             /** @description The writeback policy revision it was built under. */
             policy_revision: string;
+            /**
+             * Format: double
+             * @description Match evidence: for each victim, its strongest scored edge to another
+             *     member, then the weakest of those. Null when absent.
+             */
+            score?: number | null;
             /** @description `planned`, `approved`, `rejected` or `superseded`. */
             status: string;
         };
@@ -8233,6 +8323,51 @@ export interface operations {
             };
         };
     };
+    post_orgs_by_org_datasets_by_ds_merge_previews_decide: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+                ds: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    decision: string;
+                    items: {
+                        fingerprint: string;
+                        id: string;
+                    }[];
+                    reason?: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful response. */
+            "2XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MergePreviewSummary"] | components["schemas"]["BatchDecisionOut"];
+                };
+            };
+            /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        detail: string;
+                    };
+                };
+            };
+        };
+    };
     post_orgs_by_org_datasets_by_ds_merge_previews_generate: {
         parameters: {
             query?: never;
@@ -10329,6 +10464,84 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UploadPart"];
+                };
+            };
+            /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        detail: string;
+                    };
+                };
+            };
+        };
+    };
+    get_orgs_by_org_datasets_by_ds_writeback_auto_approval: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+                ds: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful response. */
+            "2XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutoApprovalList"];
+                };
+            };
+            /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        detail: string;
+                    };
+                };
+            };
+        };
+    };
+    put_orgs_by_org_datasets_by_ds_writeback_auto_approval: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+                ds: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    connection_id: string;
+                    enabled: boolean;
+                    max_members: number;
+                    min_score: number;
+                    object: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful response. */
+            "2XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutoApprovalView"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */

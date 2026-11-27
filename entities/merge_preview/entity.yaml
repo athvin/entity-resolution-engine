@@ -66,6 +66,9 @@ columns:
     type: bigint
     nullable: false
     description: "Members including the master."
+  - name: score
+    type: double
+    description: "The group's match evidence (#997): for each victim, its strongest active scored edge to another member, then the weakest of those. NULL when any victim has no scored edge — absent evidence, which an auto-approval policy never approves on."
   - name: proposal
     type: json
     nullable: false

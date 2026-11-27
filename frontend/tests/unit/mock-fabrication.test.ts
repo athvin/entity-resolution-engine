@@ -62,6 +62,19 @@ const ROW_THRESHOLD = 4;
  * real. `key` is `<best-matching entity>.<field>`.
  */
 const EXPLAINED: Record<string, string> = {
+  // Writeback review (#997): the server's response structs rename and compose.
+  "merge_preview.connection_id":
+    "MergePreviewSummary renames salesforce_connection_id (er-server/src/lib.rs)",
+  "merge_preview.policy_revision":
+    "MergePreviewSummary renames writeback_policy_id — the revision a preview binds (er-server/src/lib.rs)",
+  "merge_preview.summary": "MergePreviewDetail nests the summary row (er-server/src/lib.rs)",
+  "merge_preview.history":
+    "MergePreviewDetail composes merge_preview_journal rows (er-server/src/lib.rs)",
+  "merge_preview.apply":
+    "MergePreviewDetail composes the merge_apply row's status/detail (er-server/src/lib.rs)",
+  "merge_preview_journal.at": "MergePreviewEvent renames created_at (er-server/src/lib.rs)",
+  "merge_auto_approval.connection_id":
+    "AutoApprovalView renames salesforce_connection_id (er-server/src/lib.rs)",
   // These are the mock's ORG detail rows. The dataset entity mirrors the org's
   // routing/lifecycle columns by design (datasets program), so best-match
   // attribution ties and lands on `dataset` — the attribution limit this

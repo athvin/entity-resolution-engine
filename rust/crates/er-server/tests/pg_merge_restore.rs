@@ -392,6 +392,7 @@ async fn applied_merges_undo_from_the_journal_without_overwriting_later_edits() 
                 proposal: &proposal,
                 persisted: &persisted,
                 actor: "job:test",
+                score: None,
             },
         )
         .await

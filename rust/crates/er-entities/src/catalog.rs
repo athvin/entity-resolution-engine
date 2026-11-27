@@ -1947,6 +1947,75 @@ indexes:
 "#,
     ),
     (
+        "merge_auto_approval",
+        r#"kind: entity
+version: 1
+name: merge_auto_approval
+relation: merge_auto_approvals
+description: "A dataset's auto-approval rule for one connection's object (#997): a merge preview whose score is at least min_score and whose group has at most max_members is approved as it is published, attributed to this revision. Append-only — a change (including disabling) is a new row, and the newest per (connection, object) is in force. Evaluated ONLY when a preview is published: changing a rule never rewrites a decision already made, and a preview with no score evidence is never auto-approved."
+key: [id]
+generate:
+  stores: [postgres]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "UUIDv7: the rule REVISION an auto-approval names."
+  - name: org_id
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: id }
+    description: "The tenant; denormalized beside the dataset scope per V17."
+  - name: dataset_id
+    type: varchar
+    nullable: false
+    references: { relation: datasets, column: id }
+    description: "The dataset whose previews it decides."
+  - name: salesforce_connection_id
+    type: varchar
+    nullable: false
+    references: { relation: salesforce_connections, column: id }
+    description: "The connection the rule covers."
+  - name: object
+    type: varchar
+    nullable: false
+    accepted_values: [Lead, Contact, Account]
+    description: "The sObject the rule covers."
+  - name: enabled
+    type: boolean
+    nullable: false
+    description: "false is how a rule is turned off: a newer revision that approves nothing."
+  - name: min_score
+    type: double
+    nullable: false
+    description: "The lowest group score approved, 0–1."
+  - name: max_members
+    type: bigint
+    nullable: false
+    description: "The largest group approved, master included."
+  - name: created_by
+    type: varchar
+    nullable: false
+    description: "The principal that wrote this revision."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the revision was written."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the row last changed."
+indexes:
+  - name: merge_auto_approvals_scope
+    columns: [org_id, dataset_id, salesforce_connection_id, object]
+"#,
+    ),
+    (
         "merge_preview",
         r#"kind: entity
 version: 1
@@ -2016,6 +2085,9 @@ columns:
     type: bigint
     nullable: false
     description: "Members including the master."
+  - name: score
+    type: double
+    description: "The group's match evidence (#997): for each victim, its strongest active scored edge to another member, then the weakest of those. NULL when any victim has no scored edge — absent evidence, which an auto-approval policy never approves on."
   - name: proposal
     type: json
     nullable: false

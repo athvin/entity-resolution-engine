@@ -6410,6 +6410,123 @@
         ]
       }
     },
+    "/v1/orgs/{org}/datasets/{ds}/merge-previews/decide": {
+      "post": {
+        "summary": "approve or reject several merge previews at once",
+        "operationId": "post_orgs_by_org_datasets_by_ds_merge_previews_decide",
+        "parameters": [
+          {
+            "name": "org",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ds",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "decision",
+                  "items"
+                ],
+                "properties": {
+                  "decision": {
+                    "type": "string"
+                  },
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "fingerprint"
+                      ],
+                      "properties": {
+                        "fingerprint": {
+                          "type": "string"
+                        },
+                        "id": {
+                          "type": "string"
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "reason": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "2XX": {
+            "description": "Successful response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/MergePreviewSummary"
+                    },
+                    {
+                      "$ref": "#/components/schemas/BatchDecisionOut"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "detail"
+                  ],
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "steward"
+            ]
+          }
+        ]
+      }
+    },
     "/v1/orgs/{org}/datasets/{ds}/merge-previews/generate": {
       "post": {
         "summary": "build merge previews from the dataset's latest results",
@@ -10887,6 +11004,161 @@
         ]
       }
     },
+    "/v1/orgs/{org}/datasets/{ds}/writeback/auto-approval": {
+      "get": {
+        "summary": "the auto-approval rules in force",
+        "operationId": "get_orgs_by_org_datasets_by_ds_writeback_auto_approval",
+        "parameters": [
+          {
+            "name": "org",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ds",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "2XX": {
+            "description": "Successful response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutoApprovalList"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "detail"
+                  ],
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "viewer"
+            ]
+          }
+        ]
+      },
+      "put": {
+        "summary": "set the auto-approval rule for one connection's object",
+        "operationId": "put_orgs_by_org_datasets_by_ds_writeback_auto_approval",
+        "parameters": [
+          {
+            "name": "org",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ds",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "connection_id",
+                  "object",
+                  "enabled",
+                  "min_score",
+                  "max_members"
+                ],
+                "properties": {
+                  "connection_id": {
+                    "type": "string"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "max_members": {
+                    "type": "integer"
+                  },
+                  "min_score": {
+                    "type": "number"
+                  },
+                  "object": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "2XX": {
+            "description": "Successful response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutoApprovalView"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "detail"
+                  ],
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "admin"
+            ]
+          }
+        ]
+      }
+    },
     "/v1/orgs/{org}/datasets/{ds}/writeback/policies": {
       "get": {
         "summary": "a dataset's active writeback policies",
@@ -12395,6 +12667,113 @@
             "type": "string",
             "format": "date-time",
             "description": "Wall-clock last-write time (equals created_at; audit rows are append-only)."
+          }
+        }
+      },
+      "AutoApprovalList": {
+        "type": "object",
+        "description": "The rules in force.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AutoApprovalView"
+            }
+          }
+        }
+      },
+      "AutoApprovalView": {
+        "type": "object",
+        "description": "An auto-approval rule revision.",
+        "required": [
+          "id",
+          "connection_id",
+          "object",
+          "enabled",
+          "min_score",
+          "max_members",
+          "created_by",
+          "created_at"
+        ],
+        "properties": {
+          "connection_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "description": "RFC 3339."
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string",
+            "description": "The revision; auto-approved previews name it as `policy:<id>`."
+          },
+          "max_members": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "min_score": {
+            "type": "number",
+            "format": "double"
+          },
+          "object": {
+            "type": "string"
+          }
+        }
+      },
+      "BatchDecisionOut": {
+        "type": "object",
+        "description": "The outcome of a batch decision, item by item.",
+        "required": [
+          "results"
+        ],
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BatchDecisionResult"
+            }
+          }
+        }
+      },
+      "BatchDecisionResult": {
+        "type": "object",
+        "description": "One item of a batch decision.",
+        "required": [
+          "id",
+          "status"
+        ],
+        "properties": {
+          "detail": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it was refused, when it was."
+          },
+          "id": {
+            "type": "string"
+          },
+          "preview_status": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The preview's state after, when decided."
+          },
+          "status": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The HTTP status the single-item route would have answered.",
+            "minimum": 0
           }
         }
       },
@@ -14928,6 +15307,26 @@
           }
         }
       },
+      "MergeApplyView": {
+        "type": "object",
+        "description": "An apply's outcome.",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "detail": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it settled as it did."
+          },
+          "status": {
+            "type": "string",
+            "description": "`applying`, `applied`, `failed`, `skipped_stale` or `applied_externally`."
+          }
+        }
+      },
       "MergePlan": {
         "type": "object",
         "description": "One entity's merge plan (`GET …/merge-plans`): its elected master, the\ngolden preview, every member as `source_system:source_record_id`, and the\nsame group confidence the duplicates view shows.",
@@ -15035,6 +15434,17 @@
           "history"
         ],
         "properties": {
+          "apply": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MergeApplyView",
+                "description": "The apply to Salesforce, once one has begun (#995)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "decided_by": {
             "type": [
               "string",
@@ -15147,6 +15557,13 @@
             "type": "string",
             "description": "RFC 3339."
           },
+          "decided_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Who decided it — a principal, or `policy:<rule id>` for an\nauto-approval."
+          },
           "entity_id": {
             "type": "string"
           },
@@ -15174,6 +15591,14 @@
           "policy_revision": {
             "type": "string",
             "description": "The writeback policy revision it was built under."
+          },
+          "score": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Match evidence: for each victim, its strongest scored edge to another\nmember, then the weakest of those. Null when absent."
           },
           "status": {
             "type": "string",

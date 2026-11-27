@@ -264,6 +264,17 @@ C002,Priya,Raghavan,priya.raghavan@example.com,(415) 555-0132,88 Harbor Street #
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{policy}");
+    // An auto-approval rule in force before generation (#997).
+    let (status, rule) = json_call(
+        &router,
+        "PUT",
+        &format!("{base}/writeback/auto-approval"),
+        &key,
+        Some(json!({"connection_id": conn, "object": "Contact", "enabled": true, "min_score": 0.5, "max_members": 5})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{rule}");
+    let rule_id = rule["id"].as_str().unwrap().to_owned();
 
     // --- Generate: only the provenanced crm pair forms a group -------------
     let (status, queued) = generate(key.clone()).await;
@@ -289,6 +300,16 @@ C002,Priya,Raghavan,priya.raghavan@example.com,(415) 555-0132,88 Harbor Street #
     assert_eq!(items.len(), 1, "one group: the crm pair: {page}");
     assert_eq!(items[0]["member_count"], 2, "{page}");
     assert_eq!(items[0]["object"], "Contact");
+    // The pair was scored by the match run, so the group has evidence, and
+    // the rule approved it as it was published.
+    let score = items[0]["score"].as_f64().expect("a scored group");
+    assert!(score >= 0.5, "{page}");
+    assert_eq!(items[0]["status"], "approved", "{page}");
+    assert_eq!(
+        items[0]["decided_by"],
+        format!("policy:{rule_id}"),
+        "{page}"
+    );
     let id = items[0]["id"].as_str().unwrap().to_owned();
     let (_, detail) = json_call(
         &router,

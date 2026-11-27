@@ -73,6 +73,9 @@ pub struct PreviewContext {
 /// One proposal the pod built, persisted-shaped.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BuiltPreview {
+    /// The group's weakest-link match evidence (#997); `None` when absent.
+    #[serde(default)]
+    pub score: Option<f64>,
     pub origin_run_id: String,
     pub policy_id: String,
     pub fingerprint: String,
@@ -358,6 +361,33 @@ pub fn materialize(
                     .iter()
                     .map(|g| (g.id.clone(), golden_values(g)))
                     .collect();
+                // Score evidence: active edges among the groups' members. A
+                // lake without a match run has no `match_scores` table, and
+                // then no group has evidence.
+                let mut edges: BTreeMap<String, Vec<(String, f64)>> = BTreeMap::new();
+                if session
+                    .lake_table_exists("match_scores")
+                    .map_err(|e| e.to_string())?
+                {
+                    let keys: Vec<&str> = groups
+                        .values()
+                        .flatten()
+                        .map(|m| m.record_key.as_str())
+                        .collect();
+                    for e in
+                        er_entities::match_score::read::among_keys(conn, snapshot, &keys.join(SEP))
+                            .map_err(|e| e.to_string())?
+                    {
+                        edges
+                            .entry(e.rec_a_key.clone())
+                            .or_default()
+                            .push((e.rec_b_key.clone(), e.match_probability));
+                        edges
+                            .entry(e.rec_b_key)
+                            .or_default()
+                            .push((e.rec_a_key, e.match_probability));
+                    }
+                }
                 for (key, members) in groups {
                     let policy = policies[&(key.1.clone(), key.2.clone())];
                     let Some(master) =
@@ -398,6 +428,7 @@ pub fn materialize(
                     };
                     match MergeProposal::build(input.clone()) {
                         Ok(proposal) => out.previews.push(BuiltPreview {
+                            score: group_score(&input.members, &input.master_record_key, &edges),
                             origin_run_id: run.id.clone(),
                             policy_id: policy.id.clone(),
                             fingerprint: proposal.fingerprint().to_string(),
@@ -421,4 +452,75 @@ pub fn materialize(
     out.affected.sort();
     out.affected.dedup();
     Ok(out)
+}
+
+/// A group's match evidence: for each victim, its strongest scored edge to
+/// another member of the SAME group; then the weakest of those. `None` when
+/// any victim has no such edge — a group held together only transitively,
+/// or scored by no model, has no evidence to approve on.
+fn group_score(
+    members: &[MemberSnapshot],
+    master: &str,
+    edges: &BTreeMap<String, Vec<(String, f64)>>,
+) -> Option<f64> {
+    let keys: BTreeSet<&str> = members.iter().map(|m| m.record_key.as_str()).collect();
+    let mut weakest: Option<f64> = None;
+    for victim in members.iter().filter(|m| m.record_key != master) {
+        let best = edges
+            .get(&victim.record_key)?
+            .iter()
+            .filter(|(other, _)| keys.contains(other.as_str()))
+            .map(|(_, p)| *p)
+            .fold(None, |acc: Option<f64>, p| {
+                Some(acc.map_or(p, |a| a.max(p)))
+            })?;
+        weakest = Some(weakest.map_or(best, |w| w.min(best)));
+    }
+    weakest
+}
+
+#[cfg(test)]
+mod score_tests {
+    use super::*;
+
+    fn member(key: &str) -> MemberSnapshot {
+        MemberSnapshot {
+            provider: ProviderScope {
+                org_id: "o".into(),
+                dataset_id: "d".into(),
+                connection_id: "c".into(),
+                object: crate::writeback::MergeObject::Contact,
+            },
+            record_key: key.into(),
+            external_id: key.into(),
+            system_modstamp: String::new(),
+            fields: BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn the_score_is_the_weakest_victims_strongest_edge_and_absent_evidence_is_none() {
+        let members = vec![member("m"), member("v1"), member("v2")];
+        let mut edges: BTreeMap<String, Vec<(String, f64)>> = BTreeMap::new();
+        for (a, b, p) in [
+            ("m", "v1", 0.99),
+            ("v1", "v2", 0.80),
+            ("m", "v2", 0.70),
+            ("v2", "outsider", 1.0),
+        ] {
+            edges.entry(a.into()).or_default().push((b.into(), p));
+            edges.entry(b.into()).or_default().push((a.into(), p));
+        }
+        // v1's best is 0.99, v2's best inside the group is 0.80 (the 1.0 edge leaves it).
+        assert_eq!(group_score(&members, "m", &edges), Some(0.80));
+        edges.remove("v2");
+        for list in edges.values_mut() {
+            list.retain(|(o, _)| o != "v2");
+        }
+        assert_eq!(
+            group_score(&members, "m", &edges),
+            None,
+            "a victim without evidence"
+        );
+    }
 }

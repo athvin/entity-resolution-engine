@@ -216,8 +216,61 @@ function mockTasks(job, clearedFrom) {
 }
 
 /** Deterministic base fixtures — all timestamps fixed for visual snapshots. */
+/** Salesforce merge previews (#993/#997): three for acme-dev — one awaiting a
+ * reviewer, one with no score evidence, one an auto-approval rule decided and
+ * the apply then merged. */
+function seedMergePreviews() {
+  const preview = (n, status, score, decidedBy) => ({
+    id: `01jmprev${String(n).padStart(5, "0")}`,
+    connection_id: "conn-prod",
+    object: "Contact",
+    entity_id: `ent-${String(n)}`,
+    fingerprint: `v1:fp${String(n)}`,
+    status,
+    master_record_key: `crm:C-${String(100 + n)}`,
+    member_count: 2,
+    score,
+    decided_by: decidedBy,
+    lake_snapshot: 12,
+    policy_revision: "pol-1",
+    created_at: "2026-11-27T08:00:00Z",
+  });
+  const seeded = () => [
+    preview(1, "planned", 0.982, null),
+    preview(2, "planned", null, null),
+    preview(3, "approved", 0.997, "policy:rule-1"),
+  ];
+  // acme-dev is render-only; the triage orgs (one per device project) take
+  // the decisions, so parallel projects never race.
+  return Object.fromEntries(
+    ["acme-dev", "mutable-dev", "mutable-ios", "mutable-android"].map((org) => [org, seeded()]),
+  );
+}
+
 export function initialState() {
   const state = {
+    mergePreviews: seedMergePreviews(),
+    mergeApplies: Object.fromEntries(
+      ["acme-dev", "mutable-dev", "mutable-ios", "mutable-android"].map((org) => [
+        `${org}:01jmprev00003`,
+        { status: "applied", detail: "1 victim(s) merged" },
+      ]),
+    ),
+    mergeRestores: {},
+    autoApprovals: {
+      "acme-dev": [
+        {
+          id: "rule-1",
+          connection_id: "conn-prod",
+          object: "Contact",
+          enabled: true,
+          min_score: 0.99,
+          max_members: 2,
+          created_by: "key:admin",
+          created_at: "2026-11-27T07:00:00Z",
+        },
+      ],
+    },
     /// Which task a clear started from, per job — so a cleared ledger shows
     /// the cleared suffix pending again rather than silently re-reporting the
     /// old states.
@@ -2600,6 +2653,147 @@ const server = http.createServer((req, res) => {
       job.state = "queued";
       job.error_class = null;
       return send(res, 200, { id: job.id, state: "queued" });
+    }
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/merge-previews$/.exec(path)) &&
+      req.method === "GET"
+    ) {
+      const status = url.searchParams.get("status");
+      const items = (state.mergePreviews[match[1]] ?? []).filter(
+        (p) => !status || p.status === status,
+      );
+      return send(res, 200, { items, next_cursor: null });
+    }
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/merge-previews\/decide$/.exec(path)) &&
+      req.method === "POST"
+    ) {
+      const body = await readBody(req);
+      const to = body.decision === "approve" ? "approved" : "rejected";
+      const results = (body.items ?? []).map((item) => {
+        const row = (state.mergePreviews[match[1]] ?? []).find((p) => p.id === item.id);
+        if (!row)
+          return {
+            id: item.id,
+            status: 404,
+            preview_status: null,
+            detail: "no such merge preview",
+          };
+        if (row.fingerprint !== item.fingerprint)
+          return {
+            id: item.id,
+            status: 409,
+            preview_status: null,
+            detail: "the preview changed since you saw it",
+          };
+        if (row.status !== "planned")
+          return {
+            id: item.id,
+            status: 409,
+            preview_status: null,
+            detail: `the preview is ${row.status}`,
+          };
+        row.status = to;
+        row.decided_by = "key:steward";
+        return { id: item.id, status: 200, preview_status: to, detail: null };
+      });
+      return send(res, 200, { results });
+    }
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/merge-previews\/(generate|apply)$/.exec(
+        path,
+      )) &&
+      req.method === "POST"
+    ) {
+      return send(res, 202, { job_id: `job-${match[2]}`, state: "queued" });
+    }
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/merge-previews\/([^/]+)\/restore$/.exec(
+        path,
+      ))
+    ) {
+      const key = `${match[1]}:${match[2]}`;
+      const apply = state.mergeApplies[key];
+      if (!apply) return send(res, 404, { detail: "no applied merge for this preview" });
+      if (req.method === "POST" && !state.mergeRestores[key]) {
+        state.mergeRestores[key] = {
+          status: "restoring",
+          conflicts: [],
+          detail: null,
+          steps: [],
+          related_records_reverted: false,
+          job_id: "job-restore",
+        };
+      }
+      const view = state.mergeRestores[key];
+      if (!view) return send(res, 404, { detail: "this preview has no undo" });
+      return send(res, req.method === "POST" ? 202 : 200, view);
+    }
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/merge-previews\/([^/]+)$/.exec(path)) &&
+      req.method === "GET"
+    ) {
+      const row = (state.mergePreviews[match[1]] ?? []).find((p) => p.id === match[2]);
+      if (!row) return send(res, 404, { detail: "no such merge preview" });
+      const victim = row.master_record_key.replace("crm:C-", "crm:C-9");
+      return send(res, 200, {
+        summary: row,
+        proposal: {
+          master_record_key: row.master_record_key,
+          members: [
+            {
+              record_key: row.master_record_key,
+              external_id: "003000000000001",
+              system_modstamp: "2026-11-27T00:00:00Z",
+              fields: { Email: "old@acme.test" },
+            },
+            {
+              record_key: victim,
+              external_id: "003000000000002",
+              system_modstamp: "2026-11-27T00:00:00Z",
+              fields: { Email: "new@acme.test" },
+            },
+          ],
+        },
+        field_changes: { Email: { before: "old@acme.test", after: "new@acme.test" } },
+        related_counts: null,
+        related_counts_state: "unavailable",
+        decided_by: row.decided_by,
+        decision_reason: row.decided_by?.startsWith("policy:")
+          ? "auto-approval rule rule-1: score 0.997 >= 0.990"
+          : null,
+        history: [
+          {
+            from_status: null,
+            to_status: "planned",
+            fingerprint: row.fingerprint,
+            actor: "job:gen",
+            at: "2026-11-27T08:00:00Z",
+          },
+        ],
+        apply: state.mergeApplies[`${match[1]}:${row.id}`] ?? null,
+      });
+    }
+    if (
+      (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/writeback\/auto-approval$/.exec(path))
+    ) {
+      const rules = (state.autoApprovals[match[1]] ??= []);
+      if (req.method === "PUT") {
+        const body = await readBody(req);
+        const rule = {
+          id: `rule-${String(rules.length + 1)}`,
+          ...body,
+          created_by: "key:admin",
+          created_at: "2026-11-27T09:00:00Z",
+        };
+        const at = rules.findIndex(
+          (r) => r.connection_id === body.connection_id && r.object === body.object,
+        );
+        if (at >= 0) rules[at] = rule;
+        else rules.push(rule);
+        return send(res, 200, rule);
+      }
+      return send(res, 200, { items: rules });
     }
     if (
       (match = /^\/v1\/orgs\/([^/]+)\/datasets\/(?:[^/]+)\/reviews$/.exec(path)) &&

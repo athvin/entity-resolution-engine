@@ -200,6 +200,85 @@ LIMIT $5
         ActivePageRow::from_batches(&batches)
     }
 
+    /// One row of `among_keys`: Active scored edges whose two endpoints are both in a chr(31)-joined record-key list, at a pinned snapshot — the evidence a merge preview's score is computed from (#997). The caller groups edges by its own groups and only calls this when the lake has a match_scores table.
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct AmongKeysRow {
+        pub rec_a_key: String,
+        pub rec_b_key: String,
+        pub match_probability: f64,
+    }
+
+    impl AmongKeysRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![
+                ("rec_a_key", ::arrow::datatypes::DataType::Utf8),
+                ("rec_b_key", ::arrow::datatypes::DataType::Utf8),
+                ("match_probability", ::arrow::datatypes::DataType::Float64),
+            ]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::StringArray = crate::batch::col(batch, 0, "rec_a_key")?;
+                let c1: &::arrow::array::StringArray = crate::batch::col(batch, 1, "rec_b_key")?;
+                let c2: &::arrow::array::Float64Array =
+                    crate::batch::col(batch, 2, "match_probability")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        rec_a_key: crate::batch::req(crate::batch::opt_str(c0, i), "rec_a_key", i)?,
+                        rec_b_key: crate::batch::req(crate::batch::opt_str(c1, i), "rec_b_key", i)?,
+                        match_probability: crate::batch::req(
+                            crate::batch::opt_f64(c2, i),
+                            "match_probability",
+                            i,
+                        )?,
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// Active scored edges whose two endpoints are both in a chr(31)-joined record-key list, at a pinned snapshot — the evidence a merge preview's score is computed from (#997). The caller groups edges by its own groups and only calls this when the lake has a match_scores table.
+    pub fn among_keys(
+        conn: &::duckdb::Connection,
+        snapshot: i64,
+        record_keys: &str,
+    ) -> ::duckdb::Result<Vec<AmongKeysRow>> {
+        const SQL: &str = "SELECT rec_a_key, rec_b_key, match_probability
+FROM lake.main.match_scores AT (VERSION => {snapshot})
+WHERE is_active
+  AND rec_a_key IN (SELECT unnest(string_split($1, chr(31))))
+  AND rec_b_key IN (SELECT unnest(string_split($1, chr(31))))
+ORDER BY rec_a_key, rec_b_key
+";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "match_score",
+            "read",
+            "among_keys",
+            "match_scores",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let sql = SQL.replace("{snapshot}", &snapshot.to_string());
+        let mut stmt = ::er_span::check(&__span, conn.prepare(&sql))?;
+        let batches = ::er_span::check(&__span, stmt.query_arrow(::duckdb::params![record_keys]))?
+            .collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
+        AmongKeysRow::from_batches(&batches)
+    }
+
     /// One row of `auto_merge_counts`: Per-run count of active pairs at or above the auto-merge threshold, at a pinned snapshot (the runs surface).
     #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
     pub struct AutoMergeCountsRow {

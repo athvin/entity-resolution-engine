@@ -387,6 +387,7 @@ async fn approved_merges_apply_through_the_journal_and_fail_closed() {
                 proposal: &proposal,
                 persisted: &persisted,
                 actor: "job:test",
+                score: None,
             },
         )
         .await

@@ -387,6 +387,61 @@ impl ControlTask<PgClient> for PublishPreviews {
     }
 }
 
+/// Approve a just-published preview if a rule in force covers it: enabled,
+/// a score present and at least the rule's minimum, and a group no larger
+/// than its maximum. Attributed to the rule revision, journaled in the
+/// caller's transaction. Absent score evidence never approves.
+async fn auto_approve(
+    ctx: &mut ControlCtx<'_, PgClient>,
+    rules: &[er_entities::merge_auto_approval::MergeAutoApproval],
+    row: &er_entities::merge_preview::MergePreview,
+) -> Result<bool, tokio_postgres::Error> {
+    let Some(score) = row.score else {
+        return Ok(false);
+    };
+    let Some(rule) = rules.iter().find(|r| {
+        r.enabled
+            && r.salesforce_connection_id == row.salesforce_connection_id
+            && r.object == row.object
+            && score >= r.min_score
+            && row.member_count <= r.max_members
+    }) else {
+        return Ok(false);
+    };
+    let actor = format!("policy:{}", rule.id);
+    let reason = format!(
+        "auto-approval rule {}: score {score:.3} >= {:.3}, {} member(s) <= {}",
+        rule.id, rule.min_score, row.member_count, rule.max_members
+    );
+    let moved = er_entities::merge_preview::update::decide(
+        ctx.client,
+        "approved",
+        &actor,
+        Some(&reason),
+        &row.id,
+        &row.org_id,
+        &row.dataset_id,
+        &row.fingerprint,
+    )
+    .await?;
+    if moved.is_empty() {
+        return Ok(false);
+    }
+    er_entities::merge_preview_journal::create::append(
+        ctx.client,
+        &er_ids::new_v7(),
+        &row.org_id,
+        &row.dataset_id,
+        &row.id,
+        Some("planned"),
+        "approved",
+        &row.fingerprint,
+        &actor,
+    )
+    .await?;
+    Ok(true)
+}
+
 async fn publish_batch(
     ctx: &mut ControlCtx<'_, PgClient>,
     org_id: &str,
@@ -410,6 +465,17 @@ async fn publish_batch(
         let mut published = 0usize;
         let mut kept: std::collections::BTreeSet<(String, String, String)> =
             std::collections::BTreeSet::new();
+        // Auto-approval rules in force NOW: a rule only ever decides previews
+        // as they are published, never ones already stored.
+        let rules =
+            er_entities::merge_auto_approval::read::active(ctx.client, &org_id, &dataset_id)
+                .await
+                .map_err(|e| {
+                    failed(
+                        format!("reading auto-approval rules: {e}"),
+                        er_errors::ErrorClass::TransientIo,
+                    )
+                })?;
         for preview in &built.previews {
             let proposal = crate::writeback::PersistedProposalV1::restore(&preview.persisted)
                 .map_err(|e| {
@@ -438,6 +504,7 @@ async fn publish_batch(
                 proposal: &proposal,
                 persisted: &preview.persisted,
                 actor: &format!("job:{}", ctx.order.job_id),
+                score: preview.score,
             };
             let stored = crate::pg::publish_preview(ctx.client, &publish)
                 .await
@@ -447,8 +514,14 @@ async fn publish_batch(
                         er_errors::ErrorClass::TransientIo,
                     )
                 })?;
-            if stored.is_some() {
+            if let Some(row) = stored {
                 published += 1;
+                auto_approve(ctx, &rules, &row).await.map_err(|e| {
+                    failed(
+                        format!("auto-approving a preview: {e}"),
+                        er_errors::ErrorClass::TransientIo,
+                    )
+                })?;
             }
         }
         // An affected entity with no group under a policy any more: its

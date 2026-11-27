@@ -362,6 +362,28 @@ merged something. Composition:
 attachments — are not moved back.** The view says so (`related_records_reverted:
 false`). Salesforce Files archival and audit-driven retry remain #530.
 
+### 4.3.4 Review: manual, batch and policy-driven (as built, #997)
+
+The tenant surface is `/{org}/{ds}/writeback`: previews by state, each with its
+master, victims, master field diffs, score, related-count availability, the
+apply outcome, the undo (with its conflicts, and the statement that reparented
+records are not moved back) and the full history.
+
+| Mode | Route | Rule |
+|---|---|---|
+| single | `POST …/merge-previews/{id}/approve` · `/reject` | names the fingerprint the reviewer saw; the proposal must still validate under a live policy revision and connection |
+| batch | `POST …/merge-previews/decide` (Steward, ≤100) | each item runs through exactly the single-item checks and reports its own status |
+| policy | `PUT/GET …/writeback/auto-approval` (Admin / Viewer) | append-only rule per (connection, object): `min_score`, `max_members`, `enabled`; the actor is `policy:<revision>` |
+
+A preview's **score** is weakest-link evidence from the active `match_scores`
+edges at its snapshot: for each victim, its strongest edge to another member of
+the same group, then the minimum. A victim with no edge (held only
+transitively, or never scored) makes the score NULL, and **a NULL score is
+never auto-approved**. A rule is evaluated only as a preview is published, in
+the same transaction; changing or disabling it never rewrites a decision
+already made. Every mode ends in the same apply (§4.3.2), with the same
+authorization, staleness and journal.
+
 ### 4.4 Explicit v1 boundaries
 
 - Writeback via `merge()` (Lead/Contact/Account) and `upsert`.

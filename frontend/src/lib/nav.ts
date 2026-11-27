@@ -10,6 +10,7 @@ import {
   Settings,
   Sparkles,
   Database,
+  GitMerge,
   Users,
   type LucideIcon,
 } from "lucide-react";
@@ -52,6 +53,13 @@ export const NAV_ITEMS: NavItem[] = [
     label: "Reviews",
     icon: Inbox,
     path: (org, ds) => `/${org}/${ds}/reviews`,
+    enabled: true,
+  },
+  {
+    id: "writeback",
+    label: "Writeback",
+    icon: GitMerge,
+    path: (org, ds) => `/${org}/${ds}/writeback`,
     enabled: true,
   },
   {

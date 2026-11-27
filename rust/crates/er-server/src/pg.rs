@@ -2548,6 +2548,8 @@ pub struct PreviewToPublish<'a> {
     pub proposal: &'a crate::writeback::MergeProposal,
     pub persisted: &'a serde_json::Value,
     pub actor: &'a str,
+    /// The group's match evidence (#997); `None` when absent.
+    pub score: Option<f64>,
 }
 
 /// Publish a proposal and supersede the group's older PLANNED previews, with
@@ -2585,6 +2587,7 @@ pub async fn publish_preview(
         p.policy_id,
         &content.master.record_key,
         i64::try_from(content.victims.len() + 1).unwrap_or(i64::MAX),
+        p.score,
         p.persisted,
         &field_changes,
         None,
