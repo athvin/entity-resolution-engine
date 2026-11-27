@@ -1978,6 +1978,9 @@ columns:
   - name: max_concurrent_jobs
     type: bigint
     description: "How many of this org's jobs may be active at once, across its datasets (the noisy-neighbor cap). NULL inherits the server default (ER_ORG_JOB_CAP, which ships as 1 — the pre-dataset single-writer profile). The per-DATASET writer lock is separate and absolute."
+  - name: record_allowance
+    type: bigint
+    description: "The org's record allowance: the most connected records (standardized source records, summed over its datasets) it may hold before new deliveries are refused with 402. NULL is unlimited. The commercial unit is connected records (#518); the operator sets it per pilot."
   - name: created_at
     type: timestamp
     nullable: false

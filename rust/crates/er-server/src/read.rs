@@ -1184,93 +1184,6 @@ impl DuplicateGroups {
         }
     }
 
-    /// The Arrow schema every page of `entity_type`'s groups exports as
-    /// (#1252), declared from the typed group rather than inferred from a
-    /// page, so a nullable field that is null on every row of the first page
-    /// keeps its type on a later page that carries a value. One row per group:
-    ///
-    /// - `members`: `List<Struct<key, confidence>>`, each member key with its
-    ///   attachment confidence (null when the member is unscored), in the
-    ///   group's member order. It folds the JSON's `member_confidences` map
-    ///   into the list it is keyed by;
-    /// - `golden`: the golden preview as one struct, the entity type's preview
-    ///   fields (person: `given_name`, `family_name`, `email`; account:
-    ///   `company_name`, `domain`);
-    /// - every other column is the JSON field of the same name.
-    #[must_use]
-    pub fn arrow_schema(entity_type: EntityType) -> arrow::datatypes::SchemaRef {
-        use arrow::datatypes::{DataType, Field, Schema};
-        std::sync::Arc::new(Schema::new(vec![
-            Field::new("entity_id", DataType::Utf8, false),
-            Field::new("member_count", DataType::Int64, false),
-            Field::new("members", DataType::List(member_item()), false),
-            Field::new("group_confidence", DataType::Int64, true),
-            Field::new("master_record_key", DataType::Utf8, true),
-            Field::new("model_versions", DataType::List(string_item()), false),
-            Field::new("matched_fields", DataType::List(string_item()), false),
-            Field::new("verified", DataType::Boolean, false),
-            Field::new(
-                "golden",
-                DataType::Struct(golden_fields(entity_type)),
-                false,
-            ),
-        ]))
-    }
-
-    /// The page as one batch of [`Self::arrow_schema`], built from the typed
-    /// groups directly, never through their JSON.
-    ///
-    /// # Errors
-    /// An Arrow error if an array does not fit the declared schema.
-    pub fn to_record_batch(
-        &self,
-    ) -> Result<arrow::record_batch::RecordBatch, arrow::error::ArrowError> {
-        match self {
-            Self::Person(v) => group_batch(
-                EntityType::Person,
-                v.iter().map(|g| {
-                    (
-                        GroupColumns {
-                            entity_id: &g.entity_id,
-                            member_count: g.member_count,
-                            members: &g.members,
-                            group_confidence: g.group_confidence,
-                            master_record_key: g.master_record_key.as_deref(),
-                            member_confidences: &g.member_confidences,
-                            model_versions: &g.model_versions,
-                            matched_fields: &g.matched_fields,
-                            verified: g.verified,
-                        },
-                        vec![
-                            g.given_name.as_deref(),
-                            g.family_name.as_deref(),
-                            g.email.as_deref(),
-                        ],
-                    )
-                }),
-            ),
-            Self::Account(v) => group_batch(
-                EntityType::Account,
-                v.iter().map(|g| {
-                    (
-                        GroupColumns {
-                            entity_id: &g.entity_id,
-                            member_count: g.member_count,
-                            members: &g.members,
-                            group_confidence: g.group_confidence,
-                            master_record_key: g.master_record_key.as_deref(),
-                            member_confidences: &g.member_confidences,
-                            model_versions: &g.model_versions,
-                            matched_fields: &g.matched_fields,
-                            verified: g.verified,
-                        },
-                        vec![g.company_name.as_deref(), g.domain.as_deref()],
-                    )
-                }),
-            ),
-        }
-    }
-
     fn push(&mut self, group: GroupItem) {
         let (confidence, master, members) = match group.score {
             Some(score) => (
@@ -1315,136 +1228,6 @@ impl DuplicateGroups {
             }),
         }
     }
-}
-
-/// The columns both entity types' groups share, borrowed for one batch.
-struct GroupColumns<'a> {
-    entity_id: &'a str,
-    member_count: i64,
-    members: &'a [String],
-    group_confidence: Option<i64>,
-    master_record_key: Option<&'a str>,
-    member_confidences: &'a std::collections::BTreeMap<String, i64>,
-    model_versions: &'a [String],
-    matched_fields: &'a [String],
-    verified: bool,
-}
-
-/// A `members` element: the member key and its attachment confidence.
-fn member_fields() -> arrow::datatypes::Fields {
-    use arrow::datatypes::{DataType, Field};
-    vec![
-        Field::new("key", DataType::Utf8, false),
-        Field::new("confidence", DataType::Int64, true),
-    ]
-    .into()
-}
-
-fn member_item() -> arrow::datatypes::FieldRef {
-    use arrow::datatypes::{DataType, Field};
-    std::sync::Arc::new(Field::new_list_field(
-        DataType::Struct(member_fields()),
-        false,
-    ))
-}
-
-fn string_item() -> arrow::datatypes::FieldRef {
-    use arrow::datatypes::{DataType, Field};
-    std::sync::Arc::new(Field::new_list_field(DataType::Utf8, false))
-}
-
-/// The golden preview's fields, in the order the preview is assembled.
-fn preview_fields(entity_type: EntityType) -> &'static [&'static str] {
-    match entity_type {
-        EntityType::Person => &["given_name", "family_name", "email"],
-        EntityType::Account => &["company_name", "domain"],
-    }
-}
-
-fn golden_fields(entity_type: EntityType) -> arrow::datatypes::Fields {
-    use arrow::datatypes::{DataType, Field};
-    preview_fields(entity_type)
-        .iter()
-        .map(|name| Field::new(*name, DataType::Utf8, true))
-        .collect()
-}
-
-/// One batch of [`DuplicateGroups::arrow_schema`] from each group's shared
-/// columns and its golden preview values.
-fn group_batch<'a>(
-    entity_type: EntityType,
-    groups: impl Iterator<Item = (GroupColumns<'a>, Vec<Option<&'a str>>)>,
-) -> Result<arrow::record_batch::RecordBatch, arrow::error::ArrowError> {
-    use arrow::array::{ArrayRef, BooleanArray, Int64Array, ListArray, StringArray, StructArray};
-    use arrow::buffer::OffsetBuffer;
-    use std::sync::Arc;
-
-    let (rows, previews): (Vec<GroupColumns<'a>>, Vec<Vec<Option<&'a str>>>) = groups.unzip();
-    let strings = |each: fn(&GroupColumns<'a>) -> &'a [String]| {
-        ListArray::try_new(
-            string_item(),
-            OffsetBuffer::from_lengths(rows.iter().map(|r| each(r).len())),
-            Arc::new(StringArray::from_iter_values(
-                rows.iter().flat_map(|r| each(r).iter()),
-            )),
-            None,
-        )
-        .map(|list| Arc::new(list) as ArrayRef)
-    };
-    let members = StructArray::try_new(
-        member_fields(),
-        vec![
-            Arc::new(StringArray::from_iter_values(
-                rows.iter().flat_map(|r| r.members.iter()),
-            )),
-            Arc::new(Int64Array::from_iter(rows.iter().flat_map(|r| {
-                r.members
-                    .iter()
-                    .map(|key| r.member_confidences.get(key).copied())
-            }))),
-        ],
-        None,
-    )?;
-    let golden = StructArray::try_new(
-        golden_fields(entity_type),
-        (0..preview_fields(entity_type).len())
-            .map(|i| {
-                Arc::new(StringArray::from_iter(
-                    previews.iter().map(|p| p.get(i).copied().flatten()),
-                )) as ArrayRef
-            })
-            .collect(),
-        None,
-    )?;
-    arrow::record_batch::RecordBatch::try_new(
-        DuplicateGroups::arrow_schema(entity_type),
-        vec![
-            Arc::new(StringArray::from_iter_values(
-                rows.iter().map(|r| r.entity_id),
-            )),
-            Arc::new(Int64Array::from_iter_values(
-                rows.iter().map(|r| r.member_count),
-            )),
-            Arc::new(ListArray::try_new(
-                member_item(),
-                OffsetBuffer::from_lengths(rows.iter().map(|r| r.members.len())),
-                Arc::new(members),
-                None,
-            )?),
-            Arc::new(Int64Array::from_iter(
-                rows.iter().map(|r| r.group_confidence),
-            )),
-            Arc::new(StringArray::from_iter(
-                rows.iter().map(|r| r.master_record_key),
-            )),
-            strings(|r| r.model_versions)?,
-            strings(|r| r.matched_fields)?,
-            Arc::new(BooleanArray::from_iter(
-                rows.iter().map(|r| Some(r.verified)),
-            )),
-            Arc::new(golden),
-        ],
-    )
 }
 
 /// Whether one assembled group passes every active filter dimension.
@@ -1690,7 +1473,10 @@ fn assemble_group_items(
 
 /// How many golden preview fields the entity type carries (person 3, account 2).
 fn preview_field_count(entity_type: EntityType) -> usize {
-    preview_fields(entity_type).len()
+    match entity_type {
+        EntityType::Person => 3,
+        EntityType::Account => 2,
+    }
 }
 
 /// The composite key separator for `match_scores` cursors (`readapi` joins the
@@ -3288,6 +3074,28 @@ fn std_record_count(session: &Session, snapshot: i64) -> Result<i64, String> {
     let rows = er_entities::int_std_record::read::count(session.connection(), snapshot)
         .map_err(|e| e.to_string())?;
     Ok(rows.first().and_then(|r| r.n).unwrap_or(0))
+}
+
+/// A dataset's connected records — its standardized source records at the
+/// latest snapshot — and that snapshot: the usage unit (#518). A lake whose
+/// standardized table does not exist yet (nothing ingested) holds zero.
+///
+/// # Errors
+/// Propagates a lake error other than the table's absence.
+pub fn connected_records(session: &Session, account: bool) -> Result<(i64, i64), String> {
+    let snapshot = latest_snapshot(session)?;
+    let counted = if account {
+        er_entities::acct_int_std_record::read::count(session.connection(), snapshot)
+            .map(|rows| rows.first().and_then(|r| r.n).unwrap_or(0))
+    } else {
+        er_entities::int_std_record::read::count(session.connection(), snapshot)
+            .map(|rows| rows.first().and_then(|r| r.n).unwrap_or(0))
+    };
+    match counted {
+        Ok(n) => Ok((snapshot, n)),
+        Err(e) if e.to_string().contains("does not exist") => Ok((snapshot, 0)),
+        Err(e) => Err(e.to_string()),
+    }
 }
 
 /// The golden-record count at `snapshot` via the declared statement.

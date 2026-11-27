@@ -204,6 +204,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/orgs/{org}/allowance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** set or clear an org's record allowance */
+        patch: operations["patch_orgs_by_org_allowance"];
+        trace?: never;
+    };
     "/v1/orgs/{org}/api-keys": {
         parameters: {
             query?: never;
@@ -1835,6 +1852,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/orgs/{org}/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** the org's usage against its allowance */
+        get: operations["get_orgs_by_org_usage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/orgs/{org}/webhooks": {
         parameters: {
             query?: never;
@@ -2034,6 +2068,12 @@ export interface components {
              * @description Run-logical last-write time (equals created_at; the mart is rebuilt whole).
              */
             updated_at: string;
+        };
+        /** @description `PATCH /v1/orgs/{org}/allowance`: the allowance now in force. */
+        AllowanceSet: {
+            name: string;
+            /** Format: int64 */
+            record_allowance?: number | null;
         };
         /** @description An org-scoped API key: its role and the at-rest hash of the secret. */
         ApiKey: {
@@ -2661,6 +2701,20 @@ export interface components {
             job_id: string;
             name: string;
             state: string;
+        };
+        /** @description One dataset's share of an org's usage. */
+        DatasetUsage: {
+            name: string;
+            /**
+             * Format: int64
+             * @description Connected records: standardized source records at `snapshot`.
+             */
+            records: number;
+            /**
+             * Format: int64
+             * @description The lake snapshot counted; null for a dataset with no lake yet.
+             */
+            snapshot?: number | null;
         };
         /**
          * @description One dataset: the body of `GET`/`PATCH /v1/orgs/{org}/datasets/{ds}` and an
@@ -3474,6 +3528,11 @@ export interface components {
             max_concurrent_jobs?: number | null;
             /** @description The tenant's unique name (the routing handle; URLs stay name-based). */
             name: string;
+            /**
+             * Format: int64
+             * @description The org's record allowance: the most connected records (standardized source records, summed over its datasets) it may hold before new deliveries are refused with 402. NULL is unlimited. The commercial unit is connected records (#518); the operator sets it per pilot.
+             */
+            record_allowance?: number | null;
             /** @description Bucket the auto-ingest poller watches for this tenant. Null means auto-ingest is off, which is every existing tenant — the feature has to be opted into, because a poller that starts reading a bucket nobody pointed at it would be ingesting data on its own initiative. */
             s3_ingest_bucket?: string | null;
             /** @description Key prefix under `s3_ingest_bucket`, with one directory per config source beneath it. A column rather than a key in `env` deliberately: `env` is handed to the engine subprocess, while this is read by the control plane itself, and D5 is what happens when the two stores of per-tenant settings disagree. */
@@ -3522,6 +3581,26 @@ export interface components {
             duckdb_memory_limit?: string | null;
             /** Format: int64 */
             duckdb_threads?: number | null;
+        };
+        /** @description `GET /v1/orgs/{org}/usage`: the org's consumption of its allowance. */
+        OrgUsage: {
+            /**
+             * Format: int64
+             * @description The allowance; null is unlimited.
+             */
+            allowance?: number | null;
+            /** @description True once `records >= allowance`: new deliveries are refused with 402. */
+            at_limit: boolean;
+            datasets: components["schemas"]["DatasetUsage"][];
+            /** Format: int64 */
+            records: number;
+            /**
+             * Format: int64
+             * @description `allowance - records`, never negative; null when unlimited.
+             */
+            remaining?: number | null;
+            /** @description Always `records`: connected records, summed over every dataset. */
+            unit: string;
         };
         /** @description An org's detail: the body of `GET /v1/orgs/{org}`. */
         OrgView: {
@@ -5299,6 +5378,45 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OrgView"];
+                };
+            };
+            /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        detail: string;
+                    };
+                };
+            };
+        };
+    };
+    patch_orgs_by_org_allowance: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    record_allowance?: number | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful response. */
+            "2XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AllowanceSet"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
@@ -9679,6 +9797,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TagRetired"];
+                };
+            };
+            /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        detail: string;
+                    };
+                };
+            };
+        };
+    };
+    get_orgs_by_org_usage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful response. Payload types are described only at envelope granularity. */
+            "2XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */

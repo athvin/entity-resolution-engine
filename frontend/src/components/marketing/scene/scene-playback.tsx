@@ -10,18 +10,12 @@ import { RotateCcw } from "lucide-react";
  * Two jobs. If the stage is not on screen when the page hydrates (a short
  * phone, where the hero scene sits below the way into the story), its
  * animations are held at the start and run when it is first seen, so nobody
- * scrolls down to a scene that already finished. "On screen" means the same
- * 40% the observer waits for: a solutions page's figure starts 19px above the
- * bottom of an iPhone 15's screen, and counting that sliver as seen played it
- * out unwatched. And Replay runs it again.
+ * scrolls down to a scene that already finished. And Replay runs it again.
  *
  * Without JavaScript the CSS simply plays on load. The button renders only
  * after hydration, so a reader without JavaScript never meets one that does
  * nothing; reduced motion hides it in CSS, because nothing moves.
  */
-/** How much of the stage must be on screen for it to count as seen. */
-const SEEN = 0.4;
-
 export function ScenePlayback({ target, label }: { target: string; label: string }) {
   const [ready, setReady] = useState(false);
 
@@ -30,8 +24,7 @@ export function ScenePlayback({ target, label }: { target: string; label: string
     const stage = document.getElementById(target);
     if (!stage || typeof IntersectionObserver === "undefined") return;
     const box = stage.getBoundingClientRect();
-    const visible = Math.min(box.bottom, window.innerHeight) - Math.max(box.top, 0);
-    if (box.height > 0 && visible / box.height >= SEEN) return;
+    if (box.top < window.innerHeight && box.bottom > 0) return;
     const animations = stage.getAnimations({ subtree: true });
     for (const animation of animations) {
       animation.pause();
@@ -43,7 +36,7 @@ export function ScenePlayback({ target, label }: { target: string; label: string
         for (const animation of animations) animation.play();
         observer.disconnect();
       },
-      { threshold: SEEN },
+      { threshold: 0.4 },
     );
     observer.observe(stage);
     return () => {

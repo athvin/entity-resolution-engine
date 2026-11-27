@@ -19,9 +19,7 @@
 //! 7. Parquet (#1241): golden at R round-trips through a reader with exactly
 //!    `AcctGoldenRecord`'s columns and R's four entities, across a page
 //!    boundary; an empty export is still a readable file with that schema;
-//!    lineage carries the same seven rows as its CSV;
-//! 8. duplicates Parquet (#1252): R's three groups, one row each across the
-//!    page boundary, members a nested list matching the JSON Lines export.
+//!    lineage carries the same seven rows as its CSV.
 
 use std::path::{Path, PathBuf};
 
@@ -352,89 +350,9 @@ fn an_export_writes_every_page_of_its_pinned_snapshot() {
     from_parquet.sort();
     from_csv.sort();
     assert_eq!(from_parquet, from_csv);
-    // Duplicates (#1252): one row per group, across the page boundary (three
-    // groups at a page size of 2), its members a nested list of structs
-    // carrying exactly what the JSON Lines export says, group by group.
-    let (report, path) = write(
-        "dups.parquet",
-        &request(ExportKind::Duplicates, ExportFormat::Parquet, r),
-        exports::MAX_ROWS,
-    );
-    assert_eq!(report.unwrap().rows, 3);
-    let schema = read::DuplicateGroups::arrow_schema(EntityType::Account);
-    let (columns, batches) = parquet(&path);
-    assert_eq!(
-        columns,
-        schema
-            .fields()
-            .iter()
-            .map(|f| f.name().clone())
-            .collect::<Vec<_>>()
-    );
-    let batch = arrow::compute::concat_batches(&schema, &batches).unwrap();
-    assert_eq!(batch.num_rows(), 3, "one row per group");
-    let (_, path) = write(
-        "dups-r.jsonl",
-        &request(ExportKind::Duplicates, ExportFormat::Jsonl, r),
-        exports::MAX_ROWS,
-    );
-    let from_jsonl: Vec<serde_json::Value> = lines(&path)
-        .iter()
-        .map(|l| serde_json::from_str(l).unwrap())
-        .collect();
-    let ids = strings(&batches, "entity_id");
-    let members = arrow::array::AsArray::as_list::<i32>(batch.column_by_name("members").unwrap());
-    let group_confidence = batch.column_by_name("group_confidence").unwrap();
-    let golden = arrow::array::AsArray::as_struct(batch.column_by_name("golden").unwrap());
-    for (i, group) in from_jsonl.iter().enumerate() {
-        assert_eq!(group["entity_id"].as_str(), Some(ids[i].as_str()));
-        let row = members.value(i);
-        let row = arrow::array::AsArray::as_struct(&row);
-        let keys: Vec<serde_json::Value> =
-            arrow::array::AsArray::as_string::<i32>(row.column_by_name("key").unwrap())
-                .iter()
-                .map(|k| serde_json::json!(k))
-                .collect();
-        assert_eq!(&serde_json::Value::Array(keys.clone()), &group["members"]);
-        let confidences = arrow::array::AsArray::as_primitive::<arrow::datatypes::Int64Type>(
-            row.column_by_name("confidence").unwrap(),
-        );
-        for (j, key) in keys.iter().enumerate() {
-            let expected = &group["member_confidences"][key.as_str().unwrap()];
-            assert_eq!(
-                confidences
-                    .is_valid(j)
-                    .then(|| serde_json::json!(confidences.value(j))),
-                (!expected.is_null()).then(|| expected.clone()),
-                "{key}"
-            );
-        }
-        let confidence =
-            arrow::array::AsArray::as_primitive::<arrow::datatypes::Int64Type>(group_confidence);
-        assert_eq!(
-            confidence.is_valid(i).then(|| confidence.value(i)),
-            group["group_confidence"].as_i64()
-        );
-        let company =
-            arrow::array::AsArray::as_string::<i32>(golden.column_by_name("company_name").unwrap());
-        assert_eq!(
-            company.is_valid(i).then(|| company.value(i)),
-            group["company_name"].as_str()
-        );
-    }
-    // An empty lake: a readable, zero-row file with that schema.
-    let (report, path) = write(
-        "empty-dups.parquet",
-        &request(ExportKind::Duplicates, ExportFormat::Parquet, empty),
-        exports::MAX_ROWS,
-    );
-    assert_eq!(report.unwrap().rows, 0);
-    let (columns, batches) = parquet(&path);
-    assert_eq!(columns.len(), schema.fields().len());
-    assert!(batches.iter().all(|b| b.num_rows() == 0));
-    // CSV is still refused: a member list does not flatten into cells.
+    // Duplicates are JSON Lines only.
     assert!(
-        ExportRequest::from_params(&serde_json::json!({"kind": "duplicates", "format": "csv"}))
+        ExportRequest::from_params(&serde_json::json!({"kind": "duplicates", "format": "parquet"}))
             .is_err()
     );
 

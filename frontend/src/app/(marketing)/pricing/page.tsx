@@ -13,7 +13,6 @@ import {
 import { PRICING_CONFIG } from "@/lib/pricing/config";
 import { canonicalUrl } from "@/lib/site/routes";
 import { PricingCalculator } from "@/components/marketing/pricing/pricing-calculator";
-import { RecordsPool } from "@/components/marketing/pricing/records-pool";
 import "@/components/marketing/pricing/pricing.css";
 import { MarketingCut } from "@/components/marketing/cut";
 
@@ -82,7 +81,6 @@ function PricingPageContent() {
         <p className="story-muted">{PRICING.intro}</p>
         <LastUpdated iso={PAGE_UPDATED["/pricing"] ?? ""} />
       </header>
-      <RecordsPool />
       <PricingCalculator />
     </div>
   );

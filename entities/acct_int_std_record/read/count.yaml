@@ -1,0 +1,7 @@
+kind: statement
+operation: read
+description: "The standardized Account-record count at a pinned snapshot: an account dataset's connected records, the usage unit (#518)."
+params:
+  - { name: snapshot, type: bigint }
+returns:
+  - { name: n, type: bigint }

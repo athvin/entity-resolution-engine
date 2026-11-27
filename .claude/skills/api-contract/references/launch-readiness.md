@@ -16,6 +16,7 @@ no operator call after onboarding, no SQL, no Salesforce.
 | Follow | `GET …/imports`, `…/jobs`, `…/jobs/{id}` | — |
 | Read | `duplicates` (paged to the end), `golden-records` (Arrow), `golden-records/{id}` (lineage), `exports` golden + lineage | export rows equal the live read; lineage equals every delivered record |
 | Review | steward key minted by the admin; `reviews`, `reviews/bulk-resolve` (`no_match`, `apply_now`), `records/unmatch`, `runs/{id}/entity-events`, `tags` + `tags/{id}/apply` + `taggings` | the rejected review reads resolved; the unmatched record leaves its group |
+| Usage | `GET /v1/orgs/{org}/usage`, operator `PATCH /v1/orgs/{org}/allowance` | redeliveries and retries add no records; a delivery at the limit is 402 while reads continue; a tenant key cannot change its allowance (403) |
 | Isolation | — | another org: 404; another dataset's job or upload: 404 |
 
 Other failure surfaces are pinned by their own tests rather than repeated here:
@@ -41,7 +42,7 @@ The contract gates are done: deployed-contract compatibility (#658), key
 revocation and role ceilings (#866), the security regression pass (#868).
 Still open, each owned by its ticket:
 
-- [ ] usage policy and its enforcement — #518
+- [x] usage policy and its enforcement — #518: connected records, an operator-set `record_allowance`, 402 on deliveries at the limit, `GET /v1/orgs/{org}/usage`
 - [ ] alarms reach a human (confirmed SNS subscriber) — #1056
 - [ ] production mail through SES — #943, then the login probe #938
 - [ ] WAF body-inspecting groups in BLOCK — #951

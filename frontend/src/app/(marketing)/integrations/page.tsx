@@ -8,8 +8,6 @@ import {
   Related,
   Section,
 } from "@/components/marketing/pages/page-kit";
-import { RoundTripStage } from "@/components/marketing/scene/round-trip-stage";
-import { SceneBeats, ScrollScene } from "@/components/marketing/scene/scroll-scene";
 
 export const dynamic = "force-static";
 
@@ -19,34 +17,6 @@ export const metadata = pageMetadata({
   description:
     "How records get into DupeZero and how clean records get back to your systems: the Salesforce AppExchange app, API connections, CSV and signed webhooks.",
 });
-
-/** The round trip's beats, in the words the sections below use. */
-const ROUND_TRIP = [
-  {
-    title: "Records come in three ways.",
-    body: "Your Salesforce org through the DupeZero app, other systems through their APIs, and CSV files you upload. Each becomes a source in a dataset.",
-  },
-  {
-    title: "One way through.",
-    body: "However a record arrives, it lands in the same dataset, is mapped to the same fields and resolved by the same rules.",
-  },
-  {
-    title: "Clean records go back.",
-    body: "Resolved records are written back to the systems they came from. You can also download them as CSV, and your systems hear about each change by signed webhook.",
-  },
-  {
-    title: "The Salesforce round trip.",
-    body: (
-      <>
-        The app pulls your records in, you review the close calls, and the clean records are written
-        back to your org.{" "}
-        <a className="story-text-link" href="#salesforce">
-          How Salesforce fits
-        </a>
-      </>
-    ),
-  },
-];
 
 export default function IntegrationsPage() {
   return (
@@ -58,17 +28,6 @@ export default function IntegrationsPage() {
         primary={{ href: "/contact", label: "Ask about your systems" }}
         secondary={{ href: "/docs", label: "Read the developer docs" }}
       />
-
-      <Section
-        id="round-trip"
-        eyebrow="Watch the round trip"
-        title="In through one door, back out to every system."
-        intro={<p>Scroll through how a record travels. The records are illustrative.</p>}
-      >
-        <ScrollScene name="round-trip" beats={ROUND_TRIP.length} stage={<RoundTripStage />}>
-          <SceneBeats beats={ROUND_TRIP} />
-        </ScrollScene>
-      </Section>
 
       <Section id="in" title="Bringing records in">
         <CardGrid

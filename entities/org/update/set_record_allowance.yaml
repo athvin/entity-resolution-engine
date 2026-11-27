@@ -1,0 +1,8 @@
+kind: statement
+operation: update
+mode: partial
+description: "Set or clear (NULL) an org's record allowance — the operator's pilot entitlement."
+params:
+  - { name: record_allowance, type: bigint, nullable: true }
+  - { name: name, type: varchar }
+returns: none

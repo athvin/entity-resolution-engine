@@ -163,6 +163,7 @@ erDiagram
         bigint active_config_version
         varchar state "in {active, provisioning, purging, suspended}"
         bigint max_concurrent_jobs
+        bigint record_allowance
         timestamp created_at
         timestamp updated_at
     }
