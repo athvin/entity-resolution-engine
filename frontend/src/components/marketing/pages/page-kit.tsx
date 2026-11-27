@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import "./pages.css";
-import { MarketingCut } from "../cut";
+import { MarketingCut, PageMorph } from "../cut";
 import { Breadcrumbs, SHARE_IMAGE } from "../seo";
 import { DEMO_PATH } from "../site-links";
 
@@ -91,14 +91,17 @@ export function PageIntro({
   lead,
   primary,
   secondary,
+  morph,
 }: {
   eyebrow: string;
   title: string;
   lead: string;
   primary?: Action;
   secondary?: Action | undefined;
+  /** This page's path: the card that leads here opens into this heading (cut.tsx). */
+  morph?: string;
 }) {
-  return (
+  const intro = (
     <header className="page-intro">
       <p className="story-eyebrow">{eyebrow}</p>
       <h1>{title}</h1>
@@ -106,6 +109,7 @@ export function PageIntro({
       {primary && <Actions primary={primary} secondary={secondary} />}
     </header>
   );
+  return morph ? <PageMorph to={morph}>{intro}</PageMorph> : intro;
 }
 
 export function Section({
@@ -139,21 +143,36 @@ export interface Card {
   linkLabel?: string;
 }
 
-export function CardGrid({ items }: { items: readonly Card[] }) {
+/**
+ * A grid of cards. With `morph`, each linked card opens into the page it
+ * leads to (cut.tsx `PageMorph`); only for a grid whose links each go to a
+ * different page with a matching `PageIntro morph`, since one page may carry
+ * each name once.
+ */
+export function CardGrid({ items, morph = false }: { items: readonly Card[]; morph?: boolean }) {
   return (
     <ul className="page-cards">
-      {items.map((c) => (
-        <li key={c.title}>
-          <h3>{c.title}</h3>
-          <div className="story-muted">{c.body}</div>
-          {c.href && (
-            <Link href={c.href} className="story-text-link page-card-link">
-              {c.linkLabel ?? `More about ${c.title.toLowerCase()}`}
-              <span aria-hidden="true"> →</span>
-            </Link>
-          )}
-        </li>
-      ))}
+      {items.map((c) => {
+        const card = (
+          <li key={c.title}>
+            <h3>{c.title}</h3>
+            <div className="story-muted">{c.body}</div>
+            {c.href && (
+              <Link href={c.href} className="story-text-link page-card-link">
+                {c.linkLabel ?? `More about ${c.title.toLowerCase()}`}
+                <span aria-hidden="true"> →</span>
+              </Link>
+            )}
+          </li>
+        );
+        return morph && c.href ? (
+          <PageMorph key={c.title} to={c.href}>
+            {card}
+          </PageMorph>
+        ) : (
+          card
+        );
+      })}
     </ul>
   );
 }

@@ -65,6 +65,7 @@ export default function GoldenRecordsPage() {
       crumb={{ path: "/features/golden-records", label: "Golden records" }}
     >
       <PageIntro
+        morph="/features/golden-records"
         eyebrow="Feature / Golden records"
         title="One record you can trust, built from the ones you have."
         lead="Finding duplicates is half the job. The other half is deciding which email, phone number and address the surviving record should carry. DupeZero does that field by field, by rules you set."

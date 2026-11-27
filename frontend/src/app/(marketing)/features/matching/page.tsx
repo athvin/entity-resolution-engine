@@ -94,6 +94,7 @@ export default function MatchingPage() {
   return (
     <Page testId="page-matching" crumb={{ path: "/features/matching", label: "Matching" }}>
       <PageIntro
+        morph="/features/matching"
         eyebrow="Feature / Matching"
         title="Matching rules you can read, and change."
         lead="Duplicates rarely match exactly. One record says Bob, the other Robert; one email has capitals, the other a plus tag. DupeZero cleans the values first, then compares them the way you tell it to."

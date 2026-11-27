@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ArrowDown, Database, Pause, Play, ScanSearch } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -12,6 +13,7 @@ import { DEMO_DATASETS, SOURCE_NAMES, packetCount } from "./story-model";
 import { SourceLogo, sourceBrand } from "./source-logo";
 import { DedupeStage } from "../scene/dedupe-stage";
 import { ScrollScene } from "../scene/scroll-scene";
+import { PageMorph } from "../cut";
 import "./vendor/index.css";
 import "./flow-demo.css";
 
@@ -413,11 +415,17 @@ export function StoryFlow({
               ["golden", "output-2"],
             ]}
           >
-            <div className="trail-golden" data-node="golden">
-              <span className="story-eyebrow">{active.name} / Golden record</span>
-              <strong>Meridian Supply</strong>
-              <p>E-1042 · Source history preserved</p>
-            </div>
+            {/* The golden record opens into /features/golden-records' heading (cut.tsx). */}
+            <PageMorph to="/features/golden-records">
+              <div className="trail-golden" data-node="golden">
+                <span className="story-eyebrow">{active.name} / Golden record</span>
+                <strong>Meridian Supply</strong>
+                <p>E-1042 · Source history preserved</p>
+                <Link href="/features/golden-records" className="story-text-link trail-golden-link">
+                  How a golden record is built <span aria-hidden="true">→</span>
+                </Link>
+              </div>
+            </PageMorph>
             <div className="trail-destinations">
               {["Warehouse", "APIs & files", "ZoomInfo"].map((name, i) => (
                 <div data-node={`output-${String(i)}`} key={name}>

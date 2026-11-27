@@ -23,6 +23,7 @@ export default function ReviewPage() {
   return (
     <Page testId="page-review" crumb={{ path: "/features/review", label: "Review" }}>
       <PageIntro
+        morph="/features/review"
         eyebrow="Feature / Review"
         title="The close calls go to a person, with the evidence."
         lead="Automatic merging is only safe for the clear cases. For the rest, DupeZero puts each pair in front of someone who knows the data, along with the reasons it might or might not be a match."

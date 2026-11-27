@@ -33,10 +33,70 @@
   }
 }
 
+/* The card a reader clicks opens into the page it leads to (cut.tsx
+   PageMorph): a container transform. The box travels and grows from the card
+   to the heading block on an opaque surface, so nothing of either page shows
+   through it; the surface starts as the card's and settles into the page's
+   as it lands. Each picture keeps its own size, pinned to the box's top-left
+   corner and clipped by it, so text is never magnified; the card's picture
+   leaves fast and the heading's arrives as the box opens, so two pictures of
+   text barely meet (and only over that opaque surface). */
+::view-transition-group(.page-morph) {
+  animation-duration: var(--duration-deliberate);
+  animation-timing-function: var(--motion-ease-emphasized);
+}
+/* The clip and the surface live on the pair, which fills the moving box, so
+   the card's rounded corner can straighten as it lands: the heading it lands
+   on has none, and a fixed radius clipped the eyebrow's first letter. */
+::view-transition-image-pair(.page-morph) {
+  overflow: clip;
+  animation: page-morph-surface var(--duration-deliberate) var(--motion-ease-emphasized) both;
+}
+::view-transition-old(.page-morph),
+::view-transition-new(.page-morph) {
+  height: 100%;
+  object-fit: none;
+  object-position: left top;
+}
+::view-transition-old(.page-morph) {
+  animation: page-morph-out var(--duration-base) ease-in both;
+}
+::view-transition-new(.page-morph) {
+  animation: page-morph-in var(--duration-slow) var(--motion-ease-emphasized) var(--duration-fast)
+    both;
+}
+
+/* The surface alone: the card's picture carries the card's own border, and a
+   second one on the box read as a card inside a card while it faded. */
+@keyframes page-morph-surface {
+  from,
+  55% {
+    border-radius: 12px;
+    background: var(--card);
+  }
+  to {
+    border-radius: 0;
+    background: var(--background);
+  }
+}
+
+@keyframes page-morph-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes page-morph-in {
+  from {
+    opacity: 0;
+  }
+}
+
 /* The global reduced-motion clamp matches `*`, which does not reach these
    pseudo-elements on the document root, so they are zeroed here. */
 @media (prefers-reduced-motion: reduce) {
   ::view-transition-group(*),
+  ::view-transition-image-pair(*),
   ::view-transition-old(*),
   ::view-transition-new(*) {
     animation-duration: 0s !important;

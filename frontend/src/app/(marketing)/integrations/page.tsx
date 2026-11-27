@@ -52,6 +52,7 @@ export default function IntegrationsPage() {
   return (
     <Page testId="page-integrations" crumb={{ path: "/integrations", label: "Integrations" }}>
       <PageIntro
+        morph="/integrations"
         eyebrow="Integrations"
         title="Records in, clean records back."
         lead="DupeZero connects to the systems that hold your records, resolves the duplicates, and writes the clean records back, so every system ends up with the same data."
