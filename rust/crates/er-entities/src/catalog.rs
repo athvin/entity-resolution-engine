@@ -3216,6 +3216,88 @@ indexes:
 "#,
     ),
     (
+        "source_delivery_provenance",
+        r#"kind: entity
+version: 1
+name: source_delivery_provenance
+relation: source_delivery_provenance
+description: "Which provider connection and object a delivery came from, keyed by the run that ingests it (#1296). The lake's raw_records carry only the source label and the ingest batch (= the run id), and the import.extract audit is best-effort, so neither can authorize a writeback; this row is the durable link from a landed record to the Salesforce connection that produced it. Written by the extract's AdvanceSfCursor after the run is enqueued and before the cursor advances; an uploaded or pushed delivery has no row, so its records are never writeback-eligible."
+key: [id]
+natural_key: [dataset_id, run_id]
+generate:
+  stores: [postgres]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "UUIDv7, minted by the application."
+  - name: org_id
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: id }
+    description: "The tenant; denormalized beside the dataset scope per V17."
+  - name: dataset_id
+    type: varchar
+    nullable: false
+    references: { relation: datasets, column: id }
+    description: "The dataset the delivery landed in."
+  - name: run_id
+    type: varchar
+    nullable: false
+    description: "The run that ingests the delivery: the job id the extract enqueued, which the lake stamps as raw_records.ingest_batch_id."
+  - name: delivery_id
+    type: varchar
+    nullable: false
+    description: "The immutable delivery (delivery.rs) the run consumes."
+  - name: source
+    type: varchar
+    nullable: false
+    description: "The config source the delivery landed as."
+  - name: salesforce_connection_id
+    type: varchar
+    nullable: false
+    references: { relation: salesforce_connections, column: id }
+    description: "The Salesforce connection the records were extracted through."
+  - name: object
+    type: varchar
+    nullable: false
+    description: "The sObject API name extracted (Lead, Contact, Account, …)."
+  - name: delivery_sha256
+    type: varchar
+    nullable: false
+    description: "The delivery's content digest, from its pin, so a provenance row can be checked against the bytes it describes."
+  - name: source_sha256
+    type: varchar
+    nullable: false
+    description: "The source mapping's digest the delivery was pinned under."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the provenance was recorded."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "Never advanced: the row is written once. Present for the entity conventions (V4)."
+indexes:
+  - name: source_delivery_provenance_run
+    columns: [dataset_id, run_id]
+    unique: true
+  - name: source_delivery_provenance_delivery
+    columns: [dataset_id, delivery_id]
+    unique: true
+  - name: source_delivery_provenance_source
+    columns: [dataset_id, source]
+  # V15: the org-scoped read path.
+  - name: source_delivery_provenance_org
+    columns: [org_id, dataset_id]
+"#,
+    ),
+    (
         "staged_steward_action",
         r#"kind: entity
 version: 1

@@ -30,7 +30,7 @@ statements is read or written only through the engine's own stage SQL, not
 through a typed query function.
 
 <!-- BEGIN GENERATED: entities-index -->
-**54 entities, 283 declared statements.**
+**55 entities, 286 declared statements.**
 
 | Entity | Relation | Store | Key | Natural key | History |
 |---|---|---|---|---|---|
@@ -80,6 +80,7 @@ through a typed query function.
 | `schema_migration` | `schema_migrations` | postgres | `id` | — | — |
 | `scored_record` | `scored_records` | duckdb | `id` | `record_key, model_version, tf_snapshot_id` | — |
 | `sf_extract_cursor` | `sf_extract_cursors` | postgres | `id` | `dataset_id, source` | — |
+| `source_delivery_provenance` | `source_delivery_provenance` | postgres | `id` | `dataset_id, run_id` | — |
 | `staged_steward_action` | `staged_steward_actions` | postgres | `id` | — | — |
 | `statement_execution` | `statement_executions` | duckdb | `id` | `run_id, stage, seq` | — |
 | `tag` | `tags` | postgres | `id` | — | yes |
@@ -139,6 +140,7 @@ Declared statements per entity and operation:
 | `schema_migration` | 1 | 2 | 0 | 0 |
 | `scored_record` | 0 | 2 | 1 | 2 |
 | `sf_extract_cursor` | 1 | 1 | 0 | 0 |
+| `source_delivery_provenance` | 1 | 2 | 0 | 0 |
 | `staged_steward_action` | 1 | 1 | 1 | 0 |
 | `tag` | 1 | 3 | 1 | 0 |
 | `tagging` | 1 | 2 | 0 | 1 |

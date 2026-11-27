@@ -51,6 +51,20 @@ async fn extracts_advance_only_after_pinned_enqueue_and_both_batches_land_once()
         .await
         .unwrap()
         .unwrap();
+    // A real connection: the extract now records the delivery's provenance
+    // against it (#1296), which a dangling id would fail.
+    let connection = pg::create_salesforce_connection(
+        &client,
+        &org.id,
+        "prod",
+        "https://example.my.salesforce.com",
+        "client_credentials",
+        "client-id",
+        "client-secret",
+        "v62.0",
+    )
+    .await
+    .unwrap();
     let config = er_config::load_config_str(CONFIG).unwrap();
     let spec = &config.sources["crm"];
     let env = json!({"ER_CONFIG_PATH":config_path, "ER_TF_PATH":root.join("tf.csv")});
@@ -79,7 +93,7 @@ async fn extracts_advance_only_after_pinned_enqueue_and_both_batches_land_once()
         reports.push((
             ExtractReport {
                 delivery: Some(pin),
-                connection_id: "salesforce-connection".into(),
+                connection_id: connection.clone(),
                 source: "crm".into(),
                 object: "Contact".into(),
                 delivery_id: id,
@@ -120,6 +134,23 @@ async fn extracts_advance_only_after_pinned_enqueue_and_both_batches_land_once()
     );
     let b = advance(&client, &order, reports[1].0.clone()).await;
     assert_ne!(a, b);
+    // Each run is bound to the connection and object its delivery came from.
+    let provenance = pg::provenance_for_runs(&client, &org.id, &ds, &[&a, &b])
+        .await
+        .unwrap();
+    assert_eq!(
+        provenance.len(),
+        2,
+        "one provenance row per run, the retry added none"
+    );
+    assert!(
+        provenance
+            .values()
+            .all(|p| p.salesforce_connection_id == connection
+                && p.object == "Contact"
+                && p.source == "crm")
+    );
+    assert_eq!(provenance[&a].delivery_id, reports[0].0.delivery_id);
     let cursors = er_entities::sf_extract_cursor::read::get(&client, &ds, "crm")
         .await
         .unwrap();

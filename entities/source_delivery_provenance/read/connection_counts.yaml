@@ -1,0 +1,9 @@
+kind: statement
+operation: read
+description: "How many distinct connections have delivered as each source of a dataset. More than one means the source label is ambiguous — a source reused against a second Salesforce org (a sandbox copy keeps record ids) — so none of its records may acquire a provider identity from the label."
+params:
+  - { name: org_id, type: varchar }
+  - { name: dataset_id, type: varchar }
+returns:
+  - { name: source, type: varchar }
+  - { name: connections, type: bigint }

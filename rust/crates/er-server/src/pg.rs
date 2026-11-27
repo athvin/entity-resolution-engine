@@ -2367,3 +2367,126 @@ mod credential_filter_tests {
         }
     }
 }
+
+// ---- delivery provenance (#1296) --------------------------------------------
+
+/// A delivery's provider identity, as the extract knew it.
+pub struct DeliveryProvenance<'a> {
+    pub org_id: &'a str,
+    pub dataset_id: &'a str,
+    pub run_id: &'a str,
+    pub delivery_id: &'a str,
+    pub source: &'a str,
+    pub connection_id: &'a str,
+    pub object: &'a str,
+    pub delivery_sha256: &'a str,
+    pub source_sha256: &'a str,
+}
+
+/// Why provenance was not recorded.
+#[derive(Debug, thiserror::Error)]
+pub enum ProvenanceError {
+    #[error("recording delivery provenance failed")]
+    Db(#[from] PgError),
+    /// The run already carries a DIFFERENT provider identity. Never
+    /// overwritten: the first writer's row may already have authorized work.
+    #[error("run {0} already has a different provenance")]
+    Conflict(String),
+}
+
+/// Record a delivery's provider provenance, idempotently. A retry with the
+/// same identity is a no-op; a different identity for the same run or
+/// delivery is refused.
+///
+/// # Errors
+/// [`ProvenanceError::Conflict`] on a conflicting row; the database error otherwise.
+pub async fn record_provenance(
+    client: &impl tokio_postgres::GenericClient,
+    p: &DeliveryProvenance<'_>,
+) -> Result<(), ProvenanceError> {
+    er_entities::source_delivery_provenance::create::record(
+        client,
+        &er_ids::new_v7(),
+        p.org_id,
+        p.dataset_id,
+        p.run_id,
+        p.delivery_id,
+        p.source,
+        p.connection_id,
+        p.object,
+        p.delivery_sha256,
+        p.source_sha256,
+    )
+    .await?;
+    let rows = er_entities::source_delivery_provenance::read::by_runs(
+        client,
+        p.org_id,
+        p.dataset_id,
+        p.run_id,
+    )
+    .await?;
+    let same = rows.iter().any(|r| {
+        r.delivery_id == p.delivery_id
+            && r.source == p.source
+            && r.salesforce_connection_id == p.connection_id
+            && r.object == p.object
+            && r.delivery_sha256 == p.delivery_sha256
+            && r.source_sha256 == p.source_sha256
+    });
+    if same {
+        Ok(())
+    } else {
+        // The insert was a no-op against a row that says something else — the
+        // run's row differs, or the delivery is already bound to another run.
+        Err(ProvenanceError::Conflict(p.run_id.to_string()))
+    }
+}
+
+/// The provenance of these runs in one dataset, by run id. A run absent from
+/// the map is not provider-provenanced.
+///
+/// # Errors
+/// Propagates the query error.
+pub async fn provenance_for_runs(
+    client: &Client,
+    org_id: &str,
+    dataset_id: &str,
+    run_ids: &[&str],
+) -> Result<
+    std::collections::BTreeMap<
+        String,
+        er_entities::source_delivery_provenance::SourceDeliveryProvenance,
+    >,
+    PgError,
+> {
+    let joined = run_ids.join("\u{1f}");
+    Ok(
+        er_entities::source_delivery_provenance::read::by_runs(client, org_id, dataset_id, &joined)
+            .await?
+            .into_iter()
+            .map(|r| (r.run_id.clone(), r))
+            .collect(),
+    )
+}
+
+/// Sources of a dataset that more than one connection has delivered as: their
+/// label cannot confer a provider identity on any record.
+///
+/// # Errors
+/// Propagates the query error.
+pub async fn ambiguous_provenance_sources(
+    client: &Client,
+    org_id: &str,
+    dataset_id: &str,
+) -> Result<std::collections::BTreeSet<String>, PgError> {
+    Ok(
+        er_entities::source_delivery_provenance::read::connection_counts(
+            client, org_id, dataset_id,
+        )
+        .await?
+        .into_iter()
+        .filter(|r| r.connections.unwrap_or(0) > 1)
+        .filter_map(|r| r.source)
+        .collect(),
+    )
+}

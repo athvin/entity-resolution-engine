@@ -56,6 +56,7 @@ mod pg_dataset_sweep;
 mod pg_datasets;
 mod pg_ddl_log;
 mod pg_delivery_ordering;
+mod pg_delivery_provenance;
 mod pg_delivery_replay;
 mod pg_dispatch;
 mod pg_drain;
