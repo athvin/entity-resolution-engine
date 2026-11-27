@@ -240,6 +240,58 @@ impl Default for ApplyMerges {
     }
 }
 
+/// Apply approved upserts (#998) — see [`crate::upsert_apply`].
+pub struct ApplyUpserts {
+    pub egress: crate::urlguard::Egress,
+}
+
+impl Default for ApplyUpserts {
+    fn default() -> Self {
+        Self {
+            egress: crate::urlguard::Egress::Guarded,
+        }
+    }
+}
+
+impl ControlTask<PgClient> for ApplyUpserts {
+    const NAME: &'static str = "apply_upserts";
+    const VERSION: u32 = 1;
+    type Input = ();
+    type Output = Plan<crate::upsert_apply::Report>;
+
+    async fn run(
+        &mut self,
+        ctx: &mut ControlCtx<'_, PgClient>,
+        (): Self::Input,
+    ) -> Result<Outcome<Self::Output>, TaskError> {
+        let Some(dataset_id) = ctx.order.dataset_id.clone() else {
+            return Err(TaskError::Failed(er_errors::ErError::precondition(
+                "an upsert_apply job must name a dataset".to_string(),
+            )));
+        };
+        let report = crate::upsert_apply::run(
+            ctx.client,
+            &ctx.order.org_id,
+            &dataset_id,
+            &ctx.order.job_id,
+            self.egress,
+            crate::merge_apply::Limits::default(),
+        )
+        .await
+        .map_err(|e| {
+            TaskError::Failed(
+                er_errors::ErError::stage_failure(format!(
+                    "upsert apply: {}",
+                    crate::errfmt::chain(&e)
+                ))
+                .with_class(er_errors::ErrorClass::TransientIo),
+            )
+        })?;
+        let counters = serde_json::to_value(&report).unwrap_or_default();
+        Ok(Outcome::Done(Plan(report), er_dag::Counters(counters)))
+    }
+}
+
 /// Undo applied merges (#996) — see [`crate::merge_restore`].
 pub struct RestoreMerges {
     pub egress: crate::urlguard::Egress,
@@ -355,6 +407,7 @@ impl ControlTask<PgClient> for PublishPreviews {
             return Ok(Outcome::NoOp(Plan(crate::dags::plans::PreviewsPublished {
                 published: 0,
                 superseded: 0,
+                upserts_published: 0,
             })));
         };
         let org_id = ctx.order.org_id.clone();
@@ -382,6 +435,7 @@ impl ControlTask<PgClient> for PublishPreviews {
             er_dag::Counters(serde_json::json!({
                 "published": published.published,
                 "superseded": published.superseded,
+                "upserts_published": published.upserts_published,
             })),
         ))
     }
@@ -524,6 +578,54 @@ async fn publish_batch(
                 })?;
             }
         }
+        // Upsert proposals (#998): idempotent on the fingerprint; a newer one
+        // supersedes the entity's planned upserts for the same object.
+        let mut upserts_published = 0usize;
+        for u in &built.upserts {
+            let stored = er_entities::upsert_preview::create::publish(
+                ctx.client,
+                &er_ids::new_v7(),
+                &org_id,
+                &dataset_id,
+                &u.connection_id,
+                &u.object,
+                &u.entity_id,
+                &u.external_id_field,
+                &u.external_id_value,
+                &u.anchor_record_key,
+                &serde_json::to_value(&u.fields).unwrap_or_default(),
+                &u.fingerprint,
+                built.snapshot,
+                &u.origin_run_id,
+                &u.policy_id,
+            )
+            .await
+            .map_err(|e| {
+                failed(
+                    format!("publishing an upsert: {e}"),
+                    er_errors::ErrorClass::TransientIo,
+                )
+            })?;
+            if !stored.is_empty() {
+                upserts_published += 1;
+                er_entities::upsert_preview::update::supersede(
+                    ctx.client,
+                    &org_id,
+                    &dataset_id,
+                    &u.entity_id,
+                    &u.connection_id,
+                    &u.object,
+                    &u.fingerprint,
+                )
+                .await
+                .map_err(|e| {
+                    failed(
+                        format!("superseding upserts: {e}"),
+                        er_errors::ErrorClass::TransientIo,
+                    )
+                })?;
+            }
+        }
         // An affected entity with no group under a policy any more: its
         // planned previews are stale.
         let policies = crate::pg::active_writeback_policies(ctx.client, &org_id, &dataset_id)
@@ -602,6 +704,7 @@ async fn publish_batch(
         Ok(crate::dags::plans::PreviewsPublished {
             published,
             superseded,
+            upserts_published,
         })
     }
 }

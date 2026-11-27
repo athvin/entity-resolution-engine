@@ -1,0 +1,12 @@
+kind: statement
+operation: update
+mode: partial
+description: "Supersede an entity's other planned upserts for one object."
+params:
+  - { name: org_id, type: varchar }
+  - { name: dataset_id, type: varchar }
+  - { name: entity_id, type: varchar }
+  - { name: salesforce_connection_id, type: varchar }
+  - { name: object, type: varchar }
+  - { name: fingerprint, type: varchar }
+returns: entity

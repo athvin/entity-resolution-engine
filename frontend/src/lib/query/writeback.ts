@@ -180,3 +180,49 @@ export function useSetAutoApproval(org: string, ds: string) {
       post<AutoApprovalRule>(`${base(org, ds)}/writeback/auto-approval`, rule, "PUT"),
   );
 }
+
+/** A proposed Salesforce upsert (#998). */
+export interface UpsertPreview {
+  id: string;
+  connection_id: string;
+  object: string;
+  entity_id: string;
+  external_id_field: string;
+  external_id_value: string;
+  fields: Record<string, unknown>;
+  fingerprint: string;
+  /** `planned`, `approved`, `rejected` or `superseded`. */
+  status: string;
+  decided_by: string | null;
+  policy_revision: string;
+  /** `applying`, `created`, `updated`, `failed` or `skipped_stale`, once begun. */
+  apply_status: string | null;
+  sf_record_id: string | null;
+  apply_detail: string | null;
+  created_at: string;
+}
+
+export function useUpsertPreviews(org: string, ds: string) {
+  return useQuery({
+    queryKey: [...root(org, ds), "upserts"],
+    queryFn: () =>
+      bffFetch<{ items: UpsertPreview[]; next_cursor: string | null }>(
+        `${base(org, ds)}/upsert-previews?limit=100`,
+      ),
+  });
+}
+
+export function useDecideUpserts(org: string, ds: string) {
+  return useWritebackMutation(
+    org,
+    ds,
+    (vars: { decision: "approve" | "reject"; items: { id: string; fingerprint: string }[] }) =>
+      post<BatchResult>(`${base(org, ds)}/upsert-previews/decide`, vars),
+  );
+}
+
+export function useApplyUpserts(org: string, ds: string) {
+  return useWritebackMutation(org, ds, () =>
+    post<{ job_id: string; state: string }>(`${base(org, ds)}/upsert-previews/apply`),
+  );
+}

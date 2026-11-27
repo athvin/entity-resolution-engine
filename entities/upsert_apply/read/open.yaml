@@ -1,0 +1,9 @@
+kind: statement
+operation: read
+mode: full
+description: "Upserts a crash or a stop left APPLYING."
+params:
+  - { name: org_id, type: varchar }
+  - { name: dataset_id, type: varchar }
+  - { name: limit, type: bigint }
+returns: entity

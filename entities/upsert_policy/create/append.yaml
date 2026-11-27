@@ -1,0 +1,16 @@
+kind: statement
+operation: create
+mode: partial
+description: "Write a new upsert policy revision."
+params:
+  - { name: id, type: varchar }
+  - { name: org_id, type: varchar }
+  - { name: dataset_id, type: varchar }
+  - { name: salesforce_connection_id, type: varchar }
+  - { name: object, type: varchar }
+  - { name: external_id_field, type: varchar }
+  - { name: field_mapping, type: json }
+  - { name: writeback_allowlist, type: json }
+  - { name: sources, type: json }
+  - { name: created_by, type: varchar }
+returns: entity

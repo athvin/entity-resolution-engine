@@ -1,0 +1,9 @@
+kind: statement
+operation: read
+mode: full
+description: "A preview's apply, if begun."
+params:
+  - { name: org_id, type: varchar }
+  - { name: dataset_id, type: varchar }
+  - { name: upsert_preview_id, type: varchar }
+returns: entity

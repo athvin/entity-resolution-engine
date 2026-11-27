@@ -806,6 +806,17 @@
     "response": { "envelope": "scalar" }
   },
   {
+    "id": "get_orgs_by_org_datasets_by_ds_upsert_previews",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}/upsert-previews",
+    "role": "viewer",
+    "params": ["org", "ds"],
+    "body": null,
+    "needs_body": false,
+    "summary": "a dataset's upsert previews",
+    "response": { "envelope": "record", "keys": ["items", "next_cursor"] }
+  },
+  {
     "id": "get_orgs_by_org_datasets_by_ds_writeback_auto_approval",
     "method": "GET",
     "path": "/v1/orgs/{org}/datasets/{ds}/writeback/auto-approval",
@@ -825,6 +836,17 @@
     "body": null,
     "needs_body": false,
     "summary": "a dataset's active writeback policies",
+    "response": { "envelope": "wrapped", "key": "items" }
+  },
+  {
+    "id": "get_orgs_by_org_datasets_by_ds_writeback_upsert_policies",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/datasets/{ds}/writeback/upsert-policies",
+    "role": "viewer",
+    "params": ["org", "ds"],
+    "body": null,
+    "needs_body": false,
+    "summary": "the upsert policies in force",
     "response": { "envelope": "wrapped", "key": "items" }
   },
   {
@@ -1887,6 +1909,45 @@
     "response": null
   },
   {
+    "id": "post_orgs_by_org_datasets_by_ds_upsert_previews_apply",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/datasets/{ds}/upsert-previews/apply",
+    "role": "admin",
+    "params": ["org", "ds"],
+    "body": null,
+    "needs_body": false,
+    "summary": "apply the dataset's approved upserts to Salesforce",
+    "response": null
+  },
+  {
+    "id": "post_orgs_by_org_datasets_by_ds_upsert_previews_decide",
+    "method": "POST",
+    "path": "/v1/orgs/{org}/datasets/{ds}/upsert-previews/decide",
+    "role": "steward",
+    "params": ["org", "ds"],
+    "body": {
+      "type": "object",
+      "properties": {
+        "decision": { "type": "string" },
+        "reason": { "type": "string" },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": { "id": { "type": "string" }, "fingerprint": { "type": "string" } },
+            "required": ["id", "fingerprint"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["decision", "items"],
+      "additionalProperties": false
+    },
+    "needs_body": false,
+    "summary": "approve or reject upserts",
+    "response": null
+  },
+  {
     "id": "post_orgs_by_org_resume",
     "method": "POST",
     "path": "/v1/orgs/{org}/resume",
@@ -2053,6 +2114,36 @@
     },
     "needs_body": false,
     "summary": "set the writeback policy for one connection's object",
+    "response": null
+  },
+  {
+    "id": "put_orgs_by_org_datasets_by_ds_writeback_upsert_policies",
+    "method": "PUT",
+    "path": "/v1/orgs/{org}/datasets/{ds}/writeback/upsert-policies",
+    "role": "admin",
+    "params": ["org", "ds"],
+    "body": {
+      "type": "object",
+      "properties": {
+        "connection_id": { "type": "string" },
+        "object": { "type": "string" },
+        "external_id_field": { "type": "string" },
+        "field_mapping": { "type": "object", "additionalProperties": { "type": "string" } },
+        "writeback_allowlist": { "type": "array", "items": { "type": "string" } },
+        "sources": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": [
+        "connection_id",
+        "object",
+        "external_id_field",
+        "field_mapping",
+        "writeback_allowlist",
+        "sources"
+      ],
+      "additionalProperties": false
+    },
+    "needs_body": false,
+    "summary": "set the upsert policy for one connection's object",
     "response": null
   }
 ]

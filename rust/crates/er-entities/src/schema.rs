@@ -805,6 +805,66 @@ CREATE INDEX IF NOT EXISTS tenant_schema_states_org ON public.tenant_schema_stat
 CREATE UNIQUE INDEX IF NOT EXISTS tenant_schema_states_dataset_unique ON public.tenant_schema_states (dataset_id) WHERE dataset_id IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS tenant_schema_states_org_level ON public.tenant_schema_states (org_id) WHERE dataset_id IS NULL;
 CREATE INDEX IF NOT EXISTS tenant_schema_states_dataset ON public.tenant_schema_states (dataset_id);"#,
+    r#"CREATE TABLE IF NOT EXISTS public.upsert_policies (
+  id text NOT NULL,
+  org_id text NOT NULL REFERENCES orgs(id),
+  dataset_id text NOT NULL REFERENCES datasets(id),
+  salesforce_connection_id text NOT NULL REFERENCES salesforce_connections(id),
+  object text NOT NULL CHECK (object IN ('Lead', 'Contact', 'Account')),
+  external_id_field text NOT NULL,
+  field_mapping jsonb NOT NULL,
+  writeback_allowlist jsonb NOT NULL,
+  sources jsonb NOT NULL,
+  created_by text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (id)
+);
+CREATE INDEX IF NOT EXISTS upsert_policies_scope ON public.upsert_policies (org_id, dataset_id, salesforce_connection_id, object);"#,
+    r#"CREATE TABLE IF NOT EXISTS public.upsert_previews (
+  id text NOT NULL,
+  org_id text NOT NULL REFERENCES orgs(id),
+  dataset_id text NOT NULL REFERENCES datasets(id),
+  salesforce_connection_id text NOT NULL REFERENCES salesforce_connections(id),
+  object text NOT NULL CHECK (object IN ('Lead', 'Contact', 'Account')),
+  entity_id text NOT NULL,
+  external_id_field text NOT NULL,
+  external_id_value text NOT NULL,
+  anchor_record_key text NOT NULL,
+  fields jsonb NOT NULL,
+  fingerprint text NOT NULL,
+  lake_snapshot bigint NOT NULL,
+  origin_run_id text NOT NULL,
+  upsert_policy_id text NOT NULL REFERENCES upsert_policies(id),
+  status text NOT NULL DEFAULT 'planned' CHECK (status IN ('planned', 'approved', 'rejected', 'superseded')),
+  decided_by text,
+  decided_at timestamptz,
+  decision_reason text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS upsert_previews_fingerprint ON public.upsert_previews (dataset_id, fingerprint);
+CREATE INDEX IF NOT EXISTS upsert_previews_dataset ON public.upsert_previews (org_id, dataset_id, status, id);
+CREATE INDEX IF NOT EXISTS upsert_previews_entity ON public.upsert_previews (dataset_id, entity_id, salesforce_connection_id, object);"#,
+    r#"CREATE TABLE IF NOT EXISTS public.upsert_applies (
+  id text NOT NULL,
+  org_id text NOT NULL REFERENCES orgs(id),
+  dataset_id text NOT NULL REFERENCES datasets(id),
+  upsert_preview_id text NOT NULL REFERENCES upsert_previews(id),
+  job_id text NOT NULL,
+  fingerprint text NOT NULL,
+  status text NOT NULL DEFAULT 'applying' CHECK (status IN ('applying', 'created', 'updated', 'failed', 'skipped_stale')),
+  call_state text NOT NULL DEFAULT 'none' CHECK (call_state IN ('none', 'in_flight')),
+  sf_record_id text,
+  preimage text NOT NULL DEFAULT '',
+  detail text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS upsert_applies_preview ON public.upsert_applies (upsert_preview_id);
+CREATE INDEX IF NOT EXISTS upsert_applies_dataset ON public.upsert_applies (org_id, dataset_id, status);"#,
     r#"CREATE TABLE IF NOT EXISTS public.webhooks (
   id text NOT NULL,
   org_id text NOT NULL REFERENCES orgs(id),

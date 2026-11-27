@@ -9,14 +9,17 @@ import { Label } from "@/components/ui/label";
 import { effectiveRole, useSession } from "@/lib/query/hooks";
 import {
   useApplyApproved,
+  useApplyUpserts,
   useAutoApproval,
   useDecideBatch,
+  useDecideUpserts,
   useGeneratePreviews,
   useMergePreview,
   useMergePreviews,
   useRequestRestore,
   useRestore,
   useSetAutoApproval,
+  useUpsertPreviews,
   type BatchResult,
   type MergePreviewSummary,
 } from "@/lib/query/writeback";
@@ -215,8 +218,184 @@ export function WritebackContent({ org }: { org: string }) {
         )}
       </div>
 
+      <UpsertPanel org={org} ds={ds} isSteward={isSteward} isAdmin={isAdmin} />
       <AutoApprovalPanel org={org} ds={ds} isAdmin={isAdmin} previews={items} />
     </div>
+  );
+}
+
+/** Proposed upserts (#998): golden records that came in by upload and are
+ * not yet in the Salesforce object, keyed by an External ID that carries the
+ * entity id, so applying one twice can never create two records. */
+function UpsertPanel({
+  org,
+  ds,
+  isSteward,
+  isAdmin,
+}: {
+  org: string;
+  ds: string;
+  isSteward: boolean;
+  isAdmin: boolean;
+}) {
+  const upserts = useUpsertPreviews(org, ds);
+  const decide = useDecideUpserts(org, ds);
+  const apply = useApplyUpserts(org, ds);
+  const [checked, setChecked] = useState<ReadonlySet<string>>(new Set());
+  const [outcome, setOutcome] = useState<BatchResult | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const items = upserts.data?.items ?? [];
+  const chosen = items.filter((u) => u.status === "planned" && checked.has(u.id));
+
+  function run(decision: "approve" | "reject") {
+    decide.mutate(
+      { decision, items: chosen.map((u) => ({ id: u.id, fingerprint: u.fingerprint })) },
+      {
+        onSuccess: (result) => {
+          setOutcome(result);
+          setChecked(new Set());
+        },
+      },
+    );
+  }
+
+  return (
+    <Card data-testid="writeback-upserts">
+      <CardHeader>
+        <CardTitle className="text-base">Upserts</CardTitle>
+        <p className="text-muted-foreground text-sm">
+          Records that arrived by upload and are not yet in Salesforce. Each is keyed by an External
+          ID carrying the entity id, so a retry updates the same record and never creates a second.
+          A record changed in Salesforce after its proposal is skipped, not overwritten.
+        </p>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3 text-sm">
+        {items.length === 0 ? (
+          <p className="text-muted-foreground" data-testid="writeback-upserts-empty">
+            No upserts proposed. Set an upsert policy, then generate previews.
+          </p>
+        ) : (
+          <div className="overflow-x-auto rounded-md border">
+            <table className="w-full" data-testid="writeback-upserts-table">
+              <caption className="sr-only">Proposed upserts</caption>
+              <thead className="bg-muted/50 text-left">
+                <tr>
+                  {isSteward ? (
+                    <th scope="col" className="w-10 px-2 py-2">
+                      <span className="sr-only">Select</span>
+                    </th>
+                  ) : null}
+                  <th scope="col" className="px-2 py-2 font-medium">
+                    Entity
+                  </th>
+                  <th scope="col" className="px-2 py-2 font-medium">
+                    Fields
+                  </th>
+                  <th scope="col" className="px-2 py-2 font-medium">
+                    State
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((u) => (
+                  <tr key={u.id} className="border-t">
+                    {isSteward ? (
+                      <td className="px-2 py-1">
+                        {u.status === "planned" ? (
+                          <input
+                            type="checkbox"
+                            className="size-5"
+                            checked={checked.has(u.id)}
+                            onChange={() => {
+                              setChecked((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(u.id)) next.delete(u.id);
+                                else next.add(u.id);
+                                return next;
+                              });
+                            }}
+                            aria-label={`Select upsert for ${u.entity_id}`}
+                          />
+                        ) : null}
+                      </td>
+                    ) : null}
+                    <td className="px-2 py-1 font-mono">{u.entity_id}</td>
+                    <td className="px-2 py-1">
+                      {Object.entries(u.fields)
+                        .map(([field, value]) => `${field}: ${show(value)}`)
+                        .join(" · ")}
+                    </td>
+                    <td className="px-2 py-1">
+                      {u.apply_status ?? u.status}
+                      {u.sf_record_id ? (
+                        <span className="text-muted-foreground font-mono"> {u.sf_record_id}</span>
+                      ) : null}
+                      {u.apply_detail &&
+                      u.apply_status !== "created" &&
+                      u.apply_status !== "updated" ? (
+                        <span className="text-muted-foreground"> — {u.apply_detail}</span>
+                      ) : null}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {isSteward && chosen.length > 0 ? (
+            <>
+              <Button
+                size="sm"
+                disabled={decide.isPending}
+                onClick={() => {
+                  run("approve");
+                }}
+              >
+                Approve {chosen.length}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={decide.isPending}
+                onClick={() => {
+                  run("reject");
+                }}
+              >
+                Reject {chosen.length}
+              </Button>
+            </>
+          ) : null}
+          {isAdmin ? (
+            <Button
+              size="sm"
+              variant="outline"
+              className="ml-auto"
+              disabled={apply.isPending}
+              onClick={() => {
+                apply.mutate(undefined, {
+                  onSuccess: () => {
+                    setMessage("Applying approved upserts to Salesforce.");
+                  },
+                  onError: (error) => {
+                    setMessage(error.message);
+                  },
+                });
+              }}
+              data-testid="writeback-upserts-apply"
+            >
+              Apply approved upserts
+            </Button>
+          ) : null}
+        </div>
+        {outcome ? <BatchOutcome result={outcome} /> : null}
+        {message ? (
+          <p role="status" className="font-medium">
+            {message}
+          </p>
+        ) : null}
+      </CardContent>
+    </Card>
   );
 }
 

@@ -1,0 +1,106 @@
+kind: entity
+version: 1
+name: upsert_preview
+relation: upsert_previews
+description: "A proposed Salesforce upsert of one golden record (#998): the external-ID key and the allowlisted field values, reviewed and approved by fingerprint exactly like a merge preview. Idempotent on (dataset, fingerprint); a newer proposal for the same entity supersedes a planned one."
+key: [id]
+generate:
+  stores: [postgres]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "UUIDv7, minted by the application."
+  - name: org_id
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: id }
+    description: "The tenant; denormalized beside the dataset scope per V17."
+  - name: dataset_id
+    type: varchar
+    nullable: false
+    references: { relation: datasets, column: id }
+    description: "The dataset whose golden records this writes."
+  - name: salesforce_connection_id
+    type: varchar
+    nullable: false
+    references: { relation: salesforce_connections, column: id }
+    description: "The connection written through."
+  - name: object
+    type: varchar
+    nullable: false
+    accepted_values: [Lead, Contact, Account]
+    description: "The sObject upserted."
+  - name: entity_id
+    type: varchar
+    nullable: false
+    description: "The golden entity."
+  - name: external_id_field
+    type: varchar
+    nullable: false
+    description: "The External ID field keyed on."
+  - name: external_id_value
+    type: varchar
+    nullable: false
+    description: "The key value: the entity id."
+  - name: anchor_record_key
+    type: varchar
+    nullable: false
+    description: "A member's record key; a created record is asserted always-match to it, so the next extraction joins the entity instead of creating another."
+  - name: fields
+    type: json
+    nullable: false
+    description: "Provider field → value to write."
+  - name: fingerprint
+    type: varchar
+    nullable: false
+    description: "v1: + SHA-256 over the canonical proposal; approval must name it."
+  - name: lake_snapshot
+    type: bigint
+    nullable: false
+    description: "The snapshot it was computed from."
+  - name: origin_run_id
+    type: varchar
+    nullable: false
+    description: "The run whose results produced it."
+  - name: upsert_policy_id
+    type: varchar
+    nullable: false
+    references: { relation: upsert_policies, column: id }
+    description: "The policy revision it was built under."
+  - name: status
+    type: varchar
+    nullable: false
+    default: "'planned'"
+    accepted_values: [planned, approved, rejected, superseded]
+    description: "The decision state."
+  - name: decided_by
+    type: varchar
+    description: "Who decided it."
+  - name: decided_at
+    type: timestamp
+    description: "When it was decided."
+  - name: decision_reason
+    type: varchar
+    description: "Why, when given."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the row was written."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the row last changed."
+indexes:
+  - name: upsert_previews_fingerprint
+    columns: [dataset_id, fingerprint]
+    unique: true
+  - name: upsert_previews_dataset
+    columns: [org_id, dataset_id, status, id]
+  - name: upsert_previews_entity
+    columns: [dataset_id, entity_id, salesforce_connection_id, object]

@@ -1059,7 +1059,7 @@ impl Task<Session> for MaterializePreviews {
                 crate::preview_job::Materialized::default(),
             )));
         }
-        if context.policies.is_empty() {
+        if context.policies.is_empty() && context.upsert_policies.is_empty() {
             return Ok(Outcome::NoOp(Plan(
                 crate::preview_job::Materialized::default(),
             )));

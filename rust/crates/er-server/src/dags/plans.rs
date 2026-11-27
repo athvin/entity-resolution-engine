@@ -464,10 +464,17 @@ impl PlanDoc for crate::preview_job::Materialized {
 pub struct PreviewsPublished {
     pub published: usize,
     pub superseded: usize,
+    /// Upsert proposals stored (#998).
+    #[serde(default)]
+    pub upserts_published: usize,
 }
 
 impl PlanDoc for PreviewsPublished {
     const STABLE_NAME: &'static str = "previews_published";
+}
+
+impl PlanDoc for crate::upsert_apply::Report {
+    const STABLE_NAME: &'static str = "upserts_applied";
 }
 
 impl PlanDoc for crate::merge_restore::Report {

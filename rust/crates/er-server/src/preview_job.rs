@@ -68,6 +68,52 @@ pub struct PreviewContext {
     pub provenance: BTreeMap<String, ProvenanceCtx>,
     #[serde(default)]
     pub ambiguous: BTreeSet<String>,
+    /// Upsert policies in force (#998).
+    #[serde(default)]
+    pub upsert_policies: Vec<UpsertPolicyCtx>,
+}
+
+/// One upsert policy, as the work order carries it (#998).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpsertPolicyCtx {
+    pub id: String,
+    pub connection_id: String,
+    pub object: String,
+    pub external_id_field: String,
+    pub field_mapping: BTreeMap<String, String>,
+    pub writeback_allowlist: Vec<String>,
+    pub sources: Vec<String>,
+}
+
+/// One upsert proposal the pod built (#998).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BuiltUpsert {
+    pub origin_run_id: String,
+    pub policy_id: String,
+    pub connection_id: String,
+    pub object: String,
+    pub entity_id: String,
+    pub external_id_field: String,
+    pub external_id_value: String,
+    pub anchor_record_key: String,
+    pub fields: BTreeMap<String, Value>,
+    pub fingerprint: String,
+}
+
+/// `v1:` + SHA-256 over the canonical upsert content (everything but the
+/// run that produced it): the identity an approval names.
+#[must_use]
+pub fn upsert_fingerprint(u: &BuiltUpsert) -> String {
+    use sha2::{Digest, Sha256};
+    let canonical = serde_json::json!({
+        "policy": u.policy_id, "connection": u.connection_id, "object": u.object,
+        "entity": u.entity_id, "key_field": u.external_id_field, "key": u.external_id_value,
+        "anchor": u.anchor_record_key, "fields": u.fields,
+    });
+    format!(
+        "v1:{}",
+        hex::encode(Sha256::digest(canonical.to_string().as_bytes()))
+    )
 }
 
 /// One proposal the pod built, persisted-shaped.
@@ -85,6 +131,9 @@ pub struct BuiltPreview {
 /// What a materialization produced.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Materialized {
+    /// Upsert proposals (#998), from the same runs as the merge previews.
+    #[serde(default)]
+    pub upserts: Vec<BuiltUpsert>,
     pub snapshot: i64,
     /// Where the checkpoint moves to once these are published; `None` when no
     /// run was read.
@@ -201,6 +250,9 @@ pub fn materialize(
                 .into_iter()
                 .map(|r| r.entity_id)
                 .collect();
+        if !affected.is_empty() && !ctx.upsert_policies.is_empty() {
+            upsert_candidates(session, snapshot, run, &affected, ctx, &mut out)?;
+        }
         if !affected.is_empty() && !policies.is_empty() {
             let members = er_entities::entity_membership::read::members_of(
                 conn,
@@ -452,6 +504,121 @@ pub fn materialize(
     out.affected.sort();
     out.affected.dedup();
     Ok(out)
+}
+
+/// Upsert proposals for a run's affected entities (#998). An entity is a
+/// candidate for a policy when one of its members came from a source the
+/// policy names (an import, say) and NONE came from the policy's Salesforce
+/// object — an entity already in that object is a merge's business, never an
+/// upsert's. The values are the golden record's, mapped and allowlisted;
+/// a null golden value is not written.
+fn upsert_candidates(
+    session: &dedupe_core::Session,
+    snapshot: i64,
+    run: &er_entities::run::read::SucceededAfterRow,
+    affected: &[String],
+    ctx: &PreviewContext,
+    out: &mut Materialized,
+) -> Result<(), String> {
+    let conn = session.connection();
+    let members =
+        er_entities::entity_membership::read::members_of(conn, snapshot, &affected.join(SEP))
+            .map_err(|e| e.to_string())?;
+    let keys: Vec<String> = members
+        .iter()
+        .map(|m| format!("{}{KEY_SEP}{}", m.source_system, m.source_record_id))
+        .collect();
+    let raw: BTreeMap<(String, String), er_entities::raw_record::read::LatestForKeysRow> =
+        er_entities::raw_record::read::latest_for_keys(conn, snapshot, &keys.join(SEP))
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .map(|r| ((r.source_system.clone(), r.source_record_id.clone()), r))
+            .collect();
+    let mut by_entity: BTreeMap<&str, Vec<&er_entities::entity_membership::read::MembersOfRow>> =
+        BTreeMap::new();
+    for m in &members {
+        by_entity.entry(m.entity_id.as_str()).or_default().push(m);
+    }
+    let mut wanted: Vec<(&UpsertPolicyCtx, &str, String)> = Vec::new();
+    for policy in &ctx.upsert_policies {
+        for (entity, ms) in &by_entity {
+            let live: Vec<&&er_entities::entity_membership::read::MembersOfRow> = ms
+                .iter()
+                .filter(|m| {
+                    raw.get(&(m.source_system.clone(), m.source_record_id.clone()))
+                        .is_some_and(|r| !r.is_deleted)
+                })
+                .collect();
+            let in_object = live.iter().any(|m| {
+                raw.get(&(m.source_system.clone(), m.source_record_id.clone()))
+                    .and_then(|r| ctx.provenance.get(&r.ingest_batch_id))
+                    .is_some_and(|p| {
+                        p.connection_id == policy.connection_id && p.object == policy.object
+                    })
+            });
+            let anchor = live
+                .iter()
+                .filter(|m| policy.sources.contains(&m.source_system))
+                .map(|m| m.record_key.clone())
+                .min();
+            if let (false, Some(anchor)) = (in_object, anchor) {
+                wanted.push((policy, entity, anchor));
+            }
+        }
+    }
+    if wanted.is_empty() {
+        return Ok(());
+    }
+    let ids: BTreeSet<&str> = wanted.iter().map(|(_, e, _)| *e).collect();
+    let goldens: BTreeMap<String, BTreeMap<String, Value>> =
+        er_entities::golden_record::read::by_ids(
+            conn,
+            snapshot,
+            &ids.into_iter().collect::<Vec<_>>().join(SEP),
+        )
+        .map_err(|e| e.to_string())?
+        .iter()
+        .map(|g| (g.id.clone(), golden_values(g)))
+        .collect();
+    for (policy, entity, anchor) in wanted {
+        let Some(golden) = goldens.get(entity) else {
+            *out.excluded.entry("upsert_no_golden".into()).or_default() += 1;
+            continue;
+        };
+        let fields: BTreeMap<String, Value> = policy
+            .field_mapping
+            .iter()
+            .filter(|(attr, field)| {
+                GOLDEN_COLUMNS.contains(&attr.as_str())
+                    && policy.writeback_allowlist.contains(field)
+            })
+            .filter_map(|(attr, field)| {
+                golden
+                    .get(attr)
+                    .filter(|v| !v.is_null())
+                    .map(|v| (field.clone(), v.clone()))
+            })
+            .collect();
+        if fields.is_empty() {
+            *out.excluded.entry("upsert_no_fields".into()).or_default() += 1;
+            continue;
+        }
+        let mut built = BuiltUpsert {
+            origin_run_id: run.id.clone(),
+            policy_id: policy.id.clone(),
+            connection_id: policy.connection_id.clone(),
+            object: policy.object.clone(),
+            entity_id: entity.to_string(),
+            external_id_field: policy.external_id_field.clone(),
+            external_id_value: entity.to_string(),
+            anchor_record_key: anchor,
+            fields,
+            fingerprint: String::new(),
+        };
+        built.fingerprint = upsert_fingerprint(&built);
+        out.upserts.push(built);
+    }
+    Ok(())
 }
 
 /// A group's match evidence: for each victim, its strongest scored edge to

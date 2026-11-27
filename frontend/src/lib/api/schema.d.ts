@@ -1939,6 +1939,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/orgs/{org}/datasets/{ds}/upsert-previews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** a dataset's upsert previews */
+        get: operations["get_orgs_by_org_datasets_by_ds_upsert_previews"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/orgs/{org}/datasets/{ds}/upsert-previews/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** apply the dataset's approved upserts to Salesforce */
+        post: operations["post_orgs_by_org_datasets_by_ds_upsert_previews_apply"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/orgs/{org}/datasets/{ds}/upsert-previews/decide": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** approve or reject upserts */
+        post: operations["post_orgs_by_org_datasets_by_ds_upsert_previews_decide"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/orgs/{org}/datasets/{ds}/writeback/auto-approval": {
         parameters: {
             query?: never;
@@ -1968,6 +2019,24 @@ export interface paths {
         get: operations["get_orgs_by_org_datasets_by_ds_writeback_policies"];
         /** set the writeback policy for one connection's object */
         put: operations["put_orgs_by_org_datasets_by_ds_writeback_policies"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/orgs/{org}/datasets/{ds}/writeback/upsert-policies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** the upsert policies in force */
+        get: operations["get_orgs_by_org_datasets_by_ds_writeback_upsert_policies"];
+        /** set the upsert policy for one connection's object */
+        put: operations["put_orgs_by_org_datasets_by_ds_writeback_upsert_policies"];
         post?: never;
         delete?: never;
         options?: never;
@@ -5057,6 +5126,55 @@ export interface components {
             sha256: string;
             source: string;
             upload_id: string;
+        };
+        /** @description The upsert policies in force. */
+        UpsertPolicyList: {
+            items: components["schemas"]["UpsertPolicyView"][];
+        };
+        /** @description An upsert policy revision. */
+        UpsertPolicyView: {
+            connection_id: string;
+            /** @description RFC 3339. */
+            created_at: string;
+            created_by: string;
+            external_id_field: string;
+            field_mapping: Record<string, never>;
+            /** @description The revision an upsert preview binds. */
+            id: string;
+            object: string;
+            sources: string[];
+            writeback_allowlist: string[];
+        };
+        /** @description A page of upsert previews. */
+        UpsertPreviewPage: {
+            items: components["schemas"]["UpsertPreviewView"][];
+            /** @description Pass as `cursor` for the next page; null on the last. */
+            next_cursor?: string | null;
+        };
+        /** @description A proposed upsert. */
+        UpsertPreviewView: {
+            apply_detail?: string | null;
+            /** @description The apply, once begun: `applying`, `created`, `updated`, `failed` or `skipped_stale`. */
+            apply_status?: string | null;
+            connection_id: string;
+            /** @description RFC 3339. */
+            created_at: string;
+            decided_by?: string | null;
+            entity_id: string;
+            external_id_field: string;
+            external_id_value: string;
+            /** @description Provider field → value to write. */
+            fields: Record<string, never>;
+            /** @description Name it to approve or reject. */
+            fingerprint: string;
+            id: string;
+            object: string;
+            /** @description The upsert policy revision it was built under. */
+            policy_revision: string;
+            /** @description The Salesforce id written, once applied. */
+            sf_record_id?: string | null;
+            /** @description `planned`, `approved`, `rejected` or `superseded`. */
+            status: string;
         };
         /** @description A tenant webhook endpoint: its URL, subscribed events and signing secret. */
         Webhook: {
@@ -10479,6 +10597,126 @@ export interface operations {
             };
         };
     };
+    get_orgs_by_org_datasets_by_ds_upsert_previews: {
+        parameters: {
+            query?: {
+                /** @description Only previews in this state. */
+                status?: string;
+                /** @description The `next_cursor` of the previous page. */
+                cursor?: string;
+                /** @description Maximum items, 1–200; default 50. */
+                limit?: string;
+            };
+            header?: never;
+            path: {
+                org: string;
+                ds: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful response. */
+            "2XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpsertPreviewPage"];
+                };
+            };
+            /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        detail: string;
+                    };
+                };
+            };
+        };
+    };
+    post_orgs_by_org_datasets_by_ds_upsert_previews_apply: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+                ds: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful response. */
+            "2XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MergesApplying"];
+                };
+            };
+            /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        detail: string;
+                    };
+                };
+            };
+        };
+    };
+    post_orgs_by_org_datasets_by_ds_upsert_previews_decide: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+                ds: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    decision: string;
+                    items: {
+                        fingerprint: string;
+                        id: string;
+                    }[];
+                    reason?: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful response. */
+            "2XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatchDecisionOut"];
+                };
+            };
+            /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        detail: string;
+                    };
+                };
+            };
+        };
+    };
     get_orgs_by_org_datasets_by_ds_writeback_auto_approval: {
         parameters: {
             query?: never;
@@ -10622,6 +10860,87 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WritebackPolicyView"];
+                };
+            };
+            /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        detail: string;
+                    };
+                };
+            };
+        };
+    };
+    get_orgs_by_org_datasets_by_ds_writeback_upsert_policies: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+                ds: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful response. */
+            "2XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpsertPolicyList"];
+                };
+            };
+            /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        detail: string;
+                    };
+                };
+            };
+        };
+    };
+    put_orgs_by_org_datasets_by_ds_writeback_upsert_policies: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+                ds: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    connection_id: string;
+                    external_id_field: string;
+                    field_mapping: {
+                        [key: string]: string;
+                    };
+                    object: string;
+                    sources: string[];
+                    writeback_allowlist: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description Successful response. */
+            "2XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpsertPolicyView"];
                 };
             };
             /** @description Application error. Request-extractor or infrastructure rejections may use a different body. */

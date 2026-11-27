@@ -276,6 +276,9 @@ const DATASET_SCOPED: &[(&str, bool)] = &[
     ("merge_restores", true),
     ("merge_restore_steps", true),
     ("merge_auto_approvals", true),
+    ("upsert_policies", true),
+    ("upsert_previews", true),
+    ("upsert_applies", true),
     ("jobs", false),
     ("task_instances", false),
 ];
