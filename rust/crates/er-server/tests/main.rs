@@ -48,6 +48,7 @@ mod pg_bulk_upload;
 mod pg_clear_endpoint;
 mod pg_config;
 mod pg_connections;
+mod pg_customer_rules;
 mod pg_dataset_concurrency;
 mod pg_dataset_config;
 mod pg_dataset_isolation;
