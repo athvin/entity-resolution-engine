@@ -125,6 +125,29 @@ async fn run_all_full_runs_as_eight_pods_and_reproduces_base_10() {
     // the org's verbatim, which is the lake this test wrote.
     pg::converge_default_datasets(&mut client).await.unwrap();
     let ds = common::default_dataset(&client, "acme").await;
+
+    // A lake BEHIND the catalog (#1288): reconciled once, then aged by an
+    // additive column it predates, as a tenant that missed the deploy sweep
+    // is. `init` reads `runs` (including `ignore_words_hash`), so it must
+    // reconcile before that read or the run dies with a binder error.
+    {
+        let session = er_cli::open_lake(
+            tmp.join("catalog.ducklake").to_str().unwrap(),
+            tmp.join("data").to_str().unwrap(),
+        )
+        .expect("open the fresh lake");
+        er_entity_diff::reconcile_lake(
+            session.connection(),
+            &er_entities::catalog::catalog(),
+            "pg_run_all_pipeline",
+        )
+        .expect("bring the lake to the current catalog");
+        session
+            .connection()
+            .execute_batch("ALTER TABLE lake.main.runs DROP COLUMN ignore_words_hash;")
+            .expect("age the lake by one additive column");
+    }
+
     let queued = pg::enqueue(
         &client,
         &org_id,
