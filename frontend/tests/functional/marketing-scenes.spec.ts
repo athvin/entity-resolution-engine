@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 import { CHAPTERS } from "../../src/components/marketing/chapters";
+import { framesSettled } from "./helpers";
 
 test.describe("marketing scenes and cuts", () => {
   // The next-chapter button walks CHAPTERS, and a section the list forgets is
@@ -801,6 +802,9 @@ test.describe("/docs walkthrough", () => {
   test("walkthrough poster visual baseline @visual", async ({ page }) => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.goto("/docs");
+    // /docs hydrates a large tree after `load`; let WebKit's frame clock
+    // recover before the screenshot's own stability wait starts (#1281).
+    await framesSettled(page);
     await page.addStyleTag({
       content: '[data-testid="marketing-header"] { visibility: hidden !important; }',
     });
