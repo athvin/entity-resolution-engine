@@ -9,6 +9,7 @@ import { AuditDesk, type AuditPress } from "../scene/audit-desk";
 import {
   AUDIT_POSTER,
   USUAL_DECISION,
+  allStatuses,
   reduceAudit,
   statusAt,
   stepOf,
@@ -26,6 +27,7 @@ const ENTRANCE = { call: 1800, audit: 1500 } as const;
 const PRESS_AFTER = 900;
 /** How much of the stage must be on screen for the film to start: ScenePlayback's rule. */
 const SEEN = 0.4;
+const STATUSES = allStatuses();
 
 type Segment = { duration: number; action: AuditAction | null; press: AuditPress };
 
@@ -280,9 +282,18 @@ export function AuditStory({ onRunning }: { onRunning: (running: boolean) => voi
       <div className="story-audit-bottom">
         <div>
           <p className="story-eyebrow">{done ? "Correction retained" : "An illustrative audit"}</p>
-          <p className="story-audit-status" role="status">
-            {statusAt(state)}
-          </p>
+          {/* Every sentence the line can say sits invisibly in the same cell, so
+              it holds the height of the longest and the page under it never moves. */}
+          <div className="story-audit-status-frame">
+            {STATUSES.map((sentence) => (
+              <span key={sentence} className="story-audit-status-ghost" aria-hidden="true">
+                {sentence}
+              </span>
+            ))}
+            <p className="story-audit-status" role="status">
+              {statusAt(state)}
+            </p>
+          </div>
         </div>
         <div className="story-audit-controls">
           {ready && !started && (

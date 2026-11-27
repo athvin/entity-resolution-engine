@@ -442,16 +442,28 @@ html:has(.marketing-story) {
   border-top: 1px solid var(--border);
   padding-top: 24px;
 }
-.story-audit-status {
-  margin-top: 10px;
-  font-size: 17px;
-  min-height: 54px;
+.story-audit-status-frame {
+  display: grid;
   max-width: 610px;
+  margin-top: 10px;
 }
+.story-audit-status-frame > * {
+  grid-area: 1 / 1;
+}
+.story-audit-status-ghost {
+  visibility: hidden;
+}
+.story-audit-status,
+.story-audit-status-ghost {
+  margin: 0;
+  font-size: 17px;
+}
+/* One control at a time; the row keeps its height while it has none. */
 .story-audit-controls {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  min-height: 44px;
 }
 .story-audit-controls button {
   min-height: 44px;
@@ -662,7 +674,8 @@ html:has(.marketing-story) {
   .story-audit-bottom {
     gap: 12px;
   }
-  .story-audit-status {
+  .story-audit-status,
+  .story-audit-status-ghost {
     font-size: 16px;
   }
   .story-usage-summary {

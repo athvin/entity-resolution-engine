@@ -223,3 +223,46 @@ what the sheets showed, and each was seen failing first:
 - reduced motion (19 animations without the gate);
 - scrub state (the golden record at opacity 1 with its animation removed);
 - chapter landing (338px off-centre without the scroll margin).
+
+## The home audit film (#1297)
+
+Section 06 is now a film the visitor takes part in. `scene/audit-desk.tsx`
+draws it and `demo/audit-story.tsx` times it. Gold references:
+- `payout-flow`, for arrivals that overlap and a payoff that holds;
+- `table-edit`, for an edit made in place and then the total it feeds;
+- `form-error`, for a fault on the thing that caused it, cleared by fixing it.
+
+**How it was filmed.** A probe drove the real page: it brought the stage into
+view, took frames at fixed times through each moment, and clicked the decisions
+itself. Both branches were filmed on desktop Chromium (1280x800) and the Pixel
+7 profile. Three rounds:
+
+- **Round one.**
+  - The four shots share one grid cell, so the shorter ones (the zone, the
+    record view, the next run) sat over empty bands.
+  - A match left an empty column with an "= Always match" chip floating in it.
+  - The unmerge message landed under the departing row, across a gap.
+  - The never-match chip covered a card's label.
+  - The controls hid under the floating next-chapter button.
+- **Round two.**
+  - The zone gained a legend saying what each zone does, and centres in its
+    frame.
+  - A match folds the API card under the Salesforce card and uncovers E-1042's
+    golden record, opaque and dealt from under.
+  - The record view shows the record's rules. The unmerge's never-match rule
+    arrives as the row leaves, and the applied message replaces the row in
+    place.
+  - The never mark became a round ⊘.
+  - The controls moved under the status, on the left.
+- **Round three, caught by the functional spec.** On phones the window
+  changed height by 87px between shots, because the record view and the next
+  run drew some rows only in some states. The same 87px broke the footer spec
+  on WebKit, because the status bar also grew at hydration. Now every shot
+  draws one structure in every state. The status line reserves its longest
+  sentence, and the controls row reserves one button.
+
+**What was not done.** `film.mjs --gate` was not run: it needs
+`playwright-core` beside the skill, and its clock sampling cannot make the
+visitor's decisions. The sheets were judged by eye against
+`references/framing.md` and `craft.md`. Frame delivery on a physical device
+was not measured.

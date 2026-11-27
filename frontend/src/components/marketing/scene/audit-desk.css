@@ -616,6 +616,10 @@ button.audit-rail-item {
 .audit-rules small {
   font-size: 11px;
 }
+/* A rule not yet written keeps its place, unseen. */
+.audit-rules li[data-pending] {
+  visibility: hidden;
+}
 /* The rule the unmerge writes: it arrives as the row leaves. */
 [data-scene="unmerged"] .audit-rules li[data-new] {
   border-color: var(--foreground);

@@ -299,6 +299,24 @@ const { review, autoJoin } = MERIDIAN_THRESHOLDS;
 /** The one-line explanation every score carries: explain, don't gate. */
 export const CLOSE_EXPLAINED = `${CLOSE_SCORE} sits in your review band, between ${review.toFixed(2)} and ${autoJoin.toFixed(2)}, so a person decides.`;
 
+/**
+ * Every sentence the status line can say. The line reserves the height of the
+ * longest, so the page under the film never moves as it changes.
+ */
+export function allStatuses(): string[] {
+  const states: AuditState[] = [
+    AUDIT_START,
+    { scene: "call", decision: null, ticked: false },
+    { scene: "called", decision: "match", ticked: false },
+    { scene: "called", decision: "apart", ticked: false },
+    { scene: "audit", decision: USUAL_DECISION, ticked: false },
+    { scene: "audit", decision: USUAL_DECISION, ticked: true },
+    { scene: "unmerged", decision: USUAL_DECISION, ticked: true },
+    AUDIT_POSTER,
+  ];
+  return [...new Set(states.map(statusAt))];
+}
+
 /** What the status line says at each moment, for sight and for screen readers. */
 export function statusAt(state: AuditState): string {
   switch (state.scene) {

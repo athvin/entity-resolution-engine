@@ -12,6 +12,7 @@ import {
   CLOSE_SCORE,
   RECORD,
   RULE_LABEL,
+  USUAL_DECISION,
   WRONG_SCORE,
   ZONE_PAIRS,
   ZONE_WIDTHS,
@@ -25,6 +26,7 @@ import {
   type AuditScene,
   type AuditState,
   type Entity,
+  type Rule,
 } from "./audit-model";
 import { EvidenceBar, RecordCard, ThresholdScale } from "./marks";
 import {
@@ -38,6 +40,11 @@ import {
 } from "./meridian";
 import { decide } from "./score";
 import "./audit-desk.css";
+
+/** The entity the unmerged record becomes: drawn in every state, so the shot keeps its height. */
+const SPLIT: Entity = { id: MERIDIAN_LTD_ENTITY, name: RECORD.ltd.name, members: ["ltd"] };
+/** The rule an unmerge writes, held in place before it is written. */
+const UNMERGE_RULE: Rule = { kind: "never", a: "ltd", b: "salesforce", why: "your unmerge" };
 
 /** Which in-stage control "Play it for me" is about to press. */
 export type AuditPress = "match" | "tick" | "unmerge" | null;
@@ -308,9 +315,15 @@ function AuditShot({
 }) {
   const [entity] = entitiesAt(state);
   const leaving = state.scene === "unmerged";
-  // While it leaves, the row is still drawn, so it can be seen going.
-  const rows = leaving ? [...entity.members, "ltd" as const] : entity.members;
+  // The London row is always drawn, so the shot keeps one height in every
+  // state (the window is as tall as its tallest shot); while it leaves, it can
+  // be seen going.
+  const rows = [...entity.members.filter((key) => key !== "ltd"), "ltd" as const];
   const count = entity.members.length;
+  // Both rules are always drawn for the same reason: the review decision (the
+  // usual one until it is made) and the unmerge's, shown once it is written.
+  const written = rulesAt({ ...state, decision: state.decision ?? USUAL_DECISION });
+  const shown = rulesAt(state);
   return (
     <Shot name="audit" active={active} className="audit-record">
       <p className="audit-later">
@@ -327,11 +340,15 @@ function AuditShot({
           <div className="audit-rules">
             <p className="audit-kicker">Rules</p>
             <ul>
-              {rulesAt(state).map((rule) => (
+              {[...written, ...(written.length < 2 ? [UNMERGE_RULE] : [])].map((rule) => (
                 <li
                   key={`${rule.kind}-${rule.a}-${rule.b}`}
                   data-kind={rule.kind}
                   data-new={rule.why === "your unmerge" || undefined}
+                  data-pending={
+                    !shown.some((made) => made.a === rule.a && made.b === rule.b) || undefined
+                  }
+                  aria-hidden={!shown.some((made) => made.a === rule.a && made.b === rule.b)}
                 >
                   <span className="audit-rule-kind">
                     {rule.kind === "always" ? "= Always match" : "⊘ Never match"}
@@ -446,17 +463,15 @@ function EntityCard({ entity }: { entity: Entity }) {
 
 /** Step 4: the next run scores the pairs the same, and the rules decide. */
 function HoldsShot({ active, state }: { active: boolean; state: AuditState }) {
-  const entities = entitiesAt(state);
-  const kept = entities.find((entity) => entity.id === MERIDIAN_ENTITY);
-  const split = entities.find((entity) => entity.id === MERIDIAN_LTD_ENTITY);
+  const [kept] = entitiesAt(state);
   return (
     <Shot name="holds" active={active} className="audit-holds">
       <div className="audit-entities">
-        {kept && <EntityCard entity={kept} />}
+        <EntityCard entity={kept} />
         <span className="audit-never">
           <span aria-hidden="true">⊘</span> Never match
         </span>
-        {split && <EntityCard entity={split} />}
+        <EntityCard entity={SPLIT} />
       </div>
       <div className="audit-next">
         <p className="audit-kicker">The next run</p>

@@ -928,3 +928,84 @@ test.describe("the nav", () => {
     expect(await scaleIns(page, panel)).toBe(1);
   });
 });
+
+test.describe("the home audit", () => {
+  const bringIntoView = (page: Page) =>
+    page.locator("#audit-stage").evaluate((stage) => {
+      window.scrollTo({
+        top: stage.getBoundingClientRect().top + window.scrollY - 72,
+        behavior: "instant",
+      });
+    });
+
+  test("starts when seen, waits for the call, and carries a match to the next run", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    const audit = page.getByTestId("marketing-audit");
+    // Held at its first frame until it is seen.
+    await expect(audit).toHaveAttribute("data-scene", "zone");
+    await expect(audit).toHaveAttribute("data-running", "false");
+    await bringIntoView(page);
+    await expect(audit).toHaveAttribute("data-running", "true");
+    await expect(audit).toHaveAttribute("data-scene", "call", { timeout: 10000 });
+    // Time never makes the decision.
+    await page.waitForTimeout(1500);
+    await expect(audit).toHaveAttribute("data-scene", "call");
+
+    await audit.getByRole("button", { name: "Match", exact: true }).click();
+    await expect(audit).toHaveAttribute("data-scene", "audit", { timeout: 10000 });
+    const history = audit.getByRole("complementary", { name: "History" });
+    await expect(history).toContainText("matched Salesforce ↔ API");
+
+    const unmerge = audit.getByRole("button", { name: /^Unmerge .*selected$/ });
+    await expect(unmerge).toBeDisabled();
+    await audit.getByRole("checkbox", { name: /Meridian Supply Ltd/ }).check();
+    await expect(unmerge).toHaveText(/Unmerge 1 selected/);
+    await unmerge.click();
+    await expect(audit.getByRole("status")).toContainText("One never-match rule is written");
+    await expect(history).toContainText("unmerged Meridian Supply Ltd");
+
+    await expect(audit).toHaveAttribute("data-scene", "holds", { timeout: 10000 });
+    await expect(audit.getByText("Joined by your always-match rule")).toBeVisible();
+    await expect(audit.getByText("Kept apart by your never-match rule")).toBeVisible();
+    await expect(audit).toHaveAttribute("data-running", "false", { timeout: 10000 });
+    await expect(audit.getByRole("button", { name: "Replay audit" })).toBeVisible();
+  });
+
+  test("keeping the pair apart carries through, and the rail can jump", async ({ page }) => {
+    await page.goto("/");
+    const audit = page.getByTestId("marketing-audit");
+    await bringIntoView(page);
+    await audit.getByRole("button", { name: "Step 2: Your call" }).click();
+    await audit.getByRole("button", { name: "Not a match" }).click();
+    await expect(audit.getByRole("status")).toContainText("Kept apart.");
+    await audit.getByRole("button", { name: "Step 4: It holds" }).click();
+    await expect(audit).toHaveAttribute("data-scene", "holds");
+    await expect(audit.getByText(/Kept apart by your never-match rule, as E-2077/)).toBeVisible();
+  });
+
+  test("the window never changes height as the film cuts", async ({ page }) => {
+    await page.goto("/");
+    const audit = page.getByTestId("marketing-audit");
+    await bringIntoView(page);
+    const height = () =>
+      page.locator(".audit-window").evaluate((node) => node.getBoundingClientRect().height);
+    const heights: number[] = [];
+    for (const step of [1, 2, 3, 4]) {
+      const name = [
+        "Step 1: The gray zone",
+        "Step 2: Your call",
+        "Step 3: Unmerge",
+        "Step 4: It holds",
+      ][step - 1];
+      await audit.getByRole("button", { name: name ?? "" }).click();
+      await expect(audit).toHaveAttribute("data-step", String(step - 1));
+      heights.push(await height());
+    }
+    expect(Math.max(...heights) - Math.min(...heights)).toBeLessThan(1);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
+  });
+});
