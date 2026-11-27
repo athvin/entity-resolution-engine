@@ -6,7 +6,14 @@
    `--brand` is the logo's exact #2F6BFF, for marks and light. It sits at the
    AA edge (4.4-4.5:1), so text and filled controls use `--brand-ink` and
    `--primary`, deeper on light and lighter on dark, each clearing 5.8:1. */
+/* `color` resolves from the token here rather than inheriting body's
+   computed colour. WebKit sometimes misses re-inheriting `color` into body's
+   children when next-themes flips `.dark` during load, leaving the whole
+   site's text in the light-theme ink on a dark background until some later
+   restyle (#1281). A custom property's own inheritance is tracked correctly,
+   so naming it here keeps the text on the current theme. */
 .marketing-site {
+  color: var(--foreground);
   --brand: #2f6bff;
   --brand-ink: #2457e0;
   --primary: #2457e0;
