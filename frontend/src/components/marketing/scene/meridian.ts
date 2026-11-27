@@ -106,8 +106,6 @@ export type GoldenValue = {
   field: string;
   value: string;
   from: MeridianSourceKey;
-  /** Every source holding the surviving value (two agree on the phone). */
-  held: readonly MeridianSourceKey[];
   /** The survivorship rule, worded as /features/golden-records lists it. */
   rule: string;
 };
@@ -121,28 +119,19 @@ export const MERIDIAN_GOLDEN = [
     field: "Name",
     value: "Meridian Supply",
     from: "salesforce",
-    held: ["salesforce"],
     rule: "the source you trust most",
   },
   {
     field: "Email",
     value: "accounts@meridiansupply.example",
     from: "api",
-    held: ["api"],
     rule: "the most recent value",
   },
-  {
-    field: "Phone",
-    value: "+1 415 555 0142",
-    from: "salesforce",
-    held: ["salesforce", "csv"],
-    rule: "the most common value",
-  },
+  { field: "Phone", value: "+1 415 555 0142", from: "salesforce", rule: "the most common value" },
   {
     field: "Address",
     value: "18 Mercer Street, Suite 400",
     from: "csv",
-    held: ["csv"],
     rule: "fields that belong together",
   },
 ] as const satisfies readonly GoldenValue[];

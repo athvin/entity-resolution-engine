@@ -1124,6 +1124,82 @@
         ]
       }
     },
+    "/v1/orgs/{org}/allowance": {
+      "patch": {
+        "summary": "set or clear an org's record allowance",
+        "operationId": "patch_orgs_by_org_allowance",
+        "parameters": [
+          {
+            "name": "org",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "record_allowance": {
+                    "anyOf": [
+                      {
+                        "type": "integer"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "2XX": {
+            "description": "Successful response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AllowanceSet"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "detail"
+                  ],
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "operator"
+            ]
+          }
+        ]
+      }
+    },
     "/v1/orgs/{org}/api-keys": {
       "get": {
         "summary": "list the org's API keys",
@@ -10346,6 +10422,57 @@
         ]
       }
     },
+    "/v1/orgs/{org}/usage": {
+      "get": {
+        "summary": "the org's usage against its allowance",
+        "operationId": "get_orgs_by_org_usage",
+        "parameters": [
+          {
+            "name": "org",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "2XX": {
+            "description": "Successful response. Payload types are described only at envelope granularity.",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "default": {
+            "description": "Application error. Request-extractor or infrastructure rejections may use a different body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "detail"
+                  ],
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "viewer"
+            ]
+          }
+        ]
+      }
+    },
     "/v1/orgs/{org}/webhooks": {
       "get": {
         "summary": "list an org's active webhooks",
@@ -11002,6 +11129,25 @@
             "type": "string",
             "format": "date-time",
             "description": "Run-logical last-write time (equals created_at; the mart is rebuilt whole)."
+          }
+        }
+      },
+      "AllowanceSet": {
+        "type": "object",
+        "description": "`PATCH /v1/orgs/{org}/allowance`: the allowance now in force.",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "record_allowance": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
           }
         }
       },
@@ -12270,6 +12416,32 @@
           },
           "state": {
             "type": "string"
+          }
+        }
+      },
+      "DatasetUsage": {
+        "type": "object",
+        "description": "One dataset's share of an org's usage.",
+        "required": [
+          "name",
+          "records"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "records": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Connected records: standardized source records at `snapshot`."
+          },
+          "snapshot": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The lake snapshot counted; null for a dataset with no lake yet."
           }
         }
       },
@@ -14180,6 +14352,14 @@
             "type": "string",
             "description": "The tenant's unique name (the routing handle; URLs stay name-based)."
           },
+          "record_allowance": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The org's record allowance: the most connected records (standardized source records, summed over its datasets) it may hold before new deliveries are refused with 402. NULL is unlimited. The commercial unit is connected records (#518); the operator sets it per pilot."
+          },
           "s3_ingest_bucket": {
             "type": [
               "string",
@@ -14307,6 +14487,52 @@
               "null"
             ],
             "format": "int64"
+          }
+        }
+      },
+      "OrgUsage": {
+        "type": "object",
+        "description": "`GET /v1/orgs/{org}/usage`: the org's consumption of its allowance.",
+        "required": [
+          "unit",
+          "records",
+          "at_limit",
+          "datasets"
+        ],
+        "properties": {
+          "allowance": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The allowance; null is unlimited."
+          },
+          "at_limit": {
+            "type": "boolean",
+            "description": "True once `records >= allowance`: new deliveries are refused with 402."
+          },
+          "datasets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DatasetUsage"
+            }
+          },
+          "records": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "remaining": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "`allowance - records`, never negative; null when unlimited."
+          },
+          "unit": {
+            "type": "string",
+            "description": "Always `records`: connected records, summed over every dataset."
           }
         }
       },

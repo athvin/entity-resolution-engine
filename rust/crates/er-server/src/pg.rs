@@ -737,6 +737,8 @@ pub struct OrgDetail {
     /// nothing from a tenant who never pointed it at a bucket.
     pub s3_ingest_bucket: Option<String>,
     pub s3_ingest_prefix: Option<String>,
+    /// The record allowance (#518); `None` is unlimited.
+    pub record_allowance: Option<i64>,
 }
 
 impl From<er_entities::org::Org> for OrgDetail {
@@ -750,8 +752,22 @@ impl From<er_entities::org::Org> for OrgDetail {
             env: o.env,
             s3_ingest_bucket: o.s3_ingest_bucket,
             s3_ingest_prefix: o.s3_ingest_prefix,
+            record_allowance: o.record_allowance,
         }
     }
+}
+
+/// Set or clear an org's record allowance. `true` iff the org exists.
+///
+/// # Errors
+/// Propagates the update error.
+pub async fn set_record_allowance(
+    client: &Client,
+    org: &str,
+    allowance: Option<i64>,
+) -> Result<bool, PgError> {
+    er_entities::org::update::set_record_allowance(client, allowance, org).await?;
+    Ok(get_org(client, org).await?.is_some())
 }
 
 /// Upsert a bring-your-own-config org (`queue.py` `ensure_org`, the create-org

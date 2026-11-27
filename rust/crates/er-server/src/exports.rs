@@ -76,15 +76,15 @@ pub enum ExportKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ExportFormat {
-    /// Comma-separated, with a header row. Golden records and lineage only: a
-    /// duplicate group's member list does not flatten into one row of cells.
+    /// Comma-separated, with a header row. Golden records only: a duplicate
+    /// group's member list does not flatten into one row of cells.
     Csv,
     /// JSON Lines: one JSON object per line.
     Jsonl,
-    /// Apache Parquet, Snappy-compressed: golden records and lineage with
-    /// the same columns their CSV carries (#1241), and duplicate groups one
-    /// row per group with its members as a nested list (#1252). The format a
-    /// warehouse load wants.
+    /// Apache Parquet, Snappy-compressed: golden records and lineage, with
+    /// the same columns their CSV carries (#1241). The format a warehouse
+    /// load wants. Not duplicates: a group's nested shape has no schema
+    /// fixed before its first page, so it stays JSON Lines.
     Parquet,
 }
 
@@ -144,10 +144,10 @@ impl ExportRequest {
     pub fn from_params(params: &Value) -> Result<Self, String> {
         let request: Self = serde_json::from_value(params.clone())
             .map_err(|e| format!("invalid export request: {e}"))?;
-        if request.kind == ExportKind::Duplicates && request.format == ExportFormat::Csv {
+        if request.kind == ExportKind::Duplicates && request.format != ExportFormat::Jsonl {
             return Err(
-                "duplicates export as jsonl or parquet: a group's member list does not flatten \
-                 into CSV"
+                "duplicates export as jsonl only: a group's member list does not flatten into CSV, \
+                 and its nested shape has no Parquet schema fixed before the first page"
                     .to_string(),
             );
         }
@@ -590,33 +590,41 @@ fn write_to(
                 }
             }
         }
-        ExportKind::Duplicates => match request.format {
-            ExportFormat::Parquet => {
-                // The schema is declared up front, so an empty export is a
-                // readable file and no page's nulls decide a column's type.
-                let mut writer = DuplicatesParquet::new(&mut out, entity_type)?;
-                duplicate_pages(session, entity_type, snapshot, page, |groups| {
-                    rows += groups.len();
+        ExportKind::Duplicates => {
+            let mut after: Option<String> = None;
+            loop {
+                let (groups, next) = match crate::read::duplicates(
+                    session,
+                    entity_type,
+                    snapshot,
+                    after.as_deref(),
+                    &crate::read::DuplicateFilters::default(),
+                    page,
+                ) {
+                    Ok(found) => found,
+                    Err(e) if after.is_none() && not_yet_written(&e) => break,
+                    Err(e) => return Err(e),
+                };
+                for group in groups.to_values() {
+                    rows += 1;
                     ceiling(rows)?;
-                    writer.write(groups)
-                })?;
-                writer.close()?;
-            }
-            // `from_params` refuses duplicates as CSV, so this is JSON Lines.
-            ExportFormat::Csv | ExportFormat::Jsonl => {
-                duplicate_pages(session, entity_type, snapshot, page, |groups| {
-                    for group in groups.to_values() {
-                        rows += 1;
-                        ceiling(rows)?;
-                        serde_json::to_writer(&mut out, &group)
-                            .map_err(|e| format!("export jsonl: {e}"))?;
-                        out.write_all(b"\n")
-                            .map_err(|e| format!("export write: {e}"))?;
+                    serde_json::to_writer(&mut out, &group)
+                        .map_err(|e| format!("export jsonl: {e}"))?;
+                    out.write_all(b"\n")
+                        .map_err(|e| format!("export write: {e}"))?;
+                }
+                match next {
+                    Some(cursor) => {
+                        after = Some(
+                            crate::read::decode_cursor(&cursor)
+                                .ok_or("the duplicates page returned an unreadable cursor")?
+                                .key,
+                        );
                     }
-                    Ok(())
-                })?;
+                    None => break,
+                }
             }
-        },
+        }
     }
     out.flush().map_err(|e| format!("export flush: {e}"))?;
     Ok(rows)
@@ -640,6 +648,7 @@ fn not_yet_written(error: &str) -> bool {
     error.contains("Catalog Error: Table with name ") && error.contains(" does not exist")
 }
 
+/// Walk every golden page at `snapshot`, handing each batch to `each`.
 /// The lineage export's columns, in order, for every format.
 const LINEAGE_COLUMNS: [&str; 4] = [
     "record_key",
@@ -660,77 +669,6 @@ fn parquet_writer<W: std::io::Write + Send>(
         .map_err(|e| format!("export parquet: {e}"))
 }
 
-/// Duplicate groups as Parquet (#1252): one row per group, in
-/// [`crate::read::DuplicateGroups::arrow_schema`], which the writer is opened
-/// with before the first page.
-struct DuplicatesParquet<W: std::io::Write + Send> {
-    writer: parquet::arrow::ArrowWriter<W>,
-}
-
-impl<W: std::io::Write + Send> DuplicatesParquet<W> {
-    fn new(out: W, entity_type: EntityType) -> Result<Self, String> {
-        Ok(Self {
-            writer: parquet_writer(out, crate::read::DuplicateGroups::arrow_schema(entity_type))?,
-        })
-    }
-
-    fn write(&mut self, groups: &crate::read::DuplicateGroups) -> Result<(), String> {
-        if groups.is_empty() {
-            return Ok(());
-        }
-        let batch = groups
-            .to_record_batch()
-            .map_err(|e| format!("export parquet: {e}"))?;
-        self.writer
-            .write(&batch)
-            .map_err(|e| format!("export parquet: {e}"))
-    }
-
-    fn close(self) -> Result<(), String> {
-        self.writer
-            .close()
-            .map(|_| ())
-            .map_err(|e| format!("export parquet: {e}"))
-    }
-}
-
-/// Walk every duplicate-group page at `snapshot`, handing each to `each`.
-fn duplicate_pages(
-    session: &Session,
-    entity_type: EntityType,
-    snapshot: i64,
-    page: i64,
-    mut each: impl FnMut(&crate::read::DuplicateGroups) -> Result<(), String>,
-) -> Result<(), String> {
-    let mut after: Option<String> = None;
-    loop {
-        let (groups, next) = match crate::read::duplicates(
-            session,
-            entity_type,
-            snapshot,
-            after.as_deref(),
-            &crate::read::DuplicateFilters::default(),
-            page,
-        ) {
-            Ok(found) => found,
-            Err(e) if after.is_none() && not_yet_written(&e) => return Ok(()),
-            Err(e) => return Err(e),
-        };
-        each(&groups)?;
-        match next {
-            Some(cursor) => {
-                after = Some(
-                    crate::read::decode_cursor(&cursor)
-                        .ok_or("the duplicates page returned an unreadable cursor")?
-                        .key,
-                );
-            }
-            None => return Ok(()),
-        }
-    }
-}
-
-/// Walk every golden page at `snapshot`, handing each batch to `each`.
 fn golden_pages(
     session: &Session,
     entity_type: EntityType,
@@ -899,207 +837,13 @@ mod tests {
         assert!(
             ExportRequest::from_params(&json!({"kind": "duplicates", "format": "csv"}))
                 .unwrap_err()
-                .contains("jsonl or parquet")
-        );
-        assert_eq!(
-            ExportRequest::from_params(&json!({"kind": "duplicates", "format": "parquet"}))
-                .map(|r| r.format),
-            Ok(ExportFormat::Parquet),
-            "duplicates export as Parquet (#1252)"
+                .contains("jsonl only")
         );
         assert!(ExportRequest::from_params(&json!({"kind": "golden", "format": "xlsx"})).is_err());
         assert!(
             ExportRequest::from_params(&json!({"kind": "golden", "format": "csv", "extra": 1}))
                 .is_err(),
             "unknown fields are refused, not ignored"
-        );
-    }
-
-    /// A person group: `n` members, scored when `scored` (its confidence,
-    /// master, member confidences and full preview set), otherwise every
-    /// nullable field null.
-    fn group(id: &str, n: usize, scored: bool) -> crate::read::PersonDuplicateGroup {
-        let members: Vec<String> = (0..n).map(|i| format!("crm:{id}-{i}")).collect();
-        crate::read::PersonDuplicateGroup {
-            entity_id: id.into(),
-            member_count: n as i64,
-            member_confidences: if scored {
-                members
-                    .iter()
-                    .enumerate()
-                    .map(|(i, k)| (k.clone(), 90 - i as i64))
-                    .collect()
-            } else {
-                std::collections::BTreeMap::new()
-            },
-            group_confidence: scored.then_some(85),
-            master_record_key: scored.then(|| members[0].clone()),
-            members,
-            model_versions: if scored {
-                vec!["m1".into()]
-            } else {
-                Vec::new()
-            },
-            matched_fields: vec!["email".into()],
-            verified: false,
-            given_name: Some(format!("given-{id}")),
-            family_name: scored.then(|| format!("family-{id}")),
-            email: scored.then(|| format!("{id}@example.com")),
-        }
-    }
-
-    #[test]
-    fn duplicates_round_trip_through_parquet_across_a_page_boundary() {
-        // #1252: page one's nullable fields are null on every row and page two
-        // sets them. A schema inferred from page one would type them Null and
-        // refuse page two; the declared schema carries both.
-        use arrow::array::{Array as _, AsArray as _};
-        use arrow::datatypes::Int64Type;
-        let pages = [
-            crate::read::DuplicateGroups::Person(vec![
-                group("e1", 2, false),
-                group("e2", 2, false),
-            ]),
-            crate::read::DuplicateGroups::Person(Vec::new()),
-            crate::read::DuplicateGroups::Person(vec![group("e3", 3, true)]),
-        ];
-        let mut file = tempfile::tempfile().unwrap();
-        let mut writer = DuplicatesParquet::new(&mut file, EntityType::Person).unwrap();
-        for page in &pages {
-            writer.write(page).unwrap();
-        }
-        writer.close().unwrap();
-
-        let reader = parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(file)
-            .unwrap()
-            .build()
-            .unwrap();
-        let schema = crate::read::DuplicateGroups::arrow_schema(EntityType::Person);
-        let batches: Vec<_> = reader.map(Result::unwrap).collect();
-        let batch = arrow::compute::concat_batches(&schema, &batches).unwrap();
-        assert_eq!(
-            batch.schema().fields(),
-            schema.fields(),
-            "the declared schema"
-        );
-        assert_eq!(batch.num_rows(), 3, "one row per group");
-
-        let ids = batch
-            .column_by_name("entity_id")
-            .unwrap()
-            .as_string::<i32>();
-        assert_eq!(ids.iter().flatten().collect::<Vec<_>>(), ["e1", "e2", "e3"]);
-        let confidence = batch
-            .column_by_name("group_confidence")
-            .unwrap()
-            .as_primitive::<Int64Type>();
-        assert_eq!(
-            confidence.iter().collect::<Vec<_>>(),
-            [None, None, Some(85)]
-        );
-        let master = batch
-            .column_by_name("master_record_key")
-            .unwrap()
-            .as_string::<i32>();
-        assert_eq!(
-            master.iter().collect::<Vec<_>>(),
-            [None, None, Some("crm:e3-0")]
-        );
-
-        // Members: a nested list per group, each a struct of key + confidence.
-        let members = batch.column_by_name("members").unwrap().as_list::<i32>();
-        let lengths: Vec<usize> = (0..members.len()).map(|i| members.value(i).len()).collect();
-        assert_eq!(lengths, [2, 2, 3]);
-        let first = members.value(0);
-        let first = first.as_struct();
-        assert_eq!(
-            first
-                .column_by_name("key")
-                .unwrap()
-                .as_string::<i32>()
-                .iter()
-                .flatten()
-                .collect::<Vec<_>>(),
-            ["crm:e1-0", "crm:e1-1"]
-        );
-        assert_eq!(first.column_by_name("confidence").unwrap().null_count(), 2);
-        let last = members.value(2);
-        let last = last.as_struct();
-        assert_eq!(
-            last.column_by_name("key")
-                .unwrap()
-                .as_string::<i32>()
-                .iter()
-                .flatten()
-                .collect::<Vec<_>>(),
-            ["crm:e3-0", "crm:e3-1", "crm:e3-2"]
-        );
-        assert_eq!(
-            last.column_by_name("confidence")
-                .unwrap()
-                .as_primitive::<Int64Type>()
-                .iter()
-                .collect::<Vec<_>>(),
-            [Some(90), Some(89), Some(88)]
-        );
-        let versions = batch
-            .column_by_name("model_versions")
-            .unwrap()
-            .as_list::<i32>();
-        assert_eq!(
-            (0..versions.len())
-                .map(|i| versions.value(i).len())
-                .collect::<Vec<_>>(),
-            [0, 0, 1]
-        );
-
-        // The golden preview: one struct, its email null until page two.
-        let golden = batch.column_by_name("golden").unwrap().as_struct();
-        let email = golden.column_by_name("email").unwrap().as_string::<i32>();
-        assert_eq!(
-            email.iter().collect::<Vec<_>>(),
-            [None, None, Some("e3@example.com")]
-        );
-        let given = golden
-            .column_by_name("given_name")
-            .unwrap()
-            .as_string::<i32>();
-        assert_eq!(
-            given.iter().flatten().collect::<Vec<_>>(),
-            ["given-e1", "given-e2", "given-e3"]
-        );
-    }
-
-    #[test]
-    fn an_account_group_batch_takes_the_account_preview() {
-        let page =
-            crate::read::DuplicateGroups::Account(vec![crate::read::AccountDuplicateGroup {
-                entity_id: "a1".into(),
-                member_count: 2,
-                members: vec!["crm:1".into(), "erp:9".into()],
-                group_confidence: None,
-                master_record_key: None,
-                member_confidences: std::collections::BTreeMap::new(),
-                model_versions: Vec::new(),
-                matched_fields: Vec::new(),
-                verified: true,
-                company_name: Some("Acme".into()),
-                domain: None,
-            }]);
-        let batch = page.to_record_batch().unwrap();
-        assert_eq!(
-            batch.schema(),
-            crate::read::DuplicateGroups::arrow_schema(EntityType::Account)
-        );
-        let golden = batch.column_by_name("golden").unwrap();
-        let golden = arrow::array::AsArray::as_struct(golden);
-        assert_eq!(
-            golden
-                .fields()
-                .iter()
-                .map(|f| f.name().as_str())
-                .collect::<Vec<_>>(),
-            ["company_name", "domain"]
         );
     }
 

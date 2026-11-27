@@ -6267,6 +6267,190 @@ async fn dataset_for_lake(
     }
 }
 
+/// One dataset's share of an org's usage.
+#[derive(Serialize, utoipa::ToSchema)]
+struct DatasetUsage {
+    name: String,
+    /// Connected records: standardized source records at `snapshot`.
+    records: i64,
+    /// The lake snapshot counted; null for a dataset with no lake yet.
+    snapshot: Option<i64>,
+}
+
+/// `GET /v1/orgs/{org}/usage`: the org's consumption of its allowance.
+#[derive(Serialize, utoipa::ToSchema)]
+struct OrgUsage {
+    /// Always `records`: connected records, summed over every dataset.
+    unit: &'static str,
+    records: i64,
+    /// The allowance; null is unlimited.
+    allowance: Option<i64>,
+    /// `allowance - records`, never negative; null when unlimited.
+    remaining: Option<i64>,
+    /// True once `records >= allowance`: new deliveries are refused with 402.
+    at_limit: bool,
+    datasets: Vec<DatasetUsage>,
+}
+
+/// Count every dataset's connected records. A dataset whose lake cannot be
+/// opened — still provisioning, or not yet attached — counts zero and says so
+/// with a null snapshot, rather than failing the whole report.
+async fn measure_usage(
+    client: &tokio_postgres::Client,
+    org_row: &pg::OrgDetail,
+) -> Result<OrgUsage, Box<axum::response::Response>> {
+    let datasets = pg::list_datasets(client, &org_row.id)
+        .await
+        .map_err(|e| Box::new(pg_err(e)))?;
+    let mut out = Vec::with_capacity(datasets.len());
+    for d in datasets {
+        let name = d.name.clone();
+        let account = d.entity_type == "account";
+        let counted = with_dataset_lake(d, move |session, _| {
+            read::connected_records(session, account)
+        })
+        .await;
+        let (snapshot, records) = match counted {
+            Ok(Ok((snapshot, n))) => (Some(snapshot), n),
+            Ok(Err(e)) => {
+                tracing::warn!(er.dataset = %name, error = %e, "usage: the dataset's records could not be counted");
+                (None, 0)
+            }
+            Err(_) => (None, 0),
+        };
+        out.push(DatasetUsage {
+            name,
+            records,
+            snapshot,
+        });
+    }
+    let records = out.iter().map(|d| d.records).sum::<i64>();
+    let allowance = org_row.record_allowance;
+    Ok(OrgUsage {
+        unit: "records",
+        records,
+        allowance,
+        remaining: allowance.map(|a| (a - records).max(0)),
+        at_limit: allowance.is_some_and(|a| records >= a),
+        datasets: out,
+    })
+}
+
+/// The 402 a delivery gets once its org has reached its record allowance.
+/// Fails open: a count that cannot be taken never blocks a customer's data.
+async fn allowance_refusal(
+    client: &tokio_postgres::Client,
+    org_row: &pg::OrgDetail,
+) -> Option<axum::response::Response> {
+    let allowance = org_row.record_allowance?;
+    let Ok(usage) = measure_usage(client, org_row).await else {
+        tracing::warn!(er.org = %org_row.name, "usage could not be measured; the delivery is accepted");
+        return None;
+    };
+    usage.at_limit.then(|| {
+        detail_err(
+            StatusCode::PAYMENT_REQUIRED,
+            format!(
+                "org '{}' holds {} connected records, its allowance of {allowance}; new \
+                 deliveries are refused until the allowance is raised. Reads, reviews and \
+                 exports continue. See GET /v1/orgs/{}/usage",
+                org_row.name, usage.records, org_row.name
+            ),
+        )
+    })
+}
+
+/// Viewer+: the org's usage against its allowance (`GET /v1/orgs/{org}/usage`).
+/// The unit is connected records — standardized source records, summed over
+/// every dataset at each one's latest snapshot. A record delivered twice, or
+/// re-delivered with changes, is one record; a failed or canceled run lands
+/// nothing and adds nothing.
+async fn org_usage(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+) -> impl IntoResponse {
+    if let Err(e) = guard(&principal, &org, Role::Viewer) {
+        return e.into_response();
+    }
+    let Some(dsn) = &state.dsn else {
+        return detail_err(StatusCode::NOT_IMPLEMENTED, "usage requires Postgres");
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let org_row = match org_or_404(&client, &org).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
+    match measure_usage(&client, &org_row).await {
+        Ok(usage) => Json(usage).into_response(),
+        Err(r) => *r,
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AllowanceIn {
+    /// Connected records the org may hold; null removes the limit.
+    record_allowance: Option<i64>,
+}
+
+/// `PATCH /v1/orgs/{org}/allowance`: the allowance now in force.
+#[derive(Serialize, utoipa::ToSchema)]
+struct AllowanceSet {
+    name: String,
+    record_allowance: Option<i64>,
+}
+
+/// Operator: set or clear an org's record allowance
+/// (`PATCH /v1/orgs/{org}/allowance`) — the pilot entitlement (#518).
+async fn set_allowance(
+    principal: Principal,
+    State(state): State<AppState>,
+    Path(org): Path<String>,
+    Json(body): Json<AllowanceIn>,
+) -> impl IntoResponse {
+    if let Err(e) = operator_only(&principal) {
+        return e.into_response();
+    }
+    if body.record_allowance.is_some_and(|a| a < 0) {
+        return detail_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "record_allowance must be zero or more, or null for unlimited",
+        );
+    }
+    let Some(dsn) = &state.dsn else {
+        return detail_err(StatusCode::NOT_IMPLEMENTED, "allowances require Postgres");
+    };
+    let client = match connect_pg(dsn).await {
+        Ok(c) => c,
+        Err(r) => return *r,
+    };
+    let _ = pg::set_actor(&client, &principal.actor).await;
+    match pg::set_record_allowance(&client, &org, body.record_allowance).await {
+        Ok(true) => {
+            let _ = pg::audit(
+                &client,
+                &principal.actor,
+                Some(&org),
+                None,
+                "org.allowance",
+                &json!({ "record_allowance": body.record_allowance }),
+            )
+            .await;
+            Json(AllowanceSet {
+                name: org,
+                record_allowance: body.record_allowance,
+            })
+            .into_response()
+        }
+        Ok(false) => detail_err(StatusCode::NOT_FOUND, format!("no org '{org}'")),
+        Err(e) => pg_err(e),
+    }
+}
+
 /// Run the complete lake session lifecycle off the async executor. Only owned
 /// results cross back; opening, querying and dropping a session all happen in
 /// the bounded blocking closure. Authorization and dataset lookup precede this.
@@ -7237,9 +7421,8 @@ struct ExportIn {
     /// Join `lineage` to `golden` on `entity_id = id` to map every golden
     /// record back to the keys in your own systems, at the same snapshot.
     kind: String,
-    /// `csv`, `jsonl` or `parquet` (Snappy-compressed: golden and lineage
-    /// with the CSV's columns, duplicates one row per group with its members
-    /// as a nested list). Duplicates do not export as `csv`.
+    /// `csv`, `jsonl` or `parquet` (Snappy-compressed, with the CSV's
+    /// columns). Duplicates export as `jsonl` only.
     format: String,
     /// The lake snapshot to export: a run's `snapshot`, to export that run's
     /// results. Omitted, the latest is pinned and returned.
@@ -9201,6 +9384,9 @@ async fn push_records(
             Ok(t) => t,
             Err(r) => return r.into_response(),
         };
+    if let Some(refused) = allowance_refusal(&client, &org_row).await {
+        return refused;
+    }
     let spec = &config.sources[&body.source];
 
     // The columns this source declares, in a stable order: its record id, its
@@ -9354,6 +9540,9 @@ async fn upload_import(
             Ok(t) => t,
             Err(r) => return r.into_response(),
         };
+    if let Some(refused) = allowance_refusal(&client, &org_row).await {
+        return refused;
+    }
     let delivery_id = er_ids::new_v7();
     let temp_path = format!("{drop_root}/.{source}.{delivery_id}.csv.part");
 
@@ -9597,11 +9786,14 @@ async fn create_upload(
     };
     // The same refusals an import gets: unknown source, inactive dataset, no
     // drop root — before any session exists.
-    let (_, d, _, drop_root) = match delivery_preconditions(&client, &org, &ds, &body.source).await
-    {
-        Ok(t) => t,
-        Err(r) => return r.into_response(),
-    };
+    let (org_row, d, _, drop_root) =
+        match delivery_preconditions(&client, &org, &ds, &body.source).await {
+            Ok(t) => t,
+            Err(r) => return r.into_response(),
+        };
+    if let Some(refused) = allowance_refusal(&client, &org_row).await {
+        return refused;
+    }
     let root = std::path::PathBuf::from(&drop_root);
     let part_cap = state.max_import_bytes as u64;
     let dataset_id = d.id.clone();
@@ -14173,6 +14365,11 @@ fn build_routes(state: AppState) -> Router {
         )
         // Python's `{org}:suspend` / `{org}:resume` actions become sub-paths
         // (matchit forbids a param+literal in one segment, as with job cancel).
+        .route("/v1/orgs/{org}/usage", get(org_usage))
+        .route(
+            "/v1/orgs/{org}/allowance",
+            axum::routing::patch(set_allowance),
+        )
         .route("/v1/orgs/{org}/suspend", post(suspend_org))
         .route("/v1/orgs/{org}/resume", post(resume_org))
         .route(

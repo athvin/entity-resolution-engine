@@ -58,6 +58,7 @@
   "GET /v1/orgs/{org}/datasets/{ds}/tags/{tag_id}/subjects": { "envelope": "wrapped", "key": "subjects" },
   "GET /v1/orgs/{org}/datasets/{ds}/uploads/{upload_id}": { "envelope": "scalar" },
   "GET /v1/orgs/{org}/tags": { "envelope": "wrapped", "key": "tags" },
+  "GET /v1/orgs/{org}/usage": { "envelope": "scalar" },
   "GET /v1/orgs/{org}/webhooks": { "envelope": "bare" },
   "GET /v1/orgs/{org}/webhooks/deliveries": { "envelope": "wrapped", "key": "deliveries" },
   "GET /v1/orgs/{org}/webhooks/events": { "envelope": "wrapped", "key": "events" }

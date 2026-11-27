@@ -277,19 +277,12 @@ li[data-selected="true"] .pricing-option-name {
   background: color-mix(in oklch, var(--muted) 80%, transparent);
   overflow: hidden;
 }
-/* A bar is always the track's full width, scaled to its share: it grows in
-   when it first appears (the bar-grow grammar) and eases to a new share when
-   an input changes, by transform alone, never by animating its width. */
 .pricing-bar {
   display: block;
-  width: 100%;
   height: 100%;
+  width: var(--bar-w);
   border-radius: 4px;
   background: color-mix(in oklch, var(--foreground) 55%, transparent);
-  transform: scaleX(var(--bar-s, 0));
-  transform-origin: left;
-  transition: transform var(--duration-deliberate) var(--motion-ease-emphasized);
-  animation: bar-grow var(--duration-deliberate) var(--motion-ease-emphasized) backwards;
 }
 li[data-cheapest="true"] .pricing-bar {
   background: var(--brand);

@@ -1,12 +1,10 @@
 import type { Metadata } from "next";
 
 import { Breadcrumbs, LastUpdated, PAGE_UPDATED, SHARE_IMAGE } from "@/components/marketing/seo";
-import { ApiStoryboard } from "@/components/marketing/docs/api-storyboard";
 import { CodeExample } from "@/components/marketing/docs/code-example";
 import { DeveloperReference } from "@/components/marketing/docs/developer-reference";
 import "@/components/marketing/docs/docs.css";
 import { MarketingCut } from "@/components/marketing/cut";
-import { SceneBeats, ScrollScene } from "@/components/marketing/scene/scroll-scene";
 
 export const dynamic = "force-static";
 export const metadata: Metadata = {
@@ -23,7 +21,6 @@ export const metadata: Metadata = {
 };
 const CONTENTS: [string, string][] = [
   ["overview", "Start here"],
-  ["walkthrough", "The workflow, call by call"],
   ["organizations", "Organizations & datasets"],
   ["authentication", "Authentication & roles"],
   ["configuration", "Sources & configuration"],
@@ -49,42 +46,6 @@ const links = (
     ))}
   </>
 );
-
-/** The overview's six steps, as the walkthrough's beats. */
-const WALKTHROUGH = [
-  {
-    title: "Obtain a scoped key.",
-    body: "An administrator mints an organization-scoped key. The response shows it once, and every later call sends it as a bearer token.",
-  },
-  {
-    title: "Create the dataset.",
-    body: "Give it a name and an entity type. The name becomes the path of every call that follows, and the dataset reports active once it can take records.",
-  },
-  {
-    title: "Store a configuration.",
-    body: "Post the YAML as a draft. The version number it returns is the one you publish.",
-  },
-  {
-    title: "Publish it, then send records.",
-    body: "Publish that version, then upload a source's delivery. The upload answers with the job that processes it.",
-  },
-  {
-    title: "Follow the job, then read the results.",
-    body: "Poll the job until it succeeds, then list the duplicate groups: Meridian Supply's three records are one entity.",
-  },
-  {
-    title: "Inspect it, then correct it.",
-    body: (
-      <>
-        Read the entity with its members and lineage, then record a lasting decision: these two
-        records always match. It is staged until the next apply.{" "}
-        <a className="story-text-link" href="#corrections">
-          How corrections apply
-        </a>
-      </>
-    ),
-  },
-];
 
 /** The page inside its cut: see cut.tsx. */
 export default function DocsPage() {
@@ -141,18 +102,6 @@ export ER_DATASET='contacts'
             <li>Monitor the returned job and retrieve results after success.</li>
             <li>Inspect evidence and apply corrections through reconciliation.</li>
           </ol>
-        </section>
-        <section id="walkthrough">
-          <p className="story-eyebrow">Watch the calls</p>
-          <h2>The workflow, call by call.</h2>
-          <p>
-            The same six steps as the requests a client makes. Each response hands the next call
-            what it needs, outlined where it is returned and where it is used. Values are
-            illustrative and responses abbreviated; every field is in the reference below.
-          </p>
-          <ScrollScene name="api-storyboard" beats={WALKTHROUGH.length} stage={<ApiStoryboard />}>
-            <SceneBeats beats={WALKTHROUGH} />
-          </ScrollScene>
         </section>
         <section id="organizations">
           <h2>One organization. Multiple datasets.</h2>
@@ -664,6 +613,10 @@ Content-Type: application/json
                   "409",
                   "Inspect current resource state before resubmitting; on a delivery, a key reused for different bytes.",
                 ],
+                [
+                  "402",
+                  "The organization reached its record allowance; deliveries resume once it is raised.",
+                ],
                 ["413", "Reduce the delivery size to the configured cap."],
                 ["422", "Correct the request, configuration, or cursor."],
                 [
@@ -708,6 +661,23 @@ Content-Type: application/json
             system, in tiers set out on the pricing page. It does not depend on the number of
             systems, connectors, orgs or users, or on how many runs you do. Records in free sandbox
             or test environments do not count.
+          </p>
+          <h3>How usage is measured</h3>
+          <p>
+            The unit is <strong>connected records</strong>: the standardized source records your
+            datasets hold, summed across every dataset at each one’s latest snapshot. A record
+            delivered twice, retried with the same <code>Idempotency-Key</code>, or re-delivered
+            with changes is still one record. A failed or canceled run lands nothing and adds
+            nothing; a run that succeeds counts what it landed. Read it at{" "}
+            <code>GET /v1/orgs/{"{org}"}/usage</code> (any role), which reports the total, each
+            dataset’s share, the allowance and what remains.
+          </p>
+          <p>
+            Each organization has a record allowance from its plan. Once the total reaches it, new
+            deliveries — JSON pushes, file imports and uploads — are refused with{" "}
+            <strong>402</strong> and a <code>detail</code> naming the total and the allowance.
+            Nothing else stops: reads, reviews, corrections and exports continue, and data already
+            accepted keeps resolving. Raising the allowance restores deliveries at once.
           </p>
           <p>
             The web application’s usage panel meters AI calls and token units; those counts are not

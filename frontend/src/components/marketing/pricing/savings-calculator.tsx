@@ -4,7 +4,6 @@ import { useId, useState } from "react";
 
 import { Input } from "@/components/ui/input";
 import { formatRecords, formatUsd } from "@/lib/pricing/calculator";
-import { RollingFigure } from "./rolling-figure";
 import { PRICING_CONFIG as CONFIG } from "@/lib/pricing/config";
 import {
   calculateSavings,
@@ -179,7 +178,8 @@ export function SavingsCalculator({
       : null;
 
   const barMax = result ? Math.max(result.recoveredCents, annualCostCents ?? 0, 1) : 1;
-  const bar = (cents: number) => ({ "--bar-s": String(cents / barMax) }) as React.CSSProperties;
+  const bar = (cents: number) =>
+    ({ "--bar-w": `${String((cents / barMax) * 100)}%` }) as React.CSSProperties;
 
   return (
     <section
@@ -256,12 +256,11 @@ export function SavingsCalculator({
               <div>
                 <p className="story-eyebrow">Estimated value recovered</p>
                 <p className="savings-headline tabular-nums" data-testid="savings-recovered">
-                  <RollingFigure value={formatUsd(result.recoveredCents)} />
+                  {formatUsd(result.recoveredCents)}
                   <span className="story-muted"> per year</span>
                 </p>
                 <p className="story-muted">
-                  <RollingFigure value={formatHours(result.hoursRecovered)} /> working hours back
-                  each year.
+                  {formatHours(result.hoursRecovered)} working hours back each year.
                 </p>
               </div>
 
@@ -269,21 +268,13 @@ export function SavingsCalculator({
                 <div>
                   <dt>Net benefit per year</dt>
                   <dd data-testid="savings-net">
-                    {result.netCents === null ? (
-                      "—"
-                    ) : (
-                      <RollingFigure value={formatUsd(result.netCents)} />
-                    )}
+                    {result.netCents === null ? "—" : formatUsd(result.netCents)}
                   </dd>
                 </div>
                 <div>
                   <dt>Return on cost</dt>
                   <dd data-testid="savings-roi">
-                    {result.roiPct === null ? (
-                      "—"
-                    ) : (
-                      <RollingFigure value={`${formatHours(result.roiPct)}%`} />
-                    )}
+                    {result.roiPct === null ? "—" : `${formatHours(result.roiPct)}%`}
                   </dd>
                 </div>
                 <div>
@@ -299,11 +290,7 @@ export function SavingsCalculator({
                 <div>
                   <dt>Duplicates resolved</dt>
                   <dd>
-                    {result.resolvedRecords === null ? (
-                      "—"
-                    ) : (
-                      <RollingFigure value={formatRecords(result.resolvedRecords)} />
-                    )}
+                    {result.resolvedRecords === null ? "—" : formatRecords(result.resolvedRecords)}
                   </dd>
                 </div>
               </dl>
@@ -313,7 +300,7 @@ export function SavingsCalculator({
                   <div className="pricing-option-head">
                     <span className="pricing-option-name">Value recovered</span>
                     <span className="pricing-option-figure tabular-nums">
-                      <RollingFigure value={formatUsd(result.recoveredCents)} />
+                      {formatUsd(result.recoveredCents)}
                       <span className="story-muted"> /yr</span>
                     </span>
                   </div>
@@ -331,7 +318,7 @@ export function SavingsCalculator({
                         "Contact us"
                       ) : (
                         <>
-                          <RollingFigure value={formatUsd(annualCostCents)} />
+                          {formatUsd(annualCostCents)}
                           <span className="story-muted"> /yr</span>
                         </>
                       )}

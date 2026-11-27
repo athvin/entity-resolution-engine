@@ -861,6 +861,88 @@ async fn a_tenant_configures_ingests_resolves_and_reads_back_with_its_own_key() 
         );
     }
 
+    // --- 8. Usage and the record allowance (#518) ---------------------------
+    // The unit is connected records: every dataset's standardized records.
+    let (status, usage) = json_call(&router, "GET", "/v1/orgs/acme/usage", &key, None).await;
+    assert_eq!(status, StatusCode::OK, "{usage}");
+    assert_eq!(usage["unit"], "records");
+    let per_dataset: std::collections::BTreeMap<&str, i64> = usage["datasets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| (d["name"].as_str().unwrap(), d["records"].as_i64().unwrap()))
+        .collect();
+    let delivered = i64::try_from(source_records).unwrap();
+    // Redeliveries and an idempotent retry added nothing; the failed run, nothing.
+    assert_eq!(per_dataset["default"], delivered, "{usage}");
+    assert_eq!(per_dataset["contacts"], delivered, "{usage}");
+    assert_eq!(usage["records"], delivered * 2, "{usage}");
+    assert!(
+        usage["allowance"].is_null() && usage["at_limit"] == false,
+        "{usage}"
+    );
+    // The operator sets the pilot allowance at exactly what is held: the org
+    // is at its limit, so a new delivery is refused with 402 — and reads go on.
+    let (status, set) = json_call(
+        &router,
+        "PATCH",
+        "/v1/orgs/acme/allowance",
+        "op-secret",
+        Some(json!({"record_allowance": delivered * 2})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{set}");
+    let (status, refused) = json_call(
+        &router,
+        "PATCH",
+        "/v1/orgs/acme/allowance",
+        &key,
+        Some(json!({"record_allowance": null})),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "a tenant cannot raise its own allowance: {refused}"
+    );
+    let (_, usage) = json_call(&router, "GET", "/v1/orgs/acme/usage", &key, None).await;
+    assert_eq!(usage["at_limit"], true, "{usage}");
+    assert_eq!(usage["remaining"], 0, "{usage}");
+    let (status, limited) = json_call(
+        &router,
+        "POST",
+        &format!("{base}/records/ingest"),
+        &key,
+        Some(json!({"source": "crm", "records": [{"crm_id": "NEW1", "first_name": "new"}]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::PAYMENT_REQUIRED, "{limited}");
+    assert!(
+        limited["detail"].as_str().unwrap().contains("allowance"),
+        "{limited}"
+    );
+    let (status, _) = json_call(&router, "GET", &format!("{base}/duplicates"), &key, None).await;
+    assert_eq!(status, StatusCode::OK, "reads continue at the limit");
+    // Raised (here: removed), deliveries are accepted again.
+    let (status, _) = json_call(
+        &router,
+        "PATCH",
+        "/v1/orgs/acme/allowance",
+        "op-secret",
+        Some(json!({"record_allowance": null})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, accepted) = json_call(
+        &router,
+        "POST",
+        &format!("{base}/records/ingest"),
+        &key,
+        Some(json!({"source": "crm", "records": [{"crm_id": "NEW1", "first_name": "new"}]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{accepted}");
+
     // --- 6. Another tenant's key sees nothing of this one --------------------
     let (status, other) = json_call(
         &router,

@@ -26,6 +26,8 @@ pub struct Org {
     pub state: String,
     /// How many of this org's jobs may be active at once, across its datasets (the noisy-neighbor cap). NULL inherits the server default (ER_ORG_JOB_CAP, which ships as 1 — the pre-dataset single-writer profile). The per-DATASET writer lock is separate and absolute.
     pub max_concurrent_jobs: Option<i64>,
+    /// The org's record allowance: the most connected records (standardized source records, summed over its datasets) it may hold before new deliveries are refused with 402. NULL is unlimited. The commercial unit is connected records (#518); the operator sets it per pilot.
+    pub record_allowance: Option<i64>,
     /// When the tenant was created.
     pub created_at: ::chrono::DateTime<::chrono::Utc>,
     /// Wall-clock last-write time (database default; advanced by mutations once the entity migrates).
@@ -56,6 +58,8 @@ pub struct OrgWire {
     pub state: String,
     /// How many of this org's jobs may be active at once, across its datasets (the noisy-neighbor cap). NULL inherits the server default (ER_ORG_JOB_CAP, which ships as 1 — the pre-dataset single-writer profile). The per-DATASET writer lock is separate and absolute.
     pub max_concurrent_jobs: Option<i64>,
+    /// The org's record allowance: the most connected records (standardized source records, summed over its datasets) it may hold before new deliveries are refused with 402. NULL is unlimited. The commercial unit is connected records (#518); the operator sets it per pilot.
+    pub record_allowance: Option<i64>,
     /// When the tenant was created.
     pub created_at: ::chrono::DateTime<::chrono::Utc>,
     /// Wall-clock last-write time (database default; advanced by mutations once the entity migrates).
@@ -75,6 +79,7 @@ impl From<&Org> for OrgWire {
             active_config_version: row.active_config_version,
             state: row.state.clone(),
             max_concurrent_jobs: row.max_concurrent_jobs,
+            record_allowance: row.record_allowance,
             created_at: row.created_at,
             updated_at: row.updated_at,
         }
@@ -105,6 +110,7 @@ impl Org {
             "active_config_version",
             "state",
             "max_concurrent_jobs",
+            "record_allowance",
             "created_at",
             "updated_at",
         ]
@@ -210,6 +216,7 @@ pub mod read {
   active_config_version,
   state,
   max_concurrent_jobs,
+  record_allowance,
   created_at,
   updated_at
 FROM public.orgs
@@ -240,6 +247,7 @@ WHERE id = $1
                 active_config_version: row.get("active_config_version"),
                 state: row.get("state"),
                 max_concurrent_jobs: row.get("max_concurrent_jobs"),
+                record_allowance: row.get("record_allowance"),
                 created_at: row.get("created_at"),
                 updated_at: row.get("updated_at"),
             })
@@ -262,6 +270,7 @@ WHERE id = $1
   active_config_version,
   state,
   max_concurrent_jobs,
+  record_allowance,
   created_at,
   updated_at
 FROM public.orgs
@@ -292,6 +301,7 @@ WHERE name = $1
                 active_config_version: row.get("active_config_version"),
                 state: row.get("state"),
                 max_concurrent_jobs: row.get("max_concurrent_jobs"),
+                record_allowance: row.get("record_allowance"),
                 created_at: row.get("created_at"),
                 updated_at: row.get("updated_at"),
             })
@@ -313,6 +323,7 @@ WHERE name = $1
   active_config_version,
   state,
   max_concurrent_jobs,
+  record_allowance,
   created_at,
   updated_at
 FROM public.orgs
@@ -343,6 +354,7 @@ ORDER BY name
                 active_config_version: row.get("active_config_version"),
                 state: row.get("state"),
                 max_concurrent_jobs: row.get("max_concurrent_jobs"),
+                record_allowance: row.get("record_allowance"),
                 created_at: row.get("created_at"),
                 updated_at: row.get("updated_at"),
             })
@@ -364,6 +376,7 @@ ORDER BY name
   active_config_version,
   state,
   max_concurrent_jobs,
+  record_allowance,
   created_at,
   updated_at
 FROM public.orgs
@@ -396,6 +409,7 @@ ORDER BY name
                 active_config_version: row.get("active_config_version"),
                 state: row.get("state"),
                 max_concurrent_jobs: row.get("max_concurrent_jobs"),
+                record_allowance: row.get("record_allowance"),
                 created_at: row.get("created_at"),
                 updated_at: row.get("updated_at"),
             })
@@ -449,6 +463,31 @@ pub mod update {
         );
         let __result =
             ::er_span::instrument(&__span, client.execute(SQL, &[&version, &name])).await;
+        let __entered = __span.enter();
+        let __n = ::er_span::check(&__span, __result)?;
+        ::er_span::rows(&__span, __n);
+        Ok(__n)
+    }
+
+    /// Set or clear (NULL) an org's record allowance — the operator's pilot entitlement.
+    pub async fn set_record_allowance(
+        client: &impl ::tokio_postgres::GenericClient,
+        record_allowance: Option<i64>,
+        name: &str,
+    ) -> ::std::result::Result<u64, ::tokio_postgres::Error> {
+        const SQL: &str =
+            "UPDATE public.orgs SET record_allowance = $1, updated_at = now() WHERE name = $2
+";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Control,
+            "org",
+            "update",
+            "set_record_allowance",
+            "orgs",
+            SQL,
+        );
+        let __result =
+            ::er_span::instrument(&__span, client.execute(SQL, &[&record_allowance, &name])).await;
         let __entered = __span.enter();
         let __n = ::er_span::check(&__span, __result)?;
         ::er_span::rows(&__span, __n);

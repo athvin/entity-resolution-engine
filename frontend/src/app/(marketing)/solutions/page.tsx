@@ -1,4 +1,3 @@
-import { ResolutionFigure } from "@/components/marketing/scene/resolution-figure";
 import {
   CardGrid,
   CtaBand,
@@ -15,7 +14,6 @@ import {
   ROLE_BASE,
   ROLES,
   USE_CASES,
-  SOLUTIONS_SCENE,
 } from "@/components/marketing/pages/solutions-content";
 
 export const dynamic = "force-static";
@@ -36,8 +34,6 @@ export default function SolutionsPage() {
         lead="A duplicate record is an admin's cleanup, a rep's wasted call, a marketer's double send and a security reviewer's question. Find your role or your industry below."
         primary={DEMO}
       />
-
-      <ResolutionFigure id="resolve-solutions" scene={SOLUTIONS_SCENE} />
 
       <Section id="use-cases" title="Use cases">
         <CardGrid items={USE_CASES.map((u) => ({ ...u, linkLabel: "How it works" }))} />

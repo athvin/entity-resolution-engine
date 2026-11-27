@@ -82,7 +82,7 @@ const WORKFLOW: { id: string; title: string; resources: string[] }[] = [
   {
     id: "api-organization",
     title: "Organization and keys",
-    resources: ["org", "api-keys", "datasets", "audit", "connections"],
+    resources: ["org", "api-keys", "datasets", "audit", "connections", "usage"],
   },
   {
     id: "api-configuration",

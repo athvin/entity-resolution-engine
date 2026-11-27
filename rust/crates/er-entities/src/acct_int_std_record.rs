@@ -157,6 +157,62 @@ ORDER BY record_key
         AllKeysLiveRow::from_batches(&batches)
     }
 
+    /// One row of `count`: The standardized Account-record count at a pinned snapshot: an account dataset's connected records, the usage unit (#518).
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct CountRow {
+        pub n: Option<i64>,
+    }
+
+    impl CountRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![("n", ::arrow::datatypes::DataType::Int64)]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::Int64Array = crate::batch::col(batch, 0, "n")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        n: crate::batch::opt_i64(c0, i),
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// The standardized Account-record count at a pinned snapshot: an account dataset's connected records, the usage unit (#518).
+    pub fn count(conn: &::duckdb::Connection, snapshot: i64) -> ::duckdb::Result<Vec<CountRow>> {
+        const SQL: &str = "SELECT count(*) AS n
+FROM lake.main.acct_int_std_records AT (VERSION => {snapshot})
+";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "acct_int_std_record",
+            "read",
+            "count",
+            "acct_int_std_records",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let sql = SQL.replace("{snapshot}", &snapshot.to_string());
+        let mut stmt = ::er_span::check(&__span, conn.prepare(&sql))?;
+        let batches =
+            ::er_span::check(&__span, stmt.query_arrow(::duckdb::params![]))?.collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
+        CountRow::from_batches(&batches)
+    }
+
     /// One row of `screening_counts`: Import-time screening (E9b) for one delivery of the Account corpus: how many of the records it landed joined an existing entity, how many fell in the gray band, and how many are genuinely new. Derived from scores the run ALREADY produced rather than a second scoring pass — an incremental run has just compared these very records against the corpus, so screening is a read, not work. Filtered on `ingest_batch_id`, which `acct_int_std_records` stamps with the batch that landed the CURRENT content version: an unchanged re-delivery keeps its old batch id and is therefore excluded, which is right — it was screened when it first landed. Reads `match_scores` as well as `acct_int_std_records`, declared through `reads:` so the impact surface is explicit (E009). The join is the point — the question is about the intersection — and the alternative, staging the delivery's keys through Rust as a VALUES list, would scale with the size of the delivery. The two endpoint columns are unioned rather than OR-joined so the plan is two hash joins instead of a nested loop.
     #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
     pub struct ScreeningCountsRow {

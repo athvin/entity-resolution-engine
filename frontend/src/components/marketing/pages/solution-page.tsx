@@ -10,7 +10,6 @@ import {
   Related,
   Section,
 } from "./page-kit";
-import { ResolutionFigure } from "../scene/resolution-figure";
 import type { Solution } from "./solutions-content";
 
 /** Metadata for one role or industry page. */
@@ -48,8 +47,6 @@ export function SolutionPage({
         primary={DEMO}
         secondary={{ href: "/solutions", label: "All solutions" }}
       />
-
-      <ResolutionFigure id={`resolve-${solution.slug}`} scene={solution.scene} />
 
       <Section id="hurts" title="Where duplicates hurt">
         <Bullets items={solution.hurts} />

@@ -8,6 +8,79 @@ export const HERO = {
   secondaryCta: "See how it works",
 } as const;
 
+export const PROBLEM = {
+  heading: "Different systems. The same thing, recorded differently.",
+  body: "An organization has three names. A product has two identifiers. An asset changes hands. When each system keeps its own version, every report, workflow, and team inherits the disagreement.",
+  costs: [
+    {
+      term: "People & organizations",
+      detail:
+        "Connect the person behind an account or the company behind several supplier records.",
+    },
+    {
+      term: "Products & catalogs",
+      detail:
+        "Bring descriptions and identifiers together across catalogs, feeds, and inventories.",
+    },
+    {
+      term: "Assets & operations",
+      detail: "Follow the same equipment or location through systems that label it differently.",
+    },
+  ],
+} as const;
+
+export const HOW_IT_WORKS = {
+  heading: "Resolve. Review. Reconcile.",
+  intro:
+    "Three principles. One continuous flow from the data you have to the records you can trust.",
+  stages: [
+    {
+      name: "Resolve",
+      summary: "Find the same entity across every source.",
+      detail:
+        "Standardize fields and compare the evidence across people, organizations, products, assets, or any records you work with.",
+    },
+    {
+      name: "Review",
+      summary: "Set the policy. Keep the evidence.",
+      detail:
+        "Let clear matches flow under your configuration. Inspect close calls yourself or ask AI for a recommendation with reasons.",
+    },
+    {
+      name: "Reconcile",
+      summary: "Turn decisions into records you can defend.",
+      detail:
+        "Apply your decisions, rebuild golden records, and deliver them to your destinations. Unmerge a mistaken match without losing its history.",
+    },
+  ],
+} as const;
+
+export const PROOF = {
+  heading: "A record you can trace. A decision you can check.",
+  points: [
+    {
+      term: "Inspect the match",
+      detail:
+        "See the comparisons that supported a match and the ones that argued against it. A score comes with its evidence.",
+    },
+    {
+      term: "Keep the source in view",
+      detail:
+        "Follow a resolved entity back to its source records. The result has a history, not just a new identifier.",
+    },
+    {
+      term: "Make the rules yours",
+      detail:
+        "Configure comparisons, thresholds, and field-level survivorship for the data you actually have.",
+    },
+    {
+      term: "Repeat a result",
+      detail:
+        "Resolution is deterministic for unchanged inputs, configuration, and model state. Changes can be investigated rather than guessed at.",
+    },
+  ],
+} as const;
+
 export const FAQ = {
   heading: "Your data does not have to fit an industry template.",
   items: [

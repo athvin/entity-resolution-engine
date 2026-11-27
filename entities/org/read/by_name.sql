@@ -9,6 +9,7 @@ SELECT
   active_config_version,
   state,
   max_concurrent_jobs,
+  record_allowance,
   created_at,
   updated_at
 FROM public.orgs

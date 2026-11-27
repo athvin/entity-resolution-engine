@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS public.orgs (
   active_config_version bigint,
   state text NOT NULL DEFAULT 'active' CHECK (state IN ('provisioning', 'active', 'suspended', 'purging')),
   max_concurrent_jobs bigint,
+  record_allowance bigint,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (id),

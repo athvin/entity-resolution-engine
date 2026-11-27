@@ -749,6 +749,17 @@
     "response": { "envelope": "wrapped", "key": "tags" }
   },
   {
+    "id": "get_orgs_by_org_usage",
+    "method": "GET",
+    "path": "/v1/orgs/{org}/usage",
+    "role": "viewer",
+    "params": ["org"],
+    "body": null,
+    "needs_body": false,
+    "summary": "the org's usage against its allowance",
+    "response": { "envelope": "scalar" }
+  },
+  {
     "id": "get_orgs_by_org_webhooks",
     "method": "GET",
     "path": "/v1/orgs/{org}/webhooks",
@@ -780,6 +791,22 @@
     "needs_body": false,
     "summary": "the event types this system can emit",
     "response": { "envelope": "wrapped", "key": "events" }
+  },
+  {
+    "id": "patch_orgs_by_org_allowance",
+    "method": "PATCH",
+    "path": "/v1/orgs/{org}/allowance",
+    "role": "operator",
+    "params": ["org"],
+    "body": {
+      "type": "object",
+      "properties": { "record_allowance": { "type": "integer" } },
+      "required": [],
+      "additionalProperties": false
+    },
+    "needs_body": false,
+    "summary": "set or clear an org's record allowance",
+    "response": null
   },
   {
     "id": "patch_orgs_by_org_datasets_by_ds",

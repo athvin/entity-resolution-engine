@@ -115,7 +115,7 @@ function Dropdown({
         className={cn(
           mobile
             ? "pb-2 pl-4"
-            : "bg-background animate-scale-in absolute top-full left-0 z-20 mt-2 origin-top-left rounded-xl border p-4 shadow-lg",
+            : "bg-background absolute top-full left-0 z-20 mt-2 rounded-xl border p-4 shadow-lg",
           !mobile && (columns > 1 ? "w-[min(560px,90vw)]" : "w-[min(280px,90vw)]"),
         )}
         data-testid={`${testId(mobile ? "menu" : "nav", item.label)}-panel`}
@@ -249,7 +249,7 @@ export function MarketingNav() {
         id={menuId}
         aria-label="Main navigation"
         hidden={!menuOpen}
-        className="bg-background animate-scale-in absolute inset-x-0 top-16 max-h-[calc(100dvh-4rem)] origin-top overflow-y-auto border-b py-2 shadow-sm lg:hidden"
+        className="bg-background absolute inset-x-0 top-16 max-h-[calc(100dvh-4rem)] overflow-y-auto border-b py-2 shadow-sm lg:hidden"
         data-testid="marketing-menu-panel"
       >
         <ul className="mx-auto max-w-7xl px-2 sm:px-4">
