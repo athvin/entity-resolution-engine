@@ -8,9 +8,11 @@ import {
   pageMetadata,
   Related,
   Section,
-  Steps,
 } from "@/components/marketing/pages/page-kit";
 import { ExampleMapping, ProductScreenshot } from "@/components/marketing/pages/examples";
+import { SceneBeats, ScrollScene } from "@/components/marketing/scene/scroll-scene";
+import { SplitFigure } from "@/components/marketing/scene/split-figure";
+import { WorkflowStage } from "@/components/marketing/scene/workflow-stage";
 import { JsonLd, ORGANIZATION_ID, SOFTWARE_ID } from "@/components/marketing/seo";
 import { canonicalUrl } from "@/lib/site/routes";
 import { CONNECT_NOTE } from "@/components/marketing/pages/solutions-content";
@@ -31,6 +33,38 @@ export const metadata = pageMetadata({
   description:
     "What DupeZero does and how it works, step by step: connect your systems, resolve the duplicates, review the close calls, and send clean records back to every system.",
 });
+
+/** The seven steps, as the workflow scene's beats: the copy the page has always had. */
+const HOW_IT_WORKS = [
+  {
+    title: "Create a dataset",
+    body: "A dataset holds one kind of record, people or companies, with its own sources, rules and results. Keep separate cleanups in separate datasets.",
+  },
+  {
+    title: "Bring your records in",
+    body: "Connect your Salesforce org with the DupeZero app, connect another system through its API, or upload a CSV file. Each one becomes a source in the dataset.",
+  },
+  {
+    title: "Map the fields",
+    body: "Tell DupeZero which field is which: names, emails, phone numbers, addresses, company names and websites. If your organisation has turned on AI features, it can suggest the mapping for you to check.",
+  },
+  {
+    title: "Set the matching rules",
+    body: "Choose the fields to compare and how strictly, any fields that must agree, and two thresholds: the score above which records join automatically, and the band that goes to a person.",
+  },
+  {
+    title: "Run",
+    body: "Runs work in the background. Follow their progress, cancel or resume them, and schedule them to repeat. After the first full run, later runs can process only what is new or changed.",
+  },
+  {
+    title: "Review the close calls",
+    body: "Pairs between your thresholds wait in a review queue with the evidence for and against each match. Accept, reject, or merge by hand; a wrong merge can be split apart later.",
+  },
+  {
+    title: "Send clean data back",
+    body: "DupeZero writes the resolved records back to the systems they came from, so your Salesforce org and your other connected systems all hold the same clean data. You can also download golden records as CSV, or have DupeZero call your systems by webhook when runs finish and records change.",
+  },
+];
 
 export default function ProductPage() {
   return (
@@ -66,7 +100,9 @@ export default function ProductPage() {
             filtered is the incomplete one.
           </p>
         }
-      />
+      >
+        <SplitFigure />
+      </Section>
 
       <Section id="what" title="What DupeZero does">
         <CardGrid
@@ -100,38 +136,9 @@ export default function ProductPage() {
         eyebrow="How it works"
         title="From your records to a clean one, step by step."
       >
-        <Steps
-          items={[
-            {
-              title: "Create a dataset",
-              body: "A dataset holds one kind of record, people or companies, with its own sources, rules and results. Keep separate cleanups in separate datasets.",
-            },
-            {
-              title: "Bring your records in",
-              body: "Connect your Salesforce org with the DupeZero app, connect another system through its API, or upload a CSV file. Each one becomes a source in the dataset.",
-            },
-            {
-              title: "Map the fields",
-              body: "Tell DupeZero which field is which: names, emails, phone numbers, addresses, company names and websites. If your organisation has turned on AI features, it can suggest the mapping for you to check.",
-            },
-            {
-              title: "Set the matching rules",
-              body: "Choose the fields to compare and how strictly, any fields that must agree, and two thresholds: the score above which records join automatically, and the band that goes to a person.",
-            },
-            {
-              title: "Run",
-              body: "Runs work in the background. Follow their progress, cancel or resume them, and schedule them to repeat. After the first full run, later runs can process only what is new or changed.",
-            },
-            {
-              title: "Review the close calls",
-              body: "Pairs between your thresholds wait in a review queue with the evidence for and against each match. Accept, reject, or merge by hand; a wrong merge can be split apart later.",
-            },
-            {
-              title: "Send clean data back",
-              body: "DupeZero writes the resolved records back to the systems they came from, so your Salesforce org and your other connected systems all hold the same clean data. You can also download golden records as CSV, or have DupeZero call your systems by webhook when runs finish and records change.",
-            },
-          ]}
-        />
+        <ScrollScene name="workflow" beats={HOW_IT_WORKS.length} stage={<WorkflowStage />}>
+          <SceneBeats beats={HOW_IT_WORKS} />
+        </ScrollScene>
         <ExampleMapping label="Example of mapping a new source: each field in your data is assigned a DupeZero field" />
         <ProductScreenshot screen="review" />
       </Section>

@@ -1,0 +1,217 @@
+/* /integrations' close-up (round-trip-stage.tsx), inside its ScrollScene.
+
+   Unconditioned: the whole round trip at once (in, the core, out, the
+   Salesforce loop). Scrubbed: four beats (0, 33, 67, 100%) — the ways in
+   draw their lines, the core comes up a stage at a time, the ways out
+   arrive, and the Salesforce pair is framed as one loop. Every element is
+   placed by its own `animation-range`; the wiring rule is `:where()` so those
+   win. Transform and opacity only; all text is `--foreground`. */
+
+/* The wrapper is the container the narrow layout queries: in the static
+   storyboard nothing above it declares one. */
+.trip {
+  width: 100%;
+  container-type: inline-size;
+}
+.trip-stage {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr) minmax(0, 1fr);
+  gap: 16px 28px;
+  align-items: center;
+  width: 100%;
+  color: var(--foreground);
+}
+.trip-col {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.trip-col li {
+  position: relative;
+  display: grid;
+  gap: 1px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card);
+  font-size: 13px;
+}
+.trip-col li small {
+  font-size: 11px;
+}
+/* The Salesforce pair, in and out, is one loop: a solid frame, not a hue. */
+.trip-col li[data-loop="true"] {
+  border-color: var(--foreground);
+}
+.trip-line {
+  position: absolute;
+  top: 50%;
+  width: 28px;
+  height: 1.5px;
+  background: var(--brand);
+}
+.trip-in .trip-line {
+  left: 100%;
+  transform-origin: left;
+}
+.trip-out .trip-line {
+  right: 100%;
+  transform-origin: left;
+}
+.trip-core {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: var(--foreground);
+  color: var(--background);
+}
+.trip-core-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+.trip-core ol {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.trip-core ol li::before {
+  margin-right: 8px;
+  content: "→";
+}
+.trip-core-result {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+}
+.trip-loop {
+  grid-column: 1 / -1;
+  justify-self: center;
+  margin: 0;
+  padding: 4px 14px;
+  border: 1.5px solid var(--foreground);
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* A narrow stage stacks the three columns, and the lines go. */
+@container (max-width: 500px) {
+  .trip-stage {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+  .trip-col {
+    grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+    gap: 6px;
+  }
+  .trip-col li {
+    padding: 5px 8px;
+    font-size: 12px;
+  }
+  .trip-line,
+  .trip-col li small {
+    display: none;
+  }
+  .trip-core {
+    gap: 4px;
+    padding: 10px 12px;
+  }
+  .trip-core ol {
+    font-size: 11px;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  @supports (animation-timeline: view()) and (animation-range: contain) {
+    .trip-stage :where(.trip-line, .trip-core, .trip-core ol li, .trip-out li, .trip-loop) {
+      animation-duration: 1ms;
+      animation-timing-function: linear;
+      animation-fill-mode: both;
+      animation-timeline: --scene;
+      animation-range: contain 0% contain 100%;
+    }
+    .trip-core,
+    .trip-core ol li,
+    .trip-out li,
+    .trip-loop {
+      animation-name: trip-arrive;
+    }
+    .trip-line {
+      animation-name: trip-draw;
+    }
+    /* Beat 1 (0%): the ways in are there from the first frame; only their
+       lines draw. */
+    .trip-in li[data-index="0"] .trip-line {
+      animation-range: contain 2% contain 10%;
+    }
+    .trip-in li[data-index="1"] .trip-line {
+      animation-range: contain 4% contain 12%;
+    }
+    .trip-in li[data-index="2"] .trip-line {
+      animation-range: contain 6% contain 14%;
+    }
+    /* Beat 2 (33%): the core, a stage at a time. */
+    .trip-core {
+      animation-range: contain 18% contain 26%;
+    }
+    .trip-core ol li[data-index="0"] {
+      animation-range: contain 24% contain 28%;
+    }
+    .trip-core ol li[data-index="1"] {
+      animation-range: contain 27% contain 31%;
+    }
+    .trip-core ol li[data-index="2"] {
+      animation-range: contain 30% contain 34%;
+    }
+    /* Beat 3 (67%): the ways out, each line drawn as it arrives. */
+    .trip-out li[data-index="0"],
+    .trip-out li[data-index="0"] .trip-line {
+      animation-range: contain 50% contain 56%;
+    }
+    .trip-out li[data-index="1"],
+    .trip-out li[data-index="1"] .trip-line {
+      animation-range: contain 53% contain 59%;
+    }
+    .trip-out li[data-index="2"],
+    .trip-out li[data-index="2"] .trip-line {
+      animation-range: contain 56% contain 62%;
+    }
+    .trip-out li[data-index="3"],
+    .trip-out li[data-index="3"] .trip-line {
+      animation-range: contain 59% contain 65%;
+    }
+    /* Beat 4 (100%): the Salesforce loop is named. */
+    .trip-loop {
+      animation-range: contain 84% contain 94%;
+    }
+  }
+}
+
+@keyframes trip-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes trip-draw {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
