@@ -1158,7 +1158,22 @@ Two parts of this phase were decisions rather than deletions, and both are settl
 
 *Accept:* `make check` with the deletions — **green**. `make check-kind` observed failing once on a deliberately broken classifier row before it becomes a required check — **still outstanding**, and the one acceptance criterion this phase has not met.
 
-**Phase 5 — measure.** A measurement record comparing S/M/L wall-clock and node-hours before and after, the quota-wait and pending-age series, and the Kueue revisit decision against observed contention.
+**Phase 5 — measure.** A measurement record comparing S/M/L wall-clock and node-hours, the quota-wait and pending-age series, and the Kueue revisit decision against observed contention.
+
+*Recorded 2026-11-27 (#650), `er-dev` `ci`, org `p3live` (base_10: 23 source rows), one `run_all_full` with `init` cleared at each class in turn — the operator's class escalation, because nothing yet chooses a class from the corpus (§3.7's last-succeeded lookup is unbuilt). Before #649 every class rendered the S template, so no earlier record is comparable.*
+
+| Class | Nodepool / instance (spot) | Wall, 8 tasks | Task bodies | Pending age per task |
+|---|---|---|---|---|
+| S | runner-sm / c5d.2xlarge | 55 s | 17 s | 3–4 s (warm node) |
+| M | runner-sm / c5d.2xlarge | 55 s | 14 s | 3–4 s (warm node) |
+| L | runner-l / c5ad.4xlarge | 104 s | 15 s | 32 s first task (cold node), then 4–10 s |
+
+- **The fixed per-task cost dominates at this size:** ~70% of wall is between bodies (settle, Job create, schedule, container start). It is per task, so it shrinks as a share as the corpus grows; base_10 cannot show where S/M/L bodies diverge.
+- **Node-hours:** each class's run held its nodes for about one minute (L: two c5ad.4xlarge, one cold-started); S and M share runner-sm nodes.
+- **Quota waits: none.** No capacity `FailedCreate` in any run, with one tenant and `inFlightCap: 3`.
+- **Before/after is descoped.** The in-process monolith it would compare against was deleted by #645; reconstructing it from `70f31c54^` buys a number nothing now consumes.
+- **Kueue: not adopted.** There is no contention to arbitrate — zero quota waits and a single active tenant. #654 holds the revisit against multi-tenant contention data.
+- **Still unmeasured:** S/M/L bodies on a corpus big enough to separate them (#558's 10M spill run), and spot-reclaim handling under Auto Mode (§5.6).
 
 API compatibility throughout: every `/v1/orgs/{org}/jobs*` route keeps its shape; `:resume` keeps its path with clear semantics; new fields are additive and nullable.
 
