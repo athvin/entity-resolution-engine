@@ -76,8 +76,14 @@ spec:
               value: {{ .Values.executor.inFlightCap | quote }}
             - name: ER_TENANT_RUNNER_ORGS
               value: {{ include "er-platform.tenantRunners" . | fromJson | keys | sortAlpha | toJson | quote }}
+            # The default template, for a class with no file of its own.
             - name: ER_TASK_TEMPLATE_PATH
               value: /etc/er/task-template/task-template-S.yaml
+            # One template per class: an L task renders task-template-L.yaml
+            # (L's requests, the runner-l nodepool). Without this every class
+            # launched as S (#649).
+            - name: ER_TASK_TEMPLATE_DIR
+              value: /etc/er/task-template
             - name: ER_NAMESPACE
               valueFrom:
                 fieldRef:

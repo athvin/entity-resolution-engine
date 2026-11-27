@@ -50,8 +50,14 @@ pub struct ExecutorConfig {
     /// the path that runs it.
     pub profile: Result<Option<crate::provision::Profile>, crate::provision::ProfileError>,
     pub in_flight_cap: i64,
-    /// The Job template (the chart's ConfigMap, mounted as a file).
+    /// The Job template (the chart's ConfigMap, mounted as a file): the one a
+    /// class without its own template renders.
     pub template: String,
+    /// Per-class templates (`S`/`M`/`L` → the chart's `task-template-<class>.yaml`).
+    /// Until #649 the dispatcher read only the S file, so every class — M and L
+    /// included — launched with S's requests on S's nodepool, and a task row
+    /// said `L` while its pod ran on a 2-cpu budget.
+    pub class_templates: std::collections::BTreeMap<String, String>,
     pub image_digest: Option<String>,
     /// Orgs enrolled in the chart/Terraform tenant-runner registry. All other
     /// orgs use the unprivileged runner account, never another org's identity.
@@ -94,15 +100,55 @@ impl ExecutorConfig {
                     return None;
                 }
             };
+        let class_templates = std::env::var("ER_TASK_TEMPLATE_DIR")
+            .map(|dir| load_class_templates(std::path::Path::new(&dir)))
+            .unwrap_or_default();
         Some(ExecutorConfig {
             runner_orgs,
             profile: crate::provision::Profile::from_env(),
             in_flight_cap,
             template,
+            class_templates,
             image_digest: std::env::var("ER_IMAGE_DIGEST")
                 .ok()
                 .filter(|v| !v.is_empty()),
         })
+    }
+}
+
+/// The resource classes a task row may name.
+pub const RESOURCE_CLASSES: [&str; 3] = ["S", "M", "L"];
+
+/// Read `task-template-<class>.yaml` for every class present in `dir`. A class
+/// with no file falls back to the default template, logged, rather than
+/// disabling the executor: a missing L file must not stop S and M work.
+#[must_use]
+pub fn load_class_templates(dir: &std::path::Path) -> std::collections::BTreeMap<String, String> {
+    let mut out = std::collections::BTreeMap::new();
+    for class in RESOURCE_CLASSES {
+        let path = dir.join(format!("task-template-{class}.yaml"));
+        match std::fs::read_to_string(&path) {
+            Ok(t) => {
+                out.insert(class.to_string(), t);
+            }
+            Err(e) => tracing::warn!(
+                er.class = class,
+                path = %path.display(),
+                error = %e,
+                "no task template for this class; it renders the default"
+            ),
+        }
+    }
+    out
+}
+
+impl ExecutorConfig {
+    /// The template a task of `class` renders: its own, else the default.
+    #[must_use]
+    pub fn template_for(&self, class: &str) -> &str {
+        self.class_templates
+            .get(class)
+            .map_or(self.template.as_str(), String::as_str)
     }
 }
 
@@ -706,8 +752,9 @@ impl Executor {
             // refusal.
             image_digest: self.cfg.image_digest.clone().unwrap_or_default(),
         };
-        let mut manifest = er_k8s::render_job(&self.cfg.template, &attempt)
-            .map_err(|e| format!("render: {}", crate::errfmt::chain(&e)))?;
+        let mut manifest =
+            er_k8s::render_job(self.cfg.template_for(&attempt.resource_class), &attempt)
+                .map_err(|e| format!("render: {}", crate::errfmt::chain(&e)))?;
         // The claimed task row is authoritative. Neither the request params
         // nor the tenant's lake env may choose a Kubernetes/AWS identity.
         let service_account = runner_service_account(&row.org_id, &self.cfg.runner_orgs);
@@ -1669,5 +1716,33 @@ mod runner_identity_tests {
         let pod = job.spec.unwrap().template.spec.unwrap();
         assert_eq!(pod.service_account_name.as_deref(), Some(chosen.as_str()));
         assert_eq!(pod.automount_service_account_token, Some(false));
+    }
+}
+
+#[cfg(test)]
+mod class_template_tests {
+    use super::*;
+
+    #[test]
+    fn each_class_renders_its_own_template_and_a_missing_one_falls_back() {
+        let dir = std::env::temp_dir().join(format!("er_tpl_{}", er_ids::new_v7()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for class in ["S", "L"] {
+            std::fs::write(dir.join(format!("task-template-{class}.yaml")), class).unwrap();
+        }
+        let templates = load_class_templates(&dir);
+        assert_eq!(templates.keys().collect::<Vec<_>>(), ["L", "S"]);
+        let cfg = ExecutorConfig {
+            profile: Ok(None),
+            in_flight_cap: 1,
+            template: "default".into(),
+            class_templates: templates,
+            image_digest: None,
+            runner_orgs: BTreeSet::new(),
+        };
+        assert_eq!(cfg.template_for("L"), "L");
+        assert_eq!(cfg.template_for("S"), "S");
+        assert_eq!(cfg.template_for("M"), "default", "no M file: the default");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

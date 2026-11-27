@@ -110,6 +110,7 @@ async fn run_all_full_runs_as_eight_pods_and_reproduces_base_10() {
         profile: Ok(None),
         in_flight_cap: 2,
         template: er_k8s::manifest::REFERENCE_TEMPLATE.to_string(),
+        class_templates: std::collections::BTreeMap::default(),
         runner_orgs: std::collections::BTreeSet::new(),
         image_digest: None,
     };

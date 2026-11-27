@@ -8,10 +8,11 @@
 # (an unparseable render is a launch-time refusal, not a cluster-side
 # surprise).
 #
-# Phase 2 reads ONE file (ER_TASK_TEMPLATE_PATH names task-template-S.yaml);
-# per-class selection joins the executor with Phase 3's pipeline kinds, which
-# is also when the per-trigger priorityClass choice lands — until then every
-# class renders `executor.priorityClass.scheduled`.
+# The executor renders the file of the attempt's class (ER_TASK_TEMPLATE_DIR);
+# ER_TASK_TEMPLATE_PATH (the S file) is the fallback for a class with none.
+# Until #649 only the S file was read, so every class launched as S. Every
+# class still renders `executor.priorityClass.scheduled`; the per-trigger
+# priorityClass choice is separate work.
 #
 # What the spec does NOT contain, by design: the tenant's lake DSN, the
 # control-plane DSN, the operator token, any Secret reference. The pod's

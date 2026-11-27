@@ -98,6 +98,7 @@ impl Harness {
             // No per-kind allowlist to opt into: the executor owns every kind.
             in_flight_cap: 2,
             template: er_k8s::manifest::REFERENCE_TEMPLATE.to_string(),
+            class_templates: std::collections::BTreeMap::default(),
             image_digest: None,
             runner_orgs: std::collections::BTreeSet::new(),
         };

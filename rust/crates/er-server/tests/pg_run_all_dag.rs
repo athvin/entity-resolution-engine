@@ -84,6 +84,7 @@ async fn lake_maintain_runs_end_to_end_through_the_executor() {
         profile: Ok(None),
         in_flight_cap: 2,
         template: er_k8s::manifest::REFERENCE_TEMPLATE.to_string(),
+        class_templates: std::collections::BTreeMap::default(),
         runner_orgs: [org_id.clone()].into_iter().collect(),
         image_digest: Some("sha256:test".into()),
     };
