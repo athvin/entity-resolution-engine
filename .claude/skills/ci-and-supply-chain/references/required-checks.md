@@ -186,6 +186,12 @@ job instead — `terraform plan` is the worked example.
 | `cache-prune` | prune the Actions cache to budget | 30 | `github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch'` |
 | `record-pass` | record pass marker | 5 | `${{ !cancelled() && github.event_name == 'pull_request' && needs.detect.outputs.code == 't …` |
 
+### `stale-tree-guard.yml`
+
+| Job | Status-check context | Timeout | Condition |
+|---|---|---|---|
+| `guard` | stale tree guard | 10 | `always` |
+
 ### Agentic workflows (`gh aw`)
 
 Compiled to `*.lock.yml` by `gh aw compile`; edit the `.md`. **Never

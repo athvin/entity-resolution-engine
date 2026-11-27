@@ -370,6 +370,36 @@ what blocks a PR), and the fact that a body edit means one SHA can carry several
 check-runs of one name — `statusCheckRollup` returns all of them, healed
 failures included. All three: [references/pr-contract.md](references/pr-contract.md).
 
+## The stale-tree guard
+
+`stale-tree-guard.yml` flags a pull request whose files return to versions main
+already had and moved past. That is the shape of a tree from an old worktree
+committed on a fresh main, and two things make it dangerous:
+
+- **It hides from the usual signals.** The diff reads as a feature that also
+  deletes things, the merge is `CLEAN`, and the old code is self-consistent, so
+  every gate passes.
+- **It has already happened.** #1286 merged one and undid seven pull requests.
+  #1310 nearly repeated it.
+
+`scripts/ci/stale-tree-guard.sh` walks each changed file's history on main and
+names the commits a return would undo. Its verdict:
+
+- **Fail:** three or more source files return to older versions.
+- **Warn:** fewer return. That is usually a deliberate partial revert.
+- **Never count:** screenshot baselines. They are regenerated and can land on
+  old bytes.
+- **Exempt:** a `Revert…` title or the `revert-ok` label.
+
+Its self-test runs first in the job.
+
+It is **not required yet**. Promote it in the order above once it has reported
+on real pull requests.
+
+To run it locally, set `BASE_SHA` and `HEAD_SHA`, and add
+`STALE_TREE_ALLOW_SHALLOW=1` on a clone that was deepened after a shallow
+fetch.
+
 ## Agentic workflows
 
 The `gh-aw` workflows and the `agent-task.yml` dispatcher are **merged and
