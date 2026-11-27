@@ -106,6 +106,7 @@ export default function ProductPage() {
 
       <Section id="what" title="What DupeZero does">
         <CardGrid
+          morph
           items={[
             {
               title: "Matching",

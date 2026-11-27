@@ -894,6 +894,11 @@ html:has(.marketing-story) {
   color: var(--muted-foreground);
   margin-top: 10px;
 }
+/* A link like any story link (a 44px target), a size down to sit in the card. */
+.trail-golden-link {
+  margin-top: 2px;
+  font-size: 13px;
+}
 .trail-volume {
   width: min(100%, 480px);
   margin: 0 auto 12px;

@@ -66,11 +66,56 @@ test.describe("marketing scenes and cuts", () => {
           .filter(
             (animation) =>
               animation instanceof CSSAnimation &&
-              animation.animationName.startsWith("marketing-cut") &&
+              (animation.animationName.startsWith("marketing-cut") ||
+                animation.animationName.startsWith("page-morph")) &&
               animation.playState === "running",
           ).length,
     );
     expect(running).toBe(0);
+  });
+});
+
+test.describe("the card that opens into its page", () => {
+  // Every CSS animation name that plays during the next navigation. By name
+  // only, for the reason the reduced-motion cut test gives: a view-transition
+  // pseudo-element can be torn down under any other kind of access.
+  const record = (page: Page) =>
+    page.evaluate(() => {
+      const seen = new Set<string>();
+      Object.assign(window, { __seenAnimations: seen });
+      const tick = () => {
+        for (const animation of document.getAnimations())
+          if (animation instanceof CSSAnimation) seen.add(animation.animationName);
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
+  const seen = (page: Page) =>
+    page.evaluate(() => [
+      ...(window as unknown as { __seenAnimations: Set<string> }).__seenAnimations,
+    ]);
+
+  // `page-morph-surface` runs on the moving box only when React paired the
+  // card with the destination's heading; an unpaired element plays the cut.
+  test("a /product card opens into the heading of the page it leads to", async ({ page }) => {
+    await page.goto("/product");
+    const link = page.getByRole("link", { name: "More about golden records" });
+    await link.scrollIntoViewIfNeeded();
+    await record(page);
+    await link.click();
+    await expect(page.getByTestId("page-golden-records")).toBeVisible();
+    await expect.poll(() => seen(page)).toContain("page-morph-surface");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(/One record you can trust/);
+  });
+
+  test("the home page's golden record opens into the golden-records page", async ({ page }) => {
+    await page.goto("/#egress");
+    const link = page.getByRole("link", { name: "How a golden record is built" });
+    await link.scrollIntoViewIfNeeded();
+    await record(page);
+    await link.click();
+    await expect(page.getByTestId("page-golden-records")).toBeVisible();
+    await expect.poll(() => seen(page)).toContain("page-morph-surface");
   });
 });
 
