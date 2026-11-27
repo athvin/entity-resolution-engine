@@ -1009,6 +1009,66 @@ impl Task<Session> for ProfileCorpus {
     }
 }
 
+/// Build merge previews from a pinned snapshot (#993). Read-only: the
+/// Postgres context (policies, provenance, checkpoint) rides in the work
+/// order, and the proposals go to the control half to publish.
+#[derive(Default)]
+pub struct MaterializePreviews;
+
+impl Task<Session> for MaterializePreviews {
+    const NAME: &'static str = "materialize_previews";
+    const VERSION: u32 = 1;
+    type Input = ();
+    type Output = Plan<crate::preview_job::Materialized>;
+    const WRITES_LAKE: bool = false;
+
+    fn run(
+        &mut self,
+        ctx: &mut TaskCtx<'_, Session>,
+        (): Self::Input,
+    ) -> Result<Outcome<Self::Output>, TaskError> {
+        let context: crate::preview_job::PreviewContext =
+            serde_json::from_value(ctx.order.connection.clone()).unwrap_or_default();
+        let dataset_id = ctx.order.dataset_id.clone().ok_or_else(|| {
+            TaskError::Failed(er_errors::ErError::precondition(
+                "a merge_preview job must name a dataset".to_string(),
+            ))
+        })?;
+        let config = published_config(&ctx.order.lake_env)?;
+        if config.entity_type != er_config::EntityType::Person {
+            // Account datasets elect over acct_* relations the scoped
+            // election does not read yet; refuse quietly rather than guess.
+            return Ok(Outcome::NoOp(Plan(
+                crate::preview_job::Materialized::default(),
+            )));
+        }
+        if context.policies.is_empty() {
+            return Ok(Outcome::NoOp(Plan(
+                crate::preview_job::Materialized::default(),
+            )));
+        }
+        let built = crate::preview_job::materialize(
+            ctx.session,
+            &ctx.order.org_id,
+            &dataset_id,
+            &config,
+            &context,
+        )
+        .map_err(|m| {
+            TaskError::Failed(
+                er_errors::ErError::stage_failure(format!("materializing previews: {m}"))
+                    .with_class(er_errors::ErrorClass::TransientIo),
+            )
+        })?;
+        let counters = serde_json::json!({
+            "previews": built.previews.len(),
+            "affected": built.affected.len(),
+            "excluded": built.excluded,
+        });
+        Ok(Outcome::Done(Plan(built), er_dag::Counters(counters)))
+    }
+}
+
 /// Write one export artifact (#1230): every golden record or duplicate group
 /// of the dataset at the snapshot the API pinned at enqueue, to
 /// `<lake>/exports/<job id>.<ext>`. Read-only on the lake, so no

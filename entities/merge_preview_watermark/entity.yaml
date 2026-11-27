@@ -1,0 +1,59 @@
+kind: entity
+version: 1
+name: merge_preview_watermark
+relation: merge_preview_watermarks
+description: "How far a dataset's merge-preview materialization has read (#993): the (snapshot_end, run id) of the last run whose previews are durably published. Advanced only by a compare-and-set naming the value it read, after the previews commit, so a retry or a concurrent job can never skip a run."
+key: [id]
+natural_key: [dataset_id]
+generate:
+  stores: [postgres]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "UUIDv7, minted by the application."
+  - name: org_id
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: id }
+    description: "The tenant; denormalized beside the dataset scope per V17."
+  - name: dataset_id
+    type: varchar
+    nullable: false
+    references: { relation: datasets, column: id }
+    description: "The dataset the checkpoint belongs to."
+  - name: run_snapshot_end
+    type: bigint
+    nullable: false
+    description: "The checkpointed run's snapshot_end."
+  - name: run_id
+    type: varchar
+    nullable: false
+    description: "The checkpointed run's id (the tie-break within one snapshot_end)."
+  - name: lake_snapshot
+    type: bigint
+    nullable: false
+    description: "The lake snapshot the last materialization read at."
+  - name: job_id
+    type: varchar
+    nullable: false
+    description: "The merge_preview job that advanced it."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the dataset was first materialized."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When it last advanced."
+indexes:
+  - name: merge_preview_watermarks_dataset
+    columns: [dataset_id]
+    unique: true
+  - name: merge_preview_watermarks_org
+    columns: [org_id, dataset_id]

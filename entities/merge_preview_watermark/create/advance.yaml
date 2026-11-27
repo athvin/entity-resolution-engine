@@ -1,0 +1,14 @@
+kind: statement
+operation: create
+mode: partial
+description: "The first checkpoint of a dataset: inserts only when the caller read no checkpoint (expected_run_id ''). Zero rows means another job got there first."
+params:
+  - { name: id, type: varchar }
+  - { name: org_id, type: varchar }
+  - { name: dataset_id, type: varchar }
+  - { name: run_snapshot_end, type: bigint }
+  - { name: run_id, type: varchar }
+  - { name: lake_snapshot, type: bigint }
+  - { name: job_id, type: varchar }
+  - { name: expected_run_id, type: varchar }
+returns: entity

@@ -33,6 +33,7 @@ pub mod match_score;
 pub mod matching_model;
 pub mod merge_preview;
 pub mod merge_preview_journal;
+pub mod merge_preview_watermark;
 pub mod metric_snapshot;
 pub mod metric_snapshot_source;
 pub mod org;

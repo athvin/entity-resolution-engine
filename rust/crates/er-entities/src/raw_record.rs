@@ -273,6 +273,115 @@ LEFT JOIN prior_latest p ON tb.source_record_id = p.source_record_id
         BatchReceiptLiveRow::from_batches(&batches)
     }
 
+    /// One row of `latest_for_keys`: The latest landed raw row of each given record (`source_system chr(30) source_record_id`, joined by chr(31)) at a pinned snapshot: its payload, deletion state and the run (ingest batch) that landed it — which is what ties a record to its delivery's provenance.
+    #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
+    pub struct LatestForKeysRow {
+        pub source_system: String,
+        pub source_record_id: String,
+        pub payload: Option<::serde_json::Value>,
+        pub is_deleted: bool,
+        pub ingest_batch_id: String,
+    }
+
+    impl LatestForKeysRow {
+        /// The declared result schema, the compiled-in expected shape.
+        #[must_use]
+        pub fn expected_fields() -> Vec<(&'static str, ::arrow::datatypes::DataType)> {
+            vec![
+                ("source_system", ::arrow::datatypes::DataType::Utf8),
+                ("source_record_id", ::arrow::datatypes::DataType::Utf8),
+                ("payload", ::arrow::datatypes::DataType::Utf8),
+                ("is_deleted", ::arrow::datatypes::DataType::Boolean),
+                ("ingest_batch_id", ::arrow::datatypes::DataType::Utf8),
+            ]
+        }
+
+        /// Convert Arrow batches to typed rows; any shape, type or null
+        /// violation is an `Err`, never a panic.
+        pub fn from_batches(
+            batches: &[::arrow::record_batch::RecordBatch],
+        ) -> ::duckdb::Result<Vec<Self>> {
+            let expected = Self::expected_fields();
+            let mut out = Vec::new();
+            for batch in batches {
+                crate::batch::check_columns(batch, &expected)?;
+                let c0: &::arrow::array::StringArray =
+                    crate::batch::col(batch, 0, "source_system")?;
+                let c1: &::arrow::array::StringArray =
+                    crate::batch::col(batch, 1, "source_record_id")?;
+                let c2: &::arrow::array::StringArray = crate::batch::col(batch, 2, "payload")?;
+                let c3: &::arrow::array::BooleanArray = crate::batch::col(batch, 3, "is_deleted")?;
+                let c4: &::arrow::array::StringArray =
+                    crate::batch::col(batch, 4, "ingest_batch_id")?;
+                for i in 0..batch.num_rows() {
+                    out.push(Self {
+                        source_system: crate::batch::req(
+                            crate::batch::opt_str(c0, i),
+                            "source_system",
+                            i,
+                        )?,
+                        source_record_id: crate::batch::req(
+                            crate::batch::opt_str(c1, i),
+                            "source_record_id",
+                            i,
+                        )?,
+                        payload: crate::batch::opt_json(c2, i, "payload")?,
+                        is_deleted: crate::batch::req(
+                            crate::batch::opt_bool(c3, i),
+                            "is_deleted",
+                            i,
+                        )?,
+                        ingest_batch_id: crate::batch::req(
+                            crate::batch::opt_str(c4, i),
+                            "ingest_batch_id",
+                            i,
+                        )?,
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    /// The latest landed raw row of each given record (`source_system chr(30) source_record_id`, joined by chr(31)) at a pinned snapshot: its payload, deletion state and the run (ingest batch) that landed it — which is what ties a record to its delivery's provenance.
+    pub fn latest_for_keys(
+        conn: &::duckdb::Connection,
+        snapshot: i64,
+        keys: &str,
+    ) -> ::duckdb::Result<Vec<LatestForKeysRow>> {
+        const SQL: &str =
+            "SELECT source_system, source_record_id, payload, is_deleted, ingest_batch_id
+FROM (
+  SELECT source_system, source_record_id, payload, is_deleted, ingest_batch_id,
+         row_number() OVER (
+           PARTITION BY source_system, source_record_id
+           ORDER BY ingested_at DESC, ingest_batch_id DESC
+         ) AS rn
+  FROM lake.main.raw_records AT (VERSION => {snapshot})
+  WHERE (source_system || chr(30) || source_record_id)
+        IN (SELECT unnest(string_split($1, chr(31))))
+)
+WHERE rn = 1
+ORDER BY source_system, source_record_id
+";
+        let __span = ::er_span::sql_span(
+            ::er_span::Store::Lake,
+            "raw_record",
+            "read",
+            "latest_for_keys",
+            "raw_records",
+            SQL,
+        );
+        let __entered = __span.enter();
+        let sql = SQL.replace("{snapshot}", &snapshot.to_string());
+        let mut stmt = ::er_span::check(&__span, conn.prepare(&sql))?;
+        let batches = ::er_span::check(&__span, stmt.query_arrow(::duckdb::params![keys]))?
+            .collect::<Vec<_>>();
+        ::er_span::rows(&__span, batches.iter().map(|b| b.num_rows() as u64).sum());
+        drop(__entered);
+        LatestForKeysRow::from_batches(&batches)
+    }
+
     /// One row of `omitted_keys_live`: The keys a full-refresh delivery omitted: every prior key of the source absent from this batch's landed rows (they get tombstones).
     #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::utoipa::ToSchema)]
     pub struct OmittedKeysLiveRow {

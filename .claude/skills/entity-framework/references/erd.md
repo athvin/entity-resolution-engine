@@ -189,6 +189,17 @@ erDiagram
         timestamp created_at
         timestamp updated_at
     }
+    merge_preview_watermarks {
+        varchar id PK
+        varchar org_id FK
+        varchar dataset_id FK, UK
+        bigint run_snapshot_end
+        varchar run_id
+        bigint lake_snapshot
+        varchar job_id
+        timestamp created_at
+        timestamp updated_at
+    }
     orgs {
         varchar id PK
         varchar name
@@ -463,6 +474,8 @@ erDiagram
     merge_preview_journal }o--|| orgs : "org_id → id"
     merge_preview_journal }o--|| datasets : "dataset_id → id"
     merge_preview_journal }o--|| merge_previews : "merge_preview_id → id"
+    merge_preview_watermarks }o--|| orgs : "org_id → id"
+    merge_preview_watermarks }o--|| datasets : "dataset_id → id"
     pair_labels }o--|| orgs : "org_id → id"
     pair_labels }o--|| datasets : "dataset_id → id"
     remote_attempts }o--|| orgs : "org_id → id"
@@ -513,6 +526,7 @@ erDiagram
 | `matching_models` | An immutable version of a tenant's matching model: the settings document the engine scores against, its hash, provenance and activation state. |
 | `merge_previews` | One immutable writeback proposal for a duplicate group in one connection's object (#993, #1305): the members' synchronized preimages, the elected master, the field changes, and the identity (snapshot, policy revision, fingerprint) an approval binds. Content columns never change; only the decision columns move, through a compare-and-set that names the fingerprint. A newer proposal for the same group supersedes a planned one rather than editing it. Contains customer data: never logged. |
 | `merge_preview_journal` | Every state change of a merge preview, append-only (#1305): planned, approved, rejected, superseded — and, from #995, the apply states. Written in the same transaction as the change it records, so the journal and the preview cannot disagree. |
+| `merge_preview_watermarks` | How far a dataset's merge-preview materialization has read (#993): the (snapshot_end, run id) of the last run whose previews are durably published. Advanced only by a compare-and-set naming the value it read, after the previews commit, so a retry or a concurrent job can never skip a run. |
 | `orgs` | A tenant: its config pointer, lake env, lifecycle state and active config version. |
 | `pair_labels` | A human (or model) verdict on one candidate pair — the training signal the engine has always been able to learn from and never had. One row per (org, pair): a re-label corrects the previous verdict rather than stacking another. |
 | `remote_attempts` | Write-ahead remote execution identity and dataset fence; unresolved attempts survive task termination and dispatcher restarts. No SQL, parameters, profiles or credentials are stored. |

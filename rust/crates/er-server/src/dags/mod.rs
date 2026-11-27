@@ -22,13 +22,14 @@ pub mod tasks;
 use er_dag::{Dag, DagBuilder, TriggerRule};
 
 use control::{
-    Activate, AdvanceSfCursor, CreateCatalog, DrainActions, EmitWriteBack, RegisterModel,
-    SettleActions, StageApproved,
+    Activate, AdvanceSfCursor, CreateCatalog, DrainActions, EmitWriteBack, PublishPreviews,
+    RegisterModel, SettleActions, StageApproved,
 };
 use tasks::{
     ApplyStaged, Assemble, CorrectReconcile, CorrectionsInit, CorrectionsReconcile, ExportResults,
-    ExtractPull, Finish, GenerateGolden, Ingest, Init, LakeInit, Maintain, Match, ProfileCorpus,
-    Reconcile, ReconcileSchema, Standardize, Train, WriteBackScan,
+    ExtractPull, Finish, GenerateGolden, Ingest, Init, LakeInit, Maintain, Match,
+    MaterializePreviews, ProfileCorpus, Reconcile, ReconcileSchema, Standardize, Train,
+    WriteBackScan,
 };
 
 /// The lake session type every pod task body takes; fixed here so `er-dag`
@@ -56,10 +57,11 @@ pub enum JobKind {
     ApplyApproved,
     Extract,
     Export,
+    MergePreview,
 }
 
 impl JobKind {
-    pub const ALL: [JobKind; 13] = [
+    pub const ALL: [JobKind; 14] = [
         JobKind::RunAllFull,
         JobKind::RunAllIncremental,
         JobKind::Correct,
@@ -73,6 +75,7 @@ impl JobKind {
         JobKind::ApplyApproved,
         JobKind::Extract,
         JobKind::Export,
+        JobKind::MergePreview,
     ];
 
     #[must_use]
@@ -91,6 +94,7 @@ impl JobKind {
             JobKind::ApplyApproved => "apply_approved",
             JobKind::Extract => "extract",
             JobKind::Export => "export",
+            JobKind::MergePreview => "merge_preview",
         }
     }
 
@@ -131,6 +135,7 @@ pub fn dag_for(kind: JobKind) -> Dag {
         JobKind::ApplyApproved => apply_approved(),
         JobKind::Extract => extract(),
         JobKind::Export => export(),
+        JobKind::MergePreview => merge_preview(),
     }
 }
 
@@ -254,6 +259,12 @@ pub async fn run_control_task(
         }
         // `extract`'s Postgres half: publish the staged delivery (enqueue the
         // ingest run) and advance the (dataset, source) watermark.
+        // `merge_preview`'s Postgres half (#993): publish the built previews
+        // and advance the checkpoint, in one transaction.
+        (JobKind::MergePreview, "publish_previews") => {
+            let built = control_pin::<er_dag::Plan<crate::preview_job::Materialized>>(ctx, 0)?;
+            completed(control::PublishPreviews.run(ctx, (built,)).await?)
+        }
         (JobKind::Extract, "advance_sf_cursor") => {
             let report = control_pin::<er_dag::Plan<plans::ExtractReport>>(ctx, 0)?;
             completed(control::AdvanceSfCursor.run(ctx, (report,)).await?)
@@ -354,6 +365,9 @@ pub fn run_pod_task(
         }
         (JobKind::Extract, "extract") => completed(tasks::ExtractPull.run(ctx, ())?),
         (JobKind::Export, "export") => completed(tasks::ExportResults.run(ctx, ())?),
+        (JobKind::MergePreview, "materialize_previews") => {
+            completed(tasks::MaterializePreviews.run(ctx, ())?)
+        }
         // The pipeline stages (§11 Phase 3). Each rehydrates its upstream
         // references POSITIONALLY, in the order the DAG wired them — which is
         // what the typed `Input` tuples make checkable at compile time.
@@ -550,6 +564,16 @@ fn extract() -> Dag {
     let pulled = d.source::<ExtractPull>();
     let _ = d.control::<AdvanceSfCursor>((pulled,));
     d.build().expect("the extract DAG assembles")
+}
+
+/// Build Salesforce merge previews from a dataset's results (#993): one
+/// read-only pod task over a pinned snapshot, then the control half that
+/// publishes and moves the checkpoint. No `reconcile_schema`: it only reads.
+fn merge_preview() -> Dag {
+    let mut d = Builder::new(JobKind::MergePreview.dag_name());
+    let built = d.source::<MaterializePreviews>();
+    let _ = d.control::<PublishPreviews>((built,));
+    d.build().expect("the merge_preview DAG assembles")
 }
 
 /// Export a dataset's results at a pinned snapshot (#1230). One read-only pod

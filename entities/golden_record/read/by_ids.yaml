@@ -1,0 +1,19 @@
+kind: statement
+operation: read
+description: "The survivable values of the given golden records (ids joined by chr(31)) at a pinned snapshot — what a merge would write to the master."
+params:
+  - { name: snapshot, type: bigint }
+  - { name: ids, type: varchar }
+returns:
+  - { name: id, type: varchar, nullable: false }
+  - { name: given_name, type: varchar }
+  - { name: family_name, type: varchar }
+  - { name: email, type: varchar }
+  - { name: phone_e164, type: varchar }
+  - { name: addr_number, type: varchar }
+  - { name: addr_street, type: varchar }
+  - { name: addr_unit, type: varchar }
+  - { name: addr_city, type: varchar }
+  - { name: addr_region, type: varchar }
+  - { name: addr_postal, type: varchar }
+  - { name: birth_date, type: date }

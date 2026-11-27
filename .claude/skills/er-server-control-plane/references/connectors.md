@@ -254,6 +254,28 @@ The apply service is the bridge:
 - **Staleness guard:** if a member's `SystemModstamp` moved since our sync snapshot,
   skip and requeue (re-sync, re-score) by default.
 
+**As built (#993, #1296, #1305).** `POST …/merge-previews/generate` queues a
+`merge_preview` job: `materialize_previews` (pod, read-only, one pinned
+snapshot) then `publish_previews` (control, one transaction).
+
+- **Checkpoint:** `(runs.snapshot_end, runs.id)` of the last run whose
+  previews are durable, advanced by compare-and-set *after* publishing. Only
+  succeeded runs with a `snapshot_end` are read, at most 20 per job; a
+  re-executed run gets a new `snapshot_end`, so it is read again and the
+  fingerprint de-duplicates its previews.
+- **Affected entities:** `created`, `merged` and `member_added` events form
+  groups (two new records forming a group emit `created`); `split`,
+  `member_removed` and `retired` supersede an entity's stale planned previews.
+- **Eligibility, on evidence only:** a member joins a group when its latest
+  raw row is not deleted, that row's run has `source_delivery_provenance` for
+  the member's own source, the source is not delivered by two connections, and
+  an active `writeback_policies` row covers the (connection, object). Uploads
+  have no provenance and never join.
+- **Election:** `er_golden::scoped_masters_sql` — the policy vocabulary of the
+  merge-plan export, restricted to the eligible members per (entity, group).
+- **v1 limits:** person datasets only; related-record counts are
+  `unavailable` (they need a provider read); a golden NULL proposes no change.
+
 ### 4.4 Explicit v1 boundaries
 
 - Writeback via `merge()` (Lead/Contact/Account) and `upsert`.

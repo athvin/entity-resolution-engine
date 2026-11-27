@@ -1,0 +1,11 @@
+kind: statement
+operation: read
+description: "Succeeded runs after a (snapshot_end, run id) checkpoint, in checkpoint order — the merge-preview job's keyset (#993). snapshot_end is stamped at finish and rises strictly under the dataset's one writer, so the order is total and a re-executed run, which gets a new snapshot_end, is seen again rather than skipped."
+params:
+  - { name: snapshot, type: bigint }
+  - { name: after_snapshot, type: bigint }
+  - { name: after_run, type: varchar }
+  - { name: limit, type: bigint }
+returns:
+  - { name: id, type: varchar, nullable: false }
+  - { name: snapshot_end, type: bigint }

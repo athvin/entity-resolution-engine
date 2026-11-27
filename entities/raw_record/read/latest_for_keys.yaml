@@ -1,0 +1,12 @@
+kind: statement
+operation: read
+description: "The latest landed raw row of each given record (`source_system chr(30) source_record_id`, joined by chr(31)) at a pinned snapshot: its payload, deletion state and the run (ingest batch) that landed it — which is what ties a record to its delivery's provenance."
+params:
+  - { name: snapshot, type: bigint }
+  - { name: keys, type: varchar }
+returns:
+  - { name: source_system, type: varchar, nullable: false }
+  - { name: source_record_id, type: varchar, nullable: false }
+  - { name: payload, type: json }
+  - { name: is_deleted, type: boolean, nullable: false }
+  - { name: ingest_batch_id, type: varchar, nullable: false }

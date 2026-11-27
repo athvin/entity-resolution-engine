@@ -116,6 +116,7 @@ pub struct ApiDoc;
     crate::MergePreviewPage,
     crate::MergePreviewEvent,
     crate::MergePreviewDetail,
+    crate::PreviewsGenerating,
     crate::OrgUsage,
     crate::DatasetUsage,
     crate::AllowanceSet,

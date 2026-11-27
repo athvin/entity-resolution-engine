@@ -365,6 +365,27 @@ mod tests {
         }
     }
 
+    /// The scoped master election (#993): every policy × protect plans against
+    /// the entity catalog and yields one master per (entity, group).
+    #[test]
+    fn the_scoped_master_generator_plans_for_every_policy_and_topology() {
+        let catalog = build_lake_stage_catalog(&entities_catalog(), false);
+        let ranks: std::collections::BTreeMap<String, i64> =
+            [("crm".to_string(), 1)].into_iter().collect();
+        for policy in er_golden::MASTER_ELECTION_POLICIES {
+            for protect in [false, true] {
+                let sql = er_golden::scoped_masters_sql(policy, "lake.main", Some(&ranks), protect)
+                    .expect("a vocabulary policy renders");
+                let cols = plan_stage(&catalog, &sql);
+                assert_eq!(
+                    cols,
+                    ["entity_id", "group_key", "master_key"],
+                    "scoped masters ({policy}, protect={protect})"
+                );
+            }
+        }
+    }
+
     /// The merge-plan generator (er-golden) is a governed generator like the
     /// mart assembly: every shape it can emit — the full policy vocabulary ×
     /// the protect-override topology × the since filter — plans against the

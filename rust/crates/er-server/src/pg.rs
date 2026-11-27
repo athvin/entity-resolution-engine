@@ -2551,13 +2551,15 @@ pub struct PreviewToPublish<'a> {
 }
 
 /// Publish a proposal and supersede the group's older PLANNED previews, with
-/// their journal rows, in one transaction. `None` when an identical proposal
-/// is already stored — regeneration is idempotent.
+/// their journal rows. `None` when an identical proposal is already stored —
+/// regeneration is idempotent. Runs on the caller's client so the caller owns
+/// the transaction (the merge-preview job publishes a batch and moves its
+/// checkpoint in one).
 ///
 /// # Errors
-/// Propagates the transaction error.
+/// Propagates the statement error.
 pub async fn publish_preview(
-    client: &mut Client,
+    tx: &impl tokio_postgres::GenericClient,
     p: &PreviewToPublish<'_>,
 ) -> Result<Option<er_entities::merge_preview::MergePreview>, PgError> {
     let content = p.proposal.content();
@@ -2568,9 +2570,8 @@ pub async fn publish_preview(
         crate::writeback::MergeObject::Account => "Account",
     };
     let field_changes = serde_json::to_value(&content.field_changes).unwrap_or_default();
-    let tx = client.transaction().await?;
     let published = er_entities::merge_preview::create::publish(
-        &tx,
+        tx,
         &er_ids::new_v7(),
         p.org_id,
         p.dataset_id,
@@ -2594,7 +2595,7 @@ pub async fn publish_preview(
     .next();
     if let Some(row) = &published {
         let superseded = er_entities::merge_preview::update::supersede(
-            &tx,
+            tx,
             p.org_id,
             p.dataset_id,
             &scope.provider.connection_id,
@@ -2605,7 +2606,7 @@ pub async fn publish_preview(
         .await?;
         for old in &superseded {
             er_entities::merge_preview_journal::create::append(
-                &tx,
+                tx,
                 &er_ids::new_v7(),
                 p.org_id,
                 p.dataset_id,
@@ -2618,7 +2619,7 @@ pub async fn publish_preview(
             .await?;
         }
         er_entities::merge_preview_journal::create::append(
-            &tx,
+            tx,
             &er_ids::new_v7(),
             p.org_id,
             p.dataset_id,
@@ -2630,7 +2631,6 @@ pub async fn publish_preview(
         )
         .await?;
     }
-    tx.commit().await?;
     Ok(published)
 }
 
@@ -2707,5 +2707,120 @@ pub async fn decide_preview(
         Decision::AlreadyDecided(row)
     } else {
         Decision::NotPlanned(row.status)
+    })
+}
+
+/// Move a dataset's merge-preview checkpoint from what the job read to
+/// `next`. `false` when it moved underneath the job: the caller fails rather
+/// than skipping runs.
+///
+/// # Errors
+/// Propagates the statement error.
+#[allow(clippy::too_many_arguments)]
+pub async fn advance_preview_watermark(
+    client: &Client,
+    org_id: &str,
+    dataset_id: &str,
+    expected: Option<&crate::preview_job::Checkpoint>,
+    next: &crate::preview_job::Checkpoint,
+    lake_snapshot: i64,
+    job_id: &str,
+) -> Result<bool, PgError> {
+    let rows = match expected {
+        None => {
+            er_entities::merge_preview_watermark::create::advance(
+                client,
+                &er_ids::new_v7(),
+                org_id,
+                dataset_id,
+                next.snapshot_end,
+                &next.run_id,
+                lake_snapshot,
+                job_id,
+                "",
+            )
+            .await?
+        }
+        Some(e) => {
+            er_entities::merge_preview_watermark::update::advance(
+                client,
+                next.snapshot_end,
+                &next.run_id,
+                lake_snapshot,
+                job_id,
+                org_id,
+                dataset_id,
+                e.snapshot_end,
+                &e.run_id,
+            )
+            .await?
+        }
+    };
+    Ok(!rows.is_empty())
+}
+
+/// A dataset's merge-preview checkpoint.
+///
+/// # Errors
+/// Propagates the query error.
+pub async fn preview_watermark(
+    client: &Client,
+    org_id: &str,
+    dataset_id: &str,
+) -> Result<Option<crate::preview_job::Checkpoint>, PgError> {
+    Ok(
+        er_entities::merge_preview_watermark::read::get(client, org_id, dataset_id)
+            .await?
+            .into_iter()
+            .next()
+            .map(|w| crate::preview_job::Checkpoint {
+                snapshot_end: w.run_snapshot_end,
+                run_id: w.run_id,
+            }),
+    )
+}
+
+/// The work-order context of a merge_preview job: policies, provenance,
+/// ambiguous sources and the checkpoint, as the pod reads them.
+///
+/// # Errors
+/// Propagates a query error.
+pub async fn preview_context(
+    client: &Client,
+    org_id: &str,
+    dataset_id: &str,
+) -> Result<crate::preview_job::PreviewContext, PgError> {
+    let policies = active_writeback_policies(client, org_id, dataset_id)
+        .await?
+        .into_iter()
+        .map(|p| crate::preview_job::PolicyCtx {
+            id: p.id,
+            connection_id: p.salesforce_connection_id,
+            object: p.object,
+            election_policy: p.election_policy,
+            writeback_allowlist: serde_json::from_value(p.writeback_allowlist).unwrap_or_default(),
+            field_mapping: serde_json::from_value(p.field_mapping).unwrap_or_default(),
+        })
+        .collect();
+    let provenance =
+        er_entities::source_delivery_provenance::read::for_dataset(client, org_id, dataset_id)
+            .await?
+            .into_iter()
+            .map(|r| {
+                (
+                    r.run_id,
+                    crate::preview_job::ProvenanceCtx {
+                        source: r.source,
+                        connection_id: r.salesforce_connection_id,
+                        object: r.object,
+                    },
+                )
+            })
+            .collect();
+    Ok(crate::preview_job::PreviewContext {
+        watermark: preview_watermark(client, org_id, dataset_id).await?,
+        policies,
+        provenance,
+        ambiguous: ambiguous_provenance_sources(client, org_id, dataset_id).await?,
     })
 }
