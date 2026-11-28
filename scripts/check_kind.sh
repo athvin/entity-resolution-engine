@@ -19,6 +19,11 @@
 #                 ledgered. This is the only phase where a stage must read what
 #                 a previous stage's PROCESS wrote, which is the class of bug
 #                 splitting a DAG across pods introduces (§11 Phase 3).
+#   7. record   — the pods report nothing through the attempt channel
+#                 (executor.probeFaults=drop_finish, #814): each writes its
+#                 termination record and exits, and the watch must settle the
+#                 row FROM THAT RECORD (classify::terminal's ApplyRecord row,
+#                 which every other phase shadows with a landed finish).
 #   6. cutover   — `color.active` flips while a task is RUNNING, so the pod's
 #                 control-plane callbacks land on a different er-server process
 #                 than the one that launched it. The attempt must not notice:
@@ -757,5 +762,35 @@ RESTORED="$(svc_colour)"
 [ "${RESTORED}" = "${LIVE_COLOUR}" ] \
     || fail "restore failed: svc/er-api selects '${RESTORED}', wanted '${LIVE_COLOUR}'"
 log "phase 6 cleanup: restored to ${LIVE_COLOUR}, ${IDLE_COLOUR} retired"
+
+# ---- phase 7: a pod that reports nothing settles from its record --------
+# The only phase that reaches classify::terminal's ApplyRecord row: in every
+# other phase the pod's `finish` lands first and the record is never read, so
+# breaking that row moved no gate (#814). The fault is a task-template env,
+# which the dispatcher reads at startup — hence the restart either side.
+log "phase 7: settle from the termination record (finish deliberately dropped)"
+ORG="${MAINORG}"
+restart_dispatcher() {
+    kubectl --context "${CTX}" -n "${NS}" rollout restart deploy/er-dispatcher >/dev/null
+    kubectl --context "${CTX}" -n "${NS}" rollout status deploy/er-dispatcher --timeout=180s >/dev/null
+}
+helm_colour --set "executor.probeFaults=drop_finish"
+restart_dispatcher
+JOB7="$(enqueue)"
+wait_state "${JOB7}" succeeded 600
+tasks_json "${JOB7}" > /tmp/er-kind-tasks7.json
+helm_colour --set "executor.probeFaults="
+restart_dispatcher
+python3 - /tmp/er-kind-tasks7.json <<'EOF7'
+import json, sys
+tasks = json.load(open(sys.argv[1]))["tasks"]
+live = [t for t in tasks if t["live"]]
+assert live, "no live rows"
+for t in live:
+    assert t["state"] == "succeeded", (t["task_id"], t["state"], t.get("termination_reason"))
+    assert t["pod_uid"], f"{t['task_id']}: a real pod ran"
+    assert t["launches"] == 1, f"{t['task_id']}: launches={t['launches']}, the record path must not relaunch"
+print(f"phase 7 ok: {len(live)} row(s) settled succeeded from the termination record alone")
+EOF7
 
 log "ALL PHASES PASS"

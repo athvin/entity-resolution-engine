@@ -538,7 +538,19 @@ fn run_inner(args: &[String]) -> Result<i32, String> {
                 "snapshot_end": snapshot_end,
                 "exit_code": exit,
             });
-            let posted = channel.post(&format!("/v1/internal/attempts/{attempt}/finish"), &finish);
+            // `check-kind` phase 7's fault (#814): with ER_PROBE_FAULTS naming
+            // `drop_finish`, the pod reports nothing and leaves the verdict to
+            // its termination record — the path the watch's `ApplyRecord` row
+            // exists for, which no other phase reaches. The chart sets it only
+            // for that phase, on kind; it is empty everywhere else.
+            let posted = if env_var("ER_PROBE_FAULTS")
+                .is_some_and(|f| f.split(',').any(|f| f == "drop_finish"))
+            {
+                tracing::warn!("probe fault drop_finish: the finish is deliberately not posted");
+                Err("probe fault drop_finish".to_string())
+            } else {
+                channel.post(&format!("/v1/internal/attempts/{attempt}/finish"), &finish)
+            };
             if let Err(e) = &posted {
                 tracing::warn!(error = %e, "the finish was not posted; the termination record carries the verdict");
             }

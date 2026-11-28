@@ -121,6 +121,12 @@ data:
                      placeholder here would fail every launch. */}}
                 - name: ER_RESOURCE_CLASS
                   value: {{ $class | quote }}
+                {{- with $.Values.executor.probeFaults }}
+                {{/* check-kind phase 7 only (#814): a comma list of faults
+                     exec-task injects. Empty everywhere else. */}}
+                - name: ER_PROBE_FAULTS
+                  value: {{ . | quote }}
+                {{- end }}
                 - name: OTEL_EXPORTER_OTLP_ENDPOINT
                   value: {{ $.Values.otel.endpoint | quote }}
                 {{- with $.Values.otel.logLevel }}

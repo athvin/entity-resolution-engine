@@ -226,6 +226,11 @@ executor:
   # `make cluster-objects` because PriorityClass is cluster-scoped). Phase 2
   # renders `scheduled` into every template; the per-trigger choice
   # (interactive for UI "Run now", maintenance for lake_maintain) is Phase 3.
+  # Faults exec-task injects, for `check-kind` phase 7 ONLY (#814): a comma
+  # list, today just `drop_finish` (report nothing through the attempt
+  # channel, leaving the verdict to the termination record). Empty everywhere
+  # else; the probe sets it for one phase and restores it.
+  probeFaults: ""
   priorityClass:
     interactive: er-task-interactive
     scheduled: er-task-scheduled
