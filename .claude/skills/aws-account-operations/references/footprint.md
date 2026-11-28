@@ -58,10 +58,10 @@ creating two sets of real resources.
 Distinct `resource "aws_*"` blocks across `infra/terraform/`, by count:
 
 ```
+  30  aws_iam_role_policy
   29  aws_iam_role
-  29  aws_iam_role_policy
   14  aws_eks_pod_identity_association
-  12  aws_cloudwatch_metric_alarm
+  13  aws_cloudwatch_metric_alarm
   10  aws_s3_bucket
   10  aws_s3_bucket_public_access_block
    8  aws_iam_role_policy_attachment
@@ -167,7 +167,7 @@ drops off this list on the next regeneration, so an absence here cannot rot.
 
 | Resource type | Declared |
 |---|---|
-| `aws_cloudwatch_metric_alarm` | 12 |
+| `aws_cloudwatch_metric_alarm` | 13 |
 | `aws_sns_topic` | 1 |
 | `aws_sns_topic_subscription` | 1 |
 | `aws_cloudwatch_dashboard` | 1 |
