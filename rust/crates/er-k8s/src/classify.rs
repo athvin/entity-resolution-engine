@@ -261,8 +261,9 @@ pub fn terminal(
     }
 
     // A parsed record is the verdict.
-    if let Some(record) = record {
-        return TerminalVerdict::ApplyRecord(record);
+    // MUTATION (#814 proof; never merged): the record path is broken.
+    if let Some(_record) = record {
+        return TerminalVerdict::TimedOut;
     }
 
     // No record. Platform evidence decides.
