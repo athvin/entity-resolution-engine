@@ -49,6 +49,13 @@ DS="default"
 # Phase 5 repoints ${ORG} at its own pipeline org; phase 6 needs this one back.
 MAINORG="${ORG}"
 
+# What is actually running, by image ID — never by tag (#815): a probe that
+# passes against an image that never reached the node proves nothing.
+echo "check_kind: er-api image IDs running: $(kubectl --context "${CTX}" -n "${NS}" get pods \
+    -l app.kubernetes.io/part-of=er \
+    -o jsonpath='{range .items[*]}{range .status.containerStatuses[*]}{.imageID}{"\n"}{end}{end}' \
+    | grep 'er-api' | sed 's/.*@//' | sort -u | tr '\n' ' ')"
+
 log() { echo "check_kind: $*" >&2; }
 fail() { echo "check_kind: FAIL — $*" >&2; exit 1; }
 
