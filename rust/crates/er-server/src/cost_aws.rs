@@ -18,6 +18,23 @@ pub const NAMESPACE: &str = "ER/Cost";
 /// Ids per query: keeps the SQL well under Athena's statement size limit.
 const CHUNK: usize = 400;
 
+/// The SDK configuration, with an explicit Ring-backed rustls HTTP client:
+/// the AWS crates are built `default-features = false` (the default TLS needs
+/// a cmake the build image lacks — see mail.rs), which also drops the default
+/// HTTP client, so without this every call fails with "No HTTP client was
+/// available". Found by the first live run of `er-server cost-roll` (#667).
+async fn sdk_config() -> aws_config::SdkConfig {
+    let http = aws_smithy_http_client::Builder::new()
+        .tls_provider(aws_smithy_http_client::tls::Provider::Rustls(
+            aws_smithy_http_client::tls::rustls_provider::CryptoMode::Ring,
+        ))
+        .build_https();
+    aws_config::defaults(aws_config::BehaviorVersion::latest())
+        .http_client(http)
+        .load()
+        .await
+}
+
 /// The CUR through Athena.
 pub struct Athena {
     pub client: aws_sdk_athena::Client,
@@ -29,7 +46,7 @@ impl Athena {
     /// From the environment: `ER_COST_ATHENA_WORKGROUP` (default `er-cost`)
     /// and `ER_COST_CUR_TABLE` (default `er_cur.cur2`).
     pub async fn from_env() -> Self {
-        let config = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
+        let config = sdk_config().await;
         Self {
             client: aws_sdk_athena::Client::new(&config),
             workgroup: std::env::var("ER_COST_ATHENA_WORKGROUP")
@@ -172,7 +189,11 @@ impl CurSource for Athena {
     async fn latest_usage_end(&self) -> Result<Option<DateTime<Utc>>, String> {
         let (period, _, _) = crate::cost_roll::period_bounds(Utc::now());
         let sql = format!(
-            "SELECT max(line_item_usage_end_date) FROM {} WHERE billing_period = '{period}'",
+            // The newest hourly Usage line's START: `usage_end_date` is the
+            // month's end for monthly line items, so max(end) reads as fresh
+            // forever and would hide a stale CUR.
+            "SELECT max(line_item_usage_start_date) FROM {} WHERE billing_period = '{period}' \
+             AND line_item_line_item_type = 'Usage'",
             self.table
         );
         let rows = self.query(&sql).await?;
@@ -195,7 +216,7 @@ pub struct CloudWatch {
 
 impl CloudWatch {
     pub async fn from_env() -> Self {
-        let config = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
+        let config = sdk_config().await;
         Self {
             client: aws_sdk_cloudwatch::Client::new(&config),
             environment: std::env::var("ER_ENVIRONMENT").unwrap_or_else(|_| "dev".into()),
