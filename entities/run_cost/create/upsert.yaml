@@ -1,0 +1,21 @@
+kind: statement
+operation: create
+mode: partial
+description: "Record or re-roll one attempt's cost."
+params:
+  - { name: id, type: varchar }
+  - { name: org_id, type: varchar }
+  - { name: dataset_id, type: varchar, nullable: true }
+  - { name: job_id, type: varchar }
+  - { name: task_instance_id, type: varchar }
+  - { name: task_id, type: varchar }
+  - { name: resource_class, type: varchar, nullable: true }
+  - { name: node_name, type: varchar }
+  - { name: attempt_state, type: varchar }
+  - { name: billing_period, type: varchar }
+  - { name: wait_seconds, type: double }
+  - { name: run_seconds, type: double }
+  - { name: allocated_usd, type: double }
+  - { name: billed_usd, type: double, nullable: true }
+  - { name: billed_as_of, type: timestamp, nullable: true }
+returns: entity

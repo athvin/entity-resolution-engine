@@ -128,7 +128,7 @@ pub const ATTRIBUTES: &[Attr] = &[
         name: STATEMENT,
         description: "The declared statement's identity, `<entity>.<operation>.<name>` — the same triple that names its .sql file. Bounded by the entity catalog, but deliberately NOT a metric dimension: pairing each statement with two outcomes would create hundreds of CloudWatch custom metrics for one histogram, and the count grows with every new .sql file.",
         pii: Pii::Config,
-        cardinality: bounded(354, "entities/*/*/*.sql, one per declared statement"),
+        cardinality: bounded(359, "entities/*/*/*.sql, one per declared statement"),
     },
     Attr {
         name: GENERATOR,
@@ -140,7 +140,7 @@ pub const ATTRIBUTES: &[Attr] = &[
         name: RELATION,
         description: "The relation a statement reads or writes, from the entity declaration.",
         pii: Pii::Config,
-        cardinality: bounded(70, "distinct relation names in entities/*/entity.yaml"),
+        cardinality: bounded(72, "distinct relation names in entities/*/entity.yaml"),
     },
     Attr {
         name: DB_SYSTEM,

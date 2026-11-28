@@ -1,0 +1,55 @@
+# Cost attribution (#667): attribute the current and previous billing period's
+# runner cost from the CUR (Athena, `er-cost` workgroup), store it in
+# run_costs/compute_rates, and publish the five alarm scalars to CloudWatch.
+# Runs on the er-api ServiceAccount, whose Pod Identity role carries the
+# read-only cost policy. A failed run is a failed Job.
+{{- if .Values.costRoll.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: er-cost-roll
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: er-cost-roll
+    app.kubernetes.io/component: cost
+    {{- include "er-platform.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.costRoll.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 1800
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: er-cost-roll
+            {{- include "er-platform.labels" . | nindent 12 }}
+        spec:
+          restartPolicy: Never
+          serviceAccountName: er-api
+          securityContext:
+            {{- include "er-platform.podSecurityContext" . | nindent 12 }}
+          containers:
+            - name: cost-roll
+              image: {{ include "er-platform.image" (dict "root" . "image" .Values.images.api) }}
+              command: ["er-server", "cost-roll"]
+              securityContext:
+                {{- include "er-platform.containerSecurityContext" . | nindent 16 }}
+                runAsUser: 1001
+                runAsGroup: 1001
+              env:
+                {{- include "er-platform.erserverEnv" . | nindent 16 }}
+                - name: ER_ENVIRONMENT
+                  value: {{ .Values.costRoll.environment | quote }}
+                - name: AWS_REGION
+                  value: us-east-2
+              envFrom:
+                - secretRef:
+                    name: er-erserver-env
+              resources:
+                requests: { cpu: 100m, memory: 256Mi }
+                limits: { cpu: "1", memory: 1Gi }
+{{- end }}

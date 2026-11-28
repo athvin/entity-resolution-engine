@@ -1,0 +1,56 @@
+kind: entity
+version: 1
+name: compute_rate
+relation: compute_rates
+description: "The self-calibrated price of one runner pod-hour per (resource class, billing period) (#667): the CUR's billed cost of every instance that hosted a runner attempt — usage, spot and the EKS Auto Mode fee — divided by the attempt-hours those instances hosted. Self-calibrated rather than read from the Pricing API, so it folds the family mix, the spot/on-demand mix and the Auto Mode fee in, and converges rather than drifts. Not tenant-scoped: it is the platform's own price."
+key: [id]
+natural_key: [resource_class, billing_period]
+generate:
+  stores: [postgres]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "UUIDv7, minted by the application."
+  - name: resource_class
+    type: varchar
+    nullable: false
+    accepted_values: [S, M, L]
+    description: "The runner class."
+  - name: billing_period
+    type: varchar
+    nullable: false
+    description: "YYYY-MM."
+  - name: usd_per_pod_hour
+    type: double
+    nullable: false
+    description: "billed_usd / attempt_hours."
+  - name: attempt_hours
+    type: double
+    nullable: false
+    description: "Wait plus run hours of the class's attempts in the period."
+  - name: billed_usd
+    type: double
+    nullable: false
+    description: "The CUR cost of the instances those attempts ran on."
+  - name: instances
+    type: bigint
+    nullable: false
+    description: "How many instances the rate is calibrated over; a rate over very few is noisy."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the row was written."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the row last changed."
+indexes:
+  - name: compute_rates_class_period
+    columns: [resource_class, billing_period]
+    unique: true

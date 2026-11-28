@@ -1,0 +1,8 @@
+kind: statement
+operation: read
+mode: full
+description: "A tenant's attempt costs for a period."
+params:
+  - { name: org_id, type: varchar }
+  - { name: billing_period, type: varchar }
+returns: entity

@@ -1,0 +1,86 @@
+kind: entity
+version: 1
+name: run_cost
+relation: run_costs
+description: "What one runner attempt cost (#667). allocated_usd is (wait + run) hours × the class's rate — available as soon as the attempt finishes; billed_usd is the attempt's share of its instance's CUR cost, which arrives 24–48h late and is revised, hence billed_as_of. Wait is part of the cost: a node was provisioned for that attempt. An entity rather than a view because task_instances.live goes NULL on archive, and the retried attempts are exactly what the failure-spend share needs."
+key: [id]
+natural_key: [task_instance_id]
+generate:
+  stores: [postgres]
+  languages: [rust]
+columns:
+  - name: id
+    type: varchar
+    nullable: false
+    description: "UUIDv7, minted by the application."
+  - name: org_id
+    type: varchar
+    nullable: false
+    references: { relation: orgs, column: id }
+    description: "The tenant the attempt ran for."
+  - name: dataset_id
+    type: varchar
+    description: "The dataset, when the job named one."
+  - name: job_id
+    type: varchar
+    nullable: false
+    description: "The job."
+  - name: task_instance_id
+    type: varchar
+    nullable: false
+    description: "The attempt (task_instances.id)."
+  - name: task_id
+    type: varchar
+    nullable: false
+    description: "The task within the job's DAG."
+  - name: resource_class
+    type: varchar
+    description: "The class it ran at."
+  - name: node_name
+    type: varchar
+    nullable: false
+    description: "The instance it ran on (EKS Auto Mode names a node by its instance id, which is the CUR's line_item_resource_id)."
+  - name: attempt_state
+    type: varchar
+    nullable: false
+    description: "How the attempt ended; failed ones are the failure-spend share."
+  - name: billing_period
+    type: varchar
+    nullable: false
+    description: "YYYY-MM of finished_at."
+  - name: wait_seconds
+    type: double
+    nullable: false
+    description: "queued → started: the node's provisioning, paid for this attempt."
+  - name: run_seconds
+    type: double
+    nullable: false
+    description: "started → finished."
+  - name: allocated_usd
+    type: double
+    nullable: false
+    description: "(wait + run) / 3600 × the class's usd_per_pod_hour."
+  - name: billed_usd
+    type: double
+    description: "The attempt's share of its instance's billed cost; NULL until the CUR covers it."
+  - name: billed_as_of
+    type: timestamp
+    description: "When billed_usd was last computed; the CUR is revised."
+  - name: created_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the row was written."
+  - name: updated_at
+    type: timestamp
+    nullable: false
+    default: "now()"
+    volatile: true
+    description: "When the row last changed."
+indexes:
+  - name: run_costs_attempt
+    columns: [task_instance_id]
+    unique: true
+  - name: run_costs_org_period
+    columns: [org_id, billing_period, dataset_id]

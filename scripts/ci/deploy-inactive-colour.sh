@@ -52,6 +52,11 @@ args=(
 if [ -n "${PLATFORM_VALUES:-}" ]; then
 	args+=(-f "$PLATFORM_VALUES")
 fi
+# The cost roll-up CronJob (#667) runs only where its IAM exists: the dev
+# `ci` namespace's er-api Pod Identity role (infra/terraform/envs/dev/cost-roll.tf).
+if [ "${COST_ROLL:-}" = "true" ]; then
+	args+=(--set "costRoll.enabled=true")
+fi
 if [ -n "${TARGET_GROUP_ARN:-}" ]; then
 	args+=(--set "edge.targetGroupArn=$TARGET_GROUP_ARN")
 fi

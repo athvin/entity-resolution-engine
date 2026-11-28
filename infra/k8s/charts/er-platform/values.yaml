@@ -83,6 +83,16 @@ erserver:
   # POST …/connections/{id}/writeback-authorization answering 503.
   salesforceOAuthRedirectUris: ""
 
+# #667: `er-server cost-roll` daily — runner cost attributed from the CUR by
+# instance id, stored in run_costs/compute_rates, five scalars to the ER/Cost
+# CloudWatch namespace. Off by default: it needs the er-api role's cost policy
+# (infra/terraform/envs/dev/cost-roll.tf), which exists only for dev `ci`.
+costRoll:
+  enabled: false
+  # After the CUR's overnight refresh (it lands 24–48h late and is revised).
+  schedule: "17 7 * * *"
+  environment: dev
+
 # Blue/green for the web-api pod. TWO Deployments, one per colour, and the
 # `er-api`/`er-web` Services select `color.active` — so a cutover is one field
 # on two Service objects and a rollback is that field moving back, with the old

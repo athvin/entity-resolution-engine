@@ -59,9 +59,9 @@ Distinct `resource "aws_*"` blocks across `infra/terraform/`, by count:
 
 ```
   29  aws_iam_role
-  28  aws_iam_role_policy
+  29  aws_iam_role_policy
   14  aws_eks_pod_identity_association
-  11  aws_cloudwatch_metric_alarm
+  12  aws_cloudwatch_metric_alarm
   10  aws_s3_bucket
   10  aws_s3_bucket_public_access_block
    8  aws_iam_role_policy_attachment
@@ -167,7 +167,7 @@ drops off this list on the next regeneration, so an absence here cannot rot.
 
 | Resource type | Declared |
 |---|---|
-| `aws_cloudwatch_metric_alarm` | 11 |
+| `aws_cloudwatch_metric_alarm` | 12 |
 | `aws_sns_topic` | 1 |
 | `aws_sns_topic_subscription` | 1 |
 | `aws_cloudwatch_dashboard` | 1 |
@@ -192,6 +192,8 @@ Every `aws-*` dependency, with the crate that declares it. All must stay
 | Crate | Declared by |
 |---|---|
 | `aws-config` | `er-server` |
+| `aws-sdk-athena` | `er-server` |
+| `aws-sdk-cloudwatch` | `er-server` |
 | `aws-sdk-s3` | `er-server` |
 | `aws-sdk-sesv2` | `er-server` |
 | `aws-smithy-http-client` | `er-server` |
