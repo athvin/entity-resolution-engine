@@ -4023,7 +4023,7 @@ impl Drop for ExecutionScope {
 
 /// Record one DAG pod task's statement executions under `stage` (#1330).
 ///
-/// The composed pipeline records through [`observed`]; a DAG pod runs ONE stage
+/// The composed pipeline records through `observed()`; a DAG pod runs ONE stage
 /// function directly and never passed through it, so the per-attempt cost the
 /// roll-up bills (`run_costs`) had no statements to share across. Same recorder,
 /// same best-effort contract: a recording failure is logged, never the task's.
